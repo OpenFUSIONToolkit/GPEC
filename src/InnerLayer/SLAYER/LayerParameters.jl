@@ -104,7 +104,7 @@ end
 
 # Allowed dc_type values for the critical-Δ offset. `:none` is the default
 # `dc_tmp = 0` branch.
-const ALLOWED_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
+const ALLOWED_DC_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 
 """
     r_based_shear(rs, q, dq_dpsi, da_dpsi) -> Float64
@@ -131,8 +131,10 @@ function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
     return rs * dq_dpsi / (q * da_dpsi)
 end
 
-# Internal: solve the Wd self-consistency loop for the chi_parallel-based
-# critical Δ (Connor et al. 2015, PPCF 57 065001). Returns dc_tmp as a Float64.
+# Internal: solve the Wd self-consistency loop for the chi_parallel-based critical Δ. W_d and the
+# smfp/lmfp chi_parallel blend follow Fitzpatrick, Phys. Plasmas 32, 062509 (2025); the toroidal and
+# large-aspect-ratio offsets are Connor, Ham, Hastie & Liu, PPCF 57, 065001 (2015) Eqs. (59) and (61),
+# after Lütjens, Luciani & Garbet, Phys. Plasmas 8, 4267 (2001). Returns dc_tmp as a Float64.
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
     rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
@@ -178,7 +180,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
         return 0.5 * (-dr_val) * π^1.5 *
                (chi_par / chi_perp)^0.25 *
                sqrt((n_tor * abs(sval_r)) / (R0 * rs))
-    elseif dc_type === :rfitzp
+    elseif dc_type === :fitzpatrick
         return -(sqrt(2.0) * π^1.5 * dr_val) / Wd
     elseif dc_type === :toroidal
         return 0.5 * (-dr_val) * π^1.5 *
@@ -221,14 +223,16 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `R0`      -- major radius [m]
   - `mu_i`    -- ion mass in proton-mass units (e.g. 2.0 for D)
   - `zeff`    -- effective charge
-  - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]
+  - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]. `chi_perp` feeds both
+    `P_perp` (which wants the one-fluid energy diffusivity χ_E) and the critical-Δ `W_d` (which wants
+    the electron channel); one profile serves both for now, see the stability docs
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula: the resistive
     interchange index `D_R` and the Connor et al. 2015 Eq. 59 geometric factor
     in the `r_s` reference (`toroidal_dgeo`)
   - `kpar_val` -- parallel-wavenumber gradient K∥ [1/m] of the `:toroidal` χ∥
     closure (`toroidal_kpar`); `nothing` (default) uses the cylindrical `n·|s|/R₀`
-  - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
+  - `dc_type` -- one of `:none`, `:lar`, `:fitzpatrick`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
   - `k_ref`   -- reference-length ratio K = r_s·(dψ_N/dr) at the surface,
     used by the Tearing runner to convert the ψ_N-referenced outer Δ' to

@@ -37,6 +37,7 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     # Which inner-layer model produced PerSurface/: the SLAYER and GGJ branches write
     # disjoint field sets, so readers must not have to infer it from the schema.
     attrs(g)["layer_model"] = result.enabled ? _layer_model_token(eltype(result.params)) : "none"
+    attrs(g)["inner_model"] = result.model === nothing ? "none" : InnerLayer.model_name(result.model)
 
     if !result.enabled    # nothing else to write
         _annotate_tearing!(g)

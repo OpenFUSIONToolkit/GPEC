@@ -1,3 +1,4 @@
+using Statistics
 
 @testset "Equilibrium Unit Tests" begin
 
@@ -10,7 +11,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -25,7 +26,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit_arclength",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -49,7 +50,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit_by_inversion",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994
         )
@@ -90,7 +91,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=1.0
         )
@@ -107,7 +108,7 @@
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             mpsi=32,
             psilow=0.01,
             psihigh=0.994,
@@ -136,6 +137,33 @@
         @test isapprox(q_axis, 1.05; rtol=0.02)
     end
 
+    @testset "flux_surface_rtol must be positive and finite" begin
+        for rtol in (0.0, -1e-8, NaN, Inf)
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; flux_surface_rtol=rtol)
+        end
+        @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; flux_surface_rtol=1e-8).flux_surface_rtol == 1e-8
+    end
+
+    @testset "an equilibrium ODE solve that stops early is an error" begin
+        using OrdinaryDiffEq
+        check = GeneralizedPerturbedEquilibrium.Equilibrium.check_equil_solve
+        prob = ODEProblem((u, p, t) -> u, 1.0, (0.0, 10.0))
+        sol = solve(prob, Vern9())
+        @test check(sol, "test") === sol
+        stopped = @test_logs (:warn, r"maxiters") match_mode = :any solve(prob, Vern9(); maxiters=1)
+        @test_throws r"stopped early at t = .* with retcode MaxIters" check(stopped, "test")
+        terminated = solve(prob, Vern9(); callback=ContinuousCallback((u, t, integrator) -> t - 0.5, terminate!))
+        @test check(terminated, "test") === terminated
+        # Only Success and Terminated count as finished; other "successful" codes are nonlinear-solver exits.
+        stalled = OrdinaryDiffEq.SciMLBase.solution_new_retcode(sol, ReturnCode.StalledSuccess)
+        @test_throws r"retcode StalledSuccess" check(stalled, "test")
+
+        # A trial shaping solve that stops early must come out of the ν root-find, not become its ν = qa/qc fallback.
+        Equil = GeneralizedPerturbedEquilibrium.Equilibrium
+        tj = Equil.TJAnalyticConfig(; r0=4.0, a=1.0, q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0, ma=64, mtheta=64)
+        @test_throws r"stopped early at t = .* with retcode DtNaN" Equil.tj_analytic_find_nu(Equil.TJAnalyticShapeParams(tj), tj.qa; abstol=NaN)
+    end
+
     @testset "Deprecated TOML keys are dropped, not fatal" begin
         # Removed control knobs must keep old gpec.toml decks (and older gpec.h5 replays,
         # whose stored TOML blob goes through the same path) parsing with a warning.
@@ -147,10 +175,110 @@
             (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
     end
 
+    @testset "Inverse grid types (original, rho)" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        cfg(grid) = Eq.EquilibriumConfig(; eq_type="chease_binary", eq_filename=joinpath(data_dir, "INP1_binary"), jac_type="boozer",
+            grid_type=grid, mpsi=16, psilow=0.01, psihigh=0.99, r0_norm=6.8, b0_norm=7.4)
+        splines(eq) = (eq.rzphi_rsquared, eq.rzphi_offset, eq.rzphi_nu, eq.rzphi_jac, eq.eqfun_B, eq.eqfun_metric1, eq.eqfun_metric2)
+        finite(eq) = all(isfinite, eq.profiles.dVdpsi_spline.y) && all(all(isfinite, s.nodal_derivs.partials) for s in splines(eq))
+
+        # original: the file's own ψ nodes off the axis (this file starts at the axis), whatever psilow/mpsi
+        eq_o = Eq.setup_equilibrium(cfg("original"))
+        @test eq_o.rzphi_xs == Eq.read_chease_binary(cfg("original")).rz_in_xs[2:end]
+        @test finite(eq_o)
+
+        # rho: starts at psilow (Fortran's rho starts at psihigh/(mpsi+1)²)
+        eq_r = Eq.setup_equilibrium(cfg("rho"))
+        @test eq_r.rzphi_xs[[1, end]] ≈ [0.01, 0.99]
+        @test finite(eq_r)
+    end
+
+    @testset "Load TokaMaker i-file" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        # One TokaMaker solve written by save_eqdsk (g65) and save_ifile (i33x65, real*8 and real*4)
+        tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
+        cfg(type, file; kw...) = Eq.EquilibriumConfig(; eq_type=type, eq_filename=joinpath(tk_dir, file), jac_type="hamada",
+            grid_type="core_edge_packed", mpsi=64, psilow=0.01, psihigh=0.99, kw...)
+        eq_i = Eq.setup_equilibrium(cfg("ifile", "i33x65.ifile"))
+        eq_g = Eq.setup_equilibrium(cfg("efit", "g65.geqdsk"))
+        eq_s = Eq.setup_equilibrium(cfg("ifile", "i33x65_single.ifile"))
+
+        # Same equilibrium as the g-file of the same solve
+        @test isapprox(eq_i.ro, eq_g.ro; atol=1e-4) && isapprox(eq_i.zo, eq_g.zo; atol=1e-4)
+        @test isapprox(eq_i.psio, eq_g.psio; rtol=1e-6)
+        @test all(isapprox(eq_i.profiles.q_spline(x), eq_g.profiles.q_spline(x); rtol=1e-3) for x in (0.2, 0.5, 0.8))
+
+        # Grad-Shafranov residual on interior surfaces
+        g = Eq.equilibrium_gse!(eq_i)
+        @test median(vec(maximum(g.error; dims=2))[0.05 .< g.xs .< 0.7]) < 5e-4
+
+        # A real*4 file reads to single-precision agreement
+        @test isapprox(eq_s.psio, eq_i.psio; rtol=1e-6)
+        @test all(isapprox(eq_s.profiles.q_spline(x), eq_i.profiles.q_spline(x); rtol=1e-6) for x in (0.2, 0.5, 0.8))
+        @test maximum(abs.(eq_s.ingest.R_nodes .- eq_i.ingest.R_nodes)) < 1e-6
+
+        # The trailing FF′ and p′ records are ignored: a file without them reads the same
+        table(file) = Eq.read_ifile(cfg("ifile", file)).ingest.sq_fs
+        tabulated = table("i33x65.ifile")
+        raw = read(joinpath(tk_dir, "i33x65.ifile"))
+        mx = Int(reinterpret(Int32, raw[5:8])[1])
+        stripped = joinpath(mktempdir(), "no_derivatives.ifile")
+        write(stripped, raw[1:end-2*(8mx+8)])
+        @test table(stripped) == tabulated
+
+        # q is the field-line q of the file's geometry (Fortran inverse_run), not its tabulated q record
+        qrec = 16 + 3 * (8mx + 8) + 4
+        bumped = copy(raw)
+        bumped[(qrec+1):(qrec+8mx)] = reinterpret(UInt8, 1.1 .* reinterpret(Float64, raw[(qrec+1):(qrec+8mx)]))
+        bumped_file = joinpath(mktempdir(), "bumped_q.ifile")
+        write(bumped_file, bumped)
+        @test Eq.read_ifile(cfg("ifile", bumped_file)).ingest.sq_fs[:, 3] ≈ 1.1 .* tabulated[:, 3]
+        @test Eq.setup_equilibrium(cfg("ifile", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
+    end
+
+    @testset "TokaMaker i-file ψ bounds record" begin
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
+        cfg(file; kw...) = Eq.EquilibriumConfig(; eq_type="ifile", eq_filename=file, jac_type="hamada", grid_type="core_edge_packed", mpsi=32,
+            psilow=0.01, psihigh=0.99, kw...)
+        raw = read(joinpath(tk_dir, "i33x65.ifile"))  # carries the FF′ and p′ records
+        mx = Int(reinterpret(Int32, raw[5:8])[1])
+        psi = reinterpret(Float64, raw[21:(20+8mx)])
+        stripped = raw[1:(end-2*(8mx+8))]
+        record(v) = vcat(reinterpret(UInt8, [Int32(8length(v))]), reinterpret(UInt8, Float64.(v)), reinterpret(UInt8, [Int32(8length(v))]))
+        dir = mktempdir()
+        variant(name, bytes) = (path = joinpath(dir, name); write(path, bytes); path)
+        ingest(path) = Eq.read_ifile(cfg(path)).ingest
+
+        base_s = ingest(variant("s.ifile", stripped))
+
+        # The true LCFS beyond the padded last surface: ψ_N shrinks by (1 - pad), psio grows by 1/(1 - pad).
+        # The record is read both after r, z (sb) and after FF′, p′ (db).
+        pad = 0.01
+        bounds = [psi[1], psi[1] + (psi[end] - psi[1]) / (1 - pad)]
+        sb = variant("sb.ifile", vcat(stripped, record(bounds)))
+        db = variant("db.ifile", vcat(raw, record(bounds)))
+        ing_sb = @test_logs (:info, r"ψ bounds") match_mode = :any ingest(sb)
+        ing_db = ingest(db)
+        for ing in (ing_sb, ing_db)
+            @test ing.sq_xs ≈ base_s.sq_xs .* (1 - pad)
+            @test ing.psio ≈ base_s.psio / (1 - pad)
+        end
+        @test ing_sb.sq_fs[:, 1:3] == ing_db.sq_fs[:, 1:3] == base_s.sq_fs[:, 1:3]
+
+        # psihigh beyond the last surface is clamped to it; a rerun from the ingest keeps the normalisation
+        eq = @test_logs (:warn, r"clamped") match_mode = :any Eq.setup_equilibrium(cfg(db; psihigh=0.995))
+        @test eq.params.psihigh_resolved == ing_db.sq_xs[end] ≈ eq.rzphi_xs[end]
+        @test all(isfinite, eq.profiles.q_spline.y) && all(isfinite, eq.eqfun_B.nodal_derivs.partials)
+        rerun = Eq.setup_equilibrium(cfg(db; psihigh=0.995), Eq.build_inverse_from_ingest(cfg(db), eq.ingest))
+        @test rerun.rzphi_xs == eq.rzphi_xs && rerun.psio == eq.psio
+        @test rerun.profiles.q_spline.y == eq.profiles.q_spline.y
+    end
+
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 10% to allow for method-specific discretisation differences.
-        q_efit      = plasma_eq_efit.profiles.q_spline.y
+        q_efit = plasma_eq_efit.profiles.q_spline.y
         q_arclength = plasma_eq_arclength.profiles.q_spline.y
         q_inversion = plasma_eq_inversion.profiles.q_spline.y
 
@@ -169,11 +297,11 @@
             eq_filename=joinpath(data_dir, "INP1_binary"),
             eq_type="chease_binary",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994,
-            r0exp=6.8,
-            b0exp=7.4
+            r0_norm=6.8,
+            b0_norm=7.4
         )
         global plasma_eq_binary = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(binary_config)
 
@@ -185,11 +313,11 @@
             eq_filename=joinpath(data_dir, "INP1_ascii"),
             eq_type="chease_ascii",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.994,
-            r0exp=6.8,
-            b0exp=7.4
+            r0_norm=6.8,
+            b0_norm=7.4
         )
         global plasma_eq_ascii = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(ascii_config)
 
@@ -246,10 +374,10 @@
     # values up to 2π from values in [0,0.5]), causing physically impossible B fields
     # and wildly non-constant r² on what should be closed flux surfaces.
     @testset "CHEASE Physical Validation" begin
-        b0exp = 7.4  # CHEASE normalization field [T]
+        b0_norm = 7.4  # CHEASE normalization field [T]
 
         B_nodes_binary = plasma_eq_binary.eqfun_B.nodal_derivs.partials[1, :, :]
-        B_nodes_ascii  = plasma_eq_ascii.eqfun_B.nodal_derivs.partials[1, :, :]
+        B_nodes_ascii = plasma_eq_ascii.eqfun_B.nodal_derivs.partials[1, :, :]
 
         # B field must be finite and positive everywhere
         @test all(isfinite, B_nodes_binary)
@@ -258,14 +386,14 @@
         @test all(>(0), B_nodes_ascii)
 
         # B field must be within a factor of 3 of the normalization field
-        @test all(B_nodes_binary .> b0exp / 3)
-        @test all(B_nodes_binary .< b0exp * 3)
-        @test all(B_nodes_ascii .> b0exp / 3)
-        @test all(B_nodes_ascii .< b0exp * 3)
+        @test all(B_nodes_binary .> b0_norm / 3)
+        @test all(B_nodes_binary .< b0_norm * 3)
+        @test all(B_nodes_ascii .> b0_norm / 3)
+        @test all(B_nodes_ascii .< b0_norm * 3)
 
         # q must be finite, positive, and in a physically reasonable range
         q_binary = plasma_eq_binary.profiles.q_spline.y
-        q_ascii  = plasma_eq_ascii.profiles.q_spline.y
+        q_ascii = plasma_eq_ascii.profiles.q_spline.y
         @test all(isfinite, q_binary)
         @test all(isfinite, q_ascii)
         @test all(>(0), q_binary)
@@ -280,13 +408,13 @@
         lar_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_type="lar",
             jac_type="boozer",
-            grid_type="ldp",
+            grid_type="core_edge_packed",
             psilow=0.01,
             psihigh=0.99
         )
         lar_input = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(;
-            lar_r0=10.0, lar_a=1.0, q0=1.5, beta0=1e-4,
-            mtau=64, ma=64, zeroth=true
+            r0=10.0, a=1.0, q0=1.5, beta0=1e-4,
+            mtheta=64, ma=64, zeroth=true
         )
         plasma_eq_lar = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(lar_config, lar_input)
 
@@ -338,7 +466,7 @@
         end
 
         @testset "sol_run clamps p0fac to ≥ 1" begin
-            equil_inputs, sol_inputs = make_inputs(p0fac=0.5)
+            equil_inputs, sol_inputs = make_inputs(; p0fac=0.5)
             dri = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(equil_inputs, sol_inputs)
             @test all(dri.sq_in.y[:, 2] .>= 0)  # no negative pressures
         end
@@ -346,7 +474,7 @@
         @testset "sol_run scalar relationships" begin
             equil_inputs, sol_inputs = make_inputs()
             mr, mz, ma = sol_inputs.mr, sol_inputs.mz, sol_inputs.ma
-            e, a, r0, q0 = sol_inputs.e, sol_inputs.a, sol_inputs.r0, sol_inputs.q0
+            e, a, r0, q0 = sol_inputs.elongation, sol_inputs.a, sol_inputs.r0, sol_inputs.q0
             p0fac, b0fac, f0fac = sol_inputs.p0fac, sol_inputs.b0fac, sol_inputs.f0fac
 
             dri = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(equil_inputs, sol_inputs)
@@ -367,7 +495,7 @@
         end
 
         @testset "sol_run spline integrity" begin
-            equil_inputs, sol_inputs = make_inputs(mr=6, mz=5, ma=3)
+            equil_inputs, sol_inputs = make_inputs(; mr=6, mz=5, ma=3)
             dri = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(equil_inputs, sol_inputs)
             sq = dri.sq_in
             psi = dri.psi_in
@@ -389,7 +517,7 @@
         end
 
         @testset "sol_run 2D psi field properties" begin
-            equil_inputs, sol_inputs = make_inputs(mr=3, mz=3)
+            equil_inputs, sol_inputs = make_inputs(; mr=3, mz=3)
             dri = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(equil_inputs, sol_inputs)
             psi = dri.psi_in
 
@@ -408,7 +536,7 @@
             dri2 = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(
                 equil_inputs,
                 GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(sol_inputs.mr, sol_inputs.mz, sol_inputs.ma,
-                    sol_inputs.e * 1.1, sol_inputs.a, sol_inputs.r0,
+                    sol_inputs.elongation * 1.1, sol_inputs.a, sol_inputs.r0,
                     sol_inputs.q0, sol_inputs.p0fac, sol_inputs.b0fac,
                     sol_inputs.f0fac)
             )
@@ -418,13 +546,13 @@
         @testset "sol_run extreme inputs" begin
             # minimal grid (CubicInterpolant requires at least 4 points for extrap BC)
             # mr=3, mz=3 creates 4-point grids (mr+1 points)
-            equil_inputs, sol_inputs = make_inputs(mr=3, mz=3, ma=3)
+            equil_inputs, sol_inputs = make_inputs(; mr=3, mz=3, ma=3)
             dri = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(equil_inputs, sol_inputs)
             @test length(dri.psi_in_xs) == 4
             @test length(dri.psi_in_ys) == 4
 
             # very high aspect ratio
-            equil_inputs, sol_inputs = make_inputs(e=0.8, a=0.1, r0=10.0)
+            equil_inputs, sol_inputs = make_inputs(; e=0.8, a=0.1, r0=10.0)
             dri = GeneralizedPerturbedEquilibrium.Equilibrium.sol_run(equil_inputs, sol_inputs)
             @test isfinite(dri.psio)
         end
@@ -443,10 +571,10 @@
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
 
         function build_solovev_equilibrium(; e=1.6, a=0.33, r0=1.0, q0=1.9,
-                mpsi=64, mtheta=128)
+            mpsi=64, mtheta=128)
             eq_config = Eq.EquilibriumConfig(;
                 eq_type="sol", eq_filename="unused",
-                jac_type="pest", grid_type="ldp",
+                jac_type="pest", grid_type="core_edge_packed",
                 psilow=1e-4, psihigh=0.99999, mpsi=mpsi, mtheta=mtheta)
             sol_config = Eq.SolovevConfig(64, 64, 64, e, a, r0, q0, 1.0, 1.0, 1.0)
             dri = Eq.sol_run(eq_config, sol_config)
@@ -454,7 +582,7 @@
         end
 
         @testset "Elongated Solovev (e=1.6)" begin
-            pe = build_solovev_equilibrium(e=1.6)
+            pe = build_solovev_equilibrium(; e=1.6)
             rsep, zsep, rext, zext = Eq.equilibrium_separatrix_find!(pe)
 
             # rsep[1] = outboard (R > R₀), rsep[2] = inboard (R < R₀)
@@ -465,8 +593,8 @@
             # rsep values consistent with r0=1.0, a=0.33 (Shafranov shift makes it approximate)
             amean = (rsep[1] - rsep[2]) / 2
             rmean = (rsep[1] + rsep[2]) / 2
-            @test amean ≈ 0.33 rtol=0.15
-            @test rmean ≈ 1.0 rtol=0.15
+            @test amean ≈ 0.33 rtol = 0.15
+            @test rmean ≈ 1.0 rtol = 0.15
 
             # rsep should be on the midplane (Z ≈ 0)
             # (verified indirectly: R at η=0 and η=0.5 are midplane by definition)
@@ -480,7 +608,7 @@
             @test zext ≈ zsep
 
             # Up-down symmetry of Solovev: |zsep_top| ≈ |zsep_bottom|
-            @test abs(zsep[1]) ≈ abs(zsep[2]) rtol=0.01
+            @test abs(zsep[1]) ≈ abs(zsep[2]) rtol = 0.01
 
             # Extremum R should be near the magnetic axis
             @test abs(rext[1] - pe.ro) < 0.2 * (rsep[1] - rsep[2])
@@ -489,11 +617,11 @@
             # kappa ≈ elongation
             kappa = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])
             @test kappa > 0
-            @test kappa ≈ 1.6 rtol=0.02
+            @test kappa ≈ 1.6 rtol = 0.02
         end
 
         @testset "Circular Solovev (e=1.0)" begin
-            pe = build_solovev_equilibrium(e=1.0)
+            pe = build_solovev_equilibrium(; e=1.0)
             rsep, zsep, rext, zext = Eq.equilibrium_separatrix_find!(pe)
 
             @test rsep[1] > pe.ro
@@ -505,15 +633,15 @@
             @test zsep[1] > zsep[2]
 
             # For circular cross-section, rext[1] ≈ rext[2] (top/bottom at same R)
-            @test rext[1] ≈ rext[2] rtol=0.01
+            @test rext[1] ≈ rext[2] rtol = 0.01
 
             kappa = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])
             @test kappa > 0
-            @test kappa ≈ 1.0 rtol=0.02
+            @test kappa ≈ 1.0 rtol = 0.02
         end
 
         @testset "Global scalars via equilibrium_global_parameters!" begin
-            pe = build_solovev_equilibrium(e=1.6)
+            pe = build_solovev_equilibrium(; e=1.6)
             Eq.equilibrium_global_parameters!(pe)
 
             # Separatrix convention: rsep[1]=outboard, rsep[2]=inboard,
@@ -522,24 +650,24 @@
             @test pe.params.zsep[1] > pe.params.zsep[2]
 
             # Shape parameters — all physically positive quantities.
-            @test pe.params.amean  > 0
-            @test pe.params.rmean  > 0
+            @test pe.params.amean > 0
+            @test pe.params.rmean > 0
             @test pe.params.aratio > 0
-            @test pe.params.kappa  > 0
-            @test pe.params.kappa  ≈ 1.6 rtol=0.02
+            @test pe.params.kappa > 0
+            @test pe.params.kappa ≈ 1.6 rtol = 0.02
 
             # For Solovev (e=1.6, a=0.33, r0=1.0) the shape is approximately
             # recovered (Shafranov shift loosens the match).
-            @test pe.params.amean ≈ 0.33 rtol=0.15
-            @test pe.params.rmean ≈ 1.0  rtol=0.15
+            @test pe.params.amean ≈ 0.33 rtol = 0.15
+            @test pe.params.rmean ≈ 1.0 rtol = 0.15
 
             # Consistency with separatrix formulae.
             @test pe.params.rmean ≈ (pe.params.rsep[1] + pe.params.rsep[2]) / 2
             @test pe.params.amean ≈ (pe.params.rsep[1] - pe.params.rsep[2]) / 2
 
             # Beta and field quantities — all physically positive.
-            @test pe.params.bt0   > 0
-            @test pe.params.crnt  > 0
+            @test pe.params.bt0 > 0
+            @test pe.params.crnt > 0
             @test pe.params.bwall > 0
             @test pe.params.betat > 0
             @test pe.params.betan > 0

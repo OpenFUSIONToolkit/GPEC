@@ -100,14 +100,14 @@
         @test p_none.dc_tmp == 0.0   # :none ignores dr_val
 
         p_lar = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:lar)...)
-        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:rfitzp)...)
+        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:fitzpatrick)...)
         p_tor = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:toroidal)...)
 
         @test isfinite(p_lar.dc_tmp)
         @test isfinite(p_rf.dc_tmp)
         @test isfinite(p_tor.dc_tmp)
         # dr_val > 0 with the (-dr_val) prefactor ⇒ negative dc_tmp for
-        # :lar, :rfitzp, :toroidal branches.
+        # :lar, :fitzpatrick, :toroidal branches.
         @test p_lar.dc_tmp < 0
         @test p_rf.dc_tmp < 0
         @test p_tor.dc_tmp < 0
@@ -158,9 +158,9 @@
         k_cyl = common.n_tor * common.sval_r / common.R0
         dc(dc_type, g, k; tau_ee=1e-6) = _solve_dc_tmp(; common..., dc_type=dc_type, dgeo_val=g, kpar_val=k, tau_ee=tau_ee)
 
-        # Cylindrical geometry reproduces :lar (which is per metre, hence the r_s) and :rfitzp.
+        # Cylindrical geometry reproduces :lar (which is per metre, hence the r_s) and :fitzpatrick.
         @test dc(:toroidal, g_cyl, k_cyl) ≈ common.rs * dc(:lar, 0.0, nothing) rtol = 1e-12
-        @test dc(:toroidal, g_cyl, k_cyl) ≈ dc(:rfitzp, 0.0, nothing) rtol = 1e-8
+        @test dc(:toroidal, g_cyl, k_cyl) ≈ dc(:fitzpatrick, 0.0, nothing) rtol = 1e-8
         # kpar_val = nothing falls back to the cylindrical K∥.
         @test dc(:toroidal, g_cyl, nothing) == dc(:toroidal, g_cyl, k_cyl)
 

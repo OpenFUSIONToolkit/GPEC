@@ -141,6 +141,10 @@ regress --cases diiid_n1 --refs develop,my-feature-branch
 what keeps the baseline current (or pass `origin/develop` directly). After a fetch, a local pointer
 that still lags its remote prints a `!! STALE BASELINE` banner; without one the banner is silent.
 
+A pull request stacked on another one compares against the branch it targets, not `develop`, so
+its report shows only its own changes: `regress --cases diiid_n1 --refs <base-branch>,my-feature-branch`
+(see [Stacked pull requests](git-workflow.md#stacked-pull-requests)).
+
 `local` stays the right tool for a quick spot check on uncommitted work, provided you leave the tree
 alone until it finishes.
 

@@ -19,12 +19,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
 @testset "TJ-analytic model" begin
     @testset "tj_analytic_run (inverse) — basic invariants at ε = 0.25" begin
         # Keep ε, mpsi, mtheta modest so the whole block runs in ~1 s.
-        tj = TJAnalyticConfig(; lar_r0=1.0 / 0.25, lar_a=1.0,
-            qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0,
-            ma=64, mtau=64)
+        tj = TJAnalyticConfig(; r0=1.0 / 0.25, a=1.0,
+            q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0,
+            ma=64, mtheta=64)
         eq = EquilibriumConfig(; eq_type="tj_analytic",
             psilow=0.01, psihigh=0.995,
-            mpsi=64, mtheta=128, etol=1e-7)
+            mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
         pe = setup_equilibrium(eq, tj)
 
         # psio is a physical-scale ψ; regressions in the a→a² normalization
@@ -46,12 +46,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # ε = 0.60 sits on the stable side of the ideal-external-kink pole at
         # ε ≈ 0.665 for this (qc, qa, pc, μ) combination.  Pole-approach shape
         # (δW_t small, Δ' > 0 and growing) is the Option B success criterion.
-        tj = TJAnalyticConfig(; lar_r0=1.0 / 0.60, lar_a=1.0,
-            qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0,
-            ma=64, mtau=64)
+        tj = TJAnalyticConfig(; r0=1.0 / 0.60, a=1.0,
+            q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0,
+            ma=64, mtheta=64)
         eq = EquilibriumConfig(; eq_type="tj_analytic_direct",
             psilow=0.01, psihigh=0.995,
-            mpsi=64, mtheta=128, etol=1e-7)
+            mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
         pe = setup_equilibrium(eq, tj)
 
         @test pe.psio > 0
@@ -73,12 +73,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # At the magnetic axis ψ_in should equal psio (axis convention: ψ
         # positive at axis, zero at LCFS); sampling well outside the LCFS should
         # give a negative value (the vacuum branch of psi_rz).
-        tj = TJAnalyticConfig(; lar_r0=1.0 / 0.25, lar_a=1.0,
-            qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0,
-            ma=64, mtau=64)
+        tj = TJAnalyticConfig(; r0=1.0 / 0.25, a=1.0,
+            q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0,
+            ma=64, mtheta=64)
         eq = EquilibriumConfig(; eq_type="tj_analytic_direct",
             psilow=0.01, psihigh=0.995,
-            mpsi=64, mtheta=128, etol=1e-7)
+            mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
         inp = tj_analytic_run_direct(eq, tj)
 
         # ψ at the geometric axis matches psio (see DirectRunInput docstring for
@@ -92,7 +92,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
     end
 
     @testset "toroidal critical-Δ factor → √(n s r_s/R₀) as ε → 0" begin
-        # Connor et al. 2015 Eq. 59 in the r_s reference must reduce to the rfitzp factor at large
+        # Connor et al. 2015 Eq. 59 in the r_s reference must reduce to the :fitzpatrick factor at large
         # aspect ratio. The residual is a genuine O(ε) toroidal correction, so it is bounded by the
         # local r_s/R₀ (measured coefficient 0.15–0.18) and must halve with ε (measured 0.49–0.50);
         # a wrong O(1) factor would not shrink.

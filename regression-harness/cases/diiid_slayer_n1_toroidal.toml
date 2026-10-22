@@ -1,18 +1,18 @@
 # Regression case: DIII-D-like H-mode n=1 SLAYER with the toroidal critical-Δ offset.
-# Same deck as diiid_slayer_n1 with dc_type = "toroidal", so the geometric factor D_geo derived
+# Same deck as diiid_slayer_n1 with D_c_type = "toroidal", so the geometric factor D_geo derived
 # from each surface's ResistGeometry feeds the χ_‖-matching offset D_c and, through it, the roots.
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
 # and the noise floor below which a difference is treated as zero.
 [case]
 name = "diiid_slayer_n1_toroidal"
-description = "DIII-D-like H-mode, n=1, SLAYER with the toroidal critical-Δ offset (dc_type = toroidal)"
+description = "DIII-D-like H-mode, n=1, SLAYER with the toroidal critical-Δ offset (D_c_type = toroidal)"
 example_dir = "examples/DIIID-like_SLAYER_example"
 
 [overrides]
-"SLAYER.dc_type" = "toroidal"
+"SLAYER.D_c_type" = "toroidal"
 
 # Critical-Δ input and offset: the resistive interchange index and D_c. The geometric factor
-# D_geo does not depend on dc_type and is tracked once, in diiid_slayer_n1.
+# D_geo does not depend on D_c_type and is tracked once, in diiid_slayer_n1.
 [quantities.slayer_dr_val]
 h5path = "Tearing/PerSurface/D_R"
 type = "real_vector"
