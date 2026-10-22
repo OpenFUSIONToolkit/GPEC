@@ -11,9 +11,9 @@ Dimensionless parameters of the Glasser–Greene–Johnson inner-layer model
 at a single rational surface, plus the local Alfvén/resistive timescales
 needed to scale the matching data back to physical Δ. The equilibrium
 coefficients `E, F, G, H, K, M` are the flux-surface averages defined in
-GWP2016 Eq. (A8); they enter the inner-region equations (Eq. 11).
+GWP2016 Eq. (A8); E, F, G, H, K enter the inner-region equations (Eq. 11).
 
-Fields:
+## Fields
 
 | field   | meaning                                                        |
 |:------- |:-------------------------------------------------------------- |
@@ -22,10 +22,10 @@ Fields:
 | `G`     | Coupling coefficient (curvature × pressure gradient)           |
 | `H`     | Pfirsch–Schlüter coefficient                                   |
 | `K`     | Glasser parameter                                              |
-| `M`     | Mercier-related auxiliary parameter (held but not used here)   |
+| `M`     | Inertia factor (A8; enters K and Q₀, X₀); held, not used here  |
 | `taua`  | Local Alfvén time at the rational surface                      |
 | `taur`  | Local resistive time at the rational surface                   |
-| `v1`    | Linear scale factor used in the V₁ rescaling                   |
+| `v1`    | Coordinate scale: inner X = v₁·δψ/X₀; enters `rescale_delta`   |
 | `ising` | Index of the singular surface (traceability only)              |
 
 The growth rate `γ` is not stored here; it is a separate argument to `solve_inner`.
@@ -79,29 +79,30 @@ sfac(p::GGJParameters) = p.taur / p.taua
 """
     x0(p::GGJParameters) -> Float64
 
-Inner-layer length scale `X₀ = S^(−1/3)` (GWP2016 Eq. A14); physical `x = X₀ X`.
+Inner-layer length scale `X₀ = S^(−1/3)` (GWP2016 Eq. A16); physical `x = X₀ X` (Eq. A11).
 """
 x0(p::GGJParameters) = sfac(p)^(-1.0 / 3.0)
 
 """
     q0(p::GGJParameters) -> Float64
 
-Growth-rate scale `Q₀ = X₀ / τ_A` (GWP2016 Eq. A15); physical rate `= Q₀ Q`.
+Growth-rate scale `Q₀ = X₀ / τ_A` (GWP2016 Eq. A16); physical rate `= Q₀ Q` (Eq. A11).
 """
 q0(p::GGJParameters) = x0(p) / p.taua
 
 """
     inner_Q(p::GGJParameters, γ::Number) -> ComplexF64
 
-Scaled inner-layer growth rate `Q = γ / Q₀` (GWP2016 Eq. A15).
+Scaled inner-layer growth rate `Q = γ / Q₀` (GWP2016 Eq. A11).
 """
 inner_Q(p::GGJParameters, γ::Number) = ComplexF64(γ) / q0(p)
 
 """
     rescale_delta(Δ, p::GGJParameters) -> SVector{2,ComplexF64}
 
-Rescale the matching data to physical Δ by `S^(2√(−D_I)/3) · v₁^(2√(−D_I))`
-(GWP2016 Sec. IV), element-wise on `(Δ_odd, Δ_even)`.
+Rescale the matching data to physical Δ by `S^(2√(−D_I)/3) · v₁^(2√(−D_I))`, element-wise
+on the pair (Δ₊, Δ₋). The factor X₀^(−2√(−D_I)) = S^(2√(−D_I)/3) is Wang et al., Phys. Plasmas
+27, 122503 (2020), text after Eq. 11.
 """
 function rescale_delta(Δ::AbstractVector, p::GGJParameters)
     s = sfac(p)
@@ -110,8 +111,6 @@ function rescale_delta(Δ::AbstractVector, p::GGJParameters)
     return SVector{2,ComplexF64}(Δ[1] * fac, Δ[2] * fac)
 end
 
-# Profile conversions shared by the solve_inner_profile backends: δψ per unit inner
-# coordinate X = v₁·δψ/X₀, and the big-branch (μ₋ = −1/2−p₁) amplitude rescale to the
-# outer δψ-normalization, resc = (v₁/X₀)^(−μ₋) — the companion of rescale_delta's
-# (v₁/X₀)^(2p₁) = (v₁/X₀)^(μ₊−μ₋).
+# Profile conversions for solve_inner_profile: δψ per unit inner coordinate (X = v₁·δψ/X₀) and the
+# large-solution amplitude rescale (v₁/X₀)^(1/2+p₁) to the outer δψ normalization.
 _profile_conversions(p::GGJParameters) = (; dψdx=x0(p) / p.v1, rescale=(p.v1 / x0(p))^(0.5 + p1(p)))
