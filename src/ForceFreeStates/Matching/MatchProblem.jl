@@ -12,13 +12,15 @@ field `bpen`. `ffs` needs the Δ′ coil block, from `Galerkin(; rpec_flag=true)
 with `vac_flag=true`.
 
 # Keywords
-- `eta`, `rho`, `rotation`: resistivity in Ω·m, mass density in kg/m³ and rotation frequency
-  in Hz, a scalar for every surface or one value per `ffs.surfaces` entry (core to edge).
-  Required unless `ideal=true`.
-- `gamma`: ratio of specific heats.
-- `ideal`: skip the inner layer and return the perfectly shielding solution.
+
+  - `eta`, `rho`, `rotation`: resistivity in Ω·m, mass density in kg/m³ and rotation frequency
+    in Hz, a scalar for every surface or one value per `ffs.surfaces` entry (core to edge).
+    Required unless `ideal=true`.
+  - `gamma`: ratio of specific heats.
+  - `ideal`: skip the inner layer and return the perfectly shielding solution.
 
 ## Fields
+
   - `ffs` - The outer solve being matched; held by reference, not copied.
   - `eta`, `rho`, `rotation` - Per-surface η in Ω·m, ρ in kg/m³ and rotation frequency in Hz, following `ffs.surfaces`.
   - `gamma` - Ratio of specific heats.
@@ -126,45 +128,57 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         # Layer-center field weight per parity (match.f intotsol_b).
         pen = zeros(ComplexF64, msing, 2)
         inner_psi = Vector{Vector{Float64}}(undef, msing)      # ψ_s ± X·dψdx, ascending
-        inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₁, odd about ψ_s
-        inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₂, even
-        inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₁, even
-        inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₂, odd
+        inner_odd = Vector{Vector{ComplexF64}}(undef, msing)   # Ξ₋, odd about ψ_s
+        inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₊, even
+        inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₋, even
+        inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₊, odd
         inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
+        profiles = true
         for i in 1:msing
             params = ggj_parameters(sings[i], equil; eta=prob.eta[i], rho=prob.rho[i],
                 gamma=prob.gamma, ising=i)
             inner_params[i] = params
             γ = 2π * im * nn * prob.rotation[i]    # forced eigenvalue, f in Hz
             rpec_eig[i] = γ
-            inner = InnerLayer.solve_inner_profile(model, params, γ)
+            inner = InnerLayer.solve_inner_profile(model, params, γ)   # parity columns (Δ₊, Δ₋)
             deltar[i, 1] = inner.Δ[1]
             deltar[i, 2] = inner.Δ[2]
             profΨ, profΞ, xg = inner.Ψ, inner.Ξ, inner.x
             resc = inner.rescale                    # inner big-branch amplitude → outer δψ normalization
-            # b_m = 2πi·χ₁·(m−nq)·ξ_m with m−nq = −n·q′·dψdx·X and Ψ = XΞ (GWP2016 Eq. 16) ⇒ b_m = scale·resc·Ψ.
+            # b_m = 2πi·χ₁·(m−nq)·ξ_m with m−nq = −n·q′·dψdx·X and Ψ = XΞ at leading order (GWP2016 Eqs. 16, 27; Ψ normalization Eq. A17) ⇒ b_m = scale·resc·Ψ.
             scale = -2π * chi1 * im * nn * sings[i].q1 * inner.dψdx
-            pen[i, 1] = scale * profΨ[1, 1] * resc   # X = 0, parity 1
-            pen[i, 2] = scale * profΨ[1, 2] * resc   # parity 2 (Ψ(0) = 0)
+            pen[i, 1] = scale * profΨ[1, 1] * resc   # X = 0, even parity (Ψ(0) = 0)
+            pen[i, 2] = scale * profΨ[1, 2] * resc   # odd parity
+            # A backend returning only layer-center values (real-ψ profiles not requested) skips the inner profiles.
+            if length(xg) == 1
+                profiles = false
+                continue
+            end
             xvar = xg .* inner.dψdx                  # X → ψ distance
             inner_psi[i] = vcat(reverse(sings[i].psifac .- xvar), sings[i].psifac .+ xvar)
-            inner_odd[i] = resc .* vcat(reverse(.-profΞ[:, 1]), profΞ[:, 1])
-            inner_even[i] = resc .* vcat(reverse(profΞ[:, 2]), profΞ[:, 2])
-            inner_bodd[i] = (scale * resc) .* vcat(reverse(profΨ[:, 1]), profΨ[:, 1])
-            inner_beven[i] = (scale * resc) .* vcat(reverse(.-profΨ[:, 2]), profΨ[:, 2])
+            inner_odd[i] = resc .* vcat(reverse(.-profΞ[:, 2]), profΞ[:, 2])
+            inner_even[i] = resc .* vcat(reverse(profΞ[:, 1]), profΞ[:, 1])
+            inner_bodd[i] = (scale * resc) .* vcat(reverse(profΨ[:, 2]), profΨ[:, 2])
+            inner_beven[i] = (scale * resc) .* vcat(reverse(.-profΨ[:, 1]), profΨ[:, 1])
         end
 
         cout, cin, residual = _match_system(dp.raw, dp.coil, deltar)
 
-        # Penetrated field at each layer center (match.f intotsol_b).
+        # Penetrated field at each layer center (match.f intotsol_b); cin rows per surface are (d₊, d₋).
         bpen = zeros(ComplexF64, msing, mcoil)
         for i in 1:msing, j in 1:mcoil
-            bpen[i, j] = pen[i, 1] * cin[2i, j] + pen[i, 2] * cin[2i-1, j]
+            bpen[i, j] = pen[i, 1] * cin[2i-1, j] + pen[i, 2] * cin[2i, j]
         end
 
         # Matched inner ξ_ψ and b^ψ per coil: odd parity × cin[2i], even × cin[2i-1] (match.f intotsol).
-        inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
-        inner_b = [inner_bodd[i] * transpose(cin[2i, :]) .+ inner_beven[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+        if profiles
+            inner_xi = [inner_odd[i] * transpose(cin[2i, :]) .+ inner_even[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+            inner_b = [inner_bodd[i] * transpose(cin[2i, :]) .+ inner_beven[i] * transpose(cin[2i-1, :]) for i in 1:msing]
+        else
+            inner_psi = Vector{Float64}[]
+            inner_xi = Matrix{ComplexF64}[]
+            inner_b = Matrix{ComplexF64}[]
+        end
     end
 
     reconnected_flux = Matrix{ComplexF64}(dp.coil .+ transpose(dp.raw) * cout)
@@ -173,7 +187,9 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     if gal_sol === nothing
         xi = Array{ComplexF64,3}(undef, 0, 0, 0)
         xi_deriv = Array{ComplexF64,3}(undef, 0, 0, 0)
-        empty!(inner_psi); empty!(inner_xi); empty!(inner_b)
+        empty!(inner_psi)
+        empty!(inner_xi)
+        empty!(inner_b)
     else
         sols = gal_sol.xi          # (mpert, ngrid, nsol)
         sols_deriv = gal_sol.xi_deriv
@@ -197,7 +213,9 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
                       "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog=1
-                empty!(inner_psi); empty!(inner_xi); empty!(inner_b)
+                empty!(inner_psi)
+                empty!(inner_xi)
+                empty!(inner_b)
             else
                 cut_range = gal_sol.cut_range
                 keep = .!gal_sol.issing
