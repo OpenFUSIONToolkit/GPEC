@@ -223,7 +223,8 @@ function main_from_inputs(
     equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
     kf_ctrl, kinetic_profiles, kf_species = load_kinetic_context(inputs, intr, ctrl, equil)
-    equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles)
+    equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles;
+        kf_ctrl=kf_ctrl, kf_species=kf_species)
 
     equil_dt = time() - equil_start
     push!(runtimes, "equilibrium" => equil_dt)
@@ -275,6 +276,15 @@ function main_from_inputs(
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
+    # Validity describes the kinetic model, not the torque contraction, so it is written wherever
+    # kinetic profiles were loaded — including FFS-only runs that never reach run_kinetic_forces.
+    if ctrl.write_outputs_to_HDF5 && kinetic_profiles !== nothing
+        h5open(joinpath(ffs_result.dir_path, ctrl.HDF5_filename), "cw") do h5file
+            KineticForces.write_validity!(h5file, kf_ctrl, kf_species, kinetic_profiles, equil,
+                Float64[sng.psifac for sng in intr.sing])
+        end
+    end
+
     ffs_dt = time() - ffs_start
     push!(runtimes, "force_free_states" => ffs_dt)
     @info "Force-Free States completed in $(@sprintf("%.3f", ffs_dt)) s"
@@ -282,7 +292,7 @@ function main_from_inputs(
     # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
         slayer_result = run_slayer_stage(ffs_result, inputs, nothing; runtimes=runtimes)
-        # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
+        # A non-nothing result means the Tearing/ group was appended.
         slayer_result === nothing || (written_h5 = ctrl.HDF5_filename)
         total_dt = time() - total_start
         push!(runtimes, "total" => total_dt)
@@ -339,7 +349,7 @@ function main_from_inputs(
     end
 
     slayer_result = run_slayer_stage(ffs_result, inputs, pe_file; runtimes=runtimes)
-    # A non-nothing result means the Tearing/ group was appended inside the guarded stage.
+    # A non-nothing result means the Tearing/ group was appended.
     slayer_result === nothing || (written_h5 = pe_file)
 
     # ----------------------------------------------------------------
@@ -447,7 +457,8 @@ function load_kinetic_context(
 end
 
 """
-    maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles) -> equil
+    maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles;
+                             kf_ctrl=nothing, kf_species=nothing) -> equil
 
 Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, kinetic
 profiles), pin knots on rational surfaces, and re-form on the refined grid from the in-memory
@@ -459,16 +470,24 @@ function maybe_reform_equilibrium(
     additional_input,
     intr::ForceFreeStatesInternal,
     ctrl::ForceFreeStatesControl,
-    kinetic_profiles
+    kinetic_profiles;
+    kf_ctrl::Union{Nothing,KineticForces.KineticForcesControl}=nothing,
+    kf_species=nothing
 )
     Equilibrium.wants_two_pass(eq_config) || return equil
 
     mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+    # Kinetic-resonance nodes are located here rather than at the call site so the validity
+    # boundary that filters them is cleared against this pass's rationals (intr.sing is empty yet).
+    pinned = kf_ctrl === nothing ? Float64[] :
+             KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, kf_species, equil, intr; rationals=mandatory)
     # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
     # so the rational-surface brackets clear a zone large enough for every mode.
     n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
+    isempty(pinned) ||
+        @info "Pinning $(length(pinned)) kinetic-resonance surfaces into the ψ grid: $(round.(sort(pinned); digits=3))"
     psi_nodes = Equilibrium.refined_psi_grid(equil;
-        tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory,
+        tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory, pinned=pinned,
         singfac_min=ctrl.singfac_min, n_min=n_min)
     rerun_input = if additional_input !== nothing
         # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
@@ -715,12 +734,18 @@ function prepare_force_free_states!(
         # Inject the KineticForces callback so the "calculated" source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
-        calculated_cb = (c, e, i, m, f) ->
-            KineticForces.compute_calculated_kinetic_matrices(
-                c, e, i, m, f;
-                kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species)
+        # One boundary for the whole run: the widest-orbit species, moved clear of any rational
+        # surface whose window the transition band would otherwise cut through.
+        axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
+            Float64[sng.psifac for sng in intr.sing])
+        calculated_cb =
+            (c, e, i, m, f; psis::Vector{Float64}=Float64[]) ->
+                KineticForces.compute_calculated_kinetic_matrices(
+                    c, e, i, m, f;
+                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species, psis=psis,
+                    axis_psi_c=axis_psi_c)
         mats = build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
-            calculated_source=calculated_cb)
+            calculated_source=calculated_cb, axis_validity_psi_c=axis_psi_c)
 
         # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
         # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
@@ -1026,7 +1051,7 @@ function perturbed_equilibrium(
     kwargs...
 )
     ctrl = ffs.control
-    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; kwargs...)
+    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; PerturbedEquilibrium.kinetic_regularization_kwargs(ffs, kwargs)...)
     pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
 
     # Inner-layer penetrated resonant field; zeros under ideal closure.
@@ -1087,6 +1112,10 @@ function run_kinetic_forces(
     @info "\n  KineticForces\n$_SECTION"
     kf_start = time()
 
+    # One boundary for the whole run, shared with the EL kinetic matrices and the Validity output.
+    axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, result.equil,
+        Float64[sng.psifac for sng in result.surfaces])
+
     # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
     # against ξ). The self-consistent kinetic_source="calculated" path produces none — skip.
     if pe_state === nothing
@@ -1098,7 +1127,8 @@ function run_kinetic_forces(
 
         if species === nothing
             kf_state = KineticForces.KineticForcesState()
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles)
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles;
+                axis_psi_c=axis_psi_c)
             if kf_ctrl.write_outputs_to_HDF5
                 h5open(joinpath(result.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
                     KineticForces.write_to_hdf5!(h5file, kf_state;
@@ -1115,7 +1145,8 @@ function run_kinetic_forces(
                     (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
                     ion_charge=sp.z, ion_mass=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
                 st = KineticForces.KineticForcesState()
-                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles)
+                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles;
+                    axis_psi_c=axis_psi_c)
                 push!(states, st)
                 push!(labels, sp.label)
             end
@@ -1433,40 +1464,29 @@ Run the SLAYER tearing-mode analysis off the force-free-states `result`, appendi
 `pe_file` (or the force-free-states output when PE did not run). Needs only the result, so it
 runs in both the `force_termination = true` path and the full pipeline. A `runtimes` collector,
 when given, receives the solver's wall-clock seconds as a `"tearing" => dt` pair for the
-`Info/Runtimes` record.
+`Info/Runtimes` record. Errors propagate; every earlier stage has already written its output.
 """
 function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any}, pe_file::Union{String,Nothing};
     runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing)
     ("SLAYER" in keys(inputs)) || return nothing
-    # SLAYER is a post-processing diagnostic. A failure here must not
-    # discard the equilibrium / stability / PE results already computed,
-    # so the whole stage is guarded: on error we log loudly and return
-    # `nothing` for the `slayer` field rather than propagating.
-    try
-        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-        slayer_ctrl.enabled || return nothing
-        @info "\n  SLAYER\n$_SECTION"
-        slayer_start = time()
-        model = Runner._build_inner_model(slayer_ctrl.inner_model)
-        slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
-        slayer_dt = time() - slayer_start
-        runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
-        @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
-        h5_filename = pe_file === nothing ? result.control.HDF5_filename : pe_file
-        h5_path = joinpath(result.dir_path, h5_filename)
-        # Append the Tearing/ group; create the file if no prior stage wrote
-        # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
-        HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
-            Runner.write_slayer_hdf5!(f, slayer_result)
-        end
-        @info "SLAYER results written to $h5_filename"
-        return slayer_result
-    catch err
-        @error "SLAYER stage failed; continuing without tearing results. " *
-               "Equilibrium / stability / PE outputs are unaffected." exception =
-            (err, catch_backtrace())
-        return nothing
+    slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+    slayer_ctrl.enabled || return nothing
+    @info "\n  SLAYER\n$_SECTION"
+    slayer_start = time()
+    model = Runner._build_inner_model(slayer_ctrl.inner_model)
+    slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
+    slayer_dt = time() - slayer_start
+    runtimes === nothing || push!(runtimes, "tearing" => slayer_dt)
+    @info "SLAYER completed in $(@sprintf("%.3f", slayer_dt)) s"
+    h5_filename = pe_file === nothing ? result.control.HDF5_filename : pe_file
+    h5_path = joinpath(result.dir_path, h5_filename)
+    # Append the Tearing/ group; create the file if no prior stage wrote
+    # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+    HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+        Runner.write_slayer_hdf5!(f, slayer_result)
     end
+    @info "SLAYER results written to $h5_filename"
+    return slayer_result
 end
 
 """
