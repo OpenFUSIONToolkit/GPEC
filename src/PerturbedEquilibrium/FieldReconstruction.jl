@@ -1056,3 +1056,132 @@ function _apply_rzphi_transform(
 
     return R_modes, Z_modes, phi_modes
 end
+
+"""
+    compute_modb_modes(xi_modes, psi_grid, equil, ffs, metric) -> (; dbob, divx)
+
+Lagrangian δ|B|/B and ∇·ξ_⊥ Fourier modes, `[npsi, mpert]`, on `psi_grid`.
+
+These are the two spectra a neoclassical-transport calculation is driven by: NTV is a
+functional of the Lagrangian perturbation of the field strength, not of the normal field.
+They are a property of the perturbed equilibrium alone — no kinetic quantity enters — so they
+are built here and merely consumed by `KineticForces`, which is what lets another NTV code be
+run on GPEC's perturbation without running ours. The Fortran parent writes them from the same
+stage (`gpec` `gpout_pmodb` under `pmodb_flag`, read back by `pentrc` `read_pmodb`); the
+algorithm below is the one `pentrc` `set_peq` uses on the Clebsch displacements.
+
+The JBB deweighting (Fortran `pentrc/inputs.f90:828-868`):
+
+ 1. apply the geometric matrices S,T,X,Y,Z in m-space, giving the J·B²-weighted κ·ξ and ∇·ξ_⊥
+ 2. inverse DFT to θ-space
+ 3. divide by J·B² at each θ
+ 4. forward DFT back to m-space
+
+Only the two independent spectra are returned. The curvature term follows from
+δB/B = −(∇·ξ_⊥ + κ·ξ), and the Eulerian δ|B|/B differs from the Lagrangian by ξ·∇|B|/|B|,
+which `Response/xi_clebsch_psi`, `Response/xi_clebsch_alpha` and the equilibrium geometry
+already determine — so neither is written.
+
+Single toroidal mode only: `build_kinetic_metric_matrices` assembles mpert×mpert matrices at
+`n = ffs.nlow`.
+"""
+function compute_modb_modes(xi_modes::NamedTuple, psi_grid::Vector{Float64},
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffs::ForceFreeStatesResult,
+    metric::MetricData
+)
+    npsi = length(psi_grid)
+    mpert = ffs.mpert
+
+    # Geometric matrices (S,T,X,Y,Z) of the JBB-weighted Clebsch-to-physical transformation.
+    geom_mats = ForceFreeStates.build_kinetic_metric_matrices(equil, ffs, metric)
+
+    # The deweighting round-trip runs on the equilibrium's own poloidal grid.
+    mthsurf = length(equil.rzphi_ys) - 1
+    ft = Utilities.FourierTransforms.FourierTransform(mthsurf, mpert, ffs.mlow)
+
+    dbob = zeros(ComplexF64, npsi, mpert)
+    divx = zeros(ComplexF64, npsi, mpert)
+
+    smat_flat = Vector{ComplexF64}(undef, mpert^2)
+    tmat_flat = Vector{ComplexF64}(undef, mpert^2)
+    xmat_flat = Vector{ComplexF64}(undef, mpert^2)
+    ymat_flat = Vector{ComplexF64}(undef, mpert^2)
+    zmat_flat = Vector{ComplexF64}(undef, mpert^2)
+    jbb_kapx = Vector{ComplexF64}(undef, mpert)
+    jbb_divx = Vector{ComplexF64}(undef, mpert)
+    jbb_dbob = Vector{ComplexF64}(undef, mpert)
+    theta_buf = Vector{ComplexF64}(undef, mthsurf)
+
+    # Serial over ψ: the rows are independent, but the sticky bracket hints below are shared
+    # mutable state, and a threaded reassociation here would make the spectra depend on the
+    # thread count.
+    hint_s = Ref(1)
+    hint_t = Ref(1)
+    hint_x = Ref(1)
+    hint_y = Ref(1)
+    hint_z = Ref(1)
+
+    for ipsi in 1:npsi
+        psi = psi_grid[ipsi]
+
+        xsp = view(xi_modes.clebsch_psi, ipsi, :)        # ξ^ψ [mpert]
+        xmp1 = view(xi_modes.clebsch_psi1, ipsi, :)      # ∂ξ^ψ/∂ψ [mpert]
+        xms = view(xi_modes.clebsch_alpha, ipsi, :)      # ξ^α/χ₁ [mpert]
+
+        geom_mats.smats(smat_flat, psi; hint=hint_s)
+        geom_mats.tmats(tmat_flat, psi; hint=hint_t)
+        geom_mats.xmats(xmat_flat, psi; hint=hint_x)
+        geom_mats.ymats(ymat_flat, psi; hint=hint_y)
+        geom_mats.zmats(zmat_flat, psi; hint=hint_z)
+
+        smat = reshape(smat_flat, mpert, mpert)
+        tmat = reshape(tmat_flat, mpert, mpert)
+        xmat = reshape(xmat_flat, mpert, mpert)
+        ymat = reshape(ymat_flat, mpert, mpert)
+        zmat = reshape(zmat_flat, mpert, mpert)
+
+        # jbb_kapx = smat·xsp + tmat·xms;  jbb_divx = xmat·xmp1 + ymat·xsp + zmat·xms
+        mul!(jbb_kapx, smat, xsp)
+        mul!(jbb_kapx, tmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)
+        mul!(jbb_divx, xmat, xmp1)
+        mul!(jbb_divx, ymat, xsp, 1.0 + 0.0im, 1.0 + 0.0im)
+        mul!(jbb_divx, zmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)
+        @. jbb_dbob = -(jbb_divx + jbb_kapx)
+
+        _jbb_deweight!(view(dbob, ipsi, :), jbb_dbob, ft, psi, equil, mthsurf, theta_buf)
+        _jbb_deweight!(view(divx, ipsi, :), jbb_divx, ft, psi, equil, mthsurf, theta_buf)
+    end
+
+    return (; dbob, divx)
+end
+
+"""
+    _jbb_deweight!(out, jbb_modes, ft, psi, equil, mthsurf, theta_buf)
+
+JBB deweighting step: inverse DFT → divide by J(ψ,θ)·B(ψ,θ)² → forward DFT.
+
+Matches Fortran `set_peq` lines 859-868: transforms JBB-weighted m-space data to θ-space,
+removes the J·B² weighting at each poloidal angle, and transforms back.
+"""
+function _jbb_deweight!(out::AbstractVector{ComplexF64}, jbb_modes::Vector{ComplexF64},
+    ft::Utilities.FourierTransforms.FourierTransform,
+    psi::Float64, equil::Equilibrium.PlasmaEquilibrium,
+    mthsurf::Int, theta_buf::Vector{ComplexF64}
+)
+    # Inverse DFT: m-space → θ-space
+    theta_buf .= Utilities.FourierTransforms.inverse(ft, jbb_modes)
+
+    # Divide by J·B² at each θ point
+    for j in 1:mthsurf
+        theta_norm = (j - 1) / mthsurf   # θ ∈ [0, 1)
+        pt = (psi, theta_norm)
+        jac = equil.rzphi_jac(pt)
+        B = equil.eqfun_B(pt)
+        theta_buf[j] /= jac * B^2
+    end
+
+    # Forward DFT: θ-space → m-space
+    out .= ft(theta_buf)
+    return nothing
+end

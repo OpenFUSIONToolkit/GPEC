@@ -96,6 +96,8 @@ Response fields (mode space):
   - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, numpert_total]
   - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, numpert_total]
+  - `modb_modes::Union{Nothing, NamedTuple}` - Perturbation spectra driving neoclassical transport;
+    dbob=Lagrangian δ|B|/B, divx=∇·ξ_⊥ [npsi, mpert]. Single-n runs only
 
 Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
 Each row maps the full applied field to the resonant response at that surface.
@@ -173,6 +175,8 @@ well-conditioned flux-space inductances L, Λ:
     b_modes::Union{Nothing,NamedTuple} = nothing
     b_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal field b_n [npsi, numpert_total]
     xi_n_modes::Union{Nothing,Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, numpert_total]
+    # Lagrangian δ|B|/B and ∇·ξ_⊥ spectra (see compute_modb_modes); the input an NTV code needs
+    modb_modes::Union{Nothing,NamedTuple} = nothing
 
     # Coupling matrices [n_rational × numpert_total]
     C_resonant_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)

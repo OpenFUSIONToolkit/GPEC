@@ -120,7 +120,21 @@ function compute_plasma_response!(
     state.b_n_modes = b_n_modes
     state.xi_n_modes = xi_n_modes
 
+    # Lagrangian δ|B|/B and ∇·ξ_⊥: the perturbation a neoclassical-transport calculation is
+    # driven by. Derived here, where the displacement is, rather than inside KineticForces --
+    # it contains nothing kinetic, and another NTV code needs it without running ours.
+    # Restricted to a single toroidal mode by the geometric matrices it is built from.
+    modb_dt = 0.0
+    if ffs.npert == 1
+        modb_dt = @elapsed state.modb_modes = compute_modb_modes(
+            xi_modes, state.psi_grid, equil, ffs, metric
+        )
+    end
+
     if ctrl.verbose
-        @info "Response complete: $(length(intr.forcing_modes)) forcing modes, max amplitude = $(@sprintf("%.3e", maximum(abs.(response_flux))))"
+        @info "Response complete: $(length(intr.forcing_modes)) forcing modes, max amplitude = " *
+              "$(@sprintf("%.3e", maximum(abs.(response_flux))))" *
+              (state.modb_modes === nothing ? "; no δ|B|/B spectra (npert > 1)" :
+               "; δ|B|/B and ∇·ξ_⊥ spectra in $(@sprintf("%.2f", modb_dt)) s")
     end
 end

@@ -70,7 +70,9 @@ PerturbedEquilibrium/
 │   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, numpert_total])
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, numpert_total])
 │   ├── Jb_theta
-│   └── Jb_zeta
+│   ├── Jb_zeta
+│   ├── dBoB_lagrangian  # Lagrangian δ|B|/B (ComplexF64 [npsi, numpert_total]) -- NTV input
+│   └── div_xi_perp      # ∇·ξ_⊥ (ComplexF64 [npsi, numpert_total]) -- NTV input
 ├── ResponseMatrices/         # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
 │   ├── plasma_inductance     # Λ̃ = R⁻¹·Λ·R⁻†
 │   ├── surface_inductance    # L̃ = R⁻¹·L·R⁻†
@@ -164,6 +166,14 @@ function write_outputs_to_HDF5(
             response_group["xi_clebsch_psi"] = state.xi_modes.clebsch_psi
             response_group["dxi_clebsch_psidpsi"] = state.xi_modes.clebsch_psi1
             response_group["xi_clebsch_alpha"] = state.xi_modes.clebsch_alpha
+        end
+
+        # Lagrangian δ|B|/B and ∇·ξ_⊥ (gpout_pmodb): the perturbation a neoclassical-transport
+        # calculation is driven by, written whether or not this run also computes the torque.
+        # Empty for npert > 1, which the geometric matrices behind them do not support.
+        if !isnothing(state.modb_modes)
+            response_group["dBoB_lagrangian"] = state.modb_modes.dbob
+            response_group["div_xi_perp"] = state.modb_modes.divx
         end
 
         # Contravariant displacement (from gpeq_contra, all J-weighted)
@@ -291,6 +301,16 @@ const PE_H5_ANNOTATIONS = [
         (; long_name="regularized ψ_N derivative of ξ^ψ (× singfac²/(singfac²+regularization_width²))", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_clebsch_alpha" =>
         (; long_name="Clebsch displacement component ξ^α/χ₁ (PENTRC input, gpout_xclebsch convention)", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
+    "Response/dBoB_lagrangian" =>
+        (;
+            long_name="Lagrangian perturbation of the field strength δ|B|/B (gpout_pmodb lagbpar/|B|), the NTV drive; " *
+                      "δB/B(θ) = Σ_m value·exp(2πi·m·θ), θ ∈ [0,1). Eulerian form = this − ξ·∇|B|/|B| from xi_clebsch_*",
+            dims=("psi", "mode"), attach=(1 => "Response/psi",)),
+    "Response/div_xi_perp" =>
+        (;
+            long_name="∇·ξ_⊥ (gpout_pmodb divxprp/|B|), the second NTV input; same angle and sign convention as " *
+                      "dBoB_lagrangian, with κ·ξ = −(dBoB_lagrangian + div_xi_perp)", units="1/m",
+            dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_n" => (; long_name="physical normal displacement ξ_n", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_R" => (; long_name="cylindrical displacement component ξ_R (mode space)", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
     "Response/xi_Z" => (; long_name="cylindrical displacement component ξ_Z (mode space)", units="m", dims=("psi", "mode"), attach=(1 => "Response/psi",)),
