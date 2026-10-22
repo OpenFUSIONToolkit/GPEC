@@ -72,7 +72,7 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
     equil = ffs.equil
     surfaces = ffs.surfaces
 
-    model isa SLAYERModel || error("TearingProblem: GGJ tearing growth rates are unsupported in v2.0.0; use SLAYERModel()")
+    model isa SLAYERModel || error("TearingProblem: GGJ tearing growth rates are not currently supported; use SLAYERModel()")
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(surfaces) && return empty_slayer_result(control)

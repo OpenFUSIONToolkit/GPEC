@@ -173,7 +173,7 @@ const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
 function validate(ctrl::SLAYERControl)
     startswith(String(ctrl.inner_model), "ggj_") &&
-        throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) is unsupported in v2.0.0 because GGJ tearing " *
+        throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
                             "growth rates are not implemented; use inner_model=slayer_fitzpatrick"))
     ctrl.inner_model in _VALID_INNER_MODELS ||
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) " *
