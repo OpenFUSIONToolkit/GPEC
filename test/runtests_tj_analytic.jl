@@ -100,8 +100,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, toroidal_kpar, r_based_shear,
             surface_minor_radius, surface_da_dpsi
         function _lar_equilibrium(eps)
-            tj = TJAnalyticConfig(; lar_r0=1.0 / eps, lar_a=1.0, qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=12.0, ma=64, mtau=64)
-            eq = EquilibriumConfig(; eq_type="tj_analytic", psilow=0.01, psihigh=0.995, mpsi=64, mtheta=128, etol=1e-7)
+            tj = TJAnalyticConfig(; r0=1.0 / eps, a=1.0, q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0, ma=64, mtheta=64)
+            eq = EquilibriumConfig(; eq_type="tj_analytic", psilow=0.01, psihigh=0.995, mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
             return setup_equilibrium(eq, tj)
         end
         function _lar_deviation(pe, psi_s, n)
@@ -135,12 +135,12 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         using GeneralizedPerturbedEquilibrium.ForceFreeStates: resist_geometry
         using GeneralizedPerturbedEquilibrium.InnerLayer: toroidal_dgeo, toroidal_kpar, surface_minor_radius, surface_da_dpsi
         function _dgeo(a, B0, psi)
-            tj = TJAnalyticConfig(; lar_r0=a / 0.2, lar_a=a,
-                qc=1.5, qa=3.6, pc=0.001, mu=2.0, B0=B0,
-                ma=64, mtau=64)
+            tj = TJAnalyticConfig(; r0=a / 0.2, a=a,
+                q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=B0,
+                ma=64, mtheta=64)
             eq = EquilibriumConfig(; eq_type="tj_analytic",
                 psilow=0.01, psihigh=0.995,
-                mpsi=64, mtheta=128, etol=1e-7)
+                mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
             pe = setup_equilibrium(eq, tj)
             q1 = pe.profiles.q_deriv(psi)
             rg = resist_geometry(pe, psi, q1)
