@@ -1,6 +1,6 @@
 # ResonantMatch.jl
 #
-# Matching result and the 4·msing outer↔inner system (rmatch match_rpec; Wang et al. 2020 PoP 27 122509, Eq. 11).
+# Matching result and the 4·msing outer↔inner system (rmatch match_rpec; Wang et al., Phys. Plasmas 27, 122503 (2020), Eq. 11).
 
 """
     MatchResult
@@ -9,14 +9,16 @@ Matching coefficients and matched profiles, found in `result.match`. The profile
 fields are empty when the solve kept no Galerkin basis; the inner fields are empty with `ideal`.
 
 ## Fields
+
   - `cout`, `cin`: `(2msing, ncoil)` outer and inner coefficients.
-  - `deltar`: `(msing, 2)` inner-layer Δ per surface and parity.
+  - `deltar`: `(msing, 2)` inner-layer Δ per surface, columns (Δ₊, Δ₋) = (interchange, tearing).
   - `rpec_eig`: forced eigenvalue γ = 2πi·n·f per surface.
   - `residual`: relative residual of the linear solve.
   - `bpen`: `(msing, ncoil)` penetrated resonant field at each layer center.
   - `reconnected_flux`: `(2msing, ncoil)` `Δ_coil + Δ_outᵀ·cout`.
   - `xi`, `xi_deriv`: `(mpert, ngrid, ncoil)` matched outer ξ and ξ′, one column per coil.
-  - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it.
+  - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it; empty unless the
+    inner model returns real-ψ profiles (`GGJModel(; solver=:galerkin)` or `GGJModel(; real_profiles=true)`).
   - `inner_params`: per-surface `GGJParameters` used.
   - `model`: the inner-layer model solved, with its backend options.
 """
@@ -50,8 +52,8 @@ function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::
         idx2 = 2ising
         idx3 = idx1 + 2msing
         idx4 = idx2 + 2msing
-        delta1 = deltar[ising, 1]
-        delta2 = deltar[ising, 2]
+        delta1 = deltar[ising, 1]   # Δ₊; unknowns idx3, idx4 (cin rows 2i−1, 2i) are d₊, d₋ (GWP2016 Eqs. 36–37)
+        delta2 = deltar[ising, 2]   # Δ₋
         mat[idx1, idx1] = 1
         mat[idx2, idx2] = 1
         mat[idx1, idx3] = -1
@@ -111,7 +113,7 @@ const MATCH_H5_ANNOTATIONS = [
     "SingularSurfaces/Match/cin" =>
         (; long_name="inner-region matching coefficients per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
     "SingularSurfaces/Match/Delta_r" =>
-        (; long_name="inner-layer Δ per surface and parity (deltac convention)", dims=("surface", "parity")),
+        (; long_name="inner-layer Δ per surface and parity, (Δ₊ interchange, Δ₋ tearing)", dims=("surface", "parity")),
     "SingularSurfaces/Match/bpen" =>
         (; long_name="penetrated resonant field b^ψ at each layer center, per unit coil-response column", dims=("surface", "coil")),
     "SingularSurfaces/Match/reconnected_flux" =>
