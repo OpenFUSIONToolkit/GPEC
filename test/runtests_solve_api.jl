@@ -390,14 +390,15 @@ using HDF5
 
         @testset "deck matching under gal_match_flag" begin
             layer = (eta=1e-7, rho=1e-7, rotation=1.0)
+            # The galerkin inner model returns real-ψ profiles, so the composite inner profiles are compared too.
             mktempdir() do dir
                 gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
-                api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:ray))
+                api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:galerkin))
                 n = length(gal.surfaces)
                 reference = GPEC.main([_stage_deck(dir;
                     ffs_overrides=Dict{String,Any}(
                         "integrator" => "galerkin", "gal_nx" => 32, "gal_rpec_flag" => true, "gal_match_flag" => true,
-                        "gal_inner_solver" => "ray", "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n),
+                        "gal_inner_solver" => "galerkin", "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n),
                         "gal_rotation" => fill(layer.rotation, n)))]).ffs
 
                 @test reference.closure === api.closure === :matched
@@ -407,7 +408,7 @@ using HDF5
                 @test all(isapprox.(api.match.inner_xi, reference.match.inner_xi; rtol=1e-12))
 
                 uncut = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
-                matched = solve(MatchProblem(uncut; layer...), GGJModel(; solver=:ray))
+                matched = solve(MatchProblem(uncut; layer...), GGJModel(; solver=:galerkin))
                 # Known drift: gal_match_flag implies the cut solution on the deck; the API keeps it only when asked.
                 @test_broken length(matched.match.inner_xi) == length(reference.match.inner_xi)
             end
