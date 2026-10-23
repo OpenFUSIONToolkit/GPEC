@@ -41,6 +41,20 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
 end
 
 """
+    gfile_fpol_single_precision(filename) -> Bool
+
+Whether the g-file's FPOL column was written in single precision: every value lies within 1e-8
+(relative) of its Float32 rounding. Double-precision values printed to the format's ten digits
+sit about 1.5e-8 from it on average, so a whole column below 1e-8 is single precision.
+"""
+function gfile_fpol_single_precision(filename::AbstractString)
+    lines = readlines(filename)
+    nw = parse(Int, split(lines[1])[end-1])
+    fpol = _read_1d_gfile_format(lines[6:(5+cld(nw, 5))], nw)
+    return all(f -> abs(Float64(Float32(f)) - f) <= 1e-8 * abs(f), fpol)
+end
+
+"""
     _read_efit(equil_in)
 
 Parses an EFIT g-file, creates initial 1D and 2D splines, and bundles
