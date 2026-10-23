@@ -4,7 +4,7 @@
 # the m inner-layer resonances decoupled via the matching-identity rows
 #
 #     C^j_L = d^j_+ − d^j_-
-#     C^j_R = -(d^j_+ + d^j_-)
+#     C^j_R = d^j_+ + d^j_-
 #
 # (see Wang-Glasser-Brennan-Liu-Park 2020, Phys. Plasmas **27**, 122503,
 # Eq. (11a)-(11d) and Glasser-Wang-Park 2016, Phys. Plasmas **23**, 112506,
@@ -139,7 +139,7 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
     # Allocate the matching matrix and fill the lower-left 2m × 2m block
     # with transpose(dp_raw[1:s2, 1:s2]).
     mat = zeros(ComplexF64, s4, s4)
-    @views mat[s2+1:s4, 1:s2] .= transpose(mc.dp_raw[1:s2, 1:s2])
+    @views mat[(s2+1):s4, 1:s2] .= transpose(mc.dp_raw[1:s2, 1:s2])
 
     # Per-surface inner-layer assembly
     @inbounds for k in 1:m
@@ -154,7 +154,7 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
         Q_k = Qc * (sc.tauk / ref_tauk) + sc.q_shift
         resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
-        # delta1 = interchange (parity −), delta2 = tearing (parity +); named
+        # delta1 = interchange (parity +), delta2 = tearing (parity −); named
         # fields expose the two channels directly. sc.scale converts inner-basis
         # Δ to outer units (1.0 for GGJ since rescale_delta is applied inside
         # solve_inner; S^(1/3) for SLAYER).
@@ -178,15 +178,15 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
 
         # --- Upper-right 2×2 block: matching identity ---
         #   C^k_L = d^k_+ − d^k_-         ⇒ mat[idx1,idx3]=-1, mat[idx1,idx4]=+1
-        #   C^k_R = -(d^k_+ + d^k_-)      ⇒ mat[idx2,idx3]=-1, mat[idx2,idx4]=-1
+        #   C^k_R = d^k_+ + d^k_-         ⇒ mat[idx2,idx3]=-1, mat[idx2,idx4]=-1
         mat[idx1, idx3] = -1
         mat[idx1, idx4] = 1
         mat[idx2, idx3] = -1
         mat[idx2, idx4] = -1
 
         # --- Lower-right 2×2 block: inner Δ matching ---
-        #   d^k_+ eqn: -Δ_int·d^k_+ + Δ_tear·d^k_- + (outer D' terms) = 0
-        #   d^k_- eqn: -Δ_int·d^k_+ - Δ_tear·d^k_- + (outer D' terms) = 0
+        #   L-side row: -Δ_int·d^k_+ + Δ_tear·d^k_- + (outer D' terms) = 0  (GWP2016 Eq. 37)
+        #   R-side row: -Δ_int·d^k_+ - Δ_tear·d^k_- + (outer D' terms) = 0
         mat[idx3, idx3] = -delta1
         mat[idx3, idx4] = delta2
         mat[idx4, idx3] = -delta1
