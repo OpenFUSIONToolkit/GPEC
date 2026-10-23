@@ -290,11 +290,11 @@ end
 The equilibrium configuration and the input `setup_equilibrium` consumes, rebuilt from a stored
 TOML `inputs` dict and the equilibrium `ingest` read from a `gpec.h5`. Analytic kinds regenerate
 from their TOML section; file-based kinds rebuild splines from the stored ingest. A file-based
-run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Mutates `inputs`
-only to drop deprecated equilibrium keys.
+run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Stops on
+deprecated equilibrium keys.
 """
 function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir::AbstractString)
-    _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
+    _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
     # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))

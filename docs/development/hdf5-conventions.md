@@ -7,7 +7,7 @@ Conventions for the structure and naming of the `gpec.h5` output file. Every wri
 **The schema must be intuitive to a plasma physicist who is not a developer of this code.** The top level largely mirrors the TOML sections / major `src/` modules — which are themselves organized along physics lines — but **physics intuition wins whenever the two diverge**. Worked examples of that rule:
 
 - All per-rational-surface stability results consolidate under `SingularSurfaces/`, regardless of which algorithm produced them: the GGJ coefficients sit beside the Δ′/PEST-3 matching results, and the Riccati BVP and the Galerkin outer-region solve write the *same* `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_*` paths rather than each owning a producer-named subgroup.
-- `EulerLagrangeMatrices` over a bare `Matrices` — group names must say what the data *is*, not which array it came from. Same reasoning renamed `records/` → `EnergyIntegrals/` and `matrices_<method>/` → `KineticMatrices/`.
+- `EulerLagrangeMatrices` over a bare `Matrices` — group names must say what the data *is*, not which array it came from. Same reasoning renamed `matrices_<method>/` → `KineticMatrices/`.
 
 Physics-topic groups elevated to top level (rather than nested under their producer): `Info/`, `Input/`, `SingularSurfaces/`, `LocalStability/`, `SurfaceGeometries/`.
 
@@ -44,7 +44,7 @@ Top level (11 groups):
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), the inner-layer `Match/` results, `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, control-surface spectra |
-| `KineticForces/` | `<method>/` (torque/energy profiles, `EnergyIntegrals/`, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
+| `KineticForces/` | `<method>/` (torque/energy profiles, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `ErrorFields/` | `CoilSensitivities/` (per-coil-set control-surface spectra and their rigid shift/tilt derivatives, `DominantMode/` full-window projection); `MonteCarlo/` (intrinsic and corrected `\|δ\|` histograms over the sampled tolerances, per batch and averaged); `Risk/` (threshold density, `P(lock\|δ)`, locking probabilities, `ToleranceScan/`); `NTV/` (correction-coil overlap and NTV torque couplings per kAt) |
 | `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/` |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
@@ -69,7 +69,7 @@ Mechanism: writers stay table-driven — each writer keeps a `path => (; long_na
 - Complex quantities are stored as the native HDF5.jl compound type (readable by h5py as a compound dtype) — **never split into `*_real`/`*_imag` dataset pairs**. Sole sanctioned exception: `Input/RawInputs/ForcingTerms/amplitude_{real,imag}`, which mirrors the external forcing ingest-file format and keeps pre-existing snapshots replayable.
 - `NaN` is the not-computed sentinel in numeric datasets (e.g. auto-derived settings, rootless growth-rate entries).
 - A **zero-extent array** is the not-computed sentinel for whole datasets that a given run never produces (e.g. `SingularSurfaces/ca_left`/`ca_right` on kinetic or galerkin-matched runs, the free-boundary energies when `vac_flag=false`, the on-demand derivative stores). Never write unpopulated (`undef`) memory.
-- Ragged (variable-length) data uses the flat-plus-`offsets` companion pattern (`offsets[k+1] - offsets[k]` = length of row `k`) rather than HDF5 VLEN types, e.g. `KineticForces/<method>/EnergyIntegrals/` and `Tearing/Diagnostics/*`.
+- Ragged (variable-length) data uses the flat-plus-`offsets` companion pattern (`offsets[k+1] - offsets[k]` = length of row `k`) rather than HDF5 VLEN types, e.g. `Tearing/Diagnostics/*`.
 
 ## Back-compatibility policy
 

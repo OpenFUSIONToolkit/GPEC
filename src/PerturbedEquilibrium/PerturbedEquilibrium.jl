@@ -17,7 +17,6 @@ import ..ForcingTerms
 import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization
 import ..Utilities
 import ..Utilities.FourierTransforms
-import DelimitedFiles: readdlm
 
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
@@ -84,7 +83,7 @@ function compute_perturbed_equilibrium(
               "does not publish yet; set compute_response = false and compute_singular_coupling = false, or use a forward solve")
     end
 
-    # Step 0: Initialize mode arrays for convenient indexing
+    # Mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs)
 
     # A run has at most one ξ solution, already closed at the rationals and carrying populated
@@ -103,23 +102,20 @@ function compute_perturbed_equilibrium(
         isempty(coil_sets) || (intr.coil_sets = coil_sets)
     end
 
-    # Step 2: Compute plasma response
+    # Plasma response
     if ctrl.compute_response &&
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
         compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mtheta_vacuum, ffs, intr, ctrl, ffs.metric, mats)
     end
 
-    # Step 3: Compute singular coupling metrics
+    # Singular coupling metrics
     if ctrl.compute_singular_coupling &&
        ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
        ForceFreeStates.require_solution(ffs, "singular coupling calculation")
         compute_singular_coupling_metrics!(state, equil, solution, mtheta_vacuum, ffs, intr, ctrl, mats)
         compute_dominant_coupling!(state, ctrl)
     end
-
-    # Step 4: Output eigenmode fields (integrated into HDF5 output)
-    # This is handled by write_outputs_to_HDF5 in main()
 
     return state
 end

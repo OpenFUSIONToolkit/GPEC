@@ -7,10 +7,8 @@ User-facing control parameters from TOML [PerturbedEquilibrium] section.
 
 Note: Forcing data file settings are now in [ForcingTerms] section.
 
-High Priority (MWE):
+Calculation:
 
-  - `fixed_boundary::Bool` - Fixed boundary flag (default: false)
-  - `output_eigenmodes::Bool` - Output mode fields as b-fields (default: true)
   - `compute_response::Bool` - Compute plasma response (default: true)
   - `compute_singular_coupling::Bool` - Compute singular coupling metrics (default: true)
   - `verbose::Bool` - Enable verbose logging (default: true)
@@ -20,11 +18,6 @@ Output Settings:
   - `output_filename::String` - Combined output file with ForceFreeStates results (default: uses ForceFreeStates HDF5_filename)
   - `write_outputs_to_HDF5::Bool` - Write perturbed equilibrium outputs to HDF5 (default: true)
 
-Medium Priority (defer for MWE):
-
-  - `filter_modes::Bool` - Enable mode filtering (default: false)
-  - `singular_point_method::String` - Method for singular point treatment (default: "standard")
-
 Regularization:
 
   - `regularization_width::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0
@@ -32,9 +25,7 @@ Regularization:
     resonant singularity to smooth.
 """
 @kwdef struct PerturbedEquilibriumControl
-    # High Priority (MWE)
-    fixed_boundary::Bool = false
-    output_eigenmodes::Bool = true
+    # Calculation
     compute_response::Bool = true
     compute_singular_coupling::Bool = true
     verbose::Bool = true
@@ -42,10 +33,6 @@ Regularization:
     # Output settings
     output_filename::String = ""  # Empty means use ForceFreeStates filename
     write_outputs_to_HDF5::Bool = true
-
-    # Medium Priority (include but simple for MWE)
-    filter_modes::Bool = false
-    singular_point_method::String = "standard"
 
     # Regularization width for singular surface smoothing (matches Fortran gpec.f reg_spot).
     # Set to 0 to disable regularization. Must be non-negative.
@@ -64,7 +51,6 @@ Internal state variables for perturbed equilibrium calculations.
   - `coil_sets::Vector{CoilSet}` - Coil geometry used (when `forcing_data_format = "coil"`);
     captured for the gpec.h5 rerun snapshot
   - `plasma_response::Matrix{ComplexF64}` - Plasma response matrix
-  - `singular_coupling_metrics::Dict{String,Float64}` - Coupling metrics at singular surfaces
   - `m_modes::Vector{Int}` - Poloidal mode numbers for each index i in 1:numpert_total
   - `n_modes::Vector{Int}` - Toroidal mode numbers for each index i in 1:numpert_total
 """
@@ -73,7 +59,6 @@ Internal state variables for perturbed equilibrium calculations.
     forcing_modes::Vector{ForcingMode} = ForcingMode[]
     coil_sets::Vector{CoilSet} = CoilSet[]
     plasma_response::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
-    singular_coupling_metrics::Dict{String,Float64} = Dict{String,Float64}()
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
     # ForceFreeStates-provided B_pen per (match surface × coil-drive column) from inner layer.
@@ -139,7 +124,7 @@ representations (all tesla; no flux/weber is stored):
   - `forcing_b_area`/`response_b_area` - area-weighted field b̄ (= S·b̃; flux is Φ = A·b̄)
 
 Control surface matrices [numpert_total × numpert_total], stored in the coordinate-invariant
-root-area-weighted field (b̃) space (issue #233 / Pharr 2026). Writing `S ≡ rootarea_to_area_weight`
+root-area-weighted field (b̃) space (Pharr 2026). Writing `S ≡ rootarea_to_area_weight`
 (b̃→b̄) and `A ≡ surface_area`, the brief internal flux-conform operator is `R = S·A` (Φ = R·b̃).
 Recover the area-weighted (b̄) forms by conforming with `S` (e.g. `L_b̄ = S·L̃·S†`); recover flux
 with `Φ = A·b̄`.

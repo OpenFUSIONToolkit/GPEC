@@ -164,15 +164,20 @@ using Statistics
         @test_throws r"stopped early at t = .* with retcode DtNaN" Equil.tj_analytic_find_nu(Equil.TJAnalyticShapeParams(tj), tj.qa; abstol=NaN)
     end
 
-    @testset "Deprecated TOML keys are dropped, not fatal" begin
-        # Removed control knobs must keep old gpec.toml decks (and older gpec.h5 replays,
-        # whose stored TOML blob goes through the same path) parsing with a warning.
-        ffs_table = Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1)
-        @test_logs (:warn, r"reform_eq_with_psilim") GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(
-            ffs_table, GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
-        @test !haskey(ffs_table, "reform_eq_with_psilim")
-        @test GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
+    @testset "Deprecated TOML keys stop the run" begin
+        # A listed key no longer exists, so the run stops and names it instead of ignoring it.
+        GPEC = GeneralizedPerturbedEquilibrium
+        @test_throws r"\[ForceFreeStates\] sets `reform_eq_with_psilim`" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates")
+        @test_throws r"`moment`, `save_records`" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("moment" => "pressure", "save_records" => false, "fgar_flag" => true), GPEC._DEPRECATED_KF_KEYS, "KineticForces")
+        @test_throws r"\[PerturbedEquilibrium\] sets `fixed_boundary`" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("fixed_boundary" => false, "compute_response" => false), GPEC._DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
+        @test GPEC._stop_on_deprecated_keys(Dict{String,Any}("nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates") === nothing
+        # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
+        @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
+        @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)
+        @test !any(k -> hasfield(GPEC.PerturbedEquilibrium.PerturbedEquilibriumControl, Symbol(k)), GPEC._DEPRECATED_PE_KEYS)
     end
 
     @testset "Inverse grid types (original, rho)" begin

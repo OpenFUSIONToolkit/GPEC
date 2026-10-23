@@ -283,7 +283,6 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
             psi_grid=grid, dtdpsi=dtdpsi, t_cumulative=tcum,
             psi_nsteps=sum(r.psi_nsteps for r in results))
     end
-    combined.completed = true
     return combined
 end
 
@@ -407,6 +406,4 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             println("---------------------------------------------")
         end
     end
-
-    state.completed = true
 end

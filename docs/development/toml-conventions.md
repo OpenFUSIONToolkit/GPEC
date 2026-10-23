@@ -47,9 +47,9 @@ fails when its pattern matches a violation) lint-check the covered TOMLs on comm
 - `toml-no-decorative-dividers` — no `# ----`-style divider lines (all covered files).
 - `toml-inline-annotations` — every `key = value` line carries a trailing `# description`
   (`examples/*` and `test/test_data/*` only, per the rule-2 exception above).
-- `toml-no-deprecated-keys` — no deprecated config keys; its key list mirrors
-  `_DEPRECATED_FFS_KEYS`/`_DEPRECATED_EQUIL_KEYS` in `src/GeneralizedPerturbedEquilibrium.jl`,
-  so extend the hook's pattern whenever a key is deprecated there.
+- `toml-no-deprecated-keys` — no deprecated config keys; its key list mirrors the
+  `_DEPRECATED_*_KEYS` lists in `src/GeneralizedPerturbedEquilibrium.jl`, which stop any run that
+  sets one, so extend the hook's pattern whenever a key is added there.
 
 Run them manually with:
 

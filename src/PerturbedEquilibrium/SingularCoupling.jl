@@ -425,7 +425,7 @@ function compute_singular_coupling_metrics!(
                 state.C_penetrated_area_weighted_field[row, :] = pen_row
             end
 
-            # LHS normalization audit (#233) — output scalar coordinate-invariance per row:
+            # LHS normalization audit — output scalar coordinate-invariance per row:
             #  - Δ' (1/length): the resonant-surface jump in ∂b^ψ/∂ψ over 2π·χ₁; the tearing index is
             #    coordinate-invariant (its sign/zero-crossing set the stability boundary) [Glasser 2016].
             #  - resonant (shielding) current: j_c already integrates jac·|∇ψ| over the surface, so the
@@ -474,7 +474,7 @@ function compute_singular_coupling_metrics!(
     state.forcing_solution_weights = C_coeffs * forcing_flux
 
     # Conform the stored coupling-matrix input basis to the coordinate-invariant root-area-weighted
-    # field (b̃) space (#233 / Pharr 2026): C̃ = C·R, so each stored row acts on the applied field
+    # field (b̃) space (Pharr 2026): C̃ = C·R, so each stored row acts on the applied field
     # b̃_x (Φ_x = R·b̃_x) and its singular values become coordinate-invariant. The conform operator
     # R = S·A (Σ·√A) is the only place flux briefly appears; it is built from the b̃→b̄ operator S and
     # the scalar surface area A. Done after the applied-vector evaluation above so those physical
