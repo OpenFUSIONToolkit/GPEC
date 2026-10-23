@@ -111,7 +111,10 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
     reports the raw marching-squares estimate, which is sensitive to grid and
     floating-point rounding.
   - `polish_maxit` -- max polish iterations per root (default 20). Each costs a
-    handful of `f` evaluations; failures fall back to the unpolished point.
+    handful of `f` evaluations (two for the real 2×2 Jacobian, one trial step,
+    at most three backtracks); failures fall back to the unpolished point. The
+    polish does not assume `f` is holomorphic, so it also converges on the SLAYER
+    residual, which is a function of conj(Q).
   - `validity_rtol` -- with `residual` supplied, a polished root is kept only if
     `|residual| < validity_rtol · median(|Δ|)` (default 1e-3). Intersections
     that don't polish to a true zero (contour near-misses, or surfaces whose
@@ -499,9 +502,19 @@ end
 
 # Bounded Gauss-Newton minimization of |f(Q)| within a disk of radius `R`
 # around `Q0`. Returns (Q_best, n_evals, improved). `improved == false` ⇒
-# Q0 is returned unchanged (hard fallback). Secant derivative + trust-region
-# projection + |f|-decrease backtracking keep it strictly "improve-or-no-op":
-# it cannot diverge, jump to another root, or be pulled into a pole.
+# Q0 is returned unchanged (hard fallback). Trust-region projection +
+# |f|-decrease backtracking keep it strictly "improve-or-no-op": it cannot
+# diverge, jump to another root, or be pulled into a pole.
+#
+# The local linear model is the REAL 2×2 Jacobian of (Re f, Im f) with respect
+# to (Re Q, Im Q), from forward differences along both axes, not a complex
+# derivative. A complex slope assumes `f` is holomorphic, but the SLAYER
+# tearing residual is a function of conj(Q) (`solve_inner` evaluates
+# conj(Δ̂(ĝ)); see Riccati.jl). On such a residual a complex-secant step is
+# the mirror image of the true step, so the polish stalls and the validity
+# gate rejects the root, most often the steep, weakly damped root at the
+# diamagnetic frequency. The real Jacobian is exact for holomorphic and
+# anti-holomorphic residuals alike.
 function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
     tol_step::Float64=1e-12, tol_f::Float64=1e-8)
     (R > 0) || return (Q0, 0, false)
@@ -511,17 +524,21 @@ function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
     a0 = abs(f0)
     a0 == 0 && return (Q0, nev, false)
 
-    # Second point for the secant slope: a small real offset scaled to R.
+    h = max(R * 1e-3, eps(Float64))                       # finite-difference offset, scaled to R
     Qk, fk = Q0, f0
-    Qp = Q0 + complex(max(R * 1e-3, eps(Float64)), 0.0)
-    fp = ComplexF64(f(Qp))
-    nev += 1
     Qbest, abest = Q0, a0
 
     for _ in 1:maxit
-        df = (Qp == Qk) ? ComplexF64(0) : (fp - fk) / (Qp - Qk)
-        (isfinite(df) && abs(df) > 0) || break
-        step = -fk / df                                   # zero of local linear model
+        fx = ComplexF64(f(Qk + h))
+        fy = ComplexF64(f(Qk + im * h))
+        nev += 2
+        (isfinite(fx) && isfinite(fy)) || break
+        j11, j12 = real(fx - fk) / h, real(fy - fk) / h
+        j21, j22 = imag(fx - fk) / h, imag(fy - fk) / h
+        det = j11 * j22 - j12 * j21
+        (isfinite(det) && det != 0) || break
+        # zero of the local linear model: J * [dRe, dIm] = -[Re f, Im f]
+        step = complex((-real(fk) * j22 + j12 * imag(fk)) / det, (-j11 * imag(fk) + j21 * real(fk)) / det)
         Qt = Qk + step
         if abs(Qt - Q0) > R                               # project into trust region
             Qt = Q0 + R * (Qt - Q0) / abs(Qt - Q0)
@@ -537,7 +554,6 @@ function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
             bt += 1
         end
         if isfinite(ft) && abs(ft) < abest
-            Qp, fp = Qk, fk
             Qk, fk = Qt, ft
             Qbest, abest = Qt, abs(ft)
             (abs(step) < tol_step * (abs(Qk) + tol_step) || abest < tol_f * a0) && break
