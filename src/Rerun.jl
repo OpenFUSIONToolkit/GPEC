@@ -8,7 +8,7 @@
 # Analytic equilibria carry their parameters in an embedded TOML section rather than an ingest
 # array; replay regenerates them from that section. The eq_type -> section mapping (and which
 # kinds are analytic at all) lives in the `Equilibrium.ANALYTIC_EQ` registry, the single source
-# of truth shared with `setup_equilibrium`.
+# of truth shared with `Equilibrium.run_input`.
 
 """
     build_analytic_config(eq_type, inputs)
@@ -277,7 +277,7 @@ end
 """
     rebuild_equilibrium_inputs(inputs, ingest, output_dir) -> (eq_config, additional_input)
 
-The equilibrium configuration and the input `setup_equilibrium` consumes, rebuilt from a stored
+The equilibrium configuration and the input `PlasmaEquilibrium` consumes, rebuilt from a stored
 TOML `inputs` dict and the equilibrium `ingest` read from a `gpec.h5`. Analytic kinds regenerate
 from their TOML section; file-based kinds rebuild splines from the stored ingest. A file-based
 run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Mutates `inputs`
@@ -310,7 +310,7 @@ end
     equilibrium_from_h5(h5path) -> (; equil, inputs, psilim)
 
 Rebuild the `PlasmaEquilibrium` of a finished run from its `gpec.h5` alone — the stored TOML
-and equilibrium ingest, through `setup_equilibrium` on the ψ_N grid the run ended with
+and equilibrium ingest, through `PlasmaEquilibrium` on the ψ_N grid the run ended with
 (`Equilibrium/Geometry/psi`) — without running any stage or writing anything. `inputs` is the
 parsed TOML the run used and `psilim` the control surface the solve integrated to
 (`Info/psilim`), so post-hoc analyses can evaluate new coil geometry on the surface the stored

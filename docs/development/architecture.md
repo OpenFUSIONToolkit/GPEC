@@ -26,7 +26,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
 ### Core Physics Modules
 
 2. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
-   - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
+   - Main entry point: `PlasmaEquilibrium(file; eq_type)`, `PlasmaEquilibrium(analytic_config)`, `PlasmaEquilibrium(dd)`, or `PlasmaEquilibrium(config, source)`
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
      - `chease`, `chease2` - CHEASE equilibrium code formats
@@ -151,14 +151,14 @@ Example configuration files are provided in:
 - `examples/Solovev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
 
-**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are deprecated.
+**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are not read; `gpec.toml` is the only input deck.
 
 ## Data Flow
 
 The complete GPEC analysis pipeline:
 
 1. **Equilibrium Setup**:
-   - `setup_equilibrium(config)` reads configuration from `gpec.toml`
+   - `PlasmaEquilibrium(config, source)` forms the equilibrium from the `[Equilibrium]` section of `gpec.toml`
    - Parses equilibrium data (EFIT, CHEASE, or analytical)
    - Runs Grad-Shafranov solver (direct or inverse)
    - Computes global parameters: q-profile, pressure, current density, β

@@ -32,7 +32,7 @@ specified in the input.
     equilibrium is actually formed on is `EquilibriumParameters.psihigh_resolved`.
   - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
     two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
-    pins knots on rational surfaces, and re-forms on the refined grid. Standalone `setup_equilibrium`
+    pins knots on rational surfaces, and re-forms on the refined grid. Standalone `PlasmaEquilibrium`
     callers get the coarse pass-1 grid unless they refine via `refined_psi_grid` + `override_psi_nodes`.
   - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
     two-pass auto grid (knot count scales as τ^(-1/3))
@@ -187,30 +187,6 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
     end
 
     return EquilibriumConfig(; symbolize_keys(config_data)...)
-end
-
-"""
-Outer constructor for EquilibriumConfig that enables a toml file
-interface for specifying the configuration settings
-
-DEPRECATED: Use [Equilibrium] section in gpec.toml instead
-"""
-function EquilibriumConfig(path::String)
-    raw = TOML.parsefile(path)
-
-    # Extract EQUIL_CONTROL with default fallback
-    config_data = get(raw, "EQUIL_CONTROL", Dict())
-
-    # Check for required fields
-    required_keys = ("eq_filename", "eq_type")
-    missingkeys = filter(k -> !haskey(config_data, k), required_keys)
-
-    if !isempty(missingkeys)
-        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missingkeys, ", "))")
-    end
-
-    # Construct validated struct
-    return EquilibriumConfig(Dict{String,Any}(config_data), dirname(path))
 end
 
 """
@@ -545,7 +521,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `zo::Union{Nothing,Float64}` - Z-coordinate of the magnetic axis [m]
   - `psio::Union{Nothing,Float64}` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
   - `psihigh_resolved::Union{Nothing,Float64}` - Outer flux limit the equilibrium was formed on
-    (the outermost ψ node); the plasma edge downstream of `setup_equilibrium`.
+    (the outermost ψ node); the plasma edge downstream of `PlasmaEquilibrium`.
   - `rsep::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma boundary [m]
   - `zsep::Union{Nothing,Vector{Float64}}` - Z-coordinates of the plasma boundary [m]
   - `rext::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma edge [m]
@@ -937,7 +913,7 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     analytic::Union{Nothing,AnalyticEquilibriumConfig}
 end
 
-# Solvers build the equilibrium before setup_equilibrium records its source, so allow
+# Solvers build the equilibrium before PlasmaEquilibrium records its source, so allow
 # construction without it; ingest and analytic default to nothing and are assigned post-construction.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,

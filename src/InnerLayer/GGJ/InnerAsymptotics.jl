@@ -3,10 +3,10 @@
 # Wasow asymptotic basis ("inps" basis) for the GGJ inner-layer system.
 #
 # Reference: A. H. Glasser & Z. R. Wang, Phys. Plasmas 27, 012506 (2020)
-# ("GW2020"), Sections II.A–II.G (Eqs. 3–55). Notation map (all equation
+# ("GW2020"), Secs. II.A–II.G (Eqs. 1–53) and III (Eqs. 54–55). Notation map (all equation
 # numbers are GW2020):
 #
-#   A0/A1/A2  -> Eqs. 3–5      (physical-system coefficient matrices A = A₀+x⁻²A₁+x⁻⁴A₂)
+#   A0/A1/A2  -> Eqs. 3–5      (A = A₀+x⁻²A₁+x⁻⁴A₂ (Eq. 3); A₀, A₂ Eq. 4; A₁ Eq. 5)
 #   T, Tinv   -> Eqs. 6–8      (Jordan basis of A₀; u = Tv, v' = xJv, λ = Q^{-1/2})
 #   J0/J1/J2  -> Eqs. 9–10     (Jₖ = T^{-1} Aₖ T)
 #   P_k, B_k  -> Eqs. 11–24    (splitting transformation V = PW; Lyapunov solve Eq. 22)
@@ -15,16 +15,10 @@
 #   Y0, R     -> Eqs. 48–49    (lowest-order solution; Mercier Frobenius exponents r±)
 #   Y_k, Z_k  -> Eqs. 50–52    (Y-series Y = Y₀Z in shifted-exponent form)
 #   U(x)      -> Eq. 53        (final asymptotic solution U = TPQSY at large x)
-#   residual  -> Eq. 54        (convergence measure Δ± used to pick x_max)
+#   residual  -> Eq. 54        (convergence measure Δ±, used to pick the matching radius)
 
 using LinearAlgebra
 using StaticArrays
-
-# Index ranges that partition the 6-component first-order system into the
-# 2-dimensional algebraic ("small") subspace and the 4-dimensional
-# exponential ("large") subspace.
-const _R1 = SVector(1, 2)
-const _R2 = SVector(3, 4, 5, 6)
 
 """
     InnerAsymptoticsCache
@@ -33,49 +27,29 @@ Frozen `inps` Wasow asymptotic-basis construction for one `(GGJParameters, Q)`
 pair, stored as `SMatrix`/`SVector` for allocation-free evaluation. Index
 convention: `P[k+1]` holds the k-th-order matrix `P_k`, etc.
 
-Fields:
+## Fields
 
   - `params, Q, kmax` — input parameters and series truncation order.
-  - `λ = 1/√Q` — complex scale factor used by the Wasow split.
   - `R = (r₊, r₋)` — Mercier-shifted Frobenius exponents at infinity (Eq. 49).
-  - `T, Tinv` — 6×6 eigenvector basis of A₀ (Eq. 7–8).
-  - `J` — `(J₀, J₁, J₂)`, the J-rotated coefficient matrices (Eq. 9–10).
-  - `P, B` — splitting matrices, k = 0..kmax+2 (Eqs. 16, 22).
-  - `K2` — 2×2 inner working matrices, k = 0..kmax+2 (Eq. 32; entry k=0 unused).
-  - `Qmat, Cmat` — 2×2 inner-block transformation matrices, k = 0..kmax+2 (Eqs. 32–39).
-  - `Dmat` — 2×2 shearing matrices, k = 0..kmax (Eq. 43).
-  - `Y0, Y0inv` — lowest-order Y matrix and its inverse (Eq. 48; exponents from Eq. 49).
-  - `Y, Z` — 2×2 series matrices, k = 0..kmax (Eq. 52).
+  - `T` — 6×6 eigenvector basis of A₀ (Eq. 7).
+  - `J` — `(J₀, J₁, J₂)`, the J-rotated coefficient matrices (Eqs. 9–10).
+  - `P` — splitting matrices, k = 0..kmax+2 (Eqs. 16, 22).
+  - `Qmat` — 2×2 inner-block transformation matrices, k = 0..kmax+2 (Eqs. 32–39).
+  - `Y` — 2×2 series matrices Y_k = Y₀Z_k, k = 0..kmax (Eqs. 50–52).
 """
 struct InnerAsymptoticsCache
     params::GGJParameters
     Q::ComplexF64
     kmax::Int
-    λ::ComplexF64
     R::SVector{2,Float64}
     T::SMatrix{6,6,ComplexF64,36}
-    Tinv::SMatrix{6,6,ComplexF64,36}
     J::NTuple{3,SMatrix{6,6,ComplexF64,36}}
-    P::Vector{SMatrix{6,6,ComplexF64,36}}    # k = 0..kmax+2
-    B::Vector{SMatrix{6,6,ComplexF64,36}}    # k = 0..kmax+2
-    K2::Vector{SMatrix{2,2,ComplexF64,4}}    # k = 0..kmax+2
-    Qmat::Vector{SMatrix{2,2,ComplexF64,4}}  # k = 0..kmax+2
-    Cmat::Vector{SMatrix{2,2,ComplexF64,4}}  # k = 0..kmax+2
-    Dmat::Vector{SMatrix{2,2,ComplexF64,4}}  # k = 0..kmax
-    Y0::SMatrix{2,2,ComplexF64,4}
-    Y0inv::SMatrix{2,2,ComplexF64,4}
-    Y::Vector{SMatrix{2,2,ComplexF64,4}}     # k = 0..kmax
-    Z::Vector{SMatrix{2,2,ComplexF64,4}}     # k = 0..kmax
+    P::Vector{SMatrix{6,6,ComplexF64,36}}
+    Qmat::Vector{SMatrix{2,2,ComplexF64,4}}
+    Y::Vector{SMatrix{2,2,ComplexF64,4}}
 end
 
-# Helpers for cache indexing using physical (zero-based) order k.
-@inline _at(v::Vector, k::Int) = v[k+1]
-
-# -----------------------------------------------------------------------
-# Build T, Tinv, A_0..A_2, J_0..J_2. The coefficient matrices A₀,A₁,A₂ are
-# GW2020 Eqs. (3)–(5); the Jordan basis T, T⁻¹ are Eqs. (7)–(8); λ = Q^{-1/2}
-# (Eq. 6); and J_i = T⁻¹A_iT are Eqs. (9)–(10).
-# -----------------------------------------------------------------------
+# T, T⁻¹, λ = Q^{-1/2} and J_i = T⁻¹A_iT from the coefficient matrices A₀–A₂ (GW2020 Eqs. 3–10).
 
 function _build_tjmat(p::GGJParameters, Q::ComplexF64)
     e = ComplexF64(p.E)
@@ -87,8 +61,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
     q2 = q * q
     λ = 1 / sqrt(q)
 
-    # T (Eq. 7) — built by column-major reshape; the listing below is
-    # row-major Julia order matching that layout.
+    # T (Eq. 7) and T⁻¹ (Eq. 8), listed row by row.
     #! format: off
     T = @SMatrix ComplexF64[
         1 0 h*q q2/λ h*q -q2/λ
@@ -109,7 +82,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
     ]
     #! format: on
 
-    # A_0, A_1, A_2 — GW2020 Eqs. (4), (5), and the A₂ matrix of Eq. (3). Build mutable then freeze.
+    # A₀ and A₂: GW2020 Eq. (4); A₁: Eq. (5).
     A0 = zeros(ComplexF64, 6, 6)
     A1 = zeros(ComplexF64, 6, 6)
     A2 = zeros(ComplexF64, 6, 6)
@@ -141,7 +114,6 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
     A2[5, 1] = h / q2
     A2[6, 1] = -h * k * q
 
-    # Freeze A_i and build J_i = T^{-1} A_i T.
     A0s = SMatrix{6,6,ComplexF64}(A0)
     A1s = SMatrix{6,6,ComplexF64}(A1)
     A2s = SMatrix{6,6,ComplexF64}(A2)
@@ -150,21 +122,11 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
     J1 = Tinv * A1s * T
     J2 = Tinv * A2s * T
 
-    return T, Tinv, (J0, J1, J2), λ
+    return T, (J0, J1, J2), λ
 end
 
-# -----------------------------------------------------------------------
-# Closed-form Lyapunov solve for the splitting transformation — GW2020 Eq. (22),
-# J₀²² P_k²¹ − P_k²¹ J₀¹¹ = −K_k²¹ and J₀¹¹ P_k¹² − P_k¹² J₀²² = −K_k¹², with the
-# block-diagonal part B_k = K_k from Eq. (21).
-#
-# Given a 6×6 K, returns (B, P) such that:
-#   - B is block-diagonal with B[r1,r1] = K[r1,r1] and B[r2,r2] = K[r2,r2]
-#   - P has zero diagonal blocks, P[r1,r2] and P[r2,r1] given by the
-#     closed-form expressions below (which exploit the special structure
-#     of the lower-right block of J_0).
-# -----------------------------------------------------------------------
-
+# Closed-form solve of the GW2020 Eq. (22) Lyapunov equations for the off-diagonal blocks of P_k,
+# using the structure of J₀'s lower-right block; B_k is the block-diagonal part of K_k (Eq. 21).
 function _lyap_solve(K::SMatrix{6,6,ComplexF64}, λ::ComplexF64)
     Bm = zeros(ComplexF64, 6, 6)
     Pm = zeros(ComplexF64, 6, 6)
@@ -205,27 +167,19 @@ function _lyap_solve(K::SMatrix{6,6,ComplexF64}, λ::ComplexF64)
     return SMatrix{6,6,ComplexF64}(Bm), SMatrix{6,6,ComplexF64}(Pm)
 end
 
-# -----------------------------------------------------------------------
-# Split recurrence — GW2020 Eqs. (14)–(19). Seeks descending power series
-# J,P,B = Σ (·)_k x^{-2k} (Eq. 14) with B₀ = J₀, P₀ = I (Eq. 17), and solves the
-# order-by-order recurrence Eq. (16)/(18) with K_k of Eq. (19) via the Lyapunov
-# solve above. Builds B_k, P_k, K6_k for k = 0..kmax+2.
-# -----------------------------------------------------------------------
-
+# Splitting recurrence (GW2020 Eqs. 14–19): P_k, B_k for k = 0..kmax+2, each order by `_lyap_solve` of K_k.
 function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64, kmax::Int)
     N = kmax + 3                          # store k = 0..kmax+2
     P = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
     B = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
-    K6 = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
 
     Z6 = zero(SMatrix{6,6,ComplexF64})
     P[1] = SMatrix{6,6,ComplexF64}(I)     # P_0 = I
     B[1] = J[1]                            # B_0 = J_0
-    K6[1] = J[1]
 
     for k in 1:(kmax+2)
-        kk = k + 1                         # 1-based slot for K6/B/P at index k
-        # K6_k starts as J_k (only k = 1, 2 contribute), else 0
+        kk = k + 1                         # 1-based slot for B/P at index k
+        # K_k starts as J_k (only k = 1, 2 contribute), else 0
         Kacc = (k <= 2) ? J[k+1] : Z6
         # +2*(k-1)*P_{k-1}  (k > 1 only)
         if k > 1
@@ -239,22 +193,15 @@ function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64,
             end
             Kacc = Kacc - P[l+1] * B[kml+1]
         end
-        K6[kk] = Kacc
         Bk, Pk = _lyap_solve(Kacc, λ)
         B[kk] = Bk
         P[kk] = Pk
     end
-    return P, B, K6
+    return P, B
 end
 
-# -----------------------------------------------------------------------
-# Coefs recurrence — the 2×2 reduced-equation construction, GW2020 Eqs. (25)–(52).
-# Builds the inner-block diagonalization Q_k, C_k via K2_k (Eqs. 31–32, 36),
-# the shearing matrices D_k (Eqs. 42–43), the lowest-order Y₀ and Mercier
-# exponents r± (Eqs. 48–49), and the shifted-exponent series Y_k = Y₀Z_k with
-# Z_k from Eqs. (50)–(52).
-# -----------------------------------------------------------------------
-
+# Reduced 2×2 construction (GW2020 Eqs. 25–52): Q_k, C_k via K2_k, shearing D_k, lowest-order Y₀
+# with exponents r±, and the series Y_k = Y₀Z_k.
 function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
     R::SVector{2,Float64}, kmax::Int)
 
@@ -281,21 +228,18 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         end
         K2[k+1] = K2acc
 
-        # Q_k = [[0, 0], [-K2[1,1], -K2[1,2]]] (column-major reshape gives this layout)
         Qm[k+1] = @SMatrix ComplexF64[
             0 0
             -K2acc[1, 1] -K2acc[1, 2]
         ]
-        # C_k = [[0, 0], [K2[2,1], K2[1,1] + K2[2,2]]]
         Cm[k+1] = @SMatrix ComplexF64[
             0 0
-            K2acc[2, 1] K2acc[1, 1] + K2acc[2, 2]
+            K2acc[2, 1] K2acc[1, 1]+K2acc[2, 2]
         ]
     end
 
     # Build D_k for k = 0..kmax — GW2020 Eq. (43); c_2^21 = −(E+F+H+2) is Eq. (39).
     D = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
-    # D_0 = [[0, 1], [C_2[2,1], 3]]
     D[1] = @SMatrix ComplexF64[
         0 1
         Cm[3][2, 1] 3
@@ -319,20 +263,17 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         r1 -1
     ]
 
-    # E_k, Z_k, Y_k recurrence — GW2020 Eqs. (50)–(52): E_k = Y₀⁻¹D_kY₀ (Eq. 51),
-    # Z_k(R−2kI) − RZ_k = Σ E_l Z_{k−l} (Eq. 52), Y_k = Y₀Z_k (Eq. 50).
+    # Z_k and Y_k = Y₀Z_k from the GW2020 Eqs. (50)–(52) recurrence, with E_l = Y₀⁻¹D_lY₀ (Eq. 51).
     Y = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
     Z = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
     Z[1] = I2
     Y[1] = Y0
     for k in 1:kmax
-        # Build Z_k = sum_{l=1..k} E_l * Z_{k-l}, with E_l = Y0inv * D_l * Y0
         Zacc = Z2
         for l in 1:k
             El = Y0inv * D[l+1] * Y0
             Zacc = Zacc + El * Z[k-l+1]
         end
-        # Divide each entry by (R[j] - R[i] - 2k)
         Zk = MMatrix{2,2,ComplexF64}(Zacc)
         for i in 1:2, j in 1:2
             Zk[i, j] = Zk[i, j] / (R[j] - R[i] - 2 * k)
@@ -341,51 +282,33 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         Y[k+1] = Y0 * Z[k+1]
     end
 
-    return K2, Qm, Cm, D, Y0, Y0inv, Y, Z
+    return Qm, Y
 end
-
-# -----------------------------------------------------------------------
-# Public builder.
-# -----------------------------------------------------------------------
 
 """
     build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8) -> InnerAsymptoticsCache
 
 Construct the `inps` Wasow asymptotic basis (GW2020 Eqs. 7–53), truncating
 each power series at order `kmax`. Evaluate with [`evaluate_asymptotics`](@ref);
-pick a cutoff with [`pick_xmax`](@ref).
+pick a matching radius with [`pick_smax`](@ref).
 """
 function build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8)
     p1v = p1(params)
     # Mercier Frobenius exponents r± = 3/2 ± √(−D_I) — GW2020 Eq. (49).
     R = SVector{2,Float64}(p1v + 1.5, -p1v + 1.5)
 
-    T, Tinv, J, λ = _build_tjmat(params, Q)
-    P, B, _ = _split_recurrence(J, λ, kmax)
-    K2, Qm, Cm, D, Y0, Y0inv, Y, Z = _coefs(B, R, kmax)
-
-    return InnerAsymptoticsCache(
-        params, Q, kmax, λ, R, T, Tinv, J,
-        P, B, K2, Qm, Cm, D, Y0, Y0inv, Y, Z
-    )
+    T, J, λ = _build_tjmat(params, Q)
+    P, B = _split_recurrence(J, λ, kmax)
+    Qm, Y = _coefs(B, R, kmax)
+    return InnerAsymptoticsCache(params, Q, kmax, R, T, J, P, Qm, Y)
 end
 
 build_asymptotics(params::GGJParameters, Q::Number; kmax::Int=8) =
     build_asymptotics(params, ComplexF64(Q); kmax=kmax)
 
-# -----------------------------------------------------------------------
-# Horner evaluator with optional fractional-power prefactor. Sums the
-# descending power series in x^{-2k} (GW2020 Eq. 14 form) for the Y, Q, and
-# P[r2,r1] coefficient blocks, with the x^{R/2} Mercier prefactor.
-#
-# Computes y[i] = (Σ_{k=0..n} c[i,k] * x^k) * x^rvec[i]
-# and       dy[i] = d/dx of the above.
-#
-# `c` is an n_components × (n+1) matrix; the second axis is k = 0..n,
-# 1-indexed in Julia.
-# -----------------------------------------------------------------------
-
-function _horner(x::Real, c::AbstractMatrix{ComplexF64};
+# Horner sum y[i] = (Σ_{k=0..n} c[i,k+1] zᵏ)·z^rvec[i] and its z-derivative, z = 1/x² (GW2020 Eq. 14 form);
+# rvec = −R/2 gives the x^R Mercier prefactor. c is n_components × (n+1); complex z uses the principal branch.
+function _horner(x::Number, c::AbstractMatrix{ComplexF64};
     rvec::Union{Nothing,AbstractVector{<:Real}}=nothing,
     derivative::Bool=false)
     nrows, ncols = size(c)
@@ -439,9 +362,7 @@ function _horner(x::Real, c::AbstractMatrix{ComplexF64};
     return y, dy
 end
 
-# Pack the cache's Y, Qmat, and the [r2, r1] block of P into the row-major
-# reshape order used by `_horner`. Returned matrices are
-# n_components × (kmax+1).
+# Pack Y, and Qmat with P[3:6, 1:2], column-major into `_horner`'s n_components × (kmax+1) layout.
 function _pack_y_coefs(cache::InnerAsymptoticsCache)
     kmax = cache.kmax
     cc = Matrix{ComplexF64}(undef, 4, kmax + 1)
@@ -488,19 +409,19 @@ end
 # -----------------------------------------------------------------------
 
 """
-    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real; derivative=true, apply_T=true) -> (U, dU)
+    evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Number; derivative=true, apply_T=true) -> (U, dU)
 
-Evaluate the inps asymptotic basis at `x > 0`. Returns the 6×2 complex
-matrix `U` whose two columns are the algebraically-decaying ("small")
-asymptotic solutions of the GGJ system, and (if `derivative=true`) the
+Evaluate the inps asymptotic basis at `x`, real (`x > 0`) or complex on a
+rotated contour (principal branch of `x^r`; the series is in 1/x², so valid for |arg x| < π/2).
+Returns the 6×2 complex matrix `U` whose two columns are the power-like (Mercier) solutions of
+the GGJ system (column 1 large, column 2 small), and (if `derivative=true`) the
 6×2 matrix `dU` of their derivatives `dU/dx`.
 
-If `apply_T=false`, the result is left in the J-rotated coordinate basis
-(used by `asymptotic_residual` for residual checks). The default `apply_T=true`
-returns the solutions in the original 6-component first-order-system
-basis used by `_physical_uv` and the shooting / Galerkin solvers.
+If `apply_T=false`, the result is left in the J-rotated basis (used by `asymptotic_residual`).
+The default `apply_T=true` returns it in the GW2020 Eq. (2) state basis, which
+[`physical_ua_dua`](@ref) converts to (Ψ, Ξ, Υ).
 """
-function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
+function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Number;
     derivative::Bool=true, apply_T::Bool=true)
     xfac = 1.0 / (x * x)
     R = cache.R
@@ -569,22 +490,42 @@ function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Real;
     end
 end
 
-# -----------------------------------------------------------------------
-# Residual `delta` and adaptive xmax — the convergence measure Δ± of GW2020
-# Eq. (54), ‖u' − xJu‖/max(‖u'‖,‖xJu‖) in the J-rotated basis, used to choose
-# x_max (GW2020 Sec. III, Fig. 3).
-# -----------------------------------------------------------------------
+"""
+    physical_ua_dua(cache, x::Number) -> (ua, dua)
+
+Convert the inps 6×2 basis at real or complex `x` to physical `(Ψ, Ξ, Υ)`
+values and x-derivatives, each 3×2 (column 1 = large power solution, 2 = small).
+The inps columns are in the GW2020 Eq. (2) state `u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x)`,
+hence the /x and ·x factors; same map as the deltac `inpso_get_ua/dua` convention.
+"""
+function physical_ua_dua(cache::InnerAsymptoticsCache, x::Number)
+    U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=true)
+    ua = zeros(ComplexF64, 3, 2)
+    dua = zeros(ComplexF64, 3, 2)
+    @inbounds for j in 1:2
+        ua[1, j] = U[1, j] / x
+        ua[2, j] = U[2, j]
+        ua[3, j] = U[3, j]
+        dua[1, j] = U[4, j] - U[1, j] / (x * x)
+        dua[2, j] = U[5, j] * x
+        dua[3, j] = U[6, j] * x
+    end
+    return ua, dua
+end
+
+# Series residual, the analogue of GW2020 Eq. (54) for v' = xJv (Eq. 6), used to choose the matching
+# radius (`pick_smax`, `_xmax_3level`; GW2020 Sec. III, Fig. 3).
 
 """
-    asymptotic_residual(cache::InnerAsymptoticsCache, x::Real) -> SVector{2,Float64}
+    asymptotic_residual(cache::InnerAsymptoticsCache, x::Number) -> SVector{2,Float64}
 
-Compute the convergence measure `Δ±` of the asymptotic basis at `x` for each
-of the two algebraic columns (GW2020 Eq. 54). Returns
+Convergence measure of the asymptotic basis at real or complex `x` for each of the two algebraic
+columns, the analogue of GW2020 Eq. 54 in the J-rotated basis. Returns
 `‖dU − x·matrix·U‖∞ / max(‖dU‖∞, ‖x·matrix·U‖∞)` per column, where
 `matrix = J₀ + xfac·J₁ + xfac²·J₂` is the J-rotated coefficient matrix (the
 residual of `v' = xJv`, GW2020 Eq. 6).
 """
-function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
+function asymptotic_residual(cache::InnerAsymptoticsCache, x::Number)
     U, dU = evaluate_asymptotics(cache, x; derivative=true, apply_T=false)
 
     xfac = 1.0 / (x * x)
@@ -596,8 +537,6 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
         M = M + xfac * xfac * cache.J[3]
     end
 
-    # matvec(:,:,1) = dU; matvec(:,:,2) = -x*M*U; matvec(:,:,0) = sum.
-    # delta(j) = ||matvec(:,j,0)||∞ / max(||matvec(:,j,1)||∞, ||matvec(:,j,2)||∞).
     matvec1 = dU
     matvec2 = -x * (M * U)
     matvec0 = matvec1 + matvec2
@@ -619,35 +558,36 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
 end
 
 """
-    pick_xmax(params, Q; eps=1e-7, kmax=8, xlogmin=-1.0, xlogmax=4.0, dxlog=0.01) -> (x_max, cache)
+    pick_smax(params, Q; θ=angle(Q)/4, eps=1e-9, kmax=12, cache=nothing,
+              slogmin=-1.0, slogmax=6.5, dslog=0.01) -> (S, cache, achieved)
 
-Sweep `x` log-uniformly upward from `10^xlogmin` and return the smallest
-`x` at which `max(asymptotic_residual(cache, x)) < eps` — the cutoff `x_max`
-where the GW2020 Eq. (54) convergence measure drops below tolerance
-(GW2020 Sec. III, Fig. 3). Also returns the `InnerAsymptoticsCache` it built
-so callers can reuse it.
-
-Throws an `ErrorException` if no `x` in the sweep range achieves the
-target tolerance.
+Sweep `s` log-uniformly upward and return the smallest `s` at which the series residual
+(GW2020 Eq. 54) along `x = e^{iθ}s` drops below `eps`. If never reached, returns the
+residual-minimizing `s` with `achieved = false`.
 """
-function pick_xmax(params::GGJParameters, Q::ComplexF64;
-    eps::Float64=1e-7, kmax::Int=8,
-    xlogmin::Float64=-1.0, xlogmax::Float64=4.0,
-    dxlog::Float64=0.01)
-    cache = build_asymptotics(params, Q; kmax=kmax)
-    dxfac = 10.0^dxlog
-    xlog = xlogmin
-    x = 10.0^xlog
-    while xlog <= xlogmax
-        delta = asymptotic_residual(cache, x)
-        if maximum(delta) < eps
-            return x, cache
+function pick_smax(params::GGJParameters, Q::ComplexF64;
+    θ::Float64=angle(Q) / 4, eps::Float64=1e-9, kmax::Int=12,
+    cache::Union{Nothing,InnerAsymptoticsCache}=nothing,
+    slogmin::Float64=-1.0, slogmax::Float64=6.5, dslog::Float64=0.01)
+    c = cache === nothing ? build_asymptotics(params, Q; kmax=kmax) : cache
+    ph = cis(θ)
+    best_s = 10.0^slogmin
+    best_r = Inf
+    slog = slogmin
+    while slog <= slogmax
+        s = 10.0^slog
+        r = maximum(asymptotic_residual(c, ph * s))
+        if r < eps
+            return s, c, true
         end
-        xlog += dxlog
-        x *= dxfac
+        if r < best_r
+            best_r = r
+            best_s = s
+        end
+        slog += dslog
     end
-    error("pick_xmax: failed to reach residual < $eps for x in [10^$xlogmin, 10^$xlogmax]")
+    return best_s, c, false
 end
 
-pick_xmax(params::GGJParameters, Q::Number; kwargs...) =
-    pick_xmax(params, ComplexF64(Q); kwargs...)
+pick_smax(params::GGJParameters, Q::Number; kwargs...) =
+    pick_smax(params, ComplexF64(Q); kwargs...)

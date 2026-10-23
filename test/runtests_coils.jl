@@ -166,7 +166,7 @@ end
 
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir)
-    equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     mtheta = 48
     nzeta = 16
@@ -305,7 +305,7 @@ end
 
     inputs2 = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
     eq_config2 = Equilibrium.EquilibriumConfig(inputs2["Equilibrium"], equil_dir)
-    equil = Equilibrium.setup_equilibrium(eq_config2)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config2)
 
     # Build coil sets manually (standard I-coil currents for RMP studies)
     il_cfg = ForcingTerms.CoilSetConfig(;
@@ -458,7 +458,7 @@ end
 @testset "Analytic coils: window_pane standoff" begin
     equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
-    equil = Equilibrium.setup_equilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir),
+    equil = Equilibrium.PlasmaEquilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir),
         Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     # surface_point_and_normal: outboard midplane (poloidal_angle = 0)
@@ -649,8 +649,8 @@ end
         end
     end
     cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="core_edge_packed", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
-    eq_pos = Equilibrium.setup_equilibrium(cfg(gfile))
-    eq_neg = Equilibrium.setup_equilibrium(cfg(flipped))
+    eq_pos = Equilibrium.PlasmaEquilibrium(cfg(gfile))
+    eq_neg = Equilibrium.PlasmaEquilibrium(cfg(flipped))
     @test eq_pos.params.ip_sign == 1 && eq_neg.params.ip_sign == -1
     @test eq_pos.params.bt_sign == eq_neg.params.bt_sign == -1
     @test eq_pos.params.crnt > 0 && eq_neg.params.crnt > 0          # the computed current carries no sign
