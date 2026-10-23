@@ -324,7 +324,7 @@ end
 
 """
     solve_ray(params::GGJParameters, Q; θ=angle(Q)/4, kmax=12, S=nothing, smax_tol=1e-9,
-              cfl=0.2, min_cells=1024, nq=6, verbose=false, …) -> RaySolveResult
+              cfl=0.2, min_cells=1024, warn_cells=6000, nq=6, verbose=false, …) -> RaySolveResult
 
 Solve the GGJ inner-layer problem on the rotated ray x = e^{iθ}s. `Δ` is the rescaled pair
 (Δ₊, Δ₋) = (interchange, tearing), directly comparable to the `:galerkin` backend; θ = 0 is a
@@ -334,7 +334,11 @@ Both boundary points are computed per solve. `S` defaults to the smallest radius
 residual is below `smax_tol` with order `kmax` ([`pick_smax`](@ref); it warns and uses the best
 point if the tolerance is not reached). The BVP edge s_m is where every exponential family has
 decayed 45 e-folds from the origin, from the local spectrum, scaled by `sm_fac`. `cfl`,
-`min_cells` set the Hermite grid ([`ray_breaks`](@ref)) and `nq` its quadrature. `march_rtol`
+`min_cells` set the Hermite grid ([`ray_breaks`](@ref)) and `nq` its quadrature. The grid is fixed by
+these rates, not refined against a residual, and no run-time error estimate is returned: at small |Q|
+the cubic BVP gives Δ to about 1e-8–2e-7 relative, so pass a smaller `cfl` or larger `min_cells`
+when more is needed, or [`delta_convergence`](@ref) for an error bar. A grid of more than
+`warn_cells` cells, which only very large |Q| reaches, warns. `march_rtol`
 is [`march_boundary`](@ref)'s `rtol`; `growth`, `seed`, `ztrk`, `purge_budget`, `dp_res` go to
 `march_boundary`/[`decaying_pair`](@ref); `handoff` (diagnostic) supplies (Us, Ub) at S.
 """
@@ -342,7 +346,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     θ::Float64=angle(Q) / 4, kmax::Int=12,
     S::Union{Nothing,Float64}=nothing, smax_tol::Float64=1e-9,
     growth::Float64=30.0, march_rtol::Float64=1e-9, sm_fac::Float64=1.0,
-    cfl::Float64=0.2, min_cells::Int=1024, nq::Int=6, seed::Int=20260707,
+    cfl::Float64=0.2, min_cells::Int=1024, warn_cells::Int=6000, nq::Int=6, seed::Int=20260707,
     ztrk::Float64=0.3, purge_budget::Float64=2.5, dp_res::Float64=20.0,
     handoff::Union{Nothing,NTuple{2,Vector{ComplexF64}}}=nothing,
     verbose::Bool=false)
@@ -393,6 +397,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     bc_cond < 1e12 || @warn "boundary basis poorly conditioned (cond ≈ $bc_cond)"
 
     breaks = ray_breaks(params, Q, θ, Sbvp; cfl=cfl, min_cells=min_cells)
+    length(breaks) - 1 > warn_cells && @warn "GGJ ray: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells; the solve is slow at this |Q|" Q
     ws = _galerkin_workspace(breaks, fill(CT_NONE, length(breaks) - 1))
     Δraw, cexp = _assemble_and_solve_point!(ws, params, Q, θ, Us, Ub, E; nq=nq)
     verbose && @printf("  BVP: %d Hermite cells on [0, %.4g], Δraw[1] = %.6e %+.6eim\n",
@@ -414,10 +419,11 @@ Rotated-ray backend: converts γ via `inner_Q`, forwards keywords to
 [`solve_ray`](@ref), and returns the parity-projected matching data (Δ₊, Δ₋) as the
 `interchange` and `tearing` fields of [`InnerLayerResponse`](@ref).
 Preferred for |Q| ≳ 1 and near the imaginary axis; use `solve_ray` directly
-when the full [`RaySolveResult`](@ref) is wanted. `real_profiles` is a profile-only model
-option (see `solve_inner_profile`) and is ignored here.
+when the full [`RaySolveResult`](@ref) is wanted. `real_profiles`, `npc` and `certify_rtol` are
+profile-only model options (see `solve_inner_profile`) and are ignored here.
 """
-function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number; real_profiles::Bool=false, kwargs...)
+function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
+    real_profiles::Bool=false, npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
     res = solve_ray(params, inner_Q(params, γ); kwargs...)
     return InnerLayerResponse(; interchange=res.Δ[1], tearing=res.Δ[2])
 end

@@ -67,6 +67,9 @@ end
         @test abs(imag(Δ.tearing)) < 1e-3 * abs(Δ.tearing)
         # :ray is the default backend.
         @test IL.GGJModel() === IL.GGJModel{:ray}()
+        # Profile-only options on the model are ignored by solve_inner.
+        Δo = IL.solve_inner(IL.GGJModel(; solver=:ray, real_profiles=true, npc=4, certify_rtol=1e-2), p, γ)
+        @test Δo.interchange == Δ.interchange && Δo.tearing == Δ.tearing
     end
 
     @testset "q4 physical benchmark at Q = 500i (regime beyond :galerkin)" begin
@@ -97,6 +100,9 @@ end
         r = IL.solve_ray(p, Q)
         r2 = IL.solve_ray(p, Q; cfl=0.025, min_cells=2048)
         @test maximum(abs.(r2.Δraw .- r.Δraw) ./ abs.(r.Δraw)) < 1e-6
+        # A grid larger than warn_cells warns; the solve is unchanged.
+        r3 = @test_logs (:warn, r"exceed warn_cells") IL.solve_ray(p, Q; warn_cells=100)
+        @test r3.Δraw == r.Δraw
     end
 
     @testset "ode_matrix: ordinary point and type-generic build" begin
