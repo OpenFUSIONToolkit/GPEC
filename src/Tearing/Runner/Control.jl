@@ -16,8 +16,8 @@ constructor.
 # Core toggles
 
   - `enabled`       -- run the analysis at all (default `false`)
-  - `inner_model`   -- `:slayer_fitzpatrick` (default and only option; the
-    `:ggj_*` models are rejected because GGJ tearing growth rates are not implemented)
+  - `inner_model`   -- `:slayer_fitzpatrick` (default and only option; when `enabled`,
+    the `:ggj_*` models are rejected because GGJ tearing growth rates are not implemented)
   - `scan_mode`     -- `:amr` (default) or `:brute_force`
   - `coupling_mode` -- `:uncoupled` (default, per-surface) or `:coupled`
     (multi-surface determinant)
@@ -165,6 +165,7 @@ there is one consistent interface for resistive and kinetic profiles.
 end
 
 const _VALID_INNER_MODELS = (:slayer_fitzpatrick,)
+const _UNSUPPORTED_INNER_MODELS = (:ggj_ray, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_D_C_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
@@ -172,12 +173,13 @@ const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
 function validate(ctrl::SLAYERControl)
-    startswith(String(ctrl.inner_model), "ggj_") &&
-        throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
-                            "growth rates are not implemented; use inner_model=slayer_fitzpatrick"))
-    ctrl.inner_model in _VALID_INNER_MODELS ||
+    ctrl.inner_model in _VALID_INNER_MODELS || ctrl.inner_model in _UNSUPPORTED_INNER_MODELS ||
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) " *
                             "not in $(_VALID_INNER_MODELS)"))
+    # A disabled section is never solved, so it may keep a GGJ model while serving only its profiles.
+    !ctrl.enabled || ctrl.inner_model in _VALID_INNER_MODELS ||
+        throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
+                            "growth rates are not implemented; use inner_model=slayer_fitzpatrick"))
     ctrl.scan_mode in _VALID_SCAN_MODES ||
         throw(ArgumentError("SLAYERControl: scan_mode=$(ctrl.scan_mode) " *
                             "not in $(_VALID_SCAN_MODES)"))
