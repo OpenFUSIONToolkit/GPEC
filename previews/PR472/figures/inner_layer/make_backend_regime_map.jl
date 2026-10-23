@@ -19,7 +19,7 @@ using Printf
 const IL = GeneralizedPerturbedEquilibrium.InnerLayer
 const GGJ = IL.GGJ
 
-p = IL.q4_surface_benchmark()
+p = IL.GGJ.q4_surface_benchmark()
 γ(aq) = im * aq * GGJ.q0(p)                       # imaginary axis: Q = i|Q|
 
 # Worst-case relative error over the two parity components vs the :ray reference.
