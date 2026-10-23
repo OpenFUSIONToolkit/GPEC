@@ -45,7 +45,7 @@ _mode_mn(ffs::ForceFreeStatesResult, j::Int) = (ffs.mlow + (j - 1) % ffs.mpert, 
 """
     reconstruct_physical_fields(
         response_vector, flux_matrix, solution,
-        equil, ffs, intr, metric, mats, ctrl
+        equil, ffs, metric, mats, regularization_width
     ) -> (xi_modes, b_modes)
 
 Reconstruct displacement and perturbed magnetic field from eigenmode response.
@@ -80,10 +80,9 @@ function reconstruct_physical_fields(
     solution::SolutionProfiles,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
-    intr::PerturbedEquilibriumInternal,
     metric::MetricData,
     mats::MatrixSplines,
-    ctrl::PerturbedEquilibriumControl
+    regularization_width::Float64
 )
     npsi = size(solution.u_store, 4)
     psi_grid = solution.psi_store[1:npsi]
@@ -114,7 +113,7 @@ function reconstruct_physical_fields(
         # Compute Clebsch displacements with regularization (matches Fortran gpeq_sol + gpout_xclebsch)
         clebsch_psi, clebsch_psi1, clebsch_alpha = compute_clebsch_displacements(
             xi_psi_modes, xi_psi1_modes, xi_s_modes,
-            psi_grid, equil, ffs, mats, ctrl
+            psi_grid, equil, ffs, mats, regularization_width
         )
 
         # Compute regularized (modified) b-field components (matches Fortran gpeq_sol bmt/bmz)
@@ -126,7 +125,7 @@ function reconstruct_physical_fields(
         # Compute contravariant displacement via Jacobian convolution (matches Fortran gpeq_contra)
         xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes = compute_contra_displacements(
             xi_psi_modes, clebsch_psi1, clebsch_alpha,
-            psi_grid, equil, ffs, metric, ctrl
+            psi_grid, equil, ffs, metric, regularization_width
         )
 
         # Compute covariant components via metric tensor contraction (matches Fortran gpeq_cova)
@@ -327,7 +326,7 @@ end
 """
     compute_clebsch_displacements(
         xi_psi_modes, xi_psi1_modes, xi_s_modes,
-        psi_grid, equil, ffs, mats, ctrl
+        psi_grid, equil, ffs, mats, regularization_width
     ) -> (clebsch_psi, clebsch_psi1, clebsch_alpha)
 
 Compute Clebsch displacement components for PENTRC output.
@@ -351,7 +350,7 @@ function compute_clebsch_displacements(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
     mats::MatrixSplines,
-    ctrl::PerturbedEquilibriumControl
+    regularization_width::Float64
 )
     npsi, mpert = size(xi_psi_modes)
     chi1 = 2π * equil.psio
@@ -361,7 +360,7 @@ function compute_clebsch_displacements(
     clebsch_psi1 = copy(xi_psi1_modes)        # will be regularized below
     clebsch_alpha = xi_s_modes ./ chi1         # ξ^α/χ₁ (will be regularized below)
 
-    reg_spot = ctrl.regularization_width  # Fortran gpec reg_spot
+    reg_spot = regularization_width  # Fortran gpec reg_spot
     @assert reg_spot >= 0 "regularization_width must be non-negative (got $reg_spot)"
 
     if reg_spot == 0
@@ -484,7 +483,7 @@ end
 """
     compute_contra_displacements(
         xi_psi_modes, clebsch_psi1, clebsch_alpha,
-        psi_grid, equil, ffs, metric, ctrl
+        psi_grid, equil, ffs, metric, regularization_width
     ) -> (xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes)
 
 Compute contravariant displacement via Jacobian mode coupling convolution.
@@ -507,12 +506,12 @@ function compute_contra_displacements(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
     metric::MetricData,
-    ctrl::PerturbedEquilibriumControl
+    regularization_width::Float64
 )
     npsi, numpert_total = size(xi_psi_modes)
     (; mpert, mlow, nlow, npert) = ffs
     chi1 = 2π * equil.psio
-    reg_spot = ctrl.regularization_width  # Fortran gpec reg_spot
+    reg_spot = regularization_width  # Fortran gpec reg_spot
     fc = metric.fourier_coeffs
 
     xwp_modes = zeros(ComplexF64, npsi, numpert_total)

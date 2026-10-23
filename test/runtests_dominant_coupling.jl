@@ -74,31 +74,32 @@ include("h5_metadata_check.jl")
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
             inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_response" => true, "compute_singular_coupling" => true,
+                "compute_singular_coupling" => true,
                 "verbose" => false, "write_outputs_to_HDF5" => true)
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             run = GPEC.main([dir])
             pe, ffs = run.pe, run.ffs
-            # The in-memory entry point needs a coupling matrix on the state.
-            @test_throws ArgumentError PE.ResonantCoupling(PE.PerturbedEquilibriumState(), ffs)
+            # The in-memory entry point needs a coupling matrix on the response.
+            @test_throws ArgumentError PE.ResonantCoupling(PE.PlasmaResponse(; ffs))
+            resp = pe.response
             h5path = joinpath(dir, "gpec.h5")
 
             # Run summary: the core-window decomposition, rebuilt into the stored applied resonant
             # field (which the writer evaluates before conforming the matrix to b̃ space).
-            @test !isempty(pe.dominant_singular_values)
-            rank = length(pe.dominant_singular_values)
-            rows = pe.dominant_rational_index
-            @test rows == 1:length(pe.rational_psi)
-            @test issorted(pe.dominant_singular_values; rev=true)
-            V, σ, U = pe.dominant_right_singular_vectors, pe.dominant_singular_values, pe.dominant_left_singular_vectors
+            @test !isempty(resp.dominant_singular_values)
+            rank = length(resp.dominant_singular_values)
+            rows = resp.dominant_rational_index
+            @test rows == 1:length(resp.rational_psi)
+            @test issorted(resp.dominant_singular_values; rev=true)
+            V, σ, U = resp.dominant_right_singular_vectors, resp.dominant_singular_values, resp.dominant_left_singular_vectors
             @test size(V) == (length(pe.forcing_b_rootarea), rank)
             @test size(U) == (length(rows), rank)
             @test pe.dominant_forcing_overlap[1] ≈ dot(V[:, 1], pe.forcing_b_rootarea)
             @test U * (σ .* pe.dominant_forcing_overlap) ≈ pe.resonant_area_weighted_field[rows] rtol = 1e-8
 
             # The same ResonantCoupling from memory and from the file.
-            rc = PE.ResonantCoupling(pe, ffs)
+            rc = PE.ResonantCoupling(resp)
             rc_h5 = PE.ResonantCoupling(h5path)
             @test rc_h5.C ≈ rc.C
             @test rc_h5.rational_psi == rc.rational_psi
@@ -138,10 +139,6 @@ include("h5_metadata_check.jl")
             @test isempty(bare.m_modes)
             @test PE.check_mode_basis(bare, rc.m_modes .+ 1, rc.n_modes, "unlabelled") === nothing
 
-            # Without the response step the conform operator is rebuilt from the equilibrium.
-            pe.rootarea_to_area_weight = zeros(ComplexF64, 0, 0)
-            @test PE.ResonantCoupling(pe, ffs).flux_conform ≈ rc.flux_conform
-
             h5open(h5path, "r") do h5
                 g = h5["PerturbedEquilibrium/SingularCoupling/DominantMode"]
                 @test read(g["singular_values"]) ≈ σ
@@ -157,12 +154,8 @@ end
 @testset "island diagnostics across toroidal modes" begin
     PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
     # q = 2 surface (index 1) resonates at n = 1 and n = 2; q = 2.5 (index 2) at n = 2 only.
-    state = PE.PerturbedEquilibriumState()
-    state.rational_psi = [0.4, 0.4, 0.6]
-    state.rational_surface_idx = [1, 1, 2]
-    state.island_width_sq = ComplexF64[0.01, 0.0004, 0.0025]
-    PE.compute_island_diagnostics!(state, 3)
-    @test state.island_half_width ≈ [0.1, 0.02, 0.05]
+    half_width, chirikov = PE.island_diagnostics(ComplexF64[0.01, 0.0004, 0.0025], [0.4, 0.4, 0.6], [1, 1, 2])
+    @test half_width ≈ [0.1, 0.02, 0.05]
     # The repeated surface is not its own neighbour: every row sees the 0.2 gap to the other surface.
-    @test state.chirikov_parameter ≈ [0.1, 0.02, 0.05] ./ 0.1
+    @test chirikov ≈ [0.1, 0.02, 0.05] ./ 0.1
 end

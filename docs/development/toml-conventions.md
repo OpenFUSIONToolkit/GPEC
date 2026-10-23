@@ -11,7 +11,7 @@ modify them. **Do not invent a new convention** — match what the existing exam
 2. **Inline annotation on every variable line.** Every `key = value` gets a trailing
    `# description`. Source the wording from the matching config struct's docstring
    (`EquilibriumConfig`, `WallShapeSettings`, `ForceFreeStatesControl`, `ForcingTermsControl`,
-   `PerturbedEquilibriumControl`, `SolovevConfig`, `TJAnalyticConfig`, `KineticForcesControl`)
+   the `plasma_response`/`perturbed_equilibrium` docstrings, `SolovevConfig`, `TJAnalyticConfig`, `KineticForcesControl`)
    and keep it to one terse line. **Use the same description for the same variable across all
    files** — `examples/DIIID-like_ideal_example/gpec.toml` is the canonical reference for the
    common sections. Exception: in `regression-harness/cases/*.toml` the repeated
