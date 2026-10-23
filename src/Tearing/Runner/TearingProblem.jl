@@ -110,8 +110,9 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
 
     rational_psi = Float64[surfaces[p.ising].psifac for p in params]
     rational_q = Float64[surfaces[p.ising].q for p in params]
-    # E×B rotation per unit n at each surface, for the coupled determinant's Doppler shifts.
-    omega_E = Float64[loaded.profiles.omega_E(ψ) for ψ in rational_psi]
+    # E×B rotation per unit n at each surface, for the coupled determinant's Doppler shifts;
+    # empty when the kinetic file carries none.
+    omega_E = loaded.has_omega_E ? Float64[loaded.profiles.omega_E(ψ) for ψ in rational_psi] : Float64[]
     return run_slayer_from_inputs(model, params, dp, control;
         rational_psi=rational_psi, rational_q=rational_q, omega_E=omega_E)
 end

@@ -165,6 +165,10 @@
         r_cpl = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=Ω_E)
         @test r_cpl.q_shift ≈ [-1.0e-4 * 1 * Ω_E[1], -1.2e-4 * 1 * Ω_E[2]]
         @test r_cpl.omega_E == Ω_E
+        # Without a rotation profile nothing is shifted, and the unknown Ω_E is reported as NaN.
+        r_none = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:coupled, grid...))
+        @test r_none.q_shift == [0.0, 0.0]
+        @test all(isnan, r_none.omega_E)
         # The mode sees n·Ω_E: the same rotation shifts an n = 2 surface twice as far.
         r_n2 = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), [_mk_params(; tauk=1.0e-4, m=3, n=2)], ComplexF64[-2.0;;],
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[2.0e3])

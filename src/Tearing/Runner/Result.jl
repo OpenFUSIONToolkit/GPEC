@@ -40,7 +40,7 @@ downstream inspection and HDF5 output.
     resistive layer thickness (in meters) from the `del_s` Riccati solve
     plus FKR / visco-resistive sanity scales. Empty when disabled.
   - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] on each surface,
-    from the kinetic file. Recorded in both coupling modes
+    from the kinetic file (NaN when it has none). Recorded in both coupling modes
   - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
     inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
   - `scan_data`           -- scan results (per-surface in uncoupled, single
