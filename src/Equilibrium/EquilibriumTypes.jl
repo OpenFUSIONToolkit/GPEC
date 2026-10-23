@@ -42,6 +42,10 @@ specified in the input.
   - `flux_surface_rtol::Float64` - Relative tolerance of the ODE solves that trace each flux surface; their absolute tolerance
     is `equil_abstol(flux_surface_rtol)`, i.e. `flux_surface_rtol` capped at `EQUIL_ABSTOL_MAX`
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
+  - `imas_cocos::Int` - Expected COCOS convention of an IMAS `dd.equilibrium` input (11 = IMAS standard, 2 = GPEC internal)
+  - `kinetic_file::String` - Kinetic-profile file read once into `PlasmaEquilibrium.kinetic` (see [`read_kinetic_file`](@ref));
+    empty for none. Every kinetic consumer (NTV, tearing, the layer-overlap scan, grid refinement) derives its view from it.
+  - `kinetic_group::String` - HDF5 group of `kinetic_file` holding the profiles
 """
 @kwdef struct EquilibriumConfig
     eq_type::String = "efit"
@@ -75,6 +79,9 @@ specified in the input.
     # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
     imas_cocos::Int = 11
 
+    kinetic_file::String = ""
+    kinetic_group::String = "/"
+
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
@@ -84,7 +91,7 @@ specified in the input.
     function EquilibriumConfig(eq_type, eq_filename, r0_norm, b0_norm, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-        force_termination, imas_cocos)
+        force_termination, imas_cocos, kinetic_file, kinetic_group)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -151,7 +158,7 @@ specified in the input.
         return new(eq_type, eq_filename, r0_norm, b0_norm, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-            force_termination, imas_cocos)
+            force_termination, imas_cocos, kinetic_file, kinetic_group)
     end
 end
 
@@ -184,6 +191,9 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
     # rerun path's "no input file" marker and must stay empty, not become `base_path`.
     if haskey(config_data, "eq_filename") && !isempty(config_data["eq_filename"]) && !isabspath(config_data["eq_filename"])
         config_data["eq_filename"] = normpath(joinpath(base_path, config_data["eq_filename"]))
+    end
+    if !isempty(get(config_data, "kinetic_file", "")) && !isabspath(config_data["kinetic_file"])
+        config_data["kinetic_file"] = normpath(joinpath(base_path, config_data["kinetic_file"]))
     end
 
     return EquilibriumConfig(; symbolize_keys(config_data)...)
@@ -769,6 +779,51 @@ function GeometryProfileSplines(xs::Vector{Float64},
 end
 
 """
+    KineticProfileData
+
+Raw kinetic-profile columns read from a kinetic file (HDF5 or ASCII), before
+resampling and spline construction. `psi` (normalized poloidal flux) is always
+present; every profile field is `nothing` when the source omits it, so each
+consumer validates only the fields it needs. Units: densities m⁻³,
+temperatures eV, frequencies rad/s, diffusivities m²/s.
+
+| field               | meaning                                                                                                           |
+|:------------------- |:----------------------------------------------------------------------------------------------------------------- |
+| `n_i`               | main-ion density                                                                                                  |
+| `n_e`               | electron density                                                                                                  |
+| `T_i`/`T_e`         | ion / electron temperature                                                                                        |
+| `omega_E`           | ExB rotation                                                                                                      |
+| `omega_tor`         | toroidal rotation (optional)                                                                                      |
+| `chi_e`             | perpendicular heat diffusivity χ⊥ (shipped data: electron power-balance χ_e; see the stability docs)              |
+| `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
+| `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
+| `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
+| `provenance`        | short string recording the source file/format                                                                     |
+"""
+struct KineticProfileData
+    psi::Vector{Float64}
+    n_i::Union{Nothing,Vector{Float64}}
+    n_e::Union{Nothing,Vector{Float64}}
+    T_i::Union{Nothing,Vector{Float64}}
+    T_e::Union{Nothing,Vector{Float64}}
+    omega_E::Union{Nothing,Vector{Float64}}
+    omega_tor::Union{Nothing,Vector{Float64}}
+    chi_e::Union{Nothing,Vector{Float64}}
+    chi_phi::Union{Nothing,Vector{Float64}}
+    zeff::Union{Nothing,Vector{Float64}}
+    species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
+    provenance::String
+end
+
+function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
+    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing, zeff=nothing,
+    species_densities=nothing, provenance="")
+    _v(x) = x === nothing ? nothing : Float64.(collect(x))
+    return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), _v(zeff), species_densities, String(provenance))
+end
+
+"""
     KineticProfileSplines
 
 Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures,
@@ -894,6 +949,8 @@ This object provides a complete representation of the processed plasma equilibri
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
+  - `kinetic::Union{Nothing,KineticProfileData}`: the raw kinetic profiles of `config.kinetic_file` (or of
+    [`attach_kinetic_profiles!`](@ref)), on the file's own ψ grid; `nothing` when none are attached
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -921,13 +978,14 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     psio::Float64
 
     ingest::EquilibriumIngest
+    kinetic::Union{Nothing,KineticProfileData}
 end
 
-# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest, so allow
-# construction without it; ingest defaults to nothing and is assigned post-construction.
+# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest and attaches the
+# kinetic profiles, so allow construction without them; both are assigned post-construction.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
     eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
     PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing)
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing, nothing)

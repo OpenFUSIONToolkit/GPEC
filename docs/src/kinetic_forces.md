@@ -95,8 +95,8 @@ profiles and physics parameters for sensitivity studies:
 
 ### Profile-loader knobs (`density_factor`, `temperature_factor`, `ExB_rotation_factor`, `toroidal_rotation_factor`)
 
-These four knobs are applied during kinetic profile loading in
-`load_kinetic_profiles`, before any physics evaluation. The physical model is:
+These four knobs are applied when the NTV view of the kinetic profiles is built by
+`kinetic_profile_splines`, before any physics evaluation. The physical model is:
 
 ```math
 \omega_\phi = \omega_E + \omega_{*n,i} + \omega_{*T,i}

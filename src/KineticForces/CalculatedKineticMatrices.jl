@@ -45,7 +45,7 @@ section.
     carry NTV-specific knobs (nl, zi, mi, wdfac, divxfac, electron) that the
     KineticForces kernel needs but ForceFreeStatesControl does not expose.
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-
-    profile splines loaded via `Equilibrium.load_kinetic_profiles`.
+    profile splines built by `Equilibrium.kinetic_profile_splines`.
 
 # Returns
 

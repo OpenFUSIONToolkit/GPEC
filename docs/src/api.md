@@ -38,6 +38,18 @@ The four objects map one-to-one onto the pipeline stages:
   - `perturbed_equilibrium` runs the plasma-response stage — the `[PerturbedEquilibrium]`
     section.
 
+## Kinetic profiles
+
+The equilibrium carries the kinetic profiles. Name the file with the `kinetic_file` (and,
+for HDF5, `kinetic_group`) keyword, the same keys as the `[Equilibrium]` deck section, and it
+is read once into `equil.kinetic`; every kinetic stage derives its own view from it.
+[`attach_kinetic_profiles!`](@ref) attaches a file or in-memory `KineticProfileData` to an
+equilibrium built without one, such as an analytic equilibrium.
+
+```julia
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada", kinetic_file="kinetic.h5")
+```
+
 ## Combining forcing sources
 
 `RMPField`s form a vector space: `+`, `-` and scalar `*` build lazy linear combinations that

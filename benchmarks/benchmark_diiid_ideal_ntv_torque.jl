@@ -307,8 +307,8 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     _p("\n--- Torque integration ---")
     t2 = time()
 
-    kinetic_profiles = Eq.load_kinetic_profiles(
-        kf_ctrl.kinetic_file;
+    kinetic_profiles = Eq.kinetic_profile_splines(
+        Eq.read_kinetic_file(kf_ctrl.kinetic_file);
         zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass)
 
     kf_state = KF.KineticForcesState()

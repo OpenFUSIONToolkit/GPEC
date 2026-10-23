@@ -434,9 +434,9 @@ function load_kinetic_context(
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
                              (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
-        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
-        kinetic_profiles = Equilibrium.load_kinetic_profiles(
-            kinetic_file;
+        kinetic_data = Equilibrium.read_kinetic_file(joinpath(intr.dir_path, kf_ctrl.kinetic_file))
+        kinetic_profiles = Equilibrium.kinetic_profile_splines(
+            kinetic_data;
             zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge,
             mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass,
             density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
@@ -445,7 +445,7 @@ function load_kinetic_context(
         if !isempty(kf_ctrl.ion_species) || kf_ctrl.electron
             speclist = isempty(kf_ctrl.ion_species) ?
                        [KineticForces.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)] : kf_ctrl.ion_species
-            species = Equilibrium.resolve_ntv_species(kinetic_file, speclist;
+            species = Equilibrium.resolve_ntv_species(kinetic_data, speclist;
                 electron=kf_ctrl.electron, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass,
                 density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
                 ExB_rotation_factor=kf_ctrl.ExB_rotation_factor,
@@ -501,7 +501,7 @@ function maybe_reform_equilibrium(
     else
         nothing  # fall back to re-reading the input file
     end
-    equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+    equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes, kinetic=equil.kinetic)
     implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
     if implied > 1.5 * (length(psi_nodes) - 1)
         @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *

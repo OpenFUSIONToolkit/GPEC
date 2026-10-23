@@ -1,3 +1,4 @@
+using TOML
 
 @testset "KineticForces Unit Tests" begin
 
@@ -689,8 +690,8 @@
         end
 
         @testset "NTV splines identical: ASCII vs HDF5" begin
-            ka = E.load_kinetic_profiles(gpeckf)
-            kb = E.load_kinetic_profiles(h5)
+            ka = E.kinetic_profile_splines(E.read_kinetic_file(gpeckf))
+            kb = E.kinetic_profile_splines(E.read_kinetic_file(h5))
             for p in 0.0:0.1:1.0
                 @test ka.ne_spline(p) == kb.ne_spline(p)
                 @test ka.Ti_spline(p) == kb.Ti_spline(p)
@@ -712,12 +713,31 @@
         end
 
         @testset "missing required field errors" begin
-            # HDF5 with only psi + n_e: NTV load must error on the missing T_i
-            tmp = tempname() * ".h5"
+            # Only psi + n_e: the NTV view must error on the missing T_i
             d = E.KineticProfileData(; psi=[0.0, 0.5, 1.0], n_e=[1e19, 9e18, 8e18])
-            E.write_kinetic_h5(tmp, d)
-            @test_throws ErrorException E.load_kinetic_profiles(tmp)
-            rm(tmp; force=true)
+            @test_throws "missing required 'T_i'" E.kinetic_profile_splines(d)
+        end
+
+        @testset "attached to the equilibrium" begin
+            template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+            sol = E.SolovevConfig(deck["SOL_INPUT"])
+            # A relative kinetic_file resolves against the deck directory, like eq_filename.
+            config = E.EquilibriumConfig(merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))), template)
+            @test config.kinetic_file == normpath(h5)
+            raw = E.read_kinetic_file(h5)
+            equil = E.setup_equilibrium(config, sol)
+            @test equil.kinetic.psi == raw.psi
+            @test equil.kinetic.T_i == raw.T_i
+            @test equil.kinetic.chi_e == raw.chi_e
+            # A re-form passes the data through instead of reading the file again.
+            @test E.setup_equilibrium(config, sol; kinetic=equil.kinetic).kinetic === equil.kinetic
+
+            bare = E.setup_equilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), sol)
+            @test bare.kinetic === nothing
+            E.attach_kinetic_profiles!(bare, gpeckf)
+            @test bare.kinetic.n_e == E.read_kinetic_file(gpeckf).n_e
+            @test E.attach_kinetic_profiles!(bare, raw).kinetic === raw
         end
     end
 end
