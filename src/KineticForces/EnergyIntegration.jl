@@ -41,7 +41,7 @@ end
 Collision frequency ν(x) at normalized energy x = E/T.
 
 - `"zero"`: collisionless (ν = 0)
-- `"small"`: 1e-5 * we
+- `"small"`: 1e-5 * |we|, a positive Krook width for either rotation direction
 - `"krook"`: unmodified Krook operator
 - `"harmonic"`: (1 + (l/2)²) * krook * x^(-3/2)
 """
@@ -49,7 +49,7 @@ Collision frequency ν(x) at normalized energy x = E/T.
     nux = if p.nutype == "zero"
         0.0
     elseif p.nutype == "small"
-        1e-5 * p.we
+        1e-5 * abs(p.we)
     elseif p.nutype == "krook"
         p.nuk
     elseif p.nutype == "harmonic"
