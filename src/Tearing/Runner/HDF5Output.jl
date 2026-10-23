@@ -13,7 +13,7 @@
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
 #   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
-#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots
+#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame)
 #   │                           (flat-plus-offsets ragged encoding)
 #   └── Scan/               -- optional: full Q/Δ scan data
 
@@ -122,10 +122,10 @@ const TEARING_H5_ANNOTATIONS = [
         long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)",
         dims=("surface_row", "surface_col")
     ),
-    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
+    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q in the lab frame (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
         (;
-            long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root: each surface's E×B frame when uncoupled, the lab frame when coupled",
+            long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root in the lab frame (an uncoupled root's E×B-frame value is ω − n·Ω_E)",
             units="rad/s",
             dims=("surface",)
         ),

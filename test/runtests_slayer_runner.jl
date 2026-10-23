@@ -158,6 +158,15 @@
         # Uncoupled layers are solved in their own plasma frame: no shift, even when supplied.
         r_unc = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...); omega_E=Ω_E)
         @test r_unc.q_shift == [0.0, 0.0]
+        # Their roots are reported in the lab frame: Q moves by τ_k·n·Ω_E, γ and the layer-frame extraction do not.
+        r_unc0 = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...))
+        @test isequal(r_unc.Q_root, r_unc0.Q_root .+ [1.0e-4 * Ω_E[1], 1.2e-4 * Ω_E[2]])
+        @test r_unc.gamma_Hz == r_unc0.gamma_Hz
+        @test isequal([gr.Q_root for gr in r_unc.per_surface_extraction], r_unc0.Q_root)
+        for k in 1:2
+            has_root = !isnan(r_unc0.Q_root[k])
+            @test r_unc.omega_Hz[k] ≈ r_unc0.omega_Hz[k] + (has_root ? Ω_E[k] : 0.0)
+        end
         # The resolved rotation is still reported in both modes.
         @test r_unc.omega_E == Ω_E
 
