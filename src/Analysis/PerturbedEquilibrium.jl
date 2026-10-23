@@ -342,8 +342,9 @@ Inspired by `plot_spectrograms.py` from OMFIT GPEC.
 ### Keyword arguments
 
   - `component`: Response field component to plot; one of `:xi_psi`, `:b_psi`,
-    `:b_theta`, `:b_zeta` (default: `:xi_psi`). `:b_psi` reads the area-normalized
-    `b_psi_area_weighted` dataset.
+    `:Jb_theta`, `:Jb_zeta` (default: `:xi_psi`). `:b_psi` reads the area-normalized
+    `b_psi_area_weighted` dataset; `:Jb_theta` and `:Jb_zeta` are the Jacobian-weighted
+    contravariant field components.
   - `save_path`: If provided, save the figure to this path (default: `nothing`)
 
 ### Returns
@@ -352,13 +353,13 @@ A `Plots.jl` plot object.
 """
 function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     comp_map = Dict(
-        :xi_psi  => "xi_psi",
-        :b_psi   => "b_psi_area_weighted",  # area-normalized b^ψ
-        :b_theta => "b_theta",
-        :b_zeta  => "b_zeta",
+        :xi_psi   => "xi_psi",
+        :b_psi    => "b_psi_area_weighted",  # area-normalized b^ψ
+        :Jb_theta => "Jb_theta",
+        :Jb_zeta  => "Jb_zeta",
     )
     haskey(comp_map, component) ||
-        error("component must be one of :xi_psi, :b_psi, :b_theta, :b_zeta")
+        error("component must be one of :xi_psi, :b_psi, :Jb_theta, :Jb_zeta")
 
     base = "PerturbedEquilibrium/Response/"
     dataset_path = base * comp_map[component]
@@ -368,7 +369,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
 
     data, psi_response, mlow, mhigh, nhigh, q95, rational_psi = h5open(h5path, "r") do fid
         read(fid[dataset_path]),
-        read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]),
+        read(fid[base * "psi"]),
         read(fid["Info/mlow"]), read(fid["Info/mhigh"]), read(fid["Info/nhigh"]),
         read(fid["Equilibrium/q_95"]),
         read(fid["PerturbedEquilibrium/SingularCoupling/rational_psi"])
