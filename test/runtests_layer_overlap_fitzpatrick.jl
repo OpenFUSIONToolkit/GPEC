@@ -228,15 +228,15 @@ end
     # The scan must see the run's own plasma: every [SLAYER] setting the layer width depends on
     # reaches it, and changing one changes the widths.
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
-    slayer_section = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))["SLAYER"]
+    trunc_deck = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
+    slayer_section = trunc_deck["SLAYER"]
+    kin = Equilibrium.read_kinetic_file(joinpath(trunc_dir, trunc_deck["Equilibrium"]["kinetic_file"]))
     slayer_inputs(over) = Dict{String,Any}("SLAYER" => merge(slayer_section, over))
-    overlap_inputs(over; dir=trunc_dir) = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(slayer_inputs(over), dir)
+    overlap_inputs(over; kinetic=kin) = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(slayer_inputs(over), kinetic)
     oi = overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
     @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
 
     # Z_eff(psi) comes from the kinetic file's own n_i/n_e with the [SLAYER] impurity charge.
-    kin_path = joinpath(trunc_dir, slayer_section["profile_file"])
-    kin = Equilibrium.read_kinetic_file(kin_path)
     j = length(kin.psi) ÷ 2
     @test oi.zeff(kin.psi[j]) ≈ 6.0 - kin.n_i[j] / kin.n_e[j] * 5.0
     @test overlap_inputs(Dict("impurity_charge" => 10.0)).zeff(kin.psi[j]) ≈ 10.0 - kin.n_i[j] / kin.n_e[j] * 9.0
@@ -248,10 +248,12 @@ end
         base = (; psi=kin.psi, n_e=kin.n_e, T_i=kin.T_i, T_e=kin.T_e, omega_E=kin.omega_E, chi_e=kin.chi_e, chi_phi=kin.chi_phi)
         Equilibrium.write_kinetic_h5(joinpath(tmp, "own_zeff.h5"), Equilibrium.KineticProfileData(; base..., n_i=kin.n_i, zeff=own))
         @test Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5")).zeff == own
-        @test overlap_inputs(Dict("profile_file" => "own_zeff.h5", "impurity_charge" => 10.0, "zeff" => 2.5); dir=tmp).zeff(kin.psi[j]) ≈ 3.2
+        @test overlap_inputs(Dict("impurity_charge" => 10.0, "zeff" => 2.5); kinetic=Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5"))).zeff(kin.psi[j]) ≈ 3.2
         Equilibrium.write_kinetic_h5(joinpath(tmp, "no_ni.h5"), Equilibrium.KineticProfileData(; base...))
-        @test overlap_inputs(Dict("profile_file" => "no_ni.h5", "zeff" => 2.5); dir=tmp).zeff == 2.5
+        @test overlap_inputs(Dict("zeff" => 2.5); kinetic=Equilibrium.read_kinetic_file(joinpath(tmp, "no_ni.h5"))).zeff == 2.5
     end
+    # No kinetic profiles: no scan.
+    @test overlap_inputs(Dict{String,Any}(); kinetic=nothing) === nothing
 
     widths(over) = GeneralizedPerturbedEquilibrium._layer_overlap_scan(overlap_inputs(over), _fresh(), equil).width_dr
     w_ref = widths(Dict{String,Any}())
@@ -327,7 +329,7 @@ end
 
     # The scan's overlap point must therefore not depend on where the grid stops, and no
     # rational may fall between the in-grid search and the law.
-    oi = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(trunc_inputs, trunc_dir)
+    oi = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(trunc_inputs, long.kinetic)
     one_n() = (i = ForceFreeStatesInternal(); i.nlow = 1; i.nhigh = 1; i)
     scan_long = GeneralizedPerturbedEquilibrium._layer_overlap_scan(oi, one_n(), long)
     scan_short = GeneralizedPerturbedEquilibrium._layer_overlap_scan(oi, one_n(), short)

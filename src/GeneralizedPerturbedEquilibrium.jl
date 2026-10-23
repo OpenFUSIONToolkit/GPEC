@@ -257,7 +257,7 @@ function main_from_inputs(
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl;
-        overlap_inputs=_overlap_slayer_inputs(inputs, intr.dir_path))
+        overlap_inputs=_overlap_slayer_inputs(inputs, equil.kinetic))
     ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric; runtimes=runtimes)
 
     if ctrl.write_outputs_to_HDF5
@@ -532,17 +532,16 @@ function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.Pl
     return locstab, ballooning_boundary
 end
 
-# Kinetic profiles for the overlap scan come from the [SLAYER] section, through the same control
-# and loader the SLAYER analysis itself uses, so the scan sees the same profiles, the same HDF5
-# group and the same chi(psi). Returns `nothing` when there is no usable [SLAYER] profile_file.
-function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
-    (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
+# Inputs of the overlap scan: the SLAYER view of the equilibrium's kinetic profiles under the run's
+# [SLAYER] control, the same view the SLAYER analysis itself uses, so the scan sees the same
+# profiles and the same chi(psi). Returns `nothing` without a [SLAYER] section or kinetic profiles.
+function _overlap_slayer_inputs(inputs, kinetic::Union{Nothing,Equilibrium.KineticProfileData})
+    (inputs isa AbstractDict && haskey(inputs, "SLAYER") && kinetic !== nothing) || return nothing
     ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-    isempty(ctrl.profile_file) && return nothing
     loaded = try
-        Runner._load_profiles(ctrl, dir_path)
+        Runner._slayer_profiles(kinetic, ctrl)
     catch err
-        @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
+        @warn "Layer-overlap scan skipped: the kinetic profiles do not serve the SLAYER layer." exception = err
         return nothing
     end
     # chi(psi) and Z_eff(psi) from the file where it carries them, else the control's scalar
