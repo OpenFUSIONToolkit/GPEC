@@ -261,6 +261,29 @@ using HDF5
         end
     end
 
+    @testset "matched inner profiles: opt-in, and parity columns agree across inner models" begin
+        mktempdir() do dir
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, dir_path=dir, ffs_kwargs...)
+            prob = MatchProblem(gal; eta=1e-7, rho=1e-7, rotation=1.0)
+            center = solve(prob, GGJModel()).match
+            ray = solve(prob, GGJModel(; real_profiles=true)).match
+            galm = solve(prob, GGJModel(; solver=:galerkin)).match
+            # Δ and the penetrated field come from the rotated solve whether or not profiles are requested.
+            @test ray.deltar == center.deltar && ray.bpen == center.bpen
+            @test isempty(center.inner_psi) && isempty(center.inner_xi) && isempty(center.inner_b)
+            @test !isempty(ray.inner_xi) && !isempty(galm.inner_xi)
+            # At ψ_s the composite ξ is the even (Δ₊) column and b the odd (Δ₋) one, so a parity swap in the
+            # profile assembly makes the two backends disagree here.
+            for (i, sing) in enumerate(gal.surfaces)
+                ir = findfirst(==(sing.psifac), ray.inner_psi[i])
+                ig = findfirst(==(sing.psifac), galm.inner_psi[i])
+                @test ir !== nothing && ig !== nothing
+                @test isapprox(ray.inner_xi[i][ir, :], galm.inner_xi[i][ig, :]; rtol=1e-4)
+                @test isapprox(ray.inner_b[i][ir, :], galm.inner_b[i][ig, :]; rtol=1e-4)
+            end
+        end
+    end
+
     @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
         mktempdir() do dir
             ric = solve(equil, Riccati(); nn=1, dir_path=dir, ffs_kwargs...)
@@ -289,6 +312,8 @@ using HDF5
             @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(gal.surfaces) + 1), rho=1e-7, rotation=1.0)
             # The tearing model is the solve argument, never a TearingProblem keyword.
             @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
+            # The deck's tearing stage propagates errors rather than finishing without a Tearing/ group.
+            @test_throws ArgumentError GPEC.run_slayer_stage(gal, Dict{String,Any}("SLAYER" => Dict{String,Any}("enabled" => true, "inner_model" => "ggj_ray")), nothing)
             # The ideal reference match keeps the ideal closure and replaces the solution with
             # the bare coil columns in the identity-at-edge basis.
             matched = solve(prob, GGJModel())
@@ -343,14 +368,15 @@ using HDF5
 
         @testset "deck matching under gal_match_flag" begin
             layer = (eta=1e-7, rho=1e-7, rotation=1.0)
+            # The galerkin inner model returns real-ψ profiles, so the composite inner profiles are compared too.
             mktempdir() do dir
                 gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
-                api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:ray))
+                api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:galerkin))
                 n = length(gal.surfaces)
                 reference = GPEC.main([_stage_deck(dir;
                     ffs_overrides=Dict{String,Any}(
                         "integrator" => "galerkin", "gal_nx" => 32, "gal_rpec_flag" => true, "gal_match_flag" => true,
-                        "gal_inner_solver" => "ray", "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n),
+                        "gal_inner_solver" => "galerkin", "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n),
                         "gal_rotation" => fill(layer.rotation, n)))]).ffs
 
                 @test reference.closure === api.closure === :matched
@@ -360,7 +386,7 @@ using HDF5
                 @test all(isapprox.(api.match.inner_xi, reference.match.inner_xi; rtol=1e-12))
 
                 uncut = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
-                matched = solve(MatchProblem(uncut; layer...), GGJModel(; solver=:ray))
+                matched = solve(MatchProblem(uncut; layer...), GGJModel(; solver=:galerkin))
                 # Known drift: gal_match_flag implies the cut solution on the deck; the API keeps it only when asked.
                 @test_broken length(matched.match.inner_xi) == length(reference.match.inner_xi)
             end
