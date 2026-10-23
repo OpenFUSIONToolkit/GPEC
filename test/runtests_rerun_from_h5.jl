@@ -112,6 +112,14 @@ end
             end
         end
 
+        @testset "the LocalStability section replays" begin
+            mktempdir() do out_dir
+                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
+                @test haskey(inputs, "LocalStability")
+                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
+            end
+        end
+
         @testset "rerun refuses to overwrite its own source" begin
             # Default output is `<basename>_rerun.h5`, so clobbering only happens if the user
             # routes the rerun back onto the source file; exercise that guard.
