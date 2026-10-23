@@ -37,9 +37,9 @@ class = "physics_converged"
 
 # Coupled eigenvalue (one root for the whole determinant). The coupled path has no root
 # polishing, so the thresholds match the uncoupled case's absolute, modestly loose floors.
-# Pin Q, ω and γ with a measured tolerance, not the class default: re-extracting one set of scan
-# samples under different triangulations gave γ = 190.646 and 191.888 s⁻¹ (0.65 %). ω and Q
-# need the same measurement.
+# The triangulation is seeded, so the root repeats exactly in one environment and these tight floors
+# catch real changes. Across Julia versions or machines it can move further: re-extracting one set of
+# scan samples under different triangulations gave γ = 190.646 and 191.888 s⁻¹ (0.65 %).
 [quantities.slayer_Q_coupled]
 h5path = "Tearing/Roots/Q_root"
 type = "complex_vector"
