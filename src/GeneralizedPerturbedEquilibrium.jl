@@ -946,6 +946,8 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
 
     ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" &&
         error("kinetic_source = \"calculated\" needs the [KineticForces] profiles and is TOML-driven; run it through `main`")
+    ctrl.kinetic_factor > 0 && !(alg isa ForceFreeStates.Forward) &&
+        error("$(nameof(typeof(alg)))() does not support kinetic runs (kinetic_factor > 0); use Forward().")
 
     intr = ForceFreeStatesInternal(; dir_path=prob.dir_path)
     intr.wall_settings = prob.wall
