@@ -57,8 +57,6 @@ equal_arc_wall = false                  # Equal arc length distribution of nodes
 # [PerturbedEquilibrium]
 # forcing_data_file = "forcing.dat"      # Manual mode table (n, m, amplitude_real, amplitude_imag)
 # forcing_data_format = "ascii"          # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
-# fixed_boundary = false                 # Use fixed boundary conditions
-# output_eigenmodes = true               # Output eigenmode fields as b-fields
 # compute_response = true                # Compute plasma response to forcing
 # compute_singular_coupling = true       # Compute singular layer coupling metrics
 # verbose = true                         # Enable verbose logging

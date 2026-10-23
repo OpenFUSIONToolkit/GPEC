@@ -107,7 +107,7 @@
         @test default_reg != 0.0   # otherwise the override above proves nothing
 
         # Unrelated kwargs pass through untouched.
-        out = PE.kinetic_regularization_kwargs(kinetic, pairs((; regularization_width=0.05, filter_modes=true)))
-        @test out.filter_modes == true
+        out = PE.kinetic_regularization_kwargs(kinetic, pairs((; regularization_width=0.05, verbose=false)))
+        @test out.verbose == false
     end
 end

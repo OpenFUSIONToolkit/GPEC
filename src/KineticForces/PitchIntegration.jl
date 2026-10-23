@@ -37,7 +37,6 @@ struct PitchGARParams{F}
     nutype::String     # collision operator type
     f0type::String     # distribution function type
     nufac::Float64     # collisionality scaling factor
-    ximag::Float64     # imaginary contour offset
     qt::Bool           # heat flux flag
     energy_atol::Float64
     energy_rtol::Float64
@@ -78,13 +77,13 @@ function integrate_pitch_gar_quadgk(
     nqty::Int, ell::Int, n::Int,
     rex::Float64, imx::Float64, psi::Float64, method::String;
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+    nufac::Float64=1.0, qt::Bool=false,
     energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
     pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6
 )
     params = PitchGARParams(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
-        nutype, f0type, nufac, ximag, qt,
+        nutype, f0type, nufac, qt,
         energy_atol, energy_rtol,
         rex, imx, nqty, fbnce, fbnce_norm, Ref(1),
         Vector{ComplexF64}(undef, 2 + nqty),
@@ -127,19 +126,19 @@ function _pitch_gar_kernel_quadgk!(out::Vector{ComplexF64}, lambda, p::PitchGARP
         xint_co = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
                                         p.ell, leff, p.n, p.psi, lambda, p.method;
                                         nutype=p.nutype, f0type=p.f0type,
-                                        nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                        nufac=p.nufac, qt=p.qt,
                                         atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint_counter = integrate_energy(p.wn, p.wt, p.we, wd, -wb, nueff,
                                              p.ell, leff, p.n, p.psi, lambda, p.method;
                                              nutype=p.nutype, f0type=p.f0type,
-                                             nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                             nufac=p.nufac, qt=p.qt,
                                              atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint = xint_co + xint_counter
     else
         xint = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
                                      p.ell, leff, p.n, p.psi, lambda, p.method;
                                      nutype=p.nutype, f0type=p.f0type,
-                                     nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                     nufac=p.nufac, qt=p.qt,
                                      atol=p.energy_atol, rtol=p.energy_rtol)
     end
 
@@ -174,14 +173,14 @@ function integrate_pitch_gar_quadgk_wt(
     nqty::Int, ell::Int, n::Int,
     psi::Float64, method::String;
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+    nufac::Float64=1.0, qt::Bool=false,
     energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
     pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6
 )
     # rex/imx unused in the dual kernel; carry 1.0 placeholders for the struct.
     params = PitchGARParams(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
-        nutype, f0type, nufac, ximag, qt,
+        nutype, f0type, nufac, qt,
         energy_atol, energy_rtol,
         1.0, 1.0, nqty, fbnce, fbnce_norm, Ref(1),
         Vector{ComplexF64}(undef, 2 + nqty),
@@ -225,19 +224,19 @@ function _pitch_gar_kernel_quadgk_wt!(out::Vector{ComplexF64}, lambda, p::PitchG
         xint_co = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
                                         p.ell, leff, p.n, p.psi, lambda, p.method;
                                         nutype=p.nutype, f0type=p.f0type,
-                                        nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                        nufac=p.nufac, qt=p.qt,
                                         atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint_counter = integrate_energy(p.wn, p.wt, p.we, wd, -wb, nueff,
                                              p.ell, leff, p.n, p.psi, lambda, p.method;
                                              nutype=p.nutype, f0type=p.f0type,
-                                             nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                             nufac=p.nufac, qt=p.qt,
                                              atol=p.energy_atol, rtol=p.energy_rtol, segbuf=p.esegbuf)
         xint = xint_co + xint_counter
     else
         xint = integrate_energy(p.wn, p.wt, p.we, wd, wb, nueff,
                                      p.ell, leff, p.n, p.psi, lambda, p.method;
                                      nutype=p.nutype, f0type=p.f0type,
-                                     nufac=p.nufac, ximag=p.ximag, qt=p.qt,
+                                     nufac=p.nufac, qt=p.qt,
                                      atol=p.energy_atol, rtol=p.energy_rtol)
     end
 
