@@ -71,7 +71,7 @@
         te = te_of(P)
         ne = ne_of(P)
         p = slayer_parameters(; n_e=ne, t_e=te, t_i=te,
-            omega=0.0, omega_e=1.0e4, omega_i=5.0e3,
+            omega_e=1.0e4, omega_i=5.0e3,
             qval=q_of(r), sval_r=s_of(r), bt=B0,
             rs=r * A_MIN, R0=R0, mu_i=MNUM, zeff=ZEFF,
             chi_perp=CHI, chi_tor=CHI, m=1, n=n,
@@ -274,7 +274,7 @@ end
         psi_grid = collect(range(0.0, 1.0; length=npsi))
         profs = Utilities.KineticProfiles(; psi=psi_grid,
             n_e=fill(1.0e19, npsi), T_e=fill(500.0, npsi), T_i=fill(500.0, npsi),
-            omega=zeros(npsi), omega_e=zeros(npsi), omega_i=zeros(npsi))
+            omega_E=zeros(npsi))
         scan = Tearing.resistive_layer_overlap(equil, profs; n_tor=1, m_max=0, extrapolate=false)
         @test scan isa Tearing.LayerOverlapScan
         @test isempty(scan.psi)
