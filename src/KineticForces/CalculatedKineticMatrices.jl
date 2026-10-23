@@ -37,6 +37,7 @@ section.
   - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
   - `metric`: MetricData (provides ψ grid via `metric.xs`)
   - `mats`: MatrixSplines (used only for `numpert_total` cross-check)
+  - `psis`: ψ grid for the kernel; empty (default) evaluates on `metric.xs`
 
 # Keyword arguments
 
@@ -59,9 +60,13 @@ function compute_calculated_kinetic_matrices(
     mats;
     kf_ctrl::KineticForcesControl=KineticForcesControl(),
     kinetic_profiles::Equilibrium.KineticProfileSplines,
-    species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing
+    species::Union{Nothing,AbstractVector{<:Equilibrium.ResolvedNTVSpecies}}=nothing,
+    psis::Vector{Float64}=Float64[],
+    axis_psi_c::Float64=0.0
 )
-    xs = metric.xs
+    # The kernel is a pure function of psi (it evaluates equilibrium splines), so it can be
+    # driven over any knot list; default is the full equilibrium grid.
+    xs = isempty(psis) ? metric.xs : psis
     mpsi = length(xs)
     mpert = ffs_intr.mpert
     npert = ffs_intr.npert
@@ -95,7 +100,7 @@ function compute_calculated_kinetic_matrices(
     # ipsi row of kw_flat/kt_flat. Per-thread copies of kf_intr provide isolated
     # tpsi_* θ-grid buffers and interpolant hint refs; geometric/profile splines
     # are read-only and safely shared through deepcopy semantics.
-    nl = kf_ctrl.nl
+    nl = kf_ctrl.bounce_harmonic_max
     nthreads = Threads.maxthreadid()
     thread_intrs = [deepcopy(kf_intr) for _ in 1:nthreads]
     thread_full_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
@@ -108,7 +113,21 @@ function compute_calculated_kinetic_matrices(
     # from kf_ctrl. The kinetic W/torque matrices are additive over species, so we
     # accumulate (+=) each species' block-diagonal contribution.
     splist = species === nothing ?
-             [Equilibrium.ResolvedNTVSpecies(kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.electron, "single", kinetic_profiles)] : species
+             [Equilibrium.ResolvedNTVSpecies(kf_ctrl.ion_charge, kf_ctrl.ion_mass, kf_ctrl.electron, "single", kinetic_profiles)] : species
+
+
+    # Near-axis validity envelope: suppresses the drift-kinetic increments where the zero-orbit-width
+    # ordering fails (kernel evaluation skipped where it is 0). The same real scalar must scale kw and
+    # kt at the same ψ — that is what keeps the blocks Hermitian and the energy/torque relation intact.
+    env = ones(Float64, mpsi)
+    if kf_ctrl.axis_validity_suppression
+        psi_c = axis_psi_c
+        if psi_c > 0
+            env .= kinetic_axis_validity_envelope.(xs, psi_c)
+            @info "Kinetic axis-validity suppression: psi_c=$(round(psi_c; sigdigits=3)), envelope reaches 1 at " *
+                  "psi=$(round(2 * psi_c; sigdigits=3)) (kernel evaluation skipped below psi_c)" maxlog = 1
+        end
+    end
 
     for sp in splist
         # Hoisted per-species scalars: the closure then captures concrete values, not a
@@ -124,6 +143,7 @@ function compute_calculated_kinetic_matrices(
             block_w = thread_block_w[tid]
             block_t = thread_block_t[tid]
             psi = xs[ipsi]
+            env[ipsi] == 0.0 && continue   # inside the near-axis validity band: kernel skipped
             for in_idx in 1:npert
                 n = ffs_intr.nlow + in_idx - 1
                 fill!(full_w, 0)
@@ -133,10 +153,10 @@ function compute_calculated_kinetic_matrices(
                     fill!(block_t, 0)
                     compute_kinetic_matrices_at_psi!(
                         block_w, block_t, psi, n, ell,
-                        z_s, m_s, kf_ctrl.wdfac, kf_ctrl.divxfac,
+                        z_s, m_s, kf_ctrl.magnetic_drift_factor, kf_ctrl.divxi_factor,
                         el_s, equil, intr_t, prof_s;
-                        nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.nufac,
-                        atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda,
+                        nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.collisionality_factor,
+                        atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=kf_ctrl.rtol_pitch,
                         atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
                         nested_tolerance_margin=kf_ctrl.nested_tolerance_margin
                     )
@@ -148,8 +168,8 @@ function compute_calculated_kinetic_matrices(
                 row_offset = (in_idx - 1) * mpert
                 for k in 1:6, j in 1:mpert, i in 1:mpert
                     idx = (row_offset + j - 1) * np + (row_offset + i)
-                    kw_flat[ipsi, idx, k] += full_w[i, j, k]
-                    kt_flat[ipsi, idx, k] += full_t[i, j, k]
+                    kw_flat[ipsi, idx, k] += env[ipsi] * full_w[i, j, k]
+                    kt_flat[ipsi, idx, k] += env[ipsi] * full_t[i, j, k]
                 end
             end
         end

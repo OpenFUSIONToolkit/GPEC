@@ -109,7 +109,7 @@ function build_matched_fortran_deck(workdir::String)
     replace_namelist_value!(dconin, "qlow",        string(ffs["qlow"]))
     replace_namelist_value!(dconin, "qhigh",       string(ffs["qhigh"]))
     replace_namelist_value!(dconin, "singfac_min", string(ffs["singfac_min"]))
-    # Julia set_psilim_via_dmlim defaults true (sas_flag) with dmlim 0.2.
+    # Julia truncate_at_rational_offset defaults true (sas_flag) with rational_offset_fraction 0.2.
     replace_namelist_value!(dconin, "sas_flag", "t")
     replace_namelist_value!(dconin, "dmlim",    "0.2")
 
@@ -118,7 +118,7 @@ function build_matched_fortran_deck(workdir::String)
     replace_namelist_value!(pentin, "nl",     string(get(kf, "nl", 1)))
     replace_namelist_value!(pentin, "nutype", "\"" * string(get(kf, "nutype", "harmonic")) * "\"")
     replace_namelist_value!(pentin, "f0type", "\"" * string(get(kf, "f0type", "maxwellian")) * "\"")
-    replace_namelist_value!(pentin, "nufac",  string(get(kf, "nufac", 1)))
+    replace_namelist_value!(pentin, "nufac",  string(get(kf, "collisionality_factor", 1)))
     replace_namelist_value!(pentin, "kinetic_file", "\"kinetic.txt\"")
 
     # kinetic.txt — Fortran readtable wants a title line then numeric rows; the
