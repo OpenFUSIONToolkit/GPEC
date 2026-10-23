@@ -739,5 +739,31 @@ using TOML
             @test bare.kinetic.n_e == E.read_kinetic_file(gpeckf).n_e
             @test E.attach_kinetic_profiles!(bare, raw).kinetic === raw
         end
+
+        @testset "NTV views of the attached profiles" begin
+            GPEC = GeneralizedPerturbedEquilibrium
+            KF = GPEC.KineticForces
+            template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+            equil = E.setup_equilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), E.SolovevConfig(deck["SOL_INPUT"]))
+            kf = KF.KineticForcesControl()
+            @test KF.ntv_profiles(kf, equil) === nothing
+            @test_throws "set kinetic_file in [Equilibrium]" GPEC.kinetic_forces_control(
+                Dict{String,Any}("KineticForces" => Dict{String,Any}()), GPEC.ForceFreeStates.ForceFreeStatesControl(), equil)
+
+            raw = E.read_kinetic_file(h5)
+            E.attach_kinetic_profiles!(equil, raw)
+            view = KF.ntv_profiles(kf, equil)
+            ref = E.kinetic_profile_splines(raw; zi=kf.ion_charge, zimp=kf.impurity_charge, mi=kf.ion_mass, mimp=kf.impurity_mass,
+                chi1=2π * equil.psio)
+            for ψ in 0.0:0.1:1.0
+                @test view.Ti_spline(ψ) == ref.Ti_spline(ψ)
+                @test view.nui_spline(ψ) == ref.nui_spline(ψ)
+                @test view.zeff_spline(ψ) == ref.zeff_spline(ψ)
+            end
+            @test KF.ntv_species(kf, equil) === nothing
+            with_e = KF.ntv_species(KF.KineticForcesControl(; electron=true), equil)
+            @test any(sp -> sp.electron, with_e)
+        end
     end
 end

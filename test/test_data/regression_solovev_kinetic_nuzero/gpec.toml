@@ -5,6 +5,7 @@
 # tracked separately by the solovev_kinetic_nuzero regression case.
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
+kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate

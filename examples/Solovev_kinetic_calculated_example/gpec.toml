@@ -8,6 +8,7 @@
 
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
+kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
@@ -66,7 +67,6 @@ write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
 verbose = false               # Enable verbose logging
 
 [KineticForces]
-kinetic_file = "kinetic.dat"  # Kinetic profile file: psi_n, n_i, n_e, T_i, T_e, omega_E columns
 
 [[KineticForces.ion_species]]
 z = 1                         # Species charge (fundamental units)

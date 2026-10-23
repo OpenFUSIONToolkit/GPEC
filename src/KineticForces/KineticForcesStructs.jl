@@ -175,7 +175,6 @@ builds a second control for its differing tolerance).
     save_records::Bool = false      # Save detailed integration trajectories
 
     # Input files (relative to dir_path)
-    kinetic_file::String = "kinetic.dat"
     gpec_file::String = "gpec.h5"
 
     # Diagnostic flags

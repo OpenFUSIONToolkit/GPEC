@@ -42,8 +42,10 @@ paths: the post-PE ψ-quadrature diagnostic and the self-consistent
 `kinetic_source = "calculated"` matrices.
 
 ```toml
-[KineticForces]
+[Equilibrium]
 kinetic_file = "kinetic.h5"    # n_i column/dataset = TOTAL main-ion density
+
+[KineticForces]
 electron = true                # add electron NTV in addition to the ion species
 impurity_charge = 6            # impurity charge (closes quasineutrality)
 impurity_mass = 12             # impurity mass
