@@ -19,7 +19,7 @@ function extract_quantities(h5path::String, qty_specs::Vector{QuantitySpec}, run
                 push!(results, ExtractedQuantity(
                     spec.name, spec.label,
                     runtime_s, nothing, nothing,
-                    "real", spec.noise_threshold))
+                    "real", spec.noise_threshold, spec.relative_threshold))
                 continue
             end
 
@@ -28,7 +28,7 @@ function extract_quantities(h5path::String, qty_specs::Vector{QuantitySpec}, run
                 push!(results, ExtractedQuantity(
                     spec.name, spec.label,
                     nothing, nothing, nothing,
-                    "missing", spec.noise_threshold))
+                    "missing", spec.noise_threshold, spec.relative_threshold))
                 continue
             end
 
@@ -48,36 +48,37 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
     name = spec.name
     label = spec.label
     threshold = spec.noise_threshold
+    rel = spec.relative_threshold
 
     if spec.extract == "value"
         if raw isa Integer
-            return ExtractedQuantity(name, label, nothing, Int(raw), nothing, "integer", threshold)
+            return ExtractedQuantity(name, label, nothing, Int(raw), nothing, "integer", threshold, rel)
         else
-            return ExtractedQuantity(name, label, Float64(raw), nothing, nothing, "real", threshold)
+            return ExtractedQuantity(name, label, Float64(raw), nothing, nothing, "real", threshold, rel)
         end
 
     elseif spec.extract == "real_first"
         val = real(raw[1])
-        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold)
+        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold, rel)
 
     elseif spec.extract == "imag_first"
         val = imag(raw[1])
-        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold)
+        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold, rel)
 
     elseif spec.extract == "abs_first"
         val = abs(raw[1])
-        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold)
+        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold, rel)
 
     elseif spec.extract == "norm"
         val = sqrt(sum(abs2, raw))
-        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold)
+        return ExtractedQuantity(name, label, Float64(val), nothing, nothing, "real", threshold, rel)
 
     elseif spec.extract == "all_real"
         arr = Float64.(real.(raw))
         # allownan: SLAYER γ/Q_root are NaN when no dispersion root is found —
         # a legitimate state to record so a future root appearing flags a diff.
         json_str = JSON.json(arr; allownan=true)
-        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
+        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold, rel)
 
     elseif startswith(spec.extract, "first_") && endswith(spec.extract, "_complex")
         # "first_N_complex": [re, im] pairs of the leading N elements of a complex
@@ -85,7 +86,7 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         nkeep = parse(Int, spec.extract[(length("first_")+1):(end-length("_complex"))])
         pairs = [[real(x), imag(x)] for x in raw[1:min(nkeep, length(raw))]]
         json_str = JSON.json(pairs; allownan=true)
-        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
+        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold, rel)
 
     elseif startswith(spec.extract, "first_")
         # "first_N": real values of the leading N vector elements only. Used to
@@ -95,12 +96,12 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         nkeep = parse(Int, spec.extract[(length("first_")+1):end])
         arr = Float64.(real.(raw))[1:min(nkeep, length(raw))]
         json_str = JSON.json(arr; allownan=true)
-        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
+        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold, rel)
 
     elseif spec.extract == "all_complex"
         pairs = [[real(x), imag(x)] for x in raw]
         json_str = JSON.json(pairs; allownan=true)
-        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
+        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold, rel)
 
     elseif spec.extract == "diagonal_complex"
         # Extract the diagonal of a square matrix as a complex array.
@@ -110,12 +111,12 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         diag_vec = [raw[i, i] for i in 1:size(raw, 1)]
         pairs = [[real(x), imag(x)] for x in diag_vec]
         json_str = JSON.json(pairs; allownan=true)
-        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
+        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold, rel)
 
     elseif spec.extract == "checksum"
         bytes = reinterpret(UInt8, vec(collect(raw)))
         hash = bytes2hex(sha256(bytes))
-        return ExtractedQuantity(name, label, nothing, nothing, hash, "checksum", threshold)
+        return ExtractedQuantity(name, label, nothing, nothing, hash, "checksum", threshold, rel)
 
     else
         error("Unknown extraction mode: $(spec.extract)")
@@ -172,7 +173,8 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         return (NaN, NaN, "N/A (type changed)")
     end
 
-    threshold = q1.noise_threshold
+    # A change is noise below the absolute floor or below `relative_threshold` × the first ref's magnitude.
+    floor(scale) = max(q1.noise_threshold, get(q1, :relative_threshold, 0.0) * scale)
 
     if vtype == "real"
         v1 = q1.value_real
@@ -182,7 +184,7 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         end
         abs_diff = abs(v2 - v1)
         rel_diff = v1 == 0.0 ? (v2 == 0.0 ? 0.0 : Inf) : abs_diff / abs(v1)
-        status = abs_diff <= threshold ? "OK" : "CHANGED"
+        status = abs_diff <= floor(abs(v1)) ? "OK" : "CHANGED"
         return (abs_diff, rel_diff, status)
 
     elseif vtype == "integer"
@@ -193,7 +195,7 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         end
         abs_diff = Float64(abs(v2 - v1))
         rel_diff = v1 == 0 ? (v2 == 0 ? 0.0 : Inf) : abs_diff / abs(v1)
-        status = abs_diff <= threshold ? "OK" : "CHANGED"
+        status = abs_diff <= floor(abs(v1)) ? "OK" : "CHANGED"
         return (abs_diff, rel_diff, status)
 
     elseif vtype == "json_array"
@@ -215,7 +217,7 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         # For relative diff, use max absolute value as reference
         max_val = maximum(x -> _json_element_abs(x), arr1; init=0.0)
         rel_diff = max_val == 0.0 ? (max_diff == 0.0 ? 0.0 : Inf) : max_diff / max_val
-        status = max_diff <= threshold ? "OK" : "CHANGED"
+        status = max_diff <= floor(max_val) ? "OK" : "CHANGED"
         return (max_diff, rel_diff, status)
 
     elseif vtype == "checksum"
