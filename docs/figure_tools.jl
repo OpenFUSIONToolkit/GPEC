@@ -29,13 +29,16 @@ Short git commit and ISO date stamped onto every figure. `commit` is the
 `git rev-parse --short HEAD` hash (reusing the idiom from
 `benchmarks/benchmark_git_branches.jl`), with a `-dirty` suffix when the
 working tree has uncommitted changes so a figure never claims a cleaner
-provenance than it has. Falls back to `"unknown"` outside a git checkout.
+provenance than it has. Generated figures and the manifest do not count as changes, so
+several figures can be regenerated in turn on one clean commit. Falls back to `"unknown"`
+outside a git checkout.
 """
 function figure_provenance()
     date = string(Dates.today())
     try
-        h = strip(read(`git -C $(_REPO_ROOT) rev-parse --short HEAD`, String))
-        dirty = !isempty(strip(read(`git -C $(_REPO_ROOT) status --porcelain`, String)))
+        h = String(strip(read(`git -C $(_REPO_ROOT) rev-parse --short HEAD`, String)))
+        outputs = [":(exclude,glob)docs/src/figures/**/*.png", ":(exclude)docs/src/figures/manifest.toml"]
+        dirty = !isempty(strip(read(`git -C $(_REPO_ROOT) status --porcelain -- . $outputs`, String)))
         return (; commit=(dirty ? "$h-dirty" : h), date=date, dirty=dirty)
     catch
         return (; commit="unknown", date=date, dirty=false)

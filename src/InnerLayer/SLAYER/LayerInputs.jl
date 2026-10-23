@@ -23,8 +23,8 @@ using FastInterpolations: DerivOp, integrate, cubic_interp, cumulative_integrate
 
 Minor radius at normalized flux `psi` and poloidal angle `theta`,
 computed from `equil.rzphi_rsquared` as `√((R − R₀)² + (Z − Z₀)²)`.
-`theta = 0.0` (outboard midplane) is the default; pass `θ = π` to measure
-the inboard side if you want an average.
+`theta` is normalized to [0, 1): `0.0` (outboard midplane) is the default and
+`0.5` is the inboard midplane.
 """
 function surface_minor_radius(equil, psi::Real; theta::Real=0.0)
     r_sq = equil.rzphi_rsquared((Float64(psi), Float64(theta)))
@@ -183,12 +183,16 @@ profiles, without an intermediate file round-trip.
     physical field, so passing it as a scalar is almost always wrong.
 
   - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
+
   - `zeff`      -- effective charge. Scalar or a callable of `psi`, evaluated per
     surface (default `1.0`).
+
   - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
+
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
     of `psi` (default `1.0`).
+
   - `dr_val`    -- resistive interchange index `D_R = E + F + H²`
     (Glasser-Greene-Johnson 1975) feeding the critical-Δ formulas
     (`:lar`, `:fitzpatrick`, `:toroidal`). When `nothing` (default), Julia
@@ -203,6 +207,7 @@ profiles, without an intermediate file round-trip.
     NOT the Mercier index `D_I = E + F + H − 1/4`. The two differ by
     `(H − 1/2)²`, which is non-trivial on shaped equilibria (~factor 3 on
     DIII-D); this code uses the physically correct `D_R`.
+
   - `dgeo_val`  -- Connor 2015 (PPCF 57 065001) Eq. 59 geometric factor
     used by `dc_type=:toroidal`. When `nothing` (default), an error is
     raised if `dc_type=:toroidal` is also requested — the auto-derived
@@ -210,21 +215,26 @@ profiles, without an intermediate file round-trip.
     doesn't currently expose. Pass a scalar / vector / callable to use
     a prescribed value. (For `dc_type=:fitzpatrick` and `:lar`, dgeo_val is
     not consulted.)
+
   - `dc_type`   -- `:none` (default), `:lar`, `:fitzpatrick`, or `:toroidal`.
+
   - `rs_method` -- radial label defining `r_s` for the whole layer stack:
     `:midplane` (default), `:halfwidth`, `:fsa`, `:volume`, or `:flux`. See
     [`radial_label`](@ref) for the definitions. S, the r-based shear, W_d,
     and the Δ' reference-length factor `k_ref` all follow the choice
     together, so every option is self-consistent. Not exposed via TOML —
     programmatic use only.
+
   - `theta`     -- poloidal angle at which to measure minor radius (default
     `0.0`, outboard midplane).
+
   - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`,
     `SpitzerModel()`, or `SpitzerHarmModel()` (legacy Fitzpatrick σ_∥).
     Sets the η entering τ_R = μ₀r_s²/η. With a neoclassical model, `f_trap`
     and ν*_e are taken from the surface's `ResistGeometry` if populated
     (via `ForceFreeStates.resist_eval_all!`), otherwise fall back to the
     ε-only Lin-Liu-Miller form and `rs/R_0` aspect ratio.
+
   - `lnLambda_form` -- Coulomb-log form passed through to `slayer_parameters`
     (default `:nrl`; `:wesson` + `SpitzerHarmModel()` reproduces legacy
     SLAYER exactly).
@@ -370,9 +380,10 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             1.0
         end
         alpha_k = if rg === nothing
-            @warn("build_slayer_inputs: sing.restype not populated; using the " *
-                  "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
-                  "conversion at all such surfaces.", maxlog=1)
+            @warn(
+                "build_slayer_inputs: sing.restype not populated; using the " *
+                "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
+                "conversion at all such surfaces.", maxlog=1)
             0.5
         else
             sqrt(max(-(rg.E + rg.F + rg.H - 0.25), 0.0))
