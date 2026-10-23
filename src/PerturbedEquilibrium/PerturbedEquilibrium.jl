@@ -14,7 +14,7 @@ import ..ForceFreeStates
 import ..ForceFreeStates: SolutionProfiles, ForceFreeStatesResult, MatrixSplines, MetricData
 import ..Vacuum
 import ..ForcingTerms
-import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization!
+import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization
 import ..Utilities
 import ..Utilities.FourierTransforms
 import DelimitedFiles: readdlm
@@ -126,7 +126,7 @@ the response step consumes. Nothing is mutated — the caller owns where the res
 
 Coil formats build the geometry (or reuse `preloaded_coil_sets` from the gpec.h5 replay
 path) and integrate the Biot-Savart field on the control surface; file formats read the
-modes from `dir_path` and convert their normalization. Both branches evaluate on
+modes from `dir_path` and convert their normalization onto the run's `mlow:mhigh`. Both branches evaluate on
 `ffs.psilim`, the integration limit. The second return value is the coil geometry actually
 used (empty for file formats), which the writer snapshots for replay.
 """
@@ -154,18 +154,16 @@ function materialize_forcing_modes(
             append!(modes, modes_n)
         end
     else
-        norm_tag = load_forcing_data!(modes, dir_path, forcing.forcing_data_file, forcing.forcing_data_format, verbose)
+        file_modes = ForcingMode[]
+        norm_tag = load_forcing_data!(file_modes, dir_path, forcing.forcing_data_file, forcing.forcing_data_format, verbose)
         for n in ffs.nlow:ffs.nhigh
-            # filter returns a new Vector but still holds references to same ForcingMode objects
-            modes_n = filter(m -> m.n == n, modes)
+            modes_n = filter(m -> m.n == n, file_modes)
             isempty(modes_n) && continue
-            m_vals = [m.m for m in modes_n]
             # Same control surface as the coil branch above: psilim, the integration
             # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
             # the normalization was taken on the equilibrium-spline limit, which differs
             # whenever rational_offset_fraction/qhigh/dW_edge_scan_start truncation moves psilim inward.
-            convert_forcing_normalization!(modes_n, norm_tag, equil, n,
-                minimum(m_vals), maximum(m_vals); psi=ffs.psilim)
+            append!(modes, convert_forcing_normalization(modes_n, norm_tag, equil, n, ffs.mlow:ffs.mhigh; psi=ffs.psilim))
         end
     end
 
