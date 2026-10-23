@@ -160,8 +160,7 @@ A `[LocalStability]` section in the deck runs a local high-``n`` stability scan 
 flux surface, as its own stage before the global ideal analysis above. The section's keys are
 the [`Ballooning`](@ref) keywords (the ballooning angle, ODE tolerance and the α-boundary scan
 knobs), and a script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning())`
-(see the [scripting API](api.md)). The section replaces the removed `local_stability_flag`
-of `[ForceFreeStates]`.
+(see the [scripting API](api.md)).
 For the derivation and implementation details behind these diagnostics, see
 [Ballooning and Mercier Local Stability](ballooning.md).
 Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile

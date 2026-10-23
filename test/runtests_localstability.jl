@@ -110,15 +110,11 @@ using TOML
         end
     end
 
-    @testset "deck errors" begin
-        mktempdir() do dir
-            @test_throws MethodError GPEC.main([_deck(dir; ffs_extra=Dict{String,Any}("local_stability_flag" => true))])
-        end
+    @testset "deck section parsing" begin
         @test_throws ArgumentError GPEC.local_stability_algorithm(Dict{String,Any}("LocalStability" => Dict{String,Any}("n_scna" => 32)))
         alg = GPEC.local_stability_algorithm(Dict{String,Any}("LocalStability" => Dict{String,Any}("psi_window" => [0.2, 0.8], "n_scan" => 32)))
         @test alg.psi_window === (0.2, 0.8)
         @test alg.n_scan == 32
         @test GPEC.local_stability_algorithm(Dict{String,Any}()) === nothing
-        @test_throws ErrorException EulerLagrangeProblem(equil; nn=1, local_stability_flag=true)
     end
 end

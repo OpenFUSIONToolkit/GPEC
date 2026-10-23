@@ -922,8 +922,6 @@ function EulerLagrangeProblem(
     kwargs...
 )
     ctrl_kwargs = Dict{Symbol,Any}(kwargs)
-    haskey(ctrl_kwargs, :local_stability_flag) &&
-        error("local stability is its own stage now; drop local_stability_flag and call solve(LocalStabilityProblem(equil), Ballooning())")
     (haskey(ctrl_kwargs, :nn_low) || haskey(ctrl_kwargs, :nn_high)) &&
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
