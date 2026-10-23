@@ -89,6 +89,7 @@ using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing.Runner: TearingProblem
+using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
@@ -1897,6 +1898,7 @@ export main, write_imas
 export solve, perturbed_equilibrium
 export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
 export MatchProblem, TearingProblem, GGJModel, SLAYERModel
+export LocalStabilityProblem, Ballooning, LocalStabilityResult
 
 include("Precompile.jl")
 
