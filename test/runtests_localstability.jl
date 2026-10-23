@@ -1,3 +1,4 @@
+using HDF5
 using TOML
 
 # The LocalStability stage on the coarse Solovev fixture deck (mpsi=16): the named profiles of
@@ -63,5 +64,61 @@ using TOML
             end
             @test isempty(readdir(dir))
         end
+    end
+
+    # Copy the fixture deck into `dir` with HDF5 output on, no [LocalStability] section, and the
+    # given `[ForceFreeStates]` keys and extra sections.
+    function _deck(dir; ffs_extra=Dict{String,Any}(), sections=Dict{String,Any}())
+        for name in readdir(template)
+            cp(joinpath(template, name), joinpath(dir, name))
+        end
+        toml_path = joinpath(dir, "gpec.toml")
+        inputs = TOML.parsefile(toml_path)
+        delete!(inputs, "LocalStability")
+        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
+        merge!(inputs["ForceFreeStates"], ffs_extra)
+        merge!(inputs, sections)
+        open(io -> TOML.print(io, inputs), toml_path, "w")
+        return dir
+    end
+    _h5_local_stability(dir) = h5open(joinpath(dir, "gpec.h5"), "r") do f
+        Dict(k => read(f, "LocalStability/$k") for k in keys(f["LocalStability"]))
+    end
+    quiet_section = Dict{String,Any}("LocalStability" => Dict{String,Any}("verbose" => false))
+
+    @testset "deck section and solve give identical results" begin
+        mktempdir() do dir
+            run = GPEC.main([_deck(dir; sections=quiet_section)])
+            for name in fieldnames(LocalStabilityResult)
+                name === :di_psi && continue
+                @test isequal(getfield(run.local_stability, name), getfield(res, name))
+            end
+            h5 = _h5_local_stability(dir)
+            @test h5["D_I"] == res.D_I
+            @test isequal(h5["alpha_critical"], res.alpha_critical)
+            sing_di = h5open(f -> read(f, "SingularSurfaces/D_I"), joinpath(dir, "gpec.h5"))
+            @test !isempty(sing_di)
+            @test sing_di == [LS.mercier_D_I(res, s.psifac) for s in run.ffs.surfaces]
+        end
+    end
+
+    @testset "no section, no stage" begin
+        mktempdir() do dir
+            run = GPEC.main([_deck(dir)])
+            @test run.local_stability === nothing
+            @test all(isempty, values(_h5_local_stability(dir)))
+        end
+    end
+
+    @testset "deck errors" begin
+        mktempdir() do dir
+            @test_throws MethodError GPEC.main([_deck(dir; ffs_extra=Dict{String,Any}("local_stability_flag" => true))])
+        end
+        @test_throws ArgumentError GPEC.local_stability_algorithm(Dict{String,Any}("LocalStability" => Dict{String,Any}("n_scna" => 32)))
+        alg = GPEC.local_stability_algorithm(Dict{String,Any}("LocalStability" => Dict{String,Any}("psi_window" => [0.2, 0.8], "n_scan" => 32)))
+        @test alg.psi_window === (0.2, 0.8)
+        @test alg.n_scan == 32
+        @test GPEC.local_stability_algorithm(Dict{String,Any}()) === nothing
+        @test_throws ErrorException EulerLagrangeProblem(equil; nn=1, local_stability_flag=true)
     end
 end
