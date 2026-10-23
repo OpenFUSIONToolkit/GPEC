@@ -68,6 +68,8 @@ jobs:
       - name: Is the regression stamp still current?
         if: steps.scope.outputs.touches_src == 'true'
         env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           stamp=$(python3 ci/conventions/check_subject.py --harness-sha "$RUNNER_TEMP/pr_body.md")
@@ -75,6 +77,21 @@ jobs:
             echo "::error::Harness stamp '$stamp' is not a commit in this repository."
             exit 1
           fi
+
+          # A stacked PR's report covers only its own changes, so it stays current until
+          # the PR's own src/ patch changes; merging an updated parent in does not stale it.
+          # -U0 keeps parent edits that only shift the patch's context lines from counting.
+          if [ "$BASE_REF" != "develop" ] && [ "$BASE_REF" != "main" ]; then
+            own_src_patch() { git diff -U0 "$(git merge-base "$BASE_SHA" "$1")" "$1" -- src/ | git patch-id --stable | cut -d ' ' -f 1; }
+            if [ "$(own_src_patch "$stamp")" != "$(own_src_patch "$HEAD_SHA")" ]; then
+              echo "::error::The regression report is stale: this PR's own changes under src/ differ from those at $stamp."
+              echo "Re-run the harness against $BASE_REF and update the '_(harness @ ...)_' stamp in the release-note block."
+              exit 1
+            fi
+            echo "Stacked on $BASE_REF: this PR's own src/ changes match those at $stamp."
+            exit 0
+          fi
+
           changed=$(git diff --name-only "$stamp".."$HEAD_SHA" -- src/)
           if [ -n "$changed" ]; then
             echo "::error::The regression report is stale. Files under src/ changed after $stamp:"

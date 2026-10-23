@@ -553,9 +553,9 @@
         @test ctrl.fgar_flag == true
         @test ctrl.tgar_flag == false
         @test ctrl.nn == 1
-        @test ctrl.nl == 1
-        @test ctrl.zi == 1
-        @test ctrl.mi == 2
+        @test ctrl.bounce_harmonic_max == 1
+        @test ctrl.ion_charge == 1
+        @test ctrl.ion_mass == 2
         @test ctrl.nutype == "harmonic"
         @test ctrl.f0type == "maxwellian"
         @test ctrl.psilims == [0.0, 1.0]
@@ -664,6 +664,7 @@
         @test mr.total_torque == 0.0 + 0.0im
         @test mr.total_energy == 0.0
         @test isempty(mr.records)
+        @test isempty(mr.dtdpsi_ell) && isempty(mr.ell)
     end
 
     # =========================================================================

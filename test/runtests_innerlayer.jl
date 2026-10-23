@@ -19,7 +19,7 @@ const IL = GeneralizedPerturbedEquilibrium.InnerLayer
 const GGJ = IL.GGJ
 
 @testset "InnerLayer GGJ (Glasser & Wang 2020, Eq. 55)" begin
-    p = IL.glasser_wang_2020_eq55()
+    p = IL.GGJ.glasser_wang_2020_eq55()
 
     @testset "Mercier index and matching powers (Eq. 49)" begin
         # D_I = E + F + H − 1/4 from the verbatim Eq. 55 coefficients.
@@ -52,11 +52,10 @@ const GGJ = IL.GGJ
     end
 end
 
-@testset "InnerLayer GGJ :ray backend (rotated-contour collocation)" begin
-    # The method was validated before landing here: manufactured Δ* to 3e-14,
-    # Fortran rmatch pins, 96-equilibrium robustness scans to Q = 500i. These
-    # tests pin the implementation, not the method.
-    p = IL.glasser_wang_2020_eq55()
+@testset "InnerLayer GGJ :ray backend (rotated contour, Hermite BVP)" begin
+    # These tests pin the implementation; the method is validated against an independent
+    # strict reference over the Q plane outside the test suite.
+    p = IL.GGJ.glasser_wang_2020_eq55()
 
     @testset "agrees with :galerkin at the paper point Q = 0.1234" begin
         γ = 0.1234 * GGJ.q0(p)
@@ -71,7 +70,7 @@ end
     end
 
     @testset "q4 physical benchmark at Q = 500i (regime beyond :galerkin)" begin
-        q4 = IL.q4_surface_benchmark()
+        q4 = IL.GGJ.q4_surface_benchmark()
         γ = 500.0im * GGJ.q0(q4)
         Δ = IL.solve_inner(IL.GGJModel(), q4, γ)
         # Pins from the pre-port validation suite (post extended-precision
@@ -90,15 +89,14 @@ end
 end
 
 @testset "InnerLayer GGJ :ray internal machinery" begin
-    p = IL.q4_surface_benchmark()
+    p = IL.GGJ.q4_surface_benchmark()
 
-    @testset "cheblobatto nodes and differentiation matrix" begin
-        t, D = GGJ.cheblobatto(8)
-        @test length(t) == 9
-        @test issorted(t)                         # ascending, per the reflected convention
-        @test t[1] ≈ -1 && t[end] ≈ 1
-        @test D * ones(9) ≈ zeros(9) atol = 1e-10  # d/dt of a constant is zero
-        @test D * t ≈ ones(9) atol = 1e-10         # d/dt of the linear function is one
+    @testset "Hermite BVP resolution floor at small |Q|" begin
+        # At |Q| ≪ 1 the local WKB rates are small; refining the grid (cfl/8, 2× min_cells) must not move Δ.
+        Q = 0.01 + 0.0im
+        r = IL.solve_ray(p, Q)
+        r2 = IL.solve_ray(p, Q; cfl=0.025, min_cells=2048)
+        @test maximum(abs.(r2.Δraw .- r.Δraw) ./ abs.(r.Δraw)) < 1e-6
     end
 
     @testset "ode_matrix: ordinary point and type-generic build" begin
@@ -110,11 +108,6 @@ end
         # The extended-precision build agrees with the Float64 build.
         Md = GGJ.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
         @test ComplexF64.(Md) ≈ GGJ.ode_matrix(p, Q, 0.3) rtol = 1e-12
-    end
-
-    @testset "parity_rows match the deltac boundary convention" begin
-        @test GGJ.parity_rows(1) == [4, 2, 3]     # odd:  Ψ'(0)=Ξ(0)=Υ(0)=0
-        @test GGJ.parity_rows(2) == [1, 5, 6]     # even: Ψ(0)=Ξ'(0)=Υ'(0)=0
     end
 
     @testset "decaying_pair is an orthonormal 6×2 frame" begin
@@ -140,7 +133,7 @@ end
         Q = 5.0im
         conv = IL.delta_convergence(p, Q; verbose=false)
         Δ = IL.solve_inner(IL.GGJModel(; solver=:ray), p, Q * GGJ.q0(p))
-        # conv.Δ is the raw solve_ray pair (Δ₁, Δ₂) = (interchange, tearing).
+        # conv.Δ is the solve_ray pair (Δ₊, Δ₋) = (interchange, tearing).
         @test conv.Δ[1] ≈ Δ.interchange rtol = 1e-6   # baseline == the plain solve
         @test conv.Δ[2] ≈ Δ.tearing rtol = 1e-6
         @test maximum(conv.spread) < 1e-4         # honest error bar is small here
@@ -148,12 +141,12 @@ end
 end
 
 @testset "solve_inner_profile interface (matching-driver contract)" begin
-    p = IL.glasser_wang_2020_eq55()
+    p = IL.GGJ.glasser_wang_2020_eq55()
     γ = 0.1234 * GGJ.q0(p)
-    for model in (IL.GGJModel(; solver=:ray), IL.GGJModel(; solver=:galerkin))
+    for model in (IL.GGJModel(; solver=:ray, real_profiles=true), IL.GGJModel(; solver=:galerkin))
         prof = IL.solve_inner_profile(model, p, γ)
         # Δ agrees with the plain matching solve of the same backend (identical solve path).
-        # prof.Δ stays the positional pair (Δ₁, Δ₂) = (interchange, tearing) that feeds deltar.
+        # prof.Δ is the positional pair (Δ₊, Δ₋) = (interchange, tearing) that feeds deltar.
         Δ_plain = IL.solve_inner(model, p, γ)
         @test prof.Δ[1] ≈ Δ_plain.interchange rtol = 1e-12
         @test prof.Δ[2] ≈ Δ_plain.tearing rtol = 1e-12
@@ -162,13 +155,25 @@ end
         @test prof.x[1] ≈ 0 atol = 1e-12
         @test size(prof.Ψ) == (length(prof.x), 2) && size(prof.Ξ) == (length(prof.x), 2)
         @test all(isfinite, prof.Ψ) && all(isfinite, prof.Ξ)
-        # Parity at the layer center: Ψ(0) ≠ 0 odd-parity column, Ψ(0) = 0 even-parity column.
-        @test abs(prof.Ψ[1, 2]) < 1e-6 * abs(prof.Ψ[1, 1])
+        # Parity at the layer center: Ψ(0) = 0 in the even (Δ₊) column, Ψ(0) ≠ 0 in the odd (Δ₋) one.
+        @test abs(prof.Ψ[1, 1]) < 1e-6 * abs(prof.Ψ[1, 2])
         # Conversion factors match their GGJ definitions.
         @test prof.dψdx ≈ GGJ.x0(p) / p.v1
         @test prof.rescale ≈ (p.v1 / GGJ.x0(p))^(0.5 + GGJ.p1(p))
     end
     # Ray backend certificate: at real Q the optimal contour is θ = 0, so the two solves coincide.
-    ray = IL.solve_inner_profile(IL.GGJModel(; solver=:ray), p, γ)
+    ray = IL.solve_inner_profile(IL.GGJModel(; solver=:ray, real_profiles=true), p, γ)
     @test ray.certΔ < 1e-12
+
+    # Default :ray returns only the layer-center fields of the rotated solve. With real profiles the
+    # x = 0 row is still the rotated solve's, so the penetrated field does not depend on the option,
+    # and the θ = 0 profile next to it is continuous with it.
+    γi = 5.0im * GGJ.q0(p)
+    c = IL.solve_inner_profile(IL.GGJModel(; solver=:ray), p, γi)
+    full = IL.solve_inner_profile(IL.GGJModel(; solver=:ray, real_profiles=true), p, γi)
+    @test c.x == [0.0] && size(c.Ψ) == (1, 2) && isnan(c.certΔ)
+    @test c.Δ == full.Δ
+    @test full.x[1] == 0 && full.Ψ[1, :] == c.Ψ[1, :] && full.Ξ[1, :] == c.Ξ[1, :]
+    @test full.Ψ[2, 2] ≈ c.Ψ[1, 2] rtol = 1e-2      # odd Ψ is even, so smooth through x = 0
+    @test full.certΔ < 1e-5
 end
