@@ -23,7 +23,7 @@ function reference_q()
     inputs, _, additional_input = GPE.build_inputs_from_toml(EXAMPLE_DIR)
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("grid_type" => "core_edge_packed", "mpsi" => 1024))
     eq_config = GPE.Equilibrium.EquilibriumConfig(equil_dict, EXAMPLE_DIR)
-    equil = GPE.Equilibrium.setup_equilibrium(eq_config, additional_input)
+    equil = GPE.Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
     # The dict rides along so the mpsi scan can rebuild configs; EquilibriumConfig is immutable.
     return equil, equil_dict
 end

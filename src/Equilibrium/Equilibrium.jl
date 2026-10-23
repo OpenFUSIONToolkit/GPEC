@@ -29,7 +29,7 @@ include("GeometryProfiles.jl")
 include("KineticProfiles.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, reform, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, AnalyticEquilibriumConfig,
+export reform, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, AnalyticEquilibriumConfig,
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
     KineticProfileSplines, load_kinetic_profiles, shift_exb_rotation,
     KineticProfileData, read_kinetic_file, write_kinetic_h5
@@ -125,7 +125,7 @@ end
 
 Form the equilibrium `eq_config` describes from `source` (see [`run_input`](@ref)), run the
 solver, and return it with global parameters, q-profile, and GSE diagnostics. Every other
-constructor and [`setup_equilibrium`](@ref) end here.
+constructor ends here.
 
 `override_psi_nodes` bypasses the config-driven radial grid (`grid_type`/`mpsi`) and forms
 the equilibrium on the given strictly increasing ψ_N node vector, whose endpoints must match
@@ -154,16 +154,6 @@ function PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; overrid
 
     return plasma_equilibrium
 end
-
-"""
-    setup_equilibrium(eq_config::EquilibriumConfig, source=nothing; override_psi_nodes=nothing)
-    setup_equilibrium(path::String="equil.toml")
-
-Alias of [`PlasmaEquilibrium(eq_config, source)`](@ref PlasmaEquilibrium); the `path` form reads
-the [`EquilibriumConfig`](@ref) from a TOML file.
-"""
-setup_equilibrium(path::String="equil.toml") = PlasmaEquilibrium(EquilibriumConfig(path))
-setup_equilibrium(eq_config::EquilibriumConfig, source=nothing; kwargs...) = PlasmaEquilibrium(eq_config, source; kwargs...)
 
 """
     reform(equil::PlasmaEquilibrium, psi_nodes::Vector{Float64}) -> PlasmaEquilibrium

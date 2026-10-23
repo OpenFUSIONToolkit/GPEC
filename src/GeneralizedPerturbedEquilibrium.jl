@@ -138,9 +138,9 @@ end
 
 Build the pipeline inputs from a working directory containing `gpec.toml`. Returns the
 parsed `inputs` dict, the `EquilibriumConfig`, and the `additional_input` consumed by
-`setup_equilibrium` — an analytic `*Config` for
+`PlasmaEquilibrium` — an analytic `*Config` for
 sol/lar/tj equilibria (parameters from the embedded TOML section), the `dd` data dictionary
-for IMAS, or `nothing` for file-based equilibria (efit, chease) that `setup_equilibrium`
+for IMAS, or `nothing` for file-based equilibria (efit, chease) that `PlasmaEquilibrium`
 reads from disk.
 """
 function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
@@ -171,7 +171,7 @@ Shared pipeline body that every input source funnels into. The caller (one of th
 `build_inputs_from_*` builders) is responsible for producing a fully merged
 `inputs::Dict`, an `EquilibriumConfig`, and a ready `additional_input` — this body
 does no source dispatch of its own. `additional_input` is forwarded directly to
-`setup_equilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
+`PlasmaEquilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
 analytic `*Config` or IMAS `dd` (TOML path), or `nothing` for file-based equilibria.
 
 `preloaded_forcing_modes` lets the rerun path inject a `Vector{ForcingMode}`
