@@ -43,6 +43,19 @@ using TOML
         @test quick.ballooning_Delta_prime == res.ballooning_Delta_prime
     end
 
+    @testset "numerical knobs reach the kernels" begin
+        narrow = solve(LocalStabilityProblem(equil), Ballooning(; psi_window=(0.3, 0.7), verbose=false))
+        inside = [0.3 <= p <= 0.7 for p in xs]
+        @test all(isfinite, narrow.alpha[inside])
+        @test all(isnan, narrow.alpha[.!inside])
+        @test narrow.alpha[inside] == res.alpha[inside]
+
+        loose = solve(LocalStabilityProblem(equil), Ballooning(; ode_tol=1e-6, alpha_boundary_scan=false, verbose=false))
+        @test loose.D_I == res.D_I
+        @test loose.ballooning_Delta_prime ≈ res.ballooning_Delta_prime rtol = 1e-3
+        @test loose.ballooning_Delta_prime != res.ballooning_Delta_prime
+    end
+
     @testset "solve writes no file" begin
         mktempdir() do dir
             cd(dir) do
