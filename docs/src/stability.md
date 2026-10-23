@@ -156,8 +156,12 @@ integrator = "galerkin"
 
 ## Local stability: Mercier and ballooning (s–α)
 
-Setting `local_stability_flag = true` in `[ForceFreeStates]` runs a local high-``n``
-stability scan over every flux surface, in addition to the global ideal analysis above.
+A `[LocalStability]` section in the deck runs a local high-``n`` stability scan over every
+flux surface, as its own stage before the global ideal analysis above. The section's keys are
+the [`Ballooning`](@ref) keywords (the ballooning angle, ODE tolerance and the α-boundary scan
+knobs), and a script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning())`
+(see the [scripting API](api.md)). The section replaces the removed `local_stability_flag`
+of `[ForceFreeStates]`.
 For the derivation and implementation details behind these diagnostics, see
 [Ballooning and Mercier Local Stability](ballooning.md).
 Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile
@@ -378,9 +382,6 @@ delta_mhigh  = 0       # extra high poloidal modes (m > mhigh)
 numsteps_init     = 200    # initial step budget per chunk
 numunorms_init    = 50     # renorm checkpoint budget
 reltol            = 1e-6   # ODE relative tolerance
-
-# Local stability
-local_stability_flag = false  # scan Mercier D_I, resistive D_R, and ballooning Δ' over ψ
 
 # Output
 verbose              = true
