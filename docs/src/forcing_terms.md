@@ -35,7 +35,13 @@ and multiplied by (2π)² internally to reach unit-norm convention.
 
 Files tagged `normal_field_T` are automatically converted to unit-norm Phi_x convention
 during loading using the plasma boundary geometry. The conversion accounts for the
-R-variation of the Jacobian and is a mode-mixing operation.
+R-variation of the Jacobian and is a mode-mixing operation, so the flux is projected onto
+every harmonic of the run (`mlow:mhigh`), sidebands included, not only the file's own.
+
+The file's spectrum must also extend far enough that the harmonics it omits are negligible,
+since those would mix into the run's range too. GPEC estimates this from the file's edge
+harmonics: if either one alone carries more than 10% of the converted flux, a warning asks for
+a wider m range. Files with fewer than three harmonics are not checked.
 
 Files tagged `sfl_flux_Wb` (2π-angle SFL flux) are scaled by (2π)² to reach unit-norm.
 
