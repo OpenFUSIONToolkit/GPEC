@@ -71,12 +71,6 @@ end
 function _build_inner_model(name::Symbol)
     if name === :slayer_fitzpatrick
         return SLAYERModel(; variant=:fitzpatrick)
-    elseif name === :ggj_ray
-        return GGJModel(; solver=:ray)
-    elseif name === :ggj_shooting
-        return GGJModel(; solver=:shooting)
-    elseif name === :ggj_galerkin
-        return GGJModel(; solver=:galerkin)
     end
     throw(ArgumentError("_build_inner_model: unknown model $name"))
 end
@@ -196,7 +190,7 @@ the `S^(1/3)` Δ(Q) scale, both built on r_s).
 
 Near surface `k` the outer solution combines the large and small Frobenius
 solutions with the Mercier exponent `α = √(−D_I)`, `D_I = E + F + H − 1/4`
-(Glasser, Greene & Johnson 1975, Eq. 48; STRIDE's `alpha`). The displacement
+(Glasser, Greene & Johnson 1975, Eqs. 16, 24; STRIDE's `alpha`). The displacement
 scales as `|x|^(−1/2 ± α)` (Glasser, Wang & Park 2016, Eq. 26), so the
 flux-like variable `ψ ∝ x·ξ` of the slab Δ' definition scales as
 `A_L·|x|^(1/2−α) + A_S·|x|^(1/2+α)`. Rescaling the radial variable
@@ -428,7 +422,7 @@ end
 Evaluate both parity channels of the GGJ inner-layer matching data at the
 complex normalized growth rate `Q` for each rational surface. Returns a
 vector of `(ising, tearing, interchange)` named tuples, where `tearing`
-(GWP Δ_+) is the reconnecting channel and `interchange` (GWP Δ_−) the
+(GWP Δ₋, odd) is the reconnecting channel and `interchange` (GWP Δ₊, even) the
 non-reconnecting Glasser-stabilization channel (see `InnerLayerResponse`).
 
 This is the supported GGJ diagnostic: both parity Δ's are physical and
