@@ -94,7 +94,7 @@ using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "gal_cut_solution")
+    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -747,18 +747,19 @@ function prepare_force_free_states!(
 end
 
 """
-    run_force_free_states(ctrl, equil, mats, intr, metric) -> ForceFreeStatesResult
+    run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=false) -> ForceFreeStatesResult
 
 Run the formalism selected by `ctrl.integrator` — the standalone Galerkin solve, or the
 Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publish its products as a
-`ForceFreeStatesResult`.
+`ForceFreeStatesResult`. `cut_solution` is the scripting-only `Galerkin(; cut_solution)` option.
 """
 function run_force_free_states(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     mats,
     intr::ForceFreeStatesInternal,
-    metric
+    metric;
+    cut_solution::Bool=false
 )
     nstring = _mode_range_label(intr)
 
@@ -774,7 +775,7 @@ function run_force_free_states(
             error("integrator = \"galerkin\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         gal_start = time()
         wv = ctrl.vac_flag ? first(ForceFreeStates.compute_scaled_wv(ctrl, equil, intr)) : nothing
-        gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv)
+        gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
         gal_dt = time() - gal_start
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
     else
@@ -960,7 +961,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
     metric, mats, _ = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
-    result = run_force_free_states(ctrl, equil, mats, intr, metric)
+    result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa ForceFreeStates.Galerkin && alg.cut_solution)
 
     if ctrl.write_outputs_to_HDF5
         write_outputs_to_HDF5(result; locstab=locstab, ballooning_boundary=ballooning_boundary)
