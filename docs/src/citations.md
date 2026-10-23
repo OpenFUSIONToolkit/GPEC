@@ -22,6 +22,34 @@ Extends the 1997 method to high toroidal mode numbers by using 32-point Gaussian
 
 ---
 
+### 3D vacuum singular correction
+
+The 3D vacuum singular correction (`src/Vacuum/Kernel3D.jl`) is translated from BIEST and licensed under Apache-2.0 (see `NOTICE`). If you use the 3D vacuum calculation, please cite the three references below.
+
+> D. Malhotra, "BIEST: Boundary Integral Equation Solver for Taylor states,"
+> [https://github.com/dmalhotra/BIEST](https://github.com/dmalhotra/BIEST).
+> DOI: [10.5281/zenodo.23511944](https://doi.org/10.5281/zenodo.23511944)
+
+The C++ library from which the 3D singular-correction quadrature was translated.
+
+---
+
+> D. Malhotra, A. Cerfon, L.-M. Imbert-Gérard, and M. O'Neil, "Taylor states in stellarators: A fast high-order boundary integral solver,"
+> *Journal of Computational Physics* **397**, 108791 (2019).
+> DOI: [10.1016/j.jcp.2019.06.067](https://doi.org/10.1016/j.jcp.2019.06.067)
+
+Sec. 3.2 defines the polar singular quadrature: partition-of-unity split, polar Gauss–Legendre/trapezoidal rule, and Lagrange interpolation from the collocation grid to the polar nodes.
+
+---
+
+> D. Malhotra, A. J. Cerfon, M. O'Neil, and E. Toler, "Efficient high-order singular quadrature schemes in magnetic fusion,"
+> *Plasma Physics and Controlled Fusion* **62**, 024004 (2020).
+> DOI: [10.1088/1361-6587/ab57f4](https://doi.org/10.1088/1361-6587/ab57f4)
+
+Applies the scheme to the singular surface integrals of magnetic fusion (exterior vacuum fields, virtual casing) on non-axisymmetric toroidal surfaces, and shows its high-order convergence where singularity subtraction is low order.
+
+---
+
 ## ForceFreeStates Module
 
 > A. H. Glasser, "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma,"
