@@ -836,8 +836,8 @@ end
                          dir_path=".", debug=DebugSettings(), kwargs...)
 
 The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
-the perturbed potential energy whose solutions are the force-free (and, via the TOML path,
-kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
+the perturbed potential energy whose solutions are the force-free (or, with
+`kinetic_factor > 0`, kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
 [`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
 names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
 matching is a separate problem posed on the finished solve: see `MatchProblem`.
@@ -890,9 +890,10 @@ Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `al
 a `gpec.toml` run of `main` does and produces the same result object. The second form is
 sugar building the problem from an equilibrium and the problem keywords in one call.
 
-Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic
-runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]` profiles
-and errors here.
+Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic runs
+(`kinetic_factor > 0`) take `Forward()`; the `"calculated"` source needs kinetic profiles on the
+equilibrium (`kinetic_file`, or `attach_kinetic_profiles!`) and uses the default
+`KineticForcesControl` species and collision settings.
 
 ```julia
 eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
@@ -909,8 +910,8 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
 
-    ctrl.kinetic_factor > 0 &&
-        error("kinetic runs (kinetic_factor > 0) need the [KineticForces] profiles and are TOML-driven; run them through `main`")
+    ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && equil.kinetic === nothing &&
+        error("kinetic_source = \"calculated\" needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
 
     intr = ForceFreeStatesInternal(; dir_path=prob.dir_path)
     intr.wall_settings = prob.wall
