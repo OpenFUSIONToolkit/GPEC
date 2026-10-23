@@ -20,7 +20,8 @@ struct LocalStabilityProblem
 end
 
 """
-    Ballooning(; theta_k=0.0, n_scan=24, alpha_boundary_scan=true, verbose=true)
+    Ballooning(; theta_k=0.0, ode_tol=1e-8, alpha_boundary_scan=true, n_scan=24, max_alpha_scale=8.0,
+               alpha_tol=1e-3, psi_window=(0.1, 0.99), verbose=true)
 
 The local-stability algorithm: the ballooning coefficient system per flux surface, plus the
 BALOO-style α-boundary scan. Its keywords are the `[LocalStability]` deck keys.
@@ -28,14 +29,22 @@ BALOO-style α-boundary scan. Its keywords are the `[LocalStability]` deck keys.
 ## Fields
 
   - `theta_k::Float64` - Ballooning angle θ_k, used by both the profile scan and the α-boundary scan.
-  - `n_scan::Int` - Resolution of the α scan for the first boundary (see [`ballooning_alpha_boundary`](@ref)).
+  - `ode_tol::Float64` - Relative and absolute tolerance of the ballooning ODE integration behind Δ'.
   - `alpha_boundary_scan::Bool` - Run the α-boundary scan, a root find per ψ surface; `false` leaves the α fields empty.
+  - `n_scan::Int` - Resolution of the α scan for the first boundary (see [`ballooning_alpha_boundary`](@ref)).
+  - `max_alpha_scale::Float64` - Upper end of the α search, as a multiple of the experimental α; no crossing below it gives NaN.
+  - `alpha_tol::Float64` - Bisection tolerance of the critical α, in the same multiples.
+  - `psi_window::Tuple{Float64,Float64}` - ψ_N range of the α scan; surfaces outside it are NaN.
   - `verbose::Bool` - Print progress and per-surface α-scan failures.
 """
 @kwdef struct Ballooning
     theta_k::Float64 = 0.0
-    n_scan::Int = 24
+    ode_tol::Float64 = 1e-8
     alpha_boundary_scan::Bool = true
+    n_scan::Int = 24
+    max_alpha_scale::Float64 = 8.0
+    alpha_tol::Float64 = 1e-3
+    psi_window::Tuple{Float64,Float64} = BALLOONING_SCAN_PSI_WINDOW
     verbose::Bool = true
 end
 
@@ -77,9 +86,10 @@ function CommonSolve.solve(prob::LocalStabilityProblem, alg::Ballooning)
     equil = prob.equil
     xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(xs), 5)
-    compute_ballooning_stability!(locstab_fs, equil; theta_k=alg.theta_k, verbose=alg.verbose)
+    compute_ballooning_stability!(locstab_fs, equil; theta_k=alg.theta_k, ode_tol=alg.ode_tol, verbose=alg.verbose)
     boundary = if alg.alpha_boundary_scan
-        ballooning_alpha_boundary(equil; theta_k=alg.theta_k, n_scan=alg.n_scan, verbose=alg.verbose)
+        ballooning_alpha_boundary(equil; theta_k=alg.theta_k, n_scan=alg.n_scan, max_alpha_scale=alg.max_alpha_scale,
+            tol=alg.alpha_tol, psi_window=alg.psi_window, verbose=alg.verbose)
     else
         (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     end
