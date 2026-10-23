@@ -465,7 +465,7 @@ function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
         (read(kg["scan_psi"]),
             read(kg["scan_cond"]),
             read(kg["scan_threshold"]),
-            read(kg["psi"]),
+            read(kg["rational_psi"]),
             read(fid["SingularSurfaces/rational_psi"]),
             read(fid["SingularSurfaces/rational_q"]),
             read(kg["rational_count"]))
