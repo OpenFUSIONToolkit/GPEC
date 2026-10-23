@@ -55,9 +55,9 @@ end
 
 const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
 
-# Dataset units written into / expected from the HDF5 kinetic schema.
-const _KINETIC_H5_UNITS = Dict("psi" => "normalized poloidal flux", "n_i" => "m^-3",
-    "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
+# The optional profile datasets of the HDF5 kinetic schema and their units, one row per `KineticProfileData`
+# field of the same name; the reader and writer both iterate it, so a new profile is a row here plus its field.
+const _KINETIC_H5_PROFILES = ("n_i" => "m^-3", "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
     "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless")
 
 """
@@ -97,17 +97,14 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
         haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
         # Non-standard datasets named `n_*` (e.g. "n_D", "n_T") are named per-species density
         # profiles for explicit multi-ion input; other names are reserved for future schema fields.
-        standard = ("psi", "n_i", "n_e", "T_i", "T_e", "omega_E", "omega_tor", "chi_e", "chi_phi", "zeff")
         extras = Dict{String,Vector{Float64}}()
         for k in keys(g)
-            (k in standard || !startswith(k, "n_")) && continue
+            (k == "psi" || any(p -> first(p) == k, _KINETIC_H5_PROFILES) || !startswith(k, "n_")) && continue
             v = read(g[k])
             v isa AbstractArray && (extras[k] = Float64.(vec(v)))
         end
         return KineticProfileData(; psi=Float64.(vec(read(g["psi"]))),
-            n_i=rd("n_i"), n_e=rd("n_e"), T_i=rd("T_i"), T_e=rd("T_e"),
-            omega_E=rd("omega_E"), omega_tor=rd("omega_tor"),
-            chi_e=rd("chi_e"), chi_phi=rd("chi_phi"), zeff=rd("zeff"),
+            (Symbol(name) => rd(name) for (name, _) in _KINETIC_H5_PROFILES)...,
             species_densities=(isempty(extras) ? nothing : extras), provenance=prov)
     end
 end
@@ -146,21 +143,15 @@ function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
     provenance::AbstractString=data.provenance)
     h5open(path, "w") do f
         g = group == "/" ? f : create_group(f, group)
-        function put(name, v)
+        function put(name, v, units)
             v === nothing && return
             g[name] = collect(Float64, v)
-            attributes(g[name])["units"] = _KINETIC_H5_UNITS[name]
+            attributes(g[name])["units"] = units
         end
-        put("psi", data.psi)
-        put("n_i", data.n_i)
-        put("n_e", data.n_e)
-        put("T_i", data.T_i)
-        put("T_e", data.T_e)
-        put("omega_E", data.omega_E)
-        put("omega_tor", data.omega_tor)
-        put("chi_e", data.chi_e)
-        put("chi_phi", data.chi_phi)
-        put("zeff", data.zeff)
+        put("psi", data.psi, "normalized poloidal flux")
+        for (name, units) in _KINETIC_H5_PROFILES
+            put(name, getfield(data, Symbol(name)), units)
+        end
         # Named per-species densities (multi-ion input); dataset names must be `n_*` to round-trip.
         if data.species_densities !== nothing
             for (name, v) in data.species_densities

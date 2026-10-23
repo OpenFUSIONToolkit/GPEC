@@ -712,6 +712,12 @@ using TOML
             rm(tmp; force=true)
         end
 
+        @testset "schema table matches the data fields" begin
+            # Every profile dataset the reader and writer iterate is a KineticProfileData field, and vice versa.
+            table = Set(Symbol(first(p)) for p in E._KINETIC_H5_PROFILES)
+            @test table == setdiff(Set(fieldnames(E.KineticProfileData)), Set([:psi, :species_densities, :provenance]))
+        end
+
         @testset "missing required field errors" begin
             # Only psi + n_e: the NTV view must error on the missing T_i
             d = E.KineticProfileData(; psi=[0.0, 0.5, 1.0], n_e=[1e19, 9e18, 8e18])
