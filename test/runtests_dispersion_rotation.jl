@@ -46,9 +46,10 @@
 
     @testset "Real SLAYER surfaces: the lab-frame root moves with the E×B rotation" begin
         # Q_layer = τ_k·ω_lab − τ_k·n·Ω_E, so the rotating determinant at Q + τ_ref·n·Ω_E equals the
-        # static one at Q: every root keeps its γ and moves by ω_lab(Ω_E) − ω_lab(0) = +n·Ω_E.
+        # static one at Q: every root keeps its γ and moves by ω_lab(Ω_E) − ω_lab(0) = +n·Ω_E. This pins
+        # how `_q_shift` composes with the determinant; the next testset ties the sign to the physical axis.
         mk(; qval, rs, m) = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0,
-            omega_e=1.0e4, omega_i=5.0e3,
+            omega_e=-1.0e4, omega_i=5.0e3,
             qval=qval, sval_r=1.0, bt=2.0, rs=rs, R0=1.7,
             mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=2)
         params = [mk(; qval=1.5, rs=0.5, m=3), mk(; qval=2.0, rs=0.6, m=4)]
@@ -62,8 +63,22 @@
         for Q in (0.3 + 0.2im, -0.4 + 0.6im, 0.1 + 1.1im)
             # The layer arguments agree to rounding, which the adaptive layer ODE amplifies to ≲ 3e-6.
             @test rotating(Q + lab_shift) ≈ static(Q) rtol = 1e-4
-            # The opposite Doppler sign (mode counter-rotating with the plasma) must not match.
+            # A shift the other way does not reproduce the static determinant.
             @test !isapprox(rotating(Q - lab_shift), static(Q); rtol=1e-3)
+        end
+    end
+
+    @testset "Scanned Re(Q) runs along the ζ axis of Ω_E" begin
+        # The Doppler sign holds only if the scanned Re(Q) shares the ζ axis of the kinetic file's Ω_E, as
+        # GPEC's ω_*e from `build_slayer_inputs` does. The layer Δ vanishes where the mode co-rotates with the
+        # electron fluid, so that zero must sit at Re(Q) = +τ_k·ω_*e: reversing either `Q_e = −τ_k·ω_*e` or
+        # the `i·conj(Q)` bridge in `solve_inner` moves it to −τ_k·ω_*e.
+        slayer = SLAYERModel(; variant=:fitzpatrick)
+        for (ω_e, ω_i) in ((-1.0e4, 5.0e3), (1.0e4, -5.0e3), (-1.0e4, 0.0))
+            p = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0, omega_e=ω_e, omega_i=ω_i,
+                qval=2.0, sval_r=1.0, bt=2.0, rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=2, n=1)
+            Q_electron = p.tauk * ω_e + 0.01im
+            @test abs(solve_inner(slayer, p, Q_electron).tearing) < 0.1 * abs(solve_inner(slayer, p, -conj(Q_electron)).tearing)
         end
     end
 

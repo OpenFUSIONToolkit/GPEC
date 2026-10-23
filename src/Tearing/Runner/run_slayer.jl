@@ -13,7 +13,8 @@
 # case the caller falls back to the scalar `control.chi_perp`/`chi_tor`), and
 # a Z_eff(ψ) callable: the file's own `zeff` profile when it carries one, else
 # derived from its `n_i/n_e` (or `nothing` when the file carries neither, in which
-# case the caller falls back to the scalar `control.zeff`).
+# case the caller falls back to the scalar `control.zeff`), and whether the file
+# carries an `omega_E` profile.
 function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     isempty(control.profile_file) &&
         error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
@@ -27,8 +28,8 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
             error("run_slayer: kinetic file '$path' is missing required " *
                   "dataset '$name' for the SLAYER inner layer.")
     end
-    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the file has it; ω_*e/ω_*i are
-    # derived per surface from the density and temperature splines by `build_slayer_inputs`.
+    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the file has it, else zero (no shift);
+    # ω_*e/ω_*i are derived per surface from the density and temperature splines by `build_slayer_inputs`.
     npsi = length(data.psi)
     omega_E = data.omega_E === nothing ? zeros(npsi) : data.omega_E
     profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
@@ -62,7 +63,8 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source)
+    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
+        has_omega_E=data.omega_E !== nothing)
 end
 
 # ---------------------------------------------------------------------
@@ -159,13 +161,13 @@ _mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
 _mn_label(::InnerLayerParameters) = nothing
 
 # Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
-# rational surface, replaced on every surface whose m/n `control.omega_E_kHz` lists.
+# rational surface (NaN when there is none), replaced on every surface whose m/n `control.omega_E_kHz` lists.
 function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
     n = length(params)
     isempty(omega_E_file) || length(omega_E_file) == n ||
         throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
                             "$n rational surfaces were analysed."))
-    Ω_E = isempty(omega_E_file) ? zeros(Float64, n) : Float64.(omega_E_file)
+    Ω_E = isempty(omega_E_file) ? fill(NaN, n) : Float64.(omega_E_file)
     isempty(control.omega_E_kHz) && return Ω_E
     labels = [_mn_label(p) for p in params]
     any(isnothing, labels) &&
@@ -257,8 +259,9 @@ per-surface parameters, and the outer-region Δ' matrix. Bypasses the orchestrat
 tests or when rebuilding from cached HDF5 output). The model is a typed object end to
 end; nothing below this point reads `control.inner_model`. `omega_E` is the E×B angular
 frequency per unit n at each surface [rad/s], replaced on any surface whose m/n
-`control.omega_E_kHz` lists; empty means no rotation. In coupled mode it Doppler-shifts each
-surface's inner-layer Q; in both modes the resolved value is reported as `result.omega_E`.
+`control.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
+shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer Q; in
+both modes the resolved value is reported as `result.omega_E`.
 """
 function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     params::AbstractVector{<:InnerLayerParameters},
@@ -333,9 +336,11 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
             "SLAYER: omega_E_kHz does not shift the layers with coupling_mode=:uncoupled; rotation only " *
             "enters the coupled determinant, so it is just recorded in PerSurface/omega_E.")
     Ω_E = _omega_E_per_surface(control, params, omega_E)
-    coupled && _is_ggj(model) && any(!iszero, Ω_E) && @warn(
+    # A surface with no known rotation applies no shift.
+    Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
+    coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
             "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
-    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_E[k]) for k in 1:n] : zeros(Float64, n)
+    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
     ref_idx = 1
