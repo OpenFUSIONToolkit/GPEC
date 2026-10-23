@@ -439,7 +439,6 @@ function write_gpec_toml_coil(
         end
         println(io)
         println(io, "[PerturbedEquilibrium]")
-        println(io, "compute_response          = true")
         println(io, "compute_singular_coupling = true")
         println(io, "verbose                   = true")
         println(io, "write_outputs_to_HDF5     = true")
@@ -490,7 +489,6 @@ function write_gpec_toml_file(
         println(io, "forcing_data_format = \"ascii\"")
         println(io)
         println(io, "[PerturbedEquilibrium]")
-        println(io, "compute_response          = true")
         println(io, "compute_singular_coupling = true")
         println(io, "verbose                   = true")
         println(io, "write_outputs_to_HDF5     = true")

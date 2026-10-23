@@ -91,6 +91,7 @@ using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing.Runner: TearingProblem
 using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
+using .PerturbedEquilibrium: plasma_response, PlasmaResponse
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
@@ -98,7 +99,7 @@ const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 const _DEPRECATED_KF_KEYS = ("moment", "eq_out", "theta_out", "xlmda_out", "eqpsi_out", "save_records", "gpec_file",
     "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha")
-const _DEPRECATED_PE_KEYS = ("fixed_boundary", "output_eigenmodes", "filter_modes", "singular_point_method")
+const _DEPRECATED_PE_KEYS = ("fixed_boundary", "output_eigenmodes", "filter_modes", "singular_point_method", "compute_response")
 
 # Stop the run when a parsed gpec.toml section sets keys that no longer exist, so the deck is updated.
 function _stop_on_deprecated_keys(table, deprecated_keys, section::String)
@@ -987,12 +988,14 @@ function run_perturbed_equilibrium(
     pe_state = nothing
     if "PerturbedEquilibrium" in keys(inputs)
         ft_ctrl = forcing_terms_control(inputs)
+        section = inputs["PerturbedEquilibrium"]
 
-        # The deck's forcing block is an unscaled RMPField, so the TOML path and the
-        # scripting API share one stage.
-        pe_state = perturbed_equilibrium(result, ForcingTerms.RMPField(ft_ctrl);
+        # The deck's section feeds the two scripting calls, and its forcing block is an unscaled
+        # RMPField, so the TOML path and the scripting API share one stage.
+        resp = plasma_response(result; (Symbol(k) => v for (k, v) in section if k in ("compute_singular_coupling", "verbose"))...)
+        pe_state = perturbed_equilibrium(resp, ForcingTerms.RMPField(ft_ctrl);
             coil_sets=preloaded_coil_sets, runtimes=runtimes,
-            (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...)
+            (Symbol(k) => v for (k, v) in section if k != "compute_singular_coupling")...)
     end
 
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
@@ -1001,59 +1004,54 @@ function run_perturbed_equilibrium(
 end
 
 """
-    perturbed_equilibrium(ffs, rmp; coil_sets=nothing, runtimes=nothing, kwargs...) -> PerturbedEquilibriumState
+    perturbed_equilibrium(resp, rmp; regularization_width=resp.regularization_width, verbose=true,
+                          write_outputs_to_HDF5=true, output_filename="", coil_sets=nothing, runtimes=nothing)
+        -> PerturbedEquilibriumState
 
-Compute the plasma response to the external field `rmp` on top of a force-free-states solve
-`ffs`, and write the perturbed-equilibrium outputs. `rmp` is an [`RMPField`](@ref); keyword
-arguments are `PerturbedEquilibrium.PerturbedEquilibriumControl` fields.
+Drive the plasma response `resp` (from [`plasma_response`](@ref)) with the external field `rmp`, an
+[`RMPField`](@ref), and write the perturbed-equilibrium outputs. One response serves any number of
+fields, so a scan rebuilds no operator.
 
-Products the producing integrator could not supply gate the corresponding calculation: the
-step warns and is skipped rather than erroring, so a Riccati-fed result still flows through.
-Galerkin and `:matched` results publish no free-boundary δW yet and are refused when the
-response or the singular coupling is requested.
-
-`coil_sets` injects already-built coil geometry (the gpec.h5 replay path), bypassing the
-geometry read. A `runtimes` collector, when given, receives the forcing-mode materialization's wall-clock seconds as `"forcing_terms" => dt`.
+`regularization_width` smooths the ideal 1/(m−nq) divergence in the profile reconstruction (Fortran
+`reg_spot`); its default is 0 for a kinetic result and 0.05 otherwise. `write_outputs_to_HDF5` appends
+the outputs to `output_filename`, or to the force-free-states file when that is empty. `coil_sets`
+injects already-built coil geometry (the gpec.h5 replay path), bypassing the geometry read. A
+`runtimes` collector, when given, receives the forcing-mode materialization's wall-clock seconds as
+`"forcing_terms" => dt`.
 
 ```julia
-pe = perturbed_equilibrium(ffs, RMPField("forcing.dat"))
+resp = plasma_response(ffs)
+pe = perturbed_equilibrium(resp, RMPField("forcing.dat"))
 ```
 """
 function perturbed_equilibrium(
-    ffs::ForceFreeStatesResult,
+    resp::PerturbedEquilibrium.PlasmaResponse,
     rmp::ForcingTerms.RMPField;
+    regularization_width::Real=resp.regularization_width,
+    verbose::Bool=true,
+    write_outputs_to_HDF5::Bool=true,
+    output_filename::String="",
     coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing,
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing,
-    kwargs...
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
 )
+    ffs = resp.ffs
     ctrl = ffs.control
-    pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(; PerturbedEquilibrium.kinetic_regularization_kwargs(ffs, kwargs)...)
-    pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
-
-    # Inner-layer penetrated resonant field; zeros under ideal closure.
-    pe_intr.inner_bpen = ffs.bpen
-
     # Injected coil geometry (gpec.h5 replay with `--coil-source coils`) lets the coil field
     # be recomputed from stored geometry without the .dat/.h5 files.
-    if coil_sets !== nothing
-        pe_intr.coil_sets = copy(coil_sets)
-    end
-
-    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, rmp, pe_ctrl, pe_intr; runtimes=runtimes)
+    pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(resp, rmp; regularization_width, verbose,
+        preloaded_coil_sets=coil_sets === nothing ? ForcingTerms.CoilSet[] : copy(coil_sets), runtimes)
 
     # Write perturbed equilibrium outputs to same HDF5 file
-    if pe_ctrl.write_outputs_to_HDF5
-        output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
-        PerturbedEquilibrium.write_outputs_to_HDF5(
-            pe_state, pe_intr, joinpath(ffs.dir_path, output_file)
-        )
+    if write_outputs_to_HDF5
+        output_file = isempty(output_filename) ? ctrl.HDF5_filename : output_filename
+        PerturbedEquilibrium.write_outputs_to_HDF5(pe_state, joinpath(ffs.dir_path, output_file))
         @info "Results written to $output_file"
     end
 
     # Snapshot the coil geometry actually used into the gpec.h5 output so the run
     # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
-    if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
-        _write_coil_snapshot!(joinpath(ffs.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
+    if ctrl.write_outputs_to_HDF5 && !isempty(pe_state.coil_sets)
+        _write_coil_snapshot!(joinpath(ffs.dir_path, ctrl.HDF5_filename), pe_state.coil_sets)
     end
 
     return pe_state
@@ -1201,7 +1199,7 @@ function run_error_fields(
 
     cfg = ForcingTerms.CoilConfig(ft_ctrl)
     coil_sets = preloaded_coil_sets === nothing ? ForcingTerms.load_coil_sets(cfg, result.nlow; equil=result.equil) : preloaded_coil_sets
-    rc = PerturbedEquilibrium.ResonantCoupling(pe_state, result)
+    rc = PerturbedEquilibrium.ResonantCoupling(pe_state.response)
     sens = ErrorFields.compute_coil_sensitivities(coil_sets, rc, result.equil, cfg, ef_ctrl;
         psi=result.psilim, b_t0=result.equil.params.bt0)
 
@@ -1256,7 +1254,8 @@ function run_error_fields(
         missing = setdiff(ntv_ctrl.efc_coils, [cs.name for cs in efc_sets])
         isempty(missing) || error("[ErrorFields.NTV] efc_coils not among the run's coil sets: $(join(missing, ", "))")
         ntv_start = time()
-        couplings = efc_couplings(result, efc_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; method=ntv_ctrl.method, verbose=ntv_ctrl.verbose,
+        couplings = efc_couplings(pe_state.response, efc_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; method=ntv_ctrl.method, verbose=ntv_ctrl.verbose,
+            regularization_width=pe_state.regularization_width,
             rotation_scan=ntv_ctrl.rotation_scan, scan_points=ntv_ctrl.rotation_scan_points, scan_max_points=ntv_ctrl.rotation_scan_max_points,
             scan_tolerance=ntv_ctrl.rotation_scan_tolerance, span_factor=ntv_ctrl.rotation_span_factor, offset_factor=ntv_ctrl.rotation_offset_factor)
         @info "NTV couplings of $(length(couplings)) correction arrays in $(@sprintf("%.1f", time() - ntv_start)) s"
@@ -1281,22 +1280,23 @@ function run_error_fields(
 end
 
 """
-    efc_couplings(ffs, coil_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; mode=1, method="fgar", verbose=false) -> Vector{ErrorFields.EFCCoupling}
+    efc_couplings(resp, coil_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; mode=1, method="fgar",
+                  regularization_width=resp.regularization_width, verbose=false) -> Vector{ErrorFields.EFCCoupling}
 
 The couplings of each correction coil array in `coil_sets` per kilo-ampere-turn: its
 dominant-mode overlap and resonant fraction from its spectrum on the control surface, and its
 NTV torque for the whole field and for the field with mode `mode` of `dom` projected out. The
-torque is a quadratic form of the applied spectrum, so each is one plasma-response evaluation
-of the unit-current spectrum (injected as forcing modes, nothing written) followed by the
-kinetic torque of `method`; both scale exactly with the square of the current. `cfg` is the
-run's `[ForcingTerms]` coil configuration, so the boundary grid matches the one the run's
-sensitivities were evaluated on; `rc` must be the coupling of `ffs`'s own solve and
+torque is a quadratic form of the applied spectrum, so each is one evaluation of the run's plasma
+response `resp` on the unit-current spectrum (a spectrum-literal `RMPField`, nothing written, with the
+run's `regularization_width`) followed by the kinetic torque of `method`; both scale exactly with the
+square of the current. `cfg` is the run's `[ForcingTerms]` coil configuration, so the boundary grid
+matches the one the run's sensitivities were evaluated on; `rc` must be the coupling of `resp` and
 `kinetic_profiles` its kinetic context. The spectrum is normalized by the magnitude of the
 array's ampere-turns, `|nw| × max|I|`, keeping its winding sense and current pattern as the
 phase reference; the torque is stored with its sign.
 """
 function efc_couplings(
-    ffs::ForceFreeStatesResult,
+    resp::PerturbedEquilibrium.PlasmaResponse,
     coil_sets::Vector{ForcingTerms.CoilSet},
     rc::PerturbedEquilibrium.ResonantCoupling,
     dom::PerturbedEquilibrium.DominantCoupling,
@@ -1311,15 +1311,16 @@ function efc_couplings(
     scan_tolerance::Real=0.05,
     span_factor::Real=1.0,
     offset_factor::Real=2.0,
+    regularization_width::Real=resp.regularization_width,
     verbose::Bool=false
 )
+    ffs = resp.ffs
     kinetic_profiles === nothing && error("efc_couplings needs kinetic profiles: add a [KineticForces] section with a kinetic_file")
     getfield(kf_ctrl, Symbol(method * "_flag")) || error("efc_couplings: KineticForces method \"$method\" is not enabled in the control")
     equil = ffs.equil
     grids = [(n, ForcingTerms.CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)) for n in sort(unique(rc.n_modes))]
     m_low, m_high = extrema(rc.m_modes)
     v = dom.right_singular_vectors[:, mode]
-    quiet = PerturbedEquilibrium.PerturbedEquilibriumControl(; compute_response=true, compute_singular_coupling=false, verbose=verbose, write_outputs_to_HDF5=false)
 
     # Reference rotation and scan span from the kinetic profiles, with the torque kernel's own
     # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
@@ -1341,10 +1342,7 @@ function efc_couplings(
           "scan ±$(@sprintf("%.3e", span)) rad/s on $(length(grid0)) initial points (max $(scan_max_points))"
 
     function response_of(modes::Vector{ForcingTerms.ForcingMode})
-        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=ffs.dir_path)
-        pe_intr.inner_bpen = ffs.bpen
-        pe_intr.forcing_modes = modes
-        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(ffs, ForcingTerms.RMPField(ForcingTerms.ForcingTermsControl()), quiet, pe_intr)
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(resp, ForcingTerms.RMPField(modes); regularization_width, verbose)
         kf_intr = KineticForces.KineticForcesInternal(equil; verbose=verbose)
         KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
         return kf_intr
@@ -1903,8 +1901,8 @@ function write_imas(dd, result)
 end
 
 export main, write_imas
-export solve, perturbed_equilibrium
-export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
+export solve, plasma_response, perturbed_equilibrium
+export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField, PlasmaResponse
 export MatchProblem, TearingProblem, GGJModel, SLAYERModel
 
 include("Precompile.jl")

@@ -1,43 +1,28 @@
 """
-    compute_plasma_response!(
-        state, equil, solution, wt0, mtheta_vacuum, ffs,
-        intr, ctrl, metric, mats
-    )
+    build_response_operators!(resp; verbose=false)
 
-Compute plasma response to external forcing using ForceFreeStates eigenmode solutions.
-
-Implements resp_index=0 calculation from Fortran gpresp:
+Build the control-surface response operators of `resp.ffs` onto `resp`, following Fortran gpresp's
+resp_index=0 energy method:
 
   - Build flux matrix from eigenmodes
   - Calculate plasma inductance Lambda (wt0-based, resp_induct_flag=TRUE)
   - Calculate surface inductance L from Green's function
-  - Compute permeability P = Lambda * L^{-1}
-  - Apply forcing to get response: Phi_tot = P * Phi_x
+  - Compute permeability P = Lambda * L^{-1} and reluctance
+  - Conform them to the root-area-weighted field space for output
 """
-function compute_plasma_response!(
-    state::PerturbedEquilibriumState,
-    equil::Equilibrium.PlasmaEquilibrium,
-    solution::SolutionProfiles,
-    wt0::Matrix{ComplexF64},
-    mtheta_vacuum::Int,
-    ffs::ForceFreeStatesResult,
-    intr::PerturbedEquilibriumInternal,
-    ctrl::PerturbedEquilibriumControl,
-    metric::MetricData,
-    mats::MatrixSplines
-)
-    if ctrl.verbose
-        @info "Computing plasma response (wt0-based inductance)"
-    end
+function build_response_operators!(resp::PlasmaResponse; verbose::Bool=false)
+    ffs = resp.ffs
+    equil = ffs.equil
+    verbose && @info "Computing plasma response (wt0-based inductance)"
 
     # Build flux matrix from ForceFreeStates eigenmodes [mode × eigenmode]
-    flux_matrix = build_flux_matrix(equil, solution, ffs)
+    resp.flux_matrix = build_flux_matrix(equil, ffs.solution, ffs)
 
     # Plasma inductance Lambda (wt0 formula, Fortran resp_induct_flag=TRUE default)
-    plasma_inductance = calc_plasma_inductance(wt0, ffs, equil.psio)
+    plasma_inductance = calc_plasma_inductance(ffs.free_boundary.wt0, ffs, equil.psio)
 
     # Surface inductance L from vacuum surface-current matrix at psilim, block-diagonal in n.
-    surface_inductance = calc_surface_inductance(equil, ffs.psilim, mtheta_vacuum, ffs.mlow:ffs.mhigh, ffs.nlow:ffs.nhigh)
+    surface_inductance = calc_surface_inductance(equil, ffs.psilim, ffs.control.mtheta_vacuum, ffs.mlow:ffs.mhigh, ffs.nlow:ffs.nhigh)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
     # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
@@ -45,10 +30,11 @@ function compute_plasma_response!(
     L_inv = inv(surface_inductance)
     reluctance = L_inv * (plasma_inductance' - surface_inductance) * L_inv
 
-    # Store permeability in internal state for singular coupling / field reconstruction.
-    # These consumers operate on the physical control-surface flux Φ_x, so the internal
-    # copy stays in flux space; only the stored/output quantities are conformed to fields below.
-    intr.plasma_response = permeability
+    # Singular coupling, field reconstruction and the energies operate on the physical control-surface
+    # flux Φ_x, so the flux-space operators are kept; only the stored/output ones are conformed to fields.
+    resp.plasma_inductance_flux = plasma_inductance
+    resp.surface_inductance_flux = surface_inductance
+    resp.permeability_flux = permeability
 
     # Conform the control-surface matrices to the coordinate-invariant root-area-weighted
     # field (b̃) space for output (Pharr 2026). Store the b̃→b̄ operator S = Σ/√A
@@ -56,17 +42,37 @@ function compute_plasma_response!(
     # flux (Φ = A·b̄) — see Utils.jl output docs.
     rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs)
     field_mats = field_space_response_matrices(plasma_inductance, surface_inductance, permeability, reluctance, rootarea_to_area_weight, surface_area)
-    state.plasma_inductance = field_mats.plasma_inductance
-    state.surface_inductance = field_mats.surface_inductance
-    state.permeability = field_mats.permeability
-    state.reluctance = field_mats.reluctance
-    state.rootarea_to_area_weight = rootarea_to_area_weight
-    state.surface_area = surface_area
+    resp.plasma_inductance = field_mats.plasma_inductance
+    resp.surface_inductance = field_mats.surface_inductance
+    resp.permeability = field_mats.permeability
+    resp.reluctance = field_mats.reluctance
+    resp.rootarea_to_area_weight = rootarea_to_area_weight
+    resp.surface_area = surface_area
+    return resp
+end
+
+"""
+    apply_response!(state; verbose=false)
+
+Apply the response operators of `state.response` to the forcing on `state`: Phi_tot = P * Phi_x,
+the forcing and response spectra in the three field representations, the control-surface energies
+and torque, and the reconstructed ξ and b profiles.
+"""
+function apply_response!(state::PerturbedEquilibriumState; verbose::Bool=false)
+    resp = state.response
+    ffs = resp.ffs
+    equil = ffs.equil
+    solution = ffs.solution
+    permeability = resp.permeability_flux
+    surface_inductance = resp.surface_inductance_flux
+    plasma_inductance = resp.plasma_inductance_flux
+    rootarea_to_area_weight = resp.rootarea_to_area_weight
+    surface_area = resp.surface_area
 
     # Forcing and response on the control surface. Flux Φ appears only as a brief internal bridge:
     # forcing arrives as Φ_x, the field reconstruction below consumes Φ_tot, and the b̃ spectra are
     # formed via the conform operator R = S·A (Φ = R·b̃).
-    forcing_flux = map_forcing_to_eigenmodes(intr.forcing_modes, ffs)
+    forcing_flux = map_forcing_to_eigenmodes(state.forcing_modes, ffs)
     response_flux = compute_plasma_response_vector(permeability, forcing_flux)
 
     # Output forcing/response in the three Pharr field representations (all tesla):
@@ -105,8 +111,8 @@ function compute_plasma_response!(
     state.plasma_energy = real(py)              # Fortran's "total energy" is this pengy
 
     xi_modes, b_modes = reconstruct_physical_fields(
-        response_flux, flux_matrix, solution, equil, ffs, intr,
-        metric, mats, ctrl
+        response_flux, resp.flux_matrix, solution, equil, ffs,
+        ffs.metric, ffs.mats, state.regularization_width
     )
 
     npsi = size(solution.u_store, 4)
@@ -120,7 +126,7 @@ function compute_plasma_response!(
     state.b_n_modes = b_n_modes
     state.xi_n_modes = xi_n_modes
 
-    if ctrl.verbose
-        @info "Response complete: $(length(intr.forcing_modes)) forcing modes, max amplitude = $(@sprintf("%.3e", maximum(abs.(response_flux))))"
+    if verbose
+        @info "Response complete: $(length(state.forcing_modes)) forcing modes, max amplitude = $(@sprintf("%.3e", maximum(abs.(response_flux))))"
     end
 end

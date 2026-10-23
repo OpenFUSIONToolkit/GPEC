@@ -33,11 +33,9 @@ forcing_data_file = "forcing.dat"       # Manual mode table (n, m, amplitude_rea
 forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 
 [PerturbedEquilibrium]
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
-regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
 
 [ForceFreeStates]
 local_stability_flag = true   # Perform local stability analysis (Mercier and ballooning) across the ψ profile

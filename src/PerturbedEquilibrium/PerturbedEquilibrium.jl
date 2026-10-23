@@ -28,95 +28,91 @@ include("ResonantCoupling.jl")
 include("Utils.jl")
 
 # Export main types
-export PerturbedEquilibriumControl
-export PerturbedEquilibriumInternal
+export PlasmaResponse
 export PerturbedEquilibriumState
 export ForcingMode
 
 # Export main functions
+export plasma_response
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
 export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
 
 """
-    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr; runtimes=nothing)::PerturbedEquilibriumState
+    plasma_response(ffs; compute_singular_coupling=true, verbose=true) -> PlasmaResponse
 
-Main entry point for perturbed equilibrium calculations.
+Build the source-independent half of a perturbed equilibrium from a force-free-states result: the
+control-surface response operators (inductances, permeability, reluctance; Park et al., Phys.
+Plasmas 14, 052110 (2007)) and, with `compute_singular_coupling`, the singular-coupling matrices and
+their dominant modes (Park, Phys. Plasmas 16, 056115 (2009)). Apply it to an external field with
+`perturbed_equilibrium(resp, rmp)` as many times as needed.
 
-Computes plasma response to external forcing and calculates singular layer
-coupling metrics. Every ForceFreeStates input — the equilibrium, the mode space, the
-metric and matrix fits, the free-boundary energies and the ξ solution — is read off `ffs`.
-Products the producing integrator could not supply gate the corresponding calculation:
-the step warns and is skipped instead of erroring. Galerkin and `:matched` results publish
-no free-boundary δW yet, so asking for the response or the coupling on one is an error.
-
-## Arguments
-
-  - `ffs`: `ForceFreeStates.ForceFreeStatesResult` from the stability solve
-  - `forcing`: the external-field description — a `ForcingTermsControl` (TOML path) or any [`ForcingTerms.RMPField`](@ref)
-  - `ctrl`: Control parameters from [PerturbedEquilibrium] section
-  - `intr`: Internal state variables
-  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
-    materialization (coil Biot-Savart onto the plasma surface), when that step runs
-
-## Returns
-
-  - `PerturbedEquilibriumState`: Calculation results
+Products the producing integrator could not supply (free-boundary energies, a ξ solution) leave the
+corresponding operators empty: the step warns and is skipped. Galerkin and `:matched` results publish
+no free-boundary δW yet, so building a response from one is an error.
 """
-function compute_perturbed_equilibrium(
-    ffs::ForceFreeStatesResult,
-    forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField},
-    ctrl::PerturbedEquilibriumControl,
-    intr::PerturbedEquilibriumInternal;
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
-)::PerturbedEquilibriumState
-
-    state = PerturbedEquilibriumState()
-    equil = ffs.equil
-    mats = ffs.mats
-    mtheta_vacuum = ffs.control.mtheta_vacuum
-
-    # Galerkin and matched results publish no plasma edge response wp, so neither step could run.
-    if (ctrl.compute_response || ctrl.compute_singular_coupling) && ffs.free_boundary === nothing &&
-       (ffs.integrator === :galerkin || ffs.closure === :matched)
-        error("PerturbedEquilibrium needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *
-              "does not publish yet; set compute_response = false and compute_singular_coupling = false, or use a forward solve")
+function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::Bool=true, verbose::Bool=true)::PlasmaResponse
+    # Galerkin and matched results publish no plasma edge response wp, so no operator could be built.
+    if ffs.free_boundary === nothing && (ffs.integrator === :galerkin || ffs.closure === :matched)
+        error("plasma_response needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *
+              "does not publish yet; use a forward solve")
     end
 
-    # Mode arrays for convenient indexing
-    initialize_mode_arrays!(intr, ffs)
-
+    m_modes, n_modes = mode_arrays(ffs)
     # A run has at most one ξ solution, already closed at the rationals and carrying populated
     # Ξ′ / Ξ_s stores. The gal-native basis takes the analytic Galerkin Ξ′ downstream.
     solution = ffs.solution
-    intr.odet_from_gal = solution !== nothing && solution.basis === :gal_native
+    resp = PlasmaResponse(; ffs, m_modes, n_modes, regularization_width=default_regularization_width(ffs),
+        odet_from_gal=solution !== nothing && solution.basis === :gal_native)
 
-    # Unit-norm modes an internal caller already placed on `intr` skip materialization, so they
-    # are never re-converted or re-weighted.
-    if isempty(intr.forcing_modes)
-        ft_start = time()
-        modes, coil_sets = materialize_forcing_modes(ffs, forcing;
-            dir_path=intr.dir_path, preloaded_coil_sets=intr.coil_sets, verbose=ctrl.verbose)
-        runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
-        intr.forcing_modes = modes
-        isempty(coil_sets) || (intr.coil_sets = coil_sets)
-    end
-
-    # Plasma response
-    if ctrl.compute_response &&
-       ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
+    if ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
-        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mtheta_vacuum, ffs, intr, ctrl, ffs.metric, mats)
+        build_response_operators!(resp; verbose)
+        if compute_singular_coupling
+            build_coupling_operators!(resp; verbose)
+            build_dominant_coupling!(resp; verbose)
+        end
     end
+    return resp
+end
 
-    # Singular coupling metrics
-    if ctrl.compute_singular_coupling &&
-       ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
-       ForceFreeStates.require_solution(ffs, "singular coupling calculation")
-        compute_singular_coupling_metrics!(state, equil, solution, mtheta_vacuum, ffs, intr, ctrl, mats)
-        compute_dominant_coupling!(state, ctrl)
+"""
+    compute_perturbed_equilibrium(resp, forcing; regularization_width=resp.regularization_width, verbose=true,
+                                  preloaded_coil_sets=CoilSet[], runtimes=nothing)::PerturbedEquilibriumState
+
+Drive the operators of `resp` with one external field: materialize `forcing` (a `ForcingTermsControl`
+or any [`ForcingTerms.RMPField`](@ref)) on the control surface, then apply the response and the
+singular coupling to it and reconstruct the perturbed profiles. Steps whose operators `resp` does not
+carry are skipped, leaving only the forcing spectrum.
+
+## Arguments
+
+  - `regularization_width`: width of the ideal 1/(m−nq) smoothing in the profile reconstruction
+    (Fortran `reg_spot`); must be ≥ 0
+  - `preloaded_coil_sets`: coil geometry to integrate instead of reading it (the gpec.h5 replay path)
+  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
+    materialization (coil Biot-Savart onto the plasma surface)
+"""
+function compute_perturbed_equilibrium(
+    resp::PlasmaResponse,
+    forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField};
+    regularization_width::Real=resp.regularization_width,
+    verbose::Bool=true,
+    preloaded_coil_sets::Vector{CoilSet}=CoilSet[],
+    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+)::PerturbedEquilibriumState
+    ffs = resp.ffs
+    ft_start = time()
+    modes, coil_sets = materialize_forcing_modes(ffs, forcing; dir_path=ffs.dir_path, preloaded_coil_sets, verbose)
+    runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
+    state = PerturbedEquilibriumState(; response=resp, forcing_modes=modes,
+        coil_sets=isempty(coil_sets) ? preloaded_coil_sets : coil_sets, regularization_width=Float64(regularization_width))
+
+    isempty(resp.permeability_flux) || apply_response!(state; verbose)
+    isempty(resp.coupling_flux) || apply_coupling!(state; verbose)
+    if !isempty(resp.dominant_right_singular_vectors) && !isempty(state.forcing_b_rootarea)
+        state.dominant_forcing_overlap = resp.dominant_right_singular_vectors' * state.forcing_b_rootarea
     end
-
     return state
 end
 
@@ -188,6 +184,16 @@ function materialize_forcing_modes(ffs::ForceFreeStatesResult, rmp::ForcingTerms
         modes = [ForcingMode(; n=mode.n, m=mode.m, amplitude=rmp.scale * mode.amplitude) for mode in modes]
     end
     return modes, coil_sets
+end
+
+"""
+    materialize_forcing_modes(ffs, rmp::ForcingTerms.RMPSpectrum; kwargs...) -> (modes, coil_sets)
+
+Materialize a spectrum-literal leaf: fresh copies of its unit-norm modes, weighted. Nothing is read
+or integrated, and no coil geometry is produced.
+"""
+function materialize_forcing_modes(::ForceFreeStatesResult, rmp::ForcingTerms.RMPSpectrum; kwargs...)
+    return [ForcingMode(; n=mode.n, m=mode.m, amplitude=rmp.scale * mode.amplitude) for mode in rmp.modes], ForcingTerms.CoilSet[]
 end
 
 """

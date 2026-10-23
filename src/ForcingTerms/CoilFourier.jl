@@ -374,7 +374,7 @@ coil sets on the plasma boundary — a [`CoilForcingGrid`](@ref) at `psi` follow
 [`coil_forcing_modes`](@ref) over the whole assembly in one Biot-Savart pass.
 
 Output amplitudes are in unit-norm convention (= Fortran `Phi_x`).
-No normalization conversion is needed when using these modes with `compute_plasma_response!`.
+No normalization conversion is needed when using these modes to drive a plasma response.
 
 Result is appended to `forcing_modes` (existing content is cleared first).
 """
