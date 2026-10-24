@@ -1,0 +1,75 @@
+# Cerfon-Freidberg diverted analytic equilibrium — n=1 ideal stability, lower single null.
+# The plasma boundary carries a magnetic null, so q diverges logarithmically as psi_N -> 1
+# and no choice of psihigh converges. This is the truncation-sensitivity fixture: raise
+# psihigh by a decade and q at the TRUNCATION SURFACE climbs by a fixed increment forever
+# (about 0.31 per decade here, and twice that with null = "dn"). q at psi_N = 1 is infinite
+# in every configuration — it is never reached, psihigh always cuts the profile short.
+# q0 = 1.5 is a wall-stabilized operating point: n=1 is unstable with no wall and stable
+# with the conformal wall out to a gap of about 0.46, so a = 0.25 sits at roughly half the
+# critical gap. The equilibrium is generated analytically from the [CERFON_INPUT] section.
+
+[Equilibrium]
+eq_type = "cerfon"                      # Type of the input 2D equilibrium file
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "ldp"                       # Radial grid packing type
+psilow = 1e-4                           # Lower limit of normalized poloidal flux
+psihigh = 0.999                         # Upper limit of normalized poloidal flux
+mpsi = 256                              # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+mtheta = 256                            # Number of poloidal grid points
+newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
+etol = 1e-8                             # Error tolerance for equilibrium solver
+force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
+
+[Wall]
+shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.25                                # Distance from plasma (conformal) or shape parameter
+aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                                # Elongation parameter for wall shapes
+cw = 0                                  # Offset of wall center from major radius
+dw = 0.5                                # Triangularity parameter for wall shapes
+tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
+
+[ForceFreeStates]
+local_stability_flag = true   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
+
+psiedge = 0.99                # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
+sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
+
+nn_low = 1                    # Smallest toroidal mode number to include
+nn_high = 1                   # Largest toroidal mode number to include
+delta_mlow = 8                # Expands lower bound of Fourier harmonics
+delta_mhigh = 8               # Expands upper bound of Fourier harmonics
+mthvac = 960                  # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+
+kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
+kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
+ucrit = 1e3                   # Column-norm threshold that triggers solution renormalization
+save_interval = 3             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+
+use_parallel = true           # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
+parallel_threads = 2          # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
+populate_dense_xi = false     # Append serial-EL pass so dense ξ is stored (required with a [PerturbedEquilibrium] section)
+set_psilim_via_dmlim = false  # FALSE here: psihigh is the truncation knob under study, so nothing else may move it
+dmlim = 0.2                   # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
+
+# Cerfon-Freidberg analytic equilibrium parameters (eq_type = "cerfon"); see CerfonConfig in src/Equilibrium.
+[CERFON_INPUT]
+mr = 384             # Number of radial grid zones in the tabulated psi(R,Z) map
+mz = 512             # Number of axial grid zones in the tabulated psi(R,Z) map
+ma = 256             # Number of flux grid zones for the F and mu0*p profile spline
+r0 = 1.0             # Major radius R0 in m
+b0 = 2.0             # Vacuum toroidal field at r0 in T
+epsilon = 0.32       # Inverse aspect ratio eps = a/R0
+kappa = 1.7          # Elongation kappa
+delta = 0.33         # Triangularity delta
+A = -0.155           # Solov'ev parameter A setting the p'/FF' split (0 = pressure-driven only)
+q0 = 1.5             # Target safety factor on axis; fixes the flux scale
+null = "lsn"         # Null topology: "lsn" (lower single null) or "dn" (double null)
+xsep = 1.1           # Places the null at (1 - xsep*delta*eps, -xsep*kappa*eps)
+box_margin = 0.12    # psi(R,Z) box padding beyond the boundary, in units of eps
