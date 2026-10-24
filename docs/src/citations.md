@@ -60,7 +60,7 @@ The primary reference for the `ForceFreeStates` module. Derives the Euler-Lagran
 
 ---
 
-> A. H. Glasser, S. A. Sabbagh, J. M. Bialek, and Y.-S. Park, "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control,"
+> A. S. Glasser, E. Kolemen, and A. H. Glasser, "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control,"
 > *Physics of Plasmas* **25**, 032507 (2018).
 > DOI: [10.1063/1.5007042](https://doi.org/10.1063/1.5007042)
 
@@ -78,7 +78,7 @@ Describes the 3D equilibrium perturbation formalism in toroidal geometry that fo
 
 ---
 
-> J.-K. Park, A. H. Boozer, and A. H. Glasser, "Control of Asymmetric Magnetic Perturbations in Tokamaks,"
+> J.-K. Park, M. J. Schaffer, J. E. Menard, and A. H. Boozer, "Control of Asymmetric Magnetic Perturbations in Tokamaks,"
 > *Physical Review Letters* **99**, 195003 (2007).
 > DOI: [10.1103/PhysRevLett.99.195003](https://doi.org/10.1103/PhysRevLett.99.195003)
 
@@ -86,7 +86,7 @@ Demonstrates the GPEC framework for computing plasma response to resonant magnet
 
 ---
 
-> J.-K. Park, M. J. Schaffer, J. E. Menard, and A. H. Boozer, "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
+> J.-K. Park, A. H. Boozer, J. E. Menard, A. M. Garofalo, M. J. Schaffer, R. J. Hawryluk, S. M. Kaye, S. P. Gerhardt, S. A. Sabbagh, and the NSTX Team, "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
 > *Physics of Plasmas* **16**, 056115 (2009).
 > DOI: [10.1063/1.3122862](https://doi.org/10.1063/1.3122862)
 
@@ -120,7 +120,7 @@ Derives the resistive MHD stability analysis and Δ' calculation using matched a
 
 ---
 
-> A. H. Glasser, J.-K. Park, and Z. R. Wang, "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time,"
+> A. S. Glasser and E. Kolemen, "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time,"
 > *Physics of Plasmas* **25**, 082502 (2018).
 > DOI: [10.1063/1.5029477](https://doi.org/10.1063/1.5029477)
 
@@ -136,7 +136,7 @@ Constructs the Wasow large-``x`` asymptotic basis (the `inps` kernel) that suppl
 
 ---
 
-> X. Wang, A. H. Glasser, J.-K. Park, Z. R. Wang, and N. C. Logan, "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach,"
+> Z. Wang, A. H. Glasser, D. Brennan, Y. Liu, and J.-K. Park, "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach,"
 > *Physics of Plasmas* **27**, 122503 (2020).
 > DOI: [10.1063/5.0020010](https://doi.org/10.1063/5.0020010)
 
