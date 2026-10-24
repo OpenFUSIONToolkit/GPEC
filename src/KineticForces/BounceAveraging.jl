@@ -206,6 +206,7 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
   - `nlmda`: Number of pitch angle grid points (default 128, matching Fortran pentrc nlmda)
   - `ntheta`: Number of poloidal grid points per bounce (default 128)
   - `smat, tmat, xmat, ymat, zmat`: Geometric matrices (mpert×mpert) for kinetic matrix path
+  - `surface_field`: Prebuilt `_surface_b_field(B_vpar)`, shared across the harmonics of a surface
 """
 function compute_bounce_data(
     psi::Float64, n::Int, l::Int, q::Float64,
@@ -221,7 +222,8 @@ function compute_bounce_data(
     tmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
     xmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
     ymat::Union{Nothing,Matrix{ComplexF64}}=nothing,
-    zmat::Union{Nothing,Matrix{ComplexF64}}=nothing
+    zmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
+    surface_field=nothing
 )
     mpert = length(mfac)
     do_matrices = !isnothing(smat)
@@ -229,9 +231,8 @@ function compute_bounce_data(
     # Per-surface scratch, reused across all λ.
     scr = BounceScratch(ntheta, mpert)
 
-    # B(θ) is decomposed once per surface into its cells and stationary points; every
-    # λ then reuses it instead of rescanning [0,1].
-    bf = _surface_b_field(B_vpar)
+    # B(θ) decomposed into its cells and stationary points: once per surface, reused by every λ.
+    bf = surface_field === nothing ? _surface_b_field(B_vpar) : surface_field
     bpts_buf = Float64[]
     # One resumable cell hint per monotone interval; λ ascends, so each interval's
     # crossing advances steadily and the next λ starts where the last one finished.

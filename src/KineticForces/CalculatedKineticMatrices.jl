@@ -144,6 +144,8 @@ function compute_calculated_kinetic_matrices(
             block_t = thread_block_t[tid]
             psi = xs[ipsi]
             env[ipsi] == 0.0 && continue   # inside the near-axis validity band: kernel skipped
+            # (n, ℓ)-independent surface setup, built once per ψ on this thread's `intr` copy.
+            state = _setup_surface_state(psi, z_s, m_s, el_s, equil, intr_t, prof_s)
             for in_idx in 1:npert
                 n = ffs_intr.nlow + in_idx - 1
                 fill!(full_w, 0)
@@ -158,7 +160,8 @@ function compute_calculated_kinetic_matrices(
                         nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.collisionality_factor,
                         atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=kf_ctrl.rtol_pitch,
                         atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
-                        nested_tolerance_margin=kf_ctrl.nested_tolerance_margin
+                        nested_tolerance_margin=kf_ctrl.nested_tolerance_margin,
+                        state
                     )
                     full_w .+= block_w
                     full_t .+= block_t
