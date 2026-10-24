@@ -543,14 +543,16 @@ end
 
 # Kinetic profiles for the overlap scan come from the [SLAYER] section, through the same control
 # and loader the SLAYER analysis itself uses, so the scan sees the same profiles, the same HDF5
-# group and the same chi(psi). Returns `nothing` when there is no usable [SLAYER] profile_file.
+# group and the same chi(psi). Returns `nothing` when there is no usable [SLAYER] profile_file; with
+# tearing enabled that is an error instead, so the run fails before the solve rather than at its end.
 function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
     (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
     ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-    isempty(ctrl.profile_file) && return nothing
+    isempty(ctrl.profile_file) && !ctrl.enabled && return nothing
     loaded = try
         Runner._load_profiles(ctrl, dir_path)
     catch err
+        ctrl.enabled && rethrow()
         @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
         return nothing
     end
