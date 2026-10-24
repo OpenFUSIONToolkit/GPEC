@@ -282,6 +282,7 @@ const MAIN_H5_ANNOTATIONS = [
 const RUNTIME_H5_ANNOTATIONS = [
     "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
     "Info/Runtimes/galerkin" => (; long_name="wall-clock time of the Galerkin outer-region solve (measured inside force_free_states, not additional to it)", units="s"),
+    "Info/Runtimes/local_stability" => (; long_name="wall-clock time of the LocalStability stage (Mercier, resistive interchange and ballooning scans)", units="s"),
     "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
     "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
     "Info/Runtimes/forcing_terms" => (;
