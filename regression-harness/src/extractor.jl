@@ -41,6 +41,13 @@ function extract_quantities(h5path::String, qty_specs::Vector{QuantitySpec}, run
     return results
 end
 
+# Preserve nonfinite sentinels instead of JSON's default null encoding.
+struct RegressionJSONSerialization <: JSON.Serializations.CommonSerialization end
+function JSON.show_json(io::JSON.StructuralContext, ::RegressionJSONSerialization, value::AbstractFloat)
+    print(io, isnan(value) ? "NaN" : value == Inf ? "Infinity" : value == -Inf ? "-Infinity" : value)
+end
+regression_json(value) = sprint(JSON.show_json, RegressionJSONSerialization(), value)
+
 """
 Apply an extraction rule to raw HDF5 data, producing an ExtractedQuantity.
 """
@@ -74,9 +81,7 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
 
     elseif spec.extract == "all_real"
         arr = Float64.(real.(raw))
-        # allownan: SLAYER γ/Q_root are NaN when no dispersion root is found —
-        # a legitimate state to record so a future root appearing flags a diff.
-        json_str = JSON.json(arr; allownan=true)
+        json_str = regression_json(arr)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif startswith(spec.extract, "first_") && endswith(spec.extract, "_complex")
@@ -84,7 +89,7 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         # vector — the complex-preserving sibling of "first_N".
         nkeep = parse(Int, spec.extract[(length("first_")+1):(end-length("_complex"))])
         pairs = [[real(x), imag(x)] for x in raw[1:min(nkeep, length(raw))]]
-        json_str = JSON.json(pairs; allownan=true)
+        json_str = regression_json(pairs)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif startswith(spec.extract, "first_")
@@ -94,12 +99,12 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         # Real data only — use "first_N_complex" for complex datasets.
         nkeep = parse(Int, spec.extract[(length("first_")+1):end])
         arr = Float64.(real.(raw))[1:min(nkeep, length(raw))]
-        json_str = JSON.json(arr; allownan=true)
+        json_str = regression_json(arr)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif spec.extract == "all_complex"
         pairs = [[real(x), imag(x)] for x in raw]
-        json_str = JSON.json(pairs; allownan=true)
+        json_str = regression_json(pairs)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif spec.extract == "diagonal_complex"
@@ -109,7 +114,7 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
             error("diagonal_complex requires a square 2-D matrix; got size $(size(raw))")
         diag_vec = [raw[i, i] for i in 1:size(raw, 1)]
         pairs = [[real(x), imag(x)] for x in diag_vec]
-        json_str = JSON.json(pairs; allownan=true)
+        json_str = regression_json(pairs)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif spec.extract == "checksum"
