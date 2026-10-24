@@ -703,7 +703,7 @@ function equilibrium_solver_by_inversion(
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_table; itp_opts2d...)
 
     # Intermediate inverse input; the captured DirectIngest rides on the original eq_input,
-    # which setup_equilibrium forwards onto the equilibrium, so this one carries ingest=nothing.
+    # which PlasmaEquilibrium forwards onto the equilibrium, so this one carries ingest=nothing.
     inv_input = InverseRunInput(raw_profile.config, raw_profile.sq_in,
         rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, nothing, raw_profile.psihigh_resolved)
 

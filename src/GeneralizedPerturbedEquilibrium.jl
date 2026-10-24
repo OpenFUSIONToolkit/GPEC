@@ -138,9 +138,9 @@ end
 
 Build the pipeline inputs from a working directory containing `gpec.toml`. Returns the
 parsed `inputs` dict, the `EquilibriumConfig`, and the `additional_input` consumed by
-`setup_equilibrium` — an analytic `*Config` for
+`PlasmaEquilibrium` — an analytic `*Config` for
 sol/lar/tj equilibria (parameters from the embedded TOML section), the `dd` data dictionary
-for IMAS, or `nothing` for file-based equilibria (efit, chease) that `setup_equilibrium`
+for IMAS, or `nothing` for file-based equilibria (efit, chease) that `PlasmaEquilibrium`
 reads from disk.
 """
 function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
@@ -171,7 +171,7 @@ Shared pipeline body that every input source funnels into. The caller (one of th
 `build_inputs_from_*` builders) is responsible for producing a fully merged
 `inputs::Dict`, an `EquilibriumConfig`, and a ready `additional_input` — this body
 does no source dispatch of its own. `additional_input` is forwarded directly to
-`setup_equilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
+`PlasmaEquilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
 analytic `*Config` or IMAS `dd` (TOML path), or `nothing` for file-based equilibria.
 
 `preloaded_forcing_modes` lets the rerun path inject a `Vector{ForcingMode}`
@@ -220,11 +220,10 @@ function main_from_inputs(
 
     resolve_mode_space!(intr, ctrl)
 
-    equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
 
     kf_ctrl, kinetic_profiles, kf_species = load_kinetic_context(inputs, intr, ctrl, equil)
-    equil = maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles;
-        kf_ctrl=kf_ctrl, kf_species=kf_species)
+    equil = maybe_reform_equilibrium(equil, intr, ctrl, kinetic_profiles; kf_ctrl=kf_ctrl, kf_species=kf_species)
 
     equil_dt = time() - equil_start
     push!(runtimes, "equilibrium" => equil_dt)
@@ -457,23 +456,22 @@ function load_kinetic_context(
 end
 
 """
-    maybe_reform_equilibrium(equil, eq_config, additional_input, intr, ctrl, kinetic_profiles;
-                             kf_ctrl=nothing, kf_species=nothing) -> equil
+    maybe_reform_equilibrium(equil, intr, ctrl, kinetic_profiles; kf_ctrl=nothing, kf_species=nothing) -> equil
 
 Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, kinetic
-profiles), pin knots on rational surfaces, and re-form on the refined grid from the in-memory
-input — no file re-read. Returns `equil` untouched when the configuration wants a single pass.
+profiles), pin knots on rational surfaces, and re-form on the refined grid with
+`Equilibrium.reform` from the source the equilibrium remembers. Returns `equil` untouched when
+its configuration wants a single pass.
 """
 function maybe_reform_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
-    eq_config::Equilibrium.EquilibriumConfig,
-    additional_input,
     intr::ForceFreeStatesInternal,
     ctrl::ForceFreeStatesControl,
     kinetic_profiles;
     kf_ctrl::Union{Nothing,KineticForces.KineticForcesControl}=nothing,
     kf_species=nothing
 )
+    eq_config = equil.config
     Equilibrium.wants_two_pass(eq_config) || return equil
 
     mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
@@ -489,19 +487,7 @@ function maybe_reform_equilibrium(
     psi_nodes = Equilibrium.refined_psi_grid(equil;
         tau=eq_config.psi_accuracy, kin=kinetic_profiles, mandatory=mandatory, pinned=pinned,
         singfac_min=ctrl.singfac_min, n_min=n_min)
-    rerun_input = if additional_input !== nothing
-        # Analytic *Config, IMAS dd, or prebuilt RunInput — all re-formable. The IMAS
-        # path re-runs read_imas, which must resolve the same psihigh both passes;
-        # _validate_psi_nodes errors loudly if it does not.
-        additional_input
-    elseif equil.ingest isa Equilibrium.DirectIngest
-        Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
-    elseif equil.ingest isa Equilibrium.InverseIngest
-        Equilibrium.build_inverse_from_ingest(eq_config, equil.ingest)
-    else
-        nothing  # fall back to re-reading the input file
-    end
-    equil = Equilibrium.setup_equilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
+    equil = Equilibrium.reform(equil, psi_nodes)
     implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
     if implied > 1.5 * (length(psi_nodes) - 1)
         @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
@@ -957,12 +943,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     # placeholder `prepare_force_free_states!` threads into its (unused) callback.
     kf_ctrl = KineticForces.KineticForcesControl()
 
-    if Equilibrium.wants_two_pass(equil.config) && equil.ingest === nothing
-        @warn "Two-pass auto grid needs the equilibrium's raw ingest, which analytic and IMAS equilibria do not carry; " *
-              "solving on the single-pass grid. Set mpsi explicitly to choose the grid."
-    else
-        equil = maybe_reform_equilibrium(equil, equil.config, nothing, intr, ctrl, nothing)
-    end
+    equil = maybe_reform_equilibrium(equil, intr, ctrl, nothing)
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
     metric, mats, _ = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
