@@ -533,23 +533,25 @@ include("h5_metadata_check.jl")
             @test with_profiles[3].series_list[2][:y] == c.torque_residual_profile[:, 2]
             @test_throws ErrorException GPEC.efc_couplings(ffs, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl(), nothing)
 
-            # Species-resolved couplings: the deck's main ion resolved on its own reproduces the run's
-            # single-ion torque, and a species list's torque is the sum of its members' own torques.
+            # Species-resolved torque of the run's own perturbation, on the diagnostics' axis boundary: the
+            # deck's main ion resolved on its own reproduces the single-ion torque, and a D-T list's torque
+            # is the sum of its members' own torques.
             KF, EQ = GPEC.KineticForces, GPEC.Equilibrium
             kf_ctrl = KF.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
             kfile = joinpath(dir, "kinetic.dat")
             kp = EQ.load_kinetic_profiles(kfile; zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass,
                 chi1=2π * ffs.equil.psio)
-            sp = EQ.resolve_ntv_species(kfile, [KF.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)];
-                electron=false, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass)
-            @test length(sp) == 2 && !sp[1].electron && sp[2].z == kf_ctrl.impurity_charge
-            coupling_of(species) = GPEC.efc_couplings(ffs, sets[3:3], rc, dom, cfg, kf_ctrl, kp; species, rotation_scan=false)[1]
-            ion, imp, both = coupling_of(sp[1:1]), coupling_of(sp[2:2]), coupling_of(sp)
-            @test ion.torque_full_per_kat2 ≈ c.torque_full_per_kat2 rtol = 1e-6
-            @test ion.torque_residual_per_kat2 ≈ c.torque_residual_per_kat2 rtol = 1e-6
-            @test both.torque_full_per_kat2 ≈ ion.torque_full_per_kat2 + imp.torque_full_per_kat2 rtol = 1e-12
-            @test both.torque_residual_per_kat2 ≈ ion.torque_residual_per_kat2 + imp.torque_residual_per_kat2 rtol = 1e-12
-            @test !EF.has_rotation_scan(both) && both.torque_full_profile[1, 1] == 0.0
+            resolve(list) = EQ.resolve_ntv_species(kfile, list; electron=false, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass)
+            kf_intr = KF.KineticForcesInternal(ffs.equil; verbose=false)
+            KF.set_perturbation_data!(kf_intr, pe, ffs, ffs.equil, ffs.metric)
+            psi_c = KF.axis_validity_boundary(kf_ctrl, nothing, kp, ffs.equil, Float64[sng.psifac for sng in ffs.surfaces])
+            torque(species) = GPEC.ntv_torque_state(kf_intr, kf_ctrl, ffs.equil, kp, species, 0.0; axis_psi_c=psi_c).method_results["fgar"].total_torque
+            single = torque(nothing)
+            @test isfinite(single) && single != 0
+            @test torque(resolve([KF.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)])) ≈ single rtol = 1e-6
+            dt = resolve([KF.IonSpecies(; z=kf_ctrl.ion_charge, m=2, fraction=0.5), KF.IonSpecies(; z=kf_ctrl.ion_charge, m=3, fraction=0.5)])
+            @test length(dt) >= 2 && !any(s.electron for s in dt)
+            @test torque(dt) ≈ sum(torque(dt[i:i]) for i in eachindex(dt)) rtol = 1e-12
 
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,

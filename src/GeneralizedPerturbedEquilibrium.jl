@@ -1277,6 +1277,31 @@ function run_error_fields(
 end
 
 """
+    ntv_torque_state(kf_intr, kf_ctrl, equil, kinetic_profiles, species, Δω; axis_psi_c=0.0) -> KineticForcesState
+
+The NTV torque of the perturbation held by `kf_intr` with the E×B rotation rigidly shifted by `Δω`
+(rad/s): the deck's single ion on `kinetic_profiles` when `species` is `nothing`, otherwise the sum
+over the resolved species, each with the control of its identity alone and its own profiles
+shifted, as `run_kinetic_forces` sums them. Unshifted profiles are used as they are, so `Δω = 0`
+is the same evaluation as the torque diagnostics. `axis_psi_c` is the near-axis validity boundary
+passed to the torque.
+"""
+function ntv_torque_state(kf_intr, kf_ctrl::KineticForces.KineticForcesControl, equil, kinetic_profiles, species, Δω::Real; axis_psi_c::Float64=0.0)
+    shifted(p) = Δω == 0 ? p : Equilibrium.shift_exb_rotation(p, Δω)
+    if species === nothing
+        st = KineticForces.KineticForcesState()
+        KineticForces.compute_torque_all_methods!(st, kf_intr, kf_ctrl, equil, shifted(kinetic_profiles); axis_psi_c)
+        return st
+    end
+    states = map(species) do sp
+        st = KineticForces.KineticForcesState()
+        KineticForces.compute_torque_all_methods!(st, kf_intr, KineticForces.species_control(kf_ctrl, sp), equil, shifted(sp.profiles); axis_psi_c)
+        st
+    end
+    return KineticForces.combine_species_states(states)
+end
+
+"""
     efc_couplings(ffs, coil_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; species=nothing, mode=1, method="fgar", verbose=false) -> Vector{ErrorFields.EFCCoupling}
 
 The couplings of each correction coil array in `coil_sets` per kilo-ampere-turn: its
@@ -1351,24 +1376,11 @@ function efc_couplings(
         KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
         return kf_intr
     end
-    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one
-    # rotation shift Δ, summed over the species when a list is given.
-    shifted(p, Δ) = Δ == 0 ? p : Equilibrium.shift_exb_rotation(p, Δ)
+    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation shift.
     function torque_of(kf_intr, Δ)
         logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
         kf_state = Base.CoreLogging.with_logger(logger) do
-            if species === nothing
-                st = KineticForces.KineticForcesState()
-                KineticForces.compute_torque_all_methods!(st, kf_intr, kf_ctrl, equil, shifted(kp, Δ))
-                st
-            else
-                states = map(species) do sp
-                    st = KineticForces.KineticForcesState()
-                    KineticForces.compute_torque_all_methods!(st, kf_intr, KineticForces.species_control(kf_ctrl, sp), equil, shifted(sp.profiles, Δ))
-                    st
-                end
-                KineticForces.combine_species_states(states)
-            end
+            ntv_torque_state(kf_intr, kf_ctrl, equil, kp, species, Δ)
         end
         r = kf_state.method_results[String(method)]
         T = real(r.total_torque)
