@@ -48,7 +48,8 @@ Computes plasma response to external forcing and calculates singular layer
 coupling metrics. Every ForceFreeStates input — the equilibrium, the mode space, the
 metric and matrix fits, the free-boundary energies and the ξ solution — is read off `ffs`.
 Products the producing integrator could not supply gate the corresponding calculation:
-the step warns and is skipped instead of erroring.
+the step warns and is skipped instead of erroring. Galerkin and `:matched` results publish
+no free-boundary δW yet, so asking for the response or the coupling on one is an error.
 
 ## Arguments
 
@@ -75,6 +76,13 @@ function compute_perturbed_equilibrium(
     equil = ffs.equil
     mats = ffs.mats
     mtheta_vacuum = ffs.control.mtheta_vacuum
+
+    # Galerkin and matched results publish no plasma edge response wp, so neither step could run.
+    if (ctrl.compute_response || ctrl.compute_singular_coupling) && ffs.free_boundary === nothing &&
+       (ffs.integrator === :galerkin || ffs.closure === :matched)
+        error("PerturbedEquilibrium needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *
+              "does not publish yet; set compute_response = false and compute_singular_coupling = false, or use a forward solve")
+    end
 
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs)
