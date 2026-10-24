@@ -260,7 +260,7 @@ function main_from_inputs(
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles;
         species=kf_species,
         overlap_inputs=_overlap_slayer_inputs(inputs, intr.dir_path))
-    ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric)
+    ffs_result = run_deck_match(run_force_free_states(ctrl, equil, mats, intr, metric), ctrl)
 
     if ctrl.write_outputs_to_HDF5
         write_outputs_to_HDF5(
@@ -769,18 +769,19 @@ function prepare_force_free_states!(
 end
 
 """
-    run_force_free_states(ctrl, equil, mats, intr, metric) -> ForceFreeStatesResult
+    run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=false) -> ForceFreeStatesResult
 
 Run the formalism selected by `ctrl.integrator` — the standalone Galerkin solve, or the
 Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publish its products as a
-`ForceFreeStatesResult`.
+`ForceFreeStatesResult`. `cut_solution` is the scripting-only `Galerkin(; cut_solution)` option.
 """
 function run_force_free_states(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     mats,
     intr::ForceFreeStatesInternal,
-    metric
+    metric;
+    cut_solution::Bool=false
 )
     nstring = _mode_range_label(intr)
 
@@ -796,7 +797,7 @@ function run_force_free_states(
             error("integrator = \"galerkin\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         gal_start = time()
         wv = ctrl.vac_flag ? first(ForceFreeStates.compute_scaled_wv(ctrl, equil, intr)) : nothing
-        gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv)
+        gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
         gal_dt = time() - gal_start
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
     else
@@ -844,33 +845,38 @@ function run_force_free_states(
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
     result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
 
-    # Deck-driven matching, through the same MatchProblem as the API.
-    if ctrl.integrator == "galerkin" && ctrl.gal_match_flag
-        ctrl.gal_rpec_flag || error("gal_match_flag=true requires gal_rpec_flag=true")
-        ctrl.gal_ideal_flag || !(isempty(ctrl.gal_eta) || isempty(ctrl.gal_rho) || isempty(ctrl.gal_rotation)) ||
-            error("gal_match_flag needs gal_eta, gal_rho and gal_rotation (one value per matched surface, core to edge)")
-        ctrl.gal_inner_solver in ("ray", "galerkin") ||
-            error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
-        ctrl.verbose && @info(
-            ctrl.gal_ideal_flag ?
-            "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
-            "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
-        )
-        # The gal_inner_* knobs override the "galerkin" backend's defaults; unset keys keep them.
-        model = if ctrl.gal_inner_solver == "galerkin"
-            knobs = (xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx, nq=ctrl.gal_inner_nq,
-                cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax)
-            InnerLayer.GGJModel(; solver=:galerkin, (k => v for (k, v) in pairs(knobs) if v !== nothing)...)
-        else
-            InnerLayer.GGJModel(; solver=:ray)
-        end
-        prob = ForceFreeStates.MatchProblem(result; eta=ctrl.gal_eta, rho=ctrl.gal_rho, rotation=ctrl.gal_rotation,
-            gamma=ctrl.gal_gamma, ideal=ctrl.gal_ideal_flag)
-        result = solve(prob, model)
-        ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(result.match.residual)")
-    end
-
     return result
+end
+
+"""
+    run_deck_match(result, ctrl) -> ForceFreeStatesResult
+
+Solve the deck's inner-layer match (`gal_match_flag`) on a finished solve, posing the same
+`MatchProblem` a script would from the `gal_*` keys. Returns `result` unchanged when the deck
+requests no match.
+"""
+function run_deck_match(result::ForceFreeStatesResult, ctrl::ForceFreeStatesControl)
+    ctrl.gal_match_flag || return result
+    ctrl.gal_inner_solver in ("ray", "galerkin") ||
+        error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
+    ctrl.verbose && @info(
+        ctrl.gal_ideal_flag ?
+        "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
+        "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
+    )
+    # The gal_inner_* knobs override the "galerkin" backend's defaults; unset keys keep them.
+    model = if ctrl.gal_inner_solver == "galerkin"
+        knobs = (xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx, nq=ctrl.gal_inner_nq,
+            cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax)
+        InnerLayer.GGJModel(; solver=:galerkin, (k => v for (k, v) in pairs(knobs) if v !== nothing)...)
+    else
+        InnerLayer.GGJModel(; solver=:ray)
+    end
+    prob = ForceFreeStates.MatchProblem(result; eta=ctrl.gal_eta, rho=ctrl.gal_rho, rotation=ctrl.gal_rotation,
+        gamma=ctrl.gal_gamma, ideal=ctrl.gal_ideal_flag)
+    matched = solve(prob, model)
+    ctrl.gal_ideal_flag || (ctrl.verbose && @info "RPEC matching: linear-solve residual = $(matched.match.residual)")
+    return matched
 end
 
 """
@@ -959,6 +965,8 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     intr.debug_settings = prob.debug
 
     resolve_mode_space!(intr, ctrl)
+    ctrl.gal_match_flag &&
+        error("gal_match_flag is the deck's match request; match the result instead: solve(MatchProblem(ffs; eta, rho, rotation), GGJModel())")
 
     # The API path never reads kinetic profiles, so the KineticForces control is only the
     # placeholder `prepare_force_free_states!` threads into its (unused) callback.
@@ -973,7 +981,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
 
     locstab, ballooning_boundary = run_local_stability(ctrl, equil)
     metric, mats, _ = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
-    result = run_force_free_states(ctrl, equil, mats, intr, metric)
+    result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa ForceFreeStates.Galerkin && alg.cut_solution)
 
     if ctrl.write_outputs_to_HDF5
         write_outputs_to_HDF5(result; locstab=locstab, ballooning_boundary=ballooning_boundary)
