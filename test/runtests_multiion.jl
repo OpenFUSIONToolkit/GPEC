@@ -39,7 +39,8 @@ using HDF5
             electron=true, rtol_pitch=1e-3, fgar_flag=true)
         sc = KF.species_control(ctrl, (; z=2, m=4, electron=false))
         @test (sc.ion_charge, sc.ion_mass, sc.electron) == (2, 4, false) && isempty(sc.ion_species)
-        @test all(getfield(sc, f) == getfield(ctrl, f) for f in fieldnames(KF.KineticForcesControl) if f ∉ (:ion_charge, :ion_mass, :electron, :ion_species))
+        # isequal: the energy-tolerance overrides default to NaN.
+        @test all(isequal(getfield(sc, f), getfield(ctrl, f)) for f in fieldnames(KF.KineticForcesControl) if f ∉ (:ion_charge, :ion_mass, :electron, :ion_species))
     end
 
     @testset "resolve_ntv_species" begin
