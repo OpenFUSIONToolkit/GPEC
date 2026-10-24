@@ -291,6 +291,50 @@ end
 end
 
 # ---------------------------------------------------------------------------
+@testset "CoilFourier: B·n̂ file conversion onto the run's harmonics" begin
+    eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", psilow=0.01, psihigh=0.995)
+    equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig())
+    n, m_out, mtheta = 1, -10:14, 256
+    convert(modes) = ForcingTerms.convert_forcing_normalization(modes, "normal_field_T", equil, n, m_out)
+    spectrum(ms, amp) = [ForcingMode(; n, m, amplitude=amp(m)) for m in ms]
+    amplitudes(modes) = [mode.amplitude for mode in modes]
+
+    # A single B·n̂ harmonic gains flux sidebands, and its own harmonic matches a projection onto it alone.
+    single = spectrum(2:2, m -> 1e-4 + 0im)
+    flux = @test_logs (:info, r"Converting") convert(single)
+    @test [mode.m for mode in flux] == collect(m_out)
+    φ = Dict(mode.m => abs(mode.amplitude) for mode in flux)
+    @test φ[1] > 0.05φ[2] && φ[3] > 0.05φ[2]
+    alone = ForcingTerms.convert_forcing_normalization(single, "normal_field_T", equil, n, 2:2)
+    @test alone[1].amplitude ≈ flux[findfirst(==(2), m_out)].amplitude rtol = 1e-12
+
+    # On a range wide enough to hold the weight's whole spectrum, the inverse transform of the
+    # converted flux reproduces J|∇ψ| × B·n̂ on the conversion grid.
+    wide = -60:64
+    flux_wide = ForcingTerms.convert_forcing_normalization(single, "normal_field_T", equil, n, wide)
+    FT = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
+    weight = Equilibrium.compute_jac_delpsi(equil, equil.rzphi_xs[end], mtheta)
+    bn = FT.inverse(FT.FourierTransform(mtheta, 1, 2), [1e-4 + 0im])
+    rebuilt = FT.inverse(FT.FourierTransform(mtheta, length(wide), first(wide)), amplitudes(flux_wide))
+    @test maximum(abs, rebuilt .- weight .* bn) < 1e-6 * maximum(abs, weight .* bn)
+
+    # A file wider than the run loses nothing: its conversion onto a narrow run range equals the
+    # conversion onto a wide range downsampled to it.
+    broad = spectrum(-48:51, m -> 1e-4 * 0.9^abs(m - 2) + 0im)
+    narrow = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, 0:4)
+    downsampled = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, -200:200)
+    @test amplitudes(narrow) ≈ amplitudes(downsampled)[201 .+ (0:4)] rtol = 1e-5
+
+    # A hard-cut flat spectrum warns at both edges; a decaying one converts silently.
+    @test_logs (:info, r"Converting") (:warn, r"m=-2 carries") (:warn, r"m=6 carries") convert(spectrum(-2:6, m -> 1e-4 + 0im))
+    @test_logs (:info, r"Converting") convert(spectrum(-4:8, m -> 1e-4 * 0.3^abs(m - 2) + 0im))
+
+    # sfl_flux_Wb is a pure (2π)² rescale that keeps the file's harmonics.
+    sfl = ForcingTerms.convert_forcing_normalization(spectrum(1:3, m -> 1.0 + 0im), "sfl_flux_Wb", equil, n, m_out)
+    @test [mode.m for mode in sfl] == [1, 2, 3] && all(amplitudes(sfl) .≈ (2π)^2)
+end
+
+# ---------------------------------------------------------------------------
 @testset "Integration: D3D I-coil field pipeline" begin
     # Skip if coil geometry files not present (shouldn't happen since bundled)
     @test isdir(COIL_DIR)
