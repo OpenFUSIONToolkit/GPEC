@@ -210,7 +210,7 @@ function build_inputs_from_h5(args::Vector{String})
 
     # Pull the stored TOML, equilibrium ingest, and (if present) file-forcing snapshot out of the
     # source file. The snapshot exists only for a file-forced run with a [PerturbedEquilibrium]
-    # section; untagged snapshots from older files read as `normal_field_T`.
+    # section.
     use_coils = cli.coil_source == "coils"
     toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils = h5open(source_h5, "r") do in_h5
         haskey(in_h5, "Input/gpec_toml_raw") ||
