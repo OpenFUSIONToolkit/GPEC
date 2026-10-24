@@ -533,6 +533,24 @@ include("h5_metadata_check.jl")
             @test with_profiles[3].series_list[2][:y] == c.torque_residual_profile[:, 2]
             @test_throws ErrorException GPEC.efc_couplings(ffs, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl(), nothing)
 
+            # Species-resolved couplings: the deck's main ion resolved on its own reproduces the run's
+            # single-ion torque, and a species list's torque is the sum of its members' own torques.
+            KF, EQ = GPEC.KineticForces, GPEC.Equilibrium
+            kf_ctrl = KF.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
+            kfile = joinpath(dir, "kinetic.dat")
+            kp = EQ.load_kinetic_profiles(kfile; zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass,
+                chi1=2π * ffs.equil.psio)
+            sp = EQ.resolve_ntv_species(kfile, [KF.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)];
+                electron=false, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass)
+            @test length(sp) == 2 && !sp[1].electron && sp[2].z == kf_ctrl.impurity_charge
+            coupling_of(species) = GPEC.efc_couplings(ffs, sets[3:3], rc, dom, cfg, kf_ctrl, kp; species, rotation_scan=false)[1]
+            ion, imp, both = coupling_of(sp[1:1]), coupling_of(sp[2:2]), coupling_of(sp)
+            @test ion.torque_full_per_kat2 ≈ c.torque_full_per_kat2 rtol = 1e-6
+            @test ion.torque_residual_per_kat2 ≈ c.torque_residual_per_kat2 rtol = 1e-6
+            @test both.torque_full_per_kat2 ≈ ion.torque_full_per_kat2 + imp.torque_full_per_kat2 rtol = 1e-12
+            @test both.torque_residual_per_kat2 ≈ ion.torque_residual_per_kat2 + imp.torque_residual_per_kat2 rtol = 1e-12
+            @test !EF.has_rotation_scan(both) && both.torque_full_profile[1, 1] == 0.0
+
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; fd_step_shift_m=2e-3, fd_step_tilt_deg=0.2); psi=ffs.psilim, b_t0=sens.b_t0)

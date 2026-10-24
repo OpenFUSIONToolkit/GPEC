@@ -33,6 +33,15 @@ using HDF5
         @test isempty(KF.KineticForcesControl().ion_species)     # default single-ion
     end
 
+    @testset "species_control" begin
+        # One species' control is the run's control with only its identity overridden and no species list.
+        ctrl = KF.KineticForcesControl(; ion_species=[KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, fraction=0.5)],
+            electron=true, rtol_pitch=1e-3, fgar_flag=true)
+        sc = KF.species_control(ctrl, (; z=2, m=4, electron=false))
+        @test (sc.ion_charge, sc.ion_mass, sc.electron) == (2, 4, false) && isempty(sc.ion_species)
+        @test all(getfield(sc, f) == getfield(ctrl, f) for f in fieldnames(KF.KineticForcesControl) if f ∉ (:ion_charge, :ion_mass, :electron, :ion_species))
+    end
+
     @testset "resolve_ntv_species" begin
         # Synthetic ASCII kinetic profile: psi, n_i(total), n_e, T_i, T_e, omega_E.
         psi = collect(0.0:0.05:1.0)

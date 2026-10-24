@@ -264,6 +264,17 @@ function _accumulate_interp!(acc, grid, xs::AbstractVector{Float64}, ys::Abstrac
 end
 
 """
+    species_control(ctrl::KineticForcesControl, sp) -> KineticForcesControl
+
+The control one species of the NTV sum is computed with: `ctrl` with only the identity of `sp`
+(charge, mass, electron flag) in place of the deck's main ion and no species list of its own.
+`KineticForcesControl` is immutable, so every species gets a fresh copy.
+"""
+species_control(ctrl::KineticForcesControl, sp) =
+    KineticForcesControl(; (f => getfield(ctrl, f) for f in fieldnames(KineticForcesControl))...,
+        ion_charge=sp.z, ion_mass=sp.m, electron=sp.electron, ion_species=IonSpecies[])
+
+"""
     combine_species_states(states) -> KineticForcesState
 
 Sum per-species [`KineticForcesState`](@ref) results into a single total (τ = Σ_s τ_s). Per

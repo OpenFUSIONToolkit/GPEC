@@ -332,7 +332,7 @@ function main_from_inputs(
     end
 
     ef_start = time()
-    error_fields = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles)
+    error_fields = run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles, kf_species)
     coil_sensitivities, monte_carlo, locking_risk, efc_couplings = error_fields === nothing ? (nothing, nothing, nothing, nothing) : error_fields
     if "ErrorFields" in keys(inputs)
         push!(runtimes, "error_fields" => time() - ef_start)
@@ -1108,13 +1108,8 @@ function run_kinetic_forces(
             states = KineticForces.KineticForcesState[]
             labels = String[]
             for sp in species
-                # KineticForcesControl is immutable, so each species gets a fresh control
-                # built from the run's control with only its own identity overridden.
-                sctrl = KineticForces.KineticForcesControl(;
-                    (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
-                    ion_charge=sp.z, ion_mass=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
                 st = KineticForces.KineticForcesState()
-                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles;
+                KineticForces.compute_torque_all_methods!(st, kf_intr, KineticForces.species_control(kf_ctrl, sp), result.equil, sp.profiles;
                     axis_psi_c=axis_psi_c)
                 push!(states, st)
                 push!(labels, sp.label)
@@ -1154,7 +1149,7 @@ function forcing_terms_control(inputs::Dict{String,Any})
 end
 
 """
-    run_error_fields(inputs, result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles) -> (sensitivities, monte_carlo, risk, couplings) or nothing
+    run_error_fields(inputs, result, pe_state, preloaded_coil_sets, kf_ctrl, kinetic_profiles, species=nothing) -> (sensitivities, monte_carlo, risk, couplings) or nothing
 
 Linearize every coil set's resonant drive with respect to its rigid shifts and tilts and write
 `ErrorFields/CoilSensitivities/` when the deck carries an `[ErrorFields]` section. When the
@@ -1163,8 +1158,9 @@ Carlo on the full-window dominant mode with the `[ErrorFields.MonteCarlo]` setti
 `ErrorFields/MonteCarlo/`; with an `[ErrorFields.scenario]` table as well, evaluate the locking
 risk (and the tolerance scan when `[ErrorFields.Risk]` names `scan_scales`) and write
 `ErrorFields/Risk/`; with `[ErrorFields.NTV]` naming correction arrays, evaluate their overlap and NTV
-torque couplings per kilo-ampere-turn (needs the kinetic context) and write `ErrorFields/NTV/`.
-Stages not requested return `nothing`. Needs the
+torque couplings per kilo-ampere-turn (needs the kinetic context) and write `ErrorFields/NTV/`;
+`species`, the run's resolved NTV species list, makes those torques the same species sum as the
+KineticForces diagnostics. Stages not requested return `nothing`. Needs the
 perturbed-equilibrium state's singular-coupling matrix and coil-format forcing, and errors
 otherwise: a deck asking for error-field sensitivities without them is a misconfiguration, not a
 case to skip silently. Coil geometry is rebuilt from the deck unless a replay injected it.
@@ -1175,7 +1171,8 @@ function run_error_fields(
     pe_state,
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}},
     kf_ctrl::KineticForces.KineticForcesControl=KineticForces.KineticForcesControl(),
-    kinetic_profiles=nothing
+    kinetic_profiles=nothing,
+    species=nothing
 )
     ("ErrorFields" in keys(inputs)) || return nothing
 
@@ -1255,7 +1252,7 @@ function run_error_fields(
         missing = setdiff(ntv_ctrl.efc_coils, [cs.name for cs in efc_sets])
         isempty(missing) || error("[ErrorFields.NTV] efc_coils not among the run's coil sets: $(join(missing, ", "))")
         ntv_start = time()
-        couplings = efc_couplings(result, efc_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; method=ntv_ctrl.method, verbose=ntv_ctrl.verbose,
+        couplings = efc_couplings(result, efc_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; species, method=ntv_ctrl.method, verbose=ntv_ctrl.verbose,
             rotation_scan=ntv_ctrl.rotation_scan, scan_points=ntv_ctrl.rotation_scan_points, scan_max_points=ntv_ctrl.rotation_scan_max_points,
             scan_tolerance=ntv_ctrl.rotation_scan_tolerance, span_factor=ntv_ctrl.rotation_span_factor, offset_factor=ntv_ctrl.rotation_offset_factor)
         @info "NTV couplings of $(length(couplings)) correction arrays in $(@sprintf("%.1f", time() - ntv_start)) s"
@@ -1280,7 +1277,7 @@ function run_error_fields(
 end
 
 """
-    efc_couplings(ffs, coil_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; mode=1, method="fgar", verbose=false) -> Vector{ErrorFields.EFCCoupling}
+    efc_couplings(ffs, coil_sets, rc, dom, cfg, kf_ctrl, kinetic_profiles; species=nothing, mode=1, method="fgar", verbose=false) -> Vector{ErrorFields.EFCCoupling}
 
 The couplings of each correction coil array in `coil_sets` per kilo-ampere-turn: its
 dominant-mode overlap and resonant fraction from its spectrum on the control surface, and its
@@ -1292,7 +1289,12 @@ run's `[ForcingTerms]` coil configuration, so the boundary grid matches the one 
 sensitivities were evaluated on; `rc` must be the coupling of `ffs`'s own solve and
 `kinetic_profiles` its kinetic context. The spectrum is normalized by the magnitude of the
 array's ampere-turns, `|nw| × max|I|`, keeping its winding sense and current pattern as the
-phase reference; the torque is stored with its sign.
+phase reference; the torque is stored with its sign. With `species`, the run's resolved NTV
+species list, each torque is the sum over the species of their own torques — each with the
+control of its identity alone and its own profiles, shifted in the rotation scan — exactly as
+the KineticForces diagnostics sum them; the reference rotation stays that of the full-composition
+main ion in `kinetic_profiles`. A species sum's cumulative profile is re-integrated from the
+summed torque density, so its end point matches the summed total only to that integration's accuracy.
 """
 function efc_couplings(
     ffs::ForceFreeStatesResult,
@@ -1302,6 +1304,7 @@ function efc_couplings(
     cfg::ForcingTerms.CoilConfig,
     kf_ctrl::KineticForces.KineticForcesControl,
     kinetic_profiles;
+    species=nothing,
     mode::Int=1,
     method::AbstractString="fgar",
     rotation_scan::Bool=true,
@@ -1320,8 +1323,8 @@ function efc_couplings(
     v = dom.right_singular_vectors[:, mode]
     quiet = PerturbedEquilibrium.PerturbedEquilibriumControl(; compute_response=true, compute_singular_coupling=false, verbose=verbose, write_outputs_to_HDF5=false)
 
-    # Reference rotation and scan span from the kinetic profiles, with the torque kernel's own
-    # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
+    # Reference rotation and scan span of the full-composition main ion in the kinetic profiles, with
+    # the torque kernel's own diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
     kp = kinetic_profiles
     chi1 = 2π * equil.psio
     chrg = kf_ctrl.ion_charge * Utilities.E_CHG
@@ -1348,12 +1351,24 @@ function efc_couplings(
         KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
         return kf_intr
     end
-    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.
-    function torque_of(kf_intr, profiles)
-        kf_state = KineticForces.KineticForcesState()
+    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one
+    # rotation shift Δ, summed over the species when a list is given.
+    shifted(p, Δ) = Δ == 0 ? p : Equilibrium.shift_exb_rotation(p, Δ)
+    function torque_of(kf_intr, Δ)
         logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
-        Base.CoreLogging.with_logger(logger) do
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, profiles)
+        kf_state = Base.CoreLogging.with_logger(logger) do
+            if species === nothing
+                st = KineticForces.KineticForcesState()
+                KineticForces.compute_torque_all_methods!(st, kf_intr, kf_ctrl, equil, shifted(kp, Δ))
+                st
+            else
+                states = map(species) do sp
+                    st = KineticForces.KineticForcesState()
+                    KineticForces.compute_torque_all_methods!(st, kf_intr, KineticForces.species_control(kf_ctrl, sp), equil, shifted(sp.profiles, Δ))
+                    st
+                end
+                KineticForces.combine_species_states(states)
+            end
         end
         r = kf_state.method_results[String(method)]
         T = real(r.total_torque)
@@ -1393,9 +1408,8 @@ function efc_couplings(
         profiles_full = Dict{Float64,Vector{Float64}}()
         profiles_res = Dict{Float64,Vector{Float64}}()
         function torques(Δ)
-            profiles = Δ == 0 ? kp : Equilibrium.shift_exb_rotation(kp, Δ)
-            T_f, p_f = torque_of(kf_full, profiles)
-            T_r, p_r = torque_of(kf_res, profiles)
+            T_f, p_f = torque_of(kf_full, Δ)
+            T_r, p_r = torque_of(kf_res, Δ)
             profiles_full[Δ] = p_f
             profiles_res[Δ] = p_r
             verbose && @info "    $(cs.name) Δω = $(@sprintf("%+.3e", Δ)) rad/s: torque $(@sprintf("%.3e", T_f)) N·m per kAt² (residual $(@sprintf("%.3e", T_r)))"
