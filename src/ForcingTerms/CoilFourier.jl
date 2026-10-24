@@ -401,7 +401,7 @@ function compute_coil_forcing_modes!(
 end
 
 """
-    convert_forcing_normalization(modes, from_tag, equil, n, m_out; psi, mtheta, nzeta) -> Vector{ForcingMode}
+    convert_forcing_normalization(modes, from_tag, equil, n, m_out; psi, mtheta) -> Vector{ForcingMode}
 
 Convert `ForcingMode` amplitudes from `from_tag` normalization to the internal
 unit-norm convention (= Fortran `Phi_x`) that `perturbed_equilibrium` applies the plasma response to.
@@ -412,13 +412,14 @@ SFL-flux convention. These are scaled by (2π)² to reach unit-norm, keeping the
 If `from_tag == "normal_field_T"`, the amplitudes represent Fourier modes of B·n̂
 in Tesla (2π-angle convention). Conversion to unit-norm Phi_x:
 
-  - Inverse-Fourier reconstruct B·n̂(θ, ζ) from the input modes
-  - Multiply pointwise by 2π × R(θ) × |dr/dθ_norm(θ)|
+  - Inverse-Fourier reconstruct B·n̂(θ) from every harmonic in the file
+  - Multiply pointwise by the area weight J|∇ψ| (`Equilibrium.compute_jac_delpsi`)
   - Fourier transform onto every harmonic in `m_out`
 
-The 2π factor comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ.
-This conversion is a mode-mixing operation because R and |dr/dθ| vary poloidally, so the
-flux has sidebands beyond the file's own harmonics; `m_out` should be the run's full range.
+This conversion is a mode-mixing operation because J|∇ψ| varies poloidally, so the flux has
+sidebands beyond the file's own harmonics; `m_out` should be the run's full range. Each output
+harmonic is an exact projection of the full product, so a file wider than `m_out` loses nothing.
+The θ grid is widened past `mtheta` when the harmonics would otherwise alias.
 
 The file's spectrum is itself a truncation of the true field, and the missing harmonics would
 mix into `m_out` too. Following the last-coefficient rule of thumb for spectral series (Boyd,
@@ -435,7 +436,7 @@ three harmonics have no edge to judge and are not checked.
   - `n`: toroidal mode number
   - `m_out`: poloidal harmonics of the converted flux
   - `psi`: flux surface for boundary geometry (default `equil.rzphi_xs[end]`)
-  - `mtheta`, `nzeta`: grid resolution for the conversion (defaults: 256, 64)
+  - `mtheta`: minimum θ grid resolution for the conversion (default 256)
   - `truncation_tol`: relative flux change from one edge harmonic that triggers the warning
 """
 function convert_forcing_normalization(
@@ -446,7 +447,6 @@ function convert_forcing_normalization(
     m_out::UnitRange{Int};
     psi::Float64=equil.rzphi_xs[end],   # outermost computed surface (psihigh), not ψ_N=1 — see sample_boundary_grid
     mtheta::Int=256,
-    nzeta::Int=64,
     truncation_tol::Float64=0.1
 )
     if from_tag == "sfl_flux_Wb"
@@ -465,13 +465,12 @@ function convert_forcing_normalization(
     end
     @info "Converting forcing file B·n̂ (normal_field_T) to flux: n=$n, file m=$m_in → run m=$m_out"
 
-    grid = sample_boundary_grid(equil, mtheta, nzeta; psi=psi)
-    basis_in = compute_fourier_coefficients(mtheta, m_in, nzeta, [n])
-    basis_out = compute_fourier_coefficients(mtheta, m_out, nzeta, [n])
-    # 2π × R × |dr/dθ_norm| turns B·n̂ into the unit-norm Phi_x integrand; the 2π is the
-    # toroidal Jacobian (∂r/∂ζ_norm = 2π·R·ê_φ).
-    weight = 2π .* grid.R .* hypot.(grid.dR_dtheta, grid.dZ_dtheta)
-    to_flux(a) = (2.0 / (mtheta * nzeta)) .* (basis_out * vec(weight .* reshape(real.(adjoint(basis_in) * a), mtheta, nzeta)))
+    # Keep the product's harmonics, up to |m_in| + |m_out|, well inside the grid's Nyquist limit.
+    mtheta = max(mtheta, 4 * maximum(abs, (first(m_in), last(m_in), first(m_out), last(m_out))))
+    ft_in = FourierTransforms.FourierTransform(mtheta, length(m_in), first(m_in))
+    ft_out = FourierTransforms.FourierTransform(mtheta, length(m_out), first(m_out))
+    weight = Equilibrium.compute_jac_delpsi(equil, psi, mtheta)
+    to_flux(a) = ft_out(weight .* FourierTransforms.inverse(ft_in, a))
     flux = to_flux(amp)
 
     if length(modes) >= 3 && norm(flux) > 0
