@@ -361,7 +361,7 @@ for all three.
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     if ctrl.integrator == "riccati"
-        ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
+        ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.integrator == "forward"
         return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
