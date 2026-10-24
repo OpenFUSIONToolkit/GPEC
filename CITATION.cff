@@ -1,0 +1,73 @@
+cff-version: 1.2.0
+message: "If you use GPEC, please cite it as below. If you use the 3D vacuum calculation, please also cite BIEST and the papers listed under references."
+type: software
+title: "GPEC: Generalized Perturbed Equilibrium Code"
+abstract: "A Julia implementation of the GPEC suite for magnetohydrodynamic (MHD) analysis of fusion plasmas: equilibrium reconstruction, ideal MHD stability, and the perturbed-equilibrium response to external magnetic perturbations."
+authors:
+  - given-names: Nikolas
+    family-names: Logan
+  - given-names: Jong-Kyu
+    family-names: Park
+  - given-names: Matthew
+    family-names: Pharr
+  - given-names: Jacob
+    family-names: Halpern
+  - given-names: Rithik
+    family-names: Banerjee
+  - given-names: Jaebeom
+    family-names: Cho
+  - given-names: Daniel
+    family-names: Burgess
+  - given-names: Min-Gu
+    family-names: Yoo
+repository-code: "https://github.com/OpenFUSIONToolkit/GPEC"
+url: "https://openfusiontoolkit.github.io/GPEC/dev/"
+license: MIT
+keywords:
+  - plasma physics
+  - magnetohydrodynamics
+  - tokamak
+  - perturbed equilibrium
+  - Julia
+references:
+  - type: software
+    title: "BIEST: Boundary Integral Equation Solver for Taylor states"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+    repository-code: "https://github.com/dmalhotra/BIEST"
+    license: Apache-2.0
+    doi: "10.5281/zenodo.23511944"
+  - type: article
+    title: "Taylor states in stellarators: A fast high-order boundary integral solver"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+      - given-names: Antoine
+        family-names: Cerfon
+      - given-names: Lise-Marie
+        family-names: Imbert-Gérard
+      - given-names: Michael
+        family-names: "O'Neil"
+    journal: "Journal of Computational Physics"
+    volume: 397
+    start: 108791
+    year: 2019
+    doi: "10.1016/j.jcp.2019.06.067"
+  - type: article
+    title: "Efficient high-order singular quadrature schemes in magnetic fusion"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+      - given-names: Antoine J.
+        family-names: Cerfon
+      - given-names: Michael
+        family-names: "O'Neil"
+      - given-names: Evan
+        family-names: Toler
+    journal: "Plasma Physics and Controlled Fusion"
+    volume: 62
+    issue: 2
+    start: "024004"
+    year: 2020
+    doi: "10.1088/1361-6587/ab57f4"

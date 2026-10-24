@@ -29,7 +29,7 @@ See [Setup](https://openfusiontoolkit.github.io/GPEC/dev/set_up/) for full insta
 
 GPEC is MIT-licensed, except `src/Vacuum/Kernel3D.jl`, which is derived from [BIEST](https://github.com/dmalhotra/BIEST) and licensed under Apache-2.0 (see [`NOTICE`](NOTICE) and [`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt)).
 
-If you use the 3D vacuum calculation, please cite BIEST and the papers describing it, listed on the [citations page](https://openfusiontoolkit.github.io/GPEC/dev/citations/#3D-vacuum-singular-correction) with the references behind the other modules.
+If you use GPEC, please cite it as given in [`CITATION.cff`](CITATION.cff) (GitHub's "Cite this repository" button). If you use the 3D vacuum calculation, please also cite BIEST and the papers describing it, listed on the [citations page](https://openfusiontoolkit.github.io/GPEC/dev/citations/#3D-vacuum-singular-correction) with the references behind the other modules.
 
 ## Contributing
 
