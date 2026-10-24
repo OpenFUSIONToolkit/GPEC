@@ -133,8 +133,8 @@ Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedur
 (scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
 kinetic profiles come from `profile_file`, relative to the run directory.
 
-Kinetic runs (`kinetic_factor > 0`) need the `[KineticForces]` profiles and remain
-TOML-driven.
+Kinetic runs (`kinetic_factor > 0`) take `Forward()` and the `"fixed"` kinetic source;
+the `"calculated"` source needs the `[KineticForces]` profiles and remains TOML-driven.
 
 ## Entry points
 
