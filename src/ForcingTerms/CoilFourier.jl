@@ -404,7 +404,7 @@ end
     convert_forcing_normalization(modes, from_tag, equil, n, m_out; psi, mtheta, nzeta) -> Vector{ForcingMode}
 
 Convert `ForcingMode` amplitudes from `from_tag` normalization to the internal
-unit-norm convention (= Fortran `Phi_x`), expected by `compute_plasma_response!`.
+unit-norm convention (= Fortran `Phi_x`) that `perturbed_equilibrium` applies the plasma response to.
 
 If `from_tag == "sfl_flux_Wb"`, the user has provided amplitudes in the 2π-angle
 SFL-flux convention. These are scaled by (2π)² to reach unit-norm, keeping their harmonics.
