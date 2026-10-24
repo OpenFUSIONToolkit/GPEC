@@ -78,7 +78,7 @@ end
 
 """
     compute_perturbed_equilibrium(resp, forcing; regularization_width=resp.regularization_width, verbose=true,
-                                  preloaded_coil_sets=CoilSet[], runtimes=nothing)::PerturbedEquilibriumState
+                                  preloaded_coil_sets=CoilSet[])::PerturbedEquilibriumState
 
 Drive the operators of `resp` with one external field: materialize `forcing` (a `ForcingTermsControl`
 or any [`ForcingTerms.RMPField`](@ref)) on the control surface, then apply the response and the
@@ -90,21 +90,16 @@ carry are skipped, leaving only the forcing spectrum.
   - `regularization_width`: width of the ideal 1/(m−nq) smoothing in the profile reconstruction
     (Fortran `reg_spot`); must be ≥ 0
   - `preloaded_coil_sets`: coil geometry to integrate instead of reading it (the gpec.h5 replay path)
-  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
-    materialization (coil Biot-Savart onto the plasma surface)
 """
 function compute_perturbed_equilibrium(
     resp::PlasmaResponse,
     forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField};
     regularization_width::Real=resp.regularization_width,
     verbose::Bool=true,
-    preloaded_coil_sets::Vector{CoilSet}=CoilSet[],
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    preloaded_coil_sets::Vector{CoilSet}=CoilSet[]
 )::PerturbedEquilibriumState
     ffs = resp.ffs
-    ft_start = time()
     modes, coil_sets = materialize_forcing_modes(ffs, forcing; dir_path=ffs.dir_path, preloaded_coil_sets, verbose)
-    runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
     state = PerturbedEquilibriumState(; response=resp, forcing_modes=modes,
         coil_sets=isempty(coil_sets) ? preloaded_coil_sets : coil_sets, regularization_width=Float64(regularization_width))
 
