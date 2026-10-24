@@ -249,6 +249,15 @@ Applied resonant vectors `[n_rational]` = C · amp_vec:
 Diagnostics `[n_rational]`: `island_half_width`, `chirikov_parameter`
 
 Metadata `[n_rational]`: `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
+
+## Normalization
+
+  - Rows: the resonant and penetrated rows are a resonant flux divided by that surface's own area
+    `rational_area[row]`, so both are fields in T. `C_resonant_current`, `C_island_width_sq` and
+    `C_delta_prime` carry their own normalizations.
+  - Columns: every stored matrix is right-multiplied by the control-surface `flux_conform`, so it
+    acts on the root-area-weighted field b̃ in T and its singular values do not depend on `jac_type`.
+    The applied vectors are evaluated before that, on the run's own forcing flux.
 """
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
