@@ -24,6 +24,8 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 
 # Optional Arguments
 - `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
+- `surface`: Per-surface bundle from `_torque_surface`, shared across the bounce harmonics of
+  one ψ; built here when not given
 
 # Returns
 - `ComplexF64`: Toroidal torque due to nonambipolar transport
@@ -33,6 +35,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               electron::Bool, method::String, equil::Equilibrium.PlasmaEquilibrium, intr::KineticForcesInternal,
               kinetic_profiles::Equilibrium.KineticProfileSplines;
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
+              surface::Union{Nothing,NamedTuple}=nothing,
               rex_override::Union{Nothing,Float64}=nothing,
               imx_override::Union{Nothing,Float64}=nothing,
               atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
@@ -50,156 +53,15 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         return
     end
 
-    # Set species
-    if electron
-        chrg = -1 * e
-        mass = me
-        s = 2
-    else
-        chrg = zi * e
-        mass = mi * mp
-        s = 1
-    end
-
-    # Get perturbations (CubicSeriesInterpolant callable syntax).
-    # Matrix-only calls (op_wmats provided for an "mm" method) build a linear
-    # operator from the smats/tmats/xmats/ymats/zmats geometric coefficients;
-    # dbob_m / divx_m only feed the scalar dJdJ normalisation in calculate_gar
-    # which is irrelevant when rex_override / imx_override are set. Gate the
-    # dereference so a caller can pass `dbob_m === nothing` (the default) and
-    # still drive the matrix path.
-    is_matrix_only = occursin("mm", method) && !isnothing(op_wmats)
-    if is_matrix_only && isnothing(intr.dbob_m)
-        dbob_m_f = zeros(ComplexF64, intr.mpert)
-        divx_m_f = zeros(ComplexF64, intr.mpert)
-    else
-        dbob_m_f = intr.dbob_m(psi; hint=intr.dbob_m_hint)
-        divx_m_f = intr.divx_m(psi; hint=intr.divx_m_hint)
-    end
-
-    # Sample poloidal quantities on theta grid (buffers pre-allocated on intr).
-    mthsurf_local = intr.mthsurf
-    xs            = intr.tpsi_xs
-    B_vals        = intr.tpsi_B
-    dBdpsi_vals   = intr.tpsi_dBdpsi
-    dBdtheta_vals = intr.tpsi_dBdtheta
-    jac_vals      = intr.tpsi_jac
-    djdpsi_vals   = intr.tpsi_djdpsi
-
-    hB = intr.hint2d_eqfun_B
-    hJ = intr.hint2d_rzphi_jac
-    for i in 0:mthsurf_local
-        theta = i / mthsurf_local
-        pt = (psi, theta)
-
-        B_vals[i+1] = equil.eqfun_B(pt; hint=hB)
-        dBdpsi_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(1, 0), hint=hB) / intr.chi1
-        dBdtheta_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(0, 1), hint=hB)
-        jac_vals[i+1] = equil.rzphi_jac(pt; hint=hJ) / intr.chi1
-        djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0), hint=hJ) / intr.chi1^2
-    end
-
-    # Create periodic interpolant for poloidal quantities
-    tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
-    # v_par and the bounce points use a separate scalar cubic of B (Fortran's vspl).
-    # 1−(λ/bo)B is periodic on the closed θ interval, so the fit must be periodic too:
-    # a non-periodic endpoint fit is only C⁰ at the θ=0/1 seam and manufactures false
-    # near-seam extrema and root pairs there. The fit of 1−(λ/bo)B equals 1−(λ/bo)
-    # times the fit of B, so one B_vpar per surface serves every λ.
-    B_vpar = cubic_interp(xs, B_vals; bc=PeriodicBC())
-
-    bmax = maximum(B_vals)
-    ibmax = argmax(B_vals)
-    if bmax != B_vals[ibmax]
-        error("ERROR: tpsi! - Equilibrium field maximum not consistent with index")
-    end
-
-    # "4th smallest" heuristic for the initial bmin
-    bmin = minimum(B_vals)
-    for _ in 2:4
-        mask = B_vals .> bmin
-        if !any(mask)
-            break
-        end
-        bmin = minimum(B_vals[mask])
-    end
-    # Use >= for the ibmin mask
-    inds = findall(B_vals .>= bmin)
-    isempty(inds) && error("ERROR: tpsi! - could not find ibmin")
-    ibmin = inds[argmin(B_vals[inds])]
-    if !isapprox(bmin, B_vals[ibmin]; rtol=0, atol=0)
-        error("ERROR: tpsi! - Equilibrium field minimum not consistent with index")
-    end
-
-    theta_bmin = xs[ibmin]
-    theta_bmax = xs[ibmax]
-
-    # Find roots of dB/dθ = 0 (extrema)
-    dBdtheta_interp = cubic_interp(xs, dBdtheta_vals; bc=PeriodicBC())
-    extrema_roots = find_sign_change_roots(dBdtheta_interp, xs)
-    for θ in extrema_roots
-        θn = mod(θ, 1.0)
-        Bθ = tspl(θn)[1]
-        if Bθ < bmin
-            bmin = Bθ
-            theta_bmin = θn
-        end
-        if Bθ > bmax
-            bmax = Bθ
-            # theta_bmax stays at the nodal knot xs[ibmax]: the transit starts at
-            # the knot (as in Fortran), not at the refined extremum.
-        end
-    end
-
-    # Flux-function quantities — read directly from named splines on the
-    # PlasmaEquilibrium and the externally-loaded KineticProfileSplines.
-    q       = equil.profiles.q_spline(psi)
-    dVdpsi  = equil.profiles.dVdpsi_spline(psi)
-    if electron
-        n_s       = kinetic_profiles.ne_spline(psi)
-        T_s       = kinetic_profiles.Te_spline(psi)
-        dn_s_dpsi = kinetic_profiles.ne_deriv(psi)
-        dT_s_dpsi = kinetic_profiles.Te_deriv(psi)
-        nu_s      = kinetic_profiles.nue_spline(psi)
-    else
-        # ni_spline / nui_spline carry THIS species' resonant density and its
-        # full-composition collisionality (per-species views built by the loader).
-        n_s       = kinetic_profiles.ni_spline(psi)
-        T_s       = kinetic_profiles.Ti_spline(psi)
-        dn_s_dpsi = kinetic_profiles.ni_deriv(psi)
-        dT_s_dpsi = kinetic_profiles.Ti_deriv(psi)
-        nu_s      = kinetic_profiles.nui_spline(psi)
-    end
-    welec = kinetic_profiles.omegaE_spline(psi)
-
-    # Diamagnetic frequencies (Logan & Park 2013, Eq. 7) computed at evaluation
-    # time from the kinetic-profile derivatives — no longer baked into the loader.
-    wdian = -twopi * T_s * dn_s_dpsi / (chrg * intr.chi1 * n_s)
-    wdiat = -twopi * dT_s_dpsi / (chrg * intr.chi1)
-    wphi  = welec + wdian + wdiat
-    wtran = sqrt(2 * T_s / mass) / (q * intr.ro)
-    wgyro = chrg * intr.bo / mass
-    nuk   = nu_s
-
-    rsquared_bmin = equil.rzphi_rsquared((psi, theta_bmin))
-    if rsquared_bmin <= 0
-        println("  psi = ", psi, " -> r^2 at min(B) = ", rsquared_bmin)
-        println("  -- theta at min(B) = ", theta_bmin)
-        for i in 0:10
-            θ = i / 10.0
-            Bθ = tspl(θ)[1]
-            rz = equil.rzphi_rsquared((psi, θ))
-            println("  -- theta,B(theta),r^2(theta) = ", θ, ", ", Bθ, ", ", rz)
-        end
-        error("ERROR: torque - minor radius is negative")
-    end
-
-    avg_r = equil.geometry.avg_r_spline(psi)
-    avg_R = equil.geometry.avg_R_spline(psi)
-    epsr  = avg_r / avg_R
+    # Everything up to the method dispatch depends on ψ alone, so the caller may share one
+    # bundle across the bounce harmonics of a surface.
+    surf = surface === nothing ?
+           _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles; need_matrices=!isnothing(op_wmats)) :
+           surface
+    (; chrg, mass, tspl, bmax, bmin, q, n_s, T_s, welec, wdian, wdiat, wtran, wgyro, nuk, epsr, dVdpsi, dbob_m_f, divx_m_f) = surf
     wbhat = (π / 4) * sqrt(epsr / 2) * wtran
     wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
-    nueff = nu_s / (2 * epsr)
+    nueff = nuk / (2 * epsr)
 
     # Method selection — route on the registry dispatch tag (errors on unknown method)
     kind = method_kind(method)
@@ -218,28 +80,15 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                     tspl, dbob_m_f, divx_m_f, divxfac, wdfac)
 
     else  # :gar — fgar/tgar/pgar + all *mm matrix methods
-        # Evaluate geometric matrices at current ψ if matrix path
-        smat_f = nothing
-        tmat_f = nothing
-        xmat_f = nothing
-        ymat_f = nothing
-        zmat_f = nothing
-        if !isnothing(op_wmats) && !isnothing(intr.smats)
-            smat_f = reshape(intr.smats(psi), intr.mpert, intr.mpert)
-            tmat_f = reshape(intr.tmats(psi), intr.mpert, intr.mpert)
-            xmat_f = reshape(intr.xmats(psi), intr.mpert, intr.mpert)
-            ymat_f = reshape(intr.ymats(psi), intr.mpert, intr.mpert)
-            zmat_f = reshape(intr.zmats(psi), intr.mpert, intr.mpert)
-        end
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
                                    nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
                                    tspl, dbob_m_f, divx_m_f, divxfac, wdfac,
                                    method, op_wmats;
                                    chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
-                                   mpert=intr.mpert, theta_bmax=theta_bmax,
-                                   B_vpar=B_vpar,
-                                   smat=smat_f, tmat=tmat_f, xmat=xmat_f,
-                                   ymat=ymat_f, zmat=zmat_f,
+                                   mpert=intr.mpert, theta_bmax=surf.theta_bmax,
+                                   B_vpar=surf.B_vpar, surface_field=surf.bf,
+                                   smat=surf.smat_f, tmat=surf.tmat_f, xmat=surf.xmat_f,
+                                   ymat=surf.ymat_f, zmat=surf.zmat_f,
                                    energy_atol=atol_energy, energy_rtol=rtol_energy,
                                    pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
                                    rex_override=rex_override, imx_override=imx_override)
@@ -267,7 +116,7 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
                         n_s::Float64, T_s::Float64, equil,
                         intr::KineticForcesInternal)::ComplexF64
 
-    # Only implemented for l=0
+    # Only implemented for l=0, so one harmonic per surface touches the shared `intr` hints.
     if l != 0
         return ComplexF64(0.0, 0.0)
     end
@@ -421,14 +270,15 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
                        pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
                        rex_override::Union{Nothing,Float64}=nothing,
-                       imx_override::Union{Nothing,Float64}=nothing)::ComplexF64
+                       imx_override::Union{Nothing,Float64}=nothing,
+                       surface_field::Union{Nothing,SurfaceBField}=nothing)::ComplexF64
 
     # Bounce-averaged quantities per pitch angle
     bounce = compute_bounce_data(
         psi, n, l, q, bo, bmax, bmin, theta_bmax,
         tspl, B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
         mass, chrg, T_s, method;
-        nlmda, ntheta, smat, tmat, xmat, ymat, zmat)
+        nlmda, ntheta, smat, tmat, xmat, ymat, zmat, surface_field)
 
     if bounce.nlmda == 0
         return ComplexF64(0.0, 0.0)
@@ -580,17 +430,13 @@ end
 
 
 """
-    _setup_surface_state(psi, n, l, zi, mi, wdfac, electron,
-                          equil, intr, kinetic_profiles) → NamedTuple
+    _setup_surface_state(psi, zi, mi, electron, equil, intr, kinetic_profiles) → NamedTuple
 
-Private helper for the calculated-matrix path. Reproduces the per-surface
-setup in `tpsi!` (theta-grid sampling, bounce-extremum finding, flux-function
-evaluation, diamagnetic/drift frequencies) without any of the perturbation-
-dependent bookkeeping or method dispatch.
-
-This keeps `compute_kinetic_matrices_at_psi!` structurally independent of
-`tpsi!` so the matrix-only path can be evolved (e.g. QuadGK pitch in Phase C)
-without perturbing the perturbative torque pipeline.
+Per-surface setup shared by the torque and calculated-matrix paths: θ-grid sampling of B and
+the Jacobian, the periodic fits (`tspl`, `B_vpar`) and the decomposed field `bf`, bounce
+extrema, flux-function values and the diamagnetic/drift frequencies. Nothing here depends on
+the toroidal mode or the bounce harmonic, so one bundle serves every (n, ℓ) at a ψ. Writes the
+`tpsi_*` scratch buffers and 2-D hints on `intr`, so build it outside any threaded ℓ loop.
 """
 function _setup_surface_state(
     psi::Float64, zi::Int, mi::Int,
@@ -694,14 +540,53 @@ function _setup_surface_state(
     avg_r = equil.geometry.avg_r_spline(psi)
     avg_R = equil.geometry.avg_R_spline(psi)
     epsr  = avg_r / avg_R
+    dVdpsi = equil.profiles.dVdpsi_spline(psi)
+
+    # Cells and stationary points of B(θ), reused by every λ of every harmonic.
+    bf = _surface_b_field(B_vpar)
 
     return (;
         chrg, mass,
-        tspl, B_vpar, bmax, bmin, theta_bmax,
+        tspl, B_vpar, bf, bmax, bmin, theta_bmax,
         q, n_s, T_s, welec,
         wdian, wdiat, wtran, wgyro, nuk,
-        epsr,
+        epsr, dVdpsi
     )
+end
+
+"""
+    _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles;
+                    need_matrices=false) → NamedTuple
+
+`_setup_surface_state` plus the perturbation modes and, when `need_matrices`, the geometric
+matrices at ψ: everything `tpsi!` needs before its method dispatch.
+"""
+function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method::String,
+    equil, intr::KineticForcesInternal, kinetic_profiles::Equilibrium.KineticProfileSplines;
+    need_matrices::Bool=false)
+    state = _setup_surface_state(psi, zi, mi, electron, equil, intr, kinetic_profiles)
+
+    # Matrix-only methods build their operator from the geometric matrices; dbob_m / divx_m
+    # only feed the scalar dJdJ normalisation, so a run without perturbations passes zeros.
+    if occursin("mm", method) && need_matrices && isnothing(intr.dbob_m)
+        dbob_m_f = zeros(ComplexF64, intr.mpert)
+        divx_m_f = zeros(ComplexF64, intr.mpert)
+    else
+        dbob_m_f = intr.dbob_m(psi; hint=intr.dbob_m_hint)
+        divx_m_f = intr.divx_m(psi; hint=intr.divx_m_hint)
+    end
+
+    if need_matrices && !isnothing(intr.smats)
+        smat_f = reshape(intr.smats(psi), intr.mpert, intr.mpert)
+        tmat_f = reshape(intr.tmats(psi), intr.mpert, intr.mpert)
+        xmat_f = reshape(intr.xmats(psi), intr.mpert, intr.mpert)
+        ymat_f = reshape(intr.ymats(psi), intr.mpert, intr.mpert)
+        zmat_f = reshape(intr.zmats(psi), intr.mpert, intr.mpert)
+    else
+        smat_f = tmat_f = xmat_f = ymat_f = zmat_f = nothing
+    end
+
+    return (; state..., dbob_m_f, divx_m_f, smat_f, tmat_f, xmat_f, ymat_f, zmat_f)
 end
 
 
@@ -764,7 +649,8 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         psi, n, l, state.q, bo, state.bmax, state.bmin, state.theta_bmax,
         state.tspl, state.B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
         state.mass, state.chrg, state.T_s, "fwmm";
-        nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
+        nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f,
+        surface_field=state.bf)
 
     if bounce.nlmda == 0
         fill!(kwmat, 0)
@@ -906,7 +792,8 @@ function compute_kinetic_matrices_at_psi!(
     nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
     atol_x::Float64=NaN, rtol_x::Float64=NaN,
-    nested_tolerance_margin::Float64=1e-2)
+    nested_tolerance_margin::Float64=1e-2,
+    state::Union{Nothing,NamedTuple}=nothing)
 
     # Bypass ψ > 1 (no kinetic contribution outside plasma)
     if psi > 1
@@ -919,11 +806,11 @@ function compute_kinetic_matrices_at_psi!(
     atol_energy = isnan(atol_x) ? nested_tolerance_margin * atol_xlmda : atol_x
     rtol_energy = isnan(rtol_x) ? nested_tolerance_margin * rtol_xlmda : rtol_x
 
-    state = _setup_surface_state(psi, zi, mi, electron,
-                                  equil, intr, kinetic_profiles)
+    # The surface setup is (n, ℓ)-independent; a caller looping harmonics passes it in once.
+    surf = state === nothing ? _setup_surface_state(psi, zi, mi, electron, equil, intr, kinetic_profiles) : state
 
     kinetic_energy_matrices_for_euler_lagrange!(
-        kwmat, ktmat, state, psi, n, l, wdfac, intr;
+        kwmat, ktmat, surf, psi, n, l, wdfac, intr;
         nutype, f0type, nufac,
         energy_atol=atol_energy, energy_rtol=rtol_energy,
         pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)

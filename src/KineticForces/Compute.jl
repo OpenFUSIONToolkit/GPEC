@@ -111,20 +111,12 @@ function integrate_psi_quadgk(
     end
     psi_c > 0 && @info "Kinetic axis-validity suppression in ψ torque quadrature: domain starts at psi_c=$(round(psi_c; sigdigits=3))"
 
-    # The outer ψ-integral (the QuadGK batch / ψ-node loop) stays serial: QuadGK's refine
-    # loop invokes the callback with small batches (~15 nodes), so threading it is
-    # fork-join-bound. Instead thread the inner bounce-harmonic loop (2·nl+1 harmonics),
-    # which carries the ~40 ms of per-ψ work. `tpsi!` writes per-`intr` scratch buffers and
-    # spline hints, so each thread gets its own `deepcopy(intr)` (the same per-thread-scratch
-    # pattern the self-consistent kinetic matrix build uses). Per-harmonic results are stored
-    # by index and reduced in fixed ℓ order, so the sum is identical to the serial reduction
-    # and independent of thread count. The threadid()-indexed buffers require this to be a
-    # top-level @threads (the caller loops n serially); never nest it inside another @threads.
-    # The deepcopy set is sized by thread count and rebuilt once per call (per n), so multi-n
-    # runs with many threads scale memory as nthreads×sizeof(intr).
+    # The outer ψ-integral stays serial (QuadGK refines in small batches, so threading it is
+    # fork-join-bound); the 2·nl+1 bounce harmonics of each ψ node are threaded instead.
+    # Per-harmonic results are stored by index and reduced in fixed ℓ order, so the sum is
+    # independent of thread count. `:static` keeps the threadid()-indexed slots sound; never nest it.
     nharm = 1 + 2 * nl
     nth = Threads.maxthreadid()
-    thread_intrs = [deepcopy(intr) for _ in 1:nth]
     thread_tpsi = [Ref{ComplexF64}(0.0im) for _ in 1:nth]
     thread_wtw = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nth] : nothing
     harm_vals = Vector{ComplexF64}(undef, nharm)
@@ -139,16 +131,18 @@ function integrate_psi_quadgk(
         for k in eachindex(x)
             psi = Float64(x[k])
 
-            # Each bounce harmonic is independent; thread over them, each thread using its own
-            # `intr` copy and writing its own harm_vals[ell_idx] / harm_elems[ell_idx] slot.
+            # The ψ-only setup (θ sampling, fits, field decomposition, profiles) is built once
+            # here, on the serial side, and shared read-only by every harmonic.
+            surface = _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles; need_matrices=is_matrix_method)
+
             Threads.@threads :static for ell_idx in 1:nharm
                 tid = Threads.threadid()
                 l = ell_idx - 1 - nl
                 w = is_matrix_method ? thread_wtw[tid] : nothing
                 is_matrix_method && fill!(w, 0)
                 tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
-                    electron, method, equil, thread_intrs[tid], kinetic_profiles;
-                    op_wmats=w,
+                    electron, method, equil, intr, kinetic_profiles;
+                    op_wmats=w, surface,
                     atol_xlmda=ctrl.atol_pitch, rtol_xlmda=ctrl.rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
