@@ -91,6 +91,9 @@ using TOML
             @test api.psilim ≈ reference.psilim rtol = 1e-12
             @test api.kinetic.kmsing == reference.kinetic.kmsing
             @test [s.psifac for s in api.kinetic.kinsing] ≈ [s.psifac for s in reference.kinetic.kinsing]
+
+            # Too large a factor for this coarse deck: the integration aborts near ψ = 0.4 and says so.
+            @test_throws "Euler-Lagrange integration aborted" solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=0.1)
         end
     end
 
