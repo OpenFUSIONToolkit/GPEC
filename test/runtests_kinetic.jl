@@ -662,6 +662,7 @@
         mr = KF.MethodResult(method="fgar", nn=1)
         @test mr.total_torque == 0.0 + 0.0im
         @test mr.total_energy == 0.0
+        @test isempty(mr.dtdpsi_ell) && isempty(mr.ell)
     end
 
     # =========================================================================

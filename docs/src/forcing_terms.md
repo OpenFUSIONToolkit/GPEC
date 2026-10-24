@@ -34,9 +34,9 @@ and multiplied by (2π)² internally to reach unit-norm convention.
 ### Automatic conversion
 
 Files tagged `normal_field_T` are automatically converted to unit-norm Phi_x convention
-during loading using the plasma boundary geometry. The conversion accounts for the
-R-variation of the Jacobian and is a mode-mixing operation, so the flux is projected onto
-every harmonic of the run (`mlow:mhigh`), sidebands included, not only the file's own.
+during loading by weighting with the control-surface area element J|∇ψ|. This weight varies
+poloidally, so the conversion is a mode-mixing operation and the flux is projected onto
+every harmonic of the run (`mlow:mhigh`), sidebands included.
 
 The file's spectrum must also extend far enough that the harmonics it omits are negligible,
 since those would mix into the run's range too. GPEC estimates this from the file's edge

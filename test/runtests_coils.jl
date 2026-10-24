@@ -294,7 +294,7 @@ end
 @testset "CoilFourier: B·n̂ file conversion onto the run's harmonics" begin
     eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", psilow=0.01, psihigh=0.995)
     equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig())
-    n, m_out, mtheta, nzeta = 1, -10:14, 256, 64
+    n, m_out, mtheta = 1, -10:14, 256
     convert(modes) = ForcingTerms.convert_forcing_normalization(modes, "normal_field_T", equil, n, m_out)
     spectrum(ms, amp) = [ForcingMode(; n, m, amplitude=amp(m)) for m in ms]
     amplitudes(modes) = [mode.amplitude for mode in modes]
@@ -309,15 +309,21 @@ end
     @test alone[1].amplitude ≈ flux[findfirst(==(2), m_out)].amplitude rtol = 1e-12
 
     # On a range wide enough to hold the weight's whole spectrum, the inverse transform of the
-    # converted flux reproduces weight × B·n̂ on the conversion grid.
+    # converted flux reproduces J|∇ψ| × B·n̂ on the conversion grid.
     wide = -60:64
     flux_wide = ForcingTerms.convert_forcing_normalization(single, "normal_field_T", equil, n, wide)
-    grid = ForcingTerms.sample_boundary_grid(equil, mtheta, nzeta)
-    weight = 2π .* grid.R .* hypot.(grid.dR_dtheta, grid.dZ_dtheta)
-    fc(ms) = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms.compute_fourier_coefficients(mtheta, ms, nzeta, [n])
-    bn = reshape(real.(adjoint(fc(2:2)) * [1e-4 + 0im]), mtheta, nzeta)
-    rebuilt = reshape(real.(adjoint(fc(wide)) * amplitudes(flux_wide)), mtheta, nzeta)
+    FT = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
+    weight = Equilibrium.compute_jac_delpsi(equil, equil.rzphi_xs[end], mtheta)
+    bn = FT.inverse(FT.FourierTransform(mtheta, 1, 2), [1e-4 + 0im])
+    rebuilt = FT.inverse(FT.FourierTransform(mtheta, length(wide), first(wide)), amplitudes(flux_wide))
     @test maximum(abs, rebuilt .- weight .* bn) < 1e-6 * maximum(abs, weight .* bn)
+
+    # A file wider than the run loses nothing: its conversion onto a narrow run range equals the
+    # conversion onto a wide range downsampled to it.
+    broad = spectrum(-48:51, m -> 1e-4 * 0.9^abs(m - 2) + 0im)
+    narrow = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, 0:4)
+    downsampled = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, -200:200)
+    @test amplitudes(narrow) ≈ amplitudes(downsampled)[201 .+ (0:4)] rtol = 1e-5
 
     # A hard-cut flat spectrum warns at both edges; a decaying one converts silently.
     @test_logs (:info, r"Converting") (:warn, r"m=-2 carries") (:warn, r"m=6 carries") convert(spectrum(-2:6, m -> 1e-4 + 0im))
