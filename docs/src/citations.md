@@ -152,8 +152,9 @@ The basis for the presently implemented in Fortran SLAYER code which computes th
 
 ---
 
-> A. Burgess et al., "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer,"
-> Preprint (2026).
+> D. A. Burgess, N. C. Logan, J.-K. Park, C. J. Hansen, and C. Paz-Soldan, "Tearing stability prediction combining toroidal calculations with a two-fluid slab layer,"
+> *Plasma Physics and Controlled Fusion* **68**, 065017 (2026).
+> DOI: [10.1088/1361-6587/ae7156](https://doi.org/10.1088/1361-6587/ae7156)
 
 Combines the toroidal outer-region calculation with the two-fluid slab layer model to predict tearing stability, extending the matched-asymptotic approach used in the `InnerLayer` module.
 
