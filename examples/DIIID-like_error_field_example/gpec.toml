@@ -196,9 +196,6 @@ height = -1.5780                        # Hoop height: centroid Z of the pack cr
 currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
 
 [PerturbedEquilibrium]
-fixed_boundary = false                  # Use fixed boundary conditions
-output_eigenmodes = true                # Output eigenmode fields as b-fields
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
@@ -250,7 +247,6 @@ impurity_mass = 12                      # Impurity mass [proton masses]
 electron = false                        # Ion-only NTV
 nutype = "harmonic"                     # Collision operator
 f0type = "maxwellian"                   # Equilibrium distribution
-moment = "pressure"                     # Pressure-moment NTV torque
 atol_pitch = 1e-9                       # Absolute tolerance for inner pitch + energy integrations
 rtol_pitch = 1e-5                       # Relative tolerance for inner pitch + energy integrations
 write_outputs_to_HDF5 = true            # Write outputs to the HDF5 file

@@ -65,9 +65,6 @@ name = "c"                              # Coil set; resolves to coil_geometries/
 currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
 
 [PerturbedEquilibrium]
-fixed_boundary = false                  # Use fixed boundary conditions
-output_eigenmodes = true                # Output eigenmode fields as b-fields
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
@@ -91,7 +88,6 @@ impurity_mass = 12                      # Impurity mass [proton masses]
 electron = false                        # Ion-only NTV
 nutype = "harmonic"                     # Collision operator
 f0type = "maxwellian"                   # Equilibrium distribution
-moment = "pressure"                     # Pressure-moment NTV torque
 atol_pitch = 1e-9                       # Absolute tolerance for inner pitch + energy integrations
 rtol_pitch = 1e-5                       # Relative tolerance for inner pitch + energy integrations
 axis_validity_suppression = true        # Suppress kinetic terms inside the near-axis orbit-width validity limit

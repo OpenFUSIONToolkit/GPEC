@@ -91,23 +91,9 @@
         @test psi_c_spiked < 0.5
     end
 
-    @testset "kinetic_regularization_kwargs" begin
-        default_reg = PE.PerturbedEquilibriumControl().regularization_width
-        ideal = (; mats=(; kinetic=nothing))
-        kinetic = (; mats=(; kinetic=(;)))
-
-        # Ideal runs keep whatever the deck asked for, explicit or defaulted.
-        @test PE.kinetic_regularization_kwargs(ideal, pairs((; regularization_width=0.05))).regularization_width == 0.05
-        @test PE.kinetic_regularization_kwargs(ideal, pairs((;))).regularization_width == default_reg
-
-        # Kinetic runs force 0 — including when the deck omits the key entirely, which must pick up
-        # the struct default rather than leaving regularization_width unset.
-        @test PE.kinetic_regularization_kwargs(kinetic, pairs((; regularization_width=0.05))).regularization_width == 0.0
-        @test PE.kinetic_regularization_kwargs(kinetic, pairs((;))).regularization_width == 0.0
-        @test default_reg != 0.0   # otherwise the override above proves nothing
-
-        # Unrelated kwargs pass through untouched.
-        out = PE.kinetic_regularization_kwargs(kinetic, pairs((; regularization_width=0.05, filter_modes=true)))
-        @test out.filter_modes == true
+    @testset "default_regularization_width" begin
+        # A kinetic fit removes the ideal resonant singularity, so its default is no regularization.
+        @test PE.default_regularization_width((; mats=(; kinetic=nothing))) == 0.05
+        @test PE.default_regularization_width((; mats=(; kinetic=(;)))) == 0.0
     end
 end

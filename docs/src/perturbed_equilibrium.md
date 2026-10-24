@@ -1,18 +1,21 @@
 # Perturbed Equilibrium
 
-The `PerturbedEquilibrium` module computes the plasma response to external magnetic perturbations.
+The `PerturbedEquilibrium` module computes the plasma response to external magnetic perturbations,
+in two stages: `plasma_response(ffs)` builds the source-independent response and singular-coupling
+operators of a force-free-states result once, and `perturbed_equilibrium(resp, rmp)` drives them with
+one external field. A scan over fields reuses one response.
 
 ## Types
 
 ```@docs
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumControl
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumInternal
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PlasmaResponse
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 ```
 
 ## Functions
 
 ```@docs
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibrium
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.write_outputs_to_HDF5
 ```
@@ -53,7 +56,7 @@ the same way from a finished run in memory or from its `gpec.h5`:
 ```julia
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 
-rc = ResonantCoupling("gpec.h5")                 # post hoc; or ResonantCoupling(pe_state, ffs) in memory
+rc = ResonantCoupling("gpec.h5")                 # post hoc; or ResonantCoupling(resp) in memory
 dom = dominant_coupling(rc; psi_low=0.0, psi_high=0.9)   # SVD over the surfaces in the window
 
 b̃ = rootarea_field(rc, coil_modes)               # unit-norm forcing modes → root-area-weighted field
@@ -78,7 +81,7 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.CORE_PSI_HIGH
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.rootarea_field
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.coupling_overlap
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.check_mode_basis
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_dominant_coupling!
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_dominant_coupling!
 ```
 
 ## Plotting per-surface results against ψ or q

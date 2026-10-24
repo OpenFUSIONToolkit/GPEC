@@ -26,9 +26,7 @@ This routine reads equilibrium-derived profiles (q, dV/dψ, ⟨r⟩, ⟨R⟩) di
 from named splines on `equil.profiles` and `equil.geometry`, and kinetic
 profiles (n, T, ω_E, ν) from the `kinetic_profiles` argument, avoiding the
 former shadow-copy pattern in KineticForcesInternal. The perturbation-mode
-interpolants (`kf_intr.dbob_m`, `kf_intr.divx_m`) remain unwired and are
-tracked as follow-up work blocked on PR #196 — see the plan's "Out of scope"
-section.
+interpolants (`kf_intr.dbob_m`, `kf_intr.divx_m`) are not wired into this routine.
 
 # Arguments
 
@@ -42,7 +40,7 @@ section.
 # Keyword arguments
 
   - `kf_ctrl`: KineticForcesControl, defaults to `KineticForcesControl()`. Used to
-    carry NTV-specific knobs (nl, zi, mi, wdfac, divxfac, electron) that the
+    carry NTV-specific knobs (nl, zi, mi, wdfac, electron) that the
     KineticForces kernel needs but ForceFreeStatesControl does not expose.
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-
     profile splines loaded via `Equilibrium.load_kinetic_profiles`.
@@ -153,7 +151,7 @@ function compute_calculated_kinetic_matrices(
                     fill!(block_t, 0)
                     compute_kinetic_matrices_at_psi!(
                         block_w, block_t, psi, n, ell,
-                        z_s, m_s, kf_ctrl.magnetic_drift_factor, kf_ctrl.divxi_factor,
+                        z_s, m_s, kf_ctrl.magnetic_drift_factor,
                         el_s, equil, intr_t, prof_s;
                         nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.collisionality_factor,
                         atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=kf_ctrl.rtol_pitch,
