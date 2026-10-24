@@ -11,7 +11,7 @@ using HDF5
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
-    equil = GPEC.Equilibrium.setup_equilibrium(
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
@@ -367,7 +367,7 @@ using HDF5
             ffs_overrides = Dict{String,Any}("local_stability_flag" => false, "vac_flag" => false)
             mktempdir() do dir
                 reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
-                pass1 = GPEC.Equilibrium.setup_equilibrium(
+                pass1 = GPEC.Equilibrium.PlasmaEquilibrium(
                     GPEC.Equilibrium.EquilibriumConfig(merge(deck["Equilibrium"], eq_overrides), template),
                     GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
                 )
@@ -375,8 +375,8 @@ using HDF5
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
                 api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
-                # Known drift: the equilibrium does not store its analytic config, so `solve` cannot re-form it.
-                @test_broken api.equil.rzphi_xs == reference.equil.rzphi_xs
+                # The equilibrium keeps its source, so `solve` re-forms it on the deck's refined grid.
+                @test api.equil.rzphi_xs == reference.equil.rzphi_xs
             end
         end
 
