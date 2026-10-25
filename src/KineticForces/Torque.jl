@@ -6,41 +6,44 @@ Toroidal torque resulting from nonambipolar transport in perturbed equilibrium.
 Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 
 # Arguments
-- `tpsi_var`: Output complex torque value
-- `psi::Float64`: Normalized poloidal flux
-- `n::Int`: Toroidal mode number
-- `l::Int`: Bounce harmonic number
-- `zi::Int`: Ion charge in fundamental units (e)
-- `mi::Int`: Ion mass (units of proton mass)
-- `wdfac::Float64`: Drift factor
-- `divxfac::Float64`: Divergence factor
-- `electron::Bool`: Calculate quantities for electrons (zi,mi ignored)
-- `method::String`: Integration method (RLAR, CLAR, *GAR, *TMM, *WMM, *KMM)
+
+  - `tpsi_var`: Output complex torque value
+  - `psi::Float64`: Normalized poloidal flux
+  - `n::Int`: Toroidal mode number
+  - `l::Int`: Bounce harmonic number
+  - `zi::Int`: Ion charge in fundamental units (e)
+  - `mi::Int`: Ion mass (units of proton mass)
+  - `wdfac::Float64`: Drift factor
+  - `divxfac::Float64`: Divergence factor
+  - `electron::Bool`: Calculate quantities for electrons (zi,mi ignored)
+  - `method::String`: Integration method (RLAR, CLAR, *GAR, *TMM, *WMM, *KMM)
     where * = F,T,P for full,trapped,passing
-- `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
-- `intr::KineticForcesInternal`: Internal state with mode indexing and perturbation splines
-- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
+  - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
+  - `intr::KineticForcesInternal`: Internal state with mode indexing and perturbation splines
+  - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
     (n_i, n_e, T_i, T_e, ω_E, ν_i, ν_e) loaded from `kinetic.dat`
 
 # Optional Arguments
-- `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
-- `surface`: Per-surface bundle from `_torque_surface`, shared across the bounce harmonics of
-  one ψ; built here when not given
+
+  - `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
+  - `surface`: Per-surface bundle from `_torque_surface`, shared across the bounce harmonics of
+    one ψ; built here when not given
 
 # Returns
-- `ComplexF64`: Toroidal torque due to nonambipolar transport
+
+  - `ComplexF64`: Toroidal torque due to nonambipolar transport
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
-              zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
-              electron::Bool, method::String, equil::Equilibrium.PlasmaEquilibrium, intr::KineticForcesInternal,
-              kinetic_profiles::Equilibrium.KineticProfileSplines;
-              op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
-              surface::Union{Nothing,NamedTuple}=nothing,
-              rex_override::Union{Nothing,Float64}=nothing,
-              imx_override::Union{Nothing,Float64}=nothing,
-              atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
-              atol_x::Float64=NaN, rtol_x::Float64=NaN,
-              nested_tolerance_margin::Float64=1e-2)
+    zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
+    electron::Bool, method::String, equil::Equilibrium.PlasmaEquilibrium, intr::KineticForcesInternal,
+    kinetic_profiles::Equilibrium.KineticProfileSplines;
+    op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
+    surface::Union{Nothing,NamedTuple}=nothing,
+    rex_override::Union{Nothing,Float64}=nothing,
+    imx_override::Union{Nothing,Float64}=nothing,
+    atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
+    atol_x::Float64=NaN, rtol_x::Float64=NaN,
+    nested_tolerance_margin::Float64=1e-2)
 
     # The pitch integrand is itself the energy integral, so the energy level is resolved
     # tighter than the pitch level (explicit atol_x/rtol_x override the derived values).
@@ -56,7 +59,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     # Everything up to the method dispatch depends on ψ alone, so the caller may share one
     # bundle across the bounce harmonics of a surface.
     surf = surface === nothing ?
-           _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles; need_matrices=!isnothing(op_wmats)) :
+           _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles;
+        need_matrices=!isnothing(op_wmats), n, wdfac, divxfac) :
            surface
     (; chrg, mass, tspl, bmax, bmin, q, n_s, T_s, welec, wdian, wdiat, wtran, wgyro, nuk, epsr, dVdpsi, dbob_m_f, divx_m_f) = surf
     wbhat = (π / 4) * sqrt(epsr / 2) * wtran
@@ -67,31 +71,32 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     kind = method_kind(method)
     if kind == :fcgl
         tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac,
-                                    n_s, T_s, equil, intr)
+            n_s, T_s, equil, intr)
 
     elseif kind == :rlar
         tpsi_var[] = calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                    wdhat, wbhat, nueff, dVdpsi, n_s, T_s,
-                                    dbob_m_f, intr.bo, bmin)
+            wdhat, wbhat, nueff, dVdpsi, n_s, T_s,
+            dbob_m_f, intr.bo, bmin)
 
     elseif kind == :clar
         tpsi_var[] = calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                    nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
-                                    tspl, dbob_m_f, divx_m_f, divxfac, wdfac)
+            nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
+            tspl, dbob_m_f, divx_m_f, divxfac, wdfac)
 
     else  # :gar — fgar/tgar/pgar + all *mm matrix methods
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                   nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
-                                   tspl, dbob_m_f, divx_m_f, divxfac, wdfac,
-                                   method, op_wmats;
-                                   chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
-                                   mpert=intr.mpert, theta_bmax=surf.theta_bmax,
-                                   B_vpar=surf.B_vpar, surface_field=surf.bf,
-                                   smat=surf.smat_f, tmat=surf.tmat_f, xmat=surf.xmat_f,
-                                   ymat=surf.ymat_f, zmat=surf.zmat_f,
-                                   energy_atol=atol_energy, energy_rtol=rtol_energy,
-                                   pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
-                                   rex_override=rex_override, imx_override=imx_override)
+            nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
+            tspl, dbob_m_f, divx_m_f, divxfac, wdfac,
+            method, op_wmats;
+            chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
+            mpert=intr.mpert, theta_bmax=surf.theta_bmax,
+            B_vpar=surf.B_vpar, surface_field=surf.bf,
+            smat=surf.smat_f, tmat=surf.tmat_f, xmat=surf.xmat_f,
+            ymat=surf.ymat_f, zmat=surf.zmat_f,
+            energy_atol=atol_energy, energy_rtol=rtol_energy,
+            pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
+            rex_override=rex_override, imx_override=imx_override,
+            bounce_geometry=get(surf, :geometry, nothing))
     end
 
     return nothing
@@ -113,8 +118,8 @@ Only valid for bounce harmonic l=0.
 Based on: [Logan et al., Phys. Plasmas 2013]
 """
 function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
-                        n_s::Float64, T_s::Float64, equil,
-                        intr::KineticForcesInternal)::ComplexF64
+    n_s::Float64, T_s::Float64, equil,
+    intr::KineticForcesInternal)::ComplexF64
 
     # Only implemented for l=0, so one harmonic per surface touches the shared `intr` hints.
     if l != 0
@@ -125,7 +130,7 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
 
     # Create spline for poloidal integrands
     cglspl = zeros(2, mthsurf_local + 1)
-    theta_vals = range(0, 1, length=mthsurf_local + 1)
+    theta_vals = range(0, 1; length=mthsurf_local + 1)
 
     # Evaluate poloidal functions and field perturbations
     hB = intr.hint2d_eqfun_B
@@ -159,8 +164,8 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
 
     # Calculate torque: T = 2*n*i*n_s*T_s * [weighted integral]
     result = 2.0 * n * im * n_s * T_s *
-        (0.5 * (5.0/3.0) * integral_1 +
-         0.5 * (1.0/3.0) * integral_2)
+             (0.5 * (5.0 / 3.0) * integral_1 +
+              0.5 * (1.0 / 3.0) * integral_2)
 
     return result
 end
@@ -177,24 +182,24 @@ Valid for low aspect ratio tokamaks (ε << 1).
 Reference: [Logan et al., Phys. Plasmas, 2013]
 """
 function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                        wdhat, wbhat, nueff, dVdpsi::Float64,
-                        n_s::Float64, T_s::Float64,
-                        dbob_m_f, bo, bmin=0.5)::ComplexF64
+    wdhat, wbhat, nueff, dVdpsi::Float64,
+    n_s::Float64, T_s::Float64,
+    dbob_m_f, bo, bmin=0.5)::ComplexF64
 
     # Setup parameters for energy integration
     lnq = Float64(l)  # Resonant mode for trapped particles
 
     # Maximum pitch angle parameter (use safe estimate)
-    lmdamax = min(1.0/(1-epsr), bo/bmin)
+    lmdamax = min(1.0 / (1 - epsr), bo / bmin)
 
     # Energy-space quadrature
     # This computes ∫ K(x) dx where K is the resonance operator
     xint = integrate_energy(wdian, wdiat, welec, wdhat, wbhat, nueff,
-                         l, lnq, n, psi, lmdamax, "rlar")
+        l, lnq, n, psi, lmdamax, "rlar")
 
     # Kappa/bounce averaging (effect of field perturbations)
     # Placeholder: simplified estimate
-    kappaint_val = sqrt(mean(abs.(dbob_m_f).^2))
+    kappaint_val = sqrt(mean(abs.(dbob_m_f) .^ 2))
 
     # dV/dpsi gradient term from Clebsch coordinate Jacobian
     psi_factor = dVdpsi
@@ -221,10 +226,10 @@ Includes bounce-averaged integrals over lambda (pitch angle).
 Status: Partially implemented (stub for full calculation)
 """
 function calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
-                        bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
-                        dbob_m_f, divx_m_f, divxfac, wdfac)::ComplexF64
+    bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
+    dbob_m_f, divx_m_f, divxfac, wdfac)::ComplexF64
 
-    @warn "CLAR method not yet fully implemented, returning zero" maxlog=1
+    @warn "CLAR method not yet fully implemented, returning zero" maxlog = 1
     return ComplexF64(0.0, 0.0)
 end
 
@@ -242,43 +247,49 @@ Can compute torque (*TMM), energy (*WMM), or matrix elements (*KMM/*RMM).
 Ports Fortran torque.F90 GAR branch (lines 529-932).
 
 # Steps
-1. Compute bounce-averaged quantities via `compute_bounce_data()`
-2. Build fbnce interpolant over λ, normalize for numerical stability
-3. Integrate over pitch angle via `integrate_pitch_gar_quadgk()`
-4. Apply torque normalization (Eq. 19, Logan et al. 2013)
-5. If matrix path: assemble and normalize kinetic matrices
+
+ 1. Compute bounce-averaged quantities via `compute_bounce_data()`
+ 2. Build fbnce interpolant over λ, normalize for numerical stability
+ 3. Integrate over pitch angle via `integrate_pitch_gar_quadgk()`
+ 4. Apply torque normalization (Eq. 19, Logan et al. 2013)
+ 5. If matrix path: assemble and normalize kinetic matrices
 
 # Keyword Arguments (rex/imx override)
-- `rex_override::Union{Nothing,Float64}`: Override real-part multiplier for resonance
-  operator. When both overrides are provided, bypasses method-string derivation.
-- `imx_override::Union{Nothing,Float64}`: Override imaginary-part multiplier.
-  Use `rex_override=1.0, imx_override=1.0` to get full complex result for
-  simultaneous kwmat/ktmat extraction via `compute_kinetic_matrices_at_psi!`.
+
+  - `rex_override::Union{Nothing,Float64}`: Override real-part multiplier for resonance
+    operator. When both overrides are provided, bypasses method-string derivation.
+  - `imx_override::Union{Nothing,Float64}`: Override imaginary-part multiplier.
+    Use `rex_override=1.0, imx_override=1.0` to get full complex result for
+    simultaneous kwmat/ktmat extraction via `compute_kinetic_matrices_at_psi!`.
 
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
 function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
-                       bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
-                       dbob_m_f, divx_m_f, divxfac, wdfac, method, op_wmats;
-                       chi1::Float64, ro::Float64, mfac::Vector{Int}, mpert::Int,
-                       theta_bmax::Float64, B_vpar,
-                       smat=nothing, tmat=nothing, xmat=nothing,
-                       ymat=nothing, zmat=nothing,
-                       nlmda::Int=128, ntheta::Int=128,
-                       nutype::String="harmonic", f0type::String="maxwellian",
-                       nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
-                       energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
-                       pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
-                       rex_override::Union{Nothing,Float64}=nothing,
-                       imx_override::Union{Nothing,Float64}=nothing,
-                       surface_field::Union{Nothing,SurfaceBField}=nothing)::ComplexF64
+    bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
+    dbob_m_f, divx_m_f, divxfac, wdfac, method, op_wmats;
+    chi1::Float64, ro::Float64, mfac::Vector{Int}, mpert::Int,
+    theta_bmax::Float64, B_vpar,
+    smat=nothing, tmat=nothing, xmat=nothing,
+    ymat=nothing, zmat=nothing,
+    nlmda::Int=128, ntheta::Int=128,
+    nutype::String="harmonic", f0type::String="maxwellian",
+    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+    energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
+    pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
+    rex_override::Union{Nothing,Float64}=nothing,
+    imx_override::Union{Nothing,Float64}=nothing,
+    surface_field::Union{Nothing,SurfaceBField}=nothing,
+    bounce_geometry::Union{Nothing,BounceGeometry}=nothing)::ComplexF64
 
-    # Bounce-averaged quantities per pitch angle
-    bounce = compute_bounce_data(
-        psi, n, l, q, bo, bmax, bmin, theta_bmax,
-        tspl, B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
-        mass, chrg, T_s, method;
-        nlmda, ntheta, smat, tmat, xmat, ymat, zmat, surface_field)
+    # Bounce-averaged quantities per pitch angle; the harmonic-free geometry is shared across ℓ when given.
+    bounce =
+        bounce_geometry === nothing ?
+        compute_bounce_data(
+            psi, n, l, q, bo, bmax, bmin, theta_bmax,
+            tspl, B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
+            mass, chrg, T_s, method;
+            nlmda, ntheta, smat, tmat, xmat, ymat, zmat, surface_field) :
+        bounce_harmonic(bounce_geometry, l, n, q, ro, mpert; smat, tmat, xmat, ymat, zmat)
 
     if bounce.nlmda == 0
         return ComplexF64(0.0, 0.0)
@@ -302,7 +313,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         # keeps the historical OLD-path behavior (torque pipeline uses only the
         # real part of the outer products).
         @inbounds for q in 1:nqty_mat, ilmda in 1:bounce.nlmda
-            fbnce_data[ilmda, 3 + q] = real(bounce.wmats_vs_lambda[ilmda, q])
+            fbnce_data[ilmda, 3+q] = real(bounce.wmats_vs_lambda[ilmda, q])
         end
     end
 
@@ -356,7 +367,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         base = 1  # lxint offset after scalar-torque slot (index 1)
 
         # Helper: fetch normalized pitch integral at lxint[base+q] for q ∈ [1..nqty_mat].
-        @inline elem(q) = complex(lxint[base + q] / fbnce_norm[base + q]) * energy_factor
+        @inline elem(q) = complex(lxint[base+q] / fbnce_norm[base+q]) * energy_factor
 
         # A (Hermitian, k=1): upper triangle stored at q ∈ [1..Mu]; mirror to lower.
         off = 0
@@ -435,13 +446,13 @@ end
 Per-surface setup shared by the torque and calculated-matrix paths: θ-grid sampling of B and
 the Jacobian, the periodic fits (`tspl`, `B_vpar`) and the decomposed field `bf`, bounce
 extrema, flux-function values and the diamagnetic/drift frequencies. Nothing here depends on
-the toroidal mode or the bounce harmonic, so one bundle serves every (n, ℓ) at a ψ. Writes the
-`tpsi_*` scratch buffers and 2-D hints on `intr`, so build it outside any threaded ℓ loop.
+the toroidal mode or the bounce harmonic, so one bundle serves every (n, ℓ) at a ψ. Reads `intr`
+only (own θ buffers and search hints), so surfaces of different ψ may be built concurrently.
 """
 function _setup_surface_state(
     psi::Float64, zi::Int, mi::Int,
     electron::Bool, equil, intr::KineticForcesInternal,
-    kinetic_profiles::Equilibrium.KineticProfileSplines,
+    kinetic_profiles::Equilibrium.KineticProfileSplines
 )
     if electron
         chrg = -1 * e
@@ -452,15 +463,15 @@ function _setup_surface_state(
     end
 
     mthsurf_local = intr.mthsurf
-    xs            = intr.tpsi_xs
-    B_vals        = intr.tpsi_B
-    dBdpsi_vals   = intr.tpsi_dBdpsi
-    dBdtheta_vals = intr.tpsi_dBdtheta
-    jac_vals      = intr.tpsi_jac
-    djdpsi_vals   = intr.tpsi_djdpsi
+    xs = intr.tpsi_xs
+    B_vals = Vector{Float64}(undef, mthsurf_local + 1)
+    dBdpsi_vals = similar(B_vals)
+    dBdtheta_vals = similar(B_vals)
+    jac_vals = similar(B_vals)
+    djdpsi_vals = similar(B_vals)
 
-    hB = intr.hint2d_eqfun_B
-    hJ = intr.hint2d_rzphi_jac
+    hB = (Ref(1), Ref(1))
+    hJ = (Ref(1), Ref(1))
     for i in 0:mthsurf_local
         theta = i / mthsurf_local
         pt = (psi, theta)
@@ -513,17 +524,17 @@ function _setup_surface_state(
 
     q = equil.profiles.q_spline(psi)
     if electron
-        n_s       = kinetic_profiles.ne_spline(psi)
-        T_s       = kinetic_profiles.Te_spline(psi)
+        n_s = kinetic_profiles.ne_spline(psi)
+        T_s = kinetic_profiles.Te_spline(psi)
         dn_s_dpsi = kinetic_profiles.ne_deriv(psi)
         dT_s_dpsi = kinetic_profiles.Te_deriv(psi)
-        nu_s      = kinetic_profiles.nue_spline(psi)
+        nu_s = kinetic_profiles.nue_spline(psi)
     else
-        n_s       = kinetic_profiles.ni_spline(psi)
-        T_s       = kinetic_profiles.Ti_spline(psi)
+        n_s = kinetic_profiles.ni_spline(psi)
+        T_s = kinetic_profiles.Ti_spline(psi)
         dn_s_dpsi = kinetic_profiles.ni_deriv(psi)
         dT_s_dpsi = kinetic_profiles.Ti_deriv(psi)
-        nu_s      = kinetic_profiles.nui_spline(psi)
+        nu_s = kinetic_profiles.nui_spline(psi)
     end
     welec = kinetic_profiles.omegaE_spline(psi)
 
@@ -531,7 +542,7 @@ function _setup_surface_state(
     wdiat = -twopi * dT_s_dpsi / (chrg * intr.chi1)
     wtran = sqrt(2 * T_s / mass) / (q * intr.ro)
     wgyro = chrg * intr.bo / mass
-    nuk   = nu_s
+    nuk = nu_s
 
     rsquared_bmin = equil.rzphi_rsquared((psi, theta_bmin))
     rsquared_bmin > 0 ||
@@ -539,7 +550,7 @@ function _setup_surface_state(
 
     avg_r = equil.geometry.avg_r_spline(psi)
     avg_R = equil.geometry.avg_R_spline(psi)
-    epsr  = avg_r / avg_R
+    epsr = avg_r / avg_R
     dVdpsi = equil.profiles.dVdpsi_spline(psi)
 
     # Cells and stationary points of B(θ), reused by every λ of every harmonic.
@@ -556,14 +567,16 @@ end
 
 """
     _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles;
-                    need_matrices=false) → NamedTuple
+                    need_matrices=false, n=nothing, wdfac=1.0, divxfac=1.0) → NamedTuple
 
 `_setup_surface_state` plus the perturbation modes and, when `need_matrices`, the geometric
-matrices at ψ: everything `tpsi!` needs before its method dispatch.
+matrices at ψ: everything `tpsi!` needs before its method dispatch. With the toroidal mode `n`
+given, a GAR-family method also gets its harmonic-free bounce geometry (`geometry`), shared by
+every bounce harmonic of the surface; otherwise `geometry` is `nothing`. Reads `intr` only.
 """
 function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method::String,
     equil, intr::KineticForcesInternal, kinetic_profiles::Equilibrium.KineticProfileSplines;
-    need_matrices::Bool=false)
+    need_matrices::Bool=false, n::Union{Nothing,Int}=nothing, wdfac::Float64=1.0, divxfac::Float64=1.0)
     state = _setup_surface_state(psi, zi, mi, electron, equil, intr, kinetic_profiles)
 
     # Matrix-only methods build their operator from the geometric matrices; dbob_m / divx_m
@@ -572,8 +585,8 @@ function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method:
         dbob_m_f = zeros(ComplexF64, intr.mpert)
         divx_m_f = zeros(ComplexF64, intr.mpert)
     else
-        dbob_m_f = intr.dbob_m(psi; hint=intr.dbob_m_hint)
-        divx_m_f = intr.divx_m(psi; hint=intr.divx_m_hint)
+        dbob_m_f = intr.dbob_m(psi; hint=Ref(1))
+        divx_m_f = intr.divx_m(psi; hint=Ref(1))
     end
 
     if need_matrices && !isnothing(intr.smats)
@@ -586,7 +599,31 @@ function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method:
         smat_f = tmat_f = xmat_f = ymat_f = zmat_f = nothing
     end
 
-    return (; state..., dbob_m_f, divx_m_f, smat_f, tmat_f, xmat_f, ymat_f, zmat_f)
+    geometry = if n !== nothing && method_kind(method) == :gar
+        compute_bounce_geometry(psi, n, state.q, intr.bo, state.bmax, state.bmin, state.theta_bmax,
+            state.tspl, state.B_vpar, intr.mfac, intr.chi1, intr.ro, dbob_m_f, divx_m_f, divxfac, wdfac,
+            state.mass, state.chrg, state.T_s, method;
+            do_matrices=need_matrices && !isnothing(smat_f), surface_field=state.bf)
+    else
+        nothing
+    end
+
+    return (; state..., dbob_m_f, divx_m_f, smat_f, tmat_f, xmat_f, ymat_f, zmat_f, geometry)
+end
+
+"""
+    _matrix_bounce_geometry(state, psi, n, wdfac, intr; nlmda=128, ntheta=128) → BounceGeometry
+
+Harmonic-free bounce geometry of the calculated-matrix path at (ψ, n): the W_μ/W_E samples of the
+full λ range, with no perturbation modes (the matrix path discards the scalar |δJ|²).
+"""
+function _matrix_bounce_geometry(state::NamedTuple, psi::Float64, n::Int, wdfac::Float64, intr::KineticForcesInternal;
+    nlmda::Int=128, ntheta::Int=128)
+    no_modes = zeros(ComplexF64, intr.mpert)
+    return compute_bounce_geometry(psi, n, state.q, intr.bo, state.bmax, state.bmin, state.theta_bmax,
+        state.tspl, state.B_vpar, intr.mfac, intr.chi1, intr.ro, no_modes, no_modes, 1.0, wdfac,
+        state.mass, state.chrg, state.T_s, "fwmm";
+        nlmda, ntheta, do_matrices=true, surface_field=state.bf)
 end
 
 
@@ -609,8 +646,8 @@ match against Fortran `fourfit.F:1080-1082` (`kwmat_l`, `ktmat_l`).
 
 For the Hermitian-outer-product blocks A/D/H stored as upper-triangles,
 the mirror rule differs between halves:
-  kwmat[j,i] =  conj(kwmat[i,j])   — Hermitian (S_w pure imaginary)
-  ktmat[j,i] = -conj(ktmat[i,j])   — anti-Hermitian (S_t pure real)
+kwmat[j,i] =  conj(kwmat[i,j])   — Hermitian (S_w pure imaginary)
+ktmat[j,i] = -conj(ktmat[i,j])   — anti-Hermitian (S_t pure real)
 Derivation: `conj(S_w) = -S_w` vs `conj(S_t) = S_t`, combined with
 `conj(factor) = -factor` (factor = -i/(2n)). These mirrors recover
 Fortran's independent-slot computation at the mirrored (j,i) positions.
@@ -625,13 +662,14 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     nutype::String="harmonic", f0type::String="maxwellian",
     nufac::Float64=1.0, ximag::Float64=0.0,
     energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
-    pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6
+    pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
+    geometry::Union{Nothing,BounceGeometry}=nothing
 )
     mpert = intr.mpert
     mfac = intr.mfac
     chi1 = intr.chi1
-    ro   = intr.ro
-    bo   = intr.bo
+    ro = intr.ro
+    bo = intr.bo
 
     # Geometric matrices at this ψ
     smat_f = reshape(intr.smats(psi), mpert, mpert)
@@ -645,12 +683,15 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     dbob_m_f = zeros(ComplexF64, mpert)
     divx_m_f = zeros(ComplexF64, mpert)
 
-    bounce = compute_bounce_data(
-        psi, n, l, state.q, bo, state.bmax, state.bmin, state.theta_bmax,
-        state.tspl, state.B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
-        state.mass, state.chrg, state.T_s, "fwmm";
-        nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f,
-        surface_field=state.bf)
+    bounce =
+        geometry === nothing ?
+        compute_bounce_data(
+            psi, n, l, state.q, bo, state.bmax, state.bmin, state.theta_bmax,
+            state.tspl, state.B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
+            state.mass, state.chrg, state.T_s, "fwmm";
+            nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f,
+            surface_field=state.bf) :
+        bounce_harmonic(geometry, l, n, state.q, ro, mpert; smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
 
     if bounce.nlmda == 0
         fill!(kwmat, 0)
@@ -701,7 +742,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     Mu = (mpert * (mpert + 1)) ÷ 2
     # Fetch normalized element at pitch-integral slot q, from either half.
     # half_offset = 0 for wmm (→kwmat), = nqty for tmm (→ktmat).
-    @inline elem(q, half_offset) = complex(lxint[half_offset + q] / fbnce_norm[q]) * energy_factor
+    @inline elem(q, half_offset) = complex(lxint[half_offset+q] / fbnce_norm[q]) * energy_factor
 
     # For A/D/H Hermitian-outer-product blocks stored as upper-triangles, the
     # lower-triangle reconstruction uses different mirrors per half:
@@ -725,11 +766,16 @@ function kinetic_energy_matrices_for_euler_lagrange!(
 
     for (dest, half, mirror_sign) in ((kwmat, 0, 1.0), (ktmat, nqty, -1.0))
         off = 0
-        _assemble_hermitian!(dest, 1, off, half, mirror_sign);  off += Mu        # A (k=1)
-        _assemble_hermitian!(dest, 4, off, half, mirror_sign);  off += Mu        # D (k=4)
-        _assemble_hermitian!(dest, 6, off, half, mirror_sign);  off += Mu        # H (k=6)
-        _assemble_full!(dest, 2, off, half);                    off += mpert^2   # B (k=2)
-        _assemble_full!(dest, 3, off, half);                    off += mpert^2   # C (k=3)
+        _assemble_hermitian!(dest, 1, off, half, mirror_sign)
+        off += Mu        # A (k=1)
+        _assemble_hermitian!(dest, 4, off, half, mirror_sign)
+        off += Mu        # D (k=4)
+        _assemble_hermitian!(dest, 6, off, half, mirror_sign)
+        off += Mu        # H (k=6)
+        _assemble_full!(dest, 2, off, half)
+        off += mpert^2   # B (k=2)
+        _assemble_full!(dest, 3, off, half)
+        off += mpert^2   # C (k=3)
         _assemble_full!(dest, 5, off, half)                                      # E (k=5)
     end
 
@@ -771,14 +817,15 @@ adjoint combinations `kwmat ± ktmat` in `ForceFreeStates/Kinetic.jl` /
 Fortran `dcon/sing.f:967-1075` for non-Hermitian B_k, C_k, E_k.
 
 # Arguments
-- `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), fwmm half, zeroed on entry
-- `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), ftmm half, zeroed on entry
-- `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!` (divxfac unused
-  on the matrix path — retained for call-site compatibility)
-- `equil`: PlasmaEquilibrium
-- `intr::KineticForcesInternal`: Internal state with mode indexing, geometric
-  matrices (smats/tmats/xmats/ymats/zmats), and per-surface θ-grid buffers
-- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
+
+  - `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), fwmm half, zeroed on entry
+  - `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), ftmm half, zeroed on entry
+  - `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!` (divxfac unused
+    on the matrix path — retained for call-site compatibility)
+  - `equil`: PlasmaEquilibrium
+  - `intr::KineticForcesInternal`: Internal state with mode indexing, geometric
+    matrices (smats/tmats/xmats/ymats/zmats), and per-surface θ-grid buffers
+  - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
 
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
@@ -793,7 +840,8 @@ function compute_kinetic_matrices_at_psi!(
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
     atol_x::Float64=NaN, rtol_x::Float64=NaN,
     nested_tolerance_margin::Float64=1e-2,
-    state::Union{Nothing,NamedTuple}=nothing)
+    state::Union{Nothing,NamedTuple}=nothing,
+    geometry::Union{Nothing,BounceGeometry}=nothing)
 
     # Bypass ψ > 1 (no kinetic contribution outside plasma)
     if psi > 1
@@ -813,9 +861,7 @@ function compute_kinetic_matrices_at_psi!(
         kwmat, ktmat, surf, psi, n, l, wdfac, intr;
         nutype, f0type, nufac,
         energy_atol=atol_energy, energy_rtol=rtol_energy,
-        pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
+        pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda, geometry)
 
     return nothing
 end
-
-
