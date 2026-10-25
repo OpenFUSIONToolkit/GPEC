@@ -121,7 +121,7 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
     n_s::Float64, T_s::Float64, equil,
     intr::KineticForcesInternal)::ComplexF64
 
-    # Only implemented for l=0, so one harmonic per surface touches the shared `intr` hints.
+    # Only implemented for l=0.
     if l != 0
         return ComplexF64(0.0, 0.0)
     end
@@ -132,9 +132,9 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
     cglspl = zeros(2, mthsurf_local + 1)
     theta_vals = range(0, 1; length=mthsurf_local + 1)
 
-    # Evaluate poloidal functions and field perturbations
-    hB = intr.hint2d_eqfun_B
-    hJ = intr.hint2d_rzphi_jac
+    # Local search hints: ψ nodes and harmonics run concurrently, so `intr` is read-only here.
+    hB = (Ref(1), Ref(1))
+    hJ = (Ref(1), Ref(1))
     for i in eachindex(theta_vals)
         theta = theta_vals[i]
 
