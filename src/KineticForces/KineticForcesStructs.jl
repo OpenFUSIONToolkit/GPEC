@@ -270,19 +270,6 @@ this struct.
     dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
     divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
 
-    # Sticky bracket-search hints for amortized lookup in `tpsi!`. When the outer
-    # quadrature evaluates ψ non-monotonically, FastInterpolations falls back to a
-    # broader search when the hint is stale — still a net win over a cold bracket
-    # search on every call.
-    dbob_m_hint::Base.RefValue{Int} = Ref(1)
-    divx_m_hint::Base.RefValue{Int} = Ref(1)
-    # 2D hints for `equil.eqfun_B` and `equil.rzphi_jac` evaluated on the
-    # (ψ,θ) grid inside the θ loops of `tpsi!` / `calculate_fcgl`. Each call
-    # site gets its own hint tuple so the ψ index is sticky across the
-    # quadrature evaluation while the θ index updates monotonically within each θ loop.
-    hint2d_eqfun_B::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
-    hint2d_rzphi_jac::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
-
     # Upper ψ bound (FFS psilim); the perturbation interpolants are invalid beyond it,
     # so the outer ψ quadrature clips here.
     psilim::Float64 = 1.0
@@ -290,13 +277,8 @@ this struct.
     # Rational-surface ψ locations for ψ-quadrature paneling (see docstring).
     sing_psis::Vector{Float64} = Float64[]
 
-    # Pre-allocated θ-grid buffers for `tpsi!` — length mthsurf+1, reused per evaluation.
+    # θ knot grid (length mthsurf+1) read by the per-surface setup; never written after construction.
     tpsi_xs::Vector{Float64} = Float64[]
-    tpsi_B::Vector{Float64} = Float64[]
-    tpsi_dBdpsi::Vector{Float64} = Float64[]
-    tpsi_dBdtheta::Vector{Float64} = Float64[]
-    tpsi_jac::Vector{Float64} = Float64[]
-    tpsi_djdpsi::Vector{Float64} = Float64[]
 
     # Raw geometric matrices for kinetic W vector construction
     # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
@@ -338,11 +320,6 @@ function KineticForcesInternal(equil; verbose::Bool=false)
         chi1=2π * equil.psio,
         mthsurf,
         tpsi_xs=collect(range(0.0, 1.0; length=nth)),
-        tpsi_B=Vector{Float64}(undef, nth),
-        tpsi_dBdpsi=Vector{Float64}(undef, nth),
-        tpsi_dBdtheta=Vector{Float64}(undef, nth),
-        tpsi_jac=Vector{Float64}(undef, nth),
-        tpsi_djdpsi=Vector{Float64}(undef, nth),
         verbose
     )
 end
