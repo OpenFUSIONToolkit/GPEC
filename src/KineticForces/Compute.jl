@@ -116,6 +116,7 @@ function integrate_psi_quadgk(
     # Per-harmonic results are stored by index and reduced in fixed ℓ order, so the sum is
     # independent of thread count. `:static` keeps the threadid()-indexed slots sound; never nest it.
     nharm = 1 + 2 * nl
+    rtol_pitch = torque_pitch_rtol(ctrl)
     nth = Threads.maxthreadid()
     thread_tpsi = [Ref{ComplexF64}(0.0im) for _ in 1:nth]
     thread_wtw = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nth] : nothing
@@ -143,7 +144,7 @@ function integrate_psi_quadgk(
                 tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
                     electron, method, equil, intr, kinetic_profiles;
                     op_wmats=w, surface,
-                    atol_xlmda=ctrl.atol_pitch, rtol_xlmda=ctrl.rtol_pitch,
+                    atol_xlmda=ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
                 harm_vals[ell_idx] = thread_tpsi[tid][]
@@ -293,7 +294,7 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
         # when every species carries it on an identical ℓ range; otherwise left empty.
         ell = first(results).ell
         has_ell = !isempty(ell) && all(r -> r.ell == ell && size(r.dtdpsi_ell, 2) == length(ell) &&
-                                            size(r.dtdpsi_ell, 1) == length(r.psi_grid), results)
+                                                size(r.dtdpsi_ell, 1) == length(r.psi_grid), results)
         dtdpsi_ell = zeros(ComplexF64, has_ell ? length(grid) : 0, has_ell ? length(ell) : 0)
         if has_ell
             for r in results

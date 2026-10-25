@@ -93,6 +93,12 @@ builds a second control for its differing tolerance).
     transition would otherwise cut through — the increments are zeroed and the kernel is skipped,
     rising to full strength at 2ψ_c through a C² envelope. Boundary and envelope come from the
     equilibrium and kinetic profiles; there are no tuning parameters. Default `true`.
+  - Quadrature tolerances form a ladder, outermost in: `rtol_psi` (the accuracy asked of the torque, default
+    1e-2) ⊃ `rtol_pitch` (default `psi_tolerance_margin × rtol_psi` = 1e-3) ⊃ `rtol_x` (default
+    `nested_tolerance_margin × rtol_pitch` = 1e-5). Each inner integral is the outer one's integrand, so it is
+    resolved tighter than the outer tolerance by its margin and no further: QuadGK bounds the error of the
+    whole integral, so a level tighter than its margin only multiplies evaluations. Set `rtol_pitch`/`rtol_x`
+    explicitly to override the derivation (see `torque_pitch_rtol`, `matrix_pitch_rtol`).
 """
 @kwdef struct KineticForcesControl
     # Moment type
@@ -130,15 +136,16 @@ builds a second control for its differing tolerance).
     nn::Int = 1                     # Toroidal mode number
     bounce_harmonic_max::Int = 1    # Bounce harmonics summed over ℓ = -max:max
 
-    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy); each level must
-    # resolve tighter than the one enclosing it, or the outer integrator chases quadrature noise.
-    atol_pitch::Float64 = 1e-8      # Absolute tolerance for the inner pitch integration
-    rtol_pitch::Float64 = 1e-5      # Relative tolerance for the inner pitch integration
+    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy). Each level derives from the one
+    # enclosing it by a margin unless set explicitly (NaN ⇒ derived), so no integrator chases its integrand's noise.
+    atol_pitch::Float64 = 1e-8      # Absolute tolerance for the pitch integration (median-normalized kernel)
+    rtol_pitch::Float64 = NaN      # Relative tolerance for the pitch integration (NaN ⇒ psi_tolerance_margin × rtol_psi)
+    psi_tolerance_margin::Float64 = 1e-1   # Factor relating the derived pitch tolerance to rtol_psi
     atol_x::Float64 = NaN          # Absolute tolerance for the energy integration (NaN ⇒ derived)
     rtol_x::Float64 = NaN          # Relative tolerance for the energy integration (NaN ⇒ derived)
     # Energy tolerances default to this fraction of the pitch ones (the pitch integrand is itself an energy integral).
     nested_tolerance_margin::Float64 = 1e-2   # Factor relating derived energy tolerances to the pitch ones
-    # Primary convergence knob (~2 sig figs matches NTV model validity); keep rtol_psi ≳ 10 × rtol_pitch or it chases inner-integral noise.
+    # Primary convergence knob (~2 sig figs matches NTV model validity); the pitch and energy levels derive from it.
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
     # Amplitude-sensitive (NTV ∝ δB²); default 0 (rtol-only). Nonzero is an expert opt-out for near-zero-torque cases and warns when it dominates.
     atol_psi::Float64 = 0.0        # Absolute tolerance for outer ψ quadrature [N·m]
@@ -187,6 +194,28 @@ builds a second control for its differing tolerance).
     # Debugging
     verbose::Bool = false
 end
+
+"""
+    torque_pitch_rtol(ctrl::KineticForcesControl) -> Float64
+
+Relative tolerance of the pitch (λ) quadrature inside the ψ torque quadrature: `ctrl.rtol_pitch` when set,
+otherwise `ctrl.psi_tolerance_margin × ctrl.rtol_psi`, so the λ integrand is resolved one margin tighter than
+the ψ integral asks for and the ψ error estimate is not polluted by λ quadrature noise.
+"""
+torque_pitch_rtol(ctrl::KineticForcesControl) = isnan(ctrl.rtol_pitch) ? ctrl.psi_tolerance_margin * ctrl.rtol_psi : ctrl.rtol_pitch
+
+# Pitch tolerance of the kinetic matrix build when `rtol_pitch` is left derived. There is no ψ quadrature to
+# derive from; this value moves the free-boundary eigen-energies by ≤ 1e-4 relative to a 100× tighter build.
+const MATRIX_RTOL_PITCH = 1e-3
+
+"""
+    matrix_pitch_rtol(ctrl::KineticForcesControl) -> Float64
+
+Relative tolerance of the pitch (λ) quadrature in the calculated kinetic matrix build: `ctrl.rtol_pitch` when
+set, otherwise `MATRIX_RTOL_PITCH` (1e-3). The matrices are splined over ψ and fed to the Euler–Lagrange
+solve, so there is no outer quadrature tolerance to derive from.
+"""
+matrix_pitch_rtol(ctrl::KineticForcesControl) = isnan(ctrl.rtol_pitch) ? MATRIX_RTOL_PITCH : ctrl.rtol_pitch
 
 
 # ============================================================================
