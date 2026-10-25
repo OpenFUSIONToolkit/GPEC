@@ -26,18 +26,22 @@ Splines are provided by the external `FastInterpolations` package rather than by
 ### Core Physics Modules
 
 2. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
-   - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
+   - Main entry point: `PlasmaEquilibrium(file; eq_type)`, `PlasmaEquilibrium(analytic_config)`, `PlasmaEquilibrium(dd)`, or `PlasmaEquilibrium(config, source)`
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
      - `chease`, `chease2` - CHEASE equilibrium code formats
      - `lar` - Large Aspect Ratio analytical model
      - `sol` - Solovev analytical equilibrium
-   - Key files:
-     - `EquilibriumTypes.jl` - Core data structures
-     - `ReadEquilibrium.jl` - Parsing equilibrium files
-     - `DirectEquilibrium.jl` - Direct Grad-Shafranov solver
-     - `InverseEquilibrium.jl` - Inverse equilibrium solver
-     - `AnalyticEquilibrium.jl` - Analytical solutions
+   - Key files, by pipeline stage:
+     - `Config.jl` - `EquilibriumConfig`, `EquilibriumParameters`
+     - `PlasmaEquilibrium.jl` - The result type and its profile and geometry splines
+     - `Construction.jl` - Solver input for each source type, the `PlasmaEquilibrium` constructors, `reform`
+     - `Sources/` - One file per input format (`GFile.jl`, `Chease.jl`, `IFile.jl`, `IMAS.jl`), the ingest and
+       run-input types (`Ingest.jl`), and `Analytic/` (the analytic registry plus one file per model with its config and solver)
+     - `Grid/` - First-pass ψ grids (`PsiGrid.jl`) and the two-pass refinement (`GridRefinement.jl`)
+     - `Axisymmetric/` - The 2D solvers (`Direct.jl`, `DirectArcLength.jl`, `DirectByInversion.jl`, `Inverse.jl`),
+       the Grad-Shafranov residual, and separatrix finding
+     - `Derived/` - Global parameters and q extrema, flux-surface metrics, geometry profiles, coordinate-invariant weights
    - Status: Stable and feature-complete
 
 3. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
@@ -149,14 +153,14 @@ Example configuration files are provided in:
 - `examples/Solovev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
 
-**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are deprecated.
+**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are not read; `gpec.toml` is the only input deck.
 
 ## Data Flow
 
 The complete GPEC analysis pipeline:
 
 1. **Equilibrium Setup**:
-   - `setup_equilibrium(config)` reads configuration from `gpec.toml`
+   - `PlasmaEquilibrium(config, source)` forms the equilibrium from the `[Equilibrium]` section of `gpec.toml`
    - Parses equilibrium data (EFIT, CHEASE, or analytical)
    - Runs Grad-Shafranov solver (direct or inverse)
    - Computes global parameters: q-profile, pressure, current density, β

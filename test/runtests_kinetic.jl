@@ -665,6 +665,7 @@ using TOML
         @test mr.total_torque == 0.0 + 0.0im
         @test mr.total_energy == 0.0
         @test isempty(mr.records)
+        @test isempty(mr.dtdpsi_ell) && isempty(mr.ell)
     end
 
     # =========================================================================
@@ -732,14 +733,14 @@ using TOML
             config = E.EquilibriumConfig(merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))), template)
             @test config.kinetic_file == normpath(h5)
             raw = E.read_kinetic_file(h5)
-            equil = E.setup_equilibrium(config, sol)
+            equil = E.PlasmaEquilibrium(config, sol)
             @test equil.kinetic.psi == raw.psi
             @test equil.kinetic.T_i == raw.T_i
             @test equil.kinetic.chi_e == raw.chi_e
             # A re-form passes the data through instead of reading the file again.
-            @test E.setup_equilibrium(config, sol; kinetic=equil.kinetic).kinetic === equil.kinetic
+            @test E.PlasmaEquilibrium(config, sol; kinetic=equil.kinetic).kinetic === equil.kinetic
 
-            bare = E.setup_equilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), sol)
+            bare = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), sol)
             @test bare.kinetic === nothing
             E.attach_kinetic_profiles!(bare, gpeckf)
             @test bare.kinetic.n_e == E.read_kinetic_file(gpeckf).n_e
@@ -751,7 +752,7 @@ using TOML
             KF = GPEC.KineticForces
             template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
             deck = TOML.parsefile(joinpath(template, "gpec.toml"))
-            equil = E.setup_equilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), E.SolovevConfig(deck["SOL_INPUT"]))
+            equil = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), E.SolovevConfig(deck["SOL_INPUT"]))
             kf = KF.KineticForcesControl()
             @test KF.ntv_profiles(kf, equil) === nothing
             @test_throws "set kinetic_file in [Equilibrium]" GPEC.kinetic_forces_control(

@@ -10,7 +10,7 @@ using TOML
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
-    equil = GPEC.Equilibrium.setup_equilibrium(
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
@@ -80,7 +80,7 @@ using TOML
         # The equilibrium carries the deck's kinetic profiles, so the API solves the same kinetic problem.
         kin_template = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_calculated")
         kdeck = TOML.parsefile(joinpath(kin_template, "gpec.toml"))
-        kequil = GPEC.Equilibrium.setup_equilibrium(
+        kequil = GPEC.Equilibrium.PlasmaEquilibrium(
             GPEC.Equilibrium.EquilibriumConfig(kdeck["Equilibrium"], kin_template),
             GPEC.Equilibrium.SolovevConfig(kdeck["SOL_INPUT"])
         )
@@ -107,16 +107,16 @@ using TOML
         sl_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_SLAYER_example")
         sl_deck = TOML.parsefile(joinpath(sl_dir, "gpec.toml"))
         sl_config = GPEC.Equilibrium.EquilibriumConfig(sl_deck["Equilibrium"], sl_dir)
-        pass1 = GPEC.Equilibrium.setup_equilibrium(sl_config)
+        pass1 = GPEC.Equilibrium.PlasmaEquilibrium(sl_config)
         @test pass1.kinetic !== nothing
         sl_ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in sl_deck["ForceFreeStates"])...)
         sl_intr = FFS.ForceFreeStatesInternal()
         GPEC.resolve_mode_space!(sl_intr, sl_ctrl)
-        refined = GPEC.maybe_reform_equilibrium(pass1, sl_config, nothing, sl_intr, sl_ctrl)
+        refined = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
         @test refined.kinetic === pass1.kinetic        # carried through the re-form, not re-read
         kinetic = pass1.kinetic
         pass1.kinetic = nothing
-        ideal = GPEC.maybe_reform_equilibrium(pass1, sl_config, nothing, sl_intr, sl_ctrl)
+        ideal = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
         pass1.kinetic = kinetic
         @test refined.rzphi_xs != ideal.rzphi_xs
     end

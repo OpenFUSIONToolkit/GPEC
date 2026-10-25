@@ -514,7 +514,7 @@ function setup_equil(p::FortranRunParams, fortran_dir::String)
         "flux_surface_rtol" => 1e-7
     )
     eq_config = Equilibrium.EquilibriumConfig(eq_dict, fortran_dir)
-    return Equilibrium.setup_equilibrium(eq_config)
+    return Equilibrium.PlasmaEquilibrium(eq_config)
 end
 
 # ─── Phi_x comparison (coil mode) ────────────────────────────────────────────
