@@ -96,14 +96,11 @@ function compute_calculated_kinetic_matrices(
 
     # Loop over flux surfaces and n-blocks, accumulating bounce harmonics into
     # per-n blocks placed on the diagonal of the full np×np block-diagonal matrix.
-    # The ψ-loop is embarrassingly parallel: each iteration writes to a unique
-    # ipsi row of kw_flat/kt_flat. Per-thread copies of kf_intr provide isolated
-    # tpsi_* θ-grid buffers and interpolant hint refs; geometric/profile splines
-    # are read-only and safely shared through deepcopy semantics.
+    # The ψ-loop is embarrassingly parallel: each iteration writes its own ipsi row of
+    # kw_flat/kt_flat, and the kernel only reads kf_intr, so it is shared across threads.
     nl = kf_ctrl.bounce_harmonic_max
     rtol_pitch = matrix_pitch_rtol(kf_ctrl)
     nthreads = Threads.maxthreadid()
-    thread_intrs = [deepcopy(kf_intr) for _ in 1:nthreads]
     thread_full_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_full_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
@@ -138,7 +135,6 @@ function compute_calculated_kinetic_matrices(
         # (dynamic scheduling may migrate tasks at yield points, silently sharing buffers).
         Threads.@threads :static for ipsi in 1:mpsi
             tid = Threads.threadid()
-            intr_t = thread_intrs[tid]
             full_w = thread_full_w[tid]
             full_t = thread_full_t[tid]
             block_w = thread_block_w[tid]
@@ -146,20 +142,20 @@ function compute_calculated_kinetic_matrices(
             psi = xs[ipsi]
             env[ipsi] == 0.0 && continue   # inside the near-axis validity band: kernel skipped
             # (n, ℓ)-independent surface setup, built once per ψ on this thread's `intr` copy.
-            state = _setup_surface_state(psi, z_s, m_s, el_s, equil, intr_t, prof_s)
+            state = _setup_surface_state(psi, z_s, m_s, el_s, equil, kf_intr, prof_s)
             for in_idx in 1:npert
                 n = ffs_intr.nlow + in_idx - 1
                 fill!(full_w, 0)
                 fill!(full_t, 0)
                 # The bounce geometry depends on (ψ, n) only; the harmonics share it.
-                geometry = _matrix_bounce_geometry(state, psi, n, kf_ctrl.magnetic_drift_factor, intr_t)
+                geometry = _matrix_bounce_geometry(state, psi, n, kf_ctrl.magnetic_drift_factor, kf_intr)
                 for ell in -nl:nl
                     fill!(block_w, 0)
                     fill!(block_t, 0)
                     compute_kinetic_matrices_at_psi!(
                         block_w, block_t, psi, n, ell,
                         z_s, m_s, kf_ctrl.magnetic_drift_factor, kf_ctrl.divxi_factor,
-                        el_s, equil, intr_t, prof_s;
+                        el_s, equil, kf_intr, prof_s;
                         nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.collisionality_factor,
                         atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                         atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
