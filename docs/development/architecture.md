@@ -76,7 +76,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
 5. **LocalStability** (`src/LocalStability/`) - Local high-n stability
    - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Depends only on Equilibrium (plus math libraries); carries no stability-solver state
-   - Main entry points: `compute_local_stability`, `ballooning_alpha_boundary`
+   - `Problem.jl` - `solve(LocalStabilityProblem(equil), Ballooning())` → `LocalStabilityResult`; a deck's `[LocalStability]` section runs the same solve
+   - Kernels: `compute_ballooning_stability!`, `ballooning_alpha_boundary`
    - Status: Stable
 
 ### Perturbed Equilibrium Modules

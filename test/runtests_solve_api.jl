@@ -385,9 +385,9 @@ using HDF5
         end
 
         @testset "analytic equilibrium on the two-pass auto grid" begin
-            # A coarse psi_accuracy and no local-stability scan keep the 1024-interval pass-1 grid cheap.
+            # A coarse psi_accuracy keeps the 1024-interval pass-1 grid cheap; the deck runs no local-stability scan.
             eq_overrides = Dict{String,Any}("grid_type" => "auto", "mpsi" => 0, "psi_accuracy" => 3e-2)
-            ffs_overrides = Dict{String,Any}("local_stability_flag" => false, "vac_flag" => false)
+            ffs_overrides = Dict{String,Any}("vac_flag" => false)
             mktempdir() do dir
                 reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
                 pass1 = GPEC.Equilibrium.PlasmaEquilibrium(
@@ -450,8 +450,8 @@ using HDF5
                 @test reference.free_boundary !== nothing
 
                 kwargs = merge(ffs_kwargs, Dict(:kinetic_factor => 1e-9))
-                # Known drift: `solve` rejects every kinetic run, although the fixed source needs no profiles.
-                @test_broken solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...).free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
+                # The fixed source needs no profiles, so `solve` runs it as the deck does.
+                @test solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...).free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
             end
         end
     end
