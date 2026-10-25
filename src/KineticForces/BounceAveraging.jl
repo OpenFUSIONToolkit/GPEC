@@ -45,6 +45,40 @@ struct BounceData
     wmats_vs_lambda::Union{Nothing,Matrix{ComplexF64}}
 end
 
+"""
+    BounceGeometry
+
+The bounce-harmonic-independent part of the bounce averaging at one (ψ, n): per λ, the orbit's θ
+sub-grid samples that every ℓ reuses. Produced by `compute_bounce_geometry`, consumed by
+`bounce_harmonic`, which adds the ℓ-dependent phase and reduces to a `BounceData`.
+
+## Fields
+
+  - `nlmda`, `lambda`, `dlambda`, `sigma`: the λ grid, as in `BounceData`
+  - `wb`, `wd`: bounce and precession frequencies [rad/s]
+  - `wbbar::Vector{Float64}`: normalized bounce frequency per λ (`wb = wbbar·bhat`)
+  - `total_wb::Vector{Float64}`: full bounce-action integral per λ, the phase normalization
+  - `fsi_wb::Matrix{Float64}`: `ntheta × nlmda` cumulative bounce action along the orbit
+  - `jvtheta::Matrix{ComplexF64}`: `ntheta × nlmda` action integrand samples
+  - `wmu_mt`, `wen_mt`: `mpert × ntheta × nlmda` W_μ, W_E samples (matrix path, else `nothing`)
+  - `valid::Vector{Bool}`: false where the bounce integral degenerated; every output of that λ is zero
+"""
+struct BounceGeometry
+    nlmda::Int
+    lambda::Vector{Float64}
+    dlambda::Vector{Float64}
+    sigma::Vector{Int}
+    wb::Vector{Float64}
+    wd::Vector{Float64}
+    wbbar::Vector{Float64}
+    total_wb::Vector{Float64}
+    fsi_wb::Matrix{Float64}
+    jvtheta::Matrix{ComplexF64}
+    wmu_mt::Union{Nothing,Array{ComplexF64,3}}
+    wen_mt::Union{Nothing,Array{ComplexF64,3}}
+    valid::Vector{Bool}
+end
+
 
 # ============================================================================
 # Packed layout for kinetic matrix per-λ storage
@@ -174,7 +208,9 @@ end
 
 Compute bounce-averaged quantities as functions of pitch angle λ.
 This is the core function that sets up all λ-dependent quantities
-needed by the pitch-angle quadrature.
+needed by the pitch-angle quadrature. It is `compute_bounce_geometry` (everything
+independent of the bounce harmonic) followed by `bounce_harmonic` for `l`; a caller
+looping over harmonics builds the geometry once and calls `bounce_harmonic` per ℓ.
 
 Ports Fortran torque.F90 lines 530-816 (GAR branch).
 
@@ -225,8 +261,38 @@ function compute_bounce_data(
     zmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
     surface_field=nothing
 )
+    geometry = compute_bounce_geometry(
+        psi, n, q, bo, bmax, bmin, theta_bmax,
+        tspl, B_vpar, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
+        mass, chrg, T_s, method;
+        nlmda, ntheta, do_matrices=!isnothing(smat), surface_field)
+    return bounce_harmonic(geometry, l, n, q, ro, length(mfac); smat, tmat, xmat, ymat, zmat)
+end
+
+"""
+    compute_bounce_geometry(psi, n, q, bo, bmax, bmin, theta_bmax, tspl, B_vpar, mfac, chi1, ro,
+                            dbob_m_f, divx_m_f, divxfac, wdfac, mass, chrg, T_s, method;
+                            nlmda=128, ntheta=128, do_matrices=false, surface_field=nothing) → BounceGeometry
+
+The bounce-harmonic-independent half of `compute_bounce_data`: for every λ of the grid, locate the
+orbit, sample the bounce integrands on its θ sub-grid and integrate them. The harmonic enters only
+through the phase `exp(−2πi·lnq·∫J B/v_∥)`, applied by `bounce_harmonic`. Arguments as for
+`compute_bounce_data`; `do_matrices` stores the W_μ, W_E samples the kinetic matrix path needs.
+"""
+function compute_bounce_geometry(
+    psi::Float64, n::Int, q::Float64,
+    bo::Float64, bmax::Float64, bmin::Float64,
+    theta_bmax::Float64,
+    tspl, B_vpar, mfac::Vector{Int}, chi1::Float64, ro::Float64,
+    dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
+    divxfac::Float64, wdfac::Float64,
+    mass::Float64, chrg::Float64,
+    T_s::Float64, method::String;
+    nlmda::Int=128, ntheta::Int=128,
+    do_matrices::Bool=false,
+    surface_field=nothing
+)
     mpert = length(mfac)
-    do_matrices = !isnothing(smat)
 
     # Per-surface scratch, reused across all λ.
     scr = BounceScratch(ntheta, mpert)
@@ -246,12 +312,16 @@ function compute_bounce_data(
     method_char = method[1]
     lambda, dlambda = _build_lambda_grid(method_char, lmdatpb, lmdamax, nlmda)
 
-    # Pre-allocate output arrays
     wb_arr = zeros(Float64, nlmda)
     wd_arr = zeros(Float64, nlmda)
-    dJdJ_arr = zeros(Float64, nlmda)
+    wbbar_arr = zeros(Float64, nlmda)
+    total_wb_arr = zeros(Float64, nlmda)
     sigma_arr = zeros(Int, nlmda)
-    wmats_arr = do_matrices ? zeros(ComplexF64, nlmda, nqty_matrix(mpert)) : nothing
+    valid = falses(nlmda)
+    fsi_wb = zeros(Float64, ntheta, nlmda)
+    jvtheta = zeros(ComplexF64, ntheta, nlmda)
+    wmu_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta, nlmda) : nothing
+    wen_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta, nlmda) : nothing
 
     # Thermal speed and drift normalization
     bhat = sqrt(2 * T_s / mass) / ro
@@ -261,27 +331,78 @@ function compute_bounce_data(
         lmda = lambda[ilmda]
 
         # Determine trapped/passing (Fortran line 591-595)
-        if lmda > (bo / bmax)
-            sigma = 0  # trapped
-        else
-            sigma = 1  # passing
-        end
+        sigma = lmda > (bo / bmax) ? 0 : 1
         sigma_arr[ilmda] = sigma
-        lnq = l + sigma * n * q  # effective resonance number
 
         # Find bounce points and build θ sub-grid
         _, _, tdt_pts, tdt_wts = _find_bounce_points_and_grid(
             lmda, bo, sigma, B_vpar, theta_bmax, psi, ntheta, bf, bpts_buf, hints)
 
-        # Bounce integrals over θ (Fortran lines 674-735)
-        wbbar, wdbar, dJdJ_val, wmats_lmda = _bounce_integrate(
-            tdt_pts, tdt_wts, lmda, lnq, sigma, n, q, bo,
-            tspl, B_vpar, chi1, ro, mfac, dbob_m_f, divx_m_f, divxfac, wdfac,
-            do_matrices, mpert, smat, tmat, xmat, ymat, zmat, scr)
+        # Bounce integrands sampled along the orbit (Fortran lines 674-735)
+        total_wb, total_wd = _bounce_samples!(
+            view(fsi_wb, :, ilmda), view(jvtheta, :, ilmda),
+            do_matrices ? view(wmu_mt, :, :, ilmda) : nothing,
+            do_matrices ? view(wen_mt, :, :, ilmda) : nothing,
+            tdt_pts, tdt_wts, lmda, n, q, bo,
+            tspl, B_vpar, chi1, mfac, dbob_m_f, divx_m_f, divxfac,
+            do_matrices, mpert, scr)
+
+        # Degenerate orbit: every output of this λ stays zero.
+        total_wb ≈ 0.0 && continue
+        valid[ilmda] = true
+        total_wb_arr[ilmda] = total_wb
+
+        # Bounce-averaged frequencies. wbbar already carries one factor of ro that its own
+        # normalization bhat = sqrt(2T/m)/ro cancels; reusing it inside wdbar imports that ro
+        # a third time while dhat = (T/q)/(bo·ro²) removes only the two written explicitly, so
+        # the drift prefactor takes ro, not ro². (Otherwise ω_D = wdbar·dhat carries a surplus
+        # length: 4π·(I₂/I₁)·(T/q) is already V/Wb = 1/s, so the extra ro leaves m/s.)
+        wbbar = ro * twopi / ((2 - sigma) * total_wb)
+        wdbar = ro * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
+        wbbar_arr[ilmda] = wbbar
 
         # Physical frequencies (Fortran lines 744-745)
         wb_arr[ilmda] = wbbar * bhat
         wd_arr[ilmda] = wdbar * dhat
+    end
+
+    return BounceGeometry(nlmda, lambda, dlambda, sigma_arr, wb_arr, wd_arr, wbbar_arr, total_wb_arr,
+        fsi_wb, jvtheta, wmu_mt, wen_mt, valid)
+end
+
+"""
+    bounce_harmonic(geometry::BounceGeometry, l, n, q, ro, mpert;
+                    smat=nothing, tmat=nothing, xmat=nothing, ymat=nothing, zmat=nothing) → BounceData
+
+Apply bounce harmonic `l` to a `BounceGeometry`: per λ the phase factor with
+`lnq = l + σ·n·q`, the action bounce integral |δJ|², and (matrix path, when the geometric
+matrices are given and the geometry carries the W samples) the packed W outer products.
+"""
+function bounce_harmonic(geometry::BounceGeometry, l::Int, n::Int, q::Float64, ro::Float64, mpert::Int;
+    smat::Union{Nothing,Matrix{ComplexF64}}=nothing,
+    tmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
+    xmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
+    ymat::Union{Nothing,Matrix{ComplexF64}}=nothing,
+    zmat::Union{Nothing,Matrix{ComplexF64}}=nothing)
+    nlmda = geometry.nlmda
+    ntheta = size(geometry.fsi_wb, 1)
+    do_matrices = !isnothing(smat) && !isnothing(geometry.wmu_mt)
+    scr = BounceScratch(ntheta, mpert)
+
+    dJdJ_arr = zeros(Float64, nlmda)
+    wmats_arr = do_matrices ? zeros(ComplexF64, nlmda, nqty_matrix(mpert)) : nothing
+
+    for ilmda in 1:nlmda
+        geometry.valid[ilmda] || continue
+        sigma = geometry.sigma[ilmda]
+        lnq = l + sigma * n * q  # effective resonance number
+
+        dJdJ_val, wmats_lmda = _bounce_harmonic_tail(
+            view(geometry.fsi_wb, :, ilmda), view(geometry.jvtheta, :, ilmda),
+            do_matrices ? view(geometry.wmu_mt, :, :, ilmda) : nothing,
+            do_matrices ? view(geometry.wen_mt, :, :, ilmda) : nothing,
+            geometry.total_wb[ilmda], geometry.wbbar[ilmda], lnq, sigma, ro,
+            do_matrices, mpert, smat, tmat, xmat, ymat, zmat, scr)
         dJdJ_arr[ilmda] = dJdJ_val
 
         if do_matrices && !isnothing(wmats_lmda)
@@ -291,8 +412,8 @@ function compute_bounce_data(
         end
     end
 
-    return BounceData(nlmda, lambda, dlambda, sigma_arr,
-        wb_arr, wd_arr, dJdJ_arr, wmats_arr)
+    return BounceData(nlmda, geometry.lambda, geometry.dlambda, geometry.sigma,
+        geometry.wb, geometry.wd, dJdJ_arr, wmats_arr)
 end
 
 
@@ -469,12 +590,13 @@ holds at most one bounce point; within such an interval the cached knot values l
 the cell by bisection and the cell's cubic is then solved in closed form.
 
 ## Fields
-- `knot::Vector{Float64}`: cell boundaries, ascending, `knot[1] = 0`, `knot[end] = 1`
-- `bknot::Vector{Float64}`: B at each knot
-- `poly::Vector{NTuple{4,Float64}}`: per-cell `(d, c, b, a)` of `S(u) = d + cu + bu² + au³`,
-  in the cell-local coordinate `u = θ − knot[i]`
-- `theta::Vector{Float64}`: stationary points of B, ascending, in [0,1)
-- `bval::Vector{Float64}`: B at each stationary point
+
+  - `knot::Vector{Float64}`: cell boundaries, ascending, `knot[1] = 0`, `knot[end] = 1`
+  - `bknot::Vector{Float64}`: B at each knot
+  - `poly::Vector{NTuple{4,Float64}}`: per-cell `(d, c, b, a)` of `S(u) = d + cu + bu² + au³`,
+    in the cell-local coordinate `u = θ − knot[i]`
+  - `theta::Vector{Float64}`: stationary points of B, ascending, in [0,1)
+  - `bval::Vector{Float64}`: B at each stationary point
 """
 struct SurfaceBField
     knot::Vector{Float64}
@@ -535,11 +657,15 @@ function _surface_b_field(B_vpar)
     return SurfaceBField(knot, bknot, poly, theta, bval)
 end
 
-"""Cell index holding θ ∈ [0,1], from the ascending knot vector."""
+"""
+Cell index holding θ ∈ [0,1], from the ascending knot vector.
+"""
 @inline _cell_index(knot::Vector{Float64}, θ::Float64) =
     clamp(searchsortedlast(knot, θ), 1, length(knot) - 1)
 
-"""Evaluate B at θ from the cached cell polynomials."""
+"""
+Evaluate B at θ from the cached cell polynomials.
+"""
 @inline function _b_at(knot::Vector{Float64}, poly::Vector{NTuple{4,Float64}}, θ::Float64)
     i = _cell_index(knot, θ)
     return evalpoly(θ - knot[i], poly[i])
@@ -679,7 +805,9 @@ function _locate_cell(
     return pos == 0 ? ic : _bisect_cell(bf, ia, ib, btarget, s)
 end
 
-"""Bisection on the span's monotone knot values, for when the hint does not pay off."""
+"""
+Bisection on the span's monotone knot values, for when the hint does not pay off.
+"""
 function _bisect_cell(bf::SurfaceBField, ia::Int, ib::Int, btarget::Float64, s::Float64)
     ia >= ib && return ia
     s * bf.bknot[ia+1] > s * btarget && return ia
@@ -851,20 +979,21 @@ end
 
 
 """
-    _bounce_integrate(...)
+    _bounce_samples!(fsi_wb, jvtheta, wmu_mt, wen_mt, tdt_pts, tdt_wts, lmda, n, q, bo, tspl, B_vpar,
+                     chi1, mfac, dbob_m_f, divx_m_f, divxfac, do_matrices, mpert, scr) → (total_wb, total_wd)
 
-Perform bounce integrals over θ sub-grid.
-Computes ωb_bar, ωd_bar, |δJ|², and optionally W matrix outer products.
-Ports Fortran torque.F90 lines 674-793.
+Sample the bounce integrands of one orbit on its θ sub-grid and integrate them: writes the cumulative
+bounce action into `fsi_wb`, the action integrand into `jvtheta` and, on the matrix path, the W_μ/W_E
+samples into `wmu_mt`/`wen_mt`; returns the total bounce-action and drift integrals. Nothing here depends
+on the bounce harmonic. Ports Fortran torque.F90 lines 674-745.
 """
-function _bounce_integrate(
+function _bounce_samples!(
+    fsi_wb::AbstractVector{Float64}, jvtheta::AbstractVector{ComplexF64}, wmu_mt, wen_mt,
     tdt_pts::Vector{Float64}, tdt_wts::Vector{Float64},
-    lmda::Float64, lnq::Float64, sigma::Int, n::Int, q::Float64, bo::Float64,
-    tspl, B_vpar, chi1::Float64, ro::Float64,
+    lmda::Float64, n::Int, q::Float64, bo::Float64,
+    tspl, B_vpar, chi1::Float64,
     mfac::Vector{Int}, dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
-    divxfac::Float64, wdfac::Float64,
-    do_matrices::Bool, mpert::Int,
-    smat, tmat, xmat, ymat, zmat, scr::BounceScratch
+    divxfac::Float64, do_matrices::Bool, mpert::Int, scr::BounceScratch
 )
     ntheta = length(tdt_pts)
     theta0 = tdt_pts[1]
@@ -877,12 +1006,9 @@ function _bounce_integrate(
     fill!(g_wd, 0.0)
 
     # Action integrand
-    jvtheta = scr.jvtheta
     fill!(jvtheta, ComplexF64(0.0))
 
     # W vectors for matrix path
-    wmu_mt = scr.wmu_mt
-    wen_mt = scr.wen_mt
     if do_matrices
         fill!(wmu_mt, ComplexF64(0.0))
         fill!(wen_mt, ComplexF64(0.0))
@@ -976,23 +1102,28 @@ function _bounce_integrate(
     # combination of them (precomputed weights, see `_quadrature_weights`). With the
     # 1/√v_par endpoint singularities the quadrature scheme is a leading-order effect, so
     # this reproduces exact-cubic integration (not a trapezoid sum).
-    fsi_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten
-    mul!(fsi_wb, scr.cumint_W, g_wb)
-    total_wb = fsi_wb[ntheta]
+    cum_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten
+    mul!(cum_wb, scr.cumint_W, g_wb)
+    copyto!(fsi_wb, cum_wb)
+    total_wb = cum_wb[ntheta]
     total_wd = dot(scr.int_w, g_wd)
+    return total_wb, total_wd
+end
 
-    if total_wb ≈ 0.0
-        # Degenerate case — return zeros
-        return 0.0, 0.0, 0.0, nothing
-    end
+"""
+    _bounce_harmonic_tail(fsi_wb, jvtheta, wmu_mt, wen_mt, total_wb, wbbar, lnq, sigma, ro,
+                          do_matrices, mpert, smat, tmat, xmat, ymat, zmat, scr) → (dJdJ, wmats_lmda)
 
-    # Bounce-averaged frequencies. wbbar already carries one factor of ro that its own
-    # normalization bhat = sqrt(2T/m)/ro cancels; reusing it inside wdbar imports that ro
-    # a third time while dhat = (T/q)/(bo·ro²) removes only the two written explicitly, so
-    # the drift prefactor takes ro, not ro². (Otherwise ω_D = wdbar·dhat carries a surplus
-    # length: 4π·(I₂/I₁)·(T/q) is already V/Wb = 1/s, so the extra ro leaves m/s.)
-    wbbar = ro * twopi / ((2 - sigma) * total_wb)
-    wdbar = ro * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
+The bounce-harmonic-dependent end of the bounce integral for one λ: the phase factor
+`exp(−2πi·lnq·fsi_wb/((2−σ)·total_wb))`, the action bounce integral |δJ|² and, on the matrix path,
+the bounce-averaged W vectors and their packed outer products. Ports Fortran torque.F90 lines 746-793.
+"""
+function _bounce_harmonic_tail(
+    fsi_wb::AbstractVector{Float64}, jvtheta::AbstractVector{ComplexF64}, wmu_mt, wen_mt,
+    total_wb::Float64, wbbar::Float64, lnq::Float64, sigma::Int, ro::Float64,
+    do_matrices::Bool, mpert::Int, smat, tmat, xmat, ymat, zmat, scr::BounceScratch
+)
+    ntheta = length(fsi_wb)
 
     # Phase factor pl_i = exp(-2πi·lnq·fsi_wb(θ_i)/((2-σ)·total_wb)), using the
     # cumulative spline integral of the bounce action.
@@ -1085,5 +1216,5 @@ function _bounce_integrate(
         end
     end
 
-    return wbbar, wdbar, dJdJ_val, wmats_lmda
+    return dJdJ_val, wmats_lmda
 end

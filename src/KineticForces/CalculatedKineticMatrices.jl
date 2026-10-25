@@ -151,6 +151,8 @@ function compute_calculated_kinetic_matrices(
                 n = ffs_intr.nlow + in_idx - 1
                 fill!(full_w, 0)
                 fill!(full_t, 0)
+                # The bounce geometry depends on (ψ, n) only; the harmonics share it.
+                geometry = _matrix_bounce_geometry(state, psi, n, kf_ctrl.magnetic_drift_factor, intr_t)
                 for ell in -nl:nl
                     fill!(block_w, 0)
                     fill!(block_t, 0)
@@ -162,7 +164,7 @@ function compute_calculated_kinetic_matrices(
                         atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                         atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
                         nested_tolerance_margin=kf_ctrl.nested_tolerance_margin,
-                        state
+                        state, geometry
                     )
                     full_w .+= block_w
                     full_t .+= block_t
