@@ -96,15 +96,16 @@ function compute_calculated_kinetic_matrices(
 
     # Loop over flux surfaces and n-blocks, accumulating bounce harmonics into
     # per-n blocks placed on the diagonal of the full np×np block-diagonal matrix.
-    # The ψ-loop is embarrassingly parallel: each iteration writes its own ipsi row of
-    # kw_flat/kt_flat, and the kernel only reads kf_intr, so it is shared across threads.
+    # Surfaces are taken `chunk` at a time to bound the bounce geometry held in memory. Each
+    # chunk runs two greedy-scheduled passes — the (n, ℓ)-free surface setup and the (ψ, n)
+    # bounce geometry, then every (ψ, n, ℓ) harmonic as its own work item — so expensive
+    # surfaces (edge, resonance-dense) no longer pin one thread while the others idle.
+    # Per-harmonic blocks are stored by index and reduced in fixed ℓ order, so the sums are
+    # independent of thread count and schedule; the kernel only reads kf_intr.
     nl = kf_ctrl.bounce_harmonic_max
+    nharm = 2 * nl + 1
     rtol_pitch = matrix_pitch_rtol(kf_ctrl)
-    nthreads = Threads.maxthreadid()
-    thread_full_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
-    thread_full_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
-    thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
-    thread_block_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
+    chunk = Threads.maxthreadid()
 
     # Species set summed into the kinetic matrices: the resolved multi-species set
     # (main ions + neutrality impurity + electrons) when provided, else a single species
@@ -127,51 +128,72 @@ function compute_calculated_kinetic_matrices(
         end
     end
 
+    # Surfaces inside the near-axis validity band are skipped (envelope 0).
+    active = [ipsi for ipsi in 1:mpsi if env[ipsi] != 0.0]
+
     for sp in splist
-        # Hoisted per-species scalars: the closure then captures concrete values, not a
+        # Hoisted per-species scalars: the closures then capture concrete values, not a
         # union-typed `sp` (the ternary above mixes the resolved vector with the fallback).
         z_s, m_s, el_s, prof_s = sp.z, sp.m, sp.electron, sp.profiles
-        # :static pins one task per thread so the threadid() buffer indexing below is sound
-        # (dynamic scheduling may migrate tasks at yield points, silently sharing buffers).
-        Threads.@threads :static for ipsi in 1:mpsi
-            tid = Threads.threadid()
-            full_w = thread_full_w[tid]
-            full_t = thread_full_t[tid]
-            block_w = thread_block_w[tid]
-            block_t = thread_block_t[tid]
-            psi = xs[ipsi]
-            env[ipsi] == 0.0 && continue   # inside the near-axis validity band: kernel skipped
-            # (n, ℓ)-independent surface setup, built once per ψ on this thread's `intr` copy.
-            state = _setup_surface_state(psi, z_s, m_s, el_s, equil, kf_intr, prof_s)
-            for in_idx in 1:npert
+        for c0 in 1:chunk:length(active)
+            idx = active[c0:min(c0 + chunk - 1, length(active))]
+            nc = length(idx)
+
+            states = Vector{Any}(undef, nc)
+            geoms = Matrix{Any}(undef, npert, nc)
+            Threads.@threads :greedy for j in 1:nc
+                psi = xs[idx[j]]
+                st = _setup_surface_state(psi, z_s, m_s, el_s, equil, kf_intr, prof_s)
+                states[j] = st
+                for in_idx in 1:npert
+                    n = ffs_intr.nlow + in_idx - 1
+                    geoms[in_idx, j] = _matrix_bounce_geometry(st, psi, n, kf_ctrl.magnetic_drift_factor, kf_intr)
+                end
+            end
+
+            blocks_w = Array{Array{ComplexF64,3}}(undef, nharm, npert, nc)
+            blocks_t = Array{Array{ComplexF64,3}}(undef, nharm, npert, nc)
+            Threads.@threads :greedy for item in 1:(nc*npert*nharm)
+                r, ell_idx = divrem(item - 1, nharm)
+                j, in_idx = divrem(r, npert) .+ 1
+                ell_idx += 1
+                psi = xs[idx[j]]
                 n = ffs_intr.nlow + in_idx - 1
+                ell = ell_idx - 1 - nl
+                block_w = zeros(ComplexF64, mpert, mpert, 6)
+                block_t = zeros(ComplexF64, mpert, mpert, 6)
+                compute_kinetic_matrices_at_psi!(
+                    block_w, block_t, psi, n, ell,
+                    z_s, m_s, kf_ctrl.magnetic_drift_factor, kf_ctrl.divxi_factor,
+                    el_s, equil, kf_intr, prof_s;
+                    nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.collisionality_factor,
+                    atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
+                    atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
+                    nested_tolerance_margin=kf_ctrl.nested_tolerance_margin,
+                    state=states[j], geometry=geoms[in_idx, j]
+                )
+                blocks_w[ell_idx, in_idx, j] = block_w
+                blocks_t[ell_idx, in_idx, j] = block_t
+            end
+
+            full_w = zeros(ComplexF64, mpert, mpert, 6)
+            full_t = zeros(ComplexF64, mpert, mpert, 6)
+            for j in 1:nc, in_idx in 1:npert
+                ipsi = idx[j]
+                # Reduce in fixed ℓ order (bit-identical to the serial accumulation).
                 fill!(full_w, 0)
                 fill!(full_t, 0)
-                # The bounce geometry depends on (ψ, n) only; the harmonics share it.
-                geometry = _matrix_bounce_geometry(state, psi, n, kf_ctrl.magnetic_drift_factor, kf_intr)
-                for ell in -nl:nl
-                    fill!(block_w, 0)
-                    fill!(block_t, 0)
-                    compute_kinetic_matrices_at_psi!(
-                        block_w, block_t, psi, n, ell,
-                        z_s, m_s, kf_ctrl.magnetic_drift_factor, kf_ctrl.divxi_factor,
-                        el_s, equil, kf_intr, prof_s;
-                        nutype=kf_ctrl.nutype, f0type=kf_ctrl.f0type, nufac=kf_ctrl.collisionality_factor,
-                        atol_xlmda=kf_ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
-                        atol_x=kf_ctrl.atol_x, rtol_x=kf_ctrl.rtol_x,
-                        nested_tolerance_margin=kf_ctrl.nested_tolerance_margin,
-                        state, geometry
-                    )
-                    full_w .+= block_w
-                    full_t .+= block_t
+                for ell_idx in 1:nharm
+                    full_w .+= blocks_w[ell_idx, in_idx, j]
+                    full_t .+= blocks_t[ell_idx, in_idx, j]
                 end
 
                 # Place the n-block on the diagonal of the full np×np matrix and accumulate.
                 row_offset = (in_idx - 1) * mpert
-                for k in 1:6, j in 1:mpert, i in 1:mpert
-                    idx = (row_offset + j - 1) * np + (row_offset + i)
-                    kw_flat[ipsi, idx, k] += env[ipsi] * full_w[i, j, k]
-                    kt_flat[ipsi, idx, k] += env[ipsi] * full_t[i, j, k]
+                for k in 1:6, jj in 1:mpert, i in 1:mpert
+                    col = (row_offset + jj - 1) * np + (row_offset + i)
+                    kw_flat[ipsi, col, k] += env[ipsi] * full_w[i, jj, k]
+                    kt_flat[ipsi, col, k] += env[ipsi] * full_t[i, jj, k]
                 end
             end
         end

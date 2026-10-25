@@ -116,14 +116,13 @@ function integrate_psi_quadgk(
     # ψ-only setup of each node (θ sampling, fits, field decomposition, harmonic-free bounce
     # geometry) is built in a first threaded pass, then every (node, ℓ) pitch quadrature runs
     # in a second. Nodes are taken `chunk` at a time to bound the geometry held in memory.
-    # Per-harmonic results are stored by index and reduced in fixed ℓ order, so the sum is
-    # independent of thread count. `:static` keeps the threadid()-indexed slots sound; never nest it.
+    # Both passes are greedy-scheduled (each item is handed to the next free thread), so a
+    # resonance-dense node does not pin a thread; per-harmonic results are stored by index
+    # and reduced in fixed ℓ order, so the sum is independent of thread count and schedule.
     nharm = 1 + 2 * nl
     rtol_pitch = torque_pitch_rtol(ctrl)
     nth = Threads.maxthreadid()
     chunk = is_matrix_method ? nth : 2 * nth
-    thread_tpsi = [Ref{ComplexF64}(0.0im) for _ in 1:nth]
-    thread_wtw = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nth] : nothing
 
     logged_psi = Float64[]
     logged_dtdpsi = ComplexF64[]
@@ -136,27 +135,26 @@ function integrate_psi_quadgk(
             nc = length(idx)
 
             surfaces = Vector{Any}(undef, nc)
-            Threads.@threads :static for j in 1:nc
+            Threads.@threads :greedy for j in 1:nc
                 surfaces[j] = _torque_surface(Float64(x[idx[j]]), zi, mi, electron, method, equil, intr, kinetic_profiles;
                     need_matrices=is_matrix_method, n, wdfac, divxfac)
             end
 
             harm_vals = Matrix{ComplexF64}(undef, nharm, nc)
-            harm_elems = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nharm, _ in 1:nc] : nothing
-            Threads.@threads :static for item in 1:(nc*nharm)
+            harm_elems = is_matrix_method ? Matrix{Array{ComplexF64,3}}(undef, nharm, nc) : nothing
+            Threads.@threads :greedy for item in 1:(nc*nharm)
                 j, ell_idx = divrem(item - 1, nharm) .+ 1
-                tid = Threads.threadid()
                 l = ell_idx - 1 - nl
-                w = is_matrix_method ? thread_wtw[tid] : nothing
-                is_matrix_method && fill!(w, 0)
-                tpsi!(thread_tpsi[tid], Float64(x[idx[j]]), n, l, zi, mi, wdfac, divxfac,
+                w = is_matrix_method ? zeros(ComplexF64, mpert, mpert, 6) : nothing
+                tval = Ref{ComplexF64}(0.0im)
+                tpsi!(tval, Float64(x[idx[j]]), n, l, zi, mi, wdfac, divxfac,
                     electron, method, equil, intr, kinetic_profiles;
                     op_wmats=w, surface=surfaces[j],
                     atol_xlmda=ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
-                harm_vals[ell_idx, j] = thread_tpsi[tid][]
-                is_matrix_method && (harm_elems[ell_idx, j] .= w)
+                harm_vals[ell_idx, j] = tval[]
+                is_matrix_method && (harm_elems[ell_idx, j] = w)
             end
 
             for j in 1:nc
