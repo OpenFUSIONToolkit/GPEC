@@ -76,6 +76,27 @@ using TOML
         end
     end
 
+    @testset "fixed kinetic solve matches the TOML-driven run" begin
+        # Large enough that the fixed kinetic matrices visibly shift the free-boundary energies.
+        kf = 1e-3
+        mktempdir() do dir
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_factor" => kf))]).ffs
+            api = solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=kf, kinetic_source="fixed")
+
+            @test api.mats.kinetic !== nothing
+            @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
+            @test api.diagnostics.nzero == reference.diagnostics.nzero
+            @test api.mlow == reference.mlow
+            @test api.mhigh == reference.mhigh
+            @test api.psilim ≈ reference.psilim rtol = 1e-12
+            @test api.kinetic.kmsing == reference.kinetic.kmsing
+            @test [s.psifac for s in api.kinetic.kinsing] ≈ [s.psifac for s in reference.kinetic.kinsing]
+
+            # Too large a factor for this coarse deck: the integration aborts near ψ = 0.4 and says so.
+            @test_throws "Euler-Lagrange integration aborted" solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=0.1)
+        end
+    end
+
     @testset "galerkin solve returns a gal result with a unified delta_prime" begin
         mktempdir() do dir
             api = solve(equil, Galerkin(; nx=32); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
@@ -186,7 +207,9 @@ using TOML
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
+        @test_throws "kinetic_source = \"calculated\"" solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5, kinetic_source="calculated")
+        @test_throws "does not support kinetic runs" solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
+        @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)

@@ -849,7 +849,7 @@ end
                          dir_path=".", debug=DebugSettings(), kwargs...)
 
 The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
-the perturbed potential energy whose solutions are the force-free (and, via the TOML path,
+the perturbed potential energy whose solutions are the force-free (or, with `kinetic_factor > 0`,
 kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
 [`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
 names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
@@ -903,9 +903,9 @@ Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `al
 a `gpec.toml` run of `main` does and produces the same result object. The second form is
 sugar building the problem from an equilibrium and the problem keywords in one call.
 
-Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic
-runs are TOML-driven this cycle: `kinetic_factor > 0` needs the `[KineticForces]` profiles
-and errors here.
+Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic runs
+(`kinetic_factor > 0`) take `Forward()` and the `"fixed"` kinetic source; the `"calculated"`
+source needs the `[KineticForces]` profiles and stays TOML-driven this cycle.
 
 ```julia
 eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
@@ -922,8 +922,10 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
 
-    ctrl.kinetic_factor > 0 &&
-        error("kinetic runs (kinetic_factor > 0) need the [KineticForces] profiles and are TOML-driven; run them through `main`")
+    ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" &&
+        error("kinetic_source = \"calculated\" needs the [KineticForces] profiles and is TOML-driven; run it through `main`")
+    ctrl.kinetic_factor > 0 && !(alg isa ForceFreeStates.Forward) &&
+        error("$(nameof(typeof(alg)))() does not support kinetic runs (kinetic_factor > 0); use Forward().")
 
     intr = ForceFreeStatesInternal(; dir_path=prob.dir_path)
     intr.wall_settings = prob.wall
