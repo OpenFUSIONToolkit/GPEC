@@ -51,8 +51,8 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         @test isapprox(br_fine, br; rtol=5e-3)
     end
 
-    @testset "fold selection: the first maximum from Q0 toward Q_e" begin
-        # The stub's balance peaks at Q = 3 and Q = 1; walking down from Q0 = 10 the fold is the one at 3.
+    @testset "fold selection: the largest balance on the path from Q0 toward Q_e" begin
+        # The stub's balance peaks at Q = 3 and Q = 1; walking down from Q0 = 10 the fold is the higher one at 3.
         p = _mk(; Q_e=0.5, Q_i=-50.0)
         tb = TorqueBalance(_CRFStubLayer(), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
         _, bal, Qpeak, br, idx, _ = torque_balance_scan(tb; n=4001)

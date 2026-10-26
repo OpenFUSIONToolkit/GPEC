@@ -237,8 +237,9 @@ and balance is lost above (Cole Eq. 62)
   mirrors the real axis, so the scan uses conj(Δ(−Q)).
 - **Threshold.** Penetration is a fold (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
   as the field grows, Q moves from Q0 toward the electron fluid at Q_e, where the torque
-  vanishes, and the threshold is the first local maximum of the balance on that path, where the
-  steady state stops existing. Points where |Δ̂| ≤ α, the unshielded zone next to Q_e, are not
+  vanishes, and the threshold is the largest balance on that path, above which no shielded steady
+  state remains; the balance must drop by more than 0.1 % after it, which keeps sampling noise
+  from counting as a fold. Points where |Δ̂| ≤ α, the unshielded zone next to Q_e, are not
   candidates, so the balance spike there is never taken. With no fold the rotation slows
   smoothly and no discrete threshold is reported (NaN). Fortran takes the global maximum on a
   window instead, which picks that spike. The search assumes Q_i ≤ 0 ≤ Q_e; a surface where
