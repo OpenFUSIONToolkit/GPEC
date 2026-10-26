@@ -247,6 +247,11 @@ function build_inputs_from_h5(args::Vector{String})
     # Parse TOML blob, replay the frozen forcing file, then fold in overrides: file overrides
     # first, then CLI flags, so an overridden [ForcingTerms] still wins.
     inputs = TOML.parse(toml_raw)
+    # Overrides can set keys but not delete them, so a stored deck with retired keys cannot be replayed.
+    for (section, keys) in _DEPRECATED_KEYS
+        haskey(inputs, section) && _stop_on_deprecated_keys(inputs[section], keys, section;
+            remedy="$source_h5 was written by an older GPEC version; re-run from the original deck instead of replaying it")
+    end
     if forcing_snapshot !== nothing
         forcing_file = splitext(output_name)[1] * "_forcing.h5"
         modes, normalization = forcing_snapshot
