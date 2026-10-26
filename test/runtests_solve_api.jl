@@ -108,6 +108,10 @@ using TOML
             @test size(dp.matrix) == (msing, msing)
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
+
+            # With no free-boundary δW, PE refuses the response rather than returning an empty state.
+            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+            @test_throws ErrorException perturbed_equilibrium(api, RMPField(forcing); compute_response=true, write_outputs_to_HDF5=false)
         end
     end
 
@@ -139,15 +143,9 @@ using TOML
             @test size(pe.C_delta_prime) == size(reference.C_delta_prime)
             @test !isempty(pe.resonant_area_weighted_field)
 
-            # The amplitude-linear outputs are compared through the driver's own input path:
-            # the driver hands the stage the modes it snapshotted before the solve, whereas a
-            # fresh RMPField re-reads the file and re-runs the normalization conversion.
-            snapshot = GPEC.ForcingTerms.ForcingMode[]
-            GPEC.ForcingTerms.load_forcing_data!(snapshot, dir, "forcing.dat", "ascii", false)
-            injected = perturbed_equilibrium(ffs, RMPField(forcing); forcing_modes=snapshot,
-                (Symbol(k) => v for (k, v) in pe_section)...)
-            @test injected.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
-            @test injected.forcing_b ≈ reference.forcing_b rtol = 1e-10
+            # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
+            @test pe.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
+            @test pe.forcing_b ≈ reference.forcing_b rtol = 1e-10
 
             # `scale` is a uniform multiplier on the materialized forcing, and the response is
             # linear in it.
@@ -296,6 +294,11 @@ using TOML
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
             @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # PE refuses the response and coupling on it, but still materializes the forcing alone.
+            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+            @test_throws ErrorException perturbed_equilibrium(matched, RMPField(forcing); compute_singular_coupling=true, write_outputs_to_HDF5=false)
+            idle = perturbed_equilibrium(matched, RMPField(forcing); compute_response=false, compute_singular_coupling=false, write_outputs_to_HDF5=false)
+            @test idle isa GPEC.PerturbedEquilibrium.PerturbedEquilibriumState
             # A matched result is a new solution, not an outer solve to match again.
             @test_throws ErrorException MatchProblem(matched; ideal=true)
         end
