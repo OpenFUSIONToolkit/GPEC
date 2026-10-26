@@ -16,8 +16,6 @@
 # Q is on Cole's axis: the electron and ion diamagnetic frequencies sit at Q = Q_e
 # and Q = Q_i (see `cole_delta`).
 
-# Default half-width around Q_e, Q_i within which a torque-balance maximum is treated as pole-dominated.
-const TORQUE_BALANCE_POLE_WIDTH = 0.02
 
 """
     TorqueBalance{M<:InnerLayerModel,T}
@@ -66,53 +64,59 @@ function torque_balance_value(tb::TorqueBalance, Q::Real)
 end
 
 """
-    torque_balance_window(Q0, Q_e, Q_i) -> (Qmin, Qmax)
+    fold_search_range(Q0, Q_e, Q_i) -> (Qa, Qb)
 
-Q range bracketing the torque-balance branch between the natural rotation `Q0` and the
-electron diamagnetic pole `Q_e`. It assumes `Q_i < 0 < Q_e`, which `torque_balance_scan` checks.
+The segment the steady state follows as the error field grows: from the natural rotation `Q0`
+toward the electron-fluid point `Q_e`, where the electromagnetic torque vanishes, ending at `Q_i`
+instead if it lies in between (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4).
 """
-function torque_balance_window(Q0::Real, Q_e::Real, Q_i::Real)
-    Q0 > Q_e && return (1.05 * Q_e, 2.0 * Q0)
-    Qmin = Q0 > 0 ? 0.8 * Q_i : 1.5 * min(Q0, Q_i)
-    return (Qmin, 0.95 * Q_e)
+function fold_search_range(Q0::Real, Q_e::Real, Q_i::Real)
+    return (Q0, min(Q0, Q_e) < Q_i < max(Q0, Q_e) ? Q_i : Q_e)
 end
 
 """
-    torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n=2000,
-                        pole_width=TORQUE_BALANCE_POLE_WIDTH)
+    torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n=2000)
         -> (Qs, bal, Qpeak, br_crit, idx_peak, Δs)
 
-Sample `torque_balance_value` on `n` uniform real Q points and return the critical
-normalized field `br_crit = b_r/B_φ` (Cole Eq. 62) at the largest positive interior local
-maximum of `bal`, located at `Qpeak = Qs[idx_peak]`. A maximum within `pole_width` (or one
-grid step, if larger) of the diamagnetic poles `Q_e`, `Q_i` is discarded as a pole artifact.
-`Qmin`/`Qmax` default to `torque_balance_window`. Returns NaN for `Qpeak`, `br_crit` and 0 for
-`idx_peak`, with a warning, when no valid maximum is found, when `Q0` is not finite, or when
-the diamagnetic ordering `Q_i < 0 < Q_e` that the window assumes does not hold.
+Sample `torque_balance_value` on `n` uniform real Q points and return the critical normalized
+field `br_crit = b_r/B_φ` (Cole Eq. 62) at the penetration fold: the first local maximum of `bal`
+met walking from `Q0` along `fold_search_range`, where the steady state stops existing as the
+field grows. Points where |Δ| ≤ α, the unshielded zone next to Q_e, are not candidates. With no
+fold the rotation slows smoothly and there is no discrete threshold. `Qmin`/`Qmax` override the
+sampled range, but the fold is only sought between `Q0` and the end of `fold_search_range`.
+Returns NaN for `Qpeak`, `br_crit` and 0 for `idx_peak`, with a warning, when there is no fold,
+when `Q0` is not finite, when the surface is tearing-unstable (α ≤ 0), or when the diamagnetic
+ordering Q_i ≤ 0 ≤ Q_e does not hold.
 """
-function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::Integer=2000,
-    pole_width::Real=TORQUE_BALANCE_POLE_WIDTH)
+function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::Integer=2000)
     p = tb.params
     skip(why) = (@warn "CriticalResonantField: $(p.m)/$(p.n) surface skipped: $why"; (Float64[], Float64[], NaN, NaN, 0, ComplexF64[]))
     isfinite(tb.Q0) || return skip("its natural rotation Q0 = $(tb.Q0) is not finite.")
     tb.alpha > 0 || return skip("it is tearing-unstable or marginal (α = $(tb.alpha)), so there is no penetration threshold.")
-    p.Q_i < 0 < p.Q_e || return skip("the scan window assumes Q_i < 0 < Q_e, but Q_e = $(p.Q_e), Q_i = $(p.Q_i).")
-    wmin, wmax = torque_balance_window(tb.Q0, p.Q_e, p.Q_i)
-    Qs = range(something(Qmin, wmin), something(Qmax, wmax); length=n)
+    p.Q_i <= 0 <= p.Q_e && p.Q_i < p.Q_e ||
+        return skip("the fold search assumes Q_i ≤ 0 ≤ Q_e, but Q_e = $(p.Q_e), Q_i = $(p.Q_i).")
+    Qa, Qb = fold_search_range(tb.Q0, p.Q_e, p.Q_i)
+    Qs = range(something(Qmin, Qa), something(Qmax, Qb); length=n + 2)[2:(end-1)]   # open at both ends
     out = [torque_balance_value(tb, Q) for Q in Qs]
     bal = first.(out)
     Δs = last.(out)
 
-    w = max(step(Qs), pole_width)
-    near_pole(Q) = abs(Q - p.Q_e) <= w || abs(Q - p.Q_i) <= w
-    peaks = [i for i in 2:(n-1) if isfinite(bal[i]) && bal[i] > 0 &&
-             bal[i-1] < bal[i] && bal[i] >= bal[i+1] && !near_pole(Qs[i])]
-    if isempty(peaks)
-        @warn "CriticalResonantField: no positive torque-balance maximum on " *
-              "Q ∈ [$(first(Qs)), $(last(Qs))] at the $(p.m)/$(p.n) surface."
+    # Walk from Q0 toward Qb and stop at the first shielded local maximum.
+    walk = sort([i for i in eachindex(Qs) if min(Qa, Qb) < Qs[i] < max(Qa, Qb)]; by=i -> abs(Qs[i] - Qa))
+    idx = 0
+    for j in 2:(length(walk)-1)
+        i, before, after = walk[j], walk[j-1], walk[j+1]
+        if isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha && isfinite(bal[before]) && isfinite(bal[after]) &&
+           bal[i] > bal[before] && bal[i] >= bal[after]
+            idx = i
+            break
+        end
+    end
+    if idx == 0
+        @warn "CriticalResonantField: no penetration fold between Q0 = $(tb.Q0) and Q = $Qb at the $(p.m)/$(p.n) " *
+              "surface: the required field rises monotonically, so the rotation slows smoothly with no discrete threshold."
         return Qs, bal, NaN, NaN, 0, Δs
     end
-    idx = peaks[argmax(bal[peaks])]
     br_crit = sqrt(bal[idx] / (tb.lu * tb.kappa_hat))
     @info @sprintf("CriticalResonantField: %d/%d surface b_r/B_φ crit = %.3e at Q = %.3f",
         p.m, p.n, br_crit, Qs[idx])

@@ -12,6 +12,12 @@ function InnerLayer.solve_inner(::_CRFStubLayer, p, Q::Number)
     return (; tearing=conj(im / jxb - 1e-2))
 end
 
+# Cole and Fitzpatrick (2006) Table I visco-resistive layer on Cole's axis, Δ̂ = 2.104[i(Q−Q_i)]^(1/6)[i(Q−Q_e)]^(5/6)P^(1/6).
+struct _VRiStub <: InnerLayerModel end
+const _VRI_P = 4.0
+_vri(Q, Q_e, Q_i) = 2.104 * (im * (Q - Q_i))^(1 / 6) * (im * (Q - Q_e))^(5 / 6) * _VRI_P^(1 / 6)
+InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q), p.Q_e, p.Q_i)))
+
 @testset "CriticalResonantField: torque balance" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
@@ -45,40 +51,48 @@ end
         @test isapprox(br_fine, br; rtol=5e-3)
     end
 
-    @testset "scan window" begin
-        @test torque_balance_window(5.0, 1.0, -2.0) == (1.05, 10.0)
-        @test torque_balance_window(0.5, 1.0, -2.0) == (0.8 * -2.0, 0.95)
-        @test torque_balance_window(-0.5, 1.0, -2.0) == (1.5 * -2.0, 0.95)
-    end
-
-    @testset "local-maximum selection and pole rejection" begin
-        p = _mk(; Q_e=50.0, Q_i=-50.0)
+    @testset "fold selection: the first maximum from Q0 toward Q_e" begin
+        # The stub's balance peaks at Q = 3 and Q = 1; walking down from Q0 = 10 the fold is the one at 3.
+        p = _mk(; Q_e=0.5, Q_i=-50.0)
         tb = TorqueBalance(_CRFStubLayer(), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
-        _, bal, Qpeak, br, idx, _ = torque_balance_scan(tb; Qmin=0.0, Qmax=4.0, n=401)
-        @test Qpeak ≈ 3.0 atol = 0.011
+        _, bal, Qpeak, br, idx, _ = torque_balance_scan(tb; n=4001)
+        @test Qpeak ≈ 3.0 atol = 0.005
         @test bal[idx] ≈ _crf_target(Qpeak) rtol = 1e-8
-        # A maximum on the electron pole is skipped for the next one, and a narrower exclusion keeps it.
-        p_pole = _mk(; Q_e=3.0, Q_i=-50.0)
-        tb_pole = TorqueBalance(_CRFStubLayer(), p_pole, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
-        _, _, Qpeak_pole, _, _, _ = torque_balance_scan(tb_pole; Qmin=0.0, Qmax=4.0, n=401)
-        @test Qpeak_pole ≈ 1.0 atol = 0.011
-        # A maximum 0.015 from the pole is excluded by the default width and kept with pole_width = 0.
-        tb_near = TorqueBalance(_CRFStubLayer(), _mk(; Q_e=3.015, Q_i=-50.0), _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
-        @test torque_balance_scan(tb_near; Qmin=0.0, Qmax=4.0, n=401)[3] ≈ 1.0 atol = 0.011
-        @test torque_balance_scan(tb_near; Qmin=0.0, Qmax=4.0, n=401, pole_width=0.0)[3] ≈ 3.0 atol = 0.011
-        # No interior maximum (monotone balance) returns NaN.
-        _, _, Qnone, brnone, inone, _ = @test_logs (:warn,) torque_balance_scan(tb; Qmin=2.7, Qmax=2.95, n=51)
+        # A wider sampled range does not extend the search past Q_e.
+        tb_e2 = TorqueBalance(_CRFStubLayer(), _mk(; Q_e=2.0, Q_i=-50.0), _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
+        @test torque_balance_scan(tb_e2; Qmin=0.0, Qmax=4.0, n=401)[3] ≈ 3.0 atol = 0.011
+        # With the electron fluid at Q = 3 the balance rises all the way along the path: no fold, no threshold.
+        tb_e3 = TorqueBalance(_CRFStubLayer(), _mk(; Q_e=3.0, Q_i=-50.0), _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
+        _, _, Qnone, brnone, inone, _ = @test_logs (:warn, r"no penetration fold") torque_balance_scan(tb_e3; n=401)
         @test isnan(Qnone) && isnan(brnone) && inone == 0
+        # The path ends at Q_i when it lies between Q0 and Q_e.
+        @test fold_search_range(-2.0, 1.0, -0.5) == (-2.0, -0.5)
+        @test fold_search_range(5.0, 1.0, -0.5) == (5.0, 1.0)
     end
 
-    @testset "surfaces the window cannot handle are skipped" begin
+    @testset "fold reproduces Cole's visco-resistive thresholds" begin
+        # E×B rotation only (Cole Eq. 63): fold at Q0/2, where b_crit·√S/P^(7/12) = √(2.104/2) ≈ 1.03 with κ̂ = 1.
+        p = _mk(; Q_e=1e-9, Q_i=-1e-9)
+        tb = TorqueBalance(_VRiStub(), p, 1.0, _VRI_P, p.lu, 1.0, 1e-6)
+        _, _, Qpeak, br, _, _ = torque_balance_scan(tb; n=20001)
+        @test Qpeak ≈ 0.5 atol = 1e-3
+        @test br * sqrt(p.lu) / _VRI_P^(7 / 12) ≈ sqrt(2.104 / 2) rtol = 1e-4
+        # Diamagnetic rotation only (Cole Eq. 66): fold at 7Q_e/12, coefficient 1.11.
+        p = _mk(; Q_e=1.0, Q_i=-1e-9)
+        tb = TorqueBalance(_VRiStub(), p, 0.0, _VRI_P, p.lu, 1.0, 1e-6)
+        _, _, Qpeak, br, _, _ = torque_balance_scan(tb; n=20001)
+        @test Qpeak ≈ 7 / 12 atol = 1e-3
+        @test br * sqrt(p.lu) / _VRI_P^(7 / 12) ≈ 1.11 rtol = 1e-2
+    end
+
+    @testset "surfaces without a usable fold search are skipped" begin
         # Unknown rotation: no Q0, so no threshold.
         tb_nan = TorqueBalance(model, _mk(), NaN, 1.0, 6.44e7, 1.0, 1e-2)
         _, _, Qn, brn, in_, _ = @test_logs (:warn, r"not finite") torque_balance_scan(tb_nan; n=51)
         @test isnan(Qn) && isnan(brn) && in_ == 0
         # Reversed diamagnetic ordering (Q_e < 0 < Q_i) is not guessed at.
         tb_rev = TorqueBalance(model, _mk(; Q_e=-1.38, Q_i=2.15), -0.5, 1.0, 6.44e7, 1.0, 1e-2)
-        _, _, Qr, brr, ir, _ = @test_logs (:warn, r"Q_i < 0 < Q_e") torque_balance_scan(tb_rev; n=51)
+        _, _, Qr, brr, ir, _ = @test_logs (:warn, r"Q_i ≤ 0 ≤ Q_e") torque_balance_scan(tb_rev; n=51)
         @test isnan(Qr) && isnan(brr) && ir == 0
     end
 
@@ -137,12 +151,12 @@ end
 
     @testset "control: TOML parsing and validation" begin
         c = critical_resonant_field_control_from_toml(Dict("enabled" => true, "n" => 500))
-        @test c.enabled && c.n == 500 && c.Qmin === nothing && !c.store_scan && c.pole_width == 0.02
-        @test critical_resonant_field_control_from_toml(Dict("Qmin" => -2.0, "pole_width" => 0.05)).pole_width == 0.05
+        @test c.enabled && c.n == 500 && c.Qmin === nothing && !c.store_scan
+        @test critical_resonant_field_control_from_toml(Dict("Qmin" => -2.0)).Qmin == -2.0
+        @test_throws ArgumentError critical_resonant_field_control_from_toml(Dict("pole_width" => 0.02))
         @test_throws ArgumentError critical_resonant_field_control_from_toml(Dict("viscous_input" => 1.0))
         s = slayer_control_from_toml(Dict("enabled" => true, "CriticalResonantField" => Dict("enabled" => true)))
         @test s.critical_resonant_field.enabled
         @test_throws "n must be ≥ 3" Runner.validate(SLAYERControl(; critical_resonant_field=CriticalResonantFieldControl(; n=2)))
-        @test_throws "pole_width" Runner.validate(SLAYERControl(; critical_resonant_field=CriticalResonantFieldControl(; pole_width=-0.1)))
     end
 end

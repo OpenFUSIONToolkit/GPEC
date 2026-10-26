@@ -13,6 +13,6 @@ using ..InnerLayer: InnerLayerModel, solve_inner
 
 include("TorqueBalance.jl")
 
-export TorqueBalance, cole_delta, torque_balance_value, torque_balance_window, torque_balance_scan
+export TorqueBalance, cole_delta, torque_balance_value, fold_search_range, torque_balance_scan
 
 end # module CriticalResonantField

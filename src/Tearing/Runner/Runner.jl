@@ -45,7 +45,7 @@ using ..Dispersion: SurfaceCoupling, surface_coupling,
     AMRResult, amr_scan,
     MultiBoxAMRResult, multi_box_amr_scan, as_amr_result,
     GrowthRateResult, find_growth_rates
-using ..CriticalResonantField: TorqueBalance, torque_balance_scan, TORQUE_BALANCE_POLE_WIDTH
+using ..CriticalResonantField: TorqueBalance, torque_balance_scan
 
 include("Control.jl")
 include("Result.jl")

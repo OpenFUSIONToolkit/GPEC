@@ -105,9 +105,8 @@ nim        = 31                # Grid resolution along the Im(Q) axis
 [SLAYER.CriticalResonantField]
 # Critical resonant field b_r/B_φ for error-field penetration at each SLAYER surface, from the
 # Cole-Fitzpatrick 2006 torque balance with P = P_tor of each layer and Q0 = τ_k·n·Ω_E, so it
-# needs the kinetic file's omega_E (or omega_E_kHz). Qmin/Qmax may be set to override the
-# per-surface scan window derived from Q0, Q_e and Q_i.
+# needs the kinetic file's omega_E (or omega_E_kHz). b_crit is taken at the penetration fold met
+# walking from Q0 toward Q_e; Qmin/Qmax may be set to override the sampled range.
 enabled    = true      # run the analysis after SLAYER
 n          = 2000      # number of Q samples per surface
-pole_width = 0.02      # half-width in Q around Q_e, Q_i within which a maximum is discarded as pole-dominated
 store_scan = false     # write the per-surface Q, torque balance and Δ samples to gpec.h5

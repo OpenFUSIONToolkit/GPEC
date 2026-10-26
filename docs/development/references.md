@@ -85,6 +85,10 @@ The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are
   - Location: not in `docs/resources/`
   - Published: Physics of Plasmas 13, 032503 (2006), doi 10.1063/1.2178167
   - Describes: Steady-state torque balance at a rational surface (Eq. 61) and the critical resonant field for error-field penetration (Eq. 62), used by `Tearing.CriticalResonantField`
+- **Fitzpatrick (1993)**: "Interaction of tearing modes with external structures in cylindrical geometry"
+  - Location: not in `docs/resources/`
+  - Published: Nuclear Fusion 33, 1049 (1993)
+  - Describes: Bifurcated rotating states and the fold at which an error field penetrates (Sec. 7.4), the threshold definition used by `Tearing.CriticalResonantField`
 
 ## Resistive MHD Stability Analysis (Future Work)
 

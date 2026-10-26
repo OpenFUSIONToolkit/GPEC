@@ -17,10 +17,8 @@ or built with the `@kwdef` keyword constructor. The magnetic Prandtl number is t
 ## Fields
 
   - `enabled`    -- run the analysis after SLAYER
-  - `Qmin`, `Qmax` -- override the real-Q scan window; `nothing` derives it per surface from Q0, Q_e and Q_i
+  - `Qmin`, `Qmax` -- override the sampled real-Q range; `nothing` samples from Q0 toward Q_e per surface
   - `n`          -- number of Q samples per surface
-  - `pole_width` -- half-width in Q around the diamagnetic poles Q_e, Q_i within which a torque-balance
-    maximum is discarded as pole-dominated (default 0.02); it can change which maximum sets b_crit
   - `store_scan` -- write the per-surface Q, torque balance and Δ samples to `gpec.h5`
 """
 @kwdef struct CriticalResonantFieldControl
@@ -28,7 +26,6 @@ or built with the `@kwdef` keyword constructor. The magnetic Prandtl number is t
     Qmin::Union{Nothing,Float64} = nothing
     Qmax::Union{Nothing,Float64} = nothing
     n::Int = 2000
-    pole_width::Float64 = TORQUE_BALANCE_POLE_WIDTH
     store_scan::Bool = false
 end
 
@@ -261,8 +258,6 @@ function validate(ctrl::SLAYERControl)
                             "non-finite entry: $(ctrl.omega_E_kHz)"))
     crf = ctrl.critical_resonant_field
     crf.n >= 3 || throw(ArgumentError("SLAYERControl: CriticalResonantField n must be ≥ 3"))
-    isfinite(crf.pole_width) && crf.pole_width >= 0 ||
-        throw(ArgumentError("SLAYERControl: CriticalResonantField pole_width must be finite and ≥ 0"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||

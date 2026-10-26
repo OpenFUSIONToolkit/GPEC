@@ -235,10 +235,14 @@ and balance is lost above (Cole Eq. 62)
   a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
 - **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; `solve_inner`
   mirrors the real axis, so the scan uses conj(Δ(−Q)).
-- **Maximum.** The scan window follows `gslayer.f` (between Q0 and the Q_e pole), and the
-  largest positive interior local maximum is taken, skipping any within `pole_width`
-  (default 0.02, Fortran SLAYER's pole-regularization radius) of Q_e or Q_i. The window
-  assumes Q_i < 0 < Q_e; a surface where that fails is skipped with a warning.
+- **Threshold.** Penetration is a fold (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
+  as the field grows, Q moves from Q0 toward the electron fluid at Q_e, where the torque
+  vanishes, and the threshold is the first local maximum of the balance on that path, where the
+  steady state stops existing. Points where |Δ̂| ≤ α, the unshielded zone next to Q_e, are not
+  candidates, so the balance spike there is never taken. With no fold the rotation slows
+  smoothly and no discrete threshold is reported (NaN). Fortran takes the global maximum on a
+  window instead, which picks that spike. The search assumes Q_i ≤ 0 ≤ Q_e; a surface where
+  that fails is skipped with a warning.
 
 Outputs go to `Tearing/CriticalResonantField/` (`br_crit` = b_r/B_φ, `Q_peak`, `Q0`, with P in
 `PerSurface/P_tor`, and with `store_scan` the per-surface `Scan/Surface_<k>/{Q, balance, Delta}`).
