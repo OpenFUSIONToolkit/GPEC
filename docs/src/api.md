@@ -137,6 +137,10 @@ GeneralizedPerturbedEquilibrium.solve
 GeneralizedPerturbedEquilibrium.perturbed_equilibrium
 ```
 
+[`plasma_response`](@ref GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response), which builds the
+[`PlasmaResponse`](@ref GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PlasmaResponse) that `perturbed_equilibrium`
+applies, is documented with the [perturbed equilibrium](perturbed_equilibrium.md) module.
+
 ## Integrator selectors
 
 ```@autodocs

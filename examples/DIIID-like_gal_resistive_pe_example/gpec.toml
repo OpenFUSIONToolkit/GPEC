@@ -96,4 +96,4 @@ currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
-regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
+regularization_width = 0.0              # Regularization width for singular surfaces (0 = disabled)

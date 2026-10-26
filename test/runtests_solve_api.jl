@@ -188,12 +188,12 @@ using HDF5
             @test perturbed_equilibrium(resp, 2 * RMPField(pe.forcing_modes); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
             @test perturbed_equilibrium(resp, RMPField(pe.forcing_modes) + RMPField(forcing); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
 
-            # An explicit width is respected: it changes the regularized profiles, not the control-surface quantities.
-            @test resp.regularization_width == pe.regularization_width == 0.05
-            raw = perturbed_equilibrium(resp, RMPField(forcing); regularization_width=0.0, pe_kw...)
-            @test raw.regularization_width == 0.0
-            @test raw.forcing_b == pe.forcing_b
-            @test !(raw.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
+            # No regularization by default; an explicit width changes the regularized profiles, not the control-surface quantities.
+            @test resp.regularization_width == pe.regularization_width == 0.0
+            reg = perturbed_equilibrium(resp, RMPField(forcing); regularization_width=0.05, pe_kw...)
+            @test reg.regularization_width == 0.05
+            @test reg.forcing_b == pe.forcing_b
+            @test !(reg.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
         end
     end
 
@@ -367,7 +367,7 @@ using HDF5
     # A known drift is `@test_broken`, so the change that removes it surfaces as an unexpected pass.
     @testset "deck and API parity" begin
         @testset "hdf5 file forcing" begin
-            pe_kwargs = (compute_response=true, compute_singular_coupling=true, verbose=false, write_outputs_to_HDF5=false)
+            pe_kwargs = (compute_singular_coupling=true, verbose=false, write_outputs_to_HDF5=false)
             mktempdir() do dir
                 modes = GPEC.ForcingTerms.ForcingMode[]
                 GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example"), "forcing.dat", "ascii", false)
@@ -377,9 +377,10 @@ using HDF5
                         "ForcingTerms" => Dict{String,Any}("forcing_data_file" => "forcing.h5", "forcing_data_format" => "hdf5"),
                         "PerturbedEquilibrium" => Dict{String,Any}(String(k) => v for (k, v) in pairs(pe_kwargs))))
                 reference = GPEC.main([dir])
-                pe = perturbed_equilibrium(reference.ffs, RMPField(joinpath(dir, "forcing.h5")); pe_kwargs...)
+                resp = plasma_response(reference.ffs; compute_singular_coupling=true, verbose=false)
+                pe = perturbed_equilibrium(resp, RMPField(joinpath(dir, "forcing.h5")); verbose=false, write_outputs_to_HDF5=false)
 
-                @test pe.permeability ≈ reference.pe.permeability rtol = 1e-10
+                @test pe.response.permeability ≈ reference.pe.response.permeability rtol = 1e-10
                 # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
                 @test pe.forcing_b ≈ reference.pe.forcing_b rtol = 1e-10
             end

@@ -48,9 +48,10 @@ spectra.
 
   - `ffs::ForceFreeStatesResult` - The result the operators were built from.
   - `m_modes`, `n_modes` - Poloidal and toroidal mode number of each entry of a spectrum [numpert_total].
-  - `regularization_width::Float64` - Default profile-reconstruction width (Fortran `reg_spot`): 0 for a
-    kinetic result, whose Euler-Lagrange operator has no ideal 1/(m−nq) divergence to smooth (Park & Logan,
-    Phys. Plasmas 24, 032505 (2017) §III D), 0.05 otherwise.
+  - `regularization_width::Float64` - Default profile-reconstruction width (Fortran `reg_spot`): 0, no
+    regularization (Fortran `reg_flag = f`). Set it, typically to 0.05, only to drive KineticForces with an
+    ideal solve, whose 1/(m−nq) divergence leaves the NTV torque integral unconverged; a kinetic solve has
+    none to smooth (Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D).
   - `odet_from_gal::Bool` - The solution is the gal-native matched basis, whose `du_store` carries the
     analytic Galerkin Ξ′; selects that branch of the singular-coupling Ξ′ evaluation.
   - `flux_matrix::Matrix{ComplexF64}` - Control-surface flux of the free-boundary eigenmodes [mode × eigenmode].
@@ -103,7 +104,7 @@ on a `ResonantCoupling`):
     ffs::ForceFreeStatesResult
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
-    regularization_width::Float64 = 5e-2
+    regularization_width::Float64 = 0.0
     odet_from_gal::Bool = false
 
     # Flux-space operators [numpert_total × numpert_total]
@@ -146,14 +147,6 @@ on a `ResonantCoupling`):
     # Torque response of a kinetic forward solve, opt-in [numpert_total × numpert_total × npsi]
     T_xe::Array{ComplexF64,3} = zeros(ComplexF64, 0, 0, 0)
 end
-
-"""
-    default_regularization_width(ffs) -> Float64
-
-Profile-reconstruction width for a result: 0 when it carries a kinetic fit, which removes the ideal
-resonant singularity, 0.05 otherwise. `ffs` is duck-typed: only `ffs.mats.kinetic` is read.
-"""
-default_regularization_width(ffs) = ffs.mats.kinetic === nothing ? 5e-2 : 0.0
 
 """
     PerturbedEquilibriumState

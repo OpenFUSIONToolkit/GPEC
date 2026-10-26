@@ -1005,7 +1005,7 @@ function run_perturbed_equilibrium(
         response_keys = ("compute_singular_coupling", "compute_torque_response")
         resp = plasma_response(result; (Symbol(k) => v for (k, v) in section if k in response_keys || k == "verbose")...)
         pe_state = perturbed_equilibrium(resp, ForcingTerms.RMPField(ft_ctrl);
-            coil_sets=preloaded_coil_sets, runtimes=runtimes,
+            coil_sets=preloaded_coil_sets,
             (Symbol(k) => v for (k, v) in section if !(k in response_keys))...)
     end
 
@@ -1014,7 +1014,7 @@ end
 
 """
     perturbed_equilibrium(resp, rmp; regularization_width=resp.regularization_width, verbose=true,
-                          write_outputs_to_HDF5=true, output_filename="", coil_sets=nothing, runtimes=nothing)
+                          write_outputs_to_HDF5=true, output_filename="", coil_sets=nothing)
         -> PerturbedEquilibriumState
 
 Drive the plasma response `resp` (from [`plasma_response`](@ref)) with the external field `rmp`, an
@@ -1022,11 +1022,9 @@ Drive the plasma response `resp` (from [`plasma_response`](@ref)) with the exter
 fields, so a scan rebuilds no operator.
 
 `regularization_width` smooths the ideal 1/(m−nq) divergence in the profile reconstruction (Fortran
-`reg_spot`); its default is 0 for a kinetic result and 0.05 otherwise. `write_outputs_to_HDF5` appends
+`reg_spot`); its default is 0, and 0.05 is typical for driving KineticForces with an ideal solve. `write_outputs_to_HDF5` appends
 the outputs to `output_filename`, or to the force-free-states file when that is empty. `coil_sets`
-injects already-built coil geometry (the gpec.h5 replay path), bypassing the geometry read. A
-`runtimes` collector, when given, receives the forcing-mode materialization's wall-clock seconds as
-`"forcing_terms" => dt`.
+injects already-built coil geometry (the gpec.h5 replay path), bypassing the geometry read.
 
 ```julia
 resp = plasma_response(ffs)
@@ -1040,15 +1038,14 @@ function perturbed_equilibrium(
     verbose::Bool=true,
     write_outputs_to_HDF5::Bool=true,
     output_filename::String="",
-    coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing,
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing
 )
     ffs = resp.ffs
     ctrl = ffs.control
     # Injected coil geometry (gpec.h5 replay with `--coil-source coils`) lets the coil field
     # be recomputed from stored geometry without the .dat/.h5 files.
     pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(resp, rmp; regularization_width, verbose,
-        preloaded_coil_sets=coil_sets === nothing ? ForcingTerms.CoilSet[] : copy(coil_sets), runtimes)
+        preloaded_coil_sets=coil_sets === nothing ? ForcingTerms.CoilSet[] : copy(coil_sets))
 
     # Write perturbed equilibrium outputs to same HDF5 file
     if write_outputs_to_HDF5

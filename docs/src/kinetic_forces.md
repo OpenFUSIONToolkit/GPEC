@@ -141,7 +141,7 @@ terms respectively, and do not modify the stored kinetic profile splines.
        when computing the `toroidal_rotation_factor` back-solve. Julia uses a
        clean reimplementation with consistent pre-scaling derivatives throughout.
 
-## Regularization: why kinetic runs set `regularization_width = 0`
+## Regularization: off by default, and never needed by kinetic runs
 
 `[PerturbedEquilibrium] regularization_width` smooths the displacements before they drive the NTV
 integrand, multiplying ``\xi^{\psi\prime}`` and ``\xi^\alpha`` by
@@ -160,7 +160,9 @@ for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmet
 Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
 notation.
 
-GPEC therefore **defaults `regularization_width` to 0 whenever `kinetic_factor > 0`**; an explicit deck value is respected.
+GPEC therefore **defaults `regularization_width` to 0** for every result, as the Fortran `reg_flag = f`
+template does. Set it, typically to 0.05, only to compute the NTV torque of an ideal solve; a kinetic run
+should leave it at 0.
 Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
 is never regularized, so damping the other two breaks their near-resonance cancellation in
 ``\delta B/B`` and leaves a spurious residue driving the NTV integrand.
