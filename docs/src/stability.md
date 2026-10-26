@@ -179,6 +179,10 @@ in normalized poloidal flux ``\psi``:
   taking the jump in the logarithmic derivative of the solution between the two asymptotic
   ends.
 
+With `alpha_boundary_scan = true` the stage also writes the critical ballooning
+``\alpha`` boundary: `LocalStability/ballooning_psi`, `LocalStability/alpha` and
+`LocalStability/alpha_critical` (see the [scripting API](api.md)).
+
 !!! note "Two different Δ' quantities"
     `LocalStability/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
     distinct from the **resistive tearing** ``\Delta'`` described in the next section, which
