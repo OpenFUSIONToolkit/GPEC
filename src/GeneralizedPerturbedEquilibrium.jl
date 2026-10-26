@@ -89,12 +89,13 @@ using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing.Runner: TearingProblem
+using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing")
+    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 
 # Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
@@ -107,6 +108,24 @@ function _drop_deprecated_keys!(table, deprecated_keys, section::String)
         end
     end
     return table
+end
+
+"""
+    local_stability_algorithm(inputs) -> Union{LocalStability.Ballooning,Nothing}
+
+The [`Ballooning`](@ref) algorithm a deck's `[LocalStability]` section poses, its keys being the
+`Ballooning` keywords, or `nothing` when the deck has no such section. Unknown keys are an error.
+"""
+function local_stability_algorithm(inputs)
+    haskey(inputs, "LocalStability") || return nothing
+    table = inputs["LocalStability"]
+    allowed = string.(fieldnames(LocalStability.Ballooning))
+    for k in keys(table)
+        k in allowed || throw(ArgumentError("unknown key \"$k\" in [LocalStability] (allowed: $(join(allowed, ", ")))"))
+    end
+    kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in table)
+    haskey(kwargs, :psi_window) && (kwargs[:psi_window] = Tuple{Float64,Float64}(kwargs[:psi_window]))
+    return LocalStability.Ballooning(; kwargs...)
 end
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
@@ -183,9 +202,10 @@ forcing file it writes from that snapshot.
 against the current equilibrium) without the original `.dat`/`.h5` files. The coil
 geometry actually used by the run is always written back into `Input/RawInputs/Coils/`.
 
-Returns `(; ffs, pe, slayer)`: the `ForceFreeStates.ForceFreeStatesResult`, the
-`PerturbedEquilibriumState` (`nothing` when that stage did not run) and the SLAYER result
-(`nothing` when that stage did not run or failed). An equilibrium-only run
+Returns `(; ffs, pe, slayer, local_stability, ...)`: the `ForceFreeStates.ForceFreeStatesResult`, the
+`PerturbedEquilibriumState` (`nothing` when that stage did not run), the SLAYER result
+(`nothing` when that stage did not run or failed) and the `LocalStabilityResult` (`nothing`
+without a `[LocalStability]` section). An equilibrium-only run
 (`force_termination` in `[Equilibrium]`) returns `nothing` — it never reaches the solve.
 """
 function main_from_inputs(
@@ -214,6 +234,7 @@ function main_from_inputs(
     ffs_table = inputs["ForceFreeStates"]
     _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
+    local_stability_alg = local_stability_algorithm(inputs)
 
     resolve_mode_space!(intr, ctrl)
 
@@ -248,12 +269,22 @@ function main_from_inputs(
     forcing_snapshot = snapshot_forcing_modes(inputs, path, ctrl)
 
     # ----------------------------------------------------------------
+    # Local Stability
+    # ----------------------------------------------------------------
+    local_stability = nothing
+    if local_stability_alg !== nothing
+        local_stability = _timed_stage(runtimes, "local_stability", "Local Stability") do
+            solve(LocalStabilityProblem(equil), local_stability_alg)
+        end
+    end
+
+    # ----------------------------------------------------------------
     # Force-Free States
     # ----------------------------------------------------------------
     @info "\n  Force-Free States\n$_SECTION"
     ffs_start = time()
 
-    locstab, ballooning_boundary = run_local_stability(ctrl, equil)
+    # _overlap_slayer_inputs also rejects an enabled [SLAYER] section's unusable profile_file, so keep it ahead of the solve.
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles;
         species=kf_species,
         overlap_inputs=_overlap_slayer_inputs(inputs, intr.dir_path))
@@ -265,8 +296,7 @@ function main_from_inputs(
             git_version=git_version,
             inputs=inputs,
             forcing_snapshot=forcing_snapshot,
-            locstab=locstab,
-            ballooning_boundary=ballooning_boundary,
+            local_stability=local_stability,
             layer_overlap=layer_overlap
         )
         written_h5 = ctrl.HDF5_filename
@@ -355,7 +385,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
+    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, local_stability, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
 
 end
 
@@ -536,34 +566,18 @@ function snapshot_forcing_modes(inputs::Dict{String,Any}, path::String, ctrl::Fo
     return modes, normalization
 end
 
-"""
-    run_local_stability(ctrl, equil) -> (locstab, ballooning_boundary)
-
-Run the LocalStability stage when `local_stability_flag` is set. `locstab` holds `D_I` from the
-ballooning coefficient system and the local ballooning result, `ballooning_boundary` the first
-α-vs-ψ_N stability boundary; both are empty placeholders when the stage is off.
-"""
-function run_local_stability(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
-    locstab = nothing
-    ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
-    if ctrl.local_stability_flag
-        locstab = LocalStability.compute_local_stability(equil; verbose=ctrl.verbose)
-        # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
-        ballooning_boundary = LocalStability.ballooning_alpha_boundary(equil; verbose=ctrl.verbose)
-    end
-    return locstab, ballooning_boundary
-end
-
 # Kinetic profiles for the overlap scan come from the [SLAYER] section, through the same control
 # and loader the SLAYER analysis itself uses, so the scan sees the same profiles, the same HDF5
-# group and the same chi(psi). Returns `nothing` when there is no usable [SLAYER] profile_file.
+# group and the same chi(psi). Returns `nothing` when there is no usable [SLAYER] profile_file; with
+# tearing enabled that is an error instead, so the run fails before the solve rather than at its end.
 function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
     (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
     ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-    isempty(ctrl.profile_file) && return nothing
+    isempty(ctrl.profile_file) && !ctrl.enabled && return nothing
     loaded = try
         Runner._load_profiles(ctrl, dir_path)
     catch err
+        ctrl.enabled && rethrow()
         @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
         return nothing
     end
@@ -959,12 +973,11 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
         equil = maybe_reform_equilibrium(equil, equil.config, nothing, intr, ctrl, nothing)
     end
 
-    locstab, ballooning_boundary = run_local_stability(ctrl, equil)
     metric, mats, _ = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, nothing)
     result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa ForceFreeStates.Galerkin && alg.cut_solution)
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(result; locstab=locstab, ballooning_boundary=ballooning_boundary)
+        write_outputs_to_HDF5(result)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -1452,7 +1465,7 @@ end
 
 """
     write_outputs_to_HDF5(result::ForceFreeStatesResult; git_version, inputs, forcing_snapshot,
-                          locstab, ballooning_boundary)
+                          local_stability)
 
 Write the HDF5 output file with the run, equilibrium and stability products carried by a
 force-free-states `result`. This combines the functionality of several pieces of the Fortran
@@ -1468,8 +1481,8 @@ instead), and ψ, q, the step counts, `crit`, the asymptotic coefficients and th
 from `result.diagnostics`. Either may be absent, and is then written empty.
 
 `forcing_snapshot` is the `(modes, normalization)` pair from `snapshot_forcing_modes`,
-written to `Input/RawInputs/ForcingTerms/`. `locstab` and `ballooning_boundary` come from the
-LocalStability stage, which is not part of the force-free-states solve.
+written to `Input/RawInputs/ForcingTerms/`. `local_stability` is the `LocalStabilityResult`
+of the separate LocalStability stage, or `nothing` when it did not run.
 
 ### TODOs
 
@@ -1480,8 +1493,7 @@ function write_outputs_to_HDF5(
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
     forcing_snapshot::Union{Nothing,Tuple{Vector{ForcingTerms.ForcingMode},String}}=nothing,
-    locstab::Union{FastInterpolations.CubicSeriesInterpolant,Nothing}=nothing,
-    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[]),
+    local_stability::Union{LocalStabilityResult,Nothing}=nothing,
     layer_overlap=nothing
 )
 
@@ -1584,25 +1596,13 @@ function write_outputs_to_HDF5(
         # LocalStability/D_I = Mercier D_I (det(d0bar)); LocalStability/D_R = resistive interchange D_R;
         # LocalStability/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
         # tearing Δ' under PerturbedEquilibrium/SingularCoupling/Delta_prime).
-        if locstab !== nothing
-            locstab_xs = locstab.cache.x
-            out_h5["LocalStability/psi"] = collect(locstab_xs)  # cached vector → dense for HDF5
-            out_h5["LocalStability/D_I"] = locstab.y[:, 1] ./ locstab_xs
-            out_h5["LocalStability/D_R"] = locstab.y[:, 2] ./ locstab_xs
-        else
-            out_h5["LocalStability/psi"] = Float64[]
-            out_h5["LocalStability/D_I"] = Float64[]
-            out_h5["LocalStability/D_R"] = Float64[]
+        # The α boundary (ballooning_psi, alpha, alpha_critical) is on its own scan grid, distinct from LocalStability/psi.
+        ls = local_stability
+        for name in (:psi, :D_I, :D_R, :ballooning_Delta_prime, :ballooning_psi, :alpha, :alpha_critical)
+            out_h5["LocalStability/$name"] = ls === nothing ? Float64[] : getfield(ls, name)
         end
-        out_h5["SingularSurfaces/D_I"] = (locstab !== nothing && !isempty(result.surfaces)) ?
-                                         [locstab(sing.psifac)[1] / sing.psifac for sing in result.surfaces] : Float64[]
-        out_h5["LocalStability/ballooning_Delta_prime"] = locstab !== nothing ? locstab.y[:, 4] : Float64[]
-
-        # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
-        # Its own scan grid, distinct from the LocalStability/psi profile grid above.
-        out_h5["LocalStability/ballooning_psi"] = ballooning_boundary.psi
-        out_h5["LocalStability/alpha"] = ballooning_boundary.alpha
-        out_h5["LocalStability/alpha_critical"] = ballooning_boundary.alpha_critical
+        out_h5["SingularSurfaces/D_I"] = (ls !== nothing && !isempty(result.surfaces)) ?
+                                         [LocalStability.mercier_D_I(ls, sing.psifac) for sing in result.surfaces] : Float64[]
 
         # Resistive-layer overlap scan. Written whenever the scan ran, whether or not it
         # constrained the domain, so a run always shows where layer physics would have cut.
@@ -1897,6 +1897,7 @@ export main, write_imas
 export solve, perturbed_equilibrium
 export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField
 export MatchProblem, TearingProblem, GGJModel, SLAYERModel
+export LocalStabilityProblem, Ballooning, LocalStabilityResult
 
 include("Precompile.jl")
 

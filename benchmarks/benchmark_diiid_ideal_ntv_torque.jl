@@ -128,8 +128,9 @@ flux_surface_rtol = 1e-7
 [Wall]
 shape = "nowall"
 
+[LocalStability]
+
 [ForceFreeStates]
-local_stability_flag = true
 vac_flag = true
 force_termination = false
 
