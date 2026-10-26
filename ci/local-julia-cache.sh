@@ -23,7 +23,7 @@ case "$operation" in
         for path in "${paths[@]}"; do
             if [[ -d "$entry/depot/$path" ]]; then
                 mkdir -p "$HOME/.julia/$path"
-                cp -a --reflink=auto "$entry/depot/$path/." "$HOME/.julia/$path/"
+                rsync -a "$entry/depot/$path/" "$HOME/.julia/$path/"
             fi
         done
         cp "$entry/Manifest.toml" Manifest.toml
