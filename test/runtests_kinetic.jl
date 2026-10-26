@@ -600,6 +600,32 @@
         @test KF.calculate_fcgl(0.5, n, 1, nothing, dbob, divx, 1.0, n_s, T_s, equil, intr) == 0
     end
 
+    @testset "fluid CGL energy against double-adiabatic pressure work" begin
+        # Independent oracle from the CGL pressure responses (Logan and Park 2013, Eqs. 4-5):
+        # with D = ∇·ξ⊥, K = κ·ξ⊥ and δB/B = -(D + K), δp⊥/p = -D + δB/B and δp∥/p = -3D - 2δB/B.
+        # Per real Fourier mode W = -Re[(δp∥ - δp⊥)·conj(δB/B) + δp∥·conj(D)]/2, and
+        # T = 2n·i·n_s·T_s·∫J dθ·W/2 (gen/cgl_pressure.py proves W equals the code's quadratic form).
+        function pressure_work(D, K)
+            b = -(D + K)
+            dp_perp = -D + b
+            dp_par = -3D - 2b
+            return -real((dp_par - dp_perp) * conj(b) + dp_par * conj(D)) / 2
+        end
+        equil = (eqfun_B=(pt; hint = nothing) -> 3.0, rzphi_jac=(pt; hint = nothing) -> 2.0)
+        n, n_s, T_s = 1, 5.0, 7.0
+        intr1 = KF.KineticForcesInternal(; mthsurf=64, mfac=[0])
+        for (D, K) in ((0.0im, 1.0 + 0.3im), (1.0 + 2.0im, 0.7 - 0.3im), (1.0 + 0.2im, 0.0im))
+            T = KF.calculate_fcgl(0.4, n, 0, nothing, [-(D + K)], [D], 1.0, n_s, T_s, equil, intr1)
+            @test T ≈ 2im * n * n_s * T_s * 2.0 * pressure_work(D, K) / 2 rtol = 1e-13
+        end
+        # Two modes with mixed drives: distinct harmonics do not couple on a constant Jacobian.
+        intr2 = KF.KineticForcesInternal(; mthsurf=64, mfac=[0, 1])
+        D = ComplexF64[1.0+2.0im, -0.4+0.5im]
+        K = ComplexF64[0.7-0.3im, 0.2+0.9im]
+        T = KF.calculate_fcgl(0.4, n, 0, nothing, -(D .+ K), D, 1.0, n_s, T_s, equil, intr2)
+        @test T ≈ 2im * n * n_s * T_s * 2.0 * sum(pressure_work.(D, K)) / 2 rtol = 1e-12
+    end
+
     @testset "KineticForcesControl defaults" begin
         ctrl = KF.KineticForcesControl()
         @test ctrl.fgar_flag == true
