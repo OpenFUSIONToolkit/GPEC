@@ -581,6 +581,25 @@
     # =========================================================================
     # Struct construction and defaults
     # =========================================================================
+    @testset "fluid CGL energy" begin
+        # Single-mode drives on a θ-varying Jacobian with ∫J dθ = 1. With δB/B = A·e^{2πimθ} alone,
+        # κ·ξ⊥ = -δB/B and T = 2n·i·n_s·T_s·(1/6)(9/2)|A|²; with ∇·ξ⊥ alone the two terms give the same 3/2.
+        jac = (pt; hint = nothing) -> 1.0 + 0.3 * cos(2π * pt[2])
+        equil = (eqfun_B=(pt; hint = nothing) -> 2.0, rzphi_jac=jac)
+        intr = KF.KineticForcesInternal(; mthsurf=128, mfac=collect(-2:2))
+        n, n_s, T_s = 1, 3.0e19, 1.6e-16
+        A = 0.02 + 0.01im
+        dbob = [0.0im, 0.0im, 0.0im, A, 0.0im]   # m = +1
+        zero_m = zeros(ComplexF64, 5)
+        T_dbob = KF.calculate_fcgl(0.5, n, 0, nothing, dbob, zero_m, 1.0, n_s, T_s, equil, intr)
+        @test T_dbob ≈ 1.5 * n * im * n_s * T_s * abs2(A) rtol = 1e-10
+        D = 0.05 - 0.02im
+        divx = [0.0im, D, 0.0im, 0.0im, 0.0im]   # m = -1, scaled by divxfac = 2
+        T_divx = KF.calculate_fcgl(0.5, n, 0, nothing, zero_m, divx, 2.0, n_s, T_s, equil, intr)
+        @test T_divx ≈ 1.5 * n * im * n_s * T_s * abs2(2.0 * D) rtol = 1e-10
+        @test KF.calculate_fcgl(0.5, n, 1, nothing, dbob, divx, 1.0, n_s, T_s, equil, intr) == 0
+    end
+
     @testset "KineticForcesControl defaults" begin
         ctrl = KF.KineticForcesControl()
         @test ctrl.fgar_flag == true
