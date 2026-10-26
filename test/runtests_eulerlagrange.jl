@@ -677,3 +677,12 @@ end
         @test !odet.du_store_populated
     end
 end
+
+@testset "solve_el reports an aborted integration" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    # du/dψ = u² blows up at ψ = 1, so the solver stops short of the interval's end.
+    blowup = FFS.ODEProblem((du, u, p, t) -> (du .= u .^ 2), ones(ComplexF64, 1, 1, 2), (0.0, 2.0))
+    @test_throws "Euler-Lagrange integration aborted" FFS.solve_el(blowup, 1e-8)
+    calm = FFS.ODEProblem((du, u, p, t) -> (du .= -u), ones(ComplexF64, 1, 1, 2), (0.0, 1.0))
+    @test FFS.solve_el(calm, 1e-8).u[end] ≈ fill(exp(-1), 1, 1, 2) rtol = 1e-6
+end

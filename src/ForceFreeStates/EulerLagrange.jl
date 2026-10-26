@@ -361,7 +361,7 @@ for all three.
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     if ctrl.integrator == "riccati"
-        ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
+        ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.integrator == "forward"
         return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
@@ -897,8 +897,15 @@ const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refr
 
 Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
 A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
+Errors when the solver stops short of the interval's end (e.g. the step size underflows), naming the ψ reached.
 """
-solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK) = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
+function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
+    SciMLBase.successful_retcode(sol) ||
+        error("Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
+              "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor.")
+    return sol
+end
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
