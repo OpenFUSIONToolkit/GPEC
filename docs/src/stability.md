@@ -350,9 +350,11 @@ total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular 
 `n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
 flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
 in every case. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
-the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code, and GPEC's
-only option before), from `chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or
-from a whole-plasma confinement time (`"tau_E"`); see `slayer_parameters`. On the DIII-D-like
+the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code), from
+`chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
+confinement time (`"tau_E"`); see `slayer_parameters`. `"tau_E"` is for a plasma with no χ
+profiles: its uniform χ_E sets both `P_perp` and the toroidal `P_tor`, so the file's `chi_phi`
+and `[SLAYER] chi_tor` are not used in that mode. On the DIII-D-like
 profiles `D_⊥` is 0.22–0.32 of `chi_e` at the outer rational surfaces, because the weights sum to
 less than one where density gradients carry part of `p′`. Since the widths scale as `χ^{1/4}`, a
 factor-2 change in χ moves them by about 19%, which can be enough to move the overlap cut by a

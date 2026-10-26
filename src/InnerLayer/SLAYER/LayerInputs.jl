@@ -188,15 +188,13 @@ profiles, without an intermediate file round-trip.
     surface (default `1.0`).
   - `chi_perp_e`  -- electron perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
-  - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], scalar or callable of
-    `psi` (no default: NaN); used by `P_perp_model = :chi_perp_i` and `:D_perp`.
-  - `tau_E` -- whole-plasma energy confinement time τ̄_E [s], one scalar for every surface;
-    required by `P_perp_model=:tau_E`, which also takes the minor radius `a` of the boundary
-    surface (ψ = 1) from the `:flux` label `√(2ψ_t/B₀)` whatever `rs_method` is. Every P_perp
-    model is μ₀χ/η, so `r_s` cancels except through η's trapped fraction; in this mode `a` sets
-    χ_E, and the flux label is the area-equivalent radius of a shaped boundary.
+  - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], scalar or callable of `psi`;
+    required by `P_perp_model = :chi_perp_i` and `:D_perp` (default `nothing`).
+  - `tau_E` -- whole-plasma energy confinement time τ̄_E [s], required by `P_perp_model = :tau_E`
+    (default `nothing`). That mode takes the minor radius `a` of the ψ = 1 surface from the
+    `:flux` label, whatever `rs_method` is.
   - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
-    (default `:chi_perp_e`).
+    (default `:D_perp`, as in the `[SLAYER]` deck).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
     of `psi` (default `1.0`).
 
@@ -255,9 +253,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     zeff=1.0,
     z_i::Real=1.0,
     chi_perp_e=1.0,
-    chi_perp_i=NaN,
-    tau_E::Real=NaN,
-    P_perp_model::Symbol=:chi_perp_e,
+    chi_perp_i=nothing,
+    tau_E::Union{Real,Nothing}=nothing,
+    P_perp_model::Symbol=:D_perp,
     chi_tor=1.0,
     dr_val=nothing,
     dgeo_val=nothing,
@@ -266,7 +264,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl)
     R0_use = R0 === nothing ? equil.ro : Float64(R0)
-    _eval(x, ψ) = x isa Real ? Float64(x) : Float64(x(ψ))
+    _eval(x, ψ) = x === nothing ? nothing : x isa Real ? Float64(x) : Float64(x(ψ))
 
     # Compute physical B_T = F(ψ) / (2π·R₀) per surface from the F spline
     # when `bt` is not explicitly supplied.
@@ -281,7 +279,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
     _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
     # Boundary minor radius on the flux label, needed only to turn a whole-plasma τ̄_E into a uniform χ_E.
-    a_minor = P_perp_model === :tau_E ? first(radial_label(equil; rs_method=:flux, theta=theta, q_beyond=q_beyond))(1.0) : NaN
+    a_minor = P_perp_model === :tau_E ? first(radial_label(equil; rs_method=:flux, theta=theta, q_beyond=q_beyond))(1.0) : nothing
 
     # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
     # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode

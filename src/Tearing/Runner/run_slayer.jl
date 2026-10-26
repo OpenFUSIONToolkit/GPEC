@@ -41,11 +41,14 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     # to the scalar control.chi_perp_e/chi_tor fallback. Build the spline only
     # from a usable (present, not all-zero) array.
     psi_xs = collect(Float64, data.psi)
-    _chi_spline(v) = (v === nothing || all(iszero, v)) ? nothing :
-                     cubic_interp(psi_xs, collect(Float64, v))
-    chi_perp_e = _chi_spline(data.chi_e)
-    chi_perp_i = _chi_spline(data.chi_i)
-    chi_tor = _chi_spline(data.chi_phi)
+    function _chi_spline(name, v)
+        (v === nothing || all(iszero, v)) && return nothing
+        minimum(v) > 0 || error("run_slayer: kinetic file '$path' has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
+        return cubic_interp(psi_xs, collect(Float64, v))
+    end
+    chi_perp_e = _chi_spline("chi_e", data.chi_e)
+    chi_perp_i = _chi_spline("chi_i", data.chi_i)
+    chi_tor = _chi_spline("chi_phi", data.chi_phi)
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
     # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
@@ -74,7 +77,7 @@ end
 function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
     model = control.P_perp_model
     pick(f, s) = f === nothing ? s : f
-    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && !(isfinite(control.chi_perp_i) && control.chi_perp_i > 0) &&
+    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && control.chi_perp_i === nothing &&
         throw(ArgumentError("SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
                             "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."))
     if warn

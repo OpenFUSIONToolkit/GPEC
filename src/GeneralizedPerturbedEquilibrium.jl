@@ -574,7 +574,7 @@ function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
     end
     return (; profiles=loaded.profiles,
         chi.chi_perp_e, chi.chi_perp_i, chi.chi_tor,
-        tau_E=something(ctrl.tau_E, NaN), P_perp_model=ctrl.P_perp_model,
+        tau_E=ctrl.tau_E, P_perp_model=ctrl.P_perp_model,
         zeff=loaded.zeff === nothing ? ctrl.zeff : loaded.zeff,
         bt=ctrl.bt, mu_i=ctrl.ion_mass, theta=ctrl.theta_sample,
         resistivity_model=Runner._build_resistivity_model(ctrl.resistivity_model),

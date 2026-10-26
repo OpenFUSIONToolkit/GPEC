@@ -48,7 +48,7 @@
         # Q_layer = τ_k·ω_lab − τ_k·n·Ω_E, so the rotating determinant at Q + τ_ref·n·Ω_E equals the
         # static one at Q: every root keeps its γ and moves by ω_lab(Ω_E) − ω_lab(0) = +n·Ω_E. This pins
         # how `_q_shift` composes with the determinant; the next testset ties the sign to the physical axis.
-        mk(; qval, rs, m) = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0,
+        mk(; qval, rs, m) = slayer_parameters(; P_perp_model=:chi_perp_e, n_e=5.0e19, t_e=1000.0, t_i=1000.0,
             omega_e=-1.0e4, omega_i=5.0e3,
             qval=qval, sval_r=1.0, bt=2.0, rs=rs, R0=1.7,
             mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=m, n=2)
@@ -75,7 +75,7 @@
         # the `i·conj(Q)` bridge in `solve_inner` moves it to −τ_k·ω_*e.
         slayer = SLAYERModel(; variant=:fitzpatrick)
         for (ω_e, ω_i) in ((-1.0e4, 5.0e3), (1.0e4, -5.0e3), (-1.0e4, 0.0))
-            p = slayer_parameters(; n_e=5.0e19, t_e=1000.0, t_i=1000.0, omega_e=ω_e, omega_i=ω_i,
+            p = slayer_parameters(; P_perp_model=:chi_perp_e, n_e=5.0e19, t_e=1000.0, t_i=1000.0, omega_e=ω_e, omega_i=ω_i,
                 qval=2.0, sval_r=1.0, bt=2.0, rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0, chi_perp=1.0, chi_tor=1.0, m=2, n=1)
             Q_electron = p.tauk * ω_e + 0.01im
             @test abs(solve_inner(slayer, p, Q_electron).tearing) < 0.1 * abs(solve_inner(slayer, p, -conj(Q_electron)).tearing)

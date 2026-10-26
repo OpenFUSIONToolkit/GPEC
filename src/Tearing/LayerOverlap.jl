@@ -177,10 +177,10 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
     mu_i::Real=2.0,
     zeff=1.0,
     chi_perp_e=1.0,
-    chi_perp_i=NaN,
+    chi_perp_i=nothing,
     chi_tor=1.0,
-    tau_E::Real=NaN,
-    P_perp_model::Symbol=:chi_perp_e,
+    tau_E::Union{Real,Nothing}=nothing,
+    P_perp_model::Symbol=:D_perp,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl)
 

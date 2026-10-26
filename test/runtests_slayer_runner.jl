@@ -107,7 +107,10 @@
         no_chi = (; chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing)
         @test_throws "needs the ion diffusivity" Runner._slayer_chi_inputs(no_chi, SLAYERControl(); warn=false)
         @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7); warn=false).chi_perp_i == 0.7
-        @test isnan(Runner._slayer_chi_inputs(no_chi, SLAYERControl(; P_perp_model=:chi_perp_e); warn=false).chi_perp_i)
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; P_perp_model=:chi_perp_e); warn=false).chi_perp_i === nothing
+        # Scalar diffusivities must be positive.
+        @test_throws "chi_perp_i must be positive" Runner.validate(SLAYERControl(; chi_perp_i=-0.5))
+        @test_throws "chi_perp_e must be positive" Runner.validate(SLAYERControl(; chi_perp_e=0.0))
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin

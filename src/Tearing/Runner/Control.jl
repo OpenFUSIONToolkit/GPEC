@@ -49,16 +49,14 @@ constructor.
   - `chi_perp_e`, `chi_perp_i`, `chi_tor` -- fallback electron / ion perpendicular heat and
     toroidal momentum diffusivity [m²/s], used only when the kinetic file carries no usable
     `chi_e`/`chi_i`/`chi_phi` profile (dataset absent or all-zero); otherwise the file's
-    χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) take precedence. `chi_perp_i` has no default (NaN), so a model that
-    needs χ⊥,i fails loudly when neither the file nor the deck supplies it
+    χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) take precedence. `chi_perp_i` defaults to `nothing`, so a model that
+    needs χ⊥,i fails loudly when neither the file nor the deck supplies it. Each must be positive
   - `tau_E`    -- whole-plasma energy confinement time τ̄_E [s], required by
     `P_perp_model = :tau_E` (default `nothing`)
-  - `P_perp_model` -- how the perpendicular Prandtl number is built: `:D_perp` (default; D⊥ from
-    χ⊥,e, χ⊥,i and the n, T gradients, Fitzpatrick 2022 Eq. 16, so χ⊥,i is required), `:chi_perp_e`
-    (the electron-channel proxy used before this option existed), `:chi_perp_i`, `:P_phi` (P_perp = P_tor), `:c_beta`
-    (P_perp = c_β²), or `:tau_E` (a uniform χ_E = (3/16)a²/τ̄_E sets both P_perp and P_tor,
-    so `chi_phi`/`chi_tor` are ignored); see `InnerLayer.SLAYER.slayer_parameters`.
-    `chi_perp_e` still sets the critical-Δ width in every mode
+  - `P_perp_model` -- how the perpendicular Prandtl number is built: `:D_perp` (default; needs
+    χ⊥,i), `:chi_perp_e`, `:chi_perp_i`, `:P_phi`, `:c_beta` or `:tau_E`; see
+    `InnerLayer.SLAYER.slayer_parameters`. `:tau_E` sets both P_perp and P_tor from τ̄_E, so it
+    ignores `chi_phi`/`chi_tor`. `chi_perp_e` still sets the critical-Δ width in every mode
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
@@ -130,7 +128,7 @@ there is one consistent interface for resistive and kinetic profiles.
     zeff::Float64 = 1.0
     impurity_charge::Float64 = 6.0
     chi_perp_e::Float64 = 1.0
-    chi_perp_i::Float64 = NaN
+    chi_perp_i::Union{Float64,Nothing} = nothing
     chi_tor::Float64 = 1.0
     tau_E::Union{Float64,Nothing} = nothing
     P_perp_model::Symbol = :D_perp
@@ -213,6 +211,10 @@ function validate(ctrl::SLAYERControl)
     ctrl.P_perp_model in _VALID_P_PERP_MODELS ||
         throw(ArgumentError("SLAYERControl: P_perp_model=$(ctrl.P_perp_model) " *
                             "not in $(_VALID_P_PERP_MODELS)"))
+    for (name, v) in (("chi_perp_e", ctrl.chi_perp_e), ("chi_perp_i", ctrl.chi_perp_i), ("chi_tor", ctrl.chi_tor))
+        v === nothing || (isfinite(v) && v > 0) ||
+            throw(ArgumentError("SLAYERControl: $name must be positive and finite [m²/s]; got $v"))
+    end
     ctrl.P_perp_model !== :tau_E || (ctrl.tau_E !== nothing && isfinite(ctrl.tau_E) && ctrl.tau_E > 0) ||
         throw(ArgumentError("SLAYERControl: P_perp_model=tau_E requires a positive, finite tau_E [s]"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
@@ -290,7 +292,7 @@ function slayer_control_from_toml(section::AbstractDict)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym in (:bt, :D_R, :D_geo, :tau_E)
+        elseif sym in (:bt, :D_R, :D_geo, :tau_E, :chi_perp_i)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :omega_E_kHz
