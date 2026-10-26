@@ -16,8 +16,8 @@ constructor.
 # Core toggles
 
   - `enabled`       -- run the analysis at all (default `false`)
-  - `inner_model`   -- `:slayer_fitzpatrick` (default and only option; when `enabled`,
-    the `:ggj_*` models are rejected because GGJ tearing growth rates are not implemented)
+  - `inner_model`   -- `:slayer_fitzpatrick` (default and only supported option; the `:ggj_*` names
+    are accepted only when `enabled = false`, because GGJ tearing growth rates are not implemented)
   - `scan_mode`     -- `:amr` (default) or `:brute_force`
   - `coupling_mode` -- `:uncoupled` (default, per-surface) or `:coupled`
     (multi-surface determinant)
