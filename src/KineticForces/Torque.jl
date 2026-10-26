@@ -111,9 +111,9 @@ end
     calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac, n_s, T_s,
                    equil, intr)::ComplexF64
 
-Calculate FCGL (Full Circular Gyrokinetic Landau) torque.
-Implements simplified energy balance equation.
-Only valid for bounce harmonic l=0.
+Fluid Chew–Goldberger–Low limit of the kinetic energy: the double-adiabatic δW built from
+`∇·ξ⊥` and `κ·ξ⊥ = -(δB/B + ∇·ξ⊥)` on the surface, returned as `2n·i·δW` so `Im` carries the
+energy like the kinetic methods. Only the l = 0 harmonic is nonzero.
 
 Based on: [Logan et al., Phys. Plasmas 2013]
 """
@@ -142,11 +142,11 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
         jac_val = equil.rzphi_jac((psi, theta); hint=hJ)
 
         # Fourier component of field perturbations
-        expm = exp(im * twopi * intr.mfac * theta)
+        expm = exp.(im * twopi * intr.mfac * theta)
         dbob = sum(dbob_m_f .* expm)  # dB/B
         divx = sum(divx_m_f .* expm) * divxfac  # ∇·ξ⊥
 
-        kapx = -0.5 * (dbob + divx)  # Kappa coupling
+        kapx = -(dbob + divx)  # κ·ξ⊥ from δB/B = -(∇·ξ⊥ + κ·ξ⊥), the convention dbob_m is built with
 
         # Poloidal integrands (include 0.5 factor for quadratic form)
         cglspl[1, i] = jac_val * 0.5 * abs(divx)^2
