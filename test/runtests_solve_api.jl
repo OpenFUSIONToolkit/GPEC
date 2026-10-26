@@ -31,6 +31,7 @@ using HDF5
         inputs = TOML.parsefile(toml_path)
         merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
+        delete!(inputs, "LocalStability")
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir

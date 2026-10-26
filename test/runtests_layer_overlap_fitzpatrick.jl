@@ -234,10 +234,11 @@ end
     oi = overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
     @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
 
-    # A disabled section feeds the scan whatever its inner model, and an unreadable file only skips the scan;
+    # A disabled section feeds the scan whatever its inner model, and a missing or empty file only skips the scan;
     # with tearing enabled the same file is an error, raised here rather than after every other stage.
     @test overlap_inputs(Dict("inner_model" => "ggj_ray")) !== nothing
     @test (@test_logs (:warn, r"Layer-overlap scan skipped") match_mode = :any overlap_inputs(Dict("profile_file" => "missing.h5"))) === nothing
+    @test (@test_logs overlap_inputs(Dict("profile_file" => ""))) === nothing
     @test_throws ErrorException overlap_inputs(Dict("enabled" => true, "profile_file" => "missing.h5"))
     @test_throws ErrorException overlap_inputs(Dict("enabled" => true, "profile_file" => ""))
 

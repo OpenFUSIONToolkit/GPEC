@@ -96,7 +96,7 @@ using .PerturbedEquilibrium: plasma_response, PlasmaResponse
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing")
+    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 const _DEPRECATED_KF_KEYS = ("moment", "eq_out", "theta_out", "xlmda_out", "eqpsi_out", "save_records", "gpec_file",
     "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha")
@@ -110,6 +110,24 @@ function _stop_on_deprecated_keys(table, deprecated_keys, section::String; remed
     isempty(found) && return nothing
     listed = join(("`$k`" for k in found), ", ")
     error(length(found) == 1 ? "[$section] sets $listed, which is no longer a key; $remedy" : "[$section] sets $listed, which are no longer keys; $remedy")
+end
+
+"""
+    local_stability_algorithm(inputs) -> Union{LocalStability.Ballooning,Nothing}
+
+The [`Ballooning`](@ref) algorithm a deck's `[LocalStability]` section poses, its keys being the
+`Ballooning` keywords, or `nothing` when the deck has no such section. Unknown keys are an error.
+"""
+function local_stability_algorithm(inputs)
+    haskey(inputs, "LocalStability") || return nothing
+    table = inputs["LocalStability"]
+    allowed = string.(fieldnames(LocalStability.Ballooning))
+    for k in keys(table)
+        k in allowed || throw(ArgumentError("unknown key \"$k\" in [LocalStability] (allowed: $(join(allowed, ", ")))"))
+    end
+    kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in table)
+    haskey(kwargs, :psi_window) && (kwargs[:psi_window] = Tuple{Float64,Float64}(kwargs[:psi_window]))
+    return LocalStability.Ballooning(; kwargs...)
 end
 
 """
@@ -276,12 +294,9 @@ function main_from_inputs(
     # ----------------------------------------------------------------
     local_stability = nothing
     if local_stability_alg !== nothing
-        @info "\n  Local Stability\n$_SECTION"
-        ls_start = time()
-        local_stability = solve(LocalStabilityProblem(equil), local_stability_alg)
-        ls_dt = time() - ls_start
-        push!(runtimes, "local_stability" => ls_dt)
-        @info "Local Stability completed in $(@sprintf("%.3f", ls_dt)) s"
+        local_stability = _timed_stage(runtimes, "local_stability", "Local Stability") do
+            solve(LocalStabilityProblem(equil), local_stability_alg)
+        end
     end
 
     # ----------------------------------------------------------------
@@ -290,6 +305,7 @@ function main_from_inputs(
     @info "\n  Force-Free States\n$_SECTION"
     ffs_start = time()
 
+    # _overlap_slayer_inputs also rejects an enabled [SLAYER] section's unusable profile_file, so keep it ahead of the solve.
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl, kinetic_profiles;
         species=kf_species,
         overlap_inputs=_overlap_slayer_inputs(inputs, intr.dir_path))
@@ -1464,8 +1480,8 @@ instead), and ψ, q, the step counts, `crit`, the asymptotic coefficients and th
 from `result.diagnostics`. Either may be absent, and is then written empty.
 
 `forcing_snapshot` is the `(modes, normalization)` pair from `snapshot_forcing_modes`,
-written to `Input/RawInputs/ForcingTerms/`. `local_stability` is the `LocalStabilityResult` of the
-separate LocalStability stage, or `nothing` when it did not run.
+written to `Input/RawInputs/ForcingTerms/`. `local_stability` is the `LocalStabilityResult`
+of the separate LocalStability stage, or `nothing` when it did not run.
 
 ### TODOs
 
