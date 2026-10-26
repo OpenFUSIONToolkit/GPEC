@@ -133,6 +133,13 @@ _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 _is_ggj(::GGJModel) = true
 _is_ggj(::Any) = false
 
+# Winding number of an isolated zero of the dispersion residual, for
+# root_classification = :winding. The SLAYER residual is a function of conj(Q)
+# (solve_inner evaluates conj(Δ̂(ĝ)); see Riccati.jl), so a zero winds −1.
+_zero_winding(::SLAYERModel) = -1
+_zero_winding(model) =
+    throw(ArgumentError("root_classification=:winding is not available for inner model $(typeof(model))"))
+
 # ---------------------------------------------------------------------
 # Scan dispatch
 # ---------------------------------------------------------------------
@@ -425,6 +432,9 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         return 10.0 * median(abs.(finite))
     end
 
+    winding = control.root_classification === :winding
+    zw = winding ? _zero_winding(model) : -1
+
     if control.coupling_mode === :uncoupled
         for (k, sc) in enumerate(scs)
             scan = _run_scan(sc, control)
@@ -434,8 +444,11 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 filter_above_poles=control.filter_above_poles,
                 filter_outside_re=control.filter_outside_re,
                 gap_kHz_threshold=control.gap_kHz_threshold,
-                residual=control.polish_roots ? sc : nothing,
-                validity_rtol=control.validity_rtol)
+                residual=(control.polish_roots || winding) ? sc : nothing,
+                polish=control.polish_roots,
+                validity_rtol=control.validity_rtol,
+                classification=control.root_classification,
+                zero_winding=zw)
             :no_root in gr.warning_flags && @warn(
                 "SLAYER: no usable growth-rate root found for surface " *
                 "$(_surface_label(params[k])); reported γ=0 is a " *
@@ -460,12 +473,18 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
         # above zero), so |det|-based polishing is a no-op and the residual-scale
         # gate is unreliable. The coupled root is therefore the raw contour
-        # intersection and carries the triangulation's interpolation error.
+        # intersection and carries the triangulation's interpolation error. With
+        # root_classification = :winding the determinant is evaluated around
+        # each intersection only to count its zeros and poles.
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
             filter_above_poles=control.filter_above_poles,
             filter_outside_re=control.filter_outside_re,
-            gap_kHz_threshold=control.gap_kHz_threshold)
+            gap_kHz_threshold=control.gap_kHz_threshold,
+            residual=winding ? mc : nothing,
+            polish=false,
+            classification=control.root_classification,
+            zero_winding=zw)
         :no_root in gr.warning_flags && @warn(
             "SLAYER: no usable growth-rate root found for the coupled " *
             "$(m_use)-surface determinant; reported γ=0 is a placeholder, " *
