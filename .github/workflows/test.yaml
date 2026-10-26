@@ -21,7 +21,7 @@ concurrency:
 jobs:
   changes:
     name: Detect Julia changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: read
@@ -102,7 +102,7 @@ jobs:
     name: Tests
     needs: [changes, test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
       - name: Report suite result

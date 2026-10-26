@@ -35,6 +35,7 @@ const TEST_SUITES = [
     "runtests_dispersion_residual.jl" => "errorfields",
     "runtests_dispersion_coupled.jl" => "errorfields",
     "runtests_dispersion_coupled_full.jl" => "errorfields",
+    "runtests_dispersion_rotation.jl" => "errorfields",
     "runtests_dispersion_scan.jl" => "errorfields",
     "runtests_dispersion_amr.jl" => "errorfields",
     "runtests_dispersion_polish.jl" => "errorfields",

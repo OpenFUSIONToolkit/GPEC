@@ -21,12 +21,14 @@
 """
     SurfaceCoupling{M<:InnerLayerModel, P}
 
-Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk)`.
-Calling `sc(Q)` returns the complex residual
+Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk, q_shift)`. Calling `sc(Q)` returns the complex residual
 
 ```
-r(Q) = dp_diag - scale * solve_inner(model, params, Q).tearing - dc
+r(Q) = dp_diag - scale * solve_inner(model, params, Q + q_shift).tearing - dc
 ```
+
+`q_shift` is a real offset on the layer's Q argument, zero by default. The Tearing runner
+sets it to the surface's E×B Doppler shift.
 
 A root of `sc` in the complex `Q` plane is a **tearing** eigenvalue at
 this surface in the *uncoupled* approximation (only the tearing channel
@@ -42,16 +44,18 @@ struct SurfaceCoupling{M<:InnerLayerModel,P}
     dc::Float64
     scale::Float64
     tauk::Float64
+    q_shift::Float64
 end
 
 function (sc::SurfaceCoupling)(Q::Number)
-    Δ = solve_inner(sc.model, sc.params, ComplexF64(Q)).tearing
+    Δ = solve_inner(sc.model, sc.params, ComplexF64(Q) + sc.q_shift).tearing
     return sc.dp_diag - sc.scale * Δ - sc.dc
 end
 
 """
     surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-                     dp_diag::Number; dc::Real=0.0) -> SurfaceCoupling
+                     dp_diag::Number; dc::Real=0.0, q_shift::Real=0.0)
+        -> SurfaceCoupling
 
 SLAYER convenience constructor. `scale` is set to `params.lu^(1/3)`, which
 maps the dimensionless inner-layer Δ from `riccati_f` to the r_s-referenced
@@ -63,9 +67,9 @@ before building couplings. `tauk` is taken from `params.tauk` for use by
 `MultiSurfaceCoupling` Q rescaling.
 """
 function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-    dp_diag::Number; dc::Real=0.0)
+    dp_diag::Number; dc::Real=0.0, q_shift::Real=0.0)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        Float64(dc), params.lu^(1 / 3), params.tauk)
+        Float64(dc), params.lu^(1 / 3), params.tauk, Float64(q_shift))
 end
 
 """
@@ -83,25 +87,24 @@ interchange channel, which provides Glasser (Mercier) stabilization
 natively. A Δ_crit proxy (χ_parallel-matching offset on the diagonal) is
 meaningful only for tearing-only slab-layer approximations like SLAYER;
 for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
-struct's `dc` field is hard-wired to 0 here.
+struct's `dc` field is hard-wired to 0 here, and so is `q_shift`.
 """
-function surface_coupling(model::GGJModel, params::GGJParameters,
-    dp_diag::Number)
+function surface_coupling(model::GGJModel, params::GGJParameters, dp_diag::Number)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        0.0, 1.0, 1.0)
+        0.0, 1.0, 1.0, 0.0)
 end
 
 """
     surface_coupling(model::InnerLayerModel, params, dp_diag::Number;
-                     dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0)
-        -> SurfaceCoupling
+                     dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0,
+                     q_shift::Real=0.0) -> SurfaceCoupling
 
 Generic fallback constructor. Use this when wiring a new inner-layer model
 into the dispersion solver — pass the appropriate inner→outer-units `scale`
 and per-surface `tauk` explicitly.
 """
 function surface_coupling(model::InnerLayerModel, params, dp_diag::Number;
-    dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0)
+    dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0, q_shift::Real=0.0)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        Float64(dc), Float64(scale), Float64(tauk))
+        Float64(dc), Float64(scale), Float64(tauk), Float64(q_shift))
 end
