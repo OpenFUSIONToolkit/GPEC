@@ -153,6 +153,16 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             @test ts.T_source[1, 1, :] ./ 2 ≈ tr.T_applied rtol = 1e-8
         end
 
+        @testset "regularization on a kinetic result" begin
+            # No regularization by default; an explicit width still reaches the regularized profiles.
+            @test pe.regularization_width == 0.0
+            reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.RMPField(ft_ctrl); regularization_width=0.05,
+                coil_sets=pe.coil_sets, verbose=false, write_outputs_to_HDF5=false)
+            @test reg.regularization_width == 0.05
+            @test reg.forcing_b ≈ pe.forcing_b rtol = 1e-12
+            @test !(reg.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
+        end
+
         @testset "argument checks" begin
             @test_throws DimensionMismatch _PE_TR.torque_profile(tr, ComplexF64[1.0])
             # A response without its operators cannot carry a torque response.
