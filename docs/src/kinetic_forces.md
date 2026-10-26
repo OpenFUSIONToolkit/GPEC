@@ -160,7 +160,7 @@ for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmet
 Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
 notation.
 
-GPEC therefore **forces `regularization_width = 0` whenever `kinetic_factor > 0`**, logging the override.
+GPEC therefore **defaults `regularization_width` to 0 whenever `kinetic_factor > 0`**; an explicit deck value is respected.
 Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
 is never regularized, so damping the other two breaks their near-resonance cancellation in
 ``\delta B/B`` and leaves a spurious residue driving the NTV integrand.
