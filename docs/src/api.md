@@ -125,6 +125,20 @@ kinetic profiles come from `profile_file`, relative to the run directory.
 Kinetic runs (`kinetic_factor > 0`) take `Forward()` and the `"fixed"` kinetic source;
 the `"calculated"` source needs the `[KineticForces]` profiles and remains TOML-driven.
 
+## Local stability
+
+The Mercier, resistive interchange and ballooning profiles are their own stage, posed on the
+equilibrium alone. A [`LocalStabilityProblem`](@ref) holds the equilibrium, the
+[`Ballooning`](@ref) algorithm holds the scan knobs, and `solve` returns a
+[`LocalStabilityResult`](@ref) with the profiles as named fields. A deck runs the same solve
+through its `[LocalStability]` section, whose keys are the `Ballooning` keywords.
+
+```julia
+ls = solve(LocalStabilityProblem(eq), Ballooning(; n_scan=64))
+ls.psi, ls.D_I, ls.D_R, ls.ballooning_Delta_prime     # profiles on the equilibrium ψ grid
+ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundary, NaN outside its scan window
+```
+
 ## Entry points
 
 ```@docs
