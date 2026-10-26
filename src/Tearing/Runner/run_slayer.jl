@@ -156,6 +156,32 @@ end
 _build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
     surface_coupling(model, params, dp_diag)
 
+# "m/n" label keying `control.omega_E_kHz`; GGJ parameters carry no mode numbers.
+_mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
+_mn_label(::InnerLayerParameters) = nothing
+
+# Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
+# rational surface (NaN when there is none), replaced on every surface whose m/n `control.omega_E_kHz` lists.
+function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
+    n = length(params)
+    isempty(omega_E_file) || length(omega_E_file) == n ||
+        throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
+                            "$n rational surfaces were analysed."))
+    Ω_E = isempty(omega_E_file) ? fill(NaN, n) : Float64.(omega_E_file)
+    isempty(control.omega_E_kHz) && return Ω_E
+    labels = [_mn_label(p) for p in params]
+    any(isnothing, labels) &&
+        throw(ArgumentError("run_slayer: omega_E_kHz is keyed by m/n, which $(eltype(params)) surfaces do not carry."))
+    unknown = setdiff(keys(control.omega_E_kHz), labels)
+    isempty(unknown) ||
+        throw(ArgumentError("run_slayer: omega_E_kHz lists m/n $(sort(collect(unknown))) matching no analysed surface; " *
+                            "the analysed surfaces are $(labels)."))
+    for (k, label) in enumerate(labels)
+        haskey(control.omega_E_kHz, label) && (Ω_E[k] = 2π * 1e3 * control.omega_E_kHz[label])
+    end
+    return Ω_E
+end
+
 """
     _q_shift(p::SLAYERParameters, Ω_E) -> Float64
 
@@ -232,10 +258,11 @@ per-surface parameters, and the outer-region Δ' matrix. Bypasses the orchestrat
 `TearingProblem` solve — use this when the parameters are already known (e.g. in unit
 tests or when rebuilding from cached HDF5 output). The model is a typed object end to
 end; nothing below this point reads `control.inner_model`. `omega_E` is the E×B angular
-frequency per unit n at each surface [rad/s]; empty means none is known, which applies no
-shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer
-Q; in both modes it is reported as `result.omega_E`. Roots are reported in the lab frame in
-both modes: an uncoupled layer is solved in its own E×B frame and its root is then moved by
+frequency per unit n at each surface [rad/s], replaced on any surface whose m/n
+`control.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
+shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer Q; in
+both modes the resolved value is reported as `result.omega_E`. Roots are reported in the lab frame
+in both modes: an uncoupled layer is solved in its own E×B frame and its root is then moved by
 τ_k·n·Ω_E (Ω_E = 0 where it is unknown), so `γ` is the same and ω carries n·Ω_E.
 """
 function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
@@ -306,12 +333,12 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
     coupled = control.coupling_mode === :coupled
-    isempty(omega_E) || length(omega_E) == n ||
-        throw(ArgumentError("run_slayer: omega_E has $(length(omega_E)) entries but $n rational surfaces were analysed."))
-    Ω_E = isempty(omega_E) ? zeros(Float64, n) : omega_E
-    coupled && _is_ggj(model) && any(!iszero, Ω_E) && @warn(
+    Ω_E = _omega_E_per_surface(control, params, omega_E)
+    # A surface with no known rotation applies no shift.
+    Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
+    coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
             "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
-    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_E[k]) for k in 1:n] : zeros(Float64, n)
+    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
     ref_idx = 1
@@ -378,7 +405,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 "placeholder, not a physical result — check scan grid / " *
                 "pole_threshold.")
             # The layer is solved in its own E×B frame; report the root in the lab frame, Q_lab = Q + τ_k·n·Ω_E.
-            q_lab = -_q_shift(params[k], Ω_E[k])
+            q_lab = -_q_shift(params[k], Ω_shift[k])
             push!(Q_root, gr.Q_root + q_lab)
             push!(omega_Hz, :no_root in gr.warning_flags ? gr.omega_Hz : gr.omega_Hz + q_lab / params[k].tauk)
             push!(gamma_Hz, gr.gamma_Hz)
@@ -416,7 +443,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, isempty(omega_E) ? fill(NaN, n) : Ω_E, q_shifts, scan_data_list)
+        layer_widths, Ω_E, q_shifts, scan_data_list)
 end
 
 # ---------------------------------------------------------------------
