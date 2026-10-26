@@ -26,7 +26,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
 ### Core Physics Modules
 
 2. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
-   - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
+   - Main entry point: `PlasmaEquilibrium(file; eq_type)`, `PlasmaEquilibrium(analytic_config)`, `PlasmaEquilibrium(dd)`, or `PlasmaEquilibrium(config, source)`
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
      - `chease`, `chease2` - CHEASE equilibrium code formats
@@ -72,7 +72,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
 5. **LocalStability** (`src/LocalStability/`) - Local high-n stability
    - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Depends only on Equilibrium (plus math libraries); carries no stability-solver state
-   - Main entry points: `compute_local_stability`, `ballooning_alpha_boundary`
+   - `Problem.jl` - `solve(LocalStabilityProblem(equil), Ballooning())` → `LocalStabilityResult`; a deck's `[LocalStability]` section runs the same solve
+   - Kernels: `compute_ballooning_stability!`, `ballooning_alpha_boundary`
    - Status: Stable
 
 ### Perturbed Equilibrium Modules
@@ -149,14 +150,14 @@ Example configuration files are provided in:
 - `examples/Solovev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
 
-**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are deprecated.
+**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are not read; `gpec.toml` is the only input deck.
 
 ## Data Flow
 
 The complete GPEC analysis pipeline:
 
 1. **Equilibrium Setup**:
-   - `setup_equilibrium(config)` reads configuration from `gpec.toml`
+   - `PlasmaEquilibrium(config, source)` forms the equilibrium from the `[Equilibrium]` section of `gpec.toml`
    - Parses equilibrium data (EFIT, CHEASE, or analytical)
    - Runs Grad-Shafranov solver (direct or inverse)
    - Computes global parameters: q-profile, pressure, current density, β

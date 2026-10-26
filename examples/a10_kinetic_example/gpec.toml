@@ -21,8 +21,18 @@ flux_surface_rtol = 1e-7       # Relative tolerance of the ODE solves that trace
 [Wall]
 shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+[LocalStability]
+theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
+alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+n_scan = 24                   # Resolution of the α scan for the first boundary
+max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
+alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
+psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
+verbose = true                # Print progress and per-surface α-scan failures
+
 [ForceFreeStates]
-local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
 truncate_at_rational_offset = false # FALSE for limited/analytical equilibria — rationals sparse, rational_offset_fraction would chop too much edge
@@ -57,6 +67,5 @@ impurity_mass = 12             # Impurity mass
 electron = false               # Include electron contribution (false = ion-only)
 nutype = "harmonic"            # Collision operator (zero, small, krook, harmonic)
 f0type = "maxwellian"          # Distribution function (maxwellian, park, cgl)
-atol_pitch = 1e-9              # Absolute tolerance for inner pitch + energy integrations
-rtol_pitch = 1e-5              # Relative tolerance for inner pitch + energy integrations
+atol_pitch = 1e-9              # Absolute tolerance for the pitch integration (median-normalized kernel)
 axis_validity_suppression = true   # Suppress kinetic terms inside the near-axis orbit-width validity limit

@@ -17,7 +17,9 @@ whichever formalism produced it.  These are the outer-region inputs to resistive
 Select it with `integrator = "galerkin"` in `[ForceFreeStates]`. It replaces the radial ODE
 integration rather than supplementing it: the run computes its own vacuum response at the
 control surface (when `vac_flag`) and produces no free-boundary energies or ODE trace.
-Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution.
+Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution. The
+composite inner-region profiles are a scripting diagnostic: they need `Galerkin(; cut_solution=true)`
+followed by `solve(MatchProblem(...))`, and a deck run does not write them.
 
 The implementation lives in `src/ForceFreeStates/Galerkin/`:
 
