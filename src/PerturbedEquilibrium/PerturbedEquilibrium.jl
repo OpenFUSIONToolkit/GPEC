@@ -21,6 +21,7 @@ import ..Utilities.FourierTransforms
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
+include("TorqueResponse.jl")
 include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
@@ -37,9 +38,10 @@ export ForcingMode
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
 export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
+export TorqueResponse, torque_response_matrices, torque_profile
 
 """
-    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr; runtimes=nothing)::PerturbedEquilibriumState
+    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
 
 Main entry point for perturbed equilibrium calculations.
 
@@ -56,8 +58,6 @@ no free-boundary δW yet, so asking for the response or the coupling on one is a
   - `forcing`: the external-field description — a `ForcingTermsControl` (TOML path) or any [`ForcingTerms.RMPField`](@ref)
   - `ctrl`: Control parameters from [PerturbedEquilibrium] section
   - `intr`: Internal state variables
-  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
-    materialization (coil Biot-Savart onto the plasma surface), when that step runs
 
 ## Returns
 
@@ -67,8 +67,7 @@ function compute_perturbed_equilibrium(
     ffs::ForceFreeStatesResult,
     forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField},
     ctrl::PerturbedEquilibriumControl,
-    intr::PerturbedEquilibriumInternal;
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
 
     state = PerturbedEquilibriumState()
@@ -94,10 +93,8 @@ function compute_perturbed_equilibrium(
     # Unit-norm modes an internal caller already placed on `intr` skip materialization, so they
     # are never re-converted or re-weighted.
     if isempty(intr.forcing_modes)
-        ft_start = time()
         modes, coil_sets = materialize_forcing_modes(ffs, forcing;
             dir_path=intr.dir_path, preloaded_coil_sets=intr.coil_sets, verbose=ctrl.verbose)
-        runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
         intr.forcing_modes = modes
         isempty(coil_sets) || (intr.coil_sets = coil_sets)
     end
@@ -107,6 +104,14 @@ function compute_perturbed_equilibrium(
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
         compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mtheta_vacuum, ffs, intr, ctrl, ffs.metric, mats)
+    end
+
+    # Torque response matrices of a kinetic forward solve, on the plasma response just computed
+    if ctrl.compute_torque_response
+        ctrl.compute_response || throw(ArgumentError("compute_torque_response needs compute_response = true"))
+        ForceFreeStates.require_solution(ffs, "torque response matrices") ||
+            throw(ArgumentError("compute_torque_response needs the dense forward-integrated ξ solution"))
+        compute_torque_response!(state, ffs, forcing, intr, ctrl)
     end
 
     # Singular coupling metrics
