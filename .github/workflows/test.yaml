@@ -58,7 +58,7 @@ jobs:
           # trigger a run, so new untested Julia (benchmarks, docs scripts, a
           # future tools/ directory) is excluded by default rather than by
           # remembering to exclude it.
-          tested='(^src/|^test/|^examples/|^ci/manifests/|^Project\.toml$|^\.github/workflows/(test|julia-test-version)\.yaml$)'
+          tested='(^src/|^test/|^examples/|^ci/manifests/|^ci/local-julia-cache\.sh$|^Project\.toml$|^\.github/workflows/(test|julia-test-version)\.yaml$)'
 
           relevant=$(printf '%s\n' "$files" | grep -E "$tested" || true)
 

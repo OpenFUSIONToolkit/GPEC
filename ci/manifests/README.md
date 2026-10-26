@@ -44,6 +44,23 @@ the source cache helps subsequent runs of that source, not the first build. Cach
 new Julia version likewise requires rebuilding. The test runner logs elapsed and compilation
 seconds per file to distinguish this startup cost from work inside the tests.
 
+## Local cache on self-hosted runners
+
+Set the repository variable `GPEC_LOCAL_CACHE_DIR` to a shared directory on the runner host.
+On self-hosted runners this replaces GitHub cache and manifest-artifact transfers with local
+snapshots keyed by the exact Julia version, dependencies, source, architecture, and build flags.
+Hosted runners continue using GitHub storage.
+
+The precompile job copies its depot and resolved manifest into a staging directory, then publishes
+the complete snapshot with an atomic rename. A lock serializes publishers. Test jobs copy from
+that immutable snapshot into their private depots, so concurrent jobs do not write shared images.
+An absent test snapshot fails the handoff. Existing snapshots are reused between workflow runs;
+obsolete snapshots can be removed when no jobs need them. Snapshots use reflinks when supported.
+
+All runners eligible for these jobs must have access to the configured directory. On
+`pharr-desktop` it is `/home/pharr/Projects/github/julia-cache`; each new runner has its own home
+and depot. Unset the variable to return to GitHub storage.
+
 ## Files
 
 | File | Purpose |
