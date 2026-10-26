@@ -94,6 +94,9 @@ end
         r_unst = @test_logs (:warn, r"2/2 surface skipped: it is tearing-unstable") match_mode = :any run_critical_resonant_field(
             model, params, [ω_E, ω_E], [-2.0, 0.5], ctrl)
         @test isequal(r_unst.br_crit[1], r.br_crit[1]) && isnan(r_unst.br_crit[2])
+        # Zero E×B rotation is a valid input (Cole Sec. IV E: purely diamagnetic rotation) and gives a finite threshold.
+        r_zero = run_critical_resonant_field(model, params[1:1], [0.0], [-2.0], ctrl)
+        @test r_zero.Q0 == [0.0] && isfinite(r_zero.br_crit[1]) && r_zero.br_crit[1] > 0
         @test length(r.scan) == 2 && length(r.scan[1].Q) == 201
         @test !run_critical_resonant_field(model, params, [ω_E, ω_E], [-2.0, -3.0], CriticalResonantFieldControl()).enabled
         # Only the SLAYER layer defines the Cole-axis mirror the scan relies on.
