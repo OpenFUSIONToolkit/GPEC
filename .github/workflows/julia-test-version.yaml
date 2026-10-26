@@ -35,6 +35,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Fingerprint tracked package inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          fingerprint=$(
+            git ls-files -z -- Project.toml 'ci/manifests/Manifest-v*.toml' src |
+              sort -z |
+              while IFS= read -r -d '' file; do
+                sha256sum "$file" | cut -d ' ' -f 1 | xxd -r -p
+              done |
+              sha256sum | cut -d ' ' -f 1
+          )
+          echo "gpec=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Tracked package fingerprint: $fingerprint"
+
       - name: Set up Julia
         id: julia
         uses: julia-actions/setup-julia@v2
@@ -66,7 +82,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
-          key: gpec-images-v5-generic-aot-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
+          key: gpec-images-v5-generic-aot-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ steps.inputs.outputs.gpec }}
 
       - name: Pin the CI dependency set
         run: |
