@@ -1020,11 +1020,11 @@ function _bounce_integrate(
             for i in 1:ntheta
                 wsamp[i] = conj(wmu_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
             end
-            wmu_ba[mi] = dot(scr.int_w, wsamp)
+            wmu_ba[mi] = conj(dot(scr.int_w, wsamp))
             for i in 1:ntheta
                 wsamp[i] = conj(wen_mt[mi, i]) * (pl[i] + one_minus_sigma / pl[i])
             end
-            wen_ba[mi] = dot(scr.int_w, wsamp)
+            wen_ba[mi] = conj(dot(scr.int_w, wsamp))
         end
 
         # Reshape as 1×mpert for matrix multiply (Fortran lines 771-772)
