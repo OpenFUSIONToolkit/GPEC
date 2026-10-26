@@ -355,22 +355,22 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
             "reduced m×m tearing-only determinant, which DROPS the GGJ " *
             "interchange (Glasser stabilization) channel — results are " *
             "physically incomplete. Use the full Pletzer-Dewar matching " *
-            "(multi_surface_coupling_full) for coupled GGJ studies."
+            "(multi_surface_coupling_full + ggj_growth_rates) for coupled GGJ studies."
         )
     end
 
-    # GGJ growth-rate extraction by Re/Im contour matching is not yet
-    # reliable (the contours do not robustly intersect at a dispersion-relation
-    # zero). The scan still runs so the user can inspect/plot the contours and
-    # access both parity Δ channels via `ggj_inner_deltas`, but the reported γ
-    # is unvalidated and should be treated as future work.
+    # This runner's GGJ path scans the tearing-only residual in the SLAYER Q
+    # plane, which neither keeps the interchange channel nor uses the GGJ
+    # growth-rate normalization, so its γ is not a GGJ growth rate. The scan
+    # still runs so the user can inspect the contours and both parity Δ
+    # channels (`ggj_inner_deltas`). GGJ growth rates come from
+    # `Dispersion.ggj_growth_rates` on the full 4m×4m determinant.
     if _is_ggj(model)
         @warn(
-            "SLAYER: GGJ γ-extraction by Re/Im contour matching is " *
-            "FUTURE WORK — contours do not reliably intersect at a " *
-            "dispersion-relation root. The scan grid and parity Δ channels " *
-            "are provided for inspection; reported growth rates are " *
-            "unvalidated placeholders."
+            "SLAYER: the runner's GGJ path scans the tearing-only residual; " *
+            "its reported growth rates are unvalidated placeholders. Use " *
+            "Dispersion.ggj_growth_rates on multi_surface_coupling_full for " *
+            "GGJ growth rates."
         )
     end
 
@@ -559,10 +559,9 @@ vector of `(ising, tearing, interchange)` named tuples, where `tearing`
 (GWP Δ₋, odd) is the reconnecting channel and `interchange` (GWP Δ₊, even) the
 non-reconnecting Glasser-stabilization channel (see `InnerLayerResponse`).
 
-This is the supported GGJ diagnostic: both parity Δ's are physical and
-directly accessible here. Contour-matching γ extraction from these (the
-Re/Im scan intersection) is not yet validated — see the warning in
-`run_slayer_from_inputs`.
+Both parity Δ's are physical and directly accessible here. For GGJ growth
+rates use `Dispersion.ggj_growth_rates`, which matches both channels through
+the full 4m×4m determinant.
 """
 function ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
     solver::Symbol=:galerkin)
