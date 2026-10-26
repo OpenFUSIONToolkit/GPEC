@@ -151,7 +151,7 @@ end
 
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-    equil = Equilibrium.setup_equilibrium(
+    equil = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path),
         Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
@@ -313,7 +313,7 @@ end
 
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
     trunc_inputs = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
-    diiid(psihigh) = Equilibrium.setup_equilibrium(
+    diiid(psihigh) = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh)), trunc_dir), nothing)
     long, short = diiid(0.9999), diiid(0.995)
 
@@ -353,7 +353,7 @@ end
     # No 2D flux, no X-point: an analytic equilibrium is not extrapolated.
     sol_dir = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     sol_inputs = TOML.parsefile(joinpath(sol_dir, "gpec.toml"))
-    solovev = Equilibrium.setup_equilibrium(
+    solovev = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(sol_inputs["Equilibrium"], sol_dir), Equilibrium.SolovevConfig(sol_inputs["SOL_INPUT"]))
     @test separatrix_q_law(solovev) === nothing
 end

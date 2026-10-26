@@ -16,7 +16,7 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, "../.."))
 
 using GeneralizedPerturbedEquilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, EquilibriumConfig, setup_equilibrium
+using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, EquilibriumConfig
 using HDF5
 using TOML
 using Printf

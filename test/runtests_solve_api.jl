@@ -11,7 +11,7 @@ using HDF5
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
-    equil = GPEC.Equilibrium.setup_equilibrium(
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
