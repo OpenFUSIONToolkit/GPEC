@@ -1008,8 +1008,9 @@ Compute the plasma response to the external field `rmp` on top of a force-free-s
 arguments are `PerturbedEquilibrium.PerturbedEquilibriumControl` fields.
 
 Products the producing integrator could not supply gate the corresponding calculation: the
-step warns and is skipped rather than erroring, so a Riccati- or Galerkin-fed result still
-flows through.
+step warns and is skipped rather than erroring, so a Riccati-fed result still flows through.
+Galerkin and `:matched` results publish no free-boundary δW yet and are refused when the
+response or the singular coupling is requested.
 
 `coil_sets` injects already-built coil geometry (the gpec.h5 replay path), bypassing the
 geometry read. A `runtimes` collector, when given, receives the forcing-mode materialization's wall-clock seconds as `"forcing_terms" => dt`.
