@@ -122,6 +122,60 @@ end
     @test abs(By[1]) < 1e-14
 end
 
+@testset "BiotSavart: straight segment field is exact" begin
+    # Segment from (0,0,-0.5) to (0,0,0.5) m, unit current. Textbook finite-wire field at
+    # distance d, height z: B_φ = μ₀I/(4πd) × ((L/2 - z)/√(d² + (L/2 - z)²) + (L/2 + z)/√(d² + (L/2 + z)²)).
+    xs = [0.0, 0.0]
+    ys = [0.0, 0.0]
+    zs = [-0.5, 0.5]
+    for d in (0.05, 0.25, 0.5, 2.0), z in (0.0, 0.2, 0.9)
+        Bx = zeros(1)
+        By = zeros(1)
+        Bz = zeros(1)
+        ForcingTerms.accumulate_strand_field!(Bx, By, Bz, 1, d, 0.0, z, xs, ys, zs, 1.0)
+        a = 0.5 - z
+        b = 0.5 + z
+        B_exact = 1e-7 / d * (a / sqrt(d^2 + a^2) + b / sqrt(d^2 + b^2))
+        @test By[1] ≈ B_exact rtol = 1e-12
+        @test abs(Bx[1]) < 1e-14 * B_exact && abs(Bz[1]) < 1e-14 * B_exact
+    end
+    @inferred ForcingTerms._segment_field(1.0, 0.2, 0.3, 0.0, 0.0, 1.0, 1.0)
+
+    # Observer on the conductor: the segment contribution is skipped, never Inf/NaN
+    Bx = zeros(1)
+    By = zeros(1)
+    Bz = zeros(1)
+    ForcingTerms.accumulate_strand_field!(Bx, By, Bz, 1, 0.0, 0.0, 0.1, xs, ys, zs, 1.0)
+    @test Bx[1] == 0 && By[1] == 0 && Bz[1] == 0
+end
+
+@testset "BiotSavart: field independent of polyline subdivision" begin
+    # 0.6 m × 0.4 m rectangle in the plane x = 1.25 m with each side split into m collinear
+    # pieces; the conductor is the same for every m, so the field must be too.
+    function rectangle(m)
+        cy = [-0.3, 0.3, 0.3, -0.3, -0.3]
+        cz = [-0.2, -0.2, 0.2, 0.2, -0.2]
+        ys = [cy[s] + p / m * (cy[s+1] - cy[s]) for s in 1:4 for p in 0:(m-1)]
+        zs = [cz[s] + p / m * (cz[s+1] - cz[s]) for s in 1:4 for p in 0:(m-1)]
+        push!(ys, cy[5])
+        push!(zs, cz[5])
+        n = length(ys)
+        return ForcingTerms.CoilSet("rectangle", 1, 1, 1.0, n, reshape(fill(1.25, n), 1, 1, :),
+            reshape(ys, 1, 1, :), reshape(zs, 1, 1, :), [1.0e3])
+    end
+    obs_R = [r for r in 0.95:0.05:1.15 for z in -0.3:0.15:0.3]
+    obs_Z = [z for r in 0.95:0.05:1.15 for z in -0.3:0.15:0.3]
+    obs_phi = fill(0.1, length(obs_R))
+    B = map((1, 16)) do m
+        B_R = zeros(length(obs_R))
+        B_phi = zeros(length(obs_R))
+        B_Z = zeros(length(obs_R))
+        ForcingTerms.compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, [rectangle(m)])
+        hcat(B_R, B_phi, B_Z)
+    end
+    @test maximum(abs, B[1] .- B[2]) < 1e-12 * maximum(abs, B[2])
+end
+
 @testset "BiotSavart: compute_biot_savart_boundary! threading" begin
     # Same circular loop; verify threaded result matches single-obs result
     a = 0.8
@@ -288,6 +342,50 @@ end
 
     # Result must vary with R (old code without R factor gave constant amplitude)
     @test std(abs.(bn[:, 1])) > 0.01 * mean(abs.(bn[:, 1]))
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: B·n̂ file conversion onto the run's harmonics" begin
+    eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", psilow=0.01, psihigh=0.995)
+    equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig())
+    n, m_out, mtheta = 1, -10:14, 256
+    convert(modes) = ForcingTerms.convert_forcing_normalization(modes, "normal_field_T", equil, n, m_out)
+    spectrum(ms, amp) = [ForcingMode(; n, m, amplitude=amp(m)) for m in ms]
+    amplitudes(modes) = [mode.amplitude for mode in modes]
+
+    # A single B·n̂ harmonic gains flux sidebands, and its own harmonic matches a projection onto it alone.
+    single = spectrum(2:2, m -> 1e-4 + 0im)
+    flux = @test_logs (:info, r"Converting") convert(single)
+    @test [mode.m for mode in flux] == collect(m_out)
+    φ = Dict(mode.m => abs(mode.amplitude) for mode in flux)
+    @test φ[1] > 0.05φ[2] && φ[3] > 0.05φ[2]
+    alone = ForcingTerms.convert_forcing_normalization(single, "normal_field_T", equil, n, 2:2)
+    @test alone[1].amplitude ≈ flux[findfirst(==(2), m_out)].amplitude rtol = 1e-12
+
+    # On a range wide enough to hold the weight's whole spectrum, the inverse transform of the
+    # converted flux reproduces J|∇ψ| × B·n̂ on the conversion grid.
+    wide = -60:64
+    flux_wide = ForcingTerms.convert_forcing_normalization(single, "normal_field_T", equil, n, wide)
+    FT = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
+    weight = Equilibrium.compute_jac_delpsi(equil, equil.rzphi_xs[end], mtheta)
+    bn = FT.inverse(FT.FourierTransform(mtheta, 1, 2), [1e-4 + 0im])
+    rebuilt = FT.inverse(FT.FourierTransform(mtheta, length(wide), first(wide)), amplitudes(flux_wide))
+    @test maximum(abs, rebuilt .- weight .* bn) < 1e-6 * maximum(abs, weight .* bn)
+
+    # A file wider than the run loses nothing: its conversion onto a narrow run range equals the
+    # conversion onto a wide range downsampled to it.
+    broad = spectrum(-48:51, m -> 1e-4 * 0.9^abs(m - 2) + 0im)
+    narrow = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, 0:4)
+    downsampled = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, -200:200)
+    @test amplitudes(narrow) ≈ amplitudes(downsampled)[201 .+ (0:4)] rtol = 1e-5
+
+    # A hard-cut flat spectrum warns at both edges; a decaying one converts silently.
+    @test_logs (:info, r"Converting") (:warn, r"m=-2 carries") (:warn, r"m=6 carries") convert(spectrum(-2:6, m -> 1e-4 + 0im))
+    @test_logs (:info, r"Converting") convert(spectrum(-4:8, m -> 1e-4 * 0.3^abs(m - 2) + 0im))
+
+    # sfl_flux_Wb is a pure (2π)² rescale that keeps the file's harmonics.
+    sfl = ForcingTerms.convert_forcing_normalization(spectrum(1:3, m -> 1.0 + 0im), "sfl_flux_Wb", equil, n, m_out)
+    @test [mode.m for mode in sfl] == [1, 2, 3] && all(amplitudes(sfl) .≈ (2π)^2)
 end
 
 # ---------------------------------------------------------------------------
@@ -568,6 +666,9 @@ end
     # A 10° X-tilt should move the (originally flat) hoop out of the z=0.2 plane
     @test !all(isapprox.(out[1].z, 0.2; atol=1e-6))
 
+    # A misspelled or retired coil_set key is an error, not silently ignored
+    @test_throws ArgumentError ForcingTerms._parse_coil_set_config(Dict{String,Any}("source" => "pf_hoop", "xnom" => [1.0]))
+
     # File source dispatches on extension: .h5 -> read_coil_h5, .dat -> read_coil_dat
     mktempdir() do dir
         h5 = joinpath(dir, "il.h5")
@@ -590,7 +691,7 @@ end
     # window_pane standoff mode requires an equilibrium
     cfg_standoff = ForcingTerms.CoilConfig(;
         coil_sets=[
-            ForcingTerms.CoilSetConfig(; source="window_pane", ncoil_gen=2,
+            ForcingTerms.CoilSetConfig(; source="window_pane", n_coils=2,
                 standoff=0.2, poloidal_angle=0.0, poloidal_length=0.6, currents=[1.0, -1.0])
         ]
     )
@@ -599,7 +700,7 @@ end
     # Supplying both rz_corners and standoff is ambiguous
     cfg_both = ForcingTerms.CoilConfig(;
         coil_sets=[
-            ForcingTerms.CoilSetConfig(; source="window_pane", ncoil_gen=2,
+            ForcingTerms.CoilSetConfig(; source="window_pane", n_coils=2,
                 rz_corners=[[2.2, -0.5], [2.2, 0.5]], standoff=0.2, poloidal_angle=0.0)
         ]
     )
@@ -645,7 +746,7 @@ end
             println(io, l)
         end
     end
-    cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="ldp", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
+    cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="core_edge_packed", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
     eq_pos = Equilibrium.setup_equilibrium(cfg(gfile))
     eq_neg = Equilibrium.setup_equilibrium(cfg(flipped))
     @test eq_pos.params.ip_sign == 1 && eq_neg.params.ip_sign == -1

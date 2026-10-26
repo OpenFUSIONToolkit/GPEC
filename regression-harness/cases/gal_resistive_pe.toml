@@ -2,6 +2,8 @@
 # fed into PerturbedEquilibrium with DIII-D C-coil forcing. Tracks the finite
 # per-rational-surface singular-coupling scalars (island half-widths, Chirikov
 # overlap, resonant flux, penetrated field, Δ′).
+# Expected N/A: the example switches the PE response and coupling off until Galerkin and
+# matched results publish the free-boundary δW, so none of these datasets are written yet.
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
 # and the noise floor below which a difference is treated as zero.
 [case]

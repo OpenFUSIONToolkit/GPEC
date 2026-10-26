@@ -322,7 +322,7 @@ end
         @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
         # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
         c = FFS.ForceFreeStatesControl()
-        @test c.ucrit == 1e3
+        @test c.renorm_threshold == 1e3
         @test c.save_interval == 1
     end
 
@@ -330,7 +330,7 @@ end
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; ucrit=10.0)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; renorm_threshold=10.0)
 
         # Case 1: Basic norm computation
         odet.u = zeros(ComplexF64, 2, 2, 2)
@@ -356,7 +356,7 @@ end
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         @test odet.unorm[1:intr.mpert] ≈ [1, 1]
 
-        # Case 4: Trigger fixup via ucrit
+        # Case 4: Trigger fixup via renorm_threshold
         odet.unorm0 = ones(intr.mpert)
         odet.u[:, 1, 1] .= [1000, 0]   # large norm
         odet.u[:, 2, 1] .= [1, 0]      # small norm
@@ -736,4 +736,13 @@ end
         @test big == big_ref
         @test small == small_ref
     end
+end
+
+@testset "solve_el reports an aborted integration" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    # du/dψ = u² blows up at ψ = 1, so the solver stops short of the interval's end.
+    blowup = FFS.ODEProblem((du, u, p, t) -> (du .= u .^ 2), ones(ComplexF64, 1, 1, 2), (0.0, 2.0))
+    @test_throws "Euler-Lagrange integration aborted" FFS.solve_el(blowup, 1e-8)
+    calm = FFS.ODEProblem((du, u, p, t) -> (du .= -u), ones(ComplexF64, 1, 1, 2), (0.0, 1.0))
+    @test FFS.solve_el(calm, 1e-8).u[end] ≈ fill(exp(-1), 1, 1, 2) rtol = 1e-6
 end

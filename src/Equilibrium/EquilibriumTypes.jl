@@ -21,12 +21,12 @@ specified in the input.
   - `jac_custom_power_b::Int` - Total-field exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
   - `jac_custom_power_r::Int` - Major-radius exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
   - `jac_custom_power_rc::Int` - Minor-radius (rfac) exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
-  - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
-  - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
+  - `r0_norm::Float64` - Major radius normalization for CHEASE/EQDSK [m]
+  - `b0_norm::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
   - `grid_type::String` - Grid type for flux surface discretization ("auto" — two-pass measured-curvature
-    refinement when mpsi=0, three-region log layout when mpsi>0; "ldp", "pow1", "uniform";
+    refinement when mpsi=0, three-region log layout when mpsi>0; "core_edge_packed" (sin² spacing, dense at axis and edge), "pow1", "uniform";
     inverse equilibria also "rho" (uniform in √ψ from psilow to psihigh) and "original" (the input
-    file's own ψ nodes off the axis; ignores psilow and mpsi); "log_asymptotic" is a legacy alias for "auto")
+    file's own ψ nodes between psilow and psihigh; ignores mpsi); "log_asymptotic" is a legacy alias for "auto")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Requested upper limit of normalized flux coordinate; the value the
     equilibrium is actually formed on is `EquilibriumParameters.psihigh_resolved`.
@@ -39,16 +39,15 @@ specified in the input.
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Float64` - Target on-axis safety factor q(0); the q and F profiles are rescaled to
     meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
-  - `etol::Float64` - Relative tolerance of the equilibrium ODE solves; their absolute tolerance
-    is `equil_abstol(etol)`, i.e. `etol` capped at `EQUIL_ABSTOL_MAX`
+  - `flux_surface_rtol::Float64` - Relative tolerance of the ODE solves that trace each flux surface; their absolute tolerance
+    is `equil_abstol(flux_surface_rtol)`, i.e. `flux_surface_rtol` capped at `EQUIL_ABSTOL_MAX`
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
-  - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
 @kwdef struct EquilibriumConfig
     eq_type::String = "efit"
     eq_filename::String = "mypath"
-    r0exp::Float64 = 1.0
-    b0exp::Float64 = 1.0
+    r0_norm::Float64 = 1.0
+    b0_norm::Float64 = 1.0
 
     jac_type::String = "hamada"
     power_bp::Int = 0
@@ -69,10 +68,9 @@ specified in the input.
     mtheta::Int = 512
 
     newq0::Float64 = 0.0
-    etol::Float64 = 1e-10
+    flux_surface_rtol::Float64 = 1e-10
 
     force_termination::Bool = false
-    use_galgrid::Bool = true
 
     # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
     imas_cocos::Int = 11
@@ -83,10 +81,10 @@ specified in the input.
     # The four `_` slots are the `power_bp/power_b/power_r/power_rc` struct fields, which @kwdef
     # forwards positionally. They are always derived below from `jac_type` (or `jac_custom_power_*`),
     # so their incoming values are ignored (hence `_`).
-    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, _, _, _, _,
+    function EquilibriumConfig(eq_type, eq_filename, r0_norm, b0_norm, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
-        grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-        force_termination, use_galgrid, imas_cocos)
+        grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
+        force_termination, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -145,15 +143,15 @@ specified in the input.
         else
             error("Cannot recognize jac_type = $(jac_type)")
         end
-        (isfinite(etol) && etol > 0) || error("etol = $etol must be a positive, finite relative tolerance")
+        (isfinite(flux_surface_rtol) && flux_surface_rtol > 0) || error("flux_surface_rtol = $flux_surface_rtol must be a positive, finite relative tolerance")
         if psihigh > 1.0
             @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
         end
         psihigh = min(psihigh, 1.0)
-        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+        return new(eq_type, eq_filename, r0_norm, b0_norm, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
-            grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-            force_termination, use_galgrid, imas_cocos)
+            grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
+            force_termination, imas_cocos)
     end
 end
 
@@ -222,20 +220,20 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
 
 ## Fields:
 
-  - `lar_r0`: The major radius of the plasma [m].
-  - `lar_a`: The minor radius of the plasma [m].
+  - `r0`: The major radius of the plasma [m].
+  - `a`: The minor radius of the plasma [m].
   - `beta0`: The beta value on axis (normalized pressure).
   - `q0`: The safety factor on axis.
   - `p_pres`: The exponent for the pressure profile, defined as `p00 * (1 - (r / a)^2)^p_pres`.
   - `p_sig`: The exponent that determines the shape of the current-related function profile.
   - `sigma_type`: The type of sigma profile, can be "default" or "wesson". If "wesson", the sigma profile is defined as `sigma0 * (1 - (r / a)^2)^p_sig`.
-  - `mtau`: The number of grid points in the poloidal direction.
+  - `mtheta`: The number of grid points in the poloidal direction.
   - `ma`: The number of grid points in the radial direction.
   - `zeroth`: If set to true, it neglects the Shafranov shift
 """
 @kwdef mutable struct LargeAspectRatioConfig
-    lar_r0::Float64 = 10.0
-    lar_a::Float64 = 1.0
+    r0::Float64 = 10.0
+    a::Float64 = 1.0
     beta0::Float64 = 1e-3
     q0::Float64 = 1.5
     qa::Float64 = 3.6        # Edge safety factor (legacy field; not consumed by current sigma_type options)
@@ -243,7 +241,7 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     p_pres::Float64 = 2.0
     p_sig::Float64 = 1.0
     sigma_type::String = "default"
-    mtau::Int = 128
+    mtheta::Int = 128
     ma::Int = 128
     zeroth::Bool = false
 end
@@ -268,25 +266,25 @@ to GPEC's direct-GS pipeline; this is NOT a re-implementation of TJ.
 The model uses analytic profiles with exact control of both the on-axis
 and edge safety factors. The q profile is determined by:
 
-    f1(r) = [1 - (1-r²)^ν] / (ν·qc)
+    f1(r) = [1 - (1-r²)^ν] / (ν·q0)
     q(r)  = r² / f1(r)
 
-where ν = qa/qc is the current peaking parameter, qc is the axis q, and qa
+where ν = qa/q0 is the current peaking parameter, q0 is the axis q, and qa
 is the edge q. All lengths are normalized to R₀, fields to B₀. The pressure
-profile is p₂(r) = pc·(1-r²)^μ.
+profile is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`.
 
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
 @kwdef mutable struct TJAnalyticConfig
-    lar_r0::Float64 = 10.0     # Major radius R₀ [m]
-    lar_a::Float64 = 1.0       # Minor radius a [m] (ε = a/R₀)
-    qc::Float64 = 1.5          # On-axis safety factor
+    r0::Float64 = 10.0         # Major radius R₀ [m]
+    a::Float64 = 1.0           # Minor radius a [m] (ε = a/R₀)
+    q0::Float64 = 1.5          # On-axis safety factor
     qa::Float64 = 3.6          # Edge safety factor
-    pc::Float64 = 0.001        # Normalized on-axis pressure
-    mu::Float64 = 2.0          # Pressure peaking exponent: p₂ = pc·(1-r²)^μ
+    p0::Float64 = 0.001        # Normalized on-axis pressure
+    pressure_peaking::Float64 = 2.0 # Pressure peaking exponent μ: p₂ = p0·(1-r²)^μ
     B0::Float64 = 12.0         # On-axis toroidal field [T]
     ma::Int = 128              # Radial grid points
-    mtau::Int = 128            # Poloidal grid points
+    mtheta::Int = 128          # Poloidal grid points
     zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
@@ -307,7 +305,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
   - `mr`: number of radial grid zones
   - `mz`: number of axial grid zones
   - `ma`: number of flux grid zones
-  - `e`:  elongation
+  - `elongation`: elongation
   - `a`: minor radius
   - `r0`: major radius
   - `q0`: safety factor at the o-point
@@ -319,7 +317,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
     mr::Int = 128      # number of radial grid zones
     mz::Int = 128      # number of axial grid zones
     ma::Int = 128      # number of flux grid zones
-    e::Float64 = 1.6       # elongation
+    elongation::Float64 = 1.6 # elongation
     a::Float64 = 0.33      # minor radius
     r0::Float64 = 1.0      # major radius
     q0::Float64 = 1.9      # safety factor at the o-point
@@ -376,8 +374,8 @@ end
     InverseIngest
 
 The serializable raw arrays and scalars captured by an inverse-equilibrium reader
-(`read_chease_ascii`, `read_chease_binary`) — everything needed to rebuild an
-`InverseRunInput`'s splines without re-reading the original CHEASE file. Stored on
+(`read_chease_ascii`, `read_chease_binary`, `read_ifile`) — everything needed to rebuild an
+`InverseRunInput`'s splines without re-reading the original CHEASE file or i-file. Stored on
 `InverseRunInput.ingest` / `PlasmaEquilibrium.ingest` and reconstructed by
 `build_inverse_from_ingest`. See [`DirectIngest`](@ref) for the role this plays in
 the `gpec.h5` rerun snapshot.
@@ -505,8 +503,8 @@ A container struct for inputs to the `inverse_run` function.
   - `ingest::EquilibriumIngest` - captured raw arrays for the `gpec.h5` rerun snapshot
     (an [`InverseIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
   - `psihigh_resolved::Float64` - outer flux limit the equilibrium is formed on; see
-    [`DirectRunInput`](@ref). Equals `config.psihigh` for every inverse reader (CHEASE,
-    analytic); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
+    [`DirectRunInput`](@ref). `config.psihigh`, clamped to the outermost input surface for i-files and
+    reruns (`resolve_psihigh!`); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
 """
 mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig

@@ -98,28 +98,27 @@ elapsed = time() - t_start
 """
 
 # Self-contained computation for the GGJ inner-layer reference benchmark.
-# Runs the Galerkin solver on the Glasser & Wang 2020 Eq. 55 parameter set
-# at γ = 1 + i and writes (Δ_odd, Δ_even) into a small HDF5 file at ARGS[1].
+# Runs the Galerkin solver on the Glasser & Wang 2020 Eq. 55 coefficients with physical
+# time scales (the q = 4 benchmark surface's τ_A, τ_R) at a 1 kHz rotation, γ = 2πi·10³ s⁻¹
+# (Q ≈ 0.22i, where the stock Galerkin matching is accurate), and writes the interchange (Δ₊)
+# and tearing (Δ₋) matching data into a small HDF5 file at ARGS[1].
 # Runtime and environment are written to ARGS[2] by the shared run-info epilogue.
-# `solve_inner` returns the named-field `InnerLayerResponse`; the historical
-# delta_odd / delta_even slots map to interchange / tearing respectively, which
-# preserves the numeric identity of each tracked quantity.
 const COMPUTED_GGJ_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.InnerLayer
 using HDF5
-γ = ComplexF64(1.0, 1.0)
-p = glasser_wang_2020_eq55()
+γ = 2π * 1e3 * im
+p = InnerLayer.GGJ.glasser_wang_2020_eq55(; taua=2.11226e-7, taur=0.968219)
 t_start = time()
 Δ = solve_inner(GGJModel(solver=:galerkin), p, γ)
 elapsed = time() - t_start
 h5open(ARGS[1], "w") do fid
-    fid["ggj/delta_odd_real"]  = real(Δ.interchange)
-    fid["ggj/delta_odd_imag"]  = imag(Δ.interchange)
-    fid["ggj/delta_even_real"] = real(Δ.tearing)
-    fid["ggj/delta_even_imag"] = imag(Δ.tearing)
+    fid["ggj/delta_interchange_real"] = real(Δ.interchange)
+    fid["ggj/delta_interchange_imag"] = imag(Δ.interchange)
+    fid["ggj/delta_tearing_real"]     = real(Δ.tearing)
+    fid["ggj/delta_tearing_imag"]     = imag(Δ.tearing)
 end
 %RUNINFO%
 """
@@ -128,23 +127,22 @@ end
 # :galerkin backend. Builds the physical rate γ = 500i·Q₀ so inner_Q lands exactly on the
 # imaginary axis at 500i, then writes the parity matching data. Runtime and environment are
 # written to ARGS[2] by the shared run-info epilogue.
-# As in the galerkin template, the delta_odd / delta_even slots map to interchange / tearing.
 const COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE = """
 using Pkg
 %INSTANTIATE%
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.InnerLayer
 using HDF5
-p = q4_surface_benchmark()
+p = InnerLayer.GGJ.q4_surface_benchmark()
 γ = 500.0im * InnerLayer.GGJ.q0(p)
 t_start = time()
 Δ = solve_inner(GGJModel(solver=:ray), p, γ)
 elapsed = time() - t_start
 h5open(ARGS[1], "w") do fid
-    fid["ggj/delta_odd_real"]  = real(Δ.interchange)
-    fid["ggj/delta_odd_imag"]  = imag(Δ.interchange)
-    fid["ggj/delta_even_real"] = real(Δ.tearing)
-    fid["ggj/delta_even_imag"] = imag(Δ.tearing)
+    fid["ggj/delta_interchange_real"] = real(Δ.interchange)
+    fid["ggj/delta_interchange_imag"] = imag(Δ.interchange)
+    fid["ggj/delta_tearing_real"]     = real(Δ.tearing)
+    fid["ggj/delta_tearing_imag"]     = imag(Δ.tearing)
 end
 %RUNINFO%
 """

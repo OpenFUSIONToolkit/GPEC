@@ -34,7 +34,7 @@ export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParam
     KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
 export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, bracket_mandatory_nodes, enforce_min_spacing, implied_knot_count
-export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
+export compute_jac_delpsi, compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
@@ -103,12 +103,15 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         eq_input = additional_input
         eq_input.config = eq_config
         eq_input.psihigh_resolved = eq_config.psihigh
+        resolve_psihigh!(eq_input)
     elseif eq_type in EFIT_KINDS
         eq_input = resolve_psihigh!(read_efit(eq_config))
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
+    elseif eq_type == "ifile"
+        eq_input = resolve_psihigh!(read_ifile(eq_config))
     elseif haskey(ANALYTIC_EQ, eq_type)
         # Analytic kinds (sol/lar/tj_analytic[_direct]) dispatch off the ANALYTIC_EQ registry.
         # Their parameters live in the embedded `[*_INPUT]` section and are passed in as the
@@ -490,6 +493,10 @@ end
 Diagnoses the Grad-Shafranov solution by computing the residual of the
 Grad-Shafranov equation across the grid and writing diagnostic data to HDF5 files.
 Performs the same function as equil_out_gse in the Fortran code.
+
+Returns `(; xs, ys, flux_x, flux_y, source, total, error, errori)` on the `rzphi` (ψ, θ) nodes: the two
+flux-divergence terms, the source, the residual `total = flux_x - flux_y + source`, `error = |total|` over
+the largest term on the grid, and `errori`, the magnitude of the θ-integrated residual on each surface.
 """
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
@@ -648,6 +655,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             file["errlogi"] = Float32.(errlogi)
         end
     end
+    return (; xs=equil.rzphi_xs, ys=equil.rzphi_ys, flux_x=flux_fsx[:, :, 1], flux_y=flux_fsy[:, :, 2], source, total, error, errori=vec(errori))
 end
 
 end # module Equilibrium

@@ -162,7 +162,7 @@ const MAIN_H5_ANNOTATIONS = [
     "ForceFreeStates/LayerOverlap/first_overlap_index" =>
         (; long_name="index into this group's surface axis of the first surface overlapping its inner neighbour (-1 when none do)"),
     "ForceFreeStates/LayerOverlap/applied" =>
-        (; long_name="1 when the overlap bound was handed to sing_lim! as an active cap on qlim (dmlim/qhigh may still truncate deeper); 0 when recorded only"),
+        (; long_name="1 when the overlap bound was handed to sing_lim! as an active cap on qlim (rational_offset_fraction/qhigh may still truncate deeper); 0 when recorded only"),
     "LocalStability/ballooning_psi" =>
         (; long_name="normalized poloidal flux ψ_N of the ballooning α boundary scan", scale="psi_ballooning"),
     "LocalStability/alpha" =>
@@ -281,18 +281,12 @@ const MAIN_H5_ANNOTATIONS = [
 # Stages that did not run leave their path absent and are skipped by `annotate!`.
 const RUNTIME_H5_ANNOTATIONS = [
     "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
-    "Info/Runtimes/galerkin" => (; long_name="wall-clock time of the Galerkin outer-region solve (measured inside force_free_states, not additional to it)", units="s"),
     "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
     "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
-    "Info/Runtimes/forcing_terms" => (;
-        long_name="wall-clock time of the ForcingTerms forcing-mode materialization, incl. coil Biot-Savart onto the plasma surface (measured inside perturbed_equilibrium, not additional to it)",
-        units="s"
-    ),
     "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
     "Info/Runtimes/kinetic_forces" => (; long_name="wall-clock time of the KineticForces (NTV) stage", units="s"),
     "Info/Runtimes/error_fields" => (; long_name="wall-clock time of the ErrorFields stage (coil sensitivities, Monte Carlo, locking risk)", units="s"),
-    "Info/Runtimes/total" =>
-        (; long_name="wall-clock time of the full GPEC run (the per-stage values nest rather than partition it, so they do not sum to this)", units="s")
+    "Info/Runtimes/total" => (; long_name="wall-clock time of the full GPEC run, including the work between stages", units="s")
 ]
 
 # Euler-Lagrange operator matrices: same wording per letter, Ideal/ and Kinetic/ variants.

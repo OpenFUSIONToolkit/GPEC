@@ -1,4 +1,39 @@
 """
+    TorqueResponse
+
+ψ-resolved torque response of a forward kinetic Euler-Lagrange solve, expressed on the
+root-area-weighted control-surface field b̃ (the basis of `forcing_b_rootarea` and of the
+stored response matrices). The matrices are cumulative in ψ: `T_xe[:, :, k]` is the response
+of the plasma inside `psi[k]`, and the last slice is the total.
+
+The quadratic form `b̃†·T_xe(ψ)·b̃` is the complex "2×" torque, matching the Fortran GPEC
+`T_xe` array: the physical torque and energy of the applied spectrum `b̃` are recovered with a
+factor 1/2 (`torque_profile`), `T(ψ) = b̃†·T_xe(ψ)·b̃/2`, whose real part is the toroidal torque
+on the plasma inside ψ and whose imaginary part is `2n·δW` of that plasma (ideal plus kinetic).
+
+## Fields
+
+  - `psi::Vector{Float64}` - ψ_N of each stored node of the solve `[npsi]`
+  - `m_modes`, `n_modes::Vector{Int}` - (m, n) of each row and column of `T_xe` `[numpert_total]`
+  - `T_xe::Array{ComplexF64,3}` - torque response on b̃, N·m/T² `[numpert_total × numpert_total × npsi]`
+  - `source_names::Vector{String}` - name of each forcing source of `T_source`: the coil sets, or the forcing file `[nsource]`
+  - `T_source::Array{ComplexF64,3}` - torque response in forcing-source space `[nsource × nsource × npsi]`,
+    N·m per squared scale factor of each source as built: driving the sources at `s` times their deck
+    currents or file amplitudes gives the complex 2× torque `s†·T_source·s`. Empty without forcing.
+  - `T_applied::Vector{ComplexF64}` - the run's own forcing contracted, `b̃ₓ†·T_xe(ψ)·b̃ₓ/2` `[npsi]`;
+    empty when no forcing spectrum was supplied
+"""
+struct TorqueResponse
+    psi::Vector{Float64}
+    m_modes::Vector{Int}
+    n_modes::Vector{Int}
+    T_xe::Array{ComplexF64,3}
+    source_names::Vector{String}
+    T_source::Array{ComplexF64,3}
+    T_applied::Vector{ComplexF64}
+end
+
+"""
     PerturbedEquilibriumControl
 
 User-facing control parameters from TOML [PerturbedEquilibrium] section.
@@ -13,6 +48,7 @@ High Priority (MWE):
   - `output_eigenmodes::Bool` - Output mode fields as b-fields (default: true)
   - `compute_response::Bool` - Compute plasma response (default: true)
   - `compute_singular_coupling::Bool` - Compute singular coupling metrics (default: true)
+  - `compute_torque_response::Bool` - Build the ψ-resolved torque response matrices `T_xe` and `T_source` (default: false). Needs a forward-integrated kinetic solve (`integrator = "forward"`, `kinetic_factor > 0`) and `compute_response`; errors otherwise
   - `verbose::Bool` - Enable verbose logging (default: true)
 
 Output Settings:
@@ -27,9 +63,9 @@ Medium Priority (defer for MWE):
 
 Regularization:
 
-# High Priority (MWE)
-
-  - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
+  - `regularization_width::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0
+    to disable. Must be ≥ 0. Forced to 0 in kinetic runs, whose Euler-Lagrange operator has no
+    resonant singularity to smooth.
 """
 @kwdef struct PerturbedEquilibriumControl
     # High Priority (MWE)
@@ -37,6 +73,7 @@ Regularization:
     output_eigenmodes::Bool = true
     compute_response::Bool = true
     compute_singular_coupling::Bool = true
+    compute_torque_response::Bool = false
     verbose::Bool = true
 
     # Output settings
@@ -49,7 +86,7 @@ Regularization:
 
     # Regularization width for singular surface smoothing (matches Fortran gpec.f reg_spot).
     # Set to 0 to disable regularization. Must be non-negative.
-    reg_spot::Float64 = 5e-2
+    regularization_width::Float64 = 5e-2
 end
 
 """
@@ -163,6 +200,11 @@ well-conditioned flux-space inductances L, Λ:
     the boundary-response torque, zero for ideal
     (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
     self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
+
+Torque response (kinetic forward solves with `compute_torque_response`):
+
+  - `torque_response::Union{Nothing,TorqueResponse}` - the ψ-resolved torque response matrices on the
+    applied b̃ and on the coil sets, with the run's own forcing contracted; see [`TorqueResponse`](@ref)
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
@@ -229,4 +271,29 @@ well-conditioned flux-space inductances L, Λ:
     surface_energy::Float64 = 0.0
     plasma_energy::Float64 = 0.0
     toroidal_torque::Float64 = 0.0
+
+    # ψ-resolved torque response matrices of a kinetic forward solve
+    torque_response::Union{Nothing,TorqueResponse} = nothing
+end
+
+"""
+    kinetic_regularization_kwargs(ffs, kwargs) -> NamedTuple
+
+`regularization_width` smooths the **ideal** 1/(m−nq) divergence of ξ^ψ′ and ξ^α before they drive the NTV
+integrand. A kinetic solve has no such divergence — det(F̄) is complex and nonzero at the rationals
+(Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D) — so regularizing there suppresses a finite
+physical response, and does so inconsistently, since ξ^ψ is never regularized. Force
+`regularization_width = 0` whenever a kinetic fit is present (either `kinetic_source`, both of which remove the
+resonant singularity) and log the override; ideal solves keep their setting. `ffs` is duck-typed:
+only `ffs.mats.kinetic` is read, so the override is unit-testable without a full run.
+"""
+function kinetic_regularization_kwargs(ffs, kwargs)
+    base = values(kwargs)
+    default_reg = PerturbedEquilibrium.PerturbedEquilibriumControl().regularization_width
+    prev = get(base, :regularization_width, default_reg)
+    kinetic = ffs.mats.kinetic !== nothing
+    kinetic && prev != 0 &&
+        @info "Kinetic run: overriding regularization_width=$prev with 0 " *
+              "(the kinetic terms remove the ideal resonant singularity; see docs/src/kinetic_forces.md)"
+    return merge(base, (; regularization_width=kinetic ? 0.0 : prev))
 end

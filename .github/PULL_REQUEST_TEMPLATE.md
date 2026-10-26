@@ -25,6 +25,9 @@ checkout and a mid-run edit silently mixes code versions (see the doc's "Run iso
 
     git fetch && git checkout develop && git merge --ff-only origin/develop
     regress --cases diiid_n1 --refs develop,<your-branch>
+
+Stacked on another PR? Use that PR's branch as the baseline, --refs <base-branch>,<your-branch>
+(docs/development/git-workflow.md, "Stacked pull requests").
 -->
 
 ```

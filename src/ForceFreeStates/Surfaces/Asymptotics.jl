@@ -43,7 +43,7 @@ See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematica
 ### Arguments
 
   - `singp::SingType`: Singular surface parameters
-  - `sing_order`: Expansion order, defaulting to `ctrl.sing_order`. The Galerkin path overrides it
+  - `sing_order`: Expansion order, defaulting to `ctrl.frobenius_order`. The Galerkin path overrides it
     per surface (`gal_sing_order`, raised for high-Mercier-index surfaces).
 
 ### Returns
@@ -57,7 +57,7 @@ function compute_sing_asymptotics(
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
     sig::Float64=1.0,
-    sing_order::Int=ctrl.sing_order
+    sing_order::Int=ctrl.frobenius_order
 )
 
     # Allocations
@@ -190,7 +190,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
     sig::Float64=1.0,
-    sing_order::Int=ctrl.sing_order
+    sing_order::Int=ctrl.frobenius_order
 )
 
     q_spline = profiles.q_spline

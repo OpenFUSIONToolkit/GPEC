@@ -26,24 +26,33 @@ the underlying √weight identity and angle map.
 """
 
 """
+    compute_jac_delpsi(equil, psi, mtheta) -> Vector{Float64}
+
+Compute J·|∇ψ| at `mtheta` equally-spaced θ points on the flux surface at `psi`.
+This is the area weight function that maps a bare field component `b(θ)` to its
+area-weighted form `J|∇ψ|·b(θ)` in θ-space, the flux per unit-norm cell.
+"""
+function compute_jac_delpsi(equil::PlasmaEquilibrium, psi::Float64, mtheta::Int)
+    jac_delpsi = Vector{Float64}(undef, mtheta)
+
+    hint2d = (Ref(1), Ref(1))
+    for itheta in 0:(mtheta-1)
+        theta = itheta / mtheta  # normalized to [0, 1)
+        m = flux_surface_metric(equil, psi, theta; hint=hint2d)
+        jac_delpsi[itheta+1] = abs(m.jac * m.delpsi)
+    end
+
+    return jac_delpsi
+end
+
+"""
     compute_sqrt_jac_delpsi(equil, psi, mtheta) -> Vector{Float64}
 
 Compute √(J·|∇ψ|) at `mtheta` equally-spaced θ points on the flux surface at `psi`.
 This is the √weight function that maps a field component `b(θ)` to its
 root-area-weighted form `√(J|∇ψ|)·b(θ)` in θ-space.
 """
-function compute_sqrt_jac_delpsi(equil::PlasmaEquilibrium, psi::Float64, mtheta::Int)
-    sqrt_jac_delpsi = Vector{Float64}(undef, mtheta)
-
-    hint2d = (Ref(1), Ref(1))
-    for itheta in 0:(mtheta-1)
-        theta = itheta / mtheta  # normalized to [0, 1)
-        m = flux_surface_metric(equil, psi, theta; hint=hint2d)
-        sqrt_jac_delpsi[itheta+1] = sqrt(abs(m.jac * m.delpsi))
-    end
-
-    return sqrt_jac_delpsi
-end
+compute_sqrt_jac_delpsi(equil::PlasmaEquilibrium, psi::Float64, mtheta::Int) = sqrt.(compute_jac_delpsi(equil, psi, mtheta))
 
 """
     compute_sqrtamat(equil, psi, ft) -> Matrix{ComplexF64}

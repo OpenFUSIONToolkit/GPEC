@@ -14,7 +14,7 @@ import ..ForceFreeStates
 import ..ForceFreeStates: SolutionProfiles, ForceFreeStatesResult, MatrixSplines, MetricData
 import ..Vacuum
 import ..ForcingTerms
-import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization!
+import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization
 import ..Utilities
 import ..Utilities.FourierTransforms
 import DelimitedFiles: readdlm
@@ -22,6 +22,7 @@ import DelimitedFiles: readdlm
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
+include("TorqueResponse.jl")
 include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
@@ -38,9 +39,10 @@ export ForcingMode
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
 export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
+export TorqueResponse, torque_response_matrices, torque_profile
 
 """
-    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr; runtimes=nothing)::PerturbedEquilibriumState
+    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
 
 Main entry point for perturbed equilibrium calculations.
 
@@ -48,7 +50,8 @@ Computes plasma response to external forcing and calculates singular layer
 coupling metrics. Every ForceFreeStates input — the equilibrium, the mode space, the
 metric and matrix fits, the free-boundary energies and the ξ solution — is read off `ffs`.
 Products the producing integrator could not supply gate the corresponding calculation:
-the step warns and is skipped instead of erroring.
+the step warns and is skipped instead of erroring. Galerkin and `:matched` results publish
+no free-boundary δW yet, so asking for the response or the coupling on one is an error.
 
 ## Arguments
 
@@ -56,8 +59,6 @@ the step warns and is skipped instead of erroring.
   - `forcing`: the external-field description — a `ForcingTermsControl` (TOML path) or any [`ForcingTerms.RMPField`](@ref)
   - `ctrl`: Control parameters from [PerturbedEquilibrium] section
   - `intr`: Internal state variables
-  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
-    materialization (coil Biot-Savart onto the plasma surface), when that step runs
 
 ## Returns
 
@@ -67,14 +68,20 @@ function compute_perturbed_equilibrium(
     ffs::ForceFreeStatesResult,
     forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField},
     ctrl::PerturbedEquilibriumControl,
-    intr::PerturbedEquilibriumInternal;
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
 
     state = PerturbedEquilibriumState()
     equil = ffs.equil
     mats = ffs.mats
-    mthvac = ffs.control.mthvac
+    mtheta_vacuum = ffs.control.mtheta_vacuum
+
+    # Galerkin and matched results publish no plasma edge response wp, so neither step could run.
+    if (ctrl.compute_response || ctrl.compute_singular_coupling) && ffs.free_boundary === nothing &&
+       (ffs.integrator === :galerkin || ffs.closure === :matched)
+        error("PerturbedEquilibrium needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *
+              "does not publish yet; set compute_response = false and compute_singular_coupling = false, or use a forward solve")
+    end
 
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs)
@@ -84,13 +91,11 @@ function compute_perturbed_equilibrium(
     solution = ffs.solution
     intr.odet_from_gal = solution !== nothing && solution.basis === :gal_native
 
-    # The one place forcing state lands on `intr`: injected (replay) modes short-circuit the
-    # materialization entirely, so they are never re-converted or re-weighted.
+    # Unit-norm modes an internal caller already placed on `intr` skip materialization, so they
+    # are never re-converted or re-weighted.
     if isempty(intr.forcing_modes)
-        ft_start = time()
         modes, coil_sets = materialize_forcing_modes(ffs, forcing;
             dir_path=intr.dir_path, preloaded_coil_sets=intr.coil_sets, verbose=ctrl.verbose)
-        runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
         intr.forcing_modes = modes
         isempty(coil_sets) || (intr.coil_sets = coil_sets)
     end
@@ -99,14 +104,22 @@ function compute_perturbed_equilibrium(
     if ctrl.compute_response &&
        ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
        ForceFreeStates.require_solution(ffs, "plasma response calculation")
-        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mthvac, ffs, intr, ctrl, ffs.metric, mats)
+        compute_plasma_response!(state, equil, solution, ffs.free_boundary.wt0, mtheta_vacuum, ffs, intr, ctrl, ffs.metric, mats)
+    end
+
+    # Torque response matrices of a kinetic forward solve, on the plasma response just computed
+    if ctrl.compute_torque_response
+        ctrl.compute_response || throw(ArgumentError("compute_torque_response needs compute_response = true"))
+        ForceFreeStates.require_solution(ffs, "torque response matrices") ||
+            throw(ArgumentError("compute_torque_response needs the dense forward-integrated ξ solution"))
+        compute_torque_response!(state, ffs, forcing, intr, ctrl)
     end
 
     # Step 3: Compute singular coupling metrics
     if ctrl.compute_singular_coupling &&
        ForceFreeStates.require(ffs, :free_boundary, "singular coupling calculation") &&
        ForceFreeStates.require_solution(ffs, "singular coupling calculation")
-        compute_singular_coupling_metrics!(state, equil, solution, mthvac, ffs, intr, ctrl, mats)
+        compute_singular_coupling_metrics!(state, equil, solution, mtheta_vacuum, ffs, intr, ctrl, mats)
         compute_dominant_coupling!(state, ctrl)
     end
 
@@ -126,7 +139,7 @@ the response step consumes. Nothing is mutated — the caller owns where the res
 
 Coil formats build the geometry (or reuse `preloaded_coil_sets` from the gpec.h5 replay
 path) and integrate the Biot-Savart field on the control surface; file formats read the
-modes from `dir_path` and convert their normalization. Both branches evaluate on
+modes from `dir_path` and convert their normalization onto the run's `mlow:mhigh`. Both branches evaluate on
 `ffs.psilim`, the integration limit. The second return value is the coil geometry actually
 used (empty for file formats), which the writer snapshots for replay.
 """
@@ -154,18 +167,16 @@ function materialize_forcing_modes(
             append!(modes, modes_n)
         end
     else
-        norm_tag = load_forcing_data!(modes, dir_path, forcing.forcing_data_file, forcing.forcing_data_format, verbose)
+        file_modes = ForcingMode[]
+        norm_tag = load_forcing_data!(file_modes, dir_path, forcing.forcing_data_file, forcing.forcing_data_format, verbose)
         for n in ffs.nlow:ffs.nhigh
-            # filter returns a new Vector but still holds references to same ForcingMode objects
-            modes_n = filter(m -> m.n == n, modes)
+            modes_n = filter(m -> m.n == n, file_modes)
             isempty(modes_n) && continue
-            m_vals = [m.m for m in modes_n]
             # Same control surface as the coil branch above: psilim, the integration
             # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
             # the normalization was taken on the equilibrium-spline limit, which differs
-            # whenever dmlim/qhigh/psiedge truncation moves psilim inward.
-            convert_forcing_normalization!(modes_n, norm_tag, equil, n,
-                minimum(m_vals), maximum(m_vals); psi=ffs.psilim)
+            # whenever rational_offset_fraction/qhigh/dW_edge_scan_start truncation moves psilim inward.
+            append!(modes, convert_forcing_normalization(modes_n, norm_tag, equil, n, ffs.mlow:ffs.mhigh; psi=ffs.psilim))
         end
     end
 
