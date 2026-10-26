@@ -32,6 +32,12 @@ constructor.
   - `bt`       -- toroidal field `[T]`. `nothing` (default) resolves the physical
     `B_T = F(ψ)/(2π·R₀)` per surface from the equilibrium's F-spline; a scalar or a
     callable of `psi` overrides it
+  - `omega_E_kHz` -- optional override of the per-surface E×B rotation, keyed by the surface's
+    `"m/n"` (TOML: `omega_E_kHz = {"2/1" = 0.0, "3/1" = 3.0}`). Per unit toroidal mode number
+    like the kinetic file's `omega_E`, but given as Ω_E/2π in kHz rather than the file's rad/s.
+    Surfaces not listed (all of them by default) take Ω_E from the kinetic file; a key matching
+    no analysed surface is an error. Rotation enters the coupled determinant, and in both modes
+    it moves the reported lab-frame roots
   - `ion_mass` -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- fallback effective charge. `Z_eff(ψ)` is taken, in order of precedence, from
     the kinetic file's own `zeff` profile; else derived from the file's `n_i/n_e` with the
@@ -158,6 +164,8 @@ there is one consistent interface for resistive and kinetic profiles.
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
 
+    omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
+
     profile_file::String = ""
     profile_group::String = "/"
 
@@ -199,6 +207,9 @@ function validate(ctrl::SLAYERControl)
         throw(ArgumentError("SLAYERControl: impurity_charge=$(ctrl.impurity_charge) must exceed the main-ion charge 1"))
     ctrl.msing_max >= 1 ||
         throw(ArgumentError("SLAYERControl: msing_max=$(ctrl.msing_max) must be ≥ 1"))
+    all(isfinite, values(ctrl.omega_E_kHz)) ||
+        throw(ArgumentError("SLAYERControl: omega_E_kHz contains a " *
+                            "non-finite entry: $(ctrl.omega_E_kHz)"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
@@ -263,6 +274,11 @@ function slayer_control_from_toml(section::AbstractDict)
         elseif sym in (:bt, :D_R, :D_geo)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
+        elseif sym === :omega_E_kHz
+            v isa AbstractDict ||
+                throw(ArgumentError("slayer_control_from_toml: omega_E_kHz must be a table keyed by m/n, " *
+                                    "e.g. omega_E_kHz = {\"2/1\" = 0.0, \"3/1\" = 3.0}; got $v"))
+            kwargs[sym] = Dict{String,Float64}(String(key) => Float64(x) for (key, x) in v)
         elseif sym === :boxes
             # `boxes` is a Vector{NTuple{4,Float64}}; from TOML this comes
             # in as a list of 4-element arrays. Coerce each.

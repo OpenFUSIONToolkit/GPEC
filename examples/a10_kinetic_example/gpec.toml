@@ -67,6 +67,5 @@ impurity_mass = 12             # Impurity mass
 electron = false               # Include electron contribution (false = ion-only)
 nutype = "harmonic"            # Collision operator (zero, small, krook, harmonic)
 f0type = "maxwellian"          # Distribution function (maxwellian, park, cgl)
-atol_pitch = 1e-9              # Absolute tolerance for inner pitch + energy integrations
-rtol_pitch = 1e-5              # Relative tolerance for inner pitch + energy integrations
+atol_pitch = 1e-9              # Absolute tolerance for the pitch integration (median-normalized kernel)
 axis_validity_suppression = true   # Suppress kinetic terms inside the near-axis orbit-width validity limit

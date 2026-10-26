@@ -109,8 +109,7 @@ end
             end
         end
 
-        # A stored deck that sets a retired key stops the replay before any solve; the override
-        # flag stands in for a stale gpec_toml_raw.
+        # An override that sets a retired key stops the replay before any solve.
         @testset "retired ForceFreeStates keys stop a replay" begin
             mktempdir() do out_dir
                 @test_throws r"`use_parallel`" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
@@ -122,6 +121,21 @@ end
                 inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
                 @test haskey(inputs, "LocalStability")
                 @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
+            end
+        end
+
+        # A gpec.h5 from an older GPEC stores a deck with retired keys, which the replay cannot delete.
+        @testset "a stored deck with retired keys stops the replay" begin
+            mktempdir() do out_dir
+                old_h5 = joinpath(out_dir, "old.h5")
+                cp(source_h5, old_h5)
+                h5open(old_h5, "r+") do h5
+                    inputs = TOML.parse(read(h5, "Input/gpec_toml_raw"))
+                    inputs["PerturbedEquilibrium"]["fixed_boundary"] = false
+                    delete_object(h5, "Input/gpec_toml_raw")
+                    h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                end
+                @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
             end
         end
 

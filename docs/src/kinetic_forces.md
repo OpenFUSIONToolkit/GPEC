@@ -141,7 +141,19 @@ terms respectively, and do not modify the stored kinetic profile splines.
        when computing the `toroidal_rotation_factor` back-solve. Julia uses a
        clean reimplementation with consistent pre-scaling derivatives throughout.
 
-## Regularization: why kinetic runs set `regularization_width = 0`
+## Quadrature tolerances
+
+The torque is three nested adaptive Gauss–Kronrod integrals: over ψ (paneled at rational and kinetic-resonance surfaces), over pitch λ at each ψ, and over normalized energy x at each λ. Each inner integral is the integrand of the one outside it, so its tolerance is derived from the outer one by a fixed margin unless set explicitly:
+
+| level | control | default |
+|---|---|---|
+| ψ | `rtol_psi` | 1e-2 (the primary knob; ~2 significant figures matches the NTV model's validity) |
+| λ | `rtol_pitch` | `psi_tolerance_margin × rtol_psi` = 1e-3 |
+| x | `rtol_x` | `nested_tolerance_margin × rtol_pitch` = 1e-5 |
+
+QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The calculated kinetic matrix build (`kinetic_source = "calculated"`) has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
+
+## Regularization: off by default, and never needed by kinetic runs
 
 `[PerturbedEquilibrium] regularization_width` smooths the displacements before they drive the NTV
 integrand, multiplying ``\xi^{\psi\prime}`` and ``\xi^\alpha`` by
@@ -160,7 +172,9 @@ for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmet
 Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
 notation.
 
-GPEC therefore **forces `regularization_width = 0` whenever `kinetic_factor > 0`**, logging the override.
+GPEC therefore **defaults `regularization_width` to 0** for every result, as the Fortran `reg_flag = f`
+template does. Set it, typically to 0.05, only to compute the NTV torque of an ideal solve; a kinetic run
+should leave it at 0.
 Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
 is never regularized, so damping the other two breaks their near-resonance cancellation in
 ``\delta B/B`` and leaves a spurious residue driving the NTV integrand.

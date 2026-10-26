@@ -289,7 +289,7 @@ evaluated on the control surface and the mode amplitudes are summed.
 nominal = RMPField("nominal_efc.dat")
 weld_field = RMPField("weld_fields.h5"; scale=0.5)
 total = 2.0 * nominal + weld_field       # lazy: records terms and weights, computes nothing
-pe = perturbed_equilibrium(ffs, total)   # materializes each term, sums, drives PE
+pe = perturbed_equilibrium(plasma_response(ffs), total)   # materializes each term, sums, drives PE
 ```
 
 Amplitude lives with the forcing description itself: per-conductor currents for the coil

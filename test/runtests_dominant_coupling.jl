@@ -85,8 +85,8 @@ include("h5_metadata_check.jl")
             resp = pe.response
             h5path = joinpath(dir, "gpec.h5")
 
-            # Run summary: the core-window decomposition, rebuilt into the stored applied resonant
-            # field (which the writer evaluates before conforming the matrix to b̃ space).
+            # Run summary: the core-window decomposition, rebuilt into the applied resonant field
+            # that perturbed_equilibrium evaluates from the flux-space coupling.
             @test !isempty(resp.dominant_singular_values)
             rank = length(resp.dominant_singular_values)
             rows = resp.dominant_rational_index

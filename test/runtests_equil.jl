@@ -1,4 +1,5 @@
 using Statistics
+using TOML
 
 @testset "Equilibrium Unit Tests" begin
 
@@ -169,11 +170,20 @@ using Statistics
         GPEC = GeneralizedPerturbedEquilibrium
         @test_throws r"\[ForceFreeStates\] sets `reform_eq_with_psilim`" GPEC._stop_on_deprecated_keys(
             Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates")
-        @test_throws r"`moment`, `save_records`" GPEC._stop_on_deprecated_keys(
+        @test_throws r"`moment`, `save_records`, which are no longer keys" GPEC._stop_on_deprecated_keys(
             Dict{String,Any}("moment" => "pressure", "save_records" => false, "fgar_flag" => true), GPEC._DEPRECATED_KF_KEYS, "KineticForces")
-        @test_throws r"\[PerturbedEquilibrium\] sets `fixed_boundary`" GPEC._stop_on_deprecated_keys(
+        @test_throws r"\[PerturbedEquilibrium\] sets `fixed_boundary`, which is no longer a key" GPEC._stop_on_deprecated_keys(
             Dict{String,Any}("fixed_boundary" => false, "compute_singular_coupling" => false), GPEC._DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
         @test GPEC._stop_on_deprecated_keys(Dict{String,Any}("nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates") === nothing
+        # The stop runs through main, before any equilibrium work.
+        mktempdir() do deck_dir
+            template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            foreach(name -> cp(joinpath(template_dir, name), joinpath(deck_dir, name)), readdir(template_dir))
+            inputs = TOML.parsefile(joinpath(deck_dir, "gpec.toml"))
+            inputs["KineticForces"] = Dict{String,Any}("moment" => 1)
+            open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
+            @test_throws r"\[KineticForces\] sets `moment`, which is no longer a key; remove from gpec.toml" GPEC.main([deck_dir])
+        end
         # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
         @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
         @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)

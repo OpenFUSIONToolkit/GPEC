@@ -3,7 +3,6 @@
     GPE = GeneralizedPerturbedEquilibrium
     KF = GPE.KineticForces
     EQ = GPE.Equilibrium
-    PE = GPE.PerturbedEquilibrium
 
     # Duck-typed stand-in for PlasmaEquilibrium: the boundary scan reads only these fields.
     mock_equil(q, r, R; ro=1.7, b0=2.0) =
@@ -89,11 +88,5 @@
         psi_c_spiked = KF.kinetic_axis_validity_psi(mock_profiles(xs, Ti), mock_equil(q_spiked, r_of, R_of))
         @test psi_c_spiked ≈ psi_c
         @test psi_c_spiked < 0.5
-    end
-
-    @testset "default_regularization_width" begin
-        # A kinetic fit removes the ideal resonant singularity, so its default is no regularization.
-        @test PE.default_regularization_width((; mats=(; kinetic=nothing))) == 0.05
-        @test PE.default_regularization_width((; mats=(; kinetic=(;)))) == 0.0
     end
 end

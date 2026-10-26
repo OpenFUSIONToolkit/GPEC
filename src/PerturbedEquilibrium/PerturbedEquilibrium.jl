@@ -21,6 +21,7 @@ import ..Utilities.FourierTransforms
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
+include("TorqueResponse.jl")
 include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
@@ -37,21 +38,24 @@ export plasma_response
 export compute_perturbed_equilibrium
 export write_outputs_to_HDF5
 export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
+export TorqueResponse, torque_response_matrix, torque_profile
 
 """
-    plasma_response(ffs; compute_singular_coupling=true, verbose=true) -> PlasmaResponse
+    plasma_response(ffs; compute_singular_coupling=true, compute_torque_response=false, verbose=true) -> PlasmaResponse
 
 Build the source-independent half of a perturbed equilibrium from a force-free-states result: the
 control-surface response operators (inductances, permeability, reluctance; Park et al., Phys.
 Plasmas 14, 052110 (2007)) and, with `compute_singular_coupling`, the singular-coupling matrices and
-their dominant modes (Park, Phys. Plasmas 16, 056115 (2009)). Apply it to an external field with
-`perturbed_equilibrium(resp, rmp)` as many times as needed.
+their dominant modes (Park, Phys. Plasmas 16, 056115 (2009)), and with `compute_torque_response` the
+ψ-resolved torque response `T_xe` of a single-`n` forward kinetic solve. Apply it to an external field
+with `perturbed_equilibrium(resp, rmp)` as many times as needed.
 
 Products the producing integrator could not supply (free-boundary energies, a ξ solution) leave the
 corresponding operators empty: the step warns and is skipped. Galerkin and `:matched` results publish
 no free-boundary δW yet, so building a response from one is an error.
 """
-function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::Bool=true, verbose::Bool=true)::PlasmaResponse
+function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::Bool=true, compute_torque_response::Bool=false,
+    verbose::Bool=true)::PlasmaResponse
     # Galerkin and matched results publish no plasma edge response wp, so no operator could be built.
     if ffs.free_boundary === nothing && (ffs.integrator === :galerkin || ffs.closure === :matched)
         error("plasma_response needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *
@@ -62,7 +66,7 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
     # A run has at most one ξ solution, already closed at the rationals and carrying populated
     # Ξ′ / Ξ_s stores. The gal-native basis takes the analytic Galerkin Ξ′ downstream.
     solution = ffs.solution
-    resp = PlasmaResponse(; ffs, m_modes, n_modes, regularization_width=default_regularization_width(ffs),
+    resp = PlasmaResponse(; ffs, m_modes, n_modes,
         odet_from_gal=solution !== nothing && solution.basis === :gal_native)
 
     if ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
@@ -73,6 +77,7 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
             build_dominant_coupling!(resp; verbose)
         end
     end
+    compute_torque_response && build_torque_response!(resp; verbose)
     return resp
 end
 
@@ -82,8 +87,9 @@ end
 
 Drive the operators of `resp` with one external field: materialize `forcing` (a `ForcingTermsControl`
 or any [`ForcingTerms.RMPField`](@ref)) on the control surface, then apply the response and the
-singular coupling to it and reconstruct the perturbed profiles. Steps whose operators `resp` does not
-carry are skipped, leaving only the forcing spectrum.
+singular coupling to it, reconstruct the perturbed profiles, and contract any torque response with
+the forcing sources. Steps whose operators `resp` does not carry are skipped, leaving only the
+forcing spectrum.
 
 ## Arguments
 
@@ -105,6 +111,7 @@ function compute_perturbed_equilibrium(
 
     isempty(resp.permeability_flux) || apply_response!(state; verbose)
     isempty(resp.coupling_flux) || apply_coupling!(state; verbose)
+    isempty(resp.T_xe) || apply_torque_response!(state, forcing; verbose)
     if !isempty(resp.dominant_right_singular_vectors) && !isempty(state.forcing_b_rootarea)
         state.dominant_forcing_overlap = resp.dominant_right_singular_vectors' * state.forcing_b_rootarea
     end
