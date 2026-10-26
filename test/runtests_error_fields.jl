@@ -102,6 +102,9 @@ include("h5_metadata_check.jl")
                 @test haskey(h5, "Info/Runtimes/perturbed_equilibrium")
                 @test haskey(h5, "Info/Runtimes/kinetic_forces")
                 @test haskey(h5, "Info/Runtimes/total")
+                # Timed inside a stage, so no longer recorded.
+                @test !haskey(h5, "Info/Runtimes/forcing_terms")
+                @test !haskey(h5, "Info/Runtimes/galerkin")
             end
 
             @test sens.coil_names == ["hoop_tilted", "hoop_axi", "hoop_efc"]
