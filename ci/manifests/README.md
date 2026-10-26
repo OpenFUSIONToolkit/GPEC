@@ -17,10 +17,8 @@ the CI runner and never reaches a developer's working tree.
 ## Compilation caches
 
 CI uses `JULIA_CPU_TARGET=generic` for portable package images across runner CPUs of the same
-architecture. Separate depot keys retain the level-1 on-demand and level-2 production builds,
-so the first test group to finish cannot replace the production dependency images with lower
-optimization ones. The cache namespace records those settings so older native-target images are not
-restored into it. The first run of this namespace must populate a fresh dependency cache.
+architecture. The production depot and source-cache keys record the optimization and bounds-checking
+settings, so incompatible images are not restored. Existing production caches remain reusable.
 
 CI restores the dependency depot first, then overlays GPEC's compiled package directory from a
 smaller cache keyed by Julia version, runner architecture, dependency pins, source contents, and
@@ -30,17 +28,12 @@ compiled dependency images are retained on pull requests. This lets test-only up
 of the full depot for each source change. The dependency cache alone is immutable and cannot
 refresh GPEC after a source edit when its dependency key still matches.
 
-For each Julia version, three parallel test groups (`core`, `api`, `errorfields`) run the full
-battery. They reuse the normal production package image when its source-keyed cache exists;
-on a miss, they disable the optional precompile workload and compile kernels on demand. A
-fourth job builds and loads the normal package with that workload enabled in parallel, using the
-same bounds-checking flags as the tests. The cache distinguishes these build modes. Subsequent
-runs can reuse the production image without making test groups wait for its first build.
-
-`test/suites.jl` assigns every test file to one group. The runner rejects missing or duplicate
-assignments. Running `julia --project=. test/runtests.jl` still runs every file in the original
-order; set `GPEC_TEST_GROUP=core` (or either other group) to reproduce a CI group. Explicit test
-file arguments still select those files directly.
+For each Julia version, a production precompile job builds and caches the package before releasing
+three parallel test groups (`core`, `api`, `errorfields`). Each group restores the exact depot and
+source-cache keys published by that job, along with its resolved `Manifest.toml` and Julia version.
+A missing cache fails the handoff rather than silently rebuilding dependencies in every group.
+The two Julia versions progress independently. Cold compilation is paid once per version; warm
+runs reuse the existing production images.
 
 Test jobs use optimization level 1 to reduce first-use compilation. Julia can still reuse cached
 package images built at level 2; the production build job keeps that default optimization level.

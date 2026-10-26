@@ -1,0 +1,189 @@
+name: Test one Julia version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  precompile:
+    name: Precompile ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      julia-version: ${{ steps.julia.outputs.julia-version }}
+      depot-key: ${{ steps.depot.outputs.cache-primary-key }}
+      gpec-key: ${{ steps.gpec-cache.outputs.cache-primary-key }}
+    env:
+      JULIA_CPU_TARGET: 'generic'
+      JULIA_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '1'
+      DEPOT_PATHS: |
+        ~/.julia/artifacts
+        ~/.julia/packages
+        ~/.julia/registries
+        ~/.julia/compiled
+        ~/.julia/scratchspaces
+        ~/.julia/logs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Julia
+        id: julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ inputs.version }}
+
+      # Keyed on the resolved Julia version, not the matrix label: precompiled .ji
+      # files are tied to the exact Julia build, so a patch release invalidates
+      # every one of them. Cache entries are immutable, so were the key not to
+      # rotate the run would recompile the whole tree, hit the unchanged key, skip
+      # the save as having nothing new, and repeat that forever. The version-only
+      # fallback still reuses packages, artifacts and registries across a bump; the
+      # next push to the default branch repopulates under the new key.
+      - name: Restore the Julia depot
+        id: depot
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: julia-depot-v3-generic-aot-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          restore-keys: |
+            julia-depot-v3-generic-aot-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-
+            julia-depot-v3-generic-aot-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-
+
+      # The dependency cache is immutable and intentionally independent of src/. Layer
+      # a small source-keyed package cache over it so source changes can refresh GPEC
+      # without uploading another copy of the entire depot. Test-only PR updates reuse it.
+      - name: Restore GPEC compilation
+        id: gpec-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
+          key: gpec-images-v5-generic-aot-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
+
+      - name: Pin the CI dependency set
+        run: |
+          set -euo pipefail
+
+          minor=$(julia -e 'print(VERSION.major, ".", VERSION.minor)')
+          pinned="ci/manifests/Manifest-v${minor}.toml"
+
+          if [ ! -f "$pinned" ]; then
+            echo "::warning::No pinned dependency set for Julia ${minor}; resolving fresh. Generate one with 'julia +${minor} ci/manifests/update.jl'."
+            exit 0
+          fi
+
+          cp "$pinned" Manifest.toml
+          echo "Pinned dependency set: ${pinned}"
+
+          recorded=$(cat ci/manifests/project.sha256)
+          actual=$(shasum -a 256 Project.toml | cut -d ' ' -f 1)
+          if [ "$recorded" != "$actual" ]; then
+            echo "::warning::Project.toml has changed since the pinned dependency sets were generated, so ${pinned} may be stale. Regenerate with ci/manifests/update.jl."
+          fi
+
+      - name: Instantiate pinned dependencies
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      # Coverage instrumentation is off: nothing consumes the .cov files (they are
+      # gitignored and never uploaded), and instrumenting slows compute-heavy
+      # numerical code noticeably. Set coverage: true and add a Codecov upload
+      # step together if coverage reporting is ever wanted.
+      - name: Check the production precompile workload
+        run: julia --check-bounds=yes --depwarn=yes --project=. -e 'using Pkg; Pkg.precompile(; strict=true); using GeneralizedPerturbedEquilibrium'
+
+      - name: Save GPEC compilation
+        if: success() && steps.gpec-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
+          key: ${{ steps.gpec-cache.outputs.cache-primary-key }}
+
+      # A dependency-key miss must save even after a prefix restore, otherwise
+      # refreshed dependency images are discarded on every pull-request run.
+      - name: Prune the depot before caching
+        if: success() && steps.depot.outputs.cache-hit != 'true'
+        run: julia --project=. -e 'using Pkg; Pkg.gc()'
+
+      - name: Save the Julia depot
+        if: success() && steps.depot.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: julia-depot-v3-generic-aot-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+
+      - name: Share the resolved dependency set
+        uses: actions/upload-artifact@v4
+        with:
+          name: julia-test-manifest-${{ inputs.version }}
+          path: Manifest.toml
+          retention-days: 1
+          if-no-files-found: error
+
+  test:
+    name: ${{ matrix.group }}
+    needs: precompile
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [core, api, errorfields]
+    env:
+      JULIA_CPU_TARGET: 'generic'
+      JULIA_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '1'
+      DEPOT_PATHS: |
+        ~/.julia/artifacts
+        ~/.julia/packages
+        ~/.julia/registries
+        ~/.julia/compiled
+        ~/.julia/scratchspaces
+        ~/.julia/logs
+
+      GPEC_TEST_GROUP: ${{ matrix.group }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up the precompiled Julia version
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ needs.precompile.outputs.julia-version }}
+
+      - name: Restore the precompiled Julia depot
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: ${{ needs.precompile.outputs.depot-key }}
+          fail-on-cache-miss: true
+
+      - name: Restore the production package image
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
+          key: ${{ needs.precompile.outputs.gpec-key }}
+          fail-on-cache-miss: true
+
+      - name: Restore the resolved dependency set
+        uses: actions/download-artifact@v4
+        with:
+          name: julia-test-manifest-${{ inputs.version }}
+
+      # Level 1 can reuse the higher-optimization production package images.
+      - name: Run tests
+        uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+          check_bounds: 'yes'
+          optimize: '1'
+          allow_reresolve: false
