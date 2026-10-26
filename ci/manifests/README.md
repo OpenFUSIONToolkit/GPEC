@@ -16,10 +16,17 @@ the CI runner and never reaches a developer's working tree.
 
 ## Compilation caches
 
+CI uses `JULIA_CPU_TARGET=generic` for portable package images across runner CPUs of the same
+architecture. Separate depot keys retain the level-1 on-demand and level-2 production builds,
+so the first test group to finish cannot replace the production dependency images with lower
+optimization ones. The cache namespace records those settings so older native-target images are not
+restored into it. The first run of this namespace must populate a fresh dependency cache.
+
 CI restores the dependency depot first, then overlays GPEC's compiled package directory from a
 smaller cache keyed by Julia version, runner architecture, dependency pins, source contents, and
 the test compilation settings. Successful runs save a missing GPEC entry on pull requests as well
-as pushes. This lets test-only updates reuse the current package image without storing a new copy
+as pushes. A dependency-key miss also saves a refreshed depot after a prefix restore, so newly
+compiled dependency images are retained on pull requests. This lets test-only updates reuse the current package image without storing a new copy
 of the full depot for each source change. The dependency cache alone is immutable and cannot
 refresh GPEC after a source edit when its dependency key still matches.
 
@@ -49,7 +56,8 @@ seconds per file to distinguish this startup cost from work inside the tests.
 | File | Purpose |
 | --- | --- |
 | `Manifest-v1.11.toml` | Dependency set for the `1.11` matrix job |
-| `Manifest-v1.12.toml` | Dependency set for the `1.x` matrix job |
+| `Manifest-v1.12.toml` | Dependency set for local Julia 1.12 runs |
+| `Manifest-v1.13.toml` | Dependency set for the `1.x` matrix job |
 | `project.sha256` | `Project.toml` checksum when the pins were generated |
 | `update.jl` | Regenerates the above |
 
@@ -61,6 +69,7 @@ repository:
 ```bash
 julia +1.11 ci/manifests/update.jl
 julia +1.12 ci/manifests/update.jl
+julia +1.13 ci/manifests/update.jl
 ```
 
 Each run resolves a bare copy of `Project.toml` in a temporary directory, so your

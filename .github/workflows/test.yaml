@@ -95,7 +95,7 @@ jobs:
       matrix:
         version:
           - '1.11'
-          - '1.x'  # latest (currently 1.12)
+          - '1.x'  # latest stable; keep a matching dependency pin
         os:
           - ubuntu-latest
         group:
@@ -106,6 +106,7 @@ jobs:
 
     env:
       GPEC_TEST_GROUP: ${{ matrix.group }}
+      JULIA_CPU_TARGET: 'generic'
       JULIA_NUM_THREADS: '2'
       OPENBLAS_NUM_THREADS: '1'
       DEPOT_PATHS: |
@@ -126,23 +127,6 @@ jobs:
         with:
           version: ${{ matrix.version }}
 
-      # Keyed on the resolved Julia version, not the matrix label: precompiled .ji
-      # files are tied to the exact Julia build, so a patch release invalidates
-      # every one of them. Cache entries are immutable, so were the key not to
-      # rotate the run would recompile the whole tree, hit the unchanged key, skip
-      # the save as having nothing new, and repeat that forever. The version-only
-      # fallback still reuses packages, artifacts and registries across a bump; the
-      # next push to the default branch repopulates under the new key.
-      - name: Restore the Julia depot
-        id: depot
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.DEPOT_PATHS }}
-          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
-          restore-keys: |
-            julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-
-            julia-depot-${{ matrix.os }}-${{ matrix.version }}-
-
       # Prefer the normal package image when it already exists. On a source-cache
       # miss, test groups compile on demand while the precompile job builds it in parallel.
       - name: Look for the production package image
@@ -151,7 +135,7 @@ jobs:
         with:
           lookup-only: true
           path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
-          key: gpec-images-v4-aot-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
+          key: gpec-images-v5-generic-aot-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
 
       - name: Select the build mode
         id: build-mode
@@ -169,6 +153,23 @@ jobs:
             echo "Compiling kernels on demand; the production build runs in parallel."
           fi
 
+      # Keyed on the resolved Julia version, not the matrix label: precompiled .ji
+      # files are tied to the exact Julia build, so a patch release invalidates
+      # every one of them. Cache entries are immutable, so were the key not to
+      # rotate the run would recompile the whole tree, hit the unchanged key, skip
+      # the save as having nothing new, and repeat that forever. The version-only
+      # fallback still reuses packages, artifacts and registries across a bump; the
+      # next push to the default branch repopulates under the new key.
+      - name: Restore the Julia depot
+        id: depot
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPOT_PATHS }}
+          key: julia-depot-v3-generic-${{ steps.build-mode.outputs.mode }}-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          restore-keys: |
+            julia-depot-v3-generic-${{ steps.build-mode.outputs.mode }}-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-
+            julia-depot-v3-generic-${{ steps.build-mode.outputs.mode }}-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.version }}-
+
       # The dependency cache is immutable and intentionally independent of src/. Layer
       # a small source-keyed package cache over it so source changes can refresh GPEC
       # without uploading another copy of the entire depot. Test-only PR updates reuse it.
@@ -177,7 +178,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
-          key: gpec-images-v4-${{ steps.build-mode.outputs.mode }}-${{ steps.build-mode.outputs.mode == 'aot' && 'o2' || 'o1' }}-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
+          key: gpec-images-v5-generic-${{ steps.build-mode.outputs.mode }}-${{ steps.build-mode.outputs.mode == 'aot' && 'o2' || 'o1' }}-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
 
       - name: Pin the CI dependency set
         run: |
@@ -230,23 +231,18 @@ jobs:
           path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
           key: ${{ steps.gpec-cache.outputs.cache-primary-key }}
 
-      # An exact hit has nothing new to store. Otherwise pushes refresh the shared
-      # default-branch entry, and a pull request writes one only when it restored
-      # nothing at all -- which happens when this key prefix is cold, as it is the
-      # first time this runs, after a matrix version is added, or once entries age
-      # out. That entry is scoped to the pull request's own ref and so cannot be
-      # reused by another, but seeding it beats discarding a full compile; once the
-      # default branch has an entry, pull requests always prefix-match and skip.
+      # A dependency-key miss must save even after a prefix restore, otherwise
+      # refreshed dependency images are discarded on every pull-request run.
       - name: Prune the depot before caching
-        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
+        if: success() && steps.depot.outputs.cache-hit != 'true'
         run: julia --project=. -e 'using Pkg; Pkg.gc()'
 
       - name: Save the Julia depot
-        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
+        if: success() && steps.depot.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.DEPOT_PATHS }}
-          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          key: julia-depot-v3-generic-${{ steps.build-mode.outputs.mode }}-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
 
   # Stable check that is present on every pull request, whether or not the suite
   # ran. Point branch protection at this job so skipped runs do not block merges.
