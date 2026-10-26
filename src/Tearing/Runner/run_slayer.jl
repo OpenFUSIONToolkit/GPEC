@@ -444,29 +444,33 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
         layer_widths, Ω_E, q_shifts, scan_data_list,
-        run_critical_resonant_field(model, params, Ω_E, control.critical_resonant_field))
+        run_critical_resonant_field(model, params, Ω_E, real.(diag(dp)), control.critical_resonant_field))
 end
 
 # ---------------------------------------------------------------------
 # Critical resonant field (torque balance)
 # ---------------------------------------------------------------------
 """
-    run_critical_resonant_field(model, params, omega_E, ctrl) -> CriticalResonantFieldResult
+    run_critical_resonant_field(model, params, omega_E, dp_diag, ctrl) -> CriticalResonantFieldResult
 
 Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
 surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
 Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
 E×B frequency of the m/n mode, Q0 = τ_k·n·Ω_E, with `omega_E` the resolved Ω_E per unit n at
-each surface [rad/s]. A surface whose Ω_E is unknown (NaN) is skipped with a warning; if no
-surface has one, the analysis cannot run and this throws.
+each surface [rad/s]. The outer stability is α = S^(-1/3)·(Δ_crit − r_s Δ'), with `dp_diag` the
+r_s-referenced Δ' diagonal and Δ_crit the layer's critical-Δ offset, as in the dispersion relation.
+A surface whose Ω_E is unknown (NaN), or that is tearing-unstable (α ≤ 0), is skipped with a
+warning; if no surface has a known Ω_E, the analysis cannot run and this throws.
 """
 function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::AbstractVector{<:InnerLayerParameters},
-    omega_E::AbstractVector{<:Real}, ctrl::CriticalResonantFieldControl)
+    omega_E::AbstractVector{<:Real}, dp_diag::AbstractVector{<:Real}, ctrl::CriticalResonantFieldControl)
     ctrl.enabled || return empty_critical_resonant_field_result()
     model isa SLAYERModel{:fitzpatrick} && eltype(params) <: SLAYERParameters ||
         throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the SLAYER " *
                             "fitzpatrick model and SLAYER parameters; got $(typeof(model))."))
     nsurf = length(params)
+    length(dp_diag) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: dp_diag has $(length(dp_diag)) entries for $nsurf surfaces."))
     length(omega_E) == nsurf ||
         throw(ArgumentError("run_critical_resonant_field: omega_E has $(length(omega_E)) entries for $nsurf surfaces."))
     nsurf > 0 && all(isnan, omega_E) &&
@@ -477,7 +481,8 @@ function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::
     Q0 = Float64[p.tauk * p.n * Ω for (p, Ω) in zip(params, omega_E)]
     scan = CriticalResonantFieldScan[]
     for (k, p) in enumerate(params)
-        tb = TorqueBalance(model, p, Q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2)
+        alpha = (p.dc_tmp - dp_diag[k]) / p.lu^(1 / 3)
+        tb = TorqueBalance(model, p, Q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2, alpha)
         Qs, bal, Q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n,
             pole_width=ctrl.pole_width)
         ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Float64, Qs), bal, Δs))

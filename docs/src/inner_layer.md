@@ -229,8 +229,10 @@ and balance is lost above (Cole Eq. 62)
   kinetic file's `omega_E` or the `omega_E_kHz` override; the analysis needs it, and a surface
   without one is skipped.
 - **Approximations.** As in Fortran `gslayer.f`, the viscosity integral is taken as 1/2
-  (κ̂ = 2/s²) and α = 10⁻² stands in for S^(−1/3)(−r_s Δ'_s) ≪ 1 (b_crit moves about 4 %
-  over 10⁻⁴–10⁻¹).
+  (κ̂ = 2/s²).
+- **Outer stability α.** Each surface uses its own α = S^(−1/3)(Δ_crit − r_s Δ'), the same
+  outer stability the dispersion relation uses (Fortran fixes α = 10⁻²). Cole's threshold needs
+  a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
 - **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; `solve_inner`
   mirrors the real axis, so the scan uses conj(Δ(−Q)).
 - **Maximum.** The scan window follows `gslayer.f` (between Q0 and the Q_e pole), and the

@@ -34,7 +34,7 @@ end
         p = _mk()
         @test cole_delta(model, p, 0.7) ≈ conj(InnerLayer.solve_inner(model, p, -0.7).tearing)
         Q0 = 5.45
-        tb = TorqueBalance(model, p, Q0, 1.0, p.lu, 2 / p.sval_r^2)
+        tb = TorqueBalance(model, p, Q0, 1.0, p.lu, 2 / p.sval_r^2, 1e-2)
         Qs, bal, Qpeak, br, idx, _ = torque_balance_scan(tb; n=401)
         # Cole's picture: with Q0 above the electron pole, balance holds only for Q_e < Q < Q0.
         @test p.Q_e < Qpeak < Q0
@@ -53,17 +53,17 @@ end
 
     @testset "local-maximum selection and pole rejection" begin
         p = _mk(; Q_e=50.0, Q_i=-50.0)
-        tb = TorqueBalance(_CRFStubLayer(), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0)
+        tb = TorqueBalance(_CRFStubLayer(), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
         _, bal, Qpeak, br, idx, _ = torque_balance_scan(tb; Qmin=0.0, Qmax=4.0, n=401)
         @test Qpeak ≈ 3.0 atol = 0.011
         @test bal[idx] ≈ _crf_target(Qpeak) rtol = 1e-8
         # A maximum on the electron pole is skipped for the next one, and a narrower exclusion keeps it.
         p_pole = _mk(; Q_e=3.0, Q_i=-50.0)
-        tb_pole = TorqueBalance(_CRFStubLayer(), p_pole, _CRF_Q0_STUB, 1.0, p.lu, 1.0)
+        tb_pole = TorqueBalance(_CRFStubLayer(), p_pole, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
         _, _, Qpeak_pole, _, _, _ = torque_balance_scan(tb_pole; Qmin=0.0, Qmax=4.0, n=401)
         @test Qpeak_pole ≈ 1.0 atol = 0.011
         # A maximum 0.015 from the pole is excluded by the default width and kept with pole_width = 0.
-        tb_near = TorqueBalance(_CRFStubLayer(), _mk(; Q_e=3.015, Q_i=-50.0), _CRF_Q0_STUB, 1.0, p.lu, 1.0)
+        tb_near = TorqueBalance(_CRFStubLayer(), _mk(; Q_e=3.015, Q_i=-50.0), _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
         @test torque_balance_scan(tb_near; Qmin=0.0, Qmax=4.0, n=401)[3] ≈ 1.0 atol = 0.011
         @test torque_balance_scan(tb_near; Qmin=0.0, Qmax=4.0, n=401, pole_width=0.0)[3] ≈ 3.0 atol = 0.011
         # No interior maximum (monotone balance) returns NaN.
@@ -73,11 +73,11 @@ end
 
     @testset "surfaces the window cannot handle are skipped" begin
         # Unknown rotation: no Q0, so no threshold.
-        tb_nan = TorqueBalance(model, _mk(), NaN, 1.0, 6.44e7, 1.0)
+        tb_nan = TorqueBalance(model, _mk(), NaN, 1.0, 6.44e7, 1.0, 1e-2)
         _, _, Qn, brn, in_, _ = @test_logs (:warn, r"not finite") torque_balance_scan(tb_nan; n=51)
         @test isnan(Qn) && isnan(brn) && in_ == 0
         # Reversed diamagnetic ordering (Q_e < 0 < Q_i) is not guessed at.
-        tb_rev = TorqueBalance(model, _mk(; Q_e=-1.38, Q_i=2.15), -0.5, 1.0, 6.44e7, 1.0)
+        tb_rev = TorqueBalance(model, _mk(; Q_e=-1.38, Q_i=2.15), -0.5, 1.0, 6.44e7, 1.0, 1e-2)
         _, _, Qr, brr, ir, _ = @test_logs (:warn, r"Q_i < 0 < Q_e") torque_balance_scan(tb_rev; n=51)
         @test isnan(Qr) && isnan(brr) && ir == 0
     end
@@ -86,19 +86,23 @@ end
         ω_E = 4.0e4
         params = [_mk(; n=1, P_tor=3.0, ising=1), _mk(; n=2, P_tor=5.0, ising=2)]
         ctrl = CriticalResonantFieldControl(; enabled=true, n=201, store_scan=true)
-        r = run_critical_resonant_field(model, params, [ω_E, ω_E], ctrl)
+        r = run_critical_resonant_field(model, params, [ω_E, ω_E], [-2.0, -3.0], ctrl)
         @test r.enabled
         @test r.Q0 ≈ [p.tauk * p.n * ω_E for p in params]
         @test r.rational_index == [1, 2]
+        # α is each surface's own S^(-1/3)·(Δ_crit − r_s Δ'); a tearing-unstable surface has no threshold.
+        r_unst = @test_logs (:warn, r"2/2 surface skipped: it is tearing-unstable") match_mode = :any run_critical_resonant_field(
+            model, params, [ω_E, ω_E], [-2.0, 0.5], ctrl)
+        @test isequal(r_unst.br_crit[1], r.br_crit[1]) && isnan(r_unst.br_crit[2])
         @test length(r.scan) == 2 && length(r.scan[1].Q) == 201
-        @test !run_critical_resonant_field(model, params, [ω_E, ω_E], CriticalResonantFieldControl()).enabled
+        @test !run_critical_resonant_field(model, params, [ω_E, ω_E], [-2.0, -3.0], CriticalResonantFieldControl()).enabled
         # Only the SLAYER layer defines the Cole-axis mirror the scan relies on.
-        @test_throws "needs the SLAYER" run_critical_resonant_field(GGJModel(), params, [ω_E, ω_E], ctrl)
+        @test_throws "needs the SLAYER" run_critical_resonant_field(GGJModel(), params, [ω_E, ω_E], [-2.0, -3.0], ctrl)
 
         # The analysis runs inside run_slayer_from_inputs, so script callers get it too, and its
         # HDF5 output honours the metadata contract.
         c = SLAYERControl(; enabled=true, scan_mode=:brute_force, nre=4, nim=4, critical_resonant_field=ctrl)
-        dp = ComplexF64[1.0 0.0; 0.0 1.0]
+        dp = ComplexF64[-2.0 0.0; 0.0 -3.0]
         res = run_slayer_from_inputs(model, params, dp, c; rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5], omega_E=[ω_E, ω_E])
         @test res.critical_resonant_field.enabled
         @test isequal(res.critical_resonant_field.br_crit, r.br_crit)

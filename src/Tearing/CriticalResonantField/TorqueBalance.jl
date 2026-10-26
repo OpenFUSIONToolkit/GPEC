@@ -11,12 +11,11 @@
 #
 #   (b_r/B_φ)²_crit = max_Q 2·P·(Q0 − Q) / (S·κ̂·Im[−1/(α + Δ(Q))]).
 #
-# The viscosity integral is taken as 1/2 (κ̂ = 2/s²) and α is kept finite at 1e-2.
+# The viscosity integral is taken as 1/2 (κ̂ = 2/s²). α = S^(-1/3)·(−r_s Δ'_s) is each
+# surface's own value (Cole Sec. IV C), which needs a tearing-stable surface (α > 0).
 # Q is on Cole's axis: the electron and ion diamagnetic frequencies sit at Q = Q_e
 # and Q = Q_i (see `cole_delta`).
 
-# Finite stand-in for α = S^(-1/3)·(−r_s Δ'_s) ≪ 1; b_crit moves ~4% over 1e-4 to 1e-1.
-const TORQUE_BALANCE_ALPHA = 1e-2
 # Default half-width around Q_e, Q_i within which a torque-balance maximum is treated as pole-dominated.
 const TORQUE_BALANCE_POLE_WIDTH = 0.02
 
@@ -33,6 +32,7 @@ Torque-balance inputs at one rational surface.
   - `prandtl`   -- magnetic Prandtl number τ_R/τ_V (the layer's P_φ)
   - `lu`        -- Lundquist number S
   - `kappa_hat` -- Cole's slab-to-tokamak factor κ̂ (Eq. 61)
+  - `alpha`     -- outer stability α = S^(-1/3)·(−r_s Δ'_s) (Eq. 61), positive on a tearing-stable surface
 """
 struct TorqueBalance{M<:InnerLayerModel,T}
     model::M
@@ -41,6 +41,7 @@ struct TorqueBalance{M<:InnerLayerModel,T}
     prandtl::Float64
     lu::Float64
     kappa_hat::Float64
+    alpha::Float64
 end
 
 """
@@ -60,7 +61,7 @@ and the layer `Δ(Q)` it used.
 """
 function torque_balance_value(tb::TorqueBalance, Q::Real)
     Δ = cole_delta(tb.model, tb.params, Q)
-    jxb = -imag(1.0 / (Δ + TORQUE_BALANCE_ALPHA))
+    jxb = -imag(1.0 / (Δ + tb.alpha))
     return 2.0 * tb.prandtl * (tb.Q0 - Q) / jxb, Δ
 end
 
@@ -94,6 +95,7 @@ function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::I
     p = tb.params
     skip(why) = (@warn "CriticalResonantField: $(p.m)/$(p.n) surface skipped: $why"; (Float64[], Float64[], NaN, NaN, 0, ComplexF64[]))
     isfinite(tb.Q0) || return skip("its natural rotation Q0 = $(tb.Q0) is not finite.")
+    tb.alpha > 0 || return skip("it is tearing-unstable or marginal (α = $(tb.alpha)), so there is no penetration threshold.")
     p.Q_i < 0 < p.Q_e || return skip("the scan window assumes Q_i < 0 < Q_e, but Q_e = $(p.Q_e), Q_i = $(p.Q_i).")
     wmin, wmax = torque_balance_window(tb.Q0, p.Q_e, p.Q_i)
     Qs = range(something(Qmin, wmin), something(Qmax, wmax); length=n)
