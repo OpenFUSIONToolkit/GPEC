@@ -107,8 +107,7 @@
         # Default stays empty so existing decks are untouched.
         @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_E_kHz)
         @test_throws "table keyed by m/n" slayer_control_from_toml(Dict("omega_E_kHz" => [0.0, 3.0]))
-        # A non-finite shift would silently poison every Q evaluation; the
-        # validator rejects it (TOML cannot express NaN, so go through validate).
+        # Reject non-finite overrides before they reach the dispersion scan.
         @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=Dict("2/1" => NaN)))
     end
 end
