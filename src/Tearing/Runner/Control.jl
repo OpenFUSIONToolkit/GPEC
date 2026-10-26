@@ -98,6 +98,9 @@ there is one consistent interface for resistive and kinetic profiles.
 
 # Output control
 
+  - `n_triangulations` -- AMR root extraction: number of fixed-seed Delaunay
+    triangulations of the scan to pool (default 1). See
+    `Dispersion.find_growth_rates(::AMRResult, ...)`.
   - `store_scan`  -- write the full Q/Δ scan grid to HDF5. `false` by
     default to keep the output file small.
 """
@@ -157,6 +160,11 @@ there is one consistent interface for resistive and kinetic profiles.
     # |residual| is not below validity_rtol × median(|Δ|) — a contour near-miss
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
+    # AMR root extraction: number of Delaunay triangulations of the scan to pool
+    # (1 = one fixed-seed triangulation). >1 recovers near-pole roots that pass
+    # the validity gate only for some choices of cell diagonals; costs only the
+    # extra contour extraction and polishing, not new dispersion evaluations.
+    n_triangulations::Int = 1
 
     profile_file::String = ""
     profile_group::String = "/"
@@ -175,6 +183,8 @@ function validate(ctrl::SLAYERControl)
     startswith(String(ctrl.inner_model), "ggj_") &&
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
                             "growth rates are not implemented; use inner_model=slayer_fitzpatrick"))
+    ctrl.n_triangulations >= 1 ||
+        throw(ArgumentError("SLAYERControl: n_triangulations=$(ctrl.n_triangulations) must be ≥ 1"))
     ctrl.inner_model in _VALID_INNER_MODELS ||
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) " *
                             "not in $(_VALID_INNER_MODELS)"))

@@ -22,6 +22,7 @@
 
 using Contour
 using DelaunayTriangulation
+using Random: Xoshiro
 
 # ---------------------------------------------------------------------
 # Public result struct + main entry point.
@@ -164,7 +165,9 @@ end
                        re_target=0.0, im_target=0.0,
                        pole_threshold=10.0,
                        filter_above_poles=true,
-                       filter_outside_re=true) -> GrowthRateResult
+                       filter_outside_re=true,
+                       n_triangulations=1,
+                       triangulation_seed=DEFAULT_TRIANGULATION_SEED) -> GrowthRateResult
 
 Extract tearing growth-rate eigenvalues from an AMR `AMRResult` via Delaunay
 triangulation + marching triangles on the scattered evaluation points. The
@@ -173,6 +176,15 @@ outside-Re filter, physical-Hz conversion) is identical to the brute-force
 grid path — only the contour extractor changes. Hanging-node issues from the
 quadtree's mixed refinement levels are resolved by the triangulation
 respecting every evaluated point uniformly.
+
+The triangulation of the (cocircular) quadtree points is not unique, so its
+point-insertion order is drawn from a generator seeded with
+`triangulation_seed`: the result is reproducible and independent of the global
+RNG state. A root that lies close to poles can still pass or fail the polish
+validity gate depending on which diagonals the cells received;
+`n_triangulations > 1` pools that many triangulations of the same scan (no new
+dispersion evaluations) and takes the least-damped of their chosen roots,
+flagging `:triangulation_dependent` when they disagree.
 """
 function find_growth_rates(amr::AMRResult, tauk::Real;
     re_target::Real=0.0, im_target::Real=0.0,
@@ -182,8 +194,12 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
     gap_kHz_threshold::Real=1.0,
     residual=nothing,
     polish_maxit::Integer=20,
-    validity_rtol::Real=1e-3)
+    validity_rtol::Real=1e-3,
+    n_triangulations::Integer=1,
+    triangulation_seed::Integer=DEFAULT_TRIANGULATION_SEED)
     return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
+        n_triangulations=Int(n_triangulations),
+        triangulation_seed=triangulation_seed,
         re_target=Float64(re_target),
         im_target=Float64(im_target),
         pole_threshold=Float64(pole_threshold),
@@ -936,6 +952,21 @@ end
 # AMR entry point: triangulate the scattered (Q, Δ) points, march triangles
 # to extract Re=0 and Im=0 contour segments with complementary-field values
 # at endpoints, chain into polylines, then run the shared analysis.
+#
+# The quadtree's cell corners are cocircular, so their Delaunay triangulation is
+# not unique: which diagonal each cell gets depends on the point-insertion order.
+# DelaunayTriangulation randomises that order with `Random.default_rng()` unless
+# told otherwise, which made the extracted contours -- and so the pole positions,
+# the polish starting points and which near-pole roots pass the validity gate --
+# differ from one Julia session to the next on identical input. The insertion
+# order is therefore drawn from a fixed-seed generator (`triangulation_seed`).
+#
+# `n_triangulations > 1` repeats the extraction on that many triangulations
+# (seeds `triangulation_seed`, `+1`, ...) of the SAME evaluated points, at no
+# extra dispersion-residual cost beyond polishing, and pools the results: see
+# `_pool_triangulations`.
+const DEFAULT_TRIANGULATION_SEED = 0x5ac3
+
 function _extract_growth_rates_amr(Q::Vector{ComplexF64},
     Δ::Vector{ComplexF64},
     tauk::Float64;
@@ -948,14 +979,82 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
     residual=nothing,
     polish_maxit::Int=20,
     validity_scale::Float64=0.0,
-    validity_rtol::Float64=1e-3)
+    validity_rtol::Float64=1e-3,
+    n_triangulations::Int=1,
+    triangulation_seed::Integer=DEFAULT_TRIANGULATION_SEED)
     length(Q) == length(Δ) ||
         throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
     length(Q) >= 3 ||
         throw(ArgumentError("_extract_growth_rates_amr: need ≥ 3 points to triangulate"))
+    n_triangulations >= 1 ||
+        throw(ArgumentError("_extract_growth_rates_amr: n_triangulations must be ≥ 1"))
 
+    results = [_extract_growth_rates_amr_once(Q, Δ, tauk,
+                   Xoshiro(triangulation_seed + k - 1);
+                   re_target=re_target, im_target=im_target,
+                   pole_threshold=pole_threshold,
+                   filter_above_poles=filter_above_poles,
+                   filter_outside_re=filter_outside_re,
+                   gap_kHz_threshold=gap_kHz_threshold,
+                   residual=residual, polish_maxit=polish_maxit,
+                   validity_scale=validity_scale, validity_rtol=validity_rtol)
+               for k in 1:n_triangulations]
+    return n_triangulations == 1 ? results[1] : _pool_triangulations(results, tauk)
+end
+
+# Pool the extractions of several triangulations of one scan. Each
+# triangulation runs the full single-extraction pipeline (poles, polish,
+# validity gate, legacy filter, chooser); a root counts when SOME triangulation
+# polished it to a true zero. The chosen root is the least-damped of the
+# per-triangulation choices, so every filter keeps its meaning -- pooling only
+# removes the dependence on which diagonal a cell happened to get. Root and
+# pole lists are unions (deduplicated); `filtered_roots` keeps only candidates
+# that no triangulation accepted. Contours are those of the triangulation whose
+# choice was taken. `:triangulation_dependent` is flagged when the
+# triangulations did not all choose the same root.
+function _pool_triangulations(results::Vector{GrowthRateResult}, tauk::Float64)
+    dedup(v) = begin
+        out = ComplexF64[]
+        for z in v
+            any(w -> abs(w - z) <= 1e-6 * max(abs(z), 1.0), out) || push!(out, z)
+        end
+        out
+    end
+    chosen = filter(r -> !isnan(real(r.Q_root)), results)
+    best = isempty(chosen) ? results[1] :
+           chosen[argmax([imag(r.Q_root) for r in chosen])]
+    valid = dedup(reduce(vcat, [r.valid_roots for r in results]))
+    filtered = [z for z in dedup(reduce(vcat, [r.filtered_roots for r in results]))
+                if !any(w -> abs(w - z) <= 1e-6 * max(abs(z), 1.0), valid)]
+    flags = unique(reduce(vcat, [r.warning_flags for r in results]))
+    filter!(f -> f !== :no_root, flags)
+    isempty(chosen) && push!(flags, :no_root)
+    roots = [r.Q_root for r in chosen]
+    if !isempty(roots) && any(z -> abs(z - roots[1]) > 1e-6 * max(abs(roots[1]), 1.0), roots)
+        push!(flags, :triangulation_dependent)
+    end
+    return GrowthRateResult(best.Q_root, best.omega_Hz, best.gamma_Hz,
+        best.Q_root_secondary, best.omega_Hz_secondary, best.gamma_Hz_secondary,
+        flags, valid, dedup(reduce(vcat, [r.poles for r in results])), filtered,
+        best.re_contours, best.im_contours, best.pole_threshold)
+end
+
+function _extract_growth_rates_amr_once(Q::Vector{ComplexF64},
+    Δ::Vector{ComplexF64},
+    tauk::Float64,
+    rng::Xoshiro;
+    re_target::Float64,
+    im_target::Float64,
+    pole_threshold::Float64,
+    filter_above_poles::Bool,
+    filter_outside_re::Bool,
+    gap_kHz_threshold::Float64,
+    residual,
+    polish_maxit::Int,
+    validity_scale::Float64,
+    validity_rtol::Float64)
     pts = [(real(q), imag(q)) for q in Q]
-    tri = triangulate(pts)
+    tri = triangulate(pts; rng=rng)
 
     # Segment types (carry complementary-field value at each endpoint)
     re_segs = NamedTuple{(:p1, :p2, :a1, :a2),
