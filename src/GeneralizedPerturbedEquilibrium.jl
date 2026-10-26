@@ -100,12 +100,15 @@ const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "u
 const _DEPRECATED_KF_KEYS = ("moment", "eq_out", "theta_out", "xlmda_out", "eqpsi_out", "save_records", "gpec_file",
     "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha")
 const _DEPRECATED_PE_KEYS = ("fixed_boundary", "output_eigenmodes", "filter_modes", "singular_point_method", "compute_response")
+const _DEPRECATED_KEYS = ("Equilibrium" => _DEPRECATED_EQUIL_KEYS, "ForceFreeStates" => _DEPRECATED_FFS_KEYS,
+    "KineticForces" => _DEPRECATED_KF_KEYS, "PerturbedEquilibrium" => _DEPRECATED_PE_KEYS)
 
 # Stop the run when a parsed gpec.toml section sets keys that no longer exist, so the deck is updated.
-function _stop_on_deprecated_keys(table, deprecated_keys, section::String)
+function _stop_on_deprecated_keys(table, deprecated_keys, section::String; remedy::String="remove from gpec.toml")
     found = [k for k in deprecated_keys if haskey(table, k)]
-    isempty(found) || error("[$section] sets $(join(("`$k`" for k in found), ", ")), which no longer exist; remove them from gpec.toml")
-    return nothing
+    isempty(found) && return nothing
+    listed = join(("`$k`" for k in found), ", ")
+    error(length(found) == 1 ? "[$section] sets $listed, which is no longer a key; $remedy" : "[$section] sets $listed, which are no longer keys; $remedy")
 end
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
