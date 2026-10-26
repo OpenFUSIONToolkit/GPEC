@@ -261,7 +261,9 @@ end; nothing below this point reads `control.inner_model`. `omega_E` is the E×B
 frequency per unit n at each surface [rad/s], replaced on any surface whose m/n
 `control.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
 shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer Q; in
-both modes the resolved value is reported as `result.omega_E`.
+both modes the resolved value is reported as `result.omega_E`. Roots are reported in the lab frame
+in both modes: an uncoupled layer is solved in its own E×B frame and its root is then moved by
+τ_k·n·Ω_E (Ω_E = 0 where it is unknown), so `γ` is the same and ω carries n·Ω_E.
 """
 function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     params::AbstractVector{<:InnerLayerParameters},
@@ -331,10 +333,6 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
     coupled = control.coupling_mode === :coupled
-    !coupled && !isempty(control.omega_E_kHz) &&
-        @warn(
-            "SLAYER: omega_E_kHz does not shift the layers with coupling_mode=:uncoupled; rotation only " *
-            "enters the coupled determinant, so it is just recorded in PerSurface/omega_E.")
     Ω_E = _omega_E_per_surface(control, params, omega_E)
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
@@ -406,8 +404,10 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 "$(_surface_label(params[k])); reported γ=0 is a " *
                 "placeholder, not a physical result — check scan grid / " *
                 "pole_threshold.")
-            push!(Q_root, gr.Q_root)
-            push!(omega_Hz, gr.omega_Hz)
+            # The layer is solved in its own E×B frame; report the root in the lab frame, Q_lab = Q + τ_k·n·Ω_E.
+            q_lab = -_q_shift(params[k], Ω_shift[k])
+            push!(Q_root, gr.Q_root + q_lab)
+            push!(omega_Hz, :no_root in gr.warning_flags ? gr.omega_Hz : gr.omega_Hz + q_lab / params[k].tauk)
             push!(gamma_Hz, gr.gamma_Hz)
             push!(per_surface_extraction, gr)
             control.store_scan && push!(scan_data_list, scan)

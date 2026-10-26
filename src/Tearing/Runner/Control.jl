@@ -36,7 +36,8 @@ constructor.
     `"m/n"` (TOML: `omega_E_kHz = {"2/1" = 0.0, "3/1" = 3.0}`). Per unit toroidal mode number
     like the kinetic file's `omega_E`, but given as Ω_E/2π in kHz rather than the file's rad/s.
     Surfaces not listed (all of them by default) take Ω_E from the kinetic file; a key matching
-    no analysed surface is an error. Rotation enters only the coupled determinant
+    no analysed surface is an error. Rotation enters the coupled determinant, and in both modes
+    it moves the reported lab-frame roots
   - `ion_mass` -- ion mass in proton-mass units (default 2.0 for D)
   - `zeff`     -- fallback effective charge. `Z_eff(ψ)` is taken, in order of precedence, from
     the kinetic file's own `zeff` profile; else derived from the file's `n_i/n_e` with the

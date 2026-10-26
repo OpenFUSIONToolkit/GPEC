@@ -158,6 +158,15 @@
         # Uncoupled layers are solved in their own plasma frame: no shift, even when supplied.
         r_unc = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...); omega_E=Ω_E)
         @test r_unc.q_shift == [0.0, 0.0]
+        # Their roots are reported in the lab frame: Q moves by τ_k·n·Ω_E, γ and the layer-frame extraction do not.
+        r_unc0 = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm, SLAYERControl(; coupling_mode=:uncoupled, grid...))
+        @test isequal(r_unc.Q_root, r_unc0.Q_root .+ [1.0e-4 * Ω_E[1], 1.2e-4 * Ω_E[2]])
+        @test r_unc.gamma_Hz == r_unc0.gamma_Hz
+        @test isequal([gr.Q_root for gr in r_unc.per_surface_extraction], r_unc0.Q_root)
+        for k in 1:2
+            has_root = !isnan(r_unc0.Q_root[k])
+            @test r_unc.omega_Hz[k] ≈ r_unc0.omega_Hz[k] + (has_root ? Ω_E[k] : 0.0)
+        end
         # The resolved rotation is still reported in both modes.
         @test r_unc.omega_E == Ω_E
 
@@ -187,6 +196,11 @@
         @test r_part.omega_E[1] ≈ 2π * 1e3
         @test isnan(r_part.omega_E[2])
         @test r_part.q_shift ≈ [-1.0e-4 * 2π * 1e3, 0.0]
+        # Uncoupled, the override moves only its surface's lab-frame root; an unknown Ω_E moves nothing.
+        r_upart = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
+            SLAYERControl(; coupling_mode=:uncoupled, omega_E_kHz=Dict("2/1" => 1.0), grid...))
+        @test isequal(r_upart.Q_root, r_unc0.Q_root .+ [1.0e-4 * 2π * 1e3, 0.0])
+        @test r_upart.gamma_Hz == r_unc0.gamma_Hz
         @test_throws "matching no analysed surface" run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
             SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("5/1" => 1.0), grid...); omega_E=Ω_E)
 
