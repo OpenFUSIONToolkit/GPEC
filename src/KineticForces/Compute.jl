@@ -111,67 +111,78 @@ function integrate_psi_quadgk(
     end
     psi_c > 0 && @info "Kinetic axis-validity suppression in ψ torque quadrature: domain starts at psi_c=$(round(psi_c; sigdigits=3))"
 
-    # The outer ψ-integral (the QuadGK batch / ψ-node loop) stays serial: QuadGK's refine
-    # loop invokes the callback with small batches (~15 nodes), so threading it is
-    # fork-join-bound. Instead thread the inner bounce-harmonic loop (2·nl+1 harmonics),
-    # which carries the ~40 ms of per-ψ work. `tpsi!` writes per-`intr` scratch buffers and
-    # spline hints, so each thread gets its own `deepcopy(intr)` (the same per-thread-scratch
-    # pattern the self-consistent kinetic matrix build uses). Per-harmonic results are stored
-    # by index and reduced in fixed ℓ order, so the sum is identical to the serial reduction
-    # and independent of thread count. The threadid()-indexed buffers require this to be a
-    # top-level @threads (the caller loops n serially); never nest it inside another @threads.
-    # The deepcopy set is sized by thread count and rebuilt once per call (per n), so multi-n
-    # runs with many threads scale memory as nthreads×sizeof(intr).
+    # QuadGK hands the batch callback every node of a refinement pass at once (the whole first
+    # pass is one batch), so the work is threaded over (ψ node × bounce harmonic) items: the
+    # ψ-only setup of each node (θ sampling, fits, field decomposition, harmonic-free bounce
+    # geometry) is built in a first threaded pass, then every (node, ℓ) pitch quadrature runs
+    # in a second. Nodes are taken `chunk` at a time to bound the geometry held in memory.
+    # Per-harmonic results are stored by index and reduced in fixed ℓ order, so the sum is
+    # independent of thread count. `:static` keeps the threadid()-indexed slots sound; never nest it.
     nharm = 1 + 2 * nl
+    rtol_pitch = torque_pitch_rtol(ctrl)
     nth = Threads.maxthreadid()
-    thread_intrs = [deepcopy(intr) for _ in 1:nth]
+    chunk = is_matrix_method ? nth : 2 * nth
     thread_tpsi = [Ref{ComplexF64}(0.0im) for _ in 1:nth]
     thread_wtw = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nth] : nothing
-    harm_vals = Vector{ComplexF64}(undef, nharm)
-    harm_elems = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nharm] : nothing
 
     logged_psi = Float64[]
     logged_dtdpsi = ComplexF64[]
+    logged_dtdpsi_ell = Vector{Vector{ComplexF64}}()
     logged_elems = is_matrix_method ? Vector{Array{ComplexF64,3}}() : nothing
 
     function psi_batch!(y::AbstractVector{ComplexF64}, x::AbstractVector)
-        for k in eachindex(x)
-            psi = Float64(x[k])
+        for c0 in 1:chunk:length(x)
+            idx = c0:min(c0 + chunk - 1, length(x))
+            nc = length(idx)
 
-            # Each bounce harmonic is independent; thread over them, each thread using its own
-            # `intr` copy and writing its own harm_vals[ell_idx] / harm_elems[ell_idx] slot.
-            Threads.@threads :static for ell_idx in 1:nharm
+            surfaces = Vector{Any}(undef, nc)
+            Threads.@threads :static for j in 1:nc
+                surfaces[j] = _torque_surface(Float64(x[idx[j]]), zi, mi, electron, method, equil, intr, kinetic_profiles;
+                    need_matrices=is_matrix_method, n, wdfac, divxfac)
+            end
+
+            harm_vals = Matrix{ComplexF64}(undef, nharm, nc)
+            harm_elems = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nharm, _ in 1:nc] : nothing
+            Threads.@threads :static for item in 1:(nc*nharm)
+                j, ell_idx = divrem(item - 1, nharm) .+ 1
                 tid = Threads.threadid()
                 l = ell_idx - 1 - nl
                 w = is_matrix_method ? thread_wtw[tid] : nothing
                 is_matrix_method && fill!(w, 0)
-                tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
-                    electron, method, equil, thread_intrs[tid], kinetic_profiles;
-                    op_wmats=w,
-                    atol_xlmda=ctrl.atol_pitch, rtol_xlmda=ctrl.rtol_pitch,
+                tpsi!(thread_tpsi[tid], Float64(x[idx[j]]), n, l, zi, mi, wdfac, divxfac,
+                    electron, method, equil, intr, kinetic_profiles;
+                    op_wmats=w, surface=surfaces[j],
+                    atol_xlmda=ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
-                harm_vals[ell_idx] = thread_tpsi[tid][]
-                is_matrix_method && (harm_elems[ell_idx] .= w)
+                harm_vals[ell_idx, j] = thread_tpsi[tid][]
+                is_matrix_method && (harm_elems[ell_idx, j] .= w)
             end
 
-            # Reduce in fixed ℓ order (bit-identical to the serial sum).
-            total = ComplexF64(0.0)
-            for ell_idx in 1:nharm
-                total += harm_vals[ell_idx]
-            end
-            total *= kinetic_axis_validity_envelope(psi, psi_c)
-            y[k] = total
-
-            push!(logged_psi, psi)
-            push!(logged_dtdpsi, total)
-            if is_matrix_method
-                elems_accum = zeros(ComplexF64, mpert, mpert, 6)
+            for j in 1:nc
+                k = idx[j]
+                psi = Float64(x[k])
+                # Reduce in fixed ℓ order (bit-identical to the serial sum).
+                total = ComplexF64(0.0)
                 for ell_idx in 1:nharm
-                    elems_accum .+= harm_elems[ell_idx]
+                    total += harm_vals[ell_idx, j]
                 end
-                elems_accum .*= kinetic_axis_validity_envelope(psi, psi_c)
-                push!(logged_elems, elems_accum)
+                envelope = kinetic_axis_validity_envelope(psi, psi_c)
+                total *= envelope
+                y[k] = total
+
+                push!(logged_psi, psi)
+                push!(logged_dtdpsi, total)
+                # Same envelope as `total` so Σ_ℓ still reproduces it.
+                push!(logged_dtdpsi_ell, harm_vals[:, j] .* envelope)
+                if is_matrix_method
+                    elems_accum = zeros(ComplexF64, mpert, mpert, 6)
+                    for ell_idx in 1:nharm
+                        elems_accum .+= harm_elems[ell_idx, j]
+                    end
+                    elems_accum .*= envelope
+                    push!(logged_elems, elems_accum)
+                end
             end
         end
     end
@@ -190,6 +201,11 @@ function integrate_psi_quadgk(
     perm = sortperm(logged_psi)
     sorted_psi = logged_psi[perm]
     sorted_dtdpsi = logged_dtdpsi[perm]
+    # Per-ℓ profile, permuted by the SAME `perm`: QuadGK visits nodes in refinement order, not in
+    # ψ order, so a per-ℓ log left unsorted would misalign with `sorted_psi` without any error.
+    # `reduce(hcat, ...)` builds (nharm, npsi); transpose so ψ is the first axis, as `dtdpsi` is.
+    sorted_dtdpsi_ell = isempty(logged_dtdpsi_ell) ? zeros(ComplexF64, 0, 0) :
+                        permutedims(reduce(hcat, logged_dtdpsi_ell[perm]))
 
     # Cumulative trapezoidal integration for T(ψ) profile
     npts = length(sorted_psi)
@@ -202,7 +218,9 @@ function integrate_psi_quadgk(
         end
     end
 
-    torque_profile = npts > 1 ? (psi=sorted_psi, dtdpsi=sorted_dtdpsi, t_cumulative=t_cumulative) : nothing
+    torque_profile = npts > 1 ?
+                     (psi=sorted_psi, dtdpsi=sorted_dtdpsi, t_cumulative=t_cumulative,
+        dtdpsi_ell=sorted_dtdpsi_ell, ell=collect(-nl:nl)) : nothing
 
     # Trapezoidal integration of kinetic matrices over ψ (matrix methods only)
     matrix_integrated = nothing
@@ -229,6 +247,28 @@ end
 # ============================================================================
 # High-level orchestration
 # ============================================================================
+
+"""
+    _accumulate_interp!(acc, grid, xs, ys)
+
+Add the linear interpolant of `(xs, ys)` onto `grid` into `acc`, contributing zero outside
+`[xs[1], xs[end]]`. `xs` must be sorted ascending. A duplicate node or the right endpoint takes
+`ys[j]` directly rather than dividing by a zero interval. Shared by the total and per-ℓ profiles in
+[`combine_species_states`](@ref) so both use identical interpolation.
+"""
+function _accumulate_interp!(acc, grid, xs::AbstractVector{Float64}, ys::AbstractVector{ComplexF64})
+    for (k, ψ) in enumerate(grid)
+        (ψ < xs[1] || ψ > xs[end]) && continue
+        j = searchsortedlast(xs, ψ)
+        if j == length(xs) || xs[j+1] == xs[j]   # endpoint or duplicate node: no interpolation
+            acc[k] += ys[j]
+        else
+            t = (ψ - xs[j]) / (xs[j+1] - xs[j])
+            acc[k] += (1 - t) * ys[j] + t * ys[j+1]
+        end
+    end
+    return acc
+end
 
 """
     combine_species_states(states) -> KineticForcesState
@@ -259,19 +299,30 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
         for r in results
             length(r.psi_grid) >= 2 || continue
             o = sortperm(r.psi_grid)
-            xs = r.psi_grid[o]
-            ys = r.dtdpsi[o]
-            for (k, ψ) in enumerate(grid)
-                (ψ < xs[1] || ψ > xs[end]) && continue
-                j = searchsortedlast(xs, ψ)
-                if j == length(xs) || xs[j+1] == xs[j]   # endpoint or duplicate node: no interpolation
-                    dtdpsi[k] += ys[j]
-                else
-                    t = (ψ - xs[j]) / (xs[j+1] - xs[j])
-                    dtdpsi[k] += (1 - t) * ys[j] + t * ys[j+1]
+            _accumulate_interp!(dtdpsi, grid, r.psi_grid[o], r.dtdpsi[o])
+        end
+
+        # Per-ℓ profile, interpolated onto the same union grid column by column. Only combined
+        # when every species carries it on an identical ℓ range; otherwise left empty.
+        ell = first(results).ell
+        has_ell = !isempty(ell) && all(r -> r.ell == ell && size(r.dtdpsi_ell, 2) == length(ell) &&
+                                                size(r.dtdpsi_ell, 1) == length(r.psi_grid), results)
+        dtdpsi_ell = zeros(ComplexF64, has_ell ? length(grid) : 0, has_ell ? length(ell) : 0)
+        if has_ell
+            for r in results
+                length(r.psi_grid) >= 2 || continue
+                o = sortperm(r.psi_grid)
+                xs = r.psi_grid[o]
+                for j in eachindex(ell)
+                    _accumulate_interp!(view(dtdpsi_ell, :, j), grid, xs, r.dtdpsi_ell[o, j])
                 end
             end
+            # Take the total from the per-ℓ row sum so Σ_ℓ ≡ dtdpsi holds exactly rather than to
+            # interpolation roundoff. Linear interpolation commutes with the sum, so this is the
+            # same quantity the loop above produced.
+            dtdpsi = vec(sum(dtdpsi_ell; dims=2))
         end
+
         tcum = zeros(ComplexF64, length(grid))
         for j in 2:length(grid)
             tcum[j] = tcum[j-1] + 0.5 * (dtdpsi[j] + dtdpsi[j-1]) * (grid[j] - grid[j-1])
@@ -281,6 +332,7 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
             total_torque=sum(r.total_torque for r in results),
             total_energy=sum(r.total_energy for r in results),
             psi_grid=grid, dtdpsi=dtdpsi, t_cumulative=tcum,
+            dtdpsi_ell=dtdpsi_ell, ell=(has_ell ? ell : Int[]),
             psi_nsteps=sum(r.psi_nsteps for r in results))
     end
     combined.completed = true
@@ -338,6 +390,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         psi_grid_out = Float64[]
         dtdpsi_out = ComplexF64[]
         t_cum_out = ComplexF64[]
+        dtdpsi_ell_out = zeros(ComplexF64, 0, 0)
+        ell_out = Int[]
         psi_nsteps_total = 0
         panel_psis_out = Float64[]
         resonance_psis_out = Float64[]
@@ -365,6 +419,11 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                     psi_grid_out = result.torque_profile.psi
                     dtdpsi_out = result.torque_profile.dtdpsi
                     t_cum_out = result.torque_profile.t_cumulative
+                    # Profiles come from the first n only, while `total_torque` sums over all n.
+                    # So sum(dtdpsi_ell; dims=2) == dtdpsi always, but neither integrates to
+                    # `total_torque` when npert > 1.
+                    dtdpsi_ell_out = result.torque_profile.dtdpsi_ell
+                    ell_out = result.torque_profile.ell
                 end
             end
 
@@ -387,6 +446,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             psi_grid=psi_grid_out,
             dtdpsi=dtdpsi_out,
             t_cumulative=t_cum_out,
+            dtdpsi_ell=dtdpsi_ell_out,
+            ell=ell_out,
             psi_nsteps=psi_nsteps_total,
             panel_psis=panel_psis_out,
             resonance_psis=resonance_psis_out

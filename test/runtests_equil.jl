@@ -182,9 +182,10 @@ using Statistics
         splines(eq) = (eq.rzphi_rsquared, eq.rzphi_offset, eq.rzphi_nu, eq.rzphi_jac, eq.eqfun_B, eq.eqfun_metric1, eq.eqfun_metric2)
         finite(eq) = all(isfinite, eq.profiles.dVdpsi_spline.y) && all(all(isfinite, s.nodal_derivs.partials) for s in splines(eq))
 
-        # original: the file's own ψ nodes off the axis (this file starts at the axis), whatever psilow/mpsi
+        # original: the file's own ψ nodes between psilow and psihigh, whatever mpsi
         eq_o = Eq.setup_equilibrium(cfg("original"))
-        @test eq_o.rzphi_xs == Eq.read_chease_binary(cfg("original")).rz_in_xs[2:end]
+        xs_in = Eq.read_chease_binary(cfg("original")).rz_in_xs
+        @test eq_o.rzphi_xs == [0.01; filter(x -> 0.01 < x < 0.99, xs_in); 0.99]
         @test finite(eq_o)
 
         # rho: starts at psilow (Fortran's rho starts at psihigh/(mpsi+1)²)
