@@ -111,24 +111,19 @@ function integrate_psi_quadgk(
     end
     psi_c > 0 && @info "Kinetic axis-validity suppression in ψ torque quadrature: domain starts at psi_c=$(round(psi_c; sigdigits=3))"
 
-    # The outer ψ-integral (the QuadGK batch / ψ-node loop) stays serial: QuadGK's refine
-    # loop invokes the callback with small batches (~15 nodes), so threading it is
-    # fork-join-bound. Instead thread the inner bounce-harmonic loop (2·nl+1 harmonics),
-    # which carries the ~40 ms of per-ψ work. `tpsi!` writes per-`intr` scratch buffers and
-    # spline hints, so each thread gets its own `deepcopy(intr)` (the same per-thread-scratch
-    # pattern the self-consistent kinetic matrix build uses). Per-harmonic results are stored
-    # by index and reduced in fixed ℓ order, so the sum is identical to the serial reduction
-    # and independent of thread count. The threadid()-indexed buffers require this to be a
-    # top-level @threads (the caller loops n serially); never nest it inside another @threads.
-    # The deepcopy set is sized by thread count and rebuilt once per call (per n), so multi-n
-    # runs with many threads scale memory as nthreads×sizeof(intr).
+    # QuadGK hands the batch callback every node of a refinement pass at once (the whole first
+    # pass is one batch), so the work is threaded over (ψ node × bounce harmonic) items: the
+    # ψ-only setup of each node (θ sampling, fits, field decomposition, harmonic-free bounce
+    # geometry) is built in a first threaded pass, then every (node, ℓ) pitch quadrature runs
+    # in a second. Nodes are taken `chunk` at a time to bound the geometry held in memory.
+    # Per-harmonic results are stored by index and reduced in fixed ℓ order, so the sum is
+    # independent of thread count. `:static` keeps the threadid()-indexed slots sound; never nest it.
     nharm = 1 + 2 * nl
+    rtol_pitch = torque_pitch_rtol(ctrl)
     nth = Threads.maxthreadid()
-    thread_intrs = [deepcopy(intr) for _ in 1:nth]
+    chunk = is_matrix_method ? nth : 2 * nth
     thread_tpsi = [Ref{ComplexF64}(0.0im) for _ in 1:nth]
     thread_wtw = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nth] : nothing
-    harm_vals = Vector{ComplexF64}(undef, nharm)
-    harm_elems = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nharm] : nothing
 
     logged_psi = Float64[]
     logged_dtdpsi = ComplexF64[]
@@ -136,46 +131,58 @@ function integrate_psi_quadgk(
     logged_elems = is_matrix_method ? Vector{Array{ComplexF64,3}}() : nothing
 
     function psi_batch!(y::AbstractVector{ComplexF64}, x::AbstractVector)
-        for k in eachindex(x)
-            psi = Float64(x[k])
+        for c0 in 1:chunk:length(x)
+            idx = c0:min(c0 + chunk - 1, length(x))
+            nc = length(idx)
 
-            # Each bounce harmonic is independent; thread over them, each thread using its own
-            # `intr` copy and writing its own harm_vals[ell_idx] / harm_elems[ell_idx] slot.
-            Threads.@threads :static for ell_idx in 1:nharm
+            surfaces = Vector{Any}(undef, nc)
+            Threads.@threads :static for j in 1:nc
+                surfaces[j] = _torque_surface(Float64(x[idx[j]]), zi, mi, electron, method, equil, intr, kinetic_profiles;
+                    need_matrices=is_matrix_method, n, wdfac, divxfac)
+            end
+
+            harm_vals = Matrix{ComplexF64}(undef, nharm, nc)
+            harm_elems = is_matrix_method ? [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nharm, _ in 1:nc] : nothing
+            Threads.@threads :static for item in 1:(nc*nharm)
+                j, ell_idx = divrem(item - 1, nharm) .+ 1
                 tid = Threads.threadid()
                 l = ell_idx - 1 - nl
                 w = is_matrix_method ? thread_wtw[tid] : nothing
                 is_matrix_method && fill!(w, 0)
-                tpsi!(thread_tpsi[tid], psi, n, l, zi, mi, wdfac, divxfac,
-                    electron, method, equil, thread_intrs[tid], kinetic_profiles;
-                    op_wmats=w,
-                    atol_xlmda=ctrl.atol_pitch, rtol_xlmda=ctrl.rtol_pitch,
+                tpsi!(thread_tpsi[tid], Float64(x[idx[j]]), n, l, zi, mi, wdfac, divxfac,
+                    electron, method, equil, intr, kinetic_profiles;
+                    op_wmats=w, surface=surfaces[j],
+                    atol_xlmda=ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
-                harm_vals[ell_idx] = thread_tpsi[tid][]
-                is_matrix_method && (harm_elems[ell_idx] .= w)
+                harm_vals[ell_idx, j] = thread_tpsi[tid][]
+                is_matrix_method && (harm_elems[ell_idx, j] .= w)
             end
 
-            # Reduce in fixed ℓ order (bit-identical to the serial sum).
-            total = ComplexF64(0.0)
-            for ell_idx in 1:nharm
-                total += harm_vals[ell_idx]
-            end
-            envelope = kinetic_axis_validity_envelope(psi, psi_c)
-            total *= envelope
-            y[k] = total
-
-            push!(logged_psi, psi)
-            push!(logged_dtdpsi, total)
-            # Same envelope as `total` so Σ_ℓ still reproduces it; the broadcast also copies the reused `harm_vals`.
-            push!(logged_dtdpsi_ell, harm_vals .* envelope)
-            if is_matrix_method
-                elems_accum = zeros(ComplexF64, mpert, mpert, 6)
+            for j in 1:nc
+                k = idx[j]
+                psi = Float64(x[k])
+                # Reduce in fixed ℓ order (bit-identical to the serial sum).
+                total = ComplexF64(0.0)
                 for ell_idx in 1:nharm
-                    elems_accum .+= harm_elems[ell_idx]
+                    total += harm_vals[ell_idx, j]
                 end
-                elems_accum .*= envelope
-                push!(logged_elems, elems_accum)
+                envelope = kinetic_axis_validity_envelope(psi, psi_c)
+                total *= envelope
+                y[k] = total
+
+                push!(logged_psi, psi)
+                push!(logged_dtdpsi, total)
+                # Same envelope as `total` so Σ_ℓ still reproduces it.
+                push!(logged_dtdpsi_ell, harm_vals[:, j] .* envelope)
+                if is_matrix_method
+                    elems_accum = zeros(ComplexF64, mpert, mpert, 6)
+                    for ell_idx in 1:nharm
+                        elems_accum .+= harm_elems[ell_idx, j]
+                    end
+                    elems_accum .*= envelope
+                    push!(logged_elems, elems_accum)
+                end
             end
         end
     end
@@ -299,7 +306,7 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
         # when every species carries it on an identical ℓ range; otherwise left empty.
         ell = first(results).ell
         has_ell = !isempty(ell) && all(r -> r.ell == ell && size(r.dtdpsi_ell, 2) == length(ell) &&
-                                            size(r.dtdpsi_ell, 1) == length(r.psi_grid), results)
+                                                size(r.dtdpsi_ell, 1) == length(r.psi_grid), results)
         dtdpsi_ell = zeros(ComplexF64, has_ell ? length(grid) : 0, has_ell ? length(ell) : 0)
         if has_ell
             for r in results

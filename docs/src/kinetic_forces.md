@@ -141,6 +141,18 @@ terms respectively, and do not modify the stored kinetic profile splines.
        when computing the `toroidal_rotation_factor` back-solve. Julia uses a
        clean reimplementation with consistent pre-scaling derivatives throughout.
 
+## Quadrature tolerances
+
+The torque is three nested adaptive Gauss–Kronrod integrals: over ψ (paneled at rational and kinetic-resonance surfaces), over pitch λ at each ψ, and over normalized energy x at each λ. Each inner integral is the integrand of the one outside it, so its tolerance is derived from the outer one by a fixed margin unless set explicitly:
+
+| level | control | default |
+|---|---|---|
+| ψ | `rtol_psi` | 1e-2 (the primary knob; ~2 significant figures matches the NTV model's validity) |
+| λ | `rtol_pitch` | `psi_tolerance_margin × rtol_psi` = 1e-3 |
+| x | `rtol_x` | `nested_tolerance_margin × rtol_pitch` = 1e-5 |
+
+QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The calculated kinetic matrix build (`kinetic_source = "calculated"`) has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
+
 ## Regularization: why kinetic runs set `regularization_width = 0`
 
 `[PerturbedEquilibrium] regularization_width` smooths the displacements before they drive the NTV
