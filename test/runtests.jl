@@ -1,3 +1,8 @@
+module GPECTests
+
+# Test orchestration needs little optimization; imported package kernels retain their defaults.
+Base.Experimental.@optlevel 0
+
 using Test
 using Pkg
 using GeneralizedPerturbedEquilibrium.Vacuum
@@ -14,59 +19,26 @@ using LinearAlgebra
 Pkg.activate(joinpath(@__DIR__, ".."))
 using GeneralizedPerturbedEquilibrium
 
-# Check if specific test files are requested via ARGS
-if !isempty(ARGS)
-    for testfile in ARGS
-        @info "Running test file: $testfile"
-        include(testfile)
-    end
-else
-    include("./runtests_utilities.jl")
-    include("./runtests_fouriertransforms.jl")
-    include("./runtests_vacuum.jl")
-    include("./runtests_equil.jl")
-    include("./runtests_sfl_sampling.jl")
-    include("./runtests_grid_refinement.jl")
-    include("./runtests_core_capped_knots.jl")
-    include("./runtests_coordinate_invariant.jl")
-    include("./runtests_eulerlagrange.jl")
-    include("./runtests_riccati.jl")
-    include("./runtests_galerkin.jl")
-    include("./runtests_parallel_integration.jl")
-    include("./runtests_result_struct.jl")
-    include("./runtests_solve_api.jl")
-    include("./runtests_matching_models.jl")
-    include("./runtests_dominant_coupling.jl")
-    include("./runtests_error_fields.jl")
-    include("./runtests_tolerance_toml.jl")
-    include("./runtests_sampling.jl")
-    include("./runtests_monte_carlo.jl")
-    include("./runtests_risk.jl")
-    include("./runtests_phasing.jl")
-    include("./runtests_ntv_limits.jl")
-    include("./runtests_sing.jl")
-    include("./runtests_innerlayer.jl")
-    include("./runtests_tj_analytic.jl")
-    include("./runtests_kinetic_profiles.jl")
-    include("./runtests_resist_eval.jl")
-    include("./runtests_slayer_params.jl")
-    include("./runtests_slayer_riccati.jl")
-    include("./runtests_slayer_inputs.jl")
-    include("./runtests_layer_overlap_fitzpatrick.jl")
-    include("./runtests_dispersion_residual.jl")
-    include("./runtests_dispersion_coupled.jl")
-    include("./runtests_dispersion_coupled_full.jl")
-    include("./runtests_dispersion_scan.jl")
-    include("./runtests_dispersion_amr.jl")
-    include("./runtests_dispersion_polish.jl")
-    include("./runtests_slayer_runner.jl")
-    include("./runtests_kinetic.jl")
-    include("./runtests_kinetic_validity.jl")
-    include("./runtests_multiion.jl")
-    include("./runtests_fullruns.jl")
-    include("./runtests_torque_response.jl")
-    include("./runtests_coils.jl")
-    include("./runtests_imas.jl")
-    include("./runtests_rerun_from_h5.jl")
-    include("./runtests_h5_schema.jl")
+function run_test_file(testfile)
+    @info "Running test file" testfile
+    measurement = @timed include(testfile)
+    @info "Completed test file" testfile elapsed_seconds=measurement.time compile_seconds=measurement.compile_time recompile_seconds=measurement.recompile_time
+    return nothing
+end
+
+include("suites.jl")
+
+# Fail if a new test file is omitted or accidentally assigned to multiple groups.
+registered = first.(TEST_SUITES)
+discovered = filter(f -> startswith(f, "runtests_") && endswith(f, ".jl"), readdir(@__DIR__))
+length(unique(registered)) == length(registered) || error("Duplicate test file in suites.jl")
+Set(registered) == Set(discovered) || error("Update test/suites.jl to cover every runtests_*.jl file")
+
+group = get(ENV, "GPEC_TEST_GROUP", "")
+isempty(group) || group in last.(TEST_SUITES) || error("Unknown GPEC_TEST_GROUP: $group")
+selected = isempty(ARGS) ? [file for (file, suite) in TEST_SUITES if isempty(group) || suite == group] : ARGS
+for testfile in selected
+    run_test_file(testfile)
+end
+
 end

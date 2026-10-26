@@ -14,6 +14,36 @@ an unpinned resolve makes every run non-reproducible and quietly wastes time:
 minor version into `Manifest.toml` before building. The copy exists only inside
 the CI runner and never reaches a developer's working tree.
 
+## Compilation caches
+
+CI restores the dependency depot first, then overlays GPEC's compiled package directory from a
+smaller cache keyed by Julia version, runner architecture, dependency pins, source contents, and
+the test compilation settings. Successful runs save a missing GPEC entry on pull requests as well
+as pushes. This lets test-only updates reuse the current package image without storing a new copy
+of the full depot for each source change. The dependency cache alone is immutable and cannot
+refresh GPEC after a source edit when its dependency key still matches.
+
+For each Julia version, three parallel test groups (`core`, `api`, `errorfields`) run the full
+battery. They reuse the normal production package image when its source-keyed cache exists;
+on a miss, they disable the optional precompile workload and compile kernels on demand. A
+fourth job builds and loads the normal package with that workload enabled in parallel, using the
+same bounds-checking flags as the tests. The cache distinguishes these build modes. Subsequent
+runs can reuse the production image without making test groups wait for its first build.
+
+`test/suites.jl` assigns every test file to one group. The runner rejects missing or duplicate
+assignments. Running `julia --project=. test/runtests.jl` still runs every file in the original
+order; set `GPEC_TEST_GROUP=core` (or either other group) to reproduce a CI group. Explicit test
+file arguments still select those files directly.
+
+Test jobs use optimization level 1 to reduce first-use compilation. Julia can still reuse cached
+package images built at level 2; the production build job keeps that default optimization level.
+Only the test orchestration modules disable optimization entirely.
+
+Bounds checking remains enabled. A source change still requires compiling a new GPEC image;
+the source cache helps subsequent runs of that source, not the first build. Cache eviction or a
+new Julia version likewise requires rebuilding. The test runner logs elapsed and compilation
+seconds per file to distinguish this startup cost from work inside the tests.
+
 ## Files
 
 | File | Purpose |

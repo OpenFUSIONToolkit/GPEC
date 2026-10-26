@@ -117,7 +117,11 @@ end
                 inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
                 @test inputs["ForceFreeStates"]["use_parallel"] == true
 
-                @test_logs (:warn,) GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(inputs["ForceFreeStates"], GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
+                @test_logs (:warn,) GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(
+                    inputs["ForceFreeStates"],
+                    GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS,
+                    "ForceFreeStates"
+                )
                 @test !haskey(inputs["ForceFreeStates"], "use_parallel")
 
                 # With the key gone the control struct builds again, on the default integrator.
@@ -150,7 +154,7 @@ end
 # the source run and the replay: the default (recompute-from-TOML) path then
 # fails, while `--coil-source coils` succeeds from the stored geometry.
 @testset "Rerun from gpec.h5: coil geometry snapshot" begin
-    template_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
+    template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     src_dat = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries", "d3d_il.dat")
 
     read_resfield(path) =
@@ -172,8 +176,11 @@ end
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
+        inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+            "compute_response" => true, "compute_singular_coupling" => true,
+            "verbose" => false, "write_outputs_to_HDF5" => true)
         inputs["ForcingTerms"] = Dict{String,Any}(
-            "forcing_data_format" => "coil",
+            "forcing_data_format" => "coil", "mtheta_coil" => 64, "nzeta_coil" => 32,
             "coil_set" => [Dict{String,Any}(
                 "dat_file" => coil_dat,
                 "currents" => fill(1.0e3, 6)

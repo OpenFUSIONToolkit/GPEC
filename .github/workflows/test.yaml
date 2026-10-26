@@ -85,7 +85,7 @@ jobs:
           fi
 
   test:
-    name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    name: runtests ${{ matrix.version }} - ${{ matrix.group }} - ${{ matrix.os }}
     needs: changes
     if: needs.changes.outputs.julia == 'true'
     runs-on: ${{ matrix.os }}
@@ -98,8 +98,16 @@ jobs:
           - '1.x'  # latest (currently 1.12)
         os:
           - ubuntu-latest
+        group:
+          - core
+          - api
+          - errorfields
+          - precompile
 
     env:
+      GPEC_TEST_GROUP: ${{ matrix.group }}
+      JULIA_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '1'
       DEPOT_PATHS: |
         ~/.julia/artifacts
         ~/.julia/packages
@@ -135,6 +143,42 @@ jobs:
             julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-
             julia-depot-${{ matrix.os }}-${{ matrix.version }}-
 
+      # Prefer the normal package image when it already exists. On a source-cache
+      # miss, test groups compile on demand while the precompile job builds it in parallel.
+      - name: Look for the production package image
+        id: production-cache
+        uses: actions/cache/restore@v4
+        with:
+          lookup-only: true
+          path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
+          key: gpec-images-v4-aot-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
+
+      - name: Select the build mode
+        id: build-mode
+        env:
+          GROUP: ${{ matrix.group }}
+          PRODUCTION_CACHE_HIT: ${{ steps.production-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [ "$GROUP" = "precompile" ] || [ "$PRODUCTION_CACHE_HIT" = "true" ]; then
+            echo "mode=aot" >> "$GITHUB_OUTPUT"
+            echo "Using the production precompile workload."
+          else
+            printf '[GeneralizedPerturbedEquilibrium]\nprecompile_workload = false\n' > LocalPreferences.toml
+            echo "mode=jit" >> "$GITHUB_OUTPUT"
+            echo "Compiling kernels on demand; the production build runs in parallel."
+          fi
+
+      # The dependency cache is immutable and intentionally independent of src/. Layer
+      # a small source-keyed package cache over it so source changes can refresh GPEC
+      # without uploading another copy of the entire depot. Test-only PR updates reuse it.
+      - name: Restore GPEC compilation
+        id: gpec-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
+          key: gpec-images-v4-${{ steps.build-mode.outputs.mode }}-${{ steps.build-mode.outputs.mode == 'aot' && 'o2' || 'o1' }}-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml', 'src/**') }}
+
       - name: Pin the CI dependency set
         run: |
           set -euo pipefail
@@ -156,19 +200,35 @@ jobs:
             echo "::warning::Project.toml has changed since the pinned dependency sets were generated, so ${pinned} may be stale. Regenerate with ci/manifests/update.jl."
           fi
 
-      - name: Build Julia packages
-        uses: julia-actions/julia-buildpkg@v1
-        with:
-          ignore-no-cache: true
+      - name: Instantiate pinned dependencies
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
       # Coverage instrumentation is off: nothing consumes the .cov files (they are
       # gitignored and never uploaded), and instrumenting slows compute-heavy
       # numerical code noticeably. Set coverage: true and add a Codecov upload
       # step together if coverage reporting is ever wanted.
+      - name: Check the production precompile workload
+        if: matrix.group == 'precompile'
+        run: julia --check-bounds=yes --depwarn=yes --project=. -e 'using Pkg; Pkg.precompile(; strict=true); using GeneralizedPerturbedEquilibrium'
+
+      # Level 1 reduces first-use compilation; cached level-2 package images remain reusable.
       - name: Run tests
+        if: matrix.group != 'precompile'
         uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
+          check_bounds: 'yes'
+          optimize: '1'
+          allow_reresolve: false
+
+      - name: Save GPEC compilation
+        if: success() && steps.gpec-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
+          key: ${{ steps.gpec-cache.outputs.cache-primary-key }}
 
       # An exact hit has nothing new to store. Otherwise pushes refresh the shared
       # default-branch entry, and a pull request writes one only when it restored

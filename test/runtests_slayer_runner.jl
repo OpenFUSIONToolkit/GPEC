@@ -5,6 +5,7 @@
     using GeneralizedPerturbedEquilibrium.Dispersion
     using GeneralizedPerturbedEquilibrium.Runner
     using HDF5
+    using TOML
 
     include("h5_metadata_check.jl")
 
@@ -128,6 +129,13 @@
             for name in readdir(deck)
                 cp(joinpath(deck, name), joinpath(dir, name))
             end
+            # Preserve the two-surface producer/consumer path on a small Galerkin grid.
+            deck_path = joinpath(dir, "gpec.toml")
+            inputs = TOML.parsefile(deck_path)
+            merge!(inputs["Equilibrium"], Dict("mpsi" => 32, "mtheta" => 64))
+            merge!(inputs["TJ_ANALYTIC_INPUT"], Dict("ma" => 32, "mtheta" => 32))
+            merge!(inputs["ForceFreeStates"], Dict("gal_nx" => 32, "delta_mlow" => 2, "delta_mhigh" => 2, "mtheta_vacuum" => 64))
+            open(io -> TOML.print(io, inputs), deck_path, "w")
             ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
             @test ffs.integrator === :galerkin
 
@@ -199,6 +207,7 @@
         @test Runner.delta_prime_to_rs_reference(dp, [_mk_params(), _mk_params()]) ≈ dp
     end
 
+    coupled_result = Ref{SLAYERResult}()
     @testset "run_slayer_from_inputs: coupled mode finds known root" begin
         # Build a 2-surface problem with a known coupled root by construction.
         p1 = _mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, Q_e=-1.0, Q_i=0.5,
@@ -227,8 +236,10 @@
             Q_re_range=(-1.0, 1.0),
             Q_im_range=(-0.5, 0.8),
             nre=80, nim=80,
-            pole_threshold=1e5)      # tuned for lu^(1/3) scale
-        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c)
+            pole_threshold=1e5, store_scan=true)
+        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c;
+            rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
+        coupled_result[] = r
         @test r.enabled
         @test length(r.Q_root) == 1          # single coupled eigenvalue
         @test abs(r.Q_root[1] - Q_target) < 2e-2       # grid-resolution limited
@@ -237,27 +248,9 @@
     end
 
     @testset "write_slayer_hdf5!: round-trip structure" begin
-        p1 = _mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, ising=1)
-        p2 = _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, ising=2)
-        params = [p1, p2]
+        # Serialize the known-root integration result without repeating the scan.
+        r = coupled_result[]
 
-        # Diagonal dp, zero coupling → trivial root structure at Q_target=0
-        Q_target = 0.0 + 0.0im
-        model = SLAYERModel()
-        Δ1 = InnerLayer.solve_inner(model, p1, Q_target).tearing * p1.lu^(1 / 3)
-        Δ2 = InnerLayer.solve_inner(model, p2, Q_target).tearing * p2.lu^(1 / 3)
-        dp = ComplexF64[Δ1 0.0; 0.0 Δ2]
-
-        c = SLAYERControl(; enabled=true,
-            scan_mode=:brute_force,
-            coupling_mode=:coupled,
-            Q_re_range=(-0.5, 0.5),
-            Q_im_range=(-0.3, 0.3),
-            nre=40, nim=40,
-            pole_threshold=1e5,
-            store_scan=true)
-        r = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dp, c;
-            rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
         @test r.model === SLAYERModel(; variant=:fitzpatrick)
 
         mktemp() do path, io
