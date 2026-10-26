@@ -573,17 +573,17 @@ function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
     (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
     ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
     isempty(ctrl.profile_file) && return nothing
-    loaded = try
-        Runner._load_profiles(ctrl, dir_path)
-    catch err
-        @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
-        return nothing
-    end
     # chi(psi) and Z_eff(psi) from the file where it carries them, else the control's scalar
     # fallbacks -- the same precedence run_slayer uses. Every other plasma parameter the layer
     # widths depend on is the run's own [SLAYER] setting, so the scan and the SLAYER stage see
     # one plasma.
-    chi = Runner._slayer_chi_inputs(loaded, ctrl; warn=false)
+    loaded, chi = try
+        l = Runner._load_profiles(ctrl, dir_path)
+        l, Runner._slayer_chi_inputs(l, ctrl; warn=false)
+    catch err
+        @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file or the diffusivities its P_perp_model needs." exception = err
+        return nothing
+    end
     return (; profiles=loaded.profiles,
         chi.chi_perp_e, chi.chi_perp_i, chi.chi_tor,
         tau_E=something(ctrl.tau_E, NaN), P_perp_model=ctrl.P_perp_model,

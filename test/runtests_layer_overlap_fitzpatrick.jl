@@ -251,6 +251,9 @@ end
         @test overlap_inputs(Dict("profile_file" => "own_zeff.h5", "impurity_charge" => 10.0, "zeff" => 2.5); dir=tmp).zeff(kin.psi[j]) ≈ 3.2
         Equilibrium.write_kinetic_h5(joinpath(tmp, "no_ni.h5"), Equilibrium.KineticProfileData(; base...))
         @test overlap_inputs(Dict("profile_file" => "no_ni.h5", "zeff" => 2.5); dir=tmp).zeff == 2.5
+        # A P_perp_model whose χ⊥,i the file lacks skips the scan with a warning rather than aborting the run.
+        @test (@test_logs (:warn, r"Layer-overlap scan skipped") match_mode = :any overlap_inputs(
+            Dict("profile_file" => "no_ni.h5", "P_perp_model" => "D_perp", "chi_perp_i" => NaN); dir=tmp)) === nothing
     end
 
     widths(over) = GeneralizedPerturbedEquilibrium._layer_overlap_scan(overlap_inputs(over), _fresh(), equil).width_dr
