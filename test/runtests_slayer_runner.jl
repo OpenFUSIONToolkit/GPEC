@@ -111,8 +111,10 @@
 
     @testset "GGJ tearing is rejected until its growth-rate extraction exists" begin
         for name in ("ggj_ray", "ggj_shooting", "ggj_galerkin")
-            @test_throws ArgumentError Runner.validate(SLAYERControl(; inner_model=Symbol(name)))
+            @test_throws ArgumentError Runner.validate(SLAYERControl(; enabled=true, inner_model=Symbol(name)))
             @test_throws ArgumentError Runner.slayer_control_from_toml(Dict{String,Any}("enabled" => true, "inner_model" => name))
+            # A disabled section is never solved, so its inner model is not checked.
+            @test Runner.slayer_control_from_toml(Dict{String,Any}("inner_model" => name)).inner_model === Symbol(name)
         end
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing, dir_path=".")
