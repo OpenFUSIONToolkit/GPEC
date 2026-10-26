@@ -43,7 +43,7 @@ end
 Empty `GalerkinResult` for a domain with no resonant surfaces.
 """
 function empty_galerkin_result()
-    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing)
+    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, "none")
 end
 
 """
@@ -180,7 +180,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     sing_q = [s.q for s in sings]
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
-    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution), dp
+    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, ws.solver), dp
 end
 
 """
@@ -245,6 +245,7 @@ are dumped under `Basis/` in the shared axis order. Replaces the Fortran
 function write_galerkin!(out_h5, result::GalerkinResult; basis_output::Bool=false)
     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
     out_h5["$gal/rational_count"] = result.msing
+    out_h5["$gal/solver"] = result.solver
     if result.msing == 0
         annotate_galerkin!(out_h5)
         return nothing
@@ -271,6 +272,8 @@ end
 # Metadata tables for the Galerkin outputs (see docs/development/hdf5-conventions.md).
 const GALERKIN_H5_ANNOTATIONS = [
     "ForceFreeStates/Solutions/GalerkinIntegration/rational_count" => (; long_name="number of rational (singular) surfaces in the Galerkin solve"),
+    "ForceFreeStates/Solutions/GalerkinIntegration/solver" =>
+        (; long_name="banded solver used for the Galerkin system: cholesky, LU, or none when no rational surfaces were present"),
     "ForceFreeStates/Solutions/GalerkinIntegration/psi" => (; long_name="normalized poloidal flux ψ_N grid of the closed Galerkin solution", scale="psi_gal"),
     "ForceFreeStates/Solutions/GalerkinIntegration/q" =>
         (; long_name="safety factor q on the Galerkin solution grid", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
@@ -329,13 +332,21 @@ end
     gal_banded_solve!(mat, sol, kl, ku, solver) -> String
 
 Solve the full-band system `mat` (LAPACK `gbtrf` storage) in place of `sol` and return the
-solver used. `"auto"` tries `gal_cholesky_solve!` and falls back to `gal_scaled_lu_solve!` when
-the matrix is not positive definite; `"cholesky"` errors instead of falling back.
+solver used. `"auto"` tries `gal_cholesky_solve!` and reports a fallback to
+`gal_scaled_lu_solve!` for unequal bandwidths, asymmetric off-diagonal entries, or a
+non-positive-definite real-diagonal system. `"cholesky"` errors instead of falling back.
 """
 function gal_banded_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int, solver::String)
     if solver != "LU"
-        gal_cholesky_solve!(mat, sol, kl, ku) && return "cholesky"
-        solver == "cholesky" && error("gal_solver=\"cholesky\": the Galerkin matrix is not positive definite; use \"auto\" or \"LU\"")
+        if kl != ku
+            solver == "cholesky" && throw(ArgumentError("gal_solver=\"cholesky\" requires equal lower and upper bandwidths (kl=$kl, ku=$ku)"))
+            @info "Galerkin Cholesky requires equal lower and upper bandwidths; solving by LU" kl ku
+        else
+            gal_cholesky_solve!(mat, sol, kl, ku) && return "cholesky"
+            solver == "cholesky" &&
+                error("gal_solver=\"cholesky\": off-diagonal entries are not Hermitian or the real-diagonal system is not positive definite; use \"auto\" or \"LU\"")
+            @info "Galerkin off-diagonal entries are not Hermitian or the real-diagonal system is not positive definite; solving by LU"
+        end
     end
     gal_scaled_lu_solve!(mat, sol, kl, ku)
     return "LU"
@@ -346,18 +357,29 @@ end
 
 Banded Cholesky solve of the full-band system `mat`, leaving `mat` untouched. Rows that are
 identity rows (Dirichlet DOFs: axis, fixed or coil edge) have their columns moved to the
-right-hand side, which keeps the system Hermitian. Only the lower band and the real part of the
-diagonal are used. Returns `false`, with `sol` unchanged, when the matrix is not positive definite.
+right-hand side. The free block's off-diagonal entries must agree with their conjugate
+partners within `1e-10 * sqrt(abs(A_ii)) * sqrt(abs(A_jj))`. Cholesky uses the lower band
+and deliberately projects the diagonal onto its real part. Returns `false`, with `sol`
+unchanged, for unequal bandwidths, nonfinite entries, off-diagonal asymmetry, or a
+non-positive-definite projected matrix.
 """
 function gal_cholesky_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int)
     kl == ku || return false
     n = size(mat, 2)
     off = 2kl + 1
     a(i, j) = mat[off+i-j, j]
-    band(i) = max(1, i - kl):min(n, i + kl)
+    band(i) = max(1, i-kl):min(n, i+kl)
     fixed = [all(j == i ? a(i, j) == 1 : iszero(a(i, j)) for j in band(i)) for i in 1:n]
+    for j in 1:n
+        isfinite(a(j, j)) || return false
+        for i in (j+1):min(n, j+kl)
+            isfinite(a(i, j)) && isfinite(a(j, i)) || return false
+            fixed[i] || fixed[j] ||
+                abs(a(i, j) - conj(a(j, i))) <= 1e-10 * sqrt(abs(a(i, i))) * sqrt(abs(a(j, j))) || return false
+        end
+    end
     ab = zeros(ComplexF64, kl + 1, n)
-    for j in 1:n, i in j:min(n, j + kl)
+    for j in 1:n, i in j:min(n, j+kl)
         ab[1+i-j, j] = fixed[i] || fixed[j] ? (i == j ? one(ComplexF64) : zero(ComplexF64)) : a(i, j)
     end
     gal_zpbtrf!(ab, kl) || return false
@@ -371,8 +393,8 @@ function gal_cholesky_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{Comp
     return true
 end
 
-# Lower-band Hermitian Cholesky as rdcon gal.f: zpbtrf('L') then zpbtrs('L'). LinearAlgebra.LAPACK
-# has no pbtrf!/pbtrs! wrapper, so call LAPACK directly. Returns false if not positive definite.
+# Lower-band Hermitian Cholesky (LAPACK zpbtrf/zpbtrs, 'L'). LinearAlgebra.LAPACK has no
+# pbtrf!/pbtrs! wrapper, so call LAPACK directly. Returns false if not positive definite.
 function gal_zpbtrf!(AB::Matrix{ComplexF64}, kd::Int)
     info = Ref{LinearAlgebra.BlasInt}()
     ccall((LinearAlgebra.BLAS.@blasfunc(zpbtrf_), LinearAlgebra.libblastrampoline), Cvoid,

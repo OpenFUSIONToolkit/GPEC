@@ -522,7 +522,7 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
     ctrl, debug::Bool)
     s2 = 2 * msing
-    Tc = (ctrl !== nothing && ctrl.extended_precision_bvp) ? Complex{Double64} : ComplexF64
+    Tc = (ctrl === nothing || ctrl.extended_precision_bvp) ? Complex{Double64} : ComplexF64
     M_solve = Tc.(M)
     M_lu = lu(M_solve; check=false)
     use_lu = issuccess(M_lu)

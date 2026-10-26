@@ -46,6 +46,11 @@ See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematica
   - `sing_order`: Expansion order, defaulting to `ctrl.frobenius_order`. The Galerkin path overrides it
     per surface (`gal_sing_order`, raised for high-Mercier-index surfaces).
 
+A trace diagnostic warns once per surface per solve when `abs(tr(M₀))/2` exceeds both
+`1e-3 * abs(α)` and a round-off floor of `64 * Base.eps(Float64) * opnorm(M₀, Inf)`. It is not
+a Fourier or radial convergence test; near Mercier marginality the absolute floor avoids
+warning on round-off alone.
+
 ### Returns
 
   - `SingAsymptotics`: Struct containing all asymptotic expansion data
@@ -99,11 +104,12 @@ function compute_sing_asymptotics(
         m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
         alpha_i, p_big, p_small = resonant_block_exponents(m0mat_block, sig)
         alpha[i] = alpha_i
-        # The assembled block's trace is ideally zero; a large one flags a non-converged block.
+        # Warn once on the right side, ignoring traces at the block's round-off scale.
         block_tr = m0mat_block[1, 1] + m0mat_block[2, 2]
-        abs(block_tr) / 2 > 1e-3 * abs(alpha_i) &&
+        trace_floor = 64 * Base.eps(Float64) * opnorm(m0mat_block, Inf)
+        sig > 0 && abs(block_tr) / 2 > max(1e-3 * abs(alpha_i), trace_floor) &&
             @warn @sprintf("Resonant M₀ block at ψ=%.6f, m=%d (sig=%+.0f): |tr|/2 = %.3e is not small against |α| = %.3e",
-                singp.psifac, singp.m[i], sig, abs(block_tr) / 2, abs(alpha_i))
+                singp.psifac, singp.m[i], sig, abs(block_tr) / 2, abs(alpha_i)) _id=(:resonant_trace, objectid(intr), singp.psifac, singp.m[i]) maxlog=1
         r1_i = r1[i]
         power[r1_i] = p_big
         power[r1_i+intr.numpert_total] = p_small

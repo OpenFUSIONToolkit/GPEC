@@ -23,9 +23,12 @@ followed by `solve(MatchProblem(...))`, and a deck run does not write them.
 
 `gal_solver` picks the banded solver. `"auto"` (the default) tries a Hermitian Cholesky
 factorization of the lower band (LAPACK `zpbtrf`/`zpbtrs`, with the Dirichlet rows' columns moved
-to the right-hand side; the diagonal's imaginary part is ignored) and falls back to Jacobi-scaled
-LU when the matrix is not positive definite. `"LU"` skips the Cholesky attempt;
-`"cholesky"` stops with an error instead of falling back.
+to the right-hand side). The free block's off-diagonal entries must be Hermitian within
+`1e-10 * sqrt(abs(A_ii)) * sqrt(abs(A_jj))`; the diagonal's imaginary part is deliberately
+discarded. Unequal bandwidths, off-diagonal asymmetry, or failure of positive definiteness
+trigger a reported fallback to Jacobi-scaled LU. `"LU"` skips the Cholesky attempt;
+`"cholesky"` stops with an error instead of falling back. The factorization actually used is
+recorded as `ForceFreeStates/Solutions/GalerkinIntegration/solver` in `gpec.h5`.
 
 The implementation lives in `src/ForceFreeStates/Galerkin/`:
 

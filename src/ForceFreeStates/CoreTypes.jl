@@ -149,7 +149,7 @@ gpec.toml.
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
   - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
-  - `extended_precision_bvp::Bool` - Solve the Δ' BVP and its PEST3 combination in `Complex{Double64}` (~31 digits). Default `false` (Float64, 1.5–5.4× faster on large matrices); set `true` to check Float64 at small `singfac_min`, where the four-term combination loses digits.
+  - `extended_precision_bvp::Bool` - Solve the Δ' BVP and its PEST3 combination in `Complex{Double64}` (~31 digits). Default `true`, guarding the cancellation in the PEST3 combination. Set `false` to use Float64 after checking the complex Δ' matrix against Double64 at the chosen matching distance.
 """
 @kwdef struct ForceFreeStatesControl
     verbose::Bool = true
@@ -183,7 +183,7 @@ gpec.toml.
     force_termination::Bool = false
     integrator::String = "riccati"   # Default: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream. Use "forward" for dense ξ (PerturbedEquilibrium) or kinetic runs.
     nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
-    extended_precision_bvp::Bool = false   # Δ' BVP in Complex{Double64}; opt-in check of Float64 at small singfac_min.
+    extended_precision_bvp::Bool = true
 
     # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port); selected by integrator = "galerkin" ---
     gal_solver::String = "auto"     # "auto" (banded Cholesky if the matrix is positive definite, else LU), "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs, error if not positive definite)
