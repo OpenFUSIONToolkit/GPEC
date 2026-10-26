@@ -46,7 +46,7 @@ end
 
 """
     galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
-                   intr::ForceFreeStatesInternal; wv=nothing) -> (GalerkinResult, Union{Nothing,DeltaPrimeData})
+                   intr::ForceFreeStatesInternal; wv=nothing, cut_solution=false) -> (GalerkinResult, Union{Nothing,DeltaPrimeData})
 
 Compute the outer-region Δ′ matching matrix by the singular Galerkin method. Port of `gal_solve`
 (gal.f). Single toroidal mode only (`intr.npert == 1`). Returns the solver internals as a
@@ -54,10 +54,11 @@ Compute the outer-region Δ′ matching matrix by the singular Galerkin method. 
 resonant surfaces in the domain it returns an empty result and `nothing`.
 
 `wv` is the vacuum energy matrix from `free_run`, which supplies the free-boundary edge term
-`wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge.
+`wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge. `cut_solution` also keeps the
+cut solution, for a later `MatchProblem`'s composite inner profiles.
 """
 function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
-    intr::ForceFreeStatesInternal; wv=nothing)
+    intr::ForceFreeStatesInternal; wv=nothing, cut_solution::Bool=false)
 
     intr.npert == 1 || error("galerkin_solve: only single-n (npert == 1) is supported")
     ctrl.gal_solver in ("LU", "cholesky") || error("galerkin_solve: gal_solver must be \"LU\" or \"cholesky\"")
@@ -183,7 +184,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     # solution only when a later match needs the composite inner profiles.
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
-        delta=((ctrl.gal_cut_solution || ctrl.gal_match_flag) ? delta : nothing))
+        delta=(cut_solution ? delta : nothing))
 
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]

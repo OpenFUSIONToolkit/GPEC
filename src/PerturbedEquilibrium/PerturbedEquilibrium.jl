@@ -42,7 +42,7 @@ export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, co
 export TorqueResponse, torque_response_matrices, torque_profile
 
 """
-    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr; runtimes=nothing)::PerturbedEquilibriumState
+    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
 
 Main entry point for perturbed equilibrium calculations.
 
@@ -59,8 +59,6 @@ no free-boundary δW yet, so asking for the response or the coupling on one is a
   - `forcing`: the external-field description — a `ForcingTermsControl` (TOML path) or any [`ForcingTerms.RMPField`](@ref)
   - `ctrl`: Control parameters from [PerturbedEquilibrium] section
   - `intr`: Internal state variables
-  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
-    materialization (coil Biot-Savart onto the plasma surface), when that step runs
 
 ## Returns
 
@@ -70,8 +68,7 @@ function compute_perturbed_equilibrium(
     ffs::ForceFreeStatesResult,
     forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField},
     ctrl::PerturbedEquilibriumControl,
-    intr::PerturbedEquilibriumInternal;
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
 
     state = PerturbedEquilibriumState()
@@ -97,10 +94,8 @@ function compute_perturbed_equilibrium(
     # Unit-norm modes an internal caller already placed on `intr` skip materialization, so they
     # are never re-converted or re-weighted.
     if isempty(intr.forcing_modes)
-        ft_start = time()
         modes, coil_sets = materialize_forcing_modes(ffs, forcing;
             dir_path=intr.dir_path, preloaded_coil_sets=intr.coil_sets, verbose=ctrl.verbose)
-        runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
         intr.forcing_modes = modes
         isempty(coil_sets) || (intr.coil_sets = coil_sets)
     end
