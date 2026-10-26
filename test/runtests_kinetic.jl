@@ -359,6 +359,39 @@
     # =========================================================================
     # Resonance root solver
     # =========================================================================
+    @testset "bounce geometry is harmonic-free" begin
+        # Synthetic surface: periodic B(θ) with one well, unit-ish Jacobian, a few perturbation modes.
+        xs = collect(range(0.0, 1.0; length=65))
+        B = @. 1.0 + 0.3 * cos(2pi * xs)
+        dBdth = @. -0.3 * 2pi * sin(2pi * xs)
+        dBdth[end] = dBdth[1]   # periodic fit requires exact repetition of the first sample
+        tspl = cubic_interp(xs, Series(hcat(B, 0.1 .* B, dBdth, 1.0 .+ 0.1 .* B, 0.05 .* B)); bc=PeriodicBC())
+        B_vpar = cubic_interp(xs, B; bc=PeriodicBC())
+        mfac = collect(-2:2)
+        dbob = ComplexF64[0.1, 0.2im, 0.5, -0.3im, 0.05]
+        divx = ComplexF64[0.02, -0.1, 0.3im, 0.1, 0.0]
+        bo = 1.0
+        args = (0.5, 1, 2.0, bo, maximum(B), minimum(B), xs[argmax(B)], tspl, B_vpar, mfac, 1.0, 1.7,
+            dbob, divx, 1.0, 1.0, 3.3e-27, 1.6e-19, 1.6e-16, "fgar")
+        geom = KF.compute_bounce_geometry(args...; nlmda=32, ntheta=48)
+        @test all(geom.valid)
+        b0 = KF.bounce_harmonic(geom, 0, 1, 2.0, 1.7, 5)
+        b1 = KF.bounce_harmonic(geom, 1, 1, 2.0, 1.7, 5)
+        # The harmonic enters only through the action phase: frequencies and grid are shared exactly.
+        @test b0.wb === geom.wb && b1.wd === geom.wd && b0.lambda === b1.lambda
+        @test all(isfinite, b0.dJdJ) && all(>=(0), b0.dJdJ) && b0.dJdJ != b1.dJdJ
+        # The one-shot entry point is the same two steps.
+        b1_direct = KF.compute_bounce_data(args[1], args[2], 1, args[3:end]...; nlmda=32, ntheta=48)
+        @test b1_direct.dJdJ == b1.dJdJ && b1_direct.wb == b1.wb && b1_direct.wd == b1.wd
+        # Matrix path: packed outer products present and the Hermitian diagonals real.
+        I5 = ComplexF64[i == j ? 1 : 0 for i in 1:5, j in 1:5]
+        gm = KF.compute_bounce_geometry(args...; nlmda=16, ntheta=48, do_matrices=true)
+        bm = KF.bounce_harmonic(gm, -1, 1, 2.0, 1.7, 5; smat=I5, tmat=0.5I5, xmat=I5, ymat=0.2I5, zmat=0.1I5)
+        @test size(bm.wmats_vs_lambda) == (16, KF.nqty_matrix(5))
+        @test all(isfinite, bm.wmats_vs_lambda)
+        @test all(abs(imag(bm.wmats_vs_lambda[k, KF._tri_idx(i, i)])) <= 1e-12 * abs(bm.wmats_vs_lambda[k, KF._tri_idx(i, i)]) + 1e-300 for k in 1:16, i in 1:5)
+    end
+
     @testset "find_resonance_energies" begin
         # Roots of Ω(x) = leff·wb·√x + n·(we + wd·x); quadratic n·wd·s² + leff·wb·s + n·we = 0.
         @testset "no real root (negative discriminant)" begin
@@ -582,6 +615,13 @@
         @test ctrl.atol_psi == 0.0
         @test ctrl.rtol_psi == 1e-2
         @test ctrl.maxevals_psi == 2000
+        # Tolerance ladder: pitch derives from ψ by its margin unless set explicitly; the matrix build has its own default.
+        @test isnan(ctrl.rtol_pitch)
+        @test KF.torque_pitch_rtol(ctrl) ≈ 1e-3
+        @test KF.torque_pitch_rtol(KF.KineticForcesControl(; rtol_psi=1e-3)) ≈ 1e-4
+        @test KF.torque_pitch_rtol(KF.KineticForcesControl(; rtol_pitch=1e-5)) == 1e-5
+        @test KF.matrix_pitch_rtol(ctrl) == KF.MATRIX_RTOL_PITCH == 1e-3
+        @test KF.matrix_pitch_rtol(KF.KineticForcesControl(; rtol_pitch=1e-5, rtol_psi=1e-1)) == 1e-5
     end
 
     @testset "KineticForcesInternal defaults" begin

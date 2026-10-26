@@ -1,4 +1,5 @@
 using TOML
+using HDF5
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
 # same pipeline the TOML driver does. Every assertion is anchored on the coarse Solovev fixture
@@ -21,13 +22,14 @@ using TOML
     ffs_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"]
                       if !(k in ("integrator", "nn_low", "nn_high")))
 
-    # Copy the fixture deck into `dir` and apply `[ForceFreeStates]` overrides / extra sections.
-    function _stage_deck(dir; ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
+    # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
+    function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
         for name in readdir(template)
             cp(joinpath(template, name), joinpath(dir, name))
         end
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
+        merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
@@ -73,6 +75,33 @@ using TOML
             # Chunking is a decomposition of the same problem, so Δ′ tracks the TOML run.
             @test size(reference.delta_prime.matrix) == size(api.delta_prime.matrix)
             @test api.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-6
+
+            # With the deck's own (auto) chunking the two runs are the same computation.
+            same = solve(prob, Riccati())
+            @test same.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
+            @test same.delta_prime.raw ≈ reference.delta_prime.raw rtol = 1e-12
+            @test same.delta_prime.coil ≈ reference.delta_prime.coil rtol = 1e-12
+        end
+    end
+
+    @testset "fixed kinetic solve matches the TOML-driven run" begin
+        # Large enough that the fixed kinetic matrices visibly shift the free-boundary energies.
+        kf = 1e-3
+        mktempdir() do dir
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_factor" => kf))]).ffs
+            api = solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=kf, kinetic_source="fixed")
+
+            @test api.mats.kinetic !== nothing
+            @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
+            @test api.diagnostics.nzero == reference.diagnostics.nzero
+            @test api.mlow == reference.mlow
+            @test api.mhigh == reference.mhigh
+            @test api.psilim ≈ reference.psilim rtol = 1e-12
+            @test api.kinetic.kmsing == reference.kinetic.kmsing
+            @test [s.psifac for s in api.kinetic.kinsing] ≈ [s.psifac for s in reference.kinetic.kinsing]
+
+            # Too large a factor for this coarse deck: the integration aborts near ψ = 0.4 and says so.
+            @test_throws "Euler-Lagrange integration aborted" solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=0.1)
         end
     end
 
@@ -90,6 +119,15 @@ using TOML
             @test size(dp.matrix) == (msing, msing)
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
+
+            # With no free-boundary δW, PE refuses the response rather than returning an empty state.
+            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+            @test_throws ErrorException perturbed_equilibrium(api, RMPField(forcing); compute_response=true, write_outputs_to_HDF5=false)
+
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "galerkin", "gal_nx" => 32))]).ffs
+            @test reference.galerkin.msing == msing
+            @test dp.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
+            @test dp.raw ≈ reference.delta_prime.raw rtol = 1e-12
         end
     end
 
@@ -182,10 +220,13 @@ using TOML
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5)
+        @test_throws "kinetic_source = \"calculated\"" solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5, kinetic_source="calculated")
+        @test_throws "does not support kinetic runs" solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
+        @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
         @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
+        @test_throws ErrorException solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=".", ffs_kwargs..., gal_match_flag=true)
     end
 
     # Path of the first field where `a` and `b` differ (recursing into structs, arrays and
@@ -270,6 +311,11 @@ using TOML
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
             @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # PE refuses the response and coupling on it, but still materializes the forcing alone.
+            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+            @test_throws ErrorException perturbed_equilibrium(matched, RMPField(forcing); compute_singular_coupling=true, write_outputs_to_HDF5=false)
+            idle = perturbed_equilibrium(matched, RMPField(forcing); compute_response=false, compute_singular_coupling=false, write_outputs_to_HDF5=false)
+            @test idle isa GPEC.PerturbedEquilibrium.PerturbedEquilibriumState
             # A matched result is a new solution, not an outer solve to match again.
             @test_throws ErrorException MatchProblem(matched; ideal=true)
         end
@@ -299,6 +345,89 @@ using TOML
             # The ideal reference keeps the ideal δW (only a :matched closure drops it).
             @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
             @test matched.solution !== nothing && matched.solution.basis === :gal_native
+        end
+    end
+
+    # Each workflow is run from a deck through `main` and from the same inputs through the API.
+    # A known drift is `@test_broken`, so the change that removes it surfaces as an unexpected pass.
+    @testset "deck and API parity" begin
+        @testset "hdf5 file forcing" begin
+            pe_kwargs = (compute_response=true, compute_singular_coupling=true, verbose=false, write_outputs_to_HDF5=false)
+            mktempdir() do dir
+                modes = GPEC.ForcingTerms.ForcingMode[]
+                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example"), "forcing.dat", "ascii", false)
+                h5open(f -> GPEC.ForcingTerms.save_forcing_to_h5(modes, f), joinpath(dir, "forcing.h5"), "w")
+                _stage_deck(dir;
+                    extra_sections=Dict{String,Any}(
+                        "ForcingTerms" => Dict{String,Any}("forcing_data_file" => "forcing.h5", "forcing_data_format" => "hdf5"),
+                        "PerturbedEquilibrium" => Dict{String,Any}(String(k) => v for (k, v) in pairs(pe_kwargs))))
+                reference = GPEC.main([dir])
+                pe = perturbed_equilibrium(reference.ffs, RMPField(joinpath(dir, "forcing.h5")); pe_kwargs...)
+
+                @test pe.permeability ≈ reference.pe.permeability rtol = 1e-10
+                # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
+                @test pe.forcing_b ≈ reference.pe.forcing_b rtol = 1e-10
+            end
+        end
+
+        @testset "analytic equilibrium on the two-pass auto grid" begin
+            # A coarse psi_accuracy and no local-stability scan keep the 1024-interval pass-1 grid cheap.
+            eq_overrides = Dict{String,Any}("grid_type" => "auto", "mpsi" => 0, "psi_accuracy" => 3e-2)
+            ffs_overrides = Dict{String,Any}("local_stability_flag" => false, "vac_flag" => false)
+            mktempdir() do dir
+                reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
+                pass1 = GPEC.Equilibrium.setup_equilibrium(
+                    GPEC.Equilibrium.EquilibriumConfig(merge(deck["Equilibrium"], eq_overrides), template),
+                    GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
+                )
+                @test reference.equil.rzphi_xs != pass1.rzphi_xs    # the deck re-formed on a refined grid
+
+                kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
+                api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
+                # Known drift: the equilibrium does not store its analytic config, so `solve` cannot re-form it.
+                @test_broken api.equil.rzphi_xs == reference.equil.rzphi_xs
+            end
+        end
+
+        @testset "deck matching under gal_match_flag" begin
+            layer = (eta=1e-7, rho=1e-7, rotation=1.0)
+            # The deck's match keys for `n` surfaces on top of the integrator's own.
+            match_keys(n, solver) = Dict{String,Any}("gal_match_flag" => true, "gal_inner_solver" => solver,
+                "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n), "gal_rotation" => fill(layer.rotation, n))
+
+            mktempdir() do dir
+                gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                # The galerkin inner model returns real-ψ profiles, so the inner profiles are compared too.
+                api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:galerkin))
+                n = length(gal.surfaces)
+                overrides = merge(Dict{String,Any}("integrator" => "galerkin", "gal_nx" => 32, "gal_rpec_flag" => true), match_keys(n, "galerkin"))
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
+
+                @test reference.closure === api.closure === :matched
+                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.match.xi ≈ reference.match.xi rtol = 1e-12
+                # The composite inner profiles are API-only: a deck never keeps the cut solution.
+                @test isempty(reference.match.inner_xi) && isempty(api.match.inner_xi)
+                cut = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                @test length(solve(MatchProblem(cut; layer...), GGJModel(; solver=:galerkin)).match.inner_xi) == n
+            end
+
+            mktempdir() do dir
+                ric = solve(equil, Riccati(); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                api = solve(MatchProblem(ric; layer...), GGJModel(; solver=:ray))
+                overrides = merge(Dict{String,Any}("integrator" => "riccati"), match_keys(length(ric.surfaces), "ray"))
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
+
+                @test reference.closure === :matched
+                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.match.cout ≈ reference.match.cout rtol = 1e-12
+            end
+
+            # A forward solve has no Δ′ to match against, so the deck errors instead of ignoring the flag.
+            mktempdir() do dir
+                @test_throws ErrorException GPEC.main([_stage_deck(dir;
+                    ffs_overrides=Dict{String,Any}("gal_match_flag" => true, "gal_ideal_flag" => true))])
+            end
         end
     end
 end

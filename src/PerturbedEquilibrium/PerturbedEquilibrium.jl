@@ -42,7 +42,7 @@ export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, co
 export TorqueResponse, torque_response_matrices, torque_profile
 
 """
-    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr; runtimes=nothing)::PerturbedEquilibriumState
+    compute_perturbed_equilibrium(ffs, forcing, ctrl, intr)::PerturbedEquilibriumState
 
 Main entry point for perturbed equilibrium calculations.
 
@@ -50,7 +50,8 @@ Computes plasma response to external forcing and calculates singular layer
 coupling metrics. Every ForceFreeStates input — the equilibrium, the mode space, the
 metric and matrix fits, the free-boundary energies and the ξ solution — is read off `ffs`.
 Products the producing integrator could not supply gate the corresponding calculation:
-the step warns and is skipped instead of erroring.
+the step warns and is skipped instead of erroring. Galerkin and `:matched` results publish
+no free-boundary δW yet, so asking for the response or the coupling on one is an error.
 
 ## Arguments
 
@@ -58,8 +59,6 @@ the step warns and is skipped instead of erroring.
   - `forcing`: the external-field description — a `ForcingTermsControl` (TOML path) or any [`ForcingTerms.RMPField`](@ref)
   - `ctrl`: Control parameters from [PerturbedEquilibrium] section
   - `intr`: Internal state variables
-  - `runtimes`: optional collector; receives `"forcing_terms" => dt` for the forcing-mode
-    materialization (coil Biot-Savart onto the plasma surface), when that step runs
 
 ## Returns
 
@@ -69,14 +68,20 @@ function compute_perturbed_equilibrium(
     ffs::ForceFreeStatesResult,
     forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField},
     ctrl::PerturbedEquilibriumControl,
-    intr::PerturbedEquilibriumInternal;
-    runtimes::Union{Nothing,Vector{Pair{String,Float64}}}=nothing
+    intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
 
     state = PerturbedEquilibriumState()
     equil = ffs.equil
     mats = ffs.mats
     mtheta_vacuum = ffs.control.mtheta_vacuum
+
+    # Galerkin and matched results publish no plasma edge response wp, so neither step could run.
+    if (ctrl.compute_response || ctrl.compute_singular_coupling) && ffs.free_boundary === nothing &&
+       (ffs.integrator === :galerkin || ffs.closure === :matched)
+        error("PerturbedEquilibrium needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *
+              "does not publish yet; set compute_response = false and compute_singular_coupling = false, or use a forward solve")
+    end
 
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs)
@@ -89,10 +94,8 @@ function compute_perturbed_equilibrium(
     # Unit-norm modes an internal caller already placed on `intr` skip materialization, so they
     # are never re-converted or re-weighted.
     if isempty(intr.forcing_modes)
-        ft_start = time()
         modes, coil_sets = materialize_forcing_modes(ffs, forcing;
             dir_path=intr.dir_path, preloaded_coil_sets=intr.coil_sets, verbose=ctrl.verbose)
-        runtimes === nothing || push!(runtimes, "forcing_terms" => time() - ft_start)
         intr.forcing_modes = modes
         isempty(coil_sets) || (intr.coil_sets = coil_sets)
     end
