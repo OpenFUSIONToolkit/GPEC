@@ -225,6 +225,7 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
     # growth-rate roots are identical to those of Δ̂_s(ĝ); it only reflects
     # the off-root residual surface, fixing the integration-path orientation
     # so |Δ| contours are consistent across the scan plane.
+    # Real-Q callers see a mirrored axis; the critical resonant field maps back via conj(Δ(−Q)).
     Q_c = im * conj(ComplexF64(Q))
 
     # Boundary condition at p_start

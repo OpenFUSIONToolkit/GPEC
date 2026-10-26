@@ -5,6 +5,49 @@
 # `control.store_scan`) the full Q-plane scan data for plotting.
 
 """
+    CriticalResonantFieldScan
+
+Real-Q torque-balance samples at one surface.
+
+## Fields
+
+  - `Q`       -- sampled normalized frequencies (Cole's axis)
+  - `balance` -- torque-balance value 2·P·(Q0 − Q)/Im[−1/(α + Δ)] at each Q
+  - `Delta`   -- inner-layer Δ(Q) at each Q
+"""
+struct CriticalResonantFieldScan
+    Q::Vector{Float64}
+    balance::Vector{Float64}
+    Delta::Vector{ComplexF64}
+end
+
+"""
+    CriticalResonantFieldResult
+
+Output of `run_critical_resonant_field`, one entry per SLAYER surface.
+
+## Fields
+
+  - `enabled`        -- the analysis ran
+  - `rational_index` -- rational-surface index of each entry
+  - `Q_peak`         -- normalized frequency Q at the torque-balance maximum (NaN if none or skipped)
+  - `br_crit`        -- critical normalized resonant field b_r/B_φ (NaN if none or skipped)
+  - `Q0`             -- normalized natural E×B rotation τ_k·n·Ω_E (NaN where Ω_E is unknown)
+  - `scan`           -- per-surface Q scans; empty unless `store_scan`
+"""
+struct CriticalResonantFieldResult
+    enabled::Bool
+    rational_index::Vector{Int}
+    Q_peak::Vector{Float64}
+    br_crit::Vector{Float64}
+    Q0::Vector{Float64}
+    scan::Vector{CriticalResonantFieldScan}
+end
+
+empty_critical_resonant_field_result() =
+    CriticalResonantFieldResult(false, Int[], Float64[], Float64[], Float64[], CriticalResonantFieldScan[])
+
+"""
     SLAYERResult
 
 Output of the tearing solve. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
@@ -48,6 +91,8 @@ downstream inspection and HDF5 output.
     inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
   - `scan_data`           -- scan results (per-surface in uncoupled, single
     entry in coupled). Empty unless `control.store_scan == true`.
+  - `critical_resonant_field` -- `CriticalResonantFieldResult`; `enabled=false`
+    unless `control.critical_resonant_field.enabled`
 """
 struct SLAYERResult
     enabled::Bool
@@ -66,6 +111,7 @@ struct SLAYERResult
     omega_E::Vector{Float64}
     q_shift::Vector{Float64}
     scan_data::Vector{Union{ScanResult,AMRResult}}
+    critical_resonant_field::CriticalResonantFieldResult
 end
 
 # Empty result (enabled=false path)
@@ -78,5 +124,6 @@ function empty_slayer_result(control::SLAYERControl)
         GrowthRateResult[], nothing,
         LayerWidths[],
         Float64[], Float64[],
-        Union{ScanResult,AMRResult}[])
+        Union{ScanResult,AMRResult}[],
+        empty_critical_resonant_field_result())
 end

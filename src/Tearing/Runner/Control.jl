@@ -6,6 +6,47 @@
 # section(s) of a `gpec.toml`.
 
 """
+    CriticalResonantFieldControl
+
+Configuration for the critical resonant field (torque-balance) analysis, read from the
+`[SLAYER.CriticalResonantField]` TOML section via `critical_resonant_field_control_from_toml`
+or built with the `@kwdef` keyword constructor. The magnetic Prandtl number is the per-surface
+`P_tor` of the SLAYER layer parameters, and the natural rotation is each surface's resolved Ω_E
+(the kinetic file's `omega_E`, or the `omega_E_kHz` override), which it therefore requires.
+
+## Fields
+
+  - `enabled`    -- run the analysis after SLAYER
+  - `Qmin`, `Qmax` -- override the real-Q scan window; `nothing` derives it per surface from Q0, Q_e and Q_i
+  - `n`          -- number of Q samples per surface
+  - `pole_width` -- half-width in Q around the diamagnetic poles Q_e, Q_i within which a torque-balance
+    maximum is discarded as pole-dominated (default 0.02); it can change which maximum sets b_crit
+  - `store_scan` -- write the per-surface Q, torque balance and Δ samples to `gpec.h5`
+"""
+@kwdef struct CriticalResonantFieldControl
+    enabled::Bool = false
+    Qmin::Union{Nothing,Float64} = nothing
+    Qmax::Union{Nothing,Float64} = nothing
+    n::Int = 2000
+    pole_width::Float64 = TORQUE_BALANCE_POLE_WIDTH
+    store_scan::Bool = false
+end
+
+"""
+    critical_resonant_field_control_from_toml(section::AbstractDict) -> CriticalResonantFieldControl
+
+Parse a `[SLAYER.CriticalResonantField]` TOML section. Unknown keys raise an error.
+"""
+function critical_resonant_field_control_from_toml(section::AbstractDict)
+    field_names = Set(String.(fieldnames(CriticalResonantFieldControl)))
+    unknown = [k for k in keys(section) if !(k in field_names)]
+    isempty(unknown) ||
+        throw(ArgumentError("critical_resonant_field_control_from_toml: unknown keys $(unknown) in " *
+                            "[SLAYER.CriticalResonantField]. Known: $(sort(collect(field_names)))."))
+    return CriticalResonantFieldControl(; (Symbol(k) => v for (k, v) in section)...)
+end
+
+"""
     SLAYERControl
 
 Configuration for the SLAYER tearing-mode analysis. All fields are
@@ -106,6 +147,12 @@ there is one consistent interface for resistive and kinetic profiles.
 
   - `store_scan`  -- write the full Q/Δ scan grid to HDF5. `false` by
     default to keep the output file small.
+
+# Critical resonant field
+
+  - `critical_resonant_field` -- `CriticalResonantFieldControl` from the
+    `[SLAYER.CriticalResonantField]` subsection (keyword form:
+    `critical_resonant_field=CriticalResonantFieldControl(; enabled=true)`)
 """
 @kwdef struct SLAYERControl
     enabled::Bool = false
@@ -170,6 +217,8 @@ there is one consistent interface for resistive and kinetic profiles.
     profile_group::String = "/"
 
     store_scan::Bool = false
+
+    critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
 end
 
 const _VALID_INNER_MODELS = (:slayer_fitzpatrick,)
@@ -210,6 +259,10 @@ function validate(ctrl::SLAYERControl)
     all(isfinite, values(ctrl.omega_E_kHz)) ||
         throw(ArgumentError("SLAYERControl: omega_E_kHz contains a " *
                             "non-finite entry: $(ctrl.omega_E_kHz)"))
+    crf = ctrl.critical_resonant_field
+    crf.n >= 3 || throw(ArgumentError("SLAYERControl: CriticalResonantField n must be ≥ 3"))
+    isfinite(crf.pole_width) && crf.pole_width >= 0 ||
+        throw(ArgumentError("SLAYERControl: CriticalResonantField pole_width must be finite and ≥ 0"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
@@ -249,6 +302,8 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "pole_threshold") && (flat["pole_threshold"] = v["pole_threshold"])
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
             haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
+        elseif k == "CriticalResonantField" && v isa AbstractDict
+            flat["critical_resonant_field"] = critical_resonant_field_control_from_toml(v)
         else
             flat[k] = v
         end

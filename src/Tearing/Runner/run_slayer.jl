@@ -443,7 +443,46 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, Ω_E, q_shifts, scan_data_list)
+        layer_widths, Ω_E, q_shifts, scan_data_list,
+        run_critical_resonant_field(model, params, Ω_E, control.critical_resonant_field))
+end
+
+# ---------------------------------------------------------------------
+# Critical resonant field (torque balance)
+# ---------------------------------------------------------------------
+"""
+    run_critical_resonant_field(model, params, omega_E, ctrl) -> CriticalResonantFieldResult
+
+Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
+surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
+Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
+E×B frequency of the m/n mode, Q0 = τ_k·n·Ω_E, with `omega_E` the resolved Ω_E per unit n at
+each surface [rad/s]. A surface whose Ω_E is unknown (NaN) is skipped with a warning; if no
+surface has one, the analysis cannot run and this throws.
+"""
+function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::AbstractVector{<:InnerLayerParameters},
+    omega_E::AbstractVector{<:Real}, ctrl::CriticalResonantFieldControl)
+    ctrl.enabled || return empty_critical_resonant_field_result()
+    model isa SLAYERModel{:fitzpatrick} && eltype(params) <: SLAYERParameters ||
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the SLAYER " *
+                            "fitzpatrick model and SLAYER parameters; got $(typeof(model))."))
+    nsurf = length(params)
+    length(omega_E) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: omega_E has $(length(omega_E)) entries for $nsurf surfaces."))
+    nsurf > 0 && all(isnan, omega_E) &&
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the E×B rotation, but the " *
+                            "kinetic file has no omega_E and no [SLAYER] omega_E_kHz entry covers the surfaces."))
+    Q_peak, br_crit = fill(NaN, nsurf), fill(NaN, nsurf)
+    # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
+    Q0 = Float64[p.tauk * p.n * Ω for (p, Ω) in zip(params, omega_E)]
+    scan = CriticalResonantFieldScan[]
+    for (k, p) in enumerate(params)
+        tb = TorqueBalance(model, p, Q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2)
+        Qs, bal, Q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n,
+            pole_width=ctrl.pole_width)
+        ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Float64, Qs), bal, Δs))
+    end
+    return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, Q0, scan)
 end
 
 # ---------------------------------------------------------------------

@@ -15,7 +15,8 @@
 #   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
 #   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame)
 #   │                           (flat-plus-offsets ragged encoding)
-#   └── Scan/               -- optional: full Q/Δ scan data
+#   ├── Scan/               -- optional: full Q/Δ scan data
+#   └── CriticalResonantField/ -- optional: torque-balance b_r/B_φ crit per surface
 
 using HDF5
 
@@ -57,8 +58,27 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     if result.control.store_scan && !isempty(result.scan_data)
         _write_scan_data!(g, result)
     end
+    result.critical_resonant_field.enabled && _write_critical_resonant_field!(g, result.critical_resonant_field)
     _annotate_tearing!(g)
     return g
+end
+
+# ---------- critical resonant field ----------
+function _write_critical_resonant_field!(g, crf::CriticalResonantFieldResult)
+    cg = create_group(g, "CriticalResonantField")
+    cg["rational_index"] = crf.rational_index
+    cg["Q_peak"] = crf.Q_peak
+    cg["br_crit"] = crf.br_crit
+    cg["Q0"] = crf.Q0
+    isempty(crf.scan) && return nothing
+    scan = create_group(cg, "Scan")
+    for (k, sc) in enumerate(crf.scan)
+        sg = create_group(scan, "Surface_$k")
+        sg["Q"] = sc.Q
+        sg["balance"] = sc.balance
+        sg["Delta"] = sc.Delta
+    end
+    return nothing
 end
 
 # Token recorded in the Tearing group's layer_model attribute; keyed by the
@@ -138,7 +158,21 @@ const TEARING_H5_ANNOTATIONS = [
     "LayerWidths/delta_s_over_d_beta" => (; long_name="complex dimensionless layer thickness δ_s/d_β", dims=("surface",)),
     "LayerWidths/delta_s" => (; long_name="complex resistive layer thickness δ_s (Riccati)", dims=("surface",)),
     "LayerWidths/delta_s_abs" => (; long_name="physical resistive layer thickness |δ_s|", units="m", dims=("surface",)),
-    "LayerWidths/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",))
+    "LayerWidths/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
+    "CriticalResonantField/rational_index" => (; long_name="rational-surface index of each row", dims=("surface",)),
+    "CriticalResonantField/Q_peak" =>
+        (; long_name="normalized frequency Q (Cole axis) at the torque-balance maximum (NaN = no maximum or surface skipped)", units="1", dims=("surface",)),
+    "CriticalResonantField/br_crit" =>
+        (; long_name="critical normalized resonant field b_r/B_φ for error-field penetration (Cole-Fitzpatrick 2006 Eq. 62; NaN = no maximum or surface skipped)",
+            units="1", dims=("surface",)),
+    "CriticalResonantField/Q0" =>
+        (; long_name="normalized natural E×B rotation Q0 = τ_k·n·Ω_E of the m/n mode (NaN where Ω_E is unknown)", units="1", dims=("surface",))
+]
+
+const TEARING_CRF_SCAN_H5_ANNOTATIONS = [
+    "Q" => (; long_name="sampled real normalized frequency Q (Cole axis)", units="1"),
+    "balance" => (; long_name="torque balance 2·P·(Q0 − Q)/Im[−1/(α + Δ)]", units="1"),
+    "Delta" => (; long_name="complex inner-layer Δ(Q) on the Cole axis", units="1")
 ]
 
 const TEARING_RAGGED_H5_ANNOTATIONS = [
@@ -163,6 +197,11 @@ function _annotate_tearing!(g)
     if haskey(g, "Diagnostics")
         for sub in keys(g["Diagnostics"])
             ann.annotate!(g["Diagnostics"][sub], TEARING_RAGGED_H5_ANNOTATIONS)
+        end
+    end
+    if haskey(g, "CriticalResonantField/Scan")
+        for sub in keys(g["CriticalResonantField/Scan"])
+            ann.annotate!(g["CriticalResonantField/Scan"][sub], TEARING_CRF_SCAN_H5_ANNOTATIONS)
         end
     end
     if haskey(g, "Scan")

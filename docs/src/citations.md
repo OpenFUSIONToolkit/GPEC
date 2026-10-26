@@ -124,6 +124,14 @@ The basis for the presently implemented in Fortran SLAYER code which computes th
 
 ---
 
+> A. Cole and R. Fitzpatrick, "Drift-magnetohydrodynamical model of error-field penetration in tokamak plasmas,"
+> *Physics of Plasmas* **13**, 032503 (2006).
+> DOI: [10.1063/1.2178167](https://doi.org/10.1063/1.2178167)
+
+The torque-balance error-field penetration threshold (Eqs. 61–62) behind the critical resonant field computed in `Tearing.CriticalResonantField`.
+
+---
+
 > A. Burgess et al., "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer,"
 > Preprint (2026).
 
