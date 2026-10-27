@@ -409,8 +409,9 @@ function write_gpec_toml_coil(
         println(io, "[Wall]")
         println(io, "shape = \"nowall\"")
         println(io)
+        println(io, "[LocalStability]")
+        println(io)
         println(io, "[ForceFreeStates]")
-        println(io, "local_stability_flag = true")
         println(io, "vac_flag = true")
         @printf(io, "qlow     = %.4f\n", p.qlow)
         # Match the Fortran sas_flag truncation: integration stops at q = qhigh
@@ -471,8 +472,9 @@ function write_gpec_toml_file(
         println(io, "[Wall]")
         println(io, "shape = \"nowall\"")
         println(io)
+        println(io, "[LocalStability]")
+        println(io)
         println(io, "[ForceFreeStates]")
-        println(io, "local_stability_flag = true")
         println(io, "vac_flag = true")
         @printf(io, "qlow     = %.4f\n", p.qlow)
         @printf(io, "dW_edge_scan_start = %.4f\n", p.psiedge)
@@ -512,7 +514,7 @@ function setup_equil(p::FortranRunParams, fortran_dir::String)
         "flux_surface_rtol" => 1e-7
     )
     eq_config = Equilibrium.EquilibriumConfig(eq_dict, fortran_dir)
-    return Equilibrium.setup_equilibrium(eq_config)
+    return Equilibrium.PlasmaEquilibrium(eq_config)
 end
 
 # ─── Phi_x comparison (coil mode) ────────────────────────────────────────────

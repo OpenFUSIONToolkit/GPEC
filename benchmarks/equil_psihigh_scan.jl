@@ -97,7 +97,7 @@ for method in methods
         local success = false
         local err_msg = ""
         try
-            t = @elapsed pe = setup_equilibrium(cfg)
+            t = @elapsed pe = PlasmaEquilibrium(cfg)
             runtime = t
             success = true
         catch e

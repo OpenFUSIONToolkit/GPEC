@@ -19,7 +19,7 @@ function build_grids()
     tau = eq_config.psi_accuracy
 
     # Pass 1 (coarse layout) and the two-pass refined grid, as the driver builds them
-    equil1 = GPE.Equilibrium.setup_equilibrium(eq_config, additional_input)
+    equil1 = GPE.Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
     pass1 = copy(equil1.profiles.xs)
     rationals = GPE.ForceFreeStates.rational_psi_nodes(equil1; nlow=1, nhigh=1)
     auto = GPE.Equilibrium.refined_psi_grid(equil1; tau, mandatory=rationals)

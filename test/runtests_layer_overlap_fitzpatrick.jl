@@ -151,7 +151,7 @@ end
 
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-    equil = Equilibrium.setup_equilibrium(
+    equil = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path),
         Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
@@ -234,6 +234,14 @@ end
     oi = overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
     @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
 
+    # A disabled section feeds the scan whatever its inner model, and a missing or empty file only skips the scan;
+    # with tearing enabled the same file is an error, raised here rather than after every other stage.
+    @test overlap_inputs(Dict("inner_model" => "ggj_ray")) !== nothing
+    @test (@test_logs (:warn, r"Layer-overlap scan skipped") match_mode = :any overlap_inputs(Dict("profile_file" => "missing.h5"))) === nothing
+    @test (@test_logs overlap_inputs(Dict("profile_file" => ""))) === nothing
+    @test_throws ErrorException overlap_inputs(Dict("enabled" => true, "profile_file" => "missing.h5"))
+    @test_throws ErrorException overlap_inputs(Dict("enabled" => true, "profile_file" => ""))
+
     # Z_eff(psi) comes from the kinetic file's own n_i/n_e with the [SLAYER] impurity charge.
     kin_path = joinpath(trunc_dir, slayer_section["profile_file"])
     kin = Equilibrium.read_kinetic_file(kin_path)
@@ -305,7 +313,7 @@ end
 
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
     trunc_inputs = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
-    diiid(psihigh) = Equilibrium.setup_equilibrium(
+    diiid(psihigh) = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh)), trunc_dir), nothing)
     long, short = diiid(0.9999), diiid(0.995)
 
@@ -345,7 +353,7 @@ end
     # No 2D flux, no X-point: an analytic equilibrium is not extrapolated.
     sol_dir = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     sol_inputs = TOML.parsefile(joinpath(sol_dir, "gpec.toml"))
-    solovev = Equilibrium.setup_equilibrium(
+    solovev = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(sol_inputs["Equilibrium"], sol_dir), Equilibrium.SolovevConfig(sol_inputs["SOL_INPUT"]))
     @test separatrix_q_law(solovev) === nothing
 end

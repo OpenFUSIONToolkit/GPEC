@@ -44,7 +44,7 @@ using GeneralizedPerturbedEquilibrium
 
     @testset "EFIT: efit and efit_arclength tracers agree" begin
         efit_file = joinpath(@__DIR__, "test_data", "CHEASE_test_data", "EQDSK_COCOS_02")
-        efit_eq(kind) = Eq.setup_equilibrium(Eq.EquilibriumConfig(; eq_filename=efit_file, eq_type=kind,
+        efit_eq(kind) = Eq.PlasmaEquilibrium(Eq.EquilibriumConfig(; eq_filename=efit_file, eq_type=kind,
             jac_type="boozer", grid_type="core_edge_packed", psilow=0.01, psihigh=0.994, mpsi=64, mtheta=128))
         direct, arclength = efit_eq("efit"), efit_eq("efit_arclength")
         # Two integrators with different step sequences along the same surfaces. Measured: Jacobian 8.7e-8

@@ -84,7 +84,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         inputs = TOML.parsefile(gpec_path)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dirname(gpec_path))
         addl = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-        return GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, addl)
+        return GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, addl)
     end
 
     @testset "sing_der" begin
