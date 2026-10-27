@@ -97,7 +97,7 @@ end
         F = GeneralizedPerturbedEquilibrium.ForceFreeStates
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
             GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
@@ -453,7 +453,7 @@ end
             eq_inputs = copy(inputs["Equilibrium"])
             eq_inputs["psilow"] = psilow
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(eq_inputs, ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
             ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., kwargs...)
             intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
             intr.nlow = ctrl.nn_low
@@ -598,7 +598,7 @@ end
         ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
         sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, sol_cfg)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, sol_cfg)
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
         FFS.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low

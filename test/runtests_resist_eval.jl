@@ -15,7 +15,7 @@
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
     eq_cfg = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path)
     sol_cfg = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
-    equil = Equilibrium.setup_equilibrium(eq_cfg, sol_cfg)
+    equil = Equilibrium.PlasmaEquilibrium(eq_cfg, sol_cfg)
 
     # Spitzer-like η at ~1 keV and deuterium ρ at n_e = 5e19 m⁻³.
     eta, rho = 3e-8, 2 * Utilities.PhysicalConstants.M_P * 5e19

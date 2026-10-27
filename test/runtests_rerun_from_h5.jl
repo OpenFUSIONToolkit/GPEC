@@ -326,7 +326,7 @@ end
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
 
-# Drift guard for the analytic-equilibrium registry: setup_equilibrium and the rerun builder both
+# Drift guard for the analytic-equilibrium registry: `run_input` and the rerun builder both
 # dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
 # empty section) would silently break one path. Asserting each entry is well-formed and that
 # build_analytic_config resolves it keeps adding a new analytic kind a one-row change.
