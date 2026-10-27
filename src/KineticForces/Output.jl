@@ -67,13 +67,13 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
             mg["psi"] = result.psi_grid
             mg["dTdpsi"] = result.dtdpsi
             mg["T"] = result.t_cumulative
+            if !isempty(result.dtdpsi_ell)
+                mg["ell"] = result.ell
+                mg["dTdpsi_ell"] = result.dtdpsi_ell
+            end
             if dVdpsi_spline !== nothing
                 mg["dVdpsi"] = [dVdpsi_spline(p) for p in result.psi_grid]
             end
-        end
-
-        if !isempty(result.records)
-            write_integration_records!(mg, result.records)
         end
     end
 
@@ -115,17 +115,9 @@ const KF_METHOD_H5_ANNOTATIONS = [
     "psi" => (; long_name="normalized poloidal flux ψ_N at quadrature evaluation points", scale="psi"),
     "dTdpsi" => (; long_name="complex torque density dT/dψ_N = dT_φ/dψ_N + 2i·n·dδW_k/dψ_N; divide by dVdpsi for dT/dV", units="N*m", dims=("psi",), attach=(1 => "psi",)),
     "T" => (; long_name="cumulative complex torque T(ψ_N) = T_φ + 2i·n·δW_k (trapezoidal)", units="N*m", dims=("psi",), attach=(1 => "psi",)),
+    "ell" => (; long_name="bounce harmonic ℓ ∈ -nl:nl of the per-harmonic torque density", scale="ell"),
+    "dTdpsi_ell" => (; long_name="complex torque density dT/dψ_N resolved by bounce harmonic ℓ; summing over ℓ reproduces dTdpsi", units="N*m", dims=("psi", "ell"), attach=(1 => "psi", 2 => "ell")),
     "dVdpsi" => (; long_name="flux-surface volume derivative dV/dψ_N at quadrature points", units="m^3", dims=("psi",), attach=(1 => "psi",)),
-    "EnergyIntegrals/psi" => (; long_name="ψ_N of each energy-integration record"),
-    "EnergyIntegrals/lambda" => (; long_name="pitch λ = μB0/E of each record"),
-    "EnergyIntegrals/ell" => (; long_name="bounce harmonic ℓ of each record"),
-    "EnergyIntegrals/leff" => (; long_name="effective bounce harmonic ℓ_eff = ℓ + n·q (circulating) or ℓ (trapped)"),
-    "EnergyIntegrals/torque" => (; long_name="complex torque contribution of the record", units="N*m"),
-    "EnergyIntegrals/kinetic_energy" => (; long_name="complex kinetic energy contribution of the record", units="J"),
-    "EnergyIntegrals/trajectory_offsets" => (; long_name="ragged-array offsets: record k spans offsets[k]+1:offsets[k+1] of the *_all arrays"),
-    "EnergyIntegrals/x_all" => (; long_name="normalized energy x = E/T abscissae of all integration trajectories (concatenated)"),
-    "EnergyIntegrals/integrand_all" => (; long_name="complex energy-space torque integrand along all trajectories (concatenated)"),
-    "EnergyIntegrals/integral_all" => (; long_name="complex cumulative energy-space integral along all trajectories (concatenated)"),
     "KineticMatrices/A" => (; long_name="Logan 2015 drift-kinetic coefficient matrix A = W_Z†W_Z (energy normalization)", dims=("mode_row", "mode_col")),
     "KineticMatrices/B" => (; long_name="Logan 2015 drift-kinetic coefficient matrix B = W_Z†W_X (energy normalization)", dims=("mode_row", "mode_col")),
     "KineticMatrices/C" => (; long_name="Logan 2015 drift-kinetic coefficient matrix C = W_Z†W_Y (energy normalization)", dims=("mode_row", "mode_col")),
@@ -133,63 +125,6 @@ const KF_METHOD_H5_ANNOTATIONS = [
     "KineticMatrices/E" => (; long_name="Logan 2015 drift-kinetic coefficient matrix E = W_X†W_Y (energy normalization)", dims=("mode_row", "mode_col")),
     "KineticMatrices/H" => (; long_name="Logan 2015 drift-kinetic coefficient matrix H = W_Y†W_Y (energy normalization)", dims=("mode_row", "mode_col"))
 ]
-
-"""
-    write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
-
-Write variable-length integration trajectory records using offset-indexed concatenated arrays.
-This is the standard HDF5 ragged array pattern for storing variable-length data.
-
-# Arguments
-
-  - `mg::HDF5.Group`: HDF5 group for this method
-  - `records::Vector{EnergyIntegrationResult}`: Integration records to write
-"""
-function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
-    rg = create_group(mg, "EnergyIntegrals")
-
-    # Scalar fields per record
-    rg["psi"] = [r.psi for r in records]
-    rg["lambda"] = [r.lambda for r in records]
-    rg["ell"] = [r.ell for r in records]
-    rg["leff"] = [r.leff for r in records]
-    rg["torque"] = [r.torque for r in records]
-    rg["kinetic_energy"] = [r.kinetic_energy for r in records]
-
-    # Variable-length trajectories: concatenate all, store offsets for indexing
-    lengths = [length(r.x_trajectory) for r in records]
-    offsets = cumsum([0; lengths])
-    rg["trajectory_offsets"] = offsets
-
-    if sum(lengths) > 0
-        rg["x_all"] = vcat([r.x_trajectory for r in records]...)
-        rg["integrand_all"] = vcat([r.integrand_trajectory for r in records]...)
-        rg["integral_all"] = vcat([r.integral_trajectory for r in records]...)
-    end
-end
-
-
-"""
-    print_summary(state::KineticForcesState; verbose::Bool=false)
-
-Print a summary of KineticForces results to stdout.
-
-# Arguments
-
-  - `state::KineticForcesState`: Accumulated computation results
-  - `verbose::Bool`: Print detailed per-surface results
-"""
-function print_summary(state::KineticForcesState; verbose::Bool=false)
-    for (method_name, result) in state.method_results
-        @printf("%-8s  T_phi = %11.3e   2n*dW_k = %11.3e\n",
-            method_name, real(result.total_torque), imag(result.total_torque))
-    end
-    if verbose
-        for (method_name, _) in state.kinetic_matrices
-            println("  Kinetic matrices stored for: $method_name")
-        end
-    end
-end
 
 """
     write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil)

@@ -17,7 +17,7 @@ function run_ffs(ex; integrator)
     ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
         (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
     eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-    equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+    equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)

@@ -82,7 +82,7 @@ for m in all_methods
     println("--- Running: $m ---")
     cfg = make_config(config_path, m, psihigh_arg)
     try
-        pes[m] = setup_equilibrium(cfg)
+        pes[m] = PlasmaEquilibrium(cfg)
         println("  Done.\n")
     catch e
         println("  FAILED: $e\n")

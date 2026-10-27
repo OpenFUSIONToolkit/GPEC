@@ -122,6 +122,7 @@ end
 function _apply_alg!(kwargs::Dict{Symbol,Any}, alg::Galerkin)
     _set_ctrl!(kwargs, :integrator, String(_integrator_symbol(alg)), alg)
     for name in fieldnames(Galerkin)
+        name === :cut_solution && continue    # a solve option, not a control field
         _set_ctrl!(kwargs, Symbol(:gal_, name), getfield(alg, name), alg)
     end
     return kwargs

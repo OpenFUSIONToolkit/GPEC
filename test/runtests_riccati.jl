@@ -101,7 +101,7 @@ end
 
     ctrl = FFS.ForceFreeStatesControl(;
         (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-    equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+    equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
         GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
         GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 

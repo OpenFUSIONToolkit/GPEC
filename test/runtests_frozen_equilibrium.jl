@@ -104,6 +104,17 @@ using GeneralizedPerturbedEquilibrium
         @test maximum(abs, spectra[1]) > 0
         @test spectra[2] ≈ spectra[1] rtol = 1e-12
         @test rc.C * spectra[2] ≈ rc.C * spectra[1] rtol = 1e-12
+        analytic_inputs = deepcopy(inputs)
+        analytic_inputs["Equilibrium"]["eq_type"] = "sol"
+        analytic_inputs["SOL_INPUT"] = Dict("elongation" => 1.8)
+        h5open(path, "r+") do f
+            delete_object(f, "Input/gpec_toml_raw")
+            f["Input/gpec_toml_raw"] = sprint(io -> TOML.print(io, analytic_inputs))
+        end
+        analytic_snapshot = GPEC.equilibrium_from_h5(path).equil
+        @test analytic_snapshot.analytic isa Eq.SolovevConfig
+        @test analytic_snapshot.analytic.elongation == 1.8
+        @test analytic_snapshot.profiles.q_spline.y == profile_values[4]
         h5open(path, "r+") do f
             delete_object(f, "Equilibrium/Profiles/q")
         end
