@@ -236,7 +236,8 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
       + `:c_beta` -- P_perp = c_β² (J.-K. Park, Phys. Plasmas 29, 072506 (2022), Eq. 9 with K = 0),
         the χ⊥ → 0 limit of `:D_perp`
       + `:tau_E`  -- P_perp = P_tor = τ_R/τ_E(r_s) (Fitzpatrick 2023, Eqs. 37-38, 81-83 and 131), from
-        a uniform χ_E = κ_e a²/τ̄_E with κ_e = 3/16. Both Prandtl numbers come from χ_E, so
+        a uniform χ_E = κ_e a²/τ̄_E with κ_e = 3/16, the value for T_e ∝ 1 − r̂² (Eq. 38). Other
+        profile shapes change κ_e by a factor of order 2-3. Both Prandtl numbers come from χ_E, so
         `chi_tor` is ignored in this mode
     `chi_perp_e` still sets the critical-Δ `dc_tmp` in every mode.
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
