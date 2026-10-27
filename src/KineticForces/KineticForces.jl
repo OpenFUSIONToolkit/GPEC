@@ -66,7 +66,6 @@ const twopi = 2π
 const μ₀    = 4e-7 * π
 const rad2deg = 180 / π
 const deg2rad = π / 180
-const iunit = 1im               # equivalent to Fortran's (0,1)
 
 # Treat-as-zero threshold for singular denominators and degenerate-coefficient
 # checks. Used by the resonance solver, the Sokhotski-Plemelj pole shift, and

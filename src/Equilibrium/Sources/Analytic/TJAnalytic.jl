@@ -1,233 +1,43 @@
 """
-    lar_init_conditions(rmin, sigma_type, params)
+    TJAnalyticConfig(...)
 
-Initializes the starting radius and state vector for solving the LAR ODE system.
-Also evaluates the initial derivative using the analytic model.
+Parameters for the **TJ-analytic** cylindrical large-aspect-ratio equilibrium
+model — a GPEC adaptation of the analytic profile family used by
+R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).  We follow the
+same analytic-profile parameterization (ψ-ODE in dimensionless r/a, f₁
+for q, power-law pressure) for the inner cylindrical core and connect it
+to GPEC's direct-GS pipeline; this is NOT a re-implementation of TJ.
 
-## Arguments:
+The model uses analytic profiles with exact control of both the on-axis
+and edge safety factors. The q profile is determined by:
 
-  - `rmin`: Normalized starting radius (as a fraction of `lar_a`).
-  - `lar_input`: A `LargeAspectRatioConfig` object containing equilibrium parameters.
+    f1(r) = [1 - (1-r²)^ν] / (ν·q0)
+    q(r)  = r² / f1(r)
 
-## Returns:
+where ν = qa/q0 is the current peaking parameter, q0 is the axis q, and qa
+is the edge q. All lengths are normalized to R₀, fields to B₀. The pressure
+profile is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`.
 
-  - `r`: Physical radius corresponding to `rmin * lar_a`.
-  - `y`: Initial state vector of length 5.
+Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-function lar_init_conditions(rmin::Float64, lar_input::LargeAspectRatioConfig)
-    lar_a = lar_input.lar_a
-    lar_r0 = lar_input.lar_r0
-    q0 = lar_input.q0
-
-    # Ensure rmin is not too small to avoid numerical issues in LAR equations
-    # Use a physically meaningful minimum (0.001% of minor radius)
-    if rmin < 1e-6
-        @warn "Setting rmin to at least 1e-6 to avoid singularities in LAR equations."
-        rmin_safe = 1e-6
-    else
-        rmin_safe = rmin
-    end
-
-    r = rmin_safe * lar_a
-    y = zeros(5)
-
-    y[1] = r^2 / (lar_r0 * q0)
-    y[2] = 1.0
-    y[3] = y[1] * lar_r0 / 2
-
-    dy = zeros(5)
-    lar_der(dy, r, y, lar_input)
-
-    y[5] = dy[5] * r / 4
-
-    q = r^2 * y[2] / (lar_r0 * y[1])
-    y[4] = (q / r)^2 * y[5] / 2
-
-    return r, y
+@kwdef mutable struct TJAnalyticConfig <: AnalyticEquilibriumConfig
+    r0::Float64 = 10.0         # Major radius R₀ [m]
+    a::Float64 = 1.0           # Minor radius a [m] (ε = a/R₀)
+    q0::Float64 = 1.5          # On-axis safety factor
+    qa::Float64 = 3.6          # Edge safety factor
+    p0::Float64 = 0.001        # Normalized on-axis pressure
+    pressure_peaking::Float64 = 2.0 # Pressure peaking exponent μ: p₂ = p0·(1-r²)^μ
+    B0::Float64 = 12.0         # On-axis toroidal field [T]
+    ma::Int = 128              # Radial grid points
+    mtheta::Int = 128          # Poloidal grid points
+    zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
 """
-    lar_der(dy, r, y, lar_input)
-
-Evaluates the spatial derivatives of the LAR (Large Aspect Ratio) equilibrium ODE system
-at a given radius `r`, using the current state vector `y` and equilibrium parameters.
-
-## Arguments:
-- `dy`: A preallocated vector where the computed derivatives will be stored (in-place).
-- `r`: The radial position at which the derivative is evaluated.
-- `y`: The current state vector.
-- `lar_input`: A `LargeAspectRatioConfig` object containing equilibrium shaping parameters.
-
-## Returns:
-- 0. The result is stored in-place in `dy`.
+Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table.
 """
-
-function lar_der(dy::Vector{Float64}, r::Float64, y::Vector{Float64}, lar_input::LargeAspectRatioConfig)
-    lar_a = lar_input.lar_a
-    lar_r0 = lar_input.lar_r0
-
-    q0 = lar_input.q0
-
-    beta0 = lar_input.beta0
-    p00 = beta0 / 2.0
-    p_pres = lar_input.p_pres
-    p_sig = lar_input.p_sig
-
-    sigma_type = lar_input.sigma_type
-    x = r / lar_a
-    xfac = 1 - x^2
-    pp = -2 * p_pres * p00 * x * xfac^(p_pres - 1)  # p'
-    sigma0 = 2.0 / (q0 * lar_r0)
-
-    sigma = if sigma_type == "wesson"
-        sigma0 * xfac^p_sig
-    else
-        sigma0 / (1 + x^(2 * p_sig))^(1 + 1 / p_sig)
-    end
-
-    # LAR equations have singularities at r=0; ensure we never evaluate there
-    @assert r > 0.0 "LAR equations require r > 0 (called with r=$r)"
-
-    bsq = (y[1] / r)^2 + y[2]^2     # B²
-    q = r^2 * y[2] / (lar_r0 * y[1])
-
-    dy[1] = -pp / bsq * y[1] + sigma * y[2] * r
-    dy[2] = -pp / bsq * y[2] - sigma * y[1] / r
-    dy[3] = y[1] * lar_r0 / r
-    dy[4] = (q / r)^2 * y[5] / r
-    dy[5] = y[2] * (r / q)^2 * (r / lar_r0) * (1 - 2 * (lar_r0 * q / y[2])^2 * pp)
-
-    return 0
-end
-
-"""
-    lar_run(lar_input)
-
-Solves the LAR (Large Aspect Ratio) plasma equilibrium ODE system using analytic profiles
-defined by `lar_input`, and returns the full solution table including derived quantities.
-
-## Arguments:
-- `lar_input`: A `LargeAspectRatioConfig` object containing profile and geometric parameters.
-
-## Returns:
- - working on it not yet implemented
-"""
-
-function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConfig)
-    rmin = 1e-4
-    lar_a = lar_input.lar_a
-    lar_r0 = lar_input.lar_r0
-    q0 = lar_input.q0
-    beta0 = lar_input.beta0
-    sigma_type = lar_input.sigma_type
-
-    p00 = beta0 / 2.0
-    lar_input.p_pres = max(lar_input.p_pres, 1.001)
-
-    sigma0 = 2.0 / (q0 * lar_r0)
-
-    ma = lar_input.ma
-    mtau = lar_input.mtau
-
-    function dydr(du, u, p, r)
-        lar_input = p
-        return lar_der(du, r, u, lar_input)
-    end
-
-    r0, y0 = lar_init_conditions(rmin, lar_input)
-    tspan = (r0, lar_a)
-    p = lar_input
-
-    prob = ODEProblem(dydr, y0, tspan, p)
-
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol), dense=false)
-    check_equil_solve(sol, "large-aspect-ratio radial profiles")
-
-    r_arr = sol.t
-    y_mat = reduce(hcat, sol.u)'
-    steps = length(r_arr)
-
-    temp = zeros(steps, 9)
-    for i in 1:steps
-        r = r_arr[i]
-        @views y = y_mat[i, :]
-        x = r / lar_a
-        xfac = 1 - x^2
-        pval = p00 * xfac^lar_input.p_pres
-        sigma = (sigma_type == "wesson") ?
-                sigma0 * xfac^lar_input.p_sig :
-                sigma0 / (1 + x^(2 * lar_input.p_sig))^(1 + 1 / lar_input.p_sig)
-        q = r^2 * y[2] / (lar_r0 * y[1])
-        temp[i, 1] = r
-        temp[i, 2] = y[1]
-        temp[i, 3] = y[2]
-        temp[i, 4] = y[3]
-        temp[i, 5] = y[4]
-        temp[i, 6] = y[5]
-        temp[i, 7] = pval
-        temp[i, 8] = sigma
-        temp[i, 9] = q
-    end
-
-    xs_r = temp[:, 1]
-    fs_r = temp[:, 2:9]
-    spl = cubic_interp(xs_r, Series(fs_r); extrap=ExtendExtrap())
-    spl_deriv = deriv1(spl)
-
-    dr = lar_a / (ma + 1)
-    r = 0.0
-    psio = temp[end, 4]  # ψ_edge
-
-    sq_xs = zeros(ma + 1)
-    sq_fs = zeros(ma + 1, 3)
-    r_nodes = zeros(ma + 1)
-    rzphi_y_nodes = range(0.0, 1.0; length=mtau + 1)
-    rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
-
-    hint = Ref(1)
-    for ia in 1:(ma+1)
-        r += dr
-        r_nodes[ia] = r
-        f = spl(r; hint=hint)
-        f1 = spl_deriv(r; hint=hint)
-        dψdr = f1[3]
-
-        # Fill spline data for sq_in
-        sq_xs[ia] = f[3] / psio  # ψ / psio
-        sq_fs[ia, 1] = lar_r0 * f[2]  # F = R0 * Bphi
-        sq_fs[ia, 2] = f[6]  # P
-        sq_fs[ia, 3] = f[8]  # q
-
-        # Compute Shafranov shift and fill rzphi grid
-        r2 = -(f[4] * r / f[8]) / dψdr
-        if lar_input.zeroth
-            r2 = 0.0
-        end
-        for itau in 1:(mtau+1)
-            θ = 2π * (itau - 1) / mtau
-            cosθ, sinθ = cos(θ), sin(θ)
-            rfac = r + r2 * cosθ
-            rzphi_fs_nodes[ia, itau, 1] = lar_r0 + rfac * cosθ
-            rzphi_fs_nodes[ia, itau, 2] = rfac * sinθ
-        end
-    end
-
-    sq_in = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
-    # rz_in_xs is ψ_N (see InverseRunInput struct docs).  Passing physical r
-    # works only by accident when lar_a ≈ 1; otherwise the inverse solver
-    # extrapolates the (R, Z) splines at outer surfaces.
-    rz_in_xs = sq_xs
-    rz_in_ys = collect(rzphi_y_nodes)
-
-    @views rzphi_fs_nodes[:, end, :] .= rzphi_fs_nodes[:, 1, :]
-
-    itp_2d_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; itp_2d_opts...)
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)
-
-    # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0.
-    # Analytic: ingest=nothing — replay regenerates from the [LAR_INPUT] TOML section.
-    return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, lar_r0, 0.0, psio, nothing)
+function TJAnalyticConfig(input_dict::Dict{String,Any})
+    return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
 
 """
@@ -296,14 +106,14 @@ struct TJAnalyticShapeParams
 end
 
 function TJAnalyticShapeParams(tj::TJAnalyticConfig; rmin::Float64=1e-4)
-    a, R0 = tj.lar_a, tj.lar_r0
-    mu = max(tj.mu, 1.001)
+    a, R0 = tj.a, tj.r0
+    mu = max(tj.pressure_peaking, 1.001)
     return TJAnalyticShapeParams(
-        a, R0, tj.qc, mu, tj.pc, tj.B0,
+        a, R0, tj.q0, mu, tj.p0, tj.B0,
         (a / R0)^2,
         rmin, rmin, rmin * a,
-        1.0 / tj.qc,
-        -2.0 * mu * tj.pc
+        1.0 / tj.q0,
+        -2.0 * mu * tj.p0
     )
 end
 
@@ -454,16 +264,16 @@ included; they are zero in the TJ-analytic benchmark scans.
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
 function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
-    a, R0 = tj.lar_a, tj.lar_r0
-    qc, mu = tj.qc, max(tj.mu, 1.001)
-    pc, B0 = tj.pc, tj.B0
-    ma, mtau = tj.ma, tj.mtau
+    a, R0 = tj.a, tj.r0
+    qc, mu = tj.q0, max(tj.pressure_peaking, 1.001)
+    pc, B0 = tj.p0, tj.B0
+    ma, mtau = tj.ma, tj.mtheta
     p = TJAnalyticShapeParams(tj)
     epsa2 = p.epsa2
     p00_phys = B0^2 * epsa2 * pc          # μ₀P = B₀²·εa²·p₂ at axis
 
-    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
-    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol)
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.flux_surface_rtol)
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.flux_surface_rtol)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -541,7 +351,7 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     end
 
     sq_in = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
-    # InverseRunInput's rz_in_xs is specified as ψ_N (see EquilibriumTypes.jl docs);
+    # InverseRunInput's rz_in_xs is specified as ψ_N (see its docstring in Sources/Ingest.jl);
     # the inverse solver queries (R, Z) splines at ψ_N values from sq_xs.  Passing
     # physical r here happens to work when a ≈ 1 (r and ψ_N cover the same range)
     # but extrapolates the (R, Z) splines for any a < 1, corrupting outer surfaces.
@@ -591,22 +401,22 @@ EFIT-writer (R, Z) → (r, w) Newton inversion that this routine adapts.
 """
 function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticConfig;
     nrbox::Int=257, nzbox::Int=257, rc::Float64=1.2)
-    a, R0 = tj.lar_a, tj.lar_r0
-    qc, mu = tj.qc, max(tj.mu, 1.001)
-    pc, B0 = tj.pc, tj.B0
+    a, R0 = tj.a, tj.r0
+    qc, mu = tj.q0, max(tj.pressure_peaking, 1.001)
+    pc, B0 = tj.p0, tj.B0
     p = TJAnalyticShapeParams(tj)
     epsa, epsa2 = p.a / p.R0, p.epsa2
     p00_phys = B0^2 * epsa2 * pc
 
     # ν root-find (cf. Fitzpatrick TJ's Setnu): q₂(1) = qa_target.
-    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.etol)
+    nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.flux_surface_rtol)
 
     # Dense saveat so the downstream splines (H₁, g₂, f₃, ψ) are evaluated on
     # a fine uniform r grid rather than the ~30 adaptive Vern9 steps — otherwise
     # the (R, Z) → (r, w) Newton iteration hits spline interpolation artifacts.
     # That inversion also needs a tighter abstol ceiling (1e-10) than the other equilibrium solves.
     dense_r = collect(range(p.r0, p.a; length=1024))
-    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.etol, abstol=equil_abstol(equil_input.etol, 1e-10), saveat=dense_r)
+    sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.flux_surface_rtol, abstol=equil_abstol(equil_input.flux_surface_rtol, 1e-10), saveat=dense_r)
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
 
@@ -770,85 +580,4 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     # Analytic: ingest=nothing — replay regenerates from the [TJ_ANALYTIC_INPUT] TOML section.
     return DirectRunInput(equil_input, sq_in, psi_in, psi_in_xs, psi_in_ys,
         rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1, 1, nothing)
-end
-
-"""
-This function handles the Solovev analytical equilibrium model, transforming the input parameters
-into the necessary splines and scalar values for equilibrium construction. This is a Julia version
-of the Fortran code in sol.f, with no major differences except for arrays going from 0:n to 1:n+1.
-
-## Arguments:
-
-  - `mr`: Number of radial grid zones
-  - `mz`: Number of axial grid zones
-  - `ma`: Number of flux grid zones
-  - `e`: Elongation
-  - `a`: Minor radius
-  - `r0`: Major radius
-  - `q0`: Safety factor at the o-point
-  - `p0fac`: Scales on axis pressure (s*P. beta changes. Phi,q constant)
-  - `b0fac`: Scales on toroidal field (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
-  - `f0fac`: Scales on toroidal field (s*f. bt,q changes. Phi,p,bp constant)
-
-## Returns:
-
-  - `DirectRunInput` object
-"""
-function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
-
-    mr = sol_inputs.mr
-    mz = sol_inputs.mz
-    ma = sol_inputs.ma
-    e = sol_inputs.e
-    a = sol_inputs.a
-    r0 = sol_inputs.r0
-    q0 = sol_inputs.q0
-    p0fac = sol_inputs.p0fac
-    b0fac = sol_inputs.b0fac
-    f0fac = sol_inputs.f0fac
-
-    # Validate inputs
-    if p0fac < 1.0
-        @warn "Forcing p0fac ≥ 1 (no negative pressure)"
-        p0fac = 1.0
-    end
-
-    # Compute scalar data
-    f0 = r0 * b0fac
-    psio = e * f0 * a * a / (2 * q0 * r0)
-    psifac = psio / (a * r0)^2
-    efac = 1 / (e * e)
-    pfac = 2 * psio^2 * (e * e + 1) / (a * r0 * e)^2
-    rmin = r0 - 1.5 * a
-    rmax = r0 + 1.5 * a
-    zmax = 1.5 * e * a
-    zmin = -zmax
-
-    # zeros, not undef: only columns 1-3 are filled, so column 4 must stay a deterministic 0.
-    sqfs = zeros(ma + 1, 4)
-    psis = [(ia / (ma + 1))^2 for ia in 1:(ma+1)]
-    sqfs[:, 1] .= f0 .* f0fac
-    sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
-    sqfs[:, 3] .= 0.0
-    sq_in = cubic_interp(psis, Series(sqfs); extrap=ExtendExtrap())
-
-    # Compute 2D data and spline
-    r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]
-    z = [zmin + j * (zmax - zmin) / mz for j in 0:mz]
-    psifs = Array{Float64}(undef, mr + 1, mz + 1)
-    for iz in 1:(mz+1)
-        for ir in 1:(mr+1)
-            psifs[ir, iz] = psio - psifac * (efac * (r[ir] * z[iz])^2 + (r[ir]^2 - r0^2)^2 / 4)
-        end
-    end
-    psi_in_xs = r
-    psi_in_ys = z
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs; extrap=ExtendExtrap())
-
-    # Print out equilibrium info
-    @info "Generating Solovev equilibrium: mr=$mr, mz=$mz, ma=$ma, e=$(@sprintf("%.3f", e)), a=$(@sprintf("%.3f", a)), r0=$(@sprintf("%.3f", r0)), q0=$(@sprintf("%.3f", q0))"
-
-    # 1 is bt_sign=+1: Solovev has positive Bt by construction (f0 = r0 * b0fac > 0).
-    # Analytic equilibria carry positive field and current; ingest=nothing — replay regenerates from the [SOL_INPUT] TOML section.
-    return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, 1, 1, nothing)
 end
