@@ -324,28 +324,50 @@ end
 """
     equilibrium_from_h5(h5path) -> (; equil, inputs, psilim)
 
-Rebuild the `PlasmaEquilibrium` of a finished run from its `gpec.h5` alone — the stored TOML
-and equilibrium ingest, through `PlasmaEquilibrium` on the ψ_N grid the run ended with
-(`Equilibrium/Geometry/psi`) — without running any stage or writing anything. `inputs` is the
-parsed TOML the run used and `psilim` the control surface the solve integrated to
-(`Info/psilim`), so post-hoc analyses can evaluate new coil geometry on the surface the stored
-response matrices describe.
-
-Rebuilding on the stored grid reproduces the run's equilibrium exactly, including a two-pass
-run (`mpsi = 0`) that re-formed its equilibrium on a refined grid.
+Restore the processed `PlasmaEquilibrium` from the profile and geometry arrays saved in
+`gpec.h5`, using the native spline constructors without retracing flux surfaces. `inputs` is the
+stored TOML and `psilim` the original control surface (`Info/psilim`), so post-hoc analyses use
+one consistent frozen equilibrium and the surface described by the stored response matrices.
+The full rerun entry point still rebuilds equilibrium inputs and executes the requested stages.
 """
 function equilibrium_from_h5(h5path::AbstractString)
     isfile(h5path) || error("HDF5 file not found: $h5path")
-    toml_raw, ingest, psilim, psi_nodes = h5open(h5path, "r") do f
+    return h5open(h5path, "r") do f
         haskey(f, "Input/gpec_toml_raw") || error("$h5path has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
         haskey(f, "Info/psilim") || error("$h5path has no Info/psilim")
-        nodes = haskey(f, "Equilibrium/Geometry/psi") ? Vector{Float64}(read(f, "Equilibrium/Geometry/psi")) : nothing
-        read(f, "Input/gpec_toml_raw"), read_equilibrium_ingest(f), Float64(read(f, "Info/psilim")), nodes
+        inputs = TOML.parse(read(f, "Input/gpec_toml_raw"))
+        _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
+        config = Equilibrium.EquilibriumConfig(merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => "")), dirname(abspath(h5path)))
+        params = Equilibrium.EquilibriumParameters()
+        for field in fieldnames(Equilibrium.EquilibriumParameters)
+            field in EQUIL_H5_SKIP && continue
+            path = "Equilibrium/$(get(EQUIL_H5_NAMES, field, String(field)))"
+            haskey(f, path) && setfield!(params, field, read(f, path))
+        end
+        params.ro === nothing && error("$h5path has no Equilibrium/R_axis")
+        params.zo === nothing && error("$h5path has no Equilibrium/Z_axis")
+        params.psio === nothing && error("$h5path has no Equilibrium/psi_total")
+        params.psi0 = params.psi_axis = params.psio
+        params.psi_axis_norm = 0.0
+        params.zsep = params.zext === nothing ? nothing : copy(params.zext)
+        profiles = Equilibrium.ProfileSplines((Vector{Float64}(read(f, "Equilibrium/Profiles/$name")) for name in ("psi", "2piF", "mu0p", "dVdpsi", "q"))...)
+        xs = Vector{Float64}(read(f, "Equilibrium/Geometry/psi"))
+        ys = Vector{Float64}(read(f, "Equilibrium/Geometry/theta"))
+        profiles.xs == xs || error("$h5path has inconsistent equilibrium profile and geometry grids")
+        theta = range(first(ys), last(ys); length=length(ys))
+        collect(theta) == ys || error("$h5path has a nonuniform equilibrium theta grid")
+        grid2d = (xs, theta)
+        opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rzphi = map(("rcoords", "offset", "nu", "jac")) do name
+            cubic_interp(grid2d, Matrix{Float64}(read(f, "Equilibrium/Geometry/$name")); opts2d...)
+        end
+        eqfun = Equilibrium._eqfun_from_geometry(profiles, rzphi..., params.ro, params.psio, grid2d, opts2d)
+        geometry = Equilibrium.compute_geometry_profiles(xs, ys, rzphi[1], rzphi[2], rzphi[4], params.ro)
+        analytic = haskey(Equilibrium.ANALYTIC_EQ, config.eq_type) ? build_analytic_config(config.eq_type, inputs) : nothing
+        equil = Equilibrium.PlasmaEquilibrium(config, params, profiles, geometry, xs, ys, rzphi..., eqfun..., params.ro, params.zo, params.psio,
+            read_equilibrium_ingest(f), analytic)
+        return (; equil, inputs, psilim=Float64(read(f, "Info/psilim")))
     end
-    inputs = TOML.parse(toml_raw)
-    eq_config, additional_input = rebuild_equilibrium_inputs(inputs, ingest, dirname(abspath(h5path)))
-    equil = Equilibrium.PlasmaEquilibrium(eq_config, additional_input; override_psi_nodes=psi_nodes)
-    return (; equil, inputs, psilim)
 end
 
 """
