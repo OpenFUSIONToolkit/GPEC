@@ -215,12 +215,12 @@ The complete GPEC analysis pipeline:
   is built
 
 ### Perturbed Equilibrium
-- `PerturbedEquilibriumControl` - User-facing TOML configuration parameters
-- `PerturbedEquilibriumInternal` - Internal state with mode arrays
-- `PerturbedEquilibriumState` - Results including:
+- `PlasmaResponse` - Source-independent operators of one FFS result (`plasma_response`): inductances,
+  permeability and reluctance, the singular coupling matrices [n_rational × numpert_total] and their
+  dominant modes; applied to any number of external fields
+- `PerturbedEquilibriumState` - The perturbed equilibrium driven by one field (`perturbed_equilibrium`), including:
   - Response fields (ξ_modes, b_modes) in mode space
-  - Singular coupling matrices [msing × numpert_total]
-  - Island diagnostics (half-widths, Chirikov parameters)
+  - Applied resonant vectors and island diagnostics (half-widths, Chirikov parameters)
 - `ForcingMode` - External forcing specification (m, n, amplitude, phase)
 
 ## Module Dependencies
