@@ -206,7 +206,6 @@ height = -1.5780                        # Hoop height: centroid Z of the pack cr
 currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
 
 [PerturbedEquilibrium]
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5

@@ -173,7 +173,7 @@ using TOML
         @test_throws r"`moment`, `save_records`, which are no longer keys" GPEC._stop_on_deprecated_keys(
             Dict{String,Any}("moment" => "pressure", "save_records" => false, "fgar_flag" => true), GPEC._DEPRECATED_KF_KEYS, "KineticForces")
         @test_throws r"\[PerturbedEquilibrium\] sets `fixed_boundary`, which is no longer a key" GPEC._stop_on_deprecated_keys(
-            Dict{String,Any}("fixed_boundary" => false, "compute_response" => false), GPEC._DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
+            Dict{String,Any}("fixed_boundary" => false, "compute_singular_coupling" => false), GPEC._DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
         @test GPEC._stop_on_deprecated_keys(Dict{String,Any}("nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates") === nothing
         # The stop runs through main, before any equilibrium work.
         mktempdir() do deck_dir
@@ -187,7 +187,8 @@ using TOML
         # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
         @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
         @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)
-        @test !any(k -> hasfield(GPEC.PerturbedEquilibrium.PerturbedEquilibriumControl, Symbol(k)), GPEC._DEPRECATED_PE_KEYS)
+        pe_keywords = union((Base.kwarg_decl(m) for f in (GPEC.plasma_response, GPEC.perturbed_equilibrium) for m in methods(f))...)
+        @test !any(k -> Symbol(k) in pe_keywords, GPEC._DEPRECATED_PE_KEYS)
     end
 
     @testset "Inverse grid types (original, rho)" begin

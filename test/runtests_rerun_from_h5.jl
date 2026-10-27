@@ -68,7 +68,7 @@ end
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_response" => true, "compute_singular_coupling" => true,
+            "compute_singular_coupling" => true,
             "verbose" => false, "write_outputs_to_HDF5" => true)
         open(io -> TOML.print(io, inputs), toml_path, "w")
 

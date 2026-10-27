@@ -34,12 +34,10 @@ forcing_data_file = "forcing.dat"       # Manual mode table (n, m, amplitude_rea
 forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 
 [PerturbedEquilibrium]
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 compute_torque_response = true          # Build the ψ-resolved torque response matrices T_xe and T_source
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
-regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
 
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
 [LocalStability]

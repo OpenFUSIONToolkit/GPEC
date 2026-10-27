@@ -153,7 +153,7 @@ The torque is three nested adaptive Gauss–Kronrod integrals: over ψ (paneled 
 
 QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The calculated kinetic matrix build (`kinetic_source = "calculated"`) has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
 
-## Regularization: why kinetic runs set `regularization_width = 0`
+## Regularization: off by default, and never needed by kinetic runs
 
 `[PerturbedEquilibrium] regularization_width` smooths the displacements before they drive the NTV
 integrand, multiplying ``\xi^{\psi\prime}`` and ``\xi^\alpha`` by
@@ -172,7 +172,9 @@ for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmet
 Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
 notation.
 
-GPEC therefore **forces `regularization_width = 0` whenever `kinetic_factor > 0`**, logging the override.
+GPEC therefore **defaults `regularization_width` to 0** for every result, as the Fortran `reg_flag = f`
+template does. Set it, typically to 0.05, only to compute the NTV torque of an ideal solve; a kinetic run
+should leave it at 0.
 Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
 is never regularized, so damping the other two breaks their near-resonance cancellation in
 ``\delta B/B`` and leaves a spurious residue driving the NTV integrand.

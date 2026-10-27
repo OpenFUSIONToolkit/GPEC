@@ -3,7 +3,6 @@
     GPE = GeneralizedPerturbedEquilibrium
     KF = GPE.KineticForces
     EQ = GPE.Equilibrium
-    PE = GPE.PerturbedEquilibrium
 
     # Duck-typed stand-in for PlasmaEquilibrium: the boundary scan reads only these fields.
     mock_equil(q, r, R; ro=1.7, b0=2.0) =
@@ -89,25 +88,5 @@
         psi_c_spiked = KF.kinetic_axis_validity_psi(mock_profiles(xs, Ti), mock_equil(q_spiked, r_of, R_of))
         @test psi_c_spiked ≈ psi_c
         @test psi_c_spiked < 0.5
-    end
-
-    @testset "kinetic_regularization_kwargs" begin
-        default_reg = PE.PerturbedEquilibriumControl().regularization_width
-        ideal = (; mats=(; kinetic=nothing))
-        kinetic = (; mats=(; kinetic=(;)))
-
-        # Ideal runs keep whatever the deck asked for, explicit or defaulted.
-        @test PE.kinetic_regularization_kwargs(ideal, pairs((; regularization_width=0.05))).regularization_width == 0.05
-        @test PE.kinetic_regularization_kwargs(ideal, pairs((;))).regularization_width == default_reg
-
-        # Kinetic runs force 0 — including when the deck omits the key entirely, which must pick up
-        # the struct default rather than leaving regularization_width unset.
-        @test PE.kinetic_regularization_kwargs(kinetic, pairs((; regularization_width=0.05))).regularization_width == 0.0
-        @test PE.kinetic_regularization_kwargs(kinetic, pairs((;))).regularization_width == 0.0
-        @test default_reg != 0.0   # otherwise the override above proves nothing
-
-        # Unrelated kwargs pass through untouched.
-        out = PE.kinetic_regularization_kwargs(kinetic, pairs((; regularization_width=0.05, verbose=false)))
-        @test out.verbose == false
     end
 end
