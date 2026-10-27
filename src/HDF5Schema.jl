@@ -281,6 +281,7 @@ const MAIN_H5_ANNOTATIONS = [
 # Stages that did not run leave their path absent and are skipped by `annotate!`.
 const RUNTIME_H5_ANNOTATIONS = [
     "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
+    "Info/Runtimes/local_stability" => (; long_name="wall-clock time of the LocalStability stage (Mercier, resistive interchange and ballooning scans)", units="s"),
     "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
     "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
     "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),

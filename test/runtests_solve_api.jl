@@ -11,7 +11,7 @@ using HDF5
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
-    equil = GPEC.Equilibrium.setup_equilibrium(
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
@@ -31,6 +31,7 @@ using HDF5
         inputs = TOML.parsefile(toml_path)
         merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
+        delete!(inputs, "LocalStability")
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir
@@ -120,9 +121,8 @@ using HDF5
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
 
-            # With no free-boundary δW, PE refuses the response rather than returning an empty state.
-            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
-            @test_throws ErrorException perturbed_equilibrium(api, RMPField(forcing); compute_response=true, write_outputs_to_HDF5=false)
+            # With no free-boundary δW, no plasma response can be built from it.
+            @test_throws ErrorException plasma_response(api)
 
             reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "galerkin", "gal_nx" => 32))]).ffs
             @test reference.galerkin.msing == msing
@@ -134,10 +134,10 @@ using HDF5
     @testset "perturbed_equilibrium round-trips a forward result" begin
         forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
         pe_section = Dict{String,Any}(
-            "compute_response" => true,
             "compute_singular_coupling" => true,
             "verbose" => false,
             "write_outputs_to_HDF5" => false)
+        pe_kw = (; verbose=false, write_outputs_to_HDF5=false)
 
         mktempdir() do dir
             _stage_deck(dir;
@@ -150,32 +150,51 @@ using HDF5
             reference = GPEC.main([dir]).pe
 
             ffs = solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
-            pe = perturbed_equilibrium(ffs, RMPField(forcing);
-                (Symbol(k) => v for (k, v) in pe_section)...)
+            resp = plasma_response(ffs; verbose=false)
+            pe = perturbed_equilibrium(resp, RMPField(forcing); pe_kw...)
 
             # The response matrices depend on the equilibrium and the solve, not on the drive.
-            @test !isempty(pe.permeability)
-            @test pe.permeability ≈ reference.permeability rtol = 1e-10
-            @test size(pe.C_delta_prime) == size(reference.C_delta_prime)
+            @test resp isa PlasmaResponse && pe.response === resp
+            @test !isempty(resp.permeability)
+            @test resp.permeability ≈ reference.response.permeability rtol = 1e-10
+            @test size(resp.C_delta_prime) == size(reference.response.C_delta_prime)
             @test !isempty(pe.resonant_area_weighted_field)
 
             # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
             @test pe.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
             @test pe.forcing_b ≈ reference.forcing_b rtol = 1e-10
 
+            # One response serves any number of fields: forcing it again reproduces the result.
+            again = perturbed_equilibrium(resp, RMPField(forcing); pe_kw...)
+            @test again.forcing_b == pe.forcing_b
+            @test again.resonant_area_weighted_field == pe.resonant_area_weighted_field
+
             # `scale` is a uniform multiplier on the materialized forcing, and the response is
             # linear in it.
-            scaled = perturbed_equilibrium(ffs, RMPField(forcing; scale=2.0);
-                (Symbol(k) => v for (k, v) in pe_section)...)
+            scaled = perturbed_equilibrium(resp, RMPField(forcing; scale=2.0); pe_kw...)
             @test scaled.forcing_b ≈ 2 .* pe.forcing_b rtol = 1e-10
             @test scaled.resonant_area_weighted_field ≈ 2 .* pe.resonant_area_weighted_field rtol = 1e-10
 
             # Lazy source algebra materializes to the combined field: 3A - A == 2A drives
             # the same perturbed equilibrium as scale=2 (exercises +, -, * and the merge).
-            combo = perturbed_equilibrium(ffs, 3 * RMPField(forcing) - RMPField(forcing);
-                (Symbol(k) => v for (k, v) in pe_section)...)
+            combo = perturbed_equilibrium(resp, 3 * RMPField(forcing) - RMPField(forcing); pe_kw...)
             @test combo.forcing_b ≈ scaled.forcing_b rtol = 1e-10
             @test combo.resonant_area_weighted_field ≈ scaled.resonant_area_weighted_field rtol = 1e-10
+
+            # A spectrum-literal leaf of the materialized modes drives the same perturbed equilibrium,
+            # takes a weight, and sums with a file leaf.
+            literal = perturbed_equilibrium(resp, RMPField(pe.forcing_modes); pe_kw...)
+            @test literal.forcing_b == pe.forcing_b
+            @test literal.resonant_area_weighted_field == pe.resonant_area_weighted_field
+            @test perturbed_equilibrium(resp, 2 * RMPField(pe.forcing_modes); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
+            @test perturbed_equilibrium(resp, RMPField(pe.forcing_modes) + RMPField(forcing); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
+
+            # No regularization by default; an explicit width changes the regularized profiles, not the control-surface quantities.
+            @test resp.regularization_width == pe.regularization_width == 0.0
+            reg = perturbed_equilibrium(resp, RMPField(forcing); regularization_width=0.05, pe_kw...)
+            @test reg.regularization_width == 0.05
+            @test reg.forcing_b == pe.forcing_b
+            @test !(reg.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
         end
     end
 
@@ -311,11 +330,8 @@ using HDF5
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
             @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
-            # PE refuses the response and coupling on it, but still materializes the forcing alone.
-            forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
-            @test_throws ErrorException perturbed_equilibrium(matched, RMPField(forcing); compute_singular_coupling=true, write_outputs_to_HDF5=false)
-            idle = perturbed_equilibrium(matched, RMPField(forcing); compute_response=false, compute_singular_coupling=false, write_outputs_to_HDF5=false)
-            @test idle isa GPEC.PerturbedEquilibrium.PerturbedEquilibriumState
+            # It carries no ideal δW, so no plasma response can be built from it.
+            @test_throws ErrorException plasma_response(matched)
             # A matched result is a new solution, not an outer solve to match again.
             @test_throws ErrorException MatchProblem(matched; ideal=true)
         end
@@ -352,7 +368,7 @@ using HDF5
     # A known drift is `@test_broken`, so the change that removes it surfaces as an unexpected pass.
     @testset "deck and API parity" begin
         @testset "hdf5 file forcing" begin
-            pe_kwargs = (compute_response=true, compute_singular_coupling=true, verbose=false, write_outputs_to_HDF5=false)
+            pe_kwargs = (compute_singular_coupling=true, verbose=false, write_outputs_to_HDF5=false)
             mktempdir() do dir
                 modes = GPEC.ForcingTerms.ForcingMode[]
                 GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example"), "forcing.dat", "ascii", false)
@@ -362,9 +378,10 @@ using HDF5
                         "ForcingTerms" => Dict{String,Any}("forcing_data_file" => "forcing.h5", "forcing_data_format" => "hdf5"),
                         "PerturbedEquilibrium" => Dict{String,Any}(String(k) => v for (k, v) in pairs(pe_kwargs))))
                 reference = GPEC.main([dir])
-                pe = perturbed_equilibrium(reference.ffs, RMPField(joinpath(dir, "forcing.h5")); pe_kwargs...)
+                resp = plasma_response(reference.ffs; compute_singular_coupling=true, verbose=false)
+                pe = perturbed_equilibrium(resp, RMPField(joinpath(dir, "forcing.h5")); verbose=false, write_outputs_to_HDF5=false)
 
-                @test pe.permeability ≈ reference.pe.permeability rtol = 1e-10
+                @test pe.response.permeability ≈ reference.pe.response.permeability rtol = 1e-10
                 # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
                 @test pe.forcing_b ≈ reference.pe.forcing_b rtol = 1e-10
             end
@@ -373,10 +390,10 @@ using HDF5
         @testset "analytic equilibrium on the two-pass auto grid" begin
             # A coarse psi_accuracy and no local-stability scan keep the 1024-interval pass-1 grid cheap.
             eq_overrides = Dict{String,Any}("grid_type" => "auto", "mpsi" => 0, "psi_accuracy" => 3e-2)
-            ffs_overrides = Dict{String,Any}("local_stability_flag" => false, "vac_flag" => false)
+            ffs_overrides = Dict{String,Any}("vac_flag" => false)
             mktempdir() do dir
                 reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
-                pass1 = GPEC.Equilibrium.setup_equilibrium(
+                pass1 = GPEC.Equilibrium.PlasmaEquilibrium(
                     GPEC.Equilibrium.EquilibriumConfig(merge(deck["Equilibrium"], eq_overrides), template),
                     GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
                 )
@@ -384,8 +401,8 @@ using HDF5
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
                 api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
-                # Known drift: the equilibrium does not store its analytic config, so `solve` cannot re-form it.
-                @test_broken api.equil.rzphi_xs == reference.equil.rzphi_xs
+                # The equilibrium stores its analytic config, so `solve` re-forms it on the deck's grid.
+                @test api.equil.rzphi_xs == reference.equil.rzphi_xs
             end
         end
 

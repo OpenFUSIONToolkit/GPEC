@@ -70,8 +70,7 @@ The summed total is written to `KineticForces/<method>/` exactly as in a single-
 run, and each species' own contribution to `KineticForces/PerSpecies/<label>/<method>/`
 — labels are `ion_z<z>_m<m>`, `impurity_z<z>_m<m>`, and `electron` (a numeric suffix
 is appended only if a run repeats a `(z, m)` pair). Every per-species group carries the
-same datasets and metadata as the total, so `dTdpsi`, `T`, and `EnergyIntegrals/` are
-available per species. The summed cumulative torque profile is a diagnostic (linear
+same datasets and metadata as the total, so `dTdpsi` and `T` are available per species. The summed cumulative torque profile is a diagnostic (linear
 interpolation onto the union grid); the summed `total_torque` scalar is the exact
 Gauss-Kronrod value.
 
@@ -154,7 +153,7 @@ The torque is three nested adaptive Gauss–Kronrod integrals: over ψ (paneled 
 
 QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The calculated kinetic matrix build (`kinetic_source = "calculated"`) has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
 
-## Regularization: why kinetic runs set `regularization_width = 0`
+## Regularization: off by default, and never needed by kinetic runs
 
 `[PerturbedEquilibrium] regularization_width` smooths the displacements before they drive the NTV
 integrand, multiplying ``\xi^{\psi\prime}`` and ``\xi^\alpha`` by
@@ -173,7 +172,9 @@ for smoothing.) Logan, *Electromagnetic Torque in Tokamaks with Toroidal Asymmet
 Princeton, 2015), Ch. 7 Eq. 7.46 states the same resonance shifting/splitting result in GPEC's own
 notation.
 
-GPEC therefore **forces `regularization_width = 0` whenever `kinetic_factor > 0`**, logging the override.
+GPEC therefore **defaults `regularization_width` to 0** for every result, as the Fortran `reg_flag = f`
+template does. Set it, typically to 0.05, only to compute the NTV torque of an ideal solve; a kinetic run
+should leave it at 0.
 Leaving it on suppresses a finite physical response and does so inconsistently — ``\xi^\psi``
 is never regularized, so damping the other two breaks their near-resonance cancellation in
 ``\delta B/B`` and leaves a spurious residue driving the NTV integrand.
@@ -183,35 +184,13 @@ dissipation ``-2n\,\mathrm{Im}\langle \xi, u_2\rangle/4\mu_0`` — two independe
 of the same quantity — agree to a fraction of a percent with the regularization off, and disagree
 by tens of percent with it on.
 
-## HDF5 outputs: complex torque convention and the EnergyIntegrals layout
+## HDF5 outputs: complex torque convention
 
 The method level of `KineticForces/<method>/` reports the two physical scalars a user
 wants first: `total_torque` = ``T_\phi`` (N·m) and `total_energy` = ``\delta W_k`` (J).
 Internally both are halves of one complex quantity ``T = T_\phi + 2in\,\delta W_k``
 (Logan 2013), and the ψ-profiles `dTdpsi` and `T` store that complex ``T`` directly —
-so `imag(T)` carries the ``2n`` factor while `total_energy` has it divided out. The
-per-record `EnergyIntegrals/torque` and `EnergyIntegrals/kinetic_energy` are separate
-complex diagnostics of the two integrand halves at each ``(\psi, \lambda, \ell)``
-evaluation, which is why they are not packed into one number there.
-
-`EnergyIntegrals/` stores the variable-length integration trajectories in the
-flat-plus-offsets ragged layout (chosen over HDF5 VLEN types for cross-language
-support; `Tearing/Diagnostics/*` uses the same pattern). Record `k` spans
-`offsets[k]+1 : offsets[k+1]` (Julia, 1-based) of each `*_all` array:
-
-```julia
-h5open("gpec.h5", "r") do f
-    g = f["KineticForces/fgar/EnergyIntegrals"]
-    off = read(g["trajectory_offsets"])
-    x_k = read(g["x_all"])[off[k]+1:off[k+1]]          # record k's abscissae
-    I_k = read(g["integrand_all"])[off[k]+1:off[k+1]]  # its complex integrand
-end
-```
-
-```python
-g = f["KineticForces/fgar/EnergyIntegrals"]            # h5py, 0-based
-x_k = g["x_all"][g["trajectory_offsets"][k]:g["trajectory_offsets"][k + 1]]
-```
+so `imag(T)` carries the ``2n`` factor while `total_energy` has it divided out.
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.KineticForces]

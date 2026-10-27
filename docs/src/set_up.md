@@ -341,7 +341,7 @@ using GeneralizedPerturbedEquilibrium.Vacuum
 using GeneralizedPerturbedEquilibrium.ForceFreeStates
 
 # Set up equilibrium only
-equil = Equilibrium.setup_equilibrium("path/to/gpec.toml")
+equil = Equilibrium.PlasmaEquilibrium("path/to/g-file"; eq_type="efit")
 
 # Access equilibrium data
 println("q at axis: ", equil.params.q0)

@@ -13,10 +13,10 @@ specified in the input.
   - `eq_type::String` - Type of equilibrium file ("efit", "solovev", "lar", etc.)
   - `eq_filename::String` - Path to equilibrium input file
   - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "custom")
-  - `power_bp::Int` - Poloidal field power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
-  - `power_b::Int` - Total field power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
-  - `power_r::Int` - Major radius power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
-  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
+  - `power_bp::Int` - Poloidal field power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
+  - `power_b::Int` - Total field power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
+  - `power_r::Int` - Major radius power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
+  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
   - `jac_custom_power_bp::Int` - Poloidal-field exponent for a custom Jacobian `J = Bp^bp · B^b / (R^r · rfac^rc)`; read only when `jac_type = "custom"`, ignored for named types
   - `jac_custom_power_b::Int` - Total-field exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
   - `jac_custom_power_r::Int` - Major-radius exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
@@ -32,7 +32,7 @@ specified in the input.
     equilibrium is actually formed on is `EquilibriumParameters.psihigh_resolved`.
   - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
     two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
-    pins knots on rational surfaces, and re-forms on the refined grid. Standalone `setup_equilibrium`
+    pins knots on rational surfaces, and re-forms on the refined grid. Standalone `PlasmaEquilibrium`
     callers get the coarse pass-1 grid unless they refine via `refined_psi_grid` + `override_psi_nodes`.
   - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
     two-pass auto grid (knot count scales as τ^(-1/3))
@@ -190,28 +190,13 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
 end
 
 """
-Outer constructor for EquilibriumConfig that enables a toml file
-interface for specifying the configuration settings
+    AnalyticEquilibriumConfig
 
-DEPRECATED: Use [Equilibrium] section in gpec.toml instead
+Supertype of the parameter structs of the analytic equilibrium kinds. Each subtype is the
+`config_type` of one or more `ANALYTIC_EQ` rows, which pair it with an `eq_type`, its TOML
+section, and its solver.
 """
-function EquilibriumConfig(path::String)
-    raw = TOML.parsefile(path)
-
-    # Extract EQUIL_CONTROL with default fallback
-    config_data = get(raw, "EQUIL_CONTROL", Dict())
-
-    # Check for required fields
-    required_keys = ("eq_filename", "eq_type")
-    missingkeys = filter(k -> !haskey(config_data, k), required_keys)
-
-    if !isempty(missingkeys)
-        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missingkeys, ", "))")
-    end
-
-    # Construct validated struct
-    return EquilibriumConfig(Dict{String,Any}(config_data), dirname(path))
-end
+abstract type AnalyticEquilibriumConfig end
 
 """
     LargeAspectRatioConfig(...)
@@ -231,7 +216,7 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
   - `ma`: The number of grid points in the radial direction.
   - `zeroth`: If set to true, it neglects the Shafranov shift
 """
-@kwdef mutable struct LargeAspectRatioConfig
+@kwdef mutable struct LargeAspectRatioConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0
     a::Float64 = 1.0
     beta0::Float64 = 1e-3
@@ -275,7 +260,7 @@ profile is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`.
 
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-@kwdef mutable struct TJAnalyticConfig
+@kwdef mutable struct TJAnalyticConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0         # Major radius R₀ [m]
     a::Float64 = 1.0           # Minor radius a [m] (ε = a/R₀)
     q0::Float64 = 1.5          # On-axis safety factor
@@ -313,7 +298,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
   - `b0fac`: scale toroidal field at constant beta (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
   - `f0fac`: scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 """
-@kwdef mutable struct SolovevConfig
+@kwdef mutable struct SolovevConfig <: AnalyticEquilibriumConfig
     mr::Int = 128      # number of radial grid zones
     mz::Int = 128      # number of axial grid zones
     ma::Int = 128      # number of flux grid zones
@@ -536,7 +521,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `zo::Union{Nothing,Float64}` - Z-coordinate of the magnetic axis [m]
   - `psio::Union{Nothing,Float64}` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
   - `psihigh_resolved::Union{Nothing,Float64}` - Outer flux limit the equilibrium was formed on
-    (the outermost ψ node); the plasma edge downstream of `setup_equilibrium`.
+    (the outermost ψ node); the plasma edge downstream of `PlasmaEquilibrium`.
   - `rsep::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma boundary [m]
   - `zsep::Union{Nothing,Vector{Float64}}` - Z-coordinates of the plasma boundary [m]
   - `rext::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma edge [m]
@@ -894,6 +879,10 @@ This object provides a complete representation of the processed plasma equilibri
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
     equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
+  - `analytic::Union{Nothing,AnalyticEquilibriumConfig}`: the parameters an analytic kind
+    (`sol`, `lar`, `tj_analytic`, `tj_analytic_direct`) was solved from, so [`reform`](@ref) can
+    re-solve it on a new grid; `nothing` for file-based and IMAS equilibria. A defensive copy, so
+    later edits to the caller's config do not reach it.
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -921,13 +910,14 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
     psio::Float64
 
     ingest::EquilibriumIngest
+    analytic::Union{Nothing,AnalyticEquilibriumConfig}
 end
 
-# Solvers build the equilibrium before setup_equilibrium forwards eq_input.ingest, so allow
-# construction without it; ingest defaults to nothing and is assigned post-construction.
+# Solvers build the equilibrium before PlasmaEquilibrium records its source, so allow
+# construction without it; ingest and analytic default to nothing and are assigned post-construction.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
     eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
     PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing)
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing, nothing)

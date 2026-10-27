@@ -3,7 +3,7 @@
 
 Everything needed to project an applied control-surface field onto the resonant responses of a
 perturbed-equilibrium solve, detached from the run that produced it. Build it in memory from a
-`PerturbedEquilibriumState` and its `ForceFreeStatesResult`, or post hoc from a `gpec.h5`; then
+[`PlasmaResponse`](@ref), or post hoc from a `gpec.h5`; then
 window and decompose it with [`dominant_coupling`](@ref) and evaluate coil spectra with
 [`rootarea_field`](@ref) and [`coupling_overlap`](@ref) as often as needed without re-running.
 
@@ -29,26 +29,16 @@ struct ResonantCoupling
 end
 
 """
-    ResonantCoupling(state::PerturbedEquilibriumState, ffs::ForceFreeStatesResult)
+    ResonantCoupling(resp::PlasmaResponse)
 
-In-memory construction from a solve: the coupling matrix and row labels come from `state`, the
-column ordering from `ffs`, and the conform operator from `state` when the response step ran or
-from the equilibrium otherwise. Errors when `state` carries no singular-coupling matrix.
+In-memory construction from a [`PlasmaResponse`](@ref): the coupling matrix, row and column labels
+and conform operator all come from `resp`. Errors when `resp` carries no singular-coupling matrix.
 """
-function ResonantCoupling(state::PerturbedEquilibriumState, ffs::ForceFreeStatesResult)
-    isempty(state.C_resonant_area_weighted_field) &&
-        throw(ArgumentError("the perturbed-equilibrium state carries no singular-coupling matrix (compute_singular_coupling off, or no resonant surfaces)"))
-    flux_conform = if isempty(state.rootarea_to_area_weight)
-        S, A = build_control_surface_rootarea_to_area_weight(ffs.equil, ffs)
-        S .* A
-    else
-        state.rootarea_to_area_weight .* state.surface_area
-    end
-    N = ffs.numpert_total
-    m_modes = [(i - 1) % ffs.mpert + ffs.mlow for i in 1:N]
-    n_modes = [(i - 1) ÷ ffs.mpert + ffs.nlow for i in 1:N]
-    return ResonantCoupling(state.C_resonant_area_weighted_field, state.rational_psi, state.rational_q,
-        state.rational_m_res, state.rational_n, m_modes, n_modes, flux_conform)
+function ResonantCoupling(resp::PlasmaResponse)
+    isempty(resp.C_resonant_area_weighted_field) &&
+        throw(ArgumentError("the plasma response carries no singular-coupling matrix (compute_singular_coupling off, or no resonant surfaces)"))
+    return ResonantCoupling(resp.C_resonant_area_weighted_field, resp.rational_psi, resp.rational_q,
+        resp.rational_m_res, resp.rational_n, resp.m_modes, resp.n_modes, resp.rootarea_to_area_weight .* resp.surface_area)
 end
 
 """
@@ -63,7 +53,7 @@ function ResonantCoupling(h5path::AbstractString)
         haskey(f, "PerturbedEquilibrium/SingularCoupling/C_resonant_area_weighted_field") ||
             throw(ArgumentError("$h5path has no singular-coupling matrix"))
         haskey(f, "PerturbedEquilibrium/ResponseMatrices/rootarea_to_area_weight_operator") ||
-            throw(ArgumentError("$h5path has no control-surface conform operator (run with compute_response = true)"))
+            throw(ArgumentError("$h5path has no control-surface conform operator"))
         haskey(f, "Info/mn_index") || throw(ArgumentError("$h5path has no Info/mn_index mode labels"))
         sc = f["PerturbedEquilibrium/SingularCoupling"]
         mn = read(f["Info/mn_index"])
@@ -197,22 +187,20 @@ coupling_overlap(dom::DominantCoupling, b̃::AbstractVector{<:Number}) = dom.rig
 coupling_overlap(dom::DominantCoupling, rc::ResonantCoupling, modes) = coupling_overlap(dom, rootarea_field(rc, modes))
 
 """
-    compute_dominant_coupling!(state, ctrl)
+    build_dominant_coupling!(resp; verbose=false)
 
-Store the dominant resonant-coupling decomposition of `state.C_resonant_area_weighted_field`
-over the core window (`ψ_N ≤ CORE_PSI_HIGH`) on `state` as a run summary, with the applied
-forcing's coefficients on each mode when the response spectrum is available. Other windows are
+Store the dominant resonant-coupling decomposition of `resp.C_resonant_area_weighted_field`
+over the core window (`ψ_N ≤ CORE_PSI_HIGH`) on `resp` as a run summary. Other windows are
 evaluated post hoc on a [`ResonantCoupling`](@ref). Returns without change when no coupling matrix exists.
 """
-function compute_dominant_coupling!(state::PerturbedEquilibriumState, ctrl::PerturbedEquilibriumControl)
-    isempty(state.C_resonant_area_weighted_field) && return nothing
-    dom = dominant_coupling(state.C_resonant_area_weighted_field, state.rational_psi)
-    state.dominant_singular_values = dom.singular_values
-    state.dominant_right_singular_vectors = dom.right_singular_vectors
-    state.dominant_left_singular_vectors = dom.left_singular_vectors
-    state.dominant_rational_index = dom.rational_index
-    isempty(state.forcing_b_rootarea) || (state.dominant_forcing_overlap = coupling_overlap(dom, state.forcing_b_rootarea))
-    ctrl.verbose &&
+function build_dominant_coupling!(resp::PlasmaResponse; verbose::Bool=false)
+    isempty(resp.C_resonant_area_weighted_field) && return nothing
+    dom = dominant_coupling(resp.C_resonant_area_weighted_field, resp.rational_psi)
+    resp.dominant_singular_values = dom.singular_values
+    resp.dominant_right_singular_vectors = dom.right_singular_vectors
+    resp.dominant_left_singular_vectors = dom.left_singular_vectors
+    resp.dominant_rational_index = dom.rational_index
+    verbose &&
         @info "Dominant resonant coupling: $(length(dom.singular_values)) modes over " *
               "$(length(dom.rational_index)) rational surfaces, σ₁ = $(@sprintf("%.3e", dom.singular_values[1]))"
     return nothing

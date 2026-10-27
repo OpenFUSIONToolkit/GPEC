@@ -1,4 +1,5 @@
 using Statistics
+using TOML
 
 @testset "Equilibrium Unit Tests" begin
 
@@ -15,7 +16,7 @@ using Statistics
             psilow=0.01,
             psihigh=0.994
         )
-        global plasma_eq_efit = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(efit_config)
+        global plasma_eq_efit = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(efit_config)
 
         @test plasma_eq_efit isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
@@ -30,7 +31,7 @@ using Statistics
             psilow=0.01,
             psihigh=0.994
         )
-        global plasma_eq_arclength = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(arclength_config)
+        global plasma_eq_arclength = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(arclength_config)
 
         @test plasma_eq_arclength isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_arclength.ro < 7.5
@@ -54,7 +55,7 @@ using Statistics
             psilow=0.01,
             psihigh=0.994
         )
-        global plasma_eq_inversion = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(inversion_config)
+        global plasma_eq_inversion = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(inversion_config)
 
         @test plasma_eq_inversion isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_inversion.ro < 7.5
@@ -95,7 +96,7 @@ using Statistics
             psilow=0.01,
             psihigh=1.0
         )
-        plasma_eq_edge = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(edge_config)
+        plasma_eq_edge = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(edge_config)
         @test edge_config.psihigh == 1.0
         @test plasma_eq_edge.params.psihigh_resolved <= 1.0
         @test plasma_eq_edge.params.psihigh_resolved == plasma_eq_edge.rzphi_xs[end]
@@ -116,19 +117,19 @@ using Statistics
         )
 
         base_config = newq0_config(0)
-        eq_base = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(base_config)
+        eq_base = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(base_config)
 
         # -1 means "flip the sign of the axis extrapolation": f0fac vanishes, so ffac is
         # exactly -1 and the revised q-profile is the negated baseline.
         flip_config = newq0_config(-1)
-        eq_flip = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(flip_config)
+        eq_flip = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(flip_config)
         @test flip_config.newq0 == -1.0
         @test eq_flip.profiles.q_spline.y == -eq_base.profiles.q_spline.y
 
         # A non-integer target used to throw InexactError at construction (newq0 was ::Int)
         target_config = newq0_config(1.05)
         @test target_config.newq0 == 1.05
-        eq_target = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(target_config)
+        eq_target = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(target_config)
         @test all(isfinite, eq_target.profiles.q_spline.y)
         # Extrapolated q(0) meets the target; not exact because ffac uses the first node's F
         # rather than the extrapolated axis value.
@@ -164,15 +165,30 @@ using Statistics
         @test_throws r"stopped early at t = .* with retcode DtNaN" Equil.tj_analytic_find_nu(Equil.TJAnalyticShapeParams(tj), tj.qa; abstol=NaN)
     end
 
-    @testset "Deprecated TOML keys are dropped, not fatal" begin
-        # Removed control knobs must keep old gpec.toml decks (and older gpec.h5 replays,
-        # whose stored TOML blob goes through the same path) parsing with a warning.
-        ffs_table = Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1)
-        @test_logs (:warn, r"reform_eq_with_psilim") GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(
-            ffs_table, GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
-        @test !haskey(ffs_table, "reform_eq_with_psilim")
-        @test GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
+    @testset "Deprecated TOML keys stop the run" begin
+        # A listed key no longer exists, so the run stops and names it instead of ignoring it.
+        GPEC = GeneralizedPerturbedEquilibrium
+        @test_throws r"\[ForceFreeStates\] sets `reform_eq_with_psilim`" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates")
+        @test_throws r"`moment`, `save_records`, which are no longer keys" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("moment" => "pressure", "save_records" => false, "fgar_flag" => true), GPEC._DEPRECATED_KF_KEYS, "KineticForces")
+        @test_throws r"\[PerturbedEquilibrium\] sets `fixed_boundary`, which is no longer a key" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("fixed_boundary" => false, "compute_singular_coupling" => false), GPEC._DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
+        @test GPEC._stop_on_deprecated_keys(Dict{String,Any}("nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates") === nothing
+        # The stop runs through main, before any equilibrium work.
+        mktempdir() do deck_dir
+            template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            foreach(name -> cp(joinpath(template_dir, name), joinpath(deck_dir, name)), readdir(template_dir))
+            inputs = TOML.parsefile(joinpath(deck_dir, "gpec.toml"))
+            inputs["KineticForces"] = Dict{String,Any}("moment" => 1)
+            open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
+            @test_throws r"\[KineticForces\] sets `moment`, which is no longer a key; remove from gpec.toml" GPEC.main([deck_dir])
+        end
+        # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
+        @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
+        @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)
+        pe_keywords = union((Base.kwarg_decl(m) for f in (GPEC.plasma_response, GPEC.perturbed_equilibrium) for m in methods(f))...)
+        @test !any(k -> Symbol(k) in pe_keywords, GPEC._DEPRECATED_PE_KEYS)
     end
 
     @testset "Inverse grid types (original, rho)" begin
@@ -183,13 +199,13 @@ using Statistics
         finite(eq) = all(isfinite, eq.profiles.dVdpsi_spline.y) && all(all(isfinite, s.nodal_derivs.partials) for s in splines(eq))
 
         # original: the file's own ψ nodes between psilow and psihigh, whatever mpsi
-        eq_o = Eq.setup_equilibrium(cfg("original"))
+        eq_o = Eq.PlasmaEquilibrium(cfg("original"))
         xs_in = Eq.read_chease_binary(cfg("original")).rz_in_xs
         @test eq_o.rzphi_xs == [0.01; filter(x -> 0.01 < x < 0.99, xs_in); 0.99]
         @test finite(eq_o)
 
         # rho: starts at psilow (Fortran's rho starts at psihigh/(mpsi+1)²)
-        eq_r = Eq.setup_equilibrium(cfg("rho"))
+        eq_r = Eq.PlasmaEquilibrium(cfg("rho"))
         @test eq_r.rzphi_xs[[1, end]] ≈ [0.01, 0.99]
         @test finite(eq_r)
     end
@@ -200,9 +216,9 @@ using Statistics
         tk_dir = joinpath(@__DIR__, "test_data", "TokaMaker_ifile")
         cfg(type, file; kw...) = Eq.EquilibriumConfig(; eq_type=type, eq_filename=joinpath(tk_dir, file), jac_type="hamada",
             grid_type="core_edge_packed", mpsi=64, psilow=0.01, psihigh=0.99, kw...)
-        eq_i = Eq.setup_equilibrium(cfg("ifile", "i33x65.ifile"))
-        eq_g = Eq.setup_equilibrium(cfg("efit", "g65.geqdsk"))
-        eq_s = Eq.setup_equilibrium(cfg("ifile", "i33x65_single.ifile"))
+        eq_i = Eq.PlasmaEquilibrium(cfg("ifile", "i33x65.ifile"))
+        eq_g = Eq.PlasmaEquilibrium(cfg("efit", "g65.geqdsk"))
+        eq_s = Eq.PlasmaEquilibrium(cfg("ifile", "i33x65_single.ifile"))
 
         # Same equilibrium as the g-file of the same solve
         @test isapprox(eq_i.ro, eq_g.ro; atol=1e-4) && isapprox(eq_i.zo, eq_g.zo; atol=1e-4)
@@ -217,6 +233,16 @@ using Statistics
         @test isapprox(eq_s.psio, eq_i.psio; rtol=1e-6)
         @test all(isapprox(eq_s.profiles.q_spline(x), eq_i.profiles.q_spline(x); rtol=1e-6) for x in (0.2, 0.5, 0.8))
         @test maximum(abs.(eq_s.ingest.R_nodes .- eq_i.ingest.R_nodes)) < 1e-6
+
+        # Re-forming from the captured ingest matches re-reading the file on the same nodes
+        @test eq_i.ingest isa Eq.InverseIngest
+        nodes = collect(range(0.01, 0.99; length=33))
+        reformed = Eq.reform(eq_i, nodes)
+        fresh = Eq.PlasmaEquilibrium(cfg("ifile", "i33x65.ifile"); override_psi_nodes=nodes)
+        @test reformed.rzphi_xs == fresh.rzphi_xs == nodes
+        @test map(reformed.profiles.q_spline, nodes) == map(fresh.profiles.q_spline, nodes)
+        @test all(reformed.rzphi_rsquared(pt) == fresh.rzphi_rsquared(pt) && reformed.rzphi_jac(pt) == fresh.rzphi_jac(pt)
+                  for pt in ((0.1, 0.0), (0.5, 0.3), (0.9, 0.7)))
 
         # The trailing FF′ and p′ records are ignored: a file without them reads the same
         table(file) = Eq.read_ifile(cfg("ifile", file)).ingest.sq_fs
@@ -234,7 +260,7 @@ using Statistics
         bumped_file = joinpath(mktempdir(), "bumped_q.ifile")
         write(bumped_file, bumped)
         @test Eq.read_ifile(cfg("ifile", bumped_file)).ingest.sq_fs[:, 3] ≈ 1.1 .* tabulated[:, 3]
-        @test Eq.setup_equilibrium(cfg("ifile", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
+        @test Eq.PlasmaEquilibrium(cfg("ifile", bumped_file)).profiles.q_spline.y == eq_i.profiles.q_spline.y
     end
 
     @testset "TokaMaker i-file ψ bounds record" begin
@@ -268,10 +294,10 @@ using Statistics
         @test ing_sb.sq_fs[:, 1:3] == ing_db.sq_fs[:, 1:3] == base_s.sq_fs[:, 1:3]
 
         # psihigh beyond the last surface is clamped to it; a rerun from the ingest keeps the normalisation
-        eq = @test_logs (:warn, r"clamped") match_mode = :any Eq.setup_equilibrium(cfg(db; psihigh=0.995))
+        eq = @test_logs (:warn, r"clamped") match_mode = :any Eq.PlasmaEquilibrium(cfg(db; psihigh=0.995))
         @test eq.params.psihigh_resolved == ing_db.sq_xs[end] ≈ eq.rzphi_xs[end]
         @test all(isfinite, eq.profiles.q_spline.y) && all(isfinite, eq.eqfun_B.nodal_derivs.partials)
-        rerun = Eq.setup_equilibrium(cfg(db; psihigh=0.995), Eq.build_inverse_from_ingest(cfg(db), eq.ingest))
+        rerun = Eq.PlasmaEquilibrium(cfg(db; psihigh=0.995), Eq.build_inverse_from_ingest(cfg(db), eq.ingest))
         @test rerun.rzphi_xs == eq.rzphi_xs && rerun.psio == eq.psio
         @test rerun.profiles.q_spline.y == eq.profiles.q_spline.y
     end
@@ -304,7 +330,7 @@ using Statistics
             r0_norm=6.8,
             b0_norm=7.4
         )
-        global plasma_eq_binary = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(binary_config)
+        global plasma_eq_binary = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(binary_config)
 
         @test plasma_eq_binary isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
@@ -320,7 +346,7 @@ using Statistics
             r0_norm=6.8,
             b0_norm=7.4
         )
-        global plasma_eq_ascii = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(ascii_config)
+        global plasma_eq_ascii = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(ascii_config)
 
         @test plasma_eq_ascii isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
@@ -417,7 +443,7 @@ using Statistics
             r0=10.0, a=1.0, q0=1.5, beta0=1e-4,
             mtheta=64, ma=64, zeroth=true
         )
-        plasma_eq_lar = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(lar_config, lar_input)
+        plasma_eq_lar = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(lar_config, lar_input)
 
         @test plasma_eq_lar isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
 

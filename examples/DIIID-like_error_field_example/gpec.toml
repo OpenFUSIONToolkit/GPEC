@@ -32,8 +32,18 @@ triangularity = 0.5            # Triangularity parameter for wall shapes
 corner_sharpness = 0.05        # Sharpness of wall corners (try 0.05 as initial value)
 equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+[LocalStability]
+theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
+alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+n_scan = 24                   # Resolution of the α scan for the first boundary
+max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
+alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
+psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
+verbose = true                # Print progress and per-surface α-scan failures
+
 [ForceFreeStates]
-local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
 dW_edge_scan_start = 0.99      # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
@@ -196,9 +206,6 @@ height = -1.5780                        # Hoop height: centroid Z of the pack cr
 currents = [55000.0]                    # 1 kA per turn × 55 turns; sensitivities scale linearly with current [A]
 
 [PerturbedEquilibrium]
-fixed_boundary = false                  # Use fixed boundary conditions
-output_eigenmodes = true                # Output eigenmode fields as b-fields
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
@@ -250,7 +257,6 @@ impurity_mass = 12                      # Impurity mass [proton masses]
 electron = false                        # Ion-only NTV
 nutype = "harmonic"                     # Collision operator
 f0type = "maxwellian"                   # Equilibrium distribution
-moment = "pressure"                     # Pressure-moment NTV torque
 atol_pitch = 1e-9                       # Absolute tolerance for the pitch integration (median-normalized kernel)
 write_outputs_to_HDF5 = true            # Write outputs to the HDF5 file
 verbose = false                         # Enable verbose logging
