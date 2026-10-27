@@ -230,9 +230,11 @@ and balance is lost above (Cole Eq. 62)
   without one is skipped.
 - **Approximations.** As in Fortran `gslayer.f`, the viscosity integral is taken as 1/2
   (κ̂ = 2/s²).
-- **Outer stability α.** Each surface uses its own α = S^(−1/3)(Δ_crit − r_s Δ'), the same
-  outer stability the dispersion relation uses (Fortran fixes α = 10⁻²). Cole's threshold needs
-  a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
+- **Stability α.** Each surface uses its own α = S^(−1/3)(Δ_crit − r_s Δ'), so α + Δ̂ is the
+  dispersion relation's residual and the torque balance shares its poles with SLAYER's free
+  modes (Fortran fixes α = 10⁻²). Cole and Fitzpatrick have no Δ_crit; including it treats the
+  curvature offset as independent of frequency. It is zero unless `D_c_type` is set. Cole's
+  threshold needs a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
 - **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; `solve_inner`
   mirrors the real axis, so the scan uses conj(Δ(−Q)).
 - **Threshold.** Penetration is a fold (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
