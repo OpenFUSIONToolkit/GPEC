@@ -58,6 +58,7 @@
             "bt" => 1.8,
             "ion_mass" => 2.0,
             "D_R" => 0.01,
+            "P_perp_model" => "D_perp",
             "scan_grid" => Dict{String,Any}(
                 "Q_re_range" => [-5.0, 5.0],
                 "Q_im_range" => [-1.0, 3.0],
@@ -80,6 +81,7 @@
         @test c.msing_max == 2
         @test c.bt === 1.8
         @test c.D_R == 0.01
+        @test c.P_perp_model === :D_perp
         @test c.Q_re_range == (-5.0, 5.0)
         @test c.Q_im_range == (-1.0, 3.0)
         @test c.nre == 50
@@ -93,6 +95,22 @@
         # Unknown keys should raise
         bad = merge(section, Dict{String,Any}("mistyped_key" => 42))
         @test_throws ArgumentError slayer_control_from_toml(bad)
+        # The renamed χ⊥,e key and bad P_perp_model values are rejected
+        @test_throws "chi_perp` is now `chi_perp_e" slayer_control_from_toml(merge(section, Dict{String,Any}("chi_perp" => 1.0)))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "bogus"))))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E"))))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => Inf))))
+        c_te = slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => 0.05)))
+        @test c_te.tau_E == 0.05 && Runner.validate(c_te) === c_te
+        # D_perp is the default, and it refuses to run without an ion diffusivity from the file or the deck.
+        @test SLAYERControl().P_perp_model === :D_perp
+        no_chi = (; chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing)
+        @test_throws "needs the ion diffusivity" Runner._slayer_chi_inputs(no_chi, SLAYERControl(); warn=false)
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7); warn=false).chi_perp_i == 0.7
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; P_perp_model=:chi_perp_e); warn=false).chi_perp_i === nothing
+        # Scalar diffusivities must be positive.
+        @test_throws "chi_perp_i must be positive" Runner.validate(SLAYERControl(; chi_perp_i=-0.5))
+        @test_throws "chi_perp_e must be positive" Runner.validate(SLAYERControl(; chi_perp_e=0.0))
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin

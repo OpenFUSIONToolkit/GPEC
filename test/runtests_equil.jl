@@ -1,4 +1,5 @@
 using Statistics
+using TOML
 
 @testset "Equilibrium Unit Tests" begin
 
@@ -164,15 +165,30 @@ using Statistics
         @test_throws r"stopped early at t = .* with retcode DtNaN" Equil.tj_analytic_find_nu(Equil.TJAnalyticShapeParams(tj), tj.qa; abstol=NaN)
     end
 
-    @testset "Deprecated TOML keys are dropped, not fatal" begin
-        # Removed control knobs must keep old gpec.toml decks (and older gpec.h5 replays,
-        # whose stored TOML blob goes through the same path) parsing with a warning.
-        ffs_table = Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1)
-        @test_logs (:warn, r"reform_eq_with_psilim") GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(
-            ffs_table, GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
-        @test !haskey(ffs_table, "reform_eq_with_psilim")
-        @test GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in ffs_table)...) isa GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl
+    @testset "Deprecated TOML keys stop the run" begin
+        # A listed key no longer exists, so the run stops and names it instead of ignoring it.
+        GPEC = GeneralizedPerturbedEquilibrium
+        @test_throws r"\[ForceFreeStates\] sets `reform_eq_with_psilim`" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("reform_eq_with_psilim" => false, "nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates")
+        @test_throws r"`moment`, `save_records`, which are no longer keys" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("moment" => "pressure", "save_records" => false, "fgar_flag" => true), GPEC._DEPRECATED_KF_KEYS, "KineticForces")
+        @test_throws r"\[PerturbedEquilibrium\] sets `fixed_boundary`, which is no longer a key" GPEC._stop_on_deprecated_keys(
+            Dict{String,Any}("fixed_boundary" => false, "compute_singular_coupling" => false), GPEC._DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
+        @test GPEC._stop_on_deprecated_keys(Dict{String,Any}("nn_low" => 1), GPEC._DEPRECATED_FFS_KEYS, "ForceFreeStates") === nothing
+        # The stop runs through main, before any equilibrium work.
+        mktempdir() do deck_dir
+            template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            foreach(name -> cp(joinpath(template_dir, name), joinpath(deck_dir, name)), readdir(template_dir))
+            inputs = TOML.parsefile(joinpath(deck_dir, "gpec.toml"))
+            inputs["KineticForces"] = Dict{String,Any}("moment" => 1)
+            open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
+            @test_throws r"\[KineticForces\] sets `moment`, which is no longer a key; remove from gpec.toml" GPEC.main([deck_dir])
+        end
+        # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
+        @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
+        @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)
+        pe_keywords = union((Base.kwarg_decl(m) for f in (GPEC.plasma_response, GPEC.perturbed_equilibrium) for m in methods(f))...)
+        @test !any(k -> Symbol(k) in pe_keywords, GPEC._DEPRECATED_PE_KEYS)
     end
 
     @testset "Inverse grid types (original, rho)" begin
@@ -702,7 +718,7 @@ using Statistics
     @testset "field-line ODE failure is an error, not silent truncation" begin
         # Checked in the source, since a non-closing field line is costly to synthesize; the EFIT
         # testsets above are the control that neither guard false-fires.
-        src = read(joinpath(dirname(@__DIR__), "src", "Equilibrium", "DirectEquilibrium.jl"), String)
+        src = read(joinpath(dirname(@__DIR__), "src", "Equilibrium", "Axisymmetric", "Direct.jl"), String)
         @test occursin("sol.retcode != ReturnCode.Success", src)
         @test occursin("isapprox(sol.t[end], 2π", src)
     end

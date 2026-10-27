@@ -374,7 +374,7 @@ coil sets on the plasma boundary — a [`CoilForcingGrid`](@ref) at `psi` follow
 [`coil_forcing_modes`](@ref) over the whole assembly in one Biot-Savart pass.
 
 Output amplitudes are in unit-norm convention (= Fortran `Phi_x`).
-No normalization conversion is needed when using these modes with `compute_plasma_response!`.
+No normalization conversion is needed when using these modes to drive a plasma response.
 
 Result is appended to `forcing_modes` (existing content is cleared first).
 """
@@ -404,7 +404,7 @@ end
     convert_forcing_normalization(modes, from_tag, equil, n, m_out; psi, mtheta) -> Vector{ForcingMode}
 
 Convert `ForcingMode` amplitudes from `from_tag` normalization to the internal
-unit-norm convention (= Fortran `Phi_x`), expected by `compute_plasma_response!`.
+unit-norm convention (= Fortran `Phi_x`) that `perturbed_equilibrium` applies the plasma response to.
 
 If `from_tag == "sfl_flux_Wb"`, the user has provided amplitudes in the 2π-angle
 SFL-flux convention. These are scaled by (2π)² to reach unit-norm, keeping their harmonics.
