@@ -1,18 +1,21 @@
 # Perturbed Equilibrium
 
-The `PerturbedEquilibrium` module computes the plasma response to external magnetic perturbations.
+The `PerturbedEquilibrium` module computes the plasma response to external magnetic perturbations,
+in two stages: `plasma_response(ffs)` builds the source-independent response and singular-coupling
+operators of a force-free-states result once, and `perturbed_equilibrium(resp, rmp)` drives them with
+one external field. A scan over fields reuses one response.
 
 ## Types
 
 ```@docs
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumControl
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumInternal
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PlasmaResponse
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 ```
 
 ## Functions
 
 ```@docs
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibrium
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.write_outputs_to_HDF5
 ```
@@ -53,7 +56,7 @@ the same way from a finished run in memory or from its `gpec.h5`:
 ```julia
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 
-rc = ResonantCoupling("gpec.h5")                 # post hoc; or ResonantCoupling(pe_state, ffs) in memory
+rc = ResonantCoupling("gpec.h5")                 # post hoc; or ResonantCoupling(resp) in memory
 dom = dominant_coupling(rc; psi_low=0.0, psi_high=0.9)   # SVD over the surfaces in the window
 
 b̃ = rootarea_field(rc, coil_modes)               # unit-norm forcing modes → root-area-weighted field
@@ -78,7 +81,7 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.CORE_PSI_HIGH
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.rootarea_field
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.coupling_overlap
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.check_mode_basis
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_dominant_coupling!
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_dominant_coupling!
 ```
 
 ## Torque response matrices
@@ -86,8 +89,9 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_dominant_coupling!
 A kinetic forward solve (`integrator = "forward"`, `kinetic_factor > 0`) carries the
 drift-kinetic response inside its Euler-Lagrange energy: the complex plasma energy inside a
 flux surface, `δW(ψ) = ξ†·U₂(ψ)·U₁(ψ)⁻¹·ξ/(2μ₀)`, has an anti-Hermitian part that is the
-neoclassical toroidal viscosity torque (Logan & Park 2013, eq. 19). With
-`compute_torque_response = true` the response stage refers that quadratic form back to the
+neoclassical toroidal viscosity torque (Logan & Park 2013, eq. 19). On request,
+`plasma_response(ffs; compute_torque_response=true)` (deck: `compute_torque_response = true`
+in `[PerturbedEquilibrium]`) refers that quadratic form back to the
 applied root-area-weighted control-surface field b̃ — through the permeability, the
 boundary flux-to-displacement factor `χ₁(m − n·q_lim)·2πi` and the b̃ → Φ conform `R` — and
 stores the result at every stored node as the **torque response matrix** `T_xe(ψ)`, cumulative
@@ -105,8 +109,9 @@ Two conventions are worth stating explicitly:
     its eigenvectors are the applied spectra of extremal torque and its eigenvalues their torque
     per unit `‖b̃‖²/2`. The anti-Hermitian part carries the energy.
 
-The forcing-source form `T_source(ψ) = M†·T·M` is written alongside, with one column of `M` per
-forcing source of the run's `[ForcingTerms]`, each as built: every coil set at its deck currents,
+Each `perturbed_equilibrium(resp, rmp)` call contracts it with that field into a `TorqueResponse`:
+the applied torque `T_applied` and the forcing-source form `T_source(ψ) = M†·T·M`, with one column
+of `M` per forcing source, each as built: every coil set at its deck currents,
 or the forcing file's spectrum as a single source. Driving the sources at scale factors `s` gives
 `s†·T_source·s/2`.
 
@@ -124,10 +129,11 @@ T_h = Hermitian((tr.T_xe[:, :, end] + tr.T_xe[:, :, end]') / 2)
 
 ```@docs
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.TorqueResponse
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_response_matrices
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_response_matrix
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_profile
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.coil_flux_spectra
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_torque_response!
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_torque_response!
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.apply_torque_response!
 ```
 
 ## Plotting per-surface results against ψ or q
