@@ -423,7 +423,7 @@ function compute_clebsch_displacements(
         # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
-        mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
+        mul!(xms_vec, cmat_buf, xsp_vec, 1.0 + 0.0im, 1.0 + 0.0im)  # xms += C*xsp
         # ideal A only; the kinetic A is non-Hermitian and is treated separately above
         amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
@@ -832,7 +832,7 @@ function compute_b_n_xi_n_modes(
         jd = jacs .* delpsis
 
         for in in 1:npert
-            blk = ((in - 1) * mpert + 1):(in * mpert)
+            blk = ((in-1)*mpert+1):(in*mpert)
             # IDFT: mode space → theta space
             bwp_fun = phase_fwd * b_psi_modes[ipsi, blk]   # [mthsurf] — b^ψ (not J-weighted)
             xwp_fun = phase_fwd * xwp_modes[ipsi, blk]     # [mthsurf] — J·ξ^ψ (J-weighted from gpeq_contra)
@@ -900,13 +900,13 @@ function _build_rzphi_geometry(
 
         for itheta in 1:mtheta
             theta = (itheta - 1) / mtheta  # SFL theta ∈ [0, 1)
-            pt = (psi, theta)
+            g = Equilibrium.rzphi_primitives(equil, psi, theta; hint=hint)
 
-            knot_vals[ik, 0*mtheta+itheta] = equil.rzphi_rsquared(pt; hint=hint)
-            knot_vals[ik, 1*mtheta+itheta] = equil.rzphi_offset(pt; hint=hint)
-            knot_vals[ik, 2*mtheta+itheta] = equil.rzphi_jac(pt; hint=hint)
-            knot_vals[ik, 3*mtheta+itheta] = equil.rzphi_rsquared(pt; deriv=DerivOp(0, 1), hint=hint)
-            knot_vals[ik, 4*mtheta+itheta] = equil.rzphi_offset(pt; deriv=DerivOp(0, 1), hint=hint)
+            knot_vals[ik, 0*mtheta+itheta] = g.r2
+            knot_vals[ik, 1*mtheta+itheta] = g.deta
+            knot_vals[ik, 2*mtheta+itheta] = g.jac
+            knot_vals[ik, 3*mtheta+itheta] = g.r2_y
+            knot_vals[ik, 4*mtheta+itheta] = g.deta_y
         end
     end
 
@@ -1021,7 +1021,7 @@ function _apply_rzphi_transform(
         zeta_fn = buf.ze
 
         for in in 1:npert
-            blk = ((in - 1) * mpert + 1):(in * mpert)
+            blk = ((in-1)*mpert+1):(in*mpert)
             # Inverse DFT: modes → theta-space (in place)
             Utilities.FourierTransforms.inverse_transform!(psi_fun, ft, view(psi_input, ipsi, blk))
             Utilities.FourierTransforms.inverse_transform!(theta_fn, ft, view(theta_input, ipsi, blk))

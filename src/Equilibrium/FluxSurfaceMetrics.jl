@@ -1,4 +1,23 @@
 """
+    rzphi_primitives(equil, psi, theta; hint=(Ref(1), Ref(1))) -> (; r2, deta, jac, r2_y, deta_y)
+
+Evaluate the smooth `rzphi` primitives at `(psi, theta)`: `r²`, the `η`-offset, the Jacobian and the
+θ-derivatives of `r²` and the offset. Every consumer that derives flux-surface geometry from `rzphi`
+(the metric and area helpers here, the perturbed-field reconstruction transform) samples this one
+function, so the gpout.f conventions live in one place. ψ-derivatives are deliberately not provided:
+the bicubic is only C¹ in ψ, so callers differentiate a ψ-resample of these values instead.
+"""
+function rzphi_primitives(equil::PlasmaEquilibrium, psi::Float64, theta::Float64; hint=(Ref(1), Ref(1)))
+    pt = (psi, theta)
+    r2 = equil.rzphi_rsquared(pt; hint=hint)
+    deta = equil.rzphi_offset(pt; hint=hint)
+    jac = equil.rzphi_jac(pt; hint=hint)
+    r2_y = equil.rzphi_rsquared(pt; deriv=DerivOp(0, 1), hint=hint)
+    deta_y = equil.rzphi_offset(pt; deriv=DerivOp(0, 1), hint=hint)
+    return (; r2, deta, jac, r2_y, deta_y)
+end
+
+"""
     flux_surface_metric(equil, psi, theta; hint=(Ref(1), Ref(1))) -> (; r, jac, delpsi)
 
 Evaluate the flux-surface geometry at `(psi, theta)`: major radius `r`, Jacobian `jac`, and the
@@ -7,11 +26,7 @@ convention for the rzphi straight-field-line coordinates. This is the single sou
 `|∇ψ|` computation reused across the FFS and PE modules.
 """
 function flux_surface_metric(equil::PlasmaEquilibrium, psi::Float64, theta::Float64; hint=(Ref(1), Ref(1)))
-    r2 = equil.rzphi_rsquared((psi, theta); hint=hint)
-    jac = equil.rzphi_jac((psi, theta); hint=hint)
-    deta = equil.rzphi_offset((psi, theta); hint=hint)
-    r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint)
-    deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint)
+    (; r2, deta, jac, r2_y, deta_y) = rzphi_primitives(equil, psi, theta; hint=hint)
 
     rfac = sqrt(abs(r2))
     eta = 2π * (theta + deta)
