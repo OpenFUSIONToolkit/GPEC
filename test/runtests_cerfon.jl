@@ -1,7 +1,7 @@
 using Test
 using FastInterpolations: deriv1
 using GeneralizedPerturbedEquilibrium.Equilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: CerfonConfig, EquilibriumConfig, setup_equilibrium,
+using GeneralizedPerturbedEquilibrium.Equilibrium: CerfonConfig, EquilibriumConfig, PlasmaEquilibrium,
     cerfon_run, cerfon_basis, cerfon_basis_dx, cerfon_basis_dy, cerfon_basis_dxx, cerfon_basis_dyy,
     cerfon_basis_dxy, cerfon_psi_p, cerfon_dpsi_p_dx, cerfon_d2psi_p_dx2, cerfon_psihat, cerfon_grad, cerfon_hessian,
     cerfon_solve_coeffs, cerfon_find_axis, cerfon_shape_points
@@ -132,13 +132,20 @@ end
         # converges. Compare against the plain Solovev model, whose q_edge is finite.
         qedge = Float64[]
         for psihigh in (0.999, 0.9999, 0.99999)
-            eq = EquilibriumConfig(; eq_type="cerfon", jac_type="pest", grid_type="ldp",
+            eq = EquilibriumConfig(; eq_type="cerfon", jac_type="pest", grid_type="core_edge_packed",
                 psilow=1e-4, psihigh=psihigh, mpsi=128, mtheta=128,
-                etol=1e-8, force_termination=true)
+                flux_surface_rtol=1e-8, force_termination=true)
             cfg = CerfonConfig(; null="lsn", mr=256, mz=384, ma=128, q0=1.1)
-            pe = setup_equilibrium(eq, cerfon_run(eq, cfg))
+            pe = PlasmaEquilibrium(eq, cfg)
             # the closed-form flux scale must deliver the requested on-axis q
             @test pe.params.q0 ≈ cfg.q0 rtol = 1e-3
+            if psihigh == 0.999
+                @test pe.analytic isa CerfonConfig
+                @test pe.analytic !== cfg
+                reformed = reform(pe, copy(pe.rzphi_xs))
+                @test reformed.rzphi_xs == pe.rzphi_xs
+                @test reformed.profiles.q_spline.y ≈ pe.profiles.q_spline.y
+            end
             push!(qedge, pe.profiles.q_spline(last(pe.profiles.xs)))
         end
         @test issorted(qedge)
@@ -151,11 +158,11 @@ end
     @testset "double null diverges about twice as fast as single null" begin
         function edge_increment(null)
             qs = map((0.999, 0.99999)) do psihigh
-                eq = EquilibriumConfig(; eq_type="cerfon", jac_type="pest", grid_type="ldp",
+                eq = EquilibriumConfig(; eq_type="cerfon", jac_type="pest", grid_type="core_edge_packed",
                     psilow=1e-4, psihigh=psihigh, mpsi=128, mtheta=128,
-                    etol=1e-8, force_termination=true)
+                    flux_surface_rtol=1e-8, force_termination=true)
                 cfg = CerfonConfig(; null=null, mr=256, mz=384, ma=128, q0=1.1)
-                pe = setup_equilibrium(eq, cerfon_run(eq, cfg))
+                pe = PlasmaEquilibrium(eq, cfg)
                 @test pe.params.q0 ≈ cfg.q0 rtol = 1e-3
                 pe.profiles.q_spline(last(pe.profiles.xs))
             end

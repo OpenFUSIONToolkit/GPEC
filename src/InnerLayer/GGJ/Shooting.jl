@@ -1,27 +1,12 @@
 # Shooting.jl
 #
-# NOTE: This solver is NOT used in production and is not to be used. It was a
-# porting exercise retained for reference only. The Galerkin solver
-# (Galerkin.jl) is the sole supported GGJ inner-layer solver; shooting underflows
-# at large |γ| and shares none of the production matching path. Do not call it.
-#
-# Stable backward shooting solver for the GGJ inner-layer model.
-# Integrates the 4×4 origin-diagonalized
-# resistive-layer ODE from `tmax` (large-x asymptotic regime) backward to
-# a small `tmin` (origin Frobenius regime), then projects onto the local
-# Frobenius basis at the origin and reads off the parity-projected
-# matching data.
-#
-# This solves the same inner-region equations as the production Galerkin path
-# (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) but by a different numerical method: a
-# backward shoot in the origin-diagonalized basis rather than the matched
-# singular-Galerkin weak form. The 4 origin Frobenius exponents are
-# `al0 = (p1, 1/2, −p1, −1/2)` where `p1 = √(−D_I)` (Mercier-stable required;
-# D_I = E+F+H−1/4, GWP2016 Eq. A9). The two "small" (singular) modes are
-# columns 3 and 4 (`x^{−p1}` and `x^{−1/2}`); the two "large" (smooth) modes
-# are columns 1 and 2 (`x^{p1}` and `x^{1/2}`).
-#
-# Reference: A. H. Glasser, Phys. Plasmas **23**, 072505 (2016).
+# Backward shooting solver for the GGJ inner layer, valid only for |Q| ≪ 1 (the large-t initial
+# condition underflows at large |Q|); used for tests and backend comparisons. It follows the Fourier-
+# transform method of Glasser, Jardin & Tesauro, Phys. Fluids 27, 1225 (1984), Sec. V: the 4×4 system
+# in the transform variable t is diagonalized at the origin (exponents `al0 = (p1, 1/2, −p1, −1/2)`,
+# p1 = √(−D_I), GJT Eqs. 49, 56), integrated from `tmax` on the decaying large-t solutions back to
+# `tmin`, projected onto the origin Frobenius basis, and Δ± read off from the coefficient ratios
+# (GJT Eqs. 90–91).
 
 using LinearAlgebra
 using SpecialFunctions: gamma
@@ -32,23 +17,35 @@ using OrdinaryDiffEq
 
 Precomputed origin- and infinity-side arrays for the backward shoot.
 Construct via [`_build_shooting_system`](@ref).
+
+## Fields
+
+  - `params`, `Q` - Layer parameters and scaled growth rate.
+  - `p1`, `pplus` - p₁ = √(−D_I) and p₁ − 1/2.
+  - `al0` - Origin Frobenius exponents (p₁, 1/2, −p₁, −1/2), the diagonal of the origin exponent matrix.
+  - `al1` - First-order coupling in the origin-diagonalized basis.
+  - `d0`, `d0inv` - Origin diagonalizing matrix and its inverse.
+  - `ups` - `(4, 4, nps)` origin power-series coefficients in t², `ups[:, :, 1] = I`.
+  - `nps` - Origin series length.
+  - `d1` - Diagonalizing matrix at large t.
+  - `pexp` - Logarithmic exponents of the large-t asymptotic basis.
+  - `bl1` - Coefficients ±√Q of t²/2 in the large-t exponentials.
+  - `tmax`, `tmin` - Shoot start (large t) and end (small t).
 """
 struct GGJShootingSystem
     params::GGJParameters
     Q::ComplexF64
     p1::Float64
     pplus::Float64
-    # origin side
-    al0::SVector{4,Float64}                 # diagonal of origin exponent matrix
-    al1::SMatrix{4,4,ComplexF64,16}         # first-order coupling (already in al0-diag basis)
-    d0::SMatrix{4,4,ComplexF64,16}          # diagonalizing matrix at origin
+    al0::SVector{4,Float64}
+    al1::SMatrix{4,4,ComplexF64,16}
+    d0::SMatrix{4,4,ComplexF64,16}
     d0inv::SMatrix{4,4,ComplexF64,16}
-    ups::Array{ComplexF64,3}                # (4, 4, nps) origin power-series coeffs
+    ups::Array{ComplexF64,3}
     nps::Int
-    # infinity side
-    d1::SMatrix{4,4,ComplexF64,16}          # diagonalizing matrix at infinity
-    pexp::SVector{4,ComplexF64}             # log-exponents of asymptotic basis
-    bl1::SVector{4,ComplexF64}              # ±λ exponents of t² in asymptotic basis
+    d1::SMatrix{4,4,ComplexF64,16}
+    pexp::SVector{4,ComplexF64}
+    bl1::SVector{4,ComplexF64}
     tmax::Float64
     tmin::Float64
 end
@@ -149,10 +146,7 @@ function _build_origin_arrays(p::GGJParameters, Q::ComplexF64; nps::Int=8, rtol:
     return (; al0, al1=al1_s, d0=d0_s, d0inv=d0inv_s, ups, nps, p1v, pplus, tmin)
 end
 
-# -----------------------------------------------------------------------
-# Infinity arrays — large-t asymptotic basis.
-# With nxps = 1 the higher-order vps recurrence is dead code; vps[:,:,1] = I.
-# -----------------------------------------------------------------------
+# Large-t asymptotic basis, leading order only.
 
 function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
     d0inv::SMatrix{4,4,ComplexF64};
@@ -217,7 +211,7 @@ function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
     d1 = SMatrix{4,4,ComplexF64}(d1_m)
     bl1 = SVector{4,ComplexF64}(-lamda, -lamda, lamda, lamda)
 
-    # tmax (ntmax = 1 default).
+    # tmax: the smaller of the asymptotic-validity bound and 6/|Q|.
     p1v = sqrt(-mercier_di(p))
     tmax_inner = sqrt((max(0.5, p1v)^2 - log(rtol)) / abs(lamda))
     tmax_outer = 6.0 / abs(q)
@@ -272,15 +266,7 @@ function _origin_basis(sys::GGJShootingSystem, t::Real)
     return SMatrix{4,4,ComplexF64}(u)
 end
 
-# -----------------------------------------------------------------------
-# Initial condition at tmax.
-# With nxps = 1, vps[:,:,1] = I, so the asymptotic-basis
-# evaluator returns a diagonal v. The IC is then
-#   y(tmax) = d1 * v(:, 1:2)
-# which extracts the first two columns of d1 scaled by the algebraic-mode
-# exponential factors. This selects the two "small" decaying modes of the
-# large-t asymptotic basis.
-# -----------------------------------------------------------------------
+# Initial condition at tmax: the two decaying modes of the large-t basis, d1[:, 1:2]·exp(bl1·t²/2 + pexp·ln t).
 
 function _initial_condition(sys::GGJShootingSystem)
     t = sys.tmax
@@ -345,19 +331,14 @@ end
 Solve the GGJ inner-layer matching problem by stable backward shooting in
 the origin-diagonalized 4×4 basis.
 
-Returns an `InnerLayerResponse(tearing, interchange)` with rescaling
-applied. `_delta_from_c0` returns a `(Δ₁, Δ₂)` pair where `Δ₁` is the
-**interchange** (anti-symmetric / W-odd) channel and `Δ₂` is the
-**tearing** (symmetric / W-even) channel. We therefore map
-`Δ₂ → tearing` and `Δ₁ → interchange` into the named fields, matching the
-physics channel labels used by the Galerkin solver and by the
-`InnerLayerResponse` docstring.
+Returns an `InnerLayerResponse` rescaled by [`rescale_delta`](@ref), with `interchange` = Δ₊
+(Ξ even) and `tearing` = Δ₋ (Ξ odd), the same convention as the other GGJ backends.
 
 Tolerances `reltol`/`abstol` are the integrator tolerances; `rtol_origin`
 controls the truncation error of the origin Frobenius series and the
 choice of `tmin`.
 """
-function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
+function solve_inner(::_BareGGJ{:shooting}, params::GGJParameters, γ::Number;
     reltol::Float64=1e-6, abstol::Float64=1e-6,
     rtol_origin::Float64=1e-6, nps::Int=8,
     fmax::Float64=1.0, solver=Tsit5())
@@ -377,9 +358,8 @@ function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
 
     Δ_raw = _delta_from_c0(c0, sys)
     Δ_rescaled = rescale_delta(Δ_raw, params)
-    # Δ_rescaled ≡ (Δ₁, Δ₂) = (interchange, tearing).
-    return InnerLayerResponse(Δ_rescaled[2], Δ_rescaled[1])
+    return InnerLayerResponse(; interchange=Δ_rescaled[1], tearing=Δ_rescaled[2])
 end
 
-solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Real; kwargs...) =
+solve_inner(::_BareGGJ{:shooting}, params::GGJParameters, γ::Real; kwargs...) =
     solve_inner(GGJModel{:shooting}(), params, ComplexF64(γ); kwargs...)

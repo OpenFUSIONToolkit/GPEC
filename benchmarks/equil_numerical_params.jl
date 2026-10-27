@@ -56,7 +56,7 @@ end
 # JIT warmup
 println("JIT warmup...")
 warmup_cfg = make_config(config_path, "efit", 64, 128)
-setup_equilibrium(warmup_cfg)
+PlasmaEquilibrium(warmup_cfg)
 
 rows = []
 
@@ -72,7 +72,7 @@ for method in ["efit", "efit_arclength", "efit_by_inversion"]
         local runtime = NaN
         local rt_err = NaN
         try
-            t = @elapsed pe = setup_equilibrium(cfg)
+            t = @elapsed pe = PlasmaEquilibrium(cfg)
             runtime = t
             raw = Equilibrium.read_efit(cfg)
             rt_err = roundtrip_error(pe, raw)
@@ -98,7 +98,7 @@ for method in ["efit", "efit_arclength", "efit_by_inversion"]
         local runtime = NaN
         local rt_err = NaN
         try
-            t = @elapsed pe = setup_equilibrium(cfg)
+            t = @elapsed pe = PlasmaEquilibrium(cfg)
             runtime = t
             raw = Equilibrium.read_efit(cfg)
             rt_err = roundtrip_error(pe, raw)
@@ -123,7 +123,7 @@ println("=" ^ 65)
 
 # ── Contour grid refinement scan (efit_by_inversion only) ─────────────────────
 # The refine factor in equilibrium_solver_by_inversion is a keyword arg.
-# We call it directly here, bypassing the setup_equilibrium wrapper.
+# We call it directly here, bypassing the PlasmaEquilibrium constructor.
 println("\n" * "=" ^ 65)
 println("Contour grid refinement scan (efit_by_inversion only, mpsi=128, mtheta=256)")
 println("=" ^ 65)

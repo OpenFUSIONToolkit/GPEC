@@ -8,9 +8,9 @@
 # conformal wall, unstable without), so a sign change in the energies is a real signal, not
 # a marginal case wobbling about zero.
 [case]
-name = "cerfon_lsn_n1"
-description = "Cerfon-Freidberg diverted (LSN) equilibrium, n=1, ideal stability"
-example_dir = "examples/Cerfon_diverted_example"
+name = "cerfon_lsn_n1" # Case identifier
+description = "Cerfon-Freidberg diverted (LSN) equilibrium, n=1, ideal stability" # Case purpose
+example_dir = "examples/Cerfon_diverted_example" # Input deck directory
 
 # Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
 [quantities.et_real]

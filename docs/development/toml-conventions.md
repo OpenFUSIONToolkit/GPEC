@@ -11,7 +11,7 @@ modify them. **Do not invent a new convention** — match what the existing exam
 2. **Inline annotation on every variable line.** Every `key = value` gets a trailing
    `# description`. Source the wording from the matching config struct's docstring
    (`EquilibriumConfig`, `WallShapeSettings`, `ForceFreeStatesControl`, `ForcingTermsControl`,
-   `PerturbedEquilibriumControl`, `SolovevConfig`, `TJAnalyticConfig`, `KineticForcesControl`)
+   the `plasma_response`/`perturbed_equilibrium` docstrings, `SolovevConfig`, `TJAnalyticConfig`, `KineticForcesControl`)
    and keep it to one terse line. **Use the same description for the same variable across all
    files** — `examples/DIIID-like_ideal_example/gpec.toml` is the canonical reference for the
    common sections. Exception: in `regression-harness/cases/*.toml` the repeated
@@ -47,9 +47,9 @@ fails when its pattern matches a violation) lint-check the covered TOMLs on comm
 - `toml-no-decorative-dividers` — no `# ----`-style divider lines (all covered files).
 - `toml-inline-annotations` — every `key = value` line carries a trailing `# description`
   (`examples/*` and `test/test_data/*` only, per the rule-2 exception above).
-- `toml-no-deprecated-keys` — no deprecated config keys; its key list mirrors
-  `_DEPRECATED_FFS_KEYS`/`_DEPRECATED_EQUIL_KEYS` in `src/GeneralizedPerturbedEquilibrium.jl`,
-  so extend the hook's pattern whenever a key is deprecated there.
+- `toml-no-deprecated-keys` — no deprecated config keys; its key list mirrors the
+  `_DEPRECATED_*_KEYS` lists in `src/GeneralizedPerturbedEquilibrium.jl`, which stop any run that
+  sets one, so extend the hook's pattern whenever a key is added there.
 
 Run them manually with:
 

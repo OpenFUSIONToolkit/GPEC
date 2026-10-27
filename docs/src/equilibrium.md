@@ -96,18 +96,18 @@ built by a **two-pass measured-curvature refinement** driven by the single accur
    (no file re-read).
 
 Every region's knot count scales as τ^(-1/3), so tightening `psi_accuracy` refines
-the core, pedestal, and edge proportionally. The legacy `grid_type = "ldp"`
+the core, pedestal, and edge proportionally. The fixed `grid_type = "core_edge_packed"`
 (sin²-spaced), `"pow1"`, `"uniform"`, and explicit `mpsi > 0` (single-pass, fixed
-layout) are still supported. Library users calling `setup_equilibrium` directly with
-`mpsi = 0` receive the coarse pass-1 grid; use `refined_psi_grid` and the
-`override_psi_nodes` keyword to apply the refinement manually.
+layout) are still supported. A `PlasmaEquilibrium` built directly with `mpsi = 0` keeps
+the coarse pass-1 grid until `solve` re-forms it; to refine it yourself, pass the nodes from
+`refined_psi_grid` to `Equilibrium.reform`.
 
-The packing on the DIII-D-like example (n=1) compared to fixed `ldp` grids — note the
+The packing on the DIII-D-like example (n=1) compared to fixed `core_edge_packed` grids — note the
 coarse spacing across the smooth mid-radius, the spacing dips at each rational surface,
 and the core/pedestal/edge packing (`benchmarks/plot_grid_knot_placement.jl` regenerates
 this figure):
 
-![Radial knot packing: auto two-pass vs ldp](assets/grid_knot_placement.png)
+![Radial knot packing: auto two-pass vs core_edge_packed](assets/grid_knot_placement.png)
 
 Decomposing the density by source on the same example shows the pedestal band
 (ψ_N ≈ 0.85–0.98) is driven by *measured* curvature, not the edge floor: the pressure,
@@ -126,11 +126,8 @@ Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 
 ## Important types
 
-- `EquilibriumConfig` — top-level configuration container parsed from a
-	TOML file (outer constructor `EquilibriumConfig(path::String)` is
-	provided).
-- `EquilibriumControl` — low-level control parameters (grid, jacobian
-	type, tolerances, etc.).
+- `EquilibriumConfig` — configuration container, built from the `[Equilibrium]`
+	section of `gpec.toml` or from keywords.
 - `PlasmaEquilibrium` — the runtime structure containing spline fields,
 	geometry, profiles, and computed diagnostics (q-profile, separatrix,
 	etc.).
@@ -144,9 +141,11 @@ Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 
 ## Key functions
 
-- `setup_equilibrium(path::String = "equil.toml")`
-	— main entry point that reads configuration, builds the equilibrium,
-	runs the solver, and returns a `PlasmaEquilibrium` instance.
+- `PlasmaEquilibrium(file; eq_type="efit", kwargs...)`, `PlasmaEquilibrium(analytic_config; kwargs...)`
+	and `PlasmaEquilibrium(dd; kwargs...)` — read or solve the equilibrium and return a
+	`PlasmaEquilibrium`; `kwargs` are `EquilibriumConfig` fields.
+- `PlasmaEquilibrium(config::EquilibriumConfig, source=nothing)` — the form every other
+	constructor ends in, with `source` an analytic config, an IMAS `dd`, or `nothing` to read `eq_filename`.
 - `equilibrium_separatrix_find!(pe::PlasmaEquilibrium)` — locate
 	separatrix and related boundary geometry in-place.
 - `equilibrium_global_parameters!(pe::PlasmaEquilibrium)` — populate
@@ -158,15 +157,14 @@ Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 
 ## Example usage
 
-Basic example: read a TOML config and build an equilibrium
+Basic example: read a g-file and build an equilibrium
 
 ```julia
 using GeneralizedPerturbedEquilibrium
 
-# Build from a TOML file (searches relative paths if needed)
-pe = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium("docs/examples/ForceFreeStates.toml")
+pe = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada")
 
-println("Magnetic axis: ", pe.params.r0, ", ", pe.params.z0)
+println("Magnetic axis: ", pe.ro, ", ", pe.zo)
 println("q(0) = ", pe.params.q0)
 
 # Find separatrix (in-place) and inspect results
@@ -179,11 +177,10 @@ Analytic / testing example: construct a large-aspect-ratio model
 ```julia
 using GeneralizedPerturbedEquilibrium
 
-# Create a LAR config from a small TOML fragment or file
-larcfg = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(lar_r0=10.0, lar_a=1.0, beta0=1e-3)
-pe = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(control=Dict("eq_filename"=>"unused","eq_type"=>"lar")), larcfg)
+larcfg = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(r0=10.0, a=1.0, beta0=1e-3)
+pe = PlasmaEquilibrium(larcfg)  # eq_type = "lar" is implied by the config type
 
-println("Built LAR equilibrium with a = ", larcfg.lar_a)
+println("Built LAR equilibrium with a = ", larcfg.a)
 ```
 
 ## Notes and Caveats
