@@ -93,11 +93,14 @@ builds a second control for its differing tolerance).
     transition would otherwise cut through — the increments are zeroed and the kernel is skipped,
     rising to full strength at 2ψ_c through a C² envelope. Boundary and envelope come from the
     equilibrium and kinetic profiles; there are no tuning parameters. Default `true`.
+  - Quadrature tolerances form a ladder, outermost in: `rtol_psi` (the accuracy asked of the torque, default
+    1e-2) ⊃ `rtol_pitch` (default `psi_tolerance_margin × rtol_psi` = 1e-3) ⊃ `rtol_x` (default
+    `nested_tolerance_margin × rtol_pitch` = 1e-5). Each inner integral is the outer one's integrand, so it is
+    resolved tighter than the outer tolerance by its margin and no further: QuadGK bounds the error of the
+    whole integral, so a level tighter than its margin only multiplies evaluations. Set `rtol_pitch`/`rtol_x`
+    explicitly to override the derivation (see `torque_pitch_rtol`, `matrix_pitch_rtol`).
 """
 @kwdef struct KineticForcesControl
-    # Moment type
-    moment::String = "pressure"     # "heat" or "pressure"
-
     # Method flags (which methods to calculate)
     fgar_flag::Bool = true          # Full general-aspect-ratio
     tgar_flag::Bool = false         # Trapped particle GAR
@@ -130,15 +133,16 @@ builds a second control for its differing tolerance).
     nn::Int = 1                     # Toroidal mode number
     bounce_harmonic_max::Int = 1    # Bounce harmonics summed over ℓ = -max:max
 
-    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy); each level must
-    # resolve tighter than the one enclosing it, or the outer integrator chases quadrature noise.
-    atol_pitch::Float64 = 1e-8      # Absolute tolerance for the inner pitch integration
-    rtol_pitch::Float64 = 1e-5      # Relative tolerance for the inner pitch integration
+    # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy). Each level derives from the one
+    # enclosing it by a margin unless set explicitly (NaN ⇒ derived), so no integrator chases its integrand's noise.
+    atol_pitch::Float64 = 1e-8      # Absolute tolerance for the pitch integration (median-normalized kernel)
+    rtol_pitch::Float64 = NaN      # Relative tolerance for the pitch integration (NaN ⇒ psi_tolerance_margin × rtol_psi)
+    psi_tolerance_margin::Float64 = 1e-1   # Factor relating the derived pitch tolerance to rtol_psi
     atol_x::Float64 = NaN          # Absolute tolerance for the energy integration (NaN ⇒ derived)
     rtol_x::Float64 = NaN          # Relative tolerance for the energy integration (NaN ⇒ derived)
     # Energy tolerances default to this fraction of the pitch ones (the pitch integrand is itself an energy integral).
     nested_tolerance_margin::Float64 = 1e-2   # Factor relating derived energy tolerances to the pitch ones
-    # Primary convergence knob (~2 sig figs matches NTV model validity); keep rtol_psi ≳ 10 × rtol_pitch or it chases inner-integral noise.
+    # Primary convergence knob (~2 sig figs matches NTV model validity); the pitch and energy levels derive from it.
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
     # Amplitude-sensitive (NTV ∝ δB²); default 0 (rtol-only). Nonzero is an expert opt-out for near-zero-torque cases and warns when it dominates.
     atol_psi::Float64 = 0.0        # Absolute tolerance for outer ψ quadrature [N·m]
@@ -163,29 +167,35 @@ builds a second control for its differing tolerance).
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi
 
-    # Diagnostic output flags
-    eq_out::Bool = false            # Output equilibrium profiles
-    theta_out::Bool = false         # Output theta-dependent quantities
-    xlmda_out::Bool = false         # Output pitch angle profiles
-    eqpsi_out::Bool = false         # Output equilibrium psi profiles
-
     # Output configuration
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
-    save_records::Bool = false      # Save detailed integration trajectories
-
-    # Input files (relative to dir_path)
-    gpec_file::String = "gpec.h5"
-
-    # Diagnostic flags
-    fnml_flag::Bool = false         # Fourier mode coupling diagnostics
-    ellip_flag::Bool = false        # Elliptic integral diagnostics
-    diag_flag::Bool = false         # General diagnostics
-    force_xialpha::Bool = false     # Force xi_alpha formulation
 
     # Debugging
     verbose::Bool = false
 end
+
+"""
+    torque_pitch_rtol(ctrl::KineticForcesControl) -> Float64
+
+Relative tolerance of the pitch (λ) quadrature inside the ψ torque quadrature: `ctrl.rtol_pitch` when set,
+otherwise `ctrl.psi_tolerance_margin × ctrl.rtol_psi`, so the λ integrand is resolved one margin tighter than
+the ψ integral asks for and the ψ error estimate is not polluted by λ quadrature noise.
+"""
+torque_pitch_rtol(ctrl::KineticForcesControl) = isnan(ctrl.rtol_pitch) ? ctrl.psi_tolerance_margin * ctrl.rtol_psi : ctrl.rtol_pitch
+
+# Pitch tolerance of the kinetic matrix build when `rtol_pitch` is left derived. There is no ψ quadrature to
+# derive from; this value moves the free-boundary eigen-energies by ≤ 1e-4 relative to a 100× tighter build.
+const MATRIX_RTOL_PITCH = 1e-3
+
+"""
+    matrix_pitch_rtol(ctrl::KineticForcesControl) -> Float64
+
+Relative tolerance of the pitch (λ) quadrature in the calculated kinetic matrix build: `ctrl.rtol_pitch` when
+set, otherwise `MATRIX_RTOL_PITCH` (1e-3). The matrices are splined over ψ and fed to the Euler–Lagrange
+solve, so there is no outer quadrature tolerance to derive from.
+"""
+matrix_pitch_rtol(ctrl::KineticForcesControl) = isnan(ctrl.rtol_pitch) ? MATRIX_RTOL_PITCH : ctrl.rtol_pitch
 
 
 # ============================================================================
@@ -197,7 +207,7 @@ end
 # `cubic_interp` call so the 7-parameter `CubicSeriesInterpolant{...}` need not be
 # spelled out. Used to concretely type the smats..zmats fields below so the per-ψ
 # `intr.smats(psi)` reads in `Torque.jl` are statically dispatched, not boxed
-# `Any` calls (issue #247).
+# `Any` calls.
 const GeomInterp = typeof(cubic_interp(collect(0.0:0.25:1.0), Series(zeros(ComplexF64, 5, 1)); extrap=ExtendExtrap()))
 
 """
@@ -240,19 +250,6 @@ this struct.
     dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
     divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
 
-    # Sticky bracket-search hints for amortized lookup in `tpsi!`. When the outer
-    # quadrature evaluates ψ non-monotonically, FastInterpolations falls back to a
-    # broader search when the hint is stale — still a net win over a cold bracket
-    # search on every call.
-    dbob_m_hint::Base.RefValue{Int} = Ref(1)
-    divx_m_hint::Base.RefValue{Int} = Ref(1)
-    # 2D hints for `equil.eqfun_B` and `equil.rzphi_jac` evaluated on the
-    # (ψ,θ) grid inside the θ loops of `tpsi!` / `calculate_fcgl`. Each call
-    # site gets its own hint tuple so the ψ index is sticky across the
-    # quadrature evaluation while the θ index updates monotonically within each θ loop.
-    hint2d_eqfun_B::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
-    hint2d_rzphi_jac::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
-
     # Upper ψ bound (FFS psilim); the perturbation interpolants are invalid beyond it,
     # so the outer ψ quadrature clips here.
     psilim::Float64 = 1.0
@@ -260,13 +257,8 @@ this struct.
     # Rational-surface ψ locations for ψ-quadrature paneling (see docstring).
     sing_psis::Vector{Float64} = Float64[]
 
-    # Pre-allocated θ-grid buffers for `tpsi!` — length mthsurf+1, reused per evaluation.
+    # θ knot grid (length mthsurf+1) read by the per-surface setup; never written after construction.
     tpsi_xs::Vector{Float64} = Float64[]
-    tpsi_B::Vector{Float64} = Float64[]
-    tpsi_dBdpsi::Vector{Float64} = Float64[]
-    tpsi_dBdtheta::Vector{Float64} = Float64[]
-    tpsi_jac::Vector{Float64} = Float64[]
-    tpsi_djdpsi::Vector{Float64} = Float64[]
 
     # Raw geometric matrices for kinetic W vector construction
     # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
@@ -279,14 +271,8 @@ this struct.
     # Clebsch displacement vectors for mode-coupled dW contraction
     xs_m::Any = nothing            # Vector of 3 CubicSeriesInterpolants: [ξ_ψ, ξ_+, ξ_-]
 
-    # Integration results
-    tphi::ComplexF64 = 0.0 + 0.0im    # Total torque/energy
-    tsurf::ComplexF64 = 0.0 + 0.0im   # Surface torque/energy
-    teq::ComplexF64 = 0.0 + 0.0im     # Equilibrium grid result
-
     # Method tracking — available methods/docs come from `METHOD_REGISTRY`.
     method::String = ""
-    wtw::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)
 
     verbose::Bool = false
 end
@@ -308,11 +294,6 @@ function KineticForcesInternal(equil; verbose::Bool=false)
         chi1=2π * equil.psio,
         mthsurf,
         tpsi_xs=collect(range(0.0, 1.0; length=nth)),
-        tpsi_B=Vector{Float64}(undef, nth),
-        tpsi_dBdpsi=Vector{Float64}(undef, nth),
-        tpsi_dBdtheta=Vector{Float64}(undef, nth),
-        tpsi_jac=Vector{Float64}(undef, nth),
-        tpsi_djdpsi=Vector{Float64}(undef, nth),
         verbose
     )
 end
@@ -485,24 +466,6 @@ end
 # ============================================================================
 
 """
-    EnergyIntegrationResult
-
-Results from a single energy-space integration at one (ψ, λ, ℓ) point.
-Trajectory fields are only populated when `ctrl.save_records=true`.
-"""
-@kwdef struct EnergyIntegrationResult
-    psi::Float64 = 0.0
-    lambda::Float64 = 0.0
-    ell::Int = 0
-    leff::Float64 = 0.0
-    torque::ComplexF64 = 0.0 + 0.0im
-    kinetic_energy::ComplexF64 = 0.0 + 0.0im
-    x_trajectory::Vector{Float64} = Float64[]
-    integrand_trajectory::Vector{ComplexF64} = ComplexF64[]
-    integral_trajectory::Vector{ComplexF64} = ComplexF64[]
-end
-
-"""
     MethodResult
 
 Results for one NTV computation method across all flux surfaces.
@@ -513,7 +476,6 @@ Results for one NTV computation method across all flux surfaces.
     torque_profile::Any = nothing     # Interpolant of dT/dψ(ψ) from ψ integration
     total_torque::ComplexF64 = 0.0 + 0.0im  # complex T: Re = torque T_φ [N·m], Im = 2n·δW_k (Logan 2013 Eq. 19)
     total_energy::Float64 = 0.0              # real kinetic energy δW_k = Im(T)/(2n) [J]
-    records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
     # Per-step ψ profile from outer quadrature
     psi_grid::Vector{Float64} = Float64[]
     dtdpsi::Vector{ComplexF64} = ComplexF64[]
@@ -538,5 +500,4 @@ Written to gpec.h5 under the "KineticForces" group.
     method_results::Dict{String,MethodResult} = Dict{String,MethodResult}()
     # Block-diagonal kinetic matrices: key=method, value=(numpert_total, numpert_total, 6)
     kinetic_matrices::Dict{String,Array{ComplexF64,3}} = Dict{String,Array{ComplexF64,3}}()
-    completed::Bool = false
 end

@@ -128,8 +128,9 @@ flux_surface_rtol = 1e-7
 [Wall]
 shape = "nowall"
 
+[LocalStability]
+
 [ForceFreeStates]
-local_stability_flag = true
 vac_flag = true
 force_termination = false
 
@@ -264,6 +265,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     # Construct PerturbedEquilibriumState with Fortran Clebsch data.
     # Fortran gpec_xclebsch already writes ξ^α = xms/χ₁, exactly what the KF operator consumes — feed directly.
     pe_state = PE.PerturbedEquilibriumState(;
+        response=PE.PlasmaResponse(; ffs),
         psi_grid=psi_grid_f,
         xi_modes=(
             clebsch_psi=clebsch_psi,

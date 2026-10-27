@@ -141,7 +141,8 @@ temperatures eV, frequencies rad/s, diffusivities m²/s.
 | `T_i`/`T_e`         | ion / electron temperature                                                                                        |
 | `omega_E`           | ExB rotation                                                                                                      |
 | `omega_tor`         | toroidal rotation (optional)                                                                                      |
-| `chi_e`             | perpendicular heat diffusivity χ⊥ (shipped data: electron power-balance χ_e; see the stability docs)              |
+| `chi_e`             | electron perpendicular heat diffusivity χ⊥,e                                                                      |
+| `chi_i`             | ion perpendicular heat diffusivity χ⊥,i                                                                           |
 | `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
 | `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
 | `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
@@ -156,6 +157,7 @@ struct KineticProfileData
     omega_E::Union{Nothing,Vector{Float64}}
     omega_tor::Union{Nothing,Vector{Float64}}
     chi_e::Union{Nothing,Vector{Float64}}
+    chi_i::Union{Nothing,Vector{Float64}}
     chi_phi::Union{Nothing,Vector{Float64}}
     zeff::Union{Nothing,Vector{Float64}}
     species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
@@ -163,11 +165,11 @@ struct KineticProfileData
 end
 
 function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
-    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing, zeff=nothing,
+    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_i=nothing, chi_phi=nothing, zeff=nothing,
     species_densities=nothing, provenance="")
     _v(x) = x === nothing ? nothing : Float64.(collect(x))
     return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
-        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), _v(zeff), species_densities, String(provenance))
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_i), _v(chi_phi), _v(zeff), species_densities, String(provenance))
 end
 
 """

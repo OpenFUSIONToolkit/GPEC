@@ -30,17 +30,20 @@ downstream inspection and HDF5 output.
       + length `nsurfaces` in `:uncoupled` mode
       + length `1` in `:coupled` mode (global eigenvalue normalized by
         `params[1].tauk`)
-  - `omega_Hz`, `gamma_Hz` -- physical rotation frequency / growth rate
+  - `omega_Hz`, `gamma_Hz` -- rotation angular frequency Re(Q)/τ_k [rad/s] and growth rate
+    Im(Q)/τ_k [1/s]. `Q_root` and `omega_Hz` are in the lab frame in both modes; an uncoupled
+    root is moved from its layer's E×B frame by τ_k·n·Ω_E, with Ω_E = 0 where it is unknown
   - `per_surface_extraction` -- `Vector{GrowthRateResult}` of length
     `nsurfaces` in uncoupled mode (each includes polelines, pole list,
-    valid roots, filtered roots). Empty in coupled mode.
+    valid roots, filtered roots), in each surface's E×B frame. Empty in coupled mode.
   - `coupled_extraction`  -- single `GrowthRateResult` in coupled mode.
     `nothing` otherwise.
   - `layer_widths`        -- `Vector{LayerWidths}`, one per surface: the
     resistive layer thickness (in meters) from the `del_s` Riccati solve
     plus FKR / visco-resistive sanity scales. Empty when disabled.
-  - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] on each surface,
-    from the kinetic file (NaN when it has none). Recorded in both coupling modes
+  - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] resolved on each
+    surface: the kinetic file's value, or the `control.omega_E_kHz` override for that m/n;
+    NaN where neither gives one. Recorded in both coupling modes
   - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
     inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
   - `scan_data`           -- scan results (per-surface in uncoupled, single

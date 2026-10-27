@@ -20,12 +20,12 @@
         InnerLayerResponse(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
 
     function _slayer_ref()
-        return slayer_parameters(;
+        return slayer_parameters(; P_perp_model=:chi_perp_e,
             n_e=5.0e19, t_e=1000.0, t_i=1000.0,
             omega_e=-1.0e4, omega_i=5.0e3,
             qval=2.0, sval_r=1.0, bt=2.0,
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
-            chi_perp=1.0, chi_tor=1.0, m=2, n=1)
+            chi_perp_e=1.0, chi_tor=1.0, m=2, n=1)
     end
 
     @testset "Constructor validation" begin
@@ -199,12 +199,12 @@
         # exactly.
         # A second surface with different n_e and T_e, so tauk differs and the rescale is exercised.
         p_a = _slayer_ref()
-        p_b = slayer_parameters(;
+        p_b = slayer_parameters(; P_perp_model=:chi_perp_e,
             n_e=2.0e19, t_e=500.0, t_i=500.0,
             omega_e=-1.0e4, omega_i=5.0e3,
             qval=3.0, sval_r=1.5, bt=2.0,
             rs=0.6, R0=1.7, mu_i=2.0, zeff=1.0,
-            chi_perp=1.0, chi_tor=1.0, m=3, n=1)
+            chi_perp_e=1.0, chi_tor=1.0, m=3, n=1)
         m = SLAYERModel()
         sc1 = surface_coupling(m, p_a, 0.0 + 0im)
         sc2 = surface_coupling(m, p_b, 0.0 + 0im)

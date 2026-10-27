@@ -13,7 +13,7 @@
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
 #   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
-#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots
+#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame)
 #   │                           (flat-plus-offsets ragged encoding)
 #   └── Scan/               -- optional: full Q/Δ scan data
 
@@ -87,7 +87,7 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/tau_k" =>
         (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = τ_k·ω; diamagnetic inputs Q_e, Q_i carry the opposite sign by convention)", units="s", dims=("surface",)),
     "PerSurface/omega_E" =>
-        (; long_name="E×B angular frequency Ω_E per unit n on each surface, from the kinetic file (NaN when it has none)", units="rad/s", dims=("surface",)),
+        (; long_name="E×B angular frequency Ω_E per unit n on each surface (kinetic file or omega_E_kHz override; NaN when neither gives one)", units="rad/s", dims=("surface",)),
     "PerSurface/q_shift" =>
         (; long_name="real E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E applied to each surface's inner-layer Q in the coupled determinant (0 in uncoupled mode)", dims=("surface",)),
     "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface", units="s", dims=("surface",)),
@@ -122,10 +122,10 @@ const TEARING_H5_ANNOTATIONS = [
         long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)",
         dims=("surface_row", "surface_col")
     ),
-    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
+    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q in the lab frame (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
         (;
-            long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root: each surface's E×B frame when uncoupled, the lab frame when coupled",
+            long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root in the lab frame (an uncoupled root's E×B-frame value is ω − n·Ω_E)",
             units="rad/s",
             dims=("surface",)
         ),

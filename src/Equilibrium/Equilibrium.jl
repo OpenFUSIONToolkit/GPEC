@@ -1,3 +1,22 @@
+"""
+    Equilibrium
+
+Reads or solves an MHD equilibrium and maps it to straight-field-line flux coordinates as a
+[`PlasmaEquilibrium`](@ref).
+
+## Where code goes
+
+  - `Config.jl`: the run configuration (`EquilibriumConfig`) and global parameters (`EquilibriumParameters`).
+  - `PlasmaEquilibrium.jl`: the result type and its spline containers.
+  - `Construction.jl`: `run_input` for each source type, the `PlasmaEquilibrium` constructors, and `reform`.
+  - `Sources/`: one file per input format, each building a `DirectRunInput` or `InverseRunInput`
+    (`Ingest.jl` holds those and the ingest types). A new analytic model is one file in
+    `Sources/Analytic/` holding its config and solver, plus one `ANALYTIC_EQ` row.
+  - `Grid/`: radial ψ grids, first-pass and refined.
+  - `Axisymmetric/`: code that assumes axisymmetry (the 2D solvers, the Grad-Shafranov residual,
+    separatrix finding). A non-axisymmetric equilibrium gets a sibling folder.
+  - `Derived/`: quantities computed from a formed `PlasmaEquilibrium`.
+"""
 module Equilibrium
 
 # --- Module-level Dependencies ---
@@ -50,6 +69,6 @@ export reform, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, Anal
     KineticProfileData, read_kinetic_file, write_kinetic_h5, attach_kinetic_profiles!
 export flux_surface_metric, flux_surface_area
 export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, bracket_mandatory_nodes, enforce_min_spacing, implied_knot_count
-export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
+export compute_jac_delpsi, compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
 
 end # module Equilibrium

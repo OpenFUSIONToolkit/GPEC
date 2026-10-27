@@ -70,11 +70,11 @@
         P = Psi_of(r)
         te = te_of(P)
         ne = ne_of(P)
-        p = slayer_parameters(; n_e=ne, t_e=te, t_i=te,
+        p = slayer_parameters(; P_perp_model=:chi_perp_e, n_e=ne, t_e=te, t_i=te,
             omega_e=1.0e4, omega_i=5.0e3,
             qval=q_of(r), sval_r=s_of(r), bt=B0,
             rs=r * A_MIN, R0=R0, mu_i=MNUM, zeff=ZEFF,
-            chi_perp=CHI, chi_tor=CHI, m=1, n=n,
+            chi_perp_e=CHI, chi_tor=CHI, m=1, n=n,
             resistivity_model=SpitzerHarmModel(), lnLambda_form=:nrl)
         return p
     end
@@ -236,6 +236,12 @@ end
     oi = overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
     @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
 
+    # A disabled section feeds the scan whatever its inner model, and missing kinetic profiles only skip the scan;
+    # with tearing enabled they are an error, raised here rather than after every other stage.
+    @test overlap_inputs(Dict("inner_model" => "ggj_ray")) !== nothing
+    @test (@test_logs overlap_inputs(Dict{String,Any}(); kinetic=nothing)) === nothing
+    @test_throws ErrorException overlap_inputs(Dict("enabled" => true); kinetic=nothing)
+
     # Z_eff(psi) comes from the kinetic file's own n_i/n_e with the [SLAYER] impurity charge.
     j = length(kin.psi) ÷ 2
     @test oi.zeff(kin.psi[j]) ≈ 6.0 - kin.n_i[j] / kin.n_e[j] * 5.0
@@ -250,10 +256,11 @@ end
         @test Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5")).zeff == own
         @test overlap_inputs(Dict("impurity_charge" => 10.0, "zeff" => 2.5); kinetic=Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5"))).zeff(kin.psi[j]) ≈ 3.2
         Equilibrium.write_kinetic_h5(joinpath(tmp, "no_ni.h5"), Equilibrium.KineticProfileData(; base...))
-        @test overlap_inputs(Dict("zeff" => 2.5); kinetic=Equilibrium.read_kinetic_file(joinpath(tmp, "no_ni.h5"))).zeff == 2.5
+        no_ni = Equilibrium.read_kinetic_file(joinpath(tmp, "no_ni.h5"))
+        @test overlap_inputs(Dict("zeff" => 2.5); kinetic=no_ni).zeff == 2.5
+        # A P_perp_model whose χ⊥,i the profiles lack skips the scan with a warning rather than aborting the run.
+        @test (@test_logs (:warn, r"Layer-overlap scan skipped") match_mode = :any overlap_inputs(Dict("P_perp_model" => "D_perp"); kinetic=no_ni)) === nothing
     end
-    # No kinetic profiles: no scan.
-    @test overlap_inputs(Dict{String,Any}(); kinetic=nothing) === nothing
 
     widths(over) = GeneralizedPerturbedEquilibrium._layer_overlap_scan(overlap_inputs(over), _fresh(), equil).width_dr
     w_ref = widths(Dict{String,Any}())
@@ -277,7 +284,7 @@ end
         profs = Utilities.KineticProfiles(; psi=psi_grid,
             n_e=fill(1.0e19, npsi), T_e=fill(500.0, npsi), T_i=fill(500.0, npsi),
             omega_E=zeros(npsi))
-        scan = Tearing.resistive_layer_overlap(equil, profs; n_tor=1, m_max=0, extrapolate=false)
+        scan = Tearing.resistive_layer_overlap(equil, profs; P_perp_model=:chi_perp_e, n_tor=1, m_max=0, extrapolate=false)
         @test scan isa Tearing.LayerOverlapScan
         @test isempty(scan.psi)
         @test scan.psihigh === nothing && scan.first_overlap === nothing

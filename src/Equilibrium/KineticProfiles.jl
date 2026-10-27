@@ -58,7 +58,7 @@ const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
 # The optional profile datasets of the HDF5 kinetic schema and their units, one row per `KineticProfileData`
 # field of the same name; the reader and writer both iterate it, so a new profile is a row here plus its field.
 const _KINETIC_H5_PROFILES = ("n_i" => "m^-3", "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
-    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless")
+    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_i" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless")
 
 """
     read_kinetic_file(path; group="/") -> KineticProfileData

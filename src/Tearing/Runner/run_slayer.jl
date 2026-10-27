@@ -7,32 +7,39 @@
 # Kinetic-profile view
 # ---------------------------------------------------------------------
 # The SLAYER view of raw kinetic profiles (`equil.kinetic`), on their own ψ grid. Returns the
-# spline-based `KineticProfiles` plus χ⊥(ψ)/χ_φ(ψ) callables built from `chi_e`/`chi_phi` (or
-# `nothing` when the data carry no usable χ, in which case the caller falls back to the scalar
-# `control.chi_perp`/`chi_tor`), and a Z_eff(ψ) callable: the data's own `zeff` profile when they
-# carry one, else derived from `n_i/n_e` (or `nothing` when they carry neither, in which case the
-# caller falls back to the scalar `control.zeff`). The E×B rotation `omega_E` is required: the
-# layer's Doppler shift has no default.
+# spline-based `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from `chi_e`/`chi_i`/`chi_phi`
+# (or `nothing` when the data carry no usable χ, in which case the caller falls back to the scalar
+# `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), a Z_eff(ψ) callable: the data's own `zeff` profile when
+# they carry one, else derived from `n_i/n_e` (or `nothing` when they carry neither, in which case the
+# caller falls back to the scalar `control.zeff`), and whether the data carry an `omega_E` profile.
 function _slayer_profiles(data::KineticProfileData, control::SLAYERControl)
     source = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
-    for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i), ("omega_E", data.omega_E))
+    for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))
         v === nothing &&
             error("run_slayer: $source missing required dataset '$name' for the SLAYER inner layer.")
     end
+    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the data have it, else zero (no shift);
     # ω_*e/ω_*i are derived per surface from the density and temperature splines by `build_slayer_inputs`.
+    omega_E = data.omega_E === nothing ? zeros(length(data.psi)) : data.omega_E
     profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
-        T_i=data.T_i, omega_E=data.omega_E)
+        T_i=data.T_i, omega_E=omega_E)
 
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
     # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
-    # to the scalar control.chi_perp/chi_tor fallback. Build the spline only
+    # to the scalar control.chi_perp_e/chi_tor fallback. Build the spline only
     # from a usable (present, not all-zero) array.
     psi_xs = collect(Float64, data.psi)
-    _chi_spline(v) = (v === nothing || all(iszero, v)) ? nothing :
-                     cubic_interp(psi_xs, collect(Float64, v))
-    chi_perp = _chi_spline(data.chi_e)
-    chi_tor = _chi_spline(data.chi_phi)
+    function _chi_spline(name, v)
+        (v === nothing || all(iszero, v)) && return nothing
+        minimum(v) > 0 || error("run_slayer: $source has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
+        return cubic_interp(psi_xs, collect(Float64, v))
+    end
+    model = control.P_perp_model
+    uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+    chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
+    chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
+    chi_tor = model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
     # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
@@ -51,7 +58,39 @@ function _slayer_profiles(data::KineticProfileData, control::SLAYERControl)
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source)
+    return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
+        has_omega_E=(data.omega_E !== nothing))
+end
+
+# χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the control's
+# scalar fallbacks. With `warn`, a fallback is reported only for a χ the selected P_perp model
+# (and, for χ⊥,e, the critical Δ) actually uses.
+function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
+    model = control.P_perp_model
+    pick(f, s) = f === nothing ? s : f
+    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && control.chi_perp_i === nothing &&
+        throw(
+            ArgumentError(
+                "SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
+                "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."
+            )
+        )
+    if warn
+        uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+        uses_i = model in (:chi_perp_i, :D_perp)
+        uses_tor = model !== :tau_E
+        fallbacks = String[]
+        uses_e && loaded.chi_perp_e === nothing && push!(fallbacks, "chi_e → chi_perp_e = $(control.chi_perp_e)")
+        uses_i && loaded.chi_perp_i === nothing && push!(fallbacks, "chi_i → chi_perp_i = $(control.chi_perp_i)")
+        uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_tor = $(control.chi_tor)")
+        isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
+                                    "$(join(fallbacks, ", ")); using the scalar fallback."
+        model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
+              "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
+    end
+    return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
+        chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
+        chi_tor=pick(loaded.chi_tor, control.chi_tor))
 end
 
 # ---------------------------------------------------------------------
@@ -143,6 +182,32 @@ end
 _build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
     surface_coupling(model, params, dp_diag)
 
+# "m/n" label keying `control.omega_E_kHz`; GGJ parameters carry no mode numbers.
+_mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
+_mn_label(::InnerLayerParameters) = nothing
+
+# Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
+# rational surface (NaN when there is none), replaced on every surface whose m/n `control.omega_E_kHz` lists.
+function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
+    n = length(params)
+    isempty(omega_E_file) || length(omega_E_file) == n ||
+        throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
+                            "$n rational surfaces were analysed."))
+    Ω_E = isempty(omega_E_file) ? fill(NaN, n) : Float64.(omega_E_file)
+    isempty(control.omega_E_kHz) && return Ω_E
+    labels = [_mn_label(p) for p in params]
+    any(isnothing, labels) &&
+        throw(ArgumentError("run_slayer: omega_E_kHz is keyed by m/n, which $(eltype(params)) surfaces do not carry."))
+    unknown = setdiff(keys(control.omega_E_kHz), labels)
+    isempty(unknown) ||
+        throw(ArgumentError("run_slayer: omega_E_kHz lists m/n $(sort(collect(unknown))) matching no analysed surface; " *
+                            "the analysed surfaces are $(labels)."))
+    for (k, label) in enumerate(labels)
+        haskey(control.omega_E_kHz, label) && (Ω_E[k] = 2π * 1e3 * control.omega_E_kHz[label])
+    end
+    return Ω_E
+end
+
 """
     _q_shift(p::SLAYERParameters, Ω_E) -> Float64
 
@@ -219,9 +284,12 @@ per-surface parameters, and the outer-region Δ' matrix. Bypasses the orchestrat
 `TearingProblem` solve — use this when the parameters are already known (e.g. in unit
 tests or when rebuilding from cached HDF5 output). The model is a typed object end to
 end; nothing below this point reads `control.inner_model`. `omega_E` is the E×B angular
-frequency per unit n at each surface [rad/s]; empty means none is known, which applies no
-shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer
-Q; in both modes it is reported as `result.omega_E`.
+frequency per unit n at each surface [rad/s], replaced on any surface whose m/n
+`control.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
+shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer Q; in
+both modes the resolved value is reported as `result.omega_E`. Roots are reported in the lab frame
+in both modes: an uncoupled layer is solved in its own E×B frame and its root is then moved by
+τ_k·n·Ω_E (Ω_E = 0 where it is unknown), so `γ` is the same and ω carries n·Ω_E.
 """
 function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     params::AbstractVector{<:InnerLayerParameters},
@@ -291,12 +359,12 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
     coupled = control.coupling_mode === :coupled
-    isempty(omega_E) || length(omega_E) == n ||
-        throw(ArgumentError("run_slayer: omega_E has $(length(omega_E)) entries but $n rational surfaces were analysed."))
-    Ω_E = isempty(omega_E) ? zeros(Float64, n) : omega_E
-    coupled && _is_ggj(model) && any(!iszero, Ω_E) && @warn(
-            "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
-    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_E[k]) for k in 1:n] : zeros(Float64, n)
+    Ω_E = _omega_E_per_surface(control, params, omega_E)
+    # A surface with no known rotation applies no shift.
+    Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
+    coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
+        "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
+    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
     ref_idx = 1
@@ -362,8 +430,10 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 "$(_surface_label(params[k])); reported γ=0 is a " *
                 "placeholder, not a physical result — check scan grid / " *
                 "pole_threshold.")
-            push!(Q_root, gr.Q_root)
-            push!(omega_Hz, gr.omega_Hz)
+            # The layer is solved in its own E×B frame; report the root in the lab frame, Q_lab = Q + τ_k·n·Ω_E.
+            q_lab = -_q_shift(params[k], Ω_shift[k])
+            push!(Q_root, gr.Q_root + q_lab)
+            push!(omega_Hz, :no_root in gr.warning_flags ? gr.omega_Hz : gr.omega_Hz + q_lab / params[k].tauk)
             push!(gamma_Hz, gr.gamma_Hz)
             push!(per_surface_extraction, gr)
             control.store_scan && push!(scan_data_list, scan)
@@ -399,7 +469,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, isempty(omega_E) ? fill(NaN, n) : Ω_E, q_shifts, scan_data_list)
+        layer_widths, Ω_E, q_shifts, scan_data_list)
 end
 
 # ---------------------------------------------------------------------

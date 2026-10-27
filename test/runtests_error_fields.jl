@@ -75,7 +75,7 @@ include("h5_metadata_check.jl")
                     Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_response" => true, "compute_singular_coupling" => true,
+                "compute_singular_coupling" => true,
                 "verbose" => false, "write_outputs_to_HDF5" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
             # Kinetic profiles consistent with this Solovev pressure, for the NTV torque couplings.
@@ -100,10 +100,12 @@ include("h5_metadata_check.jl")
             h5open(h5path, "r") do h5
                 @test haskey(h5, "Info/Runtimes/error_fields")
                 @test read(h5["Info/Runtimes/error_fields"]) > 0
-                @test haskey(h5, "Info/Runtimes/forcing_terms")
                 @test haskey(h5, "Info/Runtimes/perturbed_equilibrium")
                 @test haskey(h5, "Info/Runtimes/kinetic_forces")
                 @test haskey(h5, "Info/Runtimes/total")
+                # Timed inside a stage, so no longer recorded.
+                @test !haskey(h5, "Info/Runtimes/forcing_terms")
+                @test !haskey(h5, "Info/Runtimes/galerkin")
             end
 
             @test sens.coil_names == ["hoop_tilted", "hoop_axi", "hoop_efc"]
@@ -130,7 +132,7 @@ include("h5_metadata_check.jl")
             @test Ty ≈ im .* Tx rtol = 1e-8
 
             # Projection onto the full-window dominant mode: the sets' overlaps sum to the run's.
-            rc = PE.ResonantCoupling(pe, ffs)
+            rc = PE.ResonantCoupling(pe.response)
             dom = PE.dominant_coupling(rc)
             table = EF.sensitivity_table(sens, dom)
             @test table.mode == 1
@@ -532,10 +534,10 @@ include("h5_metadata_check.jl")
             @test length(with_profiles.subplots) == 3                       # and the deposition profile its own panel
             @test with_profiles[3].series_list[1][:y] == c.torque_full_profile[:, 2]
             @test with_profiles[3].series_list[2][:y] == c.torque_residual_profile[:, 2]
-            attached = ffs.equil.kinetic
-            ffs.equil.kinetic = nothing
-            @test_throws "needs kinetic profiles" GPEC.efc_couplings(ffs, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
-            ffs.equil.kinetic = attached
+            attached = pe.response.ffs.equil.kinetic
+            pe.response.ffs.equil.kinetic = nothing
+            @test_throws "needs kinetic profiles" GPEC.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
+            pe.response.ffs.equil.kinetic = attached
 
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
@@ -636,7 +638,7 @@ include("h5_metadata_check.jl")
                         "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_response" => true, "compute_singular_coupling" => true,
+                "compute_singular_coupling" => true,
                 "verbose" => false, "write_outputs_to_HDF5" => false)
             inputs["ErrorFields"] = Dict{String,Any}(
                 "verbose" => false, "output_filename" => "ef_only.h5")
