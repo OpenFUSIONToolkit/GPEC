@@ -27,6 +27,16 @@ label = "NTV ψ quadrature evaluations"
 noise_threshold = 0
 order = 11
 
+# Fluid CGL limit on the same ψ quadrature (fcgl method, l = 0 only): tracks the surface drive
+# convention κ·ξ⊥ = -(δB/B + ∇·ξ⊥) independently of the kinetic resonance operator.
+[quantities.fcgl_energy]
+h5path = "KineticForces/fcgl/total_energy"
+type = "real_scalar"
+extract = "value"
+label = "fluid CGL energy fcgl [J]"
+noise_threshold = 1e-8
+order = 12
+
 # Stability anchors — confirm the upstream FFS/PE stages feeding the NTV diagnostic.
 [quantities.et_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"

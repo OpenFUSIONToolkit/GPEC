@@ -42,6 +42,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 
         resize!(eqt.profiles_2d, 1; wipe=true)
         prof2d              = eqt.profiles_2d[1]
+        prof2d.grid_type.index = 1
         prof2d.grid.dim1    = R_grid
         prof2d.grid.dim2    = Z_grid
         prof2d.psi          = psi_rz .* cf
@@ -104,6 +105,26 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
             # Without a dd, an imas config leaves additional_input === nothing.
             _, _, no_dd = GeneralizedPerturbedEquilibrium.build_inputs_from_toml(dir)
             @test no_dd === nothing
+        end
+    end
+
+    # Re-forming from the captured ingest must match re-reading the dd on the same nodes. The mock's
+    # surfaces close inside its R grid only to psihigh ≈ 0.5, below the auto grid's edge region.
+    @testset "reform from ingest matches a fresh read_imas" begin
+        dd, _ = make_mock_dd()
+        equil = PlasmaEquilibrium(dd; imas_cocos=11, grid_type="core_edge_packed", mpsi=64, psilow=0.01, psihigh=0.5)
+        @test equil.config.eq_type == "imas"
+        @test equil.ingest isa Equilibrium.DirectIngest && equil.analytic === nothing
+        @test_throws ErrorException PlasmaEquilibrium(EquilibriumConfig(; eq_type="efit"), dd)  # dd needs eq_type="imas"
+
+        nodes = Equilibrium.refined_psi_grid(equil; tau=1e-3, mandatory=Float64[], singfac_min=1e-4, n_min=1)
+        reformed = Equilibrium.reform(equil, nodes)
+        fresh = PlasmaEquilibrium(equil.config, dd; override_psi_nodes=nodes)
+        @test reformed.rzphi_xs == fresh.rzphi_xs == nodes
+        @test map(reformed.profiles.q_spline, nodes) == map(fresh.profiles.q_spline, nodes)
+        for pt in ((0.1, 0.0), (0.3, 0.2), (0.45, 0.7))
+            @test reformed.rzphi_rsquared(pt) == fresh.rzphi_rsquared(pt)
+            @test reformed.rzphi_jac(pt) == fresh.rzphi_jac(pt)
         end
     end
 

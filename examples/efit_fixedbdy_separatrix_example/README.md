@@ -13,7 +13,7 @@ loads it regardless of box size.
 
 This g-file is the fixture for the `efit_fixedbdy_separatrix` regression case
 (`regression-harness/cases/efit_fixedbdy_separatrix.toml`, a `kind = "computed"` case that calls
-`setup_equilibrium` directly). It is **not** a runnable example deck — there is no `gpec.toml`.
+`PlasmaEquilibrium` directly). It is **not** a runnable example deck — there is no `gpec.toml`.
 
 Free-boundary equilibria (real coil currents) and standard diverted EFITs are unaffected: their
 outboard midplane flux keeps dropping past the LCFS, so the bracket was never ambiguous.

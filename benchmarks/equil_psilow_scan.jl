@@ -50,7 +50,7 @@ end
 # JIT warmup
 println("JIT warmup...")
 warmup_cfg = make_config(config_path, "efit", 1e-2)
-setup_equilibrium(warmup_cfg)
+PlasmaEquilibrium(warmup_cfg)
 
 println("=" ^ 70)
 println("psilow near-axis accuracy scan")
@@ -67,7 +67,7 @@ for method in methods
         local success = false
         local err_msg = ""
         try
-            t = @elapsed pe = setup_equilibrium(cfg)
+            t = @elapsed pe = PlasmaEquilibrium(cfg)
             runtime = t
             success = true
         catch e
