@@ -28,9 +28,16 @@ ffs  = solve(prob, Riccati())
 The four objects map one-to-one onto the pipeline stages:
 
   - [`PlasmaEquilibrium`](@ref) reads and processes the equilibrium — the `[Equilibrium]`
-    section. Analytic equilibria (`sol`, `lar`, `tj_analytic`) take their parameters from a
-    separate config object and are built with
-    `setup_equilibrium(eq_config, analytic_config)` instead.
+    section. Analytic equilibria take their parameters from their config object, with the
+    `eq_type` implied, and IMAS equilibria from a data dictionary:
+
+    ```julia
+    eq = PlasmaEquilibrium(Equilibrium.SolovevConfig(; elongation=1.5); mpsi=0)
+    eq = PlasmaEquilibrium(dd; imas_cocos=11)
+    ```
+
+    Every equilibrium remembers its source, so with `mpsi=0` `solve` re-forms it on the same
+    refined two-pass grid the deck uses; `Equilibrium.reform(eq, psi_nodes)` re-forms it on any grid.
   - `solve` runs the force-free-states stage — the `[ForceFreeStates]` section — and returns
     a `ForceFreeStatesResult`, exactly the object the TOML driver publishes.
   - [`RMPField`](@ref) describes the external field — the `[ForcingTerms]` section — without

@@ -2,7 +2,7 @@ using Test
 using Printf
 using GeneralizedPerturbedEquilibrium.Equilibrium
 using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, EquilibriumConfig,
-    setup_equilibrium, tj_analytic_run, tj_analytic_run_direct
+    tj_analytic_run, tj_analytic_run_direct
 
 # Two-path smoke tests for the TJ-analytic equilibrium model
 # (GPEC adaptation of R. Fitzpatrick's TJ code,
@@ -25,7 +25,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         eq = EquilibriumConfig(; eq_type="tj_analytic",
             psilow=0.01, psihigh=0.995,
             mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
-        pe = setup_equilibrium(eq, tj)
+        pe = PlasmaEquilibrium(eq, tj)
 
         # psio is a physical-scale ψ; regressions in the a→a² normalization
         # or the dψ/dr construction would change it by factors of a.
@@ -52,7 +52,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         eq = EquilibriumConfig(; eq_type="tj_analytic_direct",
             psilow=0.01, psihigh=0.995,
             mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
-        pe = setup_equilibrium(eq, tj)
+        pe = PlasmaEquilibrium(eq, tj)
 
         @test pe.psio > 0
         @test isfinite(pe.psio)
@@ -102,7 +102,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         function _lar_equilibrium(eps)
             tj = TJAnalyticConfig(; r0=1.0 / eps, a=1.0, q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0, ma=64, mtheta=64)
             eq = EquilibriumConfig(; eq_type="tj_analytic", psilow=0.01, psihigh=0.995, mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
-            return setup_equilibrium(eq, tj)
+            return PlasmaEquilibrium(eq, tj)
         end
         function _lar_deviation(pe, psi_s, n)
             q = pe.profiles.q_spline(psi_s)
@@ -141,7 +141,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
             eq = EquilibriumConfig(; eq_type="tj_analytic",
                 psilow=0.01, psihigh=0.995,
                 mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
-            pe = setup_equilibrium(eq, tj)
+            pe = PlasmaEquilibrium(eq, tj)
             q1 = pe.profiles.q_deriv(psi)
             rg = resist_geometry(pe, psi, q1)
             rs = surface_minor_radius(pe, psi)
