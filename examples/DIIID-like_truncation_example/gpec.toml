@@ -44,6 +44,8 @@ psilim_from_layer_overlap = true   # Cap psilim where adjacent resistive layers 
 
 [SLAYER]
 # The growth-rate analysis is not run here; the section is present because the layer-overlap scan
-# takes its kinetic profiles, and its chi_perp(psi), from the SLAYER profile_file.
+# takes its kinetic profiles, and its chi_perp_e(psi), from the SLAYER profile_file. P_perp is pinned to the
+# electron channel so the cap binds: with the default D_perp the layers are ~30% narrower and do not overlap inside psi = 1.
 enabled = false                # Run the SLAYER tearing-mode analysis
+P_perp_model = "chi_perp_e"    # Perpendicular Prandtl number model (pinned; see above)
 profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (relative to the run dir), required when SLAYER is enabled
