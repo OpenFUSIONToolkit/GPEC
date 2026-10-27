@@ -385,8 +385,8 @@ using HDF5
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
                 api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
-                # Known drift: the equilibrium does not store its analytic config, so `solve` cannot re-form it.
-                @test_broken api.equil.rzphi_xs == reference.equil.rzphi_xs
+                # The API and deck reform the same analytic source on the same refined grid.
+                @test api.equil.rzphi_xs == reference.equil.rzphi_xs
             end
         end
 
