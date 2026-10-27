@@ -63,7 +63,8 @@ end
 
 Evaluate the `mpert×mpert` matrices `F = Q F̄ Qᴴ`, `K = Q K̄`, `G = Ḡ` at flux `x` with safety factor
 `q`, where `Q = diag(singfac)` and `singfac = m - n q` (direct). Port of `gal_get_fkg` (gal.f).
-Uses the un-factored reduced `mats.ideal.F_spline_gal` (F̄), `mats.ideal.K_spline` (K̄), `mats.ideal.G_spline` (Ḡ). F/K/G are the
+Reconstructs F̄ = LLᴴ from `mats.ideal.F_spline_lower`, matching the Euler–Lagrange kernel and singular
+expansions, and uses `mats.ideal.K_spline` (K̄), `mats.ideal.G_spline` (Ḡ). F/K/G are the
 ideal-MHD Euler–Lagrange coefficient matrices of the outer-region weak form (Glasser 2016, PoP 23, 112506).
 """
 function gal_get_fkg(mats::MatrixSplines, intr::ForceFreeStatesInternal, x::Float64, q::Float64;
@@ -75,7 +76,9 @@ function gal_get_fkg(mats::MatrixSplines, intr::ForceFreeStatesInternal, x::Floa
     F = Fbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Fbuf
     K = Kbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Kbuf
     G = Gbuf === nothing ? Matrix{ComplexF64}(undef, N, N) : Gbuf
-    mats.ideal.F_spline_gal(vec(F), x; hint=mats._hint)
+    # Reuse G as factor scratch before evaluating Ḡ.
+    mats.ideal.F_spline_lower(vec(G), x; hint=mats._hint)
+    mul!(F, LowerTriangular(G), adjoint(LowerTriangular(G)))
     mats.ideal.K_spline(vec(K), x; hint=mats._hint)
     mats.ideal.G_spline(vec(G), x; hint=mats._hint)
 
@@ -119,11 +122,12 @@ function gal_gauss_quad!(cell::GalCell, mats::MatrixSplines, profiles, intr::For
         pb = swap_edge ? (pbt[1], pbt[2], pbt[4], pbt[3]) : pbt
         qb = swap_edge ? (qbt[1], qbt[2], qbt[4], qbt[3]) : qbt
         for ip in 0:np, ipert in 1:N, jp in 0:np, jpert in 1:N
-            cell.mat[ipert, jpert, ip+1, jp+1] += w * (
-                F[ipert, jpert] * qb[ip+1] * qb[jp+1] +
-                K[ipert, jpert] * qb[ip+1] * pb[jp+1] +
-                conj(K[jpert, ipert]) * pb[ip+1] * qb[jp+1] +
-                G[ipert, jpert] * pb[ip+1] * pb[jp+1])
+            cell.mat[ipert, jpert, ip+1, jp+1] +=
+                w * (
+                    F[ipert, jpert] * qb[ip+1] * qb[jp+1] +
+                    K[ipert, jpert] * qb[ip+1] * pb[jp+1] +
+                    conj(K[jpert, ipert]) * pb[ip+1] * qb[jp+1] +
+                    G[ipert, jpert] * pb[ip+1] * pb[jp+1])
         end
     end
     return cell
@@ -345,8 +349,8 @@ function gal_resonant!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles,
     if verbose
         @info "  resonant jsing=$jsing side=$(cell.extra) qerr=$(qerr) res1=$(raw[1]) res2=$(raw[2])"
     end
-    hbig = reshape(@view(raw[3:2+N*(np+1)]), N, np + 1)
-    hsmall = reshape(@view(raw[3+N*(np+1):end]), N, np + 1)
+    hbig = reshape(@view(raw[3:(2+N*(np+1))]), N, np + 1)
+    hsmall = reshape(@view(raw[(3+N*(np+1)):end]), N, np + 1)
 
     # Apply the right-side negation and the gal_make_arrays signs (gal.f gal_make_arrays)
     cell.erhs = -sgn_u * raw[1]
@@ -437,7 +441,7 @@ including its full three-way edge branch (rpec count `ncoil = ws.nsol - 2*msing`
   - free boundary (`wv_edge !== nothing`): add the vacuum block `wvac·psio²` at the edge value DOF
     (gal.f).
   - fixed boundary (else): identity edge (gal.f).
-`wv_edge` is `nothing` for the rpec and fixed cases.
+    `wv_edge` is `nothing` for the rpec and fixed cases.
 """
 function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
     msing = length(ws.intvl) - 1
@@ -459,7 +463,7 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
             cell.mat[idx, idx, 4, 4] = 1
         end
         for ipert in 1:mpert
-            ws.rhs[cell.map[ipert, 4], 2 * msing + ipert] = 1
+            ws.rhs[cell.map[ipert, 4], 2*msing+ipert] = 1
         end
     elseif wv_edge !== nothing
         # free boundary: vacuum block wvac·psio² (gal.f)

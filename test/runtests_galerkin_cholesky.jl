@@ -101,3 +101,39 @@ using LinearAlgebra
         @test_throws ArgumentError FFS.gal_banded_solve!(ab, copy(b), kl_rect, ku_rect, "cholesky")
     end
 end
+
+@testset "Galerkin coefficients share the factorized ideal operator" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    xs = [0.1, 0.3, 0.6, 0.9]
+    factors = [ComplexF64[1+x^2 0; (0.2+0.3im)*x 2-x/2] for x in xs]
+    spline(values) = cubic_interp(xs, Series(permutedims(hcat(vec.(values)...))); extrap=ExtendExtrap())
+    lower = spline(factors)
+    direct = spline([L * L' for L in factors])
+    k = ComplexF64[1 2im; 3 4]
+    g = ComplexF64[5 1im; -1im 6]
+    zero_spline = spline([zeros(ComplexF64, 2, 2) for _ in xs])
+    ideal = FFS.IdealMatrices(; A_spline=zero_spline, B_spline=zero_spline, C_spline=zero_spline,
+        D_spline_prim=zero_spline, E_spline_prim=zero_spline, H_spline=zero_spline,
+        F_spline_prim=zero_spline, F_spline_lower=lower, F_spline_gal=direct,
+        K_spline=spline([k for _ in xs]), G_spline=spline([g for _ in xs]), J_spline=zero_spline)
+    mats = FFS.MatrixSplines(; ideal)
+    intr = FFS.ForceFreeStatesInternal(; mlow=1, mhigh=2, nlow=1, nhigh=1, numpert_total=2)
+    for x in (xs..., 0.42), q in (1.0, 1.4)
+        L = reshape(lower(x), 2, 2)
+        Q = Diagonal([1-q, 2-q])
+        expected = Q * L * L' * Q
+        F, K, G = FFS.gal_get_fkg(mats, intr, x, q)
+        @test F ≈ expected
+        @test K ≈ Q * k
+        @test G ≈ g
+        @test F ≈ F'
+        @test minimum(eigvals(Hermitian(F))) >= -1e-14
+        buffers = [fill(ComplexF64(NaN), 2, 2) for _ in 1:3]
+        Fb, Kb, Gb = FFS.gal_get_fkg(mats, intr, x, q; Fbuf=buffers[1], Kbuf=buffers[2], Gbuf=buffers[3])
+        @test Fb === buffers[1] && Kb === buffers[2] && Gb === buffers[3]
+        @test Fb ≈ expected && Kb ≈ K && Gb ≈ G
+    end
+    x = 0.42
+    L = reshape(lower(x), 2, 2)
+    @test norm(reshape(direct(x), 2, 2) - L * L') > 1e-6
+end

@@ -7,6 +7,11 @@ a single global banded system.  Cells adjacent to each rational surface ("resona
 "extension" cells) carry the large/small power-law asymptotic solutions analytically, so the
 singular behavior is built into the basis rather than resolved numerically.
 
+The ideal coefficient is reconstructed as ``F = (QL)(QL)^\dagger`` from the interpolated
+Cholesky factor ``L``, with ``Q = \operatorname{diag}(m-nq)``. This uses the same coefficient
+representation as the Euler–Lagrange integration and singular-surface expansions, including
+between spline knots, and preserves Hermitian positive semidefiniteness of ``F``.
+
 The solve produces the inter-surface Δ′ matrix and the PEST-3 matching blocks
 (``A'``, ``B'``, ``\Gamma'``, ``\Delta'``), written to the HDF5 output under the same
 `SingularSurfaces/` paths the Riccati Δ′ uses (`Delta_prime_matrix`, `Delta_prime_raw`,
