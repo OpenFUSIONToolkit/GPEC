@@ -1,7 +1,8 @@
-# SeparatrixQLaw.jl
+# Separatrix.jl
 #
 # Safety factor between the outermost grid surface and the separatrix of a diverted equilibrium,
-# taken from the X-point(s) of the equilibrium's own poloidal flux rather than fitted.
+# taken from the X-point(s) of the equilibrium's own poloidal flux rather than fitted, and the
+# separatrix's midplane and extremal points (`equilibrium_separatrix_find!`).
 #
 # Near a separatrix a field line stalls poloidally at each X-point it passes, so
 #
@@ -169,4 +170,94 @@ function separatrix_q_psi(law, q_target::Real; psi_gap::Real=SEPARATRIX_PSI_GAP)
     u_near, u_far = log(psi_gap), log(psi_sep - law.psi_anchor)
     residual(u_near) > 0 || return nothing
     return psi_sep - exp(find_zero(residual, (u_near, u_far), Roots.Brent()))
+end
+
+"""
+    equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
+
+Finds the separatrix locations in the plasma equilibrium (rsep, zsep, rext, zext).
+Performs the same function as equil_out_sep_find in the Fortran code.
+"""
+function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
+    mpsi = length(pe.rzphi_xs) - 1
+    edge_idx = mpsi + 1  # Edge flux surface index
+    psi_edge = pe.rzphi_xs[edge_idx]
+    rsep = zeros(2)
+
+    # Outboard and inboard midplane R via bracketed Brent on θ + η(θ) - η₀ = 0.
+    # iside=1 → outboard (η₀=0.0, θ near 0),  iside=2 → inboard (η₀=0.5, θ near 0.5).
+    for iside in 1:2
+        eta0 = (iside == 1) ? 0.0 : 0.5
+        hint2d = (Ref(1), Ref(1))
+        theta_lo, theta_hi = (iside == 1) ? (-0.25, 0.25) : (0.25, 0.75)
+        side_label = (iside == 1) ? "outboard" : "inboard"
+        theta = try
+            find_zero(
+                theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
+                (theta_lo, theta_hi), Roots.Brent();
+                atol=1e-12, rtol=1e-12)
+        catch e
+            error("Separatrix $side_label midplane root not found in bracket " *
+                  "[$(theta_lo), $(theta_hi)]: $(e.msg)")
+        end
+        r2 = pe.rzphi_rsquared((psi_edge, theta))
+        offset = pe.rzphi_offset((psi_edge, theta))
+        rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
+    end
+
+    # Top and bottom separatrix Z extrema via bracketed Brent on ∂z/∂θ = 0.
+    # iside=1 → top (θ ∈ [0.0, 0.5]),  iside=2 → bottom (θ ∈ [0.5, 1.0]).
+    # Matches Fortran convention so (r|z)ext[1] / zsep[1] refer to the top extremum
+    # and (r|z)ext[2] / zsep[2] to the bottom (see equil_out.f::equil_out_sep_find).
+    # Splines use PeriodicBC + WrapExtrap, so θ outside [0,1] is valid.
+    zsep = zeros(2)
+    rext = zeros(2)
+    zext = zeros(2)
+
+    for iside in 1:2
+        hint2d = (Ref(1), Ref(1))
+
+        # Cache variables populated by z_deriv, read after convergence
+        rfac = Ref(0.0)
+        cos_phase = Ref(0.0)
+        z_val = Ref(0.0)
+
+        # ∂z/∂θ where z(θ) = zo + √r²(θ) · sin(2π(θ + η(θ)))
+        function z_deriv(theta_inner)
+            r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
+            η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
+            rfac_local = sqrt(max(0.0, r2))
+            rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
+            phase1 = 2π * (1 + η1)
+            sin_phase = sin(2π * (theta_inner + η))
+            cos_phase_local = cos(2π * (theta_inner + η))
+
+            rfac[] = rfac_local
+            cos_phase[] = cos_phase_local
+            z_val[] = pe.zo + rfac_local * sin_phase
+
+            return rfac_local * phase1 * cos_phase_local + rfac1 * sin_phase
+        end
+
+        theta_lo, theta_hi = (iside == 1) ? (0.0, 0.5) : (0.5, 1.0)
+        side_label = (iside == 1) ? "top" : "bottom"
+        theta = try
+            find_zero(z_deriv, (theta_lo, theta_hi), Roots.Brent();
+                atol=1e-12, rtol=1e-12)
+        catch e
+            error("Separatrix $side_label Z-extremum root not found in bracket " *
+                  "[$(theta_lo), $(theta_hi)]: $(e.msg)")
+        end
+
+        rext[iside] = pe.ro + rfac[] * cos_phase[]
+        zsep[iside] = zext[iside] = z_val[]
+    end
+
+    pe.params.rsep = rsep
+    pe.params.zsep = zsep
+    pe.params.rext = rext
+    pe.params.zext = zext
+    return (rsep, zsep, rext, zext)
 end

@@ -32,12 +32,16 @@ Splines are provided by the external `FastInterpolations` package rather than by
      - `chease`, `chease2` - CHEASE equilibrium code formats
      - `lar` - Large Aspect Ratio analytical model
      - `sol` - Solovev analytical equilibrium
-   - Key files:
-     - `EquilibriumTypes.jl` - Core data structures
-     - `ReadEquilibrium.jl` - Parsing equilibrium files
-     - `DirectEquilibrium.jl` - Direct Grad-Shafranov solver
-     - `InverseEquilibrium.jl` - Inverse equilibrium solver
-     - `AnalyticEquilibrium.jl` - Analytical solutions
+   - Key files, by pipeline stage:
+     - `Config.jl` - `EquilibriumConfig`, `EquilibriumParameters`
+     - `PlasmaEquilibrium.jl` - The result type and its profile and geometry splines
+     - `Construction.jl` - Solver input for each source type, the `PlasmaEquilibrium` constructors, `reform`
+     - `Sources/` - One file per input format (`GFile.jl`, `Chease.jl`, `IFile.jl`, `IMAS.jl`), the ingest and
+       run-input types (`Ingest.jl`), and `Analytic/` (the analytic registry plus one file per model with its config and solver)
+     - `Grid/` - First-pass ψ grids (`PsiGrid.jl`) and the two-pass refinement (`GridRefinement.jl`)
+     - `Axisymmetric/` - The 2D solvers (`Direct.jl`, `DirectArcLength.jl`, `DirectByInversion.jl`, `Inverse.jl`),
+       the Grad-Shafranov residual, and separatrix finding
+     - `Derived/` - Global parameters and q extrema, flux-surface metrics, geometry profiles, coordinate-invariant weights
    - Status: Stable and feature-complete
 
 3. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
@@ -215,12 +219,12 @@ The complete GPEC analysis pipeline:
   is built
 
 ### Perturbed Equilibrium
-- `PerturbedEquilibriumControl` - User-facing TOML configuration parameters
-- `PerturbedEquilibriumInternal` - Internal state with mode arrays
-- `PerturbedEquilibriumState` - Results including:
+- `PlasmaResponse` - Source-independent operators of one FFS result (`plasma_response`): inductances,
+  permeability and reluctance, the singular coupling matrices [n_rational × numpert_total] and their
+  dominant modes; applied to any number of external fields
+- `PerturbedEquilibriumState` - The perturbed equilibrium driven by one field (`perturbed_equilibrium`), including:
   - Response fields (ξ_modes, b_modes) in mode space
-  - Singular coupling matrices [msing × numpert_total]
-  - Island diagnostics (half-widths, Chirikov parameters)
+  - Applied resonant vectors and island diagnostics (half-widths, Chirikov parameters)
 - `ForcingMode` - External forcing specification (m, n, amplitude, phase)
 
 ## Module Dependencies

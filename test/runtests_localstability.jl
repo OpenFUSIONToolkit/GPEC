@@ -8,7 +8,7 @@ using TOML
     LS = GPEC.LocalStability
     template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
-    equil = GPEC.Equilibrium.setup_equilibrium(
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )

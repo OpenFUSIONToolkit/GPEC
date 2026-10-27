@@ -118,7 +118,6 @@ include("h5_metadata_check.jl")
                         "forcing_data_file" => "forcing.dat",
                         "forcing_data_format" => "ascii"),
                     "PerturbedEquilibrium" => Dict{String,Any}(
-                        "compute_response" => true,
                         "compute_singular_coupling" => true,
                         "verbose" => false,
                         "write_outputs_to_HDF5" => false)))
@@ -129,8 +128,8 @@ include("h5_metadata_check.jl")
             @test_logs (:warn,) match_mode = :any (ret = GeneralizedPerturbedEquilibrium.main([dir]))
             # The stage runs to completion; both sub-calculations are simply not populated.
             @test ret.pe !== nothing
-            @test isempty(ret.pe.permeability)
-            @test isempty(ret.pe.C_delta_prime)
+            @test isempty(ret.pe.response.permeability)
+            @test isempty(ret.pe.response.C_delta_prime)
         end
     end
 
@@ -195,6 +194,9 @@ include("h5_metadata_check.jl")
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
                     HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                        @test ffs.galerkin.solver in ("cholesky", "LU")
+                        @test read(f["$gal/solver"]) == ffs.galerkin.solver
+                        @test haskey(attrs(f["$gal/solver"]), "long_name")
                         @test read(f["$gal/psi"]) == sol.psi_store
                         @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
                         @test read(f["$gal/dxi_psidpsi"]) == sol.du_store
