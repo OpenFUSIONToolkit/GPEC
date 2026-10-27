@@ -13,10 +13,10 @@ specified in the input.
   - `eq_type::String` - Type of equilibrium file ("efit", "solovev", "lar", etc.)
   - `eq_filename::String` - Path to equilibrium input file
   - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "custom")
-  - `power_bp::Int` - Poloidal field power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
-  - `power_b::Int` - Total field power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
-  - `power_r::Int` - Major radius power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
-  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian (internal, derived from `jac_type`; deprecated as a TOML input key)
+  - `power_bp::Int` - Poloidal field power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
+  - `power_b::Int` - Total field power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
+  - `power_r::Int` - Major radius power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
+  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
   - `jac_custom_power_bp::Int` - Poloidal-field exponent for a custom Jacobian `J = Bp^bp · B^b / (R^r · rfac^rc)`; read only when `jac_type = "custom"`, ignored for named types
   - `jac_custom_power_b::Int` - Total-field exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types
   - `jac_custom_power_r::Int` - Major-radius exponent for a custom Jacobian; read only when `jac_type = "custom"`, ignored for named types

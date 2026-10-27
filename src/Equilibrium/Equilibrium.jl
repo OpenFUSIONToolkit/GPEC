@@ -50,6 +50,6 @@ export reform, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, Anal
     KineticProfileData, read_kinetic_file, write_kinetic_h5
 export flux_surface_metric, flux_surface_area
 export wants_two_pass, refined_psi_grid, merge_mandatory_nodes, bracket_mandatory_nodes, enforce_min_spacing, implied_knot_count
-export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
+export compute_jac_delpsi, compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
 
 end # module Equilibrium

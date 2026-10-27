@@ -156,8 +156,11 @@ integrator = "galerkin"
 
 ## Local stability: Mercier and ballooning (s–α)
 
-Setting `local_stability_flag = true` in `[ForceFreeStates]` runs a local high-``n``
-stability scan over every flux surface, in addition to the global ideal analysis above.
+A `[LocalStability]` section in the deck runs a local high-``n`` stability scan over every
+flux surface, as its own stage before the global ideal analysis above. The section's keys are
+the [`Ballooning`](@ref) keywords (the ballooning angle, ODE tolerance and the α-boundary scan
+knobs), and a script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning())`
+(see the [scripting API](api.md)).
 For the derivation and implementation details behind these diagnostics, see
 [Ballooning and Mercier Local Stability](ballooning.md).
 Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile
@@ -175,6 +178,10 @@ in normalized poloidal flux ``\psi``:
   stability index, obtained by integrating the ballooning equation along the field line and
   taking the jump in the logarithmic derivative of the solution between the two asymptotic
   ends.
+
+With `alpha_boundary_scan = true` the stage also writes the critical ballooning
+``\alpha`` boundary: `LocalStability/ballooning_psi`, `LocalStability/alpha` and
+`LocalStability/alpha_critical` (see the [scripting API](api.md)).
 
 !!! note "Two different Δ' quantities"
     `LocalStability/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
@@ -326,28 +333,49 @@ resolve it from, so the cap cannot be applied there and setting the flag warns i
 `psilim_from_layer_overlap = true`. It then caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction`
 still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
 
-The flag is off by default, so every shipped deck is unchanged by it. With the shipped
-DIII-D-like profiles the overlap point is ψ ≈ 0.9985: outside the ideal and Riccati decks'
-`psihigh = 0.995`, where the cap could not bind even if enabled, but inside the SLAYER deck's
-0.9995, where enabling it would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
-raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and q = 8, and the resulting
-domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen `psihigh = 0.995` of the
-ideal deck. Whenever `psilim` lands past the overlap point, with the flag on or off, GPEC warns;
-on the shipped decks that includes the SLAYER deck.
+The flag is off by default, so every shipped deck is unchanged by it. With the default
+`P_perp_model = "D_perp"` the layers on the shipped DIII-D-like profiles do not overlap inside
+ψ = 1. With the electron-channel `"chi_perp_e"` they are about 40% wider and the overlap point is
+ψ ≈ 0.9985: outside the ideal and Riccati decks' `psihigh = 0.995`, but inside the SLAYER deck's
+0.9995, where the cap would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
+pins `"chi_perp_e"` and raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and
+q = 8, and the resulting domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen
+`psihigh = 0.995` of the ideal deck. Whenever `psilim` lands past the overlap point, with the flag
+on or off, GPEC warns.
 
-**Which perpendicular diffusivity.** The two formulas that take `chi_perp` want different
-quantities. The layer width goes through `P_perp = τ_R/τ_E` with `τ_E = r²/χ_E`, and χ_E is the
-one-fluid perpendicular *energy* diffusivity, the gradient-weighted combination of the electron and
-ion channels, `χ_E = (n_e χ_e ∇T_e + n_i χ_i ∇T_i)/(n_e ∇T_e + n_i ∇T_i)`. The critical-Δ island
-width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature flattening against an electron parallel
-conductivity, so its χ_⊥ is the electron channel. GPEC currently feeds both from one profile, the
-kinetic file's `chi_e`, which in the shipped DIII-D-like data is the electron power-balance
-diffusivity: the right channel for the critical Δ, and a proxy for χ_E in the layer width. This is
-the same single-χ convention as Fitzpatrick's TJ code, which also assumes `T_e = T_i`.
-Separating the two is deferred: it needs an ion `chi_i` in the kinetic-profile schema, and the
-power-balance ion diffusivity available upstream is not yet usable (it comes back negative across
-most of the radius on the cases checked). Since both widths scale as `χ^{1/4}`, a factor-2 error in
-χ moves them by about 19%, but that can be enough to move the overlap cut by a surface.
+**Which perpendicular diffusivity.** The two formulas that take a perpendicular diffusivity want
+different quantities. The layer width goes through `P_perp`, which multiplies the diffusion of the
+total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular particle diffusivity
+`D_⊥` of Fitzpatrick, Phys. Plasmas **29**, 032507 (2022), Eq. 16, which weights the electron and ion energy diffusivities by
+`n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
+flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
+in every case. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
+the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code), from
+`chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
+confinement time (`"tau_E"`); see `slayer_parameters`. `"tau_E"` is for a plasma with no χ
+profiles: its uniform χ_E sets both `P_perp` and the toroidal `P_tor`, so the file's `chi_phi`
+and `[SLAYER] chi_tor` are not used in that mode. On the DIII-D-like
+profiles `D_⊥` is 0.22–0.32 of `chi_e` at the outer rational surfaces, because the weights sum to
+less than one where density gradients carry part of `p′`. Since the widths scale as `χ^{1/4}`, a
+factor-2 change in χ moves them by about 19%, which can be enough to move the overlap cut by a
+surface.
+
+**The shipped diffusivities.** The DIII-D-like kinetic file carries analytic χ profiles in the
+normalized poloidal flux ψ, in m²/s:
+
+```
+chi_e   = 2.75 + ψ + 3 exp(−25 (ψ − 0.85)²)
+chi_i   = 1/2 + (3/2) ψ²⁰ + (5/4) exp(−25 (ψ − 0.7)²)
+chi_phi = 3/2 − (5/4) (1 − ψ)⁴
+```
+
+They are not fits to a measured discharge. Their magnitudes are of the same order as the TRANSP
+power-balance χ_e and χ_i reported for DIII-D H-modes by Hong *et al.*, Phys. Plasmas **30**,
+072512 (2023), Fig. 5; `chi_e` includes a factor-2 raise so that the default deck exercises the
+resistive-layer overlap cut. `chi_phi` is set to track `chi_i` (Prandtl number of order one, rising
+outward), as reported for DIII-D by Yoshida *et al.*, Nucl. Fusion **52**, 123005 (2012). The forms
+do not resolve the H-mode pedestal transport barrier, where power-balance χ falls to about
+0.1–0.3 m²/s (Callen *et al.*, Nucl. Fusion **50**, 064004 (2010)).
 
 | Dataset | Contents |
 |---|---|
@@ -378,9 +406,6 @@ delta_mhigh  = 0       # extra high poloidal modes (m > mhigh)
 numsteps_init     = 200    # initial step budget per chunk
 numunorms_init    = 50     # renorm checkpoint budget
 reltol            = 1e-6   # ODE relative tolerance
-
-# Local stability
-local_stability_flag = false  # scan Mercier D_I, resistive D_R, and ballooning Δ' over ψ
 
 # Output
 verbose              = true

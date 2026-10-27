@@ -11,7 +11,8 @@ using GeneralizedPerturbedEquilibrium
 eq  = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
 ffs = solve(eq, Riccati(); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
 rmp = RMPField("coils.dat")
-pe  = perturbed_equilibrium(ffs, rmp)
+resp = plasma_response(ffs)
+pe   = perturbed_equilibrium(resp, rmp)
 ```
 
 `solve(eq, alg; kwargs...)` is sugar for the canonical problem form: a
@@ -25,7 +26,7 @@ prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true
 ffs  = solve(prob, Riccati())
 ```
 
-The four objects map one-to-one onto the pipeline stages:
+The objects map one-to-one onto the pipeline stages:
 
   - [`PlasmaEquilibrium`](@ref) reads and processes the equilibrium — the `[Equilibrium]`
     section. Analytic equilibria take their parameters from their config object, with the
@@ -42,8 +43,9 @@ The four objects map one-to-one onto the pipeline stages:
     a `ForceFreeStatesResult`, exactly the object the TOML driver publishes.
   - [`RMPField`](@ref) describes the external field — the `[ForcingTerms]` section — without
     reading anything from disk until it is applied.
-  - `perturbed_equilibrium` runs the plasma-response stage — the `[PerturbedEquilibrium]`
-    section.
+  - [`plasma_response`](@ref) builds the plasma-response and singular-coupling operators of a
+    `ForceFreeStatesResult` once, and `perturbed_equilibrium(resp, rmp)` drives them with one field —
+    together the `[PerturbedEquilibrium]` section.
 
 ## Combining forcing sources
 
@@ -57,13 +59,15 @@ phase-rotates a source.
 ```julia
 nominal    = RMPField("nominal_efc.dat")
 weld_field = RMPField("weld_fields.h5")
-pe = perturbed_equilibrium(ffs, 2.0 * nominal + 0.5 * weld_field)
+pe = perturbed_equilibrium(resp, 2.0 * nominal + 0.5 * weld_field)
 ```
 
 This is the substrate for error-field workflows: build per-unit sources independently
 (a coil set per ampere, a displacement field per millimeter), then assemble physical cases
 by weighting and summing — without recomputing anything per combination until the final
-`perturbed_equilibrium` call.
+`perturbed_equilibrium` call, and with one `plasma_response` serving every combination.
+`RMPField(modes)` wraps a control-surface spectrum computed elsewhere, already in the unit-norm
+`Φ_x` convention, as a leaf that combines like any other.
 
 The weights are linear-combination coefficients, not physical amplitudes: sources that are
 not scalar multiples of each other get their own description and the algebra. A coil set
@@ -129,8 +133,22 @@ Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedur
 (scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
 kinetic profiles come from `profile_file`, relative to the run directory.
 
-Kinetic runs (`kinetic_factor > 0`) need the `[KineticForces]` profiles and remain
-TOML-driven.
+Kinetic runs (`kinetic_factor > 0`) take `Forward()` and the `"fixed"` kinetic source;
+the `"calculated"` source needs the `[KineticForces]` profiles and remains TOML-driven.
+
+## Local stability
+
+The Mercier, resistive interchange and ballooning profiles are their own stage, posed on the
+equilibrium alone. A [`LocalStabilityProblem`](@ref) holds the equilibrium, the
+[`Ballooning`](@ref) algorithm holds the scan knobs, and `solve` returns a
+[`LocalStabilityResult`](@ref) with the profiles as named fields. A deck runs the same solve
+through its `[LocalStability]` section, whose keys are the `Ballooning` keywords.
+
+```julia
+ls = solve(LocalStabilityProblem(eq), Ballooning(; n_scan=64))
+ls.psi, ls.D_I, ls.D_R, ls.ballooning_Delta_prime     # profiles on the equilibrium ψ grid
+ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundary, NaN outside its scan window
+```
 
 ## Entry points
 
@@ -139,6 +157,10 @@ GeneralizedPerturbedEquilibrium.EulerLagrangeProblem
 GeneralizedPerturbedEquilibrium.solve
 GeneralizedPerturbedEquilibrium.perturbed_equilibrium
 ```
+
+[`plasma_response`](@ref GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response), which builds the
+[`PlasmaResponse`](@ref GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PlasmaResponse) that `perturbed_equilibrium`
+applies, is documented with the [perturbed equilibrium](perturbed_equilibrium.md) module.
 
 ## Integrator selectors
 

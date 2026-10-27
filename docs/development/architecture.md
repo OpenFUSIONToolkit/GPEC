@@ -76,7 +76,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
 5. **LocalStability** (`src/LocalStability/`) - Local high-n stability
    - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Depends only on Equilibrium (plus math libraries); carries no stability-solver state
-   - Main entry points: `compute_local_stability`, `ballooning_alpha_boundary`
+   - `Problem.jl` - `solve(LocalStabilityProblem(equil), Ballooning())` → `LocalStabilityResult`; a deck's `[LocalStability]` section runs the same solve
+   - Kernels: `compute_ballooning_stability!`, `ballooning_alpha_boundary`
    - Status: Stable
 
 ### Perturbed Equilibrium Modules
@@ -218,12 +219,12 @@ The complete GPEC analysis pipeline:
   is built
 
 ### Perturbed Equilibrium
-- `PerturbedEquilibriumControl` - User-facing TOML configuration parameters
-- `PerturbedEquilibriumInternal` - Internal state with mode arrays
-- `PerturbedEquilibriumState` - Results including:
+- `PlasmaResponse` - Source-independent operators of one FFS result (`plasma_response`): inductances,
+  permeability and reluctance, the singular coupling matrices [n_rational × numpert_total] and their
+  dominant modes; applied to any number of external fields
+- `PerturbedEquilibriumState` - The perturbed equilibrium driven by one field (`perturbed_equilibrium`), including:
   - Response fields (ξ_modes, b_modes) in mode space
-  - Singular coupling matrices [msing × numpert_total]
-  - Island diagnostics (half-widths, Chirikov parameters)
+  - Applied resonant vectors and island diagnostics (half-widths, Chirikov parameters)
 - `ForcingMode` - External forcing specification (m, n, amplitude, phase)
 
 ## Module Dependencies
