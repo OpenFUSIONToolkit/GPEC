@@ -28,9 +28,16 @@ ffs  = solve(prob, Riccati())
 The four objects map one-to-one onto the pipeline stages:
 
   - [`PlasmaEquilibrium`](@ref) reads and processes the equilibrium — the `[Equilibrium]`
-    section. Analytic equilibria (`sol`, `lar`, `tj_analytic`) take their parameters from a
-    separate config object and are built with
-    `setup_equilibrium(eq_config, analytic_config)` instead.
+    section. Analytic equilibria take their parameters from their config object, with the
+    `eq_type` implied, and IMAS equilibria from a data dictionary:
+
+    ```julia
+    eq = PlasmaEquilibrium(Equilibrium.SolovevConfig(; elongation=1.5); mpsi=0)
+    eq = PlasmaEquilibrium(dd; imas_cocos=11)
+    ```
+
+    Every equilibrium remembers its source, so with `mpsi=0` `solve` re-forms it on the same
+    refined two-pass grid the deck uses; `Equilibrium.reform(eq, psi_nodes)` re-forms it on any grid.
   - `solve` runs the force-free-states stage — the `[ForceFreeStates]` section — and returns
     a `ForceFreeStatesResult`, exactly the object the TOML driver publishes.
   - [`RMPField`](@ref) describes the external field — the `[ForcingTerms]` section — without
@@ -122,8 +129,22 @@ Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedur
 (scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
 kinetic profiles come from `profile_file`, relative to the run directory.
 
-Kinetic runs (`kinetic_factor > 0`) need the `[KineticForces]` profiles and remain
-TOML-driven.
+Kinetic runs (`kinetic_factor > 0`) take `Forward()` and the `"fixed"` kinetic source;
+the `"calculated"` source needs the `[KineticForces]` profiles and remains TOML-driven.
+
+## Local stability
+
+The Mercier, resistive interchange and ballooning profiles are their own stage, posed on the
+equilibrium alone. A [`LocalStabilityProblem`](@ref) holds the equilibrium, the
+[`Ballooning`](@ref) algorithm holds the scan knobs, and `solve` returns a
+[`LocalStabilityResult`](@ref) with the profiles as named fields. A deck runs the same solve
+through its `[LocalStability]` section, whose keys are the `Ballooning` keywords.
+
+```julia
+ls = solve(LocalStabilityProblem(eq), Ballooning(; n_scan=64))
+ls.psi, ls.D_I, ls.D_R, ls.ballooning_Delta_prime     # profiles on the equilibrium ψ grid
+ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundary, NaN outside its scan window
+```
 
 ## Entry points
 

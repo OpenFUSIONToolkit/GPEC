@@ -135,7 +135,7 @@ function read_efit(config::EquilibriumConfig)
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; extrap=ExtendExtrap())
 
     # Capture the raw arrays that reconstruct sq_in and psi_in, so the rerun path
-    # (gpec.h5 → setup_equilibrium) can skip the g-file parse entirely.
+    # (gpec.h5 → PlasmaEquilibrium) can skip the g-file parse entirely.
     ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, psi_proc, rmin, rmax, zmin, zmax, psio, fpol_sign, ip_sign)
 
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign, ip_sign, ingest)

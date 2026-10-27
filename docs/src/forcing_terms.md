@@ -34,8 +34,14 @@ and multiplied by (2π)² internally to reach unit-norm convention.
 ### Automatic conversion
 
 Files tagged `normal_field_T` are automatically converted to unit-norm Phi_x convention
-during loading using the plasma boundary geometry. The conversion accounts for the
-R-variation of the Jacobian and is a mode-mixing operation.
+during loading by weighting with the control-surface area element J|∇ψ|. This weight varies
+poloidally, so the conversion is a mode-mixing operation and the flux is projected onto
+every harmonic of the run (`mlow:mhigh`), sidebands included.
+
+The file's spectrum must also extend far enough that the harmonics it omits are negligible,
+since those would mix into the run's range too. GPEC estimates this from the file's edge
+harmonics: if either one alone carries more than 10% of the converted flux, a warning asks for
+a wider m range. Files with fewer than three harmonics are not checked.
 
 Files tagged `sfl_flux_Wb` (2π-angle SFL flux) are scaled by (2π)² to reach unit-norm.
 
@@ -197,6 +203,11 @@ currents) is captured under `Input/RawInputs/Coils/`. The run can then be replay
   (needs the original geometry files to be present).
 - `--coil-source coils` recomputes the field from the geometry stored in `gpec.h5`, so no
   original files are required — and the equilibrium may be overridden on replay.
+
+An ASCII or HDF5 forcing file is captured raw, with its `normalization` tag, under
+`Input/RawInputs/ForcingTerms/`. The replay writes it back out as `<stem>_forcing.h5` beside its
+output and reads it like any forcing file, so the normalization is redone against the replay's
+own equilibrium.
 
 ## Comparison with Fortran GPEC
 
