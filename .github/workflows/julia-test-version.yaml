@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 90
     outputs:
       julia-version: ${{ steps.julia.outputs.julia-version }}
+      depot-key: ${{ steps.cache-keys.outputs.depot }}
       gpec-key: ${{ steps.cache-keys.outputs.gpec }}
       local-cache: ${{ steps.cache-keys.outputs.local }}
     env:
@@ -180,7 +181,7 @@ jobs:
               entries+=(".julia/$path")
             fi
           done
-          tar --use-compress-program='zstd -T2 -3' -cf "$handoff/depot.tar.zst" -C "$HOME" "${entries[@]}"
+          tar -cf - -C "$HOME" "${entries[@]}" | zstd -T2 -3 -f -o "$handoff/depot.tar.zst"
 
       - name: Share the compiled test environment
         if: steps.cache-keys.outputs.local != 'true'
@@ -189,6 +190,16 @@ jobs:
           name: julia-test-environment-${{ inputs.version }}
           path: ${{ runner.temp }}/julia-test-environment/
           compression-level: 0
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Share the resolved dependency set
+        if: steps.cache-keys.outputs.local != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: julia-test-manifest-${{ inputs.version }}
+          path: Manifest.toml
           retention-days: 1
           overwrite: true
           if-no-files-found: error
@@ -217,19 +228,62 @@ jobs:
         with:
           version: ${{ needs.precompile.outputs.julia-version }}
 
-      - name: Download the compiled test environment
+      - name: Try the compatible dependency cache
+        id: test-depot
         if: needs.precompile.outputs.local-cache != 'true'
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/packages
+            ~/.julia/registries
+            ~/.julia/compiled
+            ~/.julia/scratchspaces
+            ~/.julia/logs
+          key: ${{ needs.precompile.outputs.depot-key }}
+          restore-keys: ${{ needs.precompile.outputs.depot-key }}
+
+      - name: Try the matching GPEC image
+        id: test-gpec
+        if: needs.precompile.outputs.local-cache != 'true' && steps.test-depot.outcome == 'success' && steps.test-depot.outputs.cache-matched-key != ''
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.julia/compiled/v*/GeneralizedPerturbedEquilibrium
+          key: ${{ needs.precompile.outputs.gpec-key }}
+          restore-keys: ${{ needs.precompile.outputs.gpec-key }}
+
+      - name: Select the environment handoff
+        id: handoff
+        if: needs.precompile.outputs.local-cache != 'true'
+        env:
+          USE_ARTIFACT: ${{ steps.test-depot.outcome != 'success' || steps.test-depot.outputs.cache-matched-key == '' || steps.test-gpec.outcome != 'success' || steps.test-gpec.outputs.cache-matched-key == '' }}
+        run: echo "artifact=$USE_ARTIFACT" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the resolved dependency set
+        if: needs.precompile.outputs.local-cache != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: julia-test-manifest-${{ inputs.version }}
+
+      - name: Download the compiled test environment
+        if: steps.handoff.outputs.artifact == 'true'
         uses: actions/download-artifact@v4
         with:
           name: julia-test-environment-${{ inputs.version }}
           path: ${{ runner.temp }}/julia-test-environment/
 
       - name: Restore the compiled test environment
-        if: needs.precompile.outputs.local-cache != 'true'
+        if: steps.handoff.outputs.artifact == 'true'
         run: |
           set -euo pipefail
           handoff="$RUNNER_TEMP/julia-test-environment"
-          tar --use-compress-program=zstd -xf "$handoff/depot.tar.zst" -C "$HOME"
+          depot=$(mktemp -d "$RUNNER_TEMP/julia-test-depot.XXXXXXXX")
+          zstd -dc "$handoff/depot.tar.zst" | tar -xf - -C "$depot"
+          echo "JULIA_DEPOT_PATH=$depot/.julia:" >> "$GITHUB_ENV"
           cp "$handoff/Manifest.toml" Manifest.toml
 
       - name: Restore the local precompiled snapshot

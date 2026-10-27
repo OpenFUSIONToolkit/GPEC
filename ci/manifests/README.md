@@ -30,9 +30,13 @@ best-effort and limited to three minutes, so a stalled upload cannot block the w
 For each Julia version, a production precompile job prepares the environment before releasing
 three parallel test groups (`core`, `api`, `errorfields`). On hosted runners it uploads a one-day
 workflow artifact containing the resolved manifest and a compressed depot archive. Test groups
-restore that artifact, preserving permissions and symlinks through tar. They do not depend on
-cache availability: a cache reservation failure or eviction cannot invalidate the job handoff.
-Artifact publication is required for precompile to pass. The two Julia versions progress independently.
+first try the compatible depot and exact source-image caches. When either is missing or its restore
+fails, they restore the artifact into a fresh depot, preserving permissions and symlinks through tar
+and avoiding partially restored read-only files. Its `JULIA_DEPOT_PATH` keeps a trailing `:` to retain
+Julia's bundled depots. The small manifest
+artifact is always restored. Cache availability therefore affects speed rather than correctness:
+a reservation failure or eviction cannot invalidate the job handoff. Artifact publication is required
+for precompile to pass. The two Julia versions progress independently.
 Cold compilation is paid once per version; warm runs reuse the existing production images.
 
 Test jobs use optimization level 1 to reduce first-use compilation. Julia can still reuse cached
