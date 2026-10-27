@@ -251,18 +251,16 @@ Outputs go to `Tearing/CriticalResonantField/` (`br_crit` = b_r/B_φ, `Q_peak`, 
 ### Benchmark against Fortran
 
 On the DIII-D-like example (2/1–6/1, n = 1, P = 1, κ̂ = 2/s², Q ∈ [−5, 5] with 20001
-points), both codes were given Fortran's normalized inputs.
+points), both codes were given Fortran's normalized inputs and Fortran's fixed α = 10⁻².
 
-- **Torque-balance routine.** Fed Fortran's own Δ(Q) table with the pole exclusion narrowed to
-  one grid step, the Julia routine reproduces Fortran's b_crit and Q_peak to all printed digits
-  on every surface.
-- **Pole handling.** Fortran's global maximum sits within 0.003 of the Q_e pole on 2/1, 3/1,
-  4/1 and 6/1. Skipping the pole region moves the threshold to the torque-balance maximum
-  between Q_e and Q0 (blue dots below), lowering the Fortran-table b_crit by 6–88 %.
+- **Torque balance.** Fed Fortran's own Δ(Q) table, the Julia routine reproduces Fortran's
+  balance to all printed digits on every surface, so the thresholds differ only through the
+  selection rule above.
 - **Layer model.** Fortran solves Park's drift-MHD layer and Julia Fitzpatrick's, so Δ(Q)
-  differs by a median 24–78 % between Q_i and Q_e on 2/1, 3/1, 4/1 and 6/1 (7 % on 5/1), and
-  Julia's b_crit is 82–89 % of the Fortran-table value on those four surfaces. The 5/1 edge surface is dominated by a
-  zero of the electromagnetic torque in both codes and is not a usable threshold.
+  differs by a median 24–78 % between Q_i and Q_e on 2/1, 3/1, 4/1 and 6/1 (7 % on 5/1).
+
+The dots in the figure mark each code's balance maximum between Q_e and Q0 at that fixed α,
+not the fold threshold above.
 
 ![Fortran vs Julia inner-layer Δ(Q) and torque balance](assets/crf_fortran_benchmark.png)
 
