@@ -15,7 +15,7 @@ function _group_name_ok(parent_path, name)
     parent_path == "KineticForces" && return true
     # Multi-ion runs nest KineticForces/PerSpecies/<species>/<method>/: the species label
     # (ion_z1_m2, impurity_z6_m12, electron) and the method token are both data-driven.
-    # Exactly those two levels — anything deeper (EnergyIntegrals/, KineticMatrices/) is
+    # Exactly those two levels — anything deeper (KineticMatrices/) is
     # a normal group and still has to be CamelCase.
     occursin(r"^KineticForces/PerSpecies(/[^/]+)?$", parent_path) && return true
     occursin(r"^Surface_\d+$", name) && return true

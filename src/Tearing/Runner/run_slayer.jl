@@ -8,9 +8,9 @@
 # ---------------------------------------------------------------------
 # Read kinetic profiles through the shared `Equilibrium.read_kinetic_file`
 # reader and adapt them to the SLAYER inner layer. Returns the spline-based
-# `KineticProfiles` plus χ⊥(ψ)/χ_φ(ψ) callables built from the file's
-# `chi_e`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
-# case the caller falls back to the scalar `control.chi_perp`/`chi_tor`), and
+# `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from the file's
+# `chi_e`/`chi_i`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
+# case the caller falls back to the scalar `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), and
 # a Z_eff(ψ) callable: the file's own `zeff` profile when it carries one, else
 # derived from its `n_i/n_e` (or `nothing` when the file carries neither, in which
 # case the caller falls back to the scalar `control.zeff`), and whether the file
@@ -38,13 +38,19 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
     # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
-    # to the scalar control.chi_perp/chi_tor fallback. Build the spline only
+    # to the scalar control.chi_perp_e/chi_tor fallback. Build the spline only
     # from a usable (present, not all-zero) array.
     psi_xs = collect(Float64, data.psi)
-    _chi_spline(v) = (v === nothing || all(iszero, v)) ? nothing :
-                     cubic_interp(psi_xs, collect(Float64, v))
-    chi_perp = _chi_spline(data.chi_e)
-    chi_tor = _chi_spline(data.chi_phi)
+    function _chi_spline(name, v)
+        (v === nothing || all(iszero, v)) && return nothing
+        minimum(v) > 0 || error("run_slayer: kinetic file '$path' has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
+        return cubic_interp(psi_xs, collect(Float64, v))
+    end
+    model = control.P_perp_model
+    uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+    chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
+    chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
+    chi_tor = model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
     # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
@@ -63,8 +69,39 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
-        has_omega_E=data.omega_E !== nothing)
+    return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
+        has_omega_E=(data.omega_E !== nothing))
+end
+
+# χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the control's
+# scalar fallbacks. With `warn`, a fallback is reported only for a χ the selected P_perp model
+# (and, for χ⊥,e, the critical Δ) actually uses.
+function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
+    model = control.P_perp_model
+    pick(f, s) = f === nothing ? s : f
+    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && control.chi_perp_i === nothing &&
+        throw(
+            ArgumentError(
+                "SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
+                "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."
+            )
+        )
+    if warn
+        uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+        uses_i = model in (:chi_perp_i, :D_perp)
+        uses_tor = model !== :tau_E
+        fallbacks = String[]
+        uses_e && loaded.chi_perp_e === nothing && push!(fallbacks, "chi_e → chi_perp_e = $(control.chi_perp_e)")
+        uses_i && loaded.chi_perp_i === nothing && push!(fallbacks, "chi_i → chi_perp_i = $(control.chi_perp_i)")
+        uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_tor = $(control.chi_tor)")
+        isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
+                                    "$(join(fallbacks, ", ")); using the scalar fallback."
+        model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
+              "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
+    end
+    return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
+        chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
+        chi_tor=pick(loaded.chi_tor, control.chi_tor))
 end
 
 # ---------------------------------------------------------------------
@@ -337,7 +374,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
     coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
-            "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
+        "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
     q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.

@@ -252,10 +252,15 @@ profiles, without an intermediate file round-trip.
 
   - `zeff`      -- effective charge. Scalar or a callable of `psi`, evaluated per
     surface (default `1.0`).
-
-  - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
+  - `chi_perp_e`  -- electron perpendicular heat diffusivity [m²/s]. Scalar or a
     callable of `psi` (default `1.0`).
-
+  - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], scalar or callable of `psi`;
+    required by `P_perp_model = :chi_perp_i` and `:D_perp` (default `nothing`).
+  - `tau_E` -- whole-plasma energy confinement time τ̄_E [s], required by `P_perp_model = :tau_E`
+    (default `nothing`). That mode takes the minor radius `a` of the ψ = 1 surface from the
+    `:flux` label, whatever `rs_method` is.
+  - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
+    (default `:D_perp`, as in the `[SLAYER]` deck).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
     of `psi` (default `1.0`).
 
@@ -316,7 +321,10 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     mu_i::Real=2.0,
     zeff=1.0,
     z_i::Real=1.0,
-    chi_perp=1.0,
+    chi_perp_e=1.0,
+    chi_perp_i=nothing,
+    tau_E::Union{Real,Nothing}=nothing,
+    P_perp_model::Symbol=:D_perp,
     chi_tor=1.0,
     dr_val=nothing,
     dgeo_val=nothing,
@@ -325,7 +333,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
     lnLambda_form::Symbol=:nrl)
     R0_use = R0 === nothing ? equil.ro : Float64(R0)
-    _eval(x, ψ) = x isa Real ? Float64(x) : Float64(x(ψ))
+    _eval(x, ψ) = x === nothing ? nothing : x isa Real ? Float64(x) : Float64(x(ψ))
 
     # Compute physical B_T = F(ψ) / (2π·R₀) per surface from the F spline
     # when `bt` is not explicitly supplied.
@@ -339,19 +347,19 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         end
 
     _rs_at, _da_dpsi_at = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
+    # Boundary minor radius on the flux label, needed only to turn a whole-plasma τ̄_E into a uniform χ_E.
+    a_minor = P_perp_model === :tau_E ? first(radial_label(equil; rs_method=:flux, theta=theta, q_beyond=q_beyond))(1.0) : nothing
 
     # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
     # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode
     # number enters here. Main-ion density is taken equal to the electron density
     # (quasi-neutrality, matching the staging step).
     chi1 = 2π * equil.psio
+    _kinetic_at(ψ) = (n_e=Float64(profiles.n_e(ψ)), dn_e=Float64(profiles.n_e(ψ; deriv=DerivOp(1))),
+        T_e=Float64(profiles.T_e(ψ)), dT_e=Float64(profiles.T_e(ψ; deriv=DerivOp(1))),
+        T_i=Float64(profiles.T_i(ψ)), dT_i=Float64(profiles.T_i(ψ; deriv=DerivOp(1))))
     _omega_star_at(ψ, n_tor) = begin
-        n_e = Float64(profiles.n_e(ψ))
-        dn_e = Float64(profiles.n_e(ψ; deriv=DerivOp(1)))
-        T_e = Float64(profiles.T_e(ψ))
-        dT_e = Float64(profiles.T_e(ψ; deriv=DerivOp(1)))
-        T_i = Float64(profiles.T_i(ψ))
-        dT_i = Float64(profiles.T_i(ψ; deriv=DerivOp(1)))
+        (; n_e, dn_e, T_e, dT_e, T_i, dT_i) = _kinetic_at(ψ)
         ω_star_e = n_tor * (2π / chi1) * (T_e * dn_e / n_e + dT_e)
         ω_star_i = -n_tor * (2π / (Float64(z_i) * chi1)) * (T_i * dn_e / n_e + dT_i)
         return (ω_star_e, ω_star_i)
@@ -374,6 +382,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         n_res = sing.n[1]
 
         prof = profiles(psi)
+        kin = _kinetic_at(psi)
         # ω_*e, ω_*i from the density and temperature spline derivatives, at this surface's n.
         ω_e_use, ω_i_use = _omega_star_at(psi, n_res)
 
@@ -472,8 +481,12 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
             rs=rs, R0=R0_use, mu_i=mu_i, zeff=_eval(zeff, psi),
-            chi_perp=_eval(chi_perp, psi),
+            chi_perp_e=_eval(chi_perp_e, psi),
             chi_tor=_eval(chi_tor, psi),
+            chi_perp_i=_eval(chi_perp_i, psi),
+            dlnn=kin.dn_e / kin.n_e, dlnTe=kin.dT_e / kin.T_e, dlnTi=kin.dT_i / kin.T_i,
+            tau_E=tau_E, a_minor=a_minor,
+            P_perp_model=P_perp_model,
             m=m_res, n=n_res,
             dr_val=dr_val_k,
             dgeo_val=dgeo_val_k,

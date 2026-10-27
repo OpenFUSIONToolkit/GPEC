@@ -101,9 +101,6 @@ builds a second control for its differing tolerance).
     explicitly to override the derivation (see `torque_pitch_rtol`, `matrix_pitch_rtol`).
 """
 @kwdef struct KineticForcesControl
-    # Moment type
-    moment::String = "pressure"     # "heat" or "pressure"
-
     # Method flags (which methods to calculate)
     fgar_flag::Bool = true          # Full general-aspect-ratio
     tgar_flag::Bool = false         # Trapped particle GAR
@@ -170,26 +167,12 @@ builds a second control for its differing tolerance).
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi
 
-    # Diagnostic output flags
-    eq_out::Bool = false            # Output equilibrium profiles
-    theta_out::Bool = false         # Output theta-dependent quantities
-    xlmda_out::Bool = false         # Output pitch angle profiles
-    eqpsi_out::Bool = false         # Output equilibrium psi profiles
-
     # Output configuration
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
-    save_records::Bool = false      # Save detailed integration trajectories
 
     # Input files (relative to dir_path)
     kinetic_file::String = "kinetic.dat"
-    gpec_file::String = "gpec.h5"
-
-    # Diagnostic flags
-    fnml_flag::Bool = false         # Fourier mode coupling diagnostics
-    ellip_flag::Bool = false        # Elliptic integral diagnostics
-    diag_flag::Bool = false         # General diagnostics
-    force_xialpha::Bool = false     # Force xi_alpha formulation
 
     # Debugging
     verbose::Bool = false
@@ -227,7 +210,7 @@ matrix_pitch_rtol(ctrl::KineticForcesControl) = isnan(ctrl.rtol_pitch) ? MATRIX_
 # `cubic_interp` call so the 7-parameter `CubicSeriesInterpolant{...}` need not be
 # spelled out. Used to concretely type the smats..zmats fields below so the per-ψ
 # `intr.smats(psi)` reads in `Torque.jl` are statically dispatched, not boxed
-# `Any` calls (issue #247).
+# `Any` calls.
 const GeomInterp = typeof(cubic_interp(collect(0.0:0.25:1.0), Series(zeros(ComplexF64, 5, 1)); extrap=ExtendExtrap()))
 
 """
@@ -291,14 +274,8 @@ this struct.
     # Clebsch displacement vectors for mode-coupled dW contraction
     xs_m::Any = nothing            # Vector of 3 CubicSeriesInterpolants: [ξ_ψ, ξ_+, ξ_-]
 
-    # Integration results
-    tphi::ComplexF64 = 0.0 + 0.0im    # Total torque/energy
-    tsurf::ComplexF64 = 0.0 + 0.0im   # Surface torque/energy
-    teq::ComplexF64 = 0.0 + 0.0im     # Equilibrium grid result
-
     # Method tracking — available methods/docs come from `METHOD_REGISTRY`.
     method::String = ""
-    wtw::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)
 
     verbose::Bool = false
 end
@@ -492,24 +469,6 @@ end
 # ============================================================================
 
 """
-    EnergyIntegrationResult
-
-Results from a single energy-space integration at one (ψ, λ, ℓ) point.
-Trajectory fields are only populated when `ctrl.save_records=true`.
-"""
-@kwdef struct EnergyIntegrationResult
-    psi::Float64 = 0.0
-    lambda::Float64 = 0.0
-    ell::Int = 0
-    leff::Float64 = 0.0
-    torque::ComplexF64 = 0.0 + 0.0im
-    kinetic_energy::ComplexF64 = 0.0 + 0.0im
-    x_trajectory::Vector{Float64} = Float64[]
-    integrand_trajectory::Vector{ComplexF64} = ComplexF64[]
-    integral_trajectory::Vector{ComplexF64} = ComplexF64[]
-end
-
-"""
     MethodResult
 
 Results for one NTV computation method across all flux surfaces.
@@ -520,7 +479,6 @@ Results for one NTV computation method across all flux surfaces.
     torque_profile::Any = nothing     # Interpolant of dT/dψ(ψ) from ψ integration
     total_torque::ComplexF64 = 0.0 + 0.0im  # complex T: Re = torque T_φ [N·m], Im = 2n·δW_k (Logan 2013 Eq. 19)
     total_energy::Float64 = 0.0              # real kinetic energy δW_k = Im(T)/(2n) [J]
-    records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
     # Per-step ψ profile from outer quadrature
     psi_grid::Vector{Float64} = Float64[]
     dtdpsi::Vector{ComplexF64} = ComplexF64[]
@@ -545,5 +503,4 @@ Written to gpec.h5 under the "KineticForces" group.
     method_results::Dict{String,MethodResult} = Dict{String,MethodResult}()
     # Block-diagonal kinetic matrices: key=method, value=(numpert_total, numpert_total, 6)
     kinetic_matrices::Dict{String,Array{ComplexF64,3}} = Dict{String,Array{ComplexF64,3}}()
-    completed::Bool = false
 end

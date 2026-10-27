@@ -35,7 +35,6 @@ gap_fraction = 0.15                     # Toroidal gap between neighbouring fram
 currents = [1000.0, 0.0, -1000.0, -1000.0, 0.0, 1000.0]  # n=1 phasing shifted by 60 degrees, 1 kA peak [A]
 
 [PerturbedEquilibrium]
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = false       # Compute singular layer coupling metrics
 compute_torque_response = true          # Build the ψ-resolved torque response matrices T_xe and T_source
 verbose = false                         # Enable verbose logging
@@ -90,8 +89,9 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
 
         # The applied forcing, referred back to the solution basis without the function under test:
         # Φ_x = R·b̃, boundary ξ = D·P·Φ_x with the flux-space permeability P recovered from the stored b̃ form.
-        R = pe.rootarea_to_area_weight .* pe.surface_area
-        P = R * pe.permeability / R
+        resp = pe.response
+        R = resp.rootarea_to_area_weight .* resp.surface_area
+        P = R * resp.permeability / R
         chi1 = 2π * ffs.equil.psio
         D = Diagonal([-im / (chi1 * (tr.m_modes[i] - nn * ffs.qlim) * 2π) for i in 1:N])
         b̃ = pe.forcing_b_rootarea
@@ -145,22 +145,32 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
 
         @testset "forcing-source matrix: a forcing file is one source" begin
             file_state = deepcopy(pe)
-            file_intr = _PE_TR.PerturbedEquilibriumInternal(; plasma_response=P)
             file_ctrl = _GPE_TR.ForcingTerms.ForcingTermsControl(; forcing_data_file="forcing.dat")
-            _PE_TR.compute_torque_response!(file_state, ffs, file_ctrl, file_intr, _PE_TR.PerturbedEquilibriumControl())
+            _PE_TR.apply_torque_response!(file_state, file_ctrl)
             ts = file_state.torque_response
             @test ts.source_names == ["forcing.dat"]
             @test size(ts.T_source) == (1, 1, npsi)
             @test ts.T_source[1, 1, :] ./ 2 ≈ tr.T_applied rtol = 1e-8
         end
 
+        @testset "regularization on a kinetic result" begin
+            # No regularization by default; an explicit width still reaches the regularized profiles.
+            @test pe.regularization_width == 0.0
+            reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.RMPField(ft_ctrl); regularization_width=0.05,
+                coil_sets=pe.coil_sets, verbose=false, write_outputs_to_HDF5=false)
+            @test reg.regularization_width == 0.05
+            @test reg.forcing_b ≈ pe.forcing_b rtol = 1e-12
+            @test !(reg.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
+        end
+
         @testset "argument checks" begin
-            flux_conform = pe.rootarea_to_area_weight .* pe.surface_area
-            @test_throws DimensionMismatch _PE_TR.torque_response_matrices(ffs, P, flux_conform; source_flux=zeros(ComplexF64, N, 1))
             @test_throws DimensionMismatch _PE_TR.torque_profile(tr, ComplexF64[1.0])
-            empty_state = _PE_TR.PerturbedEquilibriumState()
-            empty_intr = _PE_TR.PerturbedEquilibriumInternal()
-            @test_throws ArgumentError _PE_TR.compute_torque_response!(empty_state, ffs, ft_ctrl, empty_intr, _PE_TR.PerturbedEquilibriumControl())
+            # A response without its operators cannot carry a torque response.
+            @test_throws ArgumentError _PE_TR.build_torque_response!(_PE_TR.PlasmaResponse(; ffs))
+            # The torque response is opt-in: a response built without it contracts nothing.
+            plain = perturbed_equilibrium(plasma_response(ffs; compute_singular_coupling=false, verbose=false), _GPE_TR.ForcingTerms.RMPField(ft_ctrl);
+                coil_sets=pe.coil_sets, verbose=false, write_outputs_to_HDF5=false)
+            @test isempty(plain.response.T_xe) && plain.torque_response === nothing
         end
     end
 end

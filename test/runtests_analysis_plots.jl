@@ -32,7 +32,7 @@ using TOML
                 "ForcingTerms" => Dict{String,Any}("forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                     "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4,
                         "currents" => [2.0e3], "tiltx" => [3.0])]),
-                "PerturbedEquilibrium" => Dict{String,Any}("compute_response" => true, "compute_singular_coupling" => true,
+                "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true,
                     "verbose" => false, "write_outputs_to_HDF5" => true)))
 
             for f in (A.Equilibrium.plot_qprofile, A.Equilibrium.plot_pressure_profile, A.Equilibrium.plot_f_profile,
