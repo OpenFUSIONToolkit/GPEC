@@ -103,8 +103,6 @@ name = "c"                              # DIII-D C-coil (6 coils); resolves to c
 currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
 
 [PerturbedEquilibrium]
-fixed_boundary = false                  # Use fixed boundary conditions
-output_eigenmodes = true                # Output eigenmode fields as b-fields
 compute_response = false                # Compute plasma response to forcing
 compute_singular_coupling = false       # Compute singular layer coupling metrics
 verbose = true                          # Enable verbose logging

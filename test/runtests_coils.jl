@@ -347,7 +347,7 @@ end
 # ---------------------------------------------------------------------------
 @testset "CoilFourier: B·n̂ file conversion onto the run's harmonics" begin
     eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", psilow=0.01, psihigh=0.995)
-    equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig())
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, Equilibrium.SolovevConfig())
     n, m_out, mtheta = 1, -10:14, 256
     convert(modes) = ForcingTerms.convert_forcing_normalization(modes, "normal_field_T", equil, n, m_out)
     spectrum(ms, amp) = [ForcingMode(; n, m, amplitude=amp(m)) for m in ms]

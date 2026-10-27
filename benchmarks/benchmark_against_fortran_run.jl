@@ -440,7 +440,6 @@ function write_gpec_toml_coil(
         end
         println(io)
         println(io, "[PerturbedEquilibrium]")
-        println(io, "fixed_boundary            = false")
         println(io, "compute_response          = true")
         println(io, "compute_singular_coupling = true")
         println(io, "verbose                   = true")
@@ -493,7 +492,6 @@ function write_gpec_toml_file(
         println(io, "forcing_data_format = \"ascii\"")
         println(io)
         println(io, "[PerturbedEquilibrium]")
-        println(io, "fixed_boundary            = false")
         println(io, "compute_response          = true")
         println(io, "compute_singular_coupling = true")
         println(io, "verbose                   = true")

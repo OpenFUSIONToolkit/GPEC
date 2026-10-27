@@ -97,17 +97,18 @@ const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
     "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
+const _DEPRECATED_KF_KEYS = ("moment", "eq_out", "theta_out", "xlmda_out", "eqpsi_out", "save_records", "gpec_file",
+    "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha")
+const _DEPRECATED_PE_KEYS = ("fixed_boundary", "output_eigenmodes", "filter_modes", "singular_point_method")
+const _DEPRECATED_KEYS = ("Equilibrium" => _DEPRECATED_EQUIL_KEYS, "ForceFreeStates" => _DEPRECATED_FFS_KEYS,
+    "KineticForces" => _DEPRECATED_KF_KEYS, "PerturbedEquilibrium" => _DEPRECATED_PE_KEYS)
 
-# Drop deprecated keys from a parsed gpec.toml section so legacy files keep parsing
-# instead of throwing an unknown-keyword error; warn so the removal is not silent.
-function _drop_deprecated_keys!(table, deprecated_keys, section::String)
-    for k in deprecated_keys
-        if haskey(table, k)
-            @warn "`$k` in [$section] is deprecated and ignored; please remove it from gpec.toml."
-            delete!(table, k)
-        end
-    end
-    return table
+# Stop the run when a parsed gpec.toml section sets keys that no longer exist, so the deck is updated.
+function _stop_on_deprecated_keys(table, deprecated_keys, section::String; remedy::String="remove from gpec.toml")
+    found = [k for k in deprecated_keys if haskey(table, k)]
+    isempty(found) && return nothing
+    listed = join(("`$k`" for k in found), ", ")
+    error(length(found) == 1 ? "[$section] sets $listed, which is no longer a key; $remedy" : "[$section] sets $listed, which are no longer keys; $remedy")
 end
 
 """
@@ -165,7 +166,7 @@ function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothi
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
 
     haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
-    _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
+    _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
 
     # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
@@ -232,7 +233,9 @@ function main_from_inputs(
     # Build data structures from inputs
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
-    _drop_deprecated_keys!(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
+    _stop_on_deprecated_keys(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
+    haskey(inputs, "KineticForces") && _stop_on_deprecated_keys(inputs["KineticForces"], _DEPRECATED_KF_KEYS, "KineticForces")
+    haskey(inputs, "PerturbedEquilibrium") && _stop_on_deprecated_keys(inputs["PerturbedEquilibrium"], _DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
     local_stability_alg = local_stability_algorithm(inputs)
 

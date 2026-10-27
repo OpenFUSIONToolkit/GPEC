@@ -51,7 +51,7 @@ function compute_plasma_response!(
     intr.plasma_response = permeability
 
     # Conform the control-surface matrices to the coordinate-invariant root-area-weighted
-    # field (b̃) space for output (issue #233 / Pharr 2026). Store the b̃→b̄ operator S = Σ/√A
+    # field (b̃) space for output (Pharr 2026). Store the b̃→b̄ operator S = Σ/√A
     # and the scalar surface area A so users can recover the area-weighted field (b̄ = S·b̃) or
     # flux (Φ = A·b̄) — see Utils.jl output docs.
     rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs)
