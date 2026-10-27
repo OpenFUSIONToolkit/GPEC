@@ -1,53 +1,19 @@
 """
-    initialize_mode_arrays!(
-        intr::PerturbedEquilibriumInternal,
-        ffs::ForceFreeStatesResult
-    )
+    mode_arrays(ffs::ForceFreeStatesResult) -> (m_modes, n_modes)
 
-Initialize mode number arrays for convenient indexing.
-
-Pre-computes m_modes[i] and n_modes[i] for each linear index i in 1:numpert_total,
-avoiding repeated index arithmetic throughout the code.
-
-## Mode Indexing Convention
-
-For linear index i ∈ [1, numpert_total]:
+Mode numbers of each linear index i ∈ [1, numpert_total], in the ForceFreeStates ordering
+(m1,n1), (m2,n1), ..., (mpert,n1), (m1,n2), ...:
 
   - m_modes[i] = (i-1) % mpert + mlow
   - n_modes[i] = (i-1) ÷ mpert + nlow
-
-This matches the convention used in ForceFreeStates where modes are ordered as:
-(m1,n1), (m2,n1), ..., (mpert,n1), (m1,n2), (m2,n2), ..., (mpert,npert)
 """
-function initialize_mode_arrays!(
-    intr::PerturbedEquilibriumInternal,
-    ffs::ForceFreeStatesResult
-)
-    numpert_total = ffs.numpert_total
-    mpert = ffs.mpert
-    mlow = ffs.mlow
-    nlow = ffs.nlow
-
-    # Allocate arrays
-    intr.m_modes = zeros(Int, numpert_total)
-    intr.n_modes = zeros(Int, numpert_total)
-
-    # Fill arrays using indexing convention
-    for i in 1:numpert_total
-        m_idx = (i - 1) % mpert + 1  # 1-based index into mpert range
-        n_idx = (i - 1) ÷ mpert + 1  # 1-based index into npert range
-
-        intr.m_modes[i] = m_idx - 1 + mlow
-        intr.n_modes[i] = n_idx - 1 + nlow
-    end
+function mode_arrays(ffs::ForceFreeStatesResult)
+    idx = 1:ffs.numpert_total
+    return [(i - 1) % ffs.mpert + ffs.mlow for i in idx], [(i - 1) ÷ ffs.mpert + ffs.nlow for i in idx]
 end
 
 """
-    write_outputs_to_HDF5(
-        state::PerturbedEquilibriumState,
-        intr::PerturbedEquilibriumInternal,
-        filename::String
-    )
+    write_outputs_to_HDF5(state::PerturbedEquilibriumState, filename::String)
 
 Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeStates output).
 
@@ -116,23 +82,20 @@ PerturbedEquilibrium/
     └── total_torque          # Re T_applied at the control surface [N·m]
 ```
 """
-function write_outputs_to_HDF5(
-    state::PerturbedEquilibriumState,
-    intr::PerturbedEquilibriumInternal,
-    filename::String
-)
+function write_outputs_to_HDF5(state::PerturbedEquilibriumState, filename::String)
+    resp = state.response
     h5open(filename, "cw") do file
         pe_group = haskey(file, "PerturbedEquilibrium") ? file["PerturbedEquilibrium"] : create_group(file, "PerturbedEquilibrium")
 
         # Forcing modes
         forcing_group = haskey(pe_group, "ForcingModes") ? pe_group["ForcingModes"] : create_group(pe_group, "ForcingModes")
-        forcing_group["n"] = [mode.n for mode in intr.forcing_modes]
-        forcing_group["m"] = [mode.m for mode in intr.forcing_modes]
-        forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
+        forcing_group["n"] = [mode.n for mode in state.forcing_modes]
+        forcing_group["m"] = [mode.m for mode in state.forcing_modes]
+        forcing_group["amplitude"] = [mode.amplitude for mode in state.forcing_modes]
 
         # Labels of the mode axis shared by the spectra, matrices and profiles below
-        !isempty(intr.m_modes) && (pe_group["mode_m"] = intr.m_modes)
-        !isempty(intr.n_modes) && (pe_group["mode_n"] = intr.n_modes)
+        !isempty(resp.m_modes) && (pe_group["mode_m"] = resp.m_modes)
+        !isempty(resp.n_modes) && (pe_group["mode_n"] = resp.n_modes)
 
         # Control-surface forcing/response spectra in the three Pharr field representations
         # (all tesla; flux/weber is never stored). b̃ = root-area-weighted (coordinate-invariant).
@@ -148,12 +111,12 @@ function write_outputs_to_HDF5(
         # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
         # scalar surface_area A: Φ = A·b̄  (internally R = S·A, Φ = R·b̃). [Pharr 2026]
         mat_group = haskey(pe_group, "ResponseMatrices") ? pe_group["ResponseMatrices"] : create_group(pe_group, "ResponseMatrices")
-        !isempty(state.plasma_inductance) && (mat_group["plasma_inductance"] = state.plasma_inductance)
-        !isempty(state.surface_inductance) && (mat_group["surface_inductance"] = state.surface_inductance)
-        !isempty(state.permeability) && (mat_group["permeability"] = state.permeability)
-        !isempty(state.reluctance) && (mat_group["reluctance"] = state.reluctance)
-        !isempty(state.rootarea_to_area_weight) && (mat_group["rootarea_to_area_weight_operator"] = state.rootarea_to_area_weight)
-        (state.surface_area != 0.0) && (mat_group["surface_area"] = state.surface_area)
+        !isempty(resp.plasma_inductance) && (mat_group["plasma_inductance"] = resp.plasma_inductance)
+        !isempty(resp.surface_inductance) && (mat_group["surface_inductance"] = resp.surface_inductance)
+        !isempty(resp.permeability) && (mat_group["permeability"] = resp.permeability)
+        !isempty(resp.reluctance) && (mat_group["reluctance"] = resp.reluctance)
+        !isempty(resp.rootarea_to_area_weight) && (mat_group["rootarea_to_area_weight_operator"] = resp.rootarea_to_area_weight)
+        (resp.surface_area != 0.0) && (mat_group["surface_area"] = resp.surface_area)
 
         # Response fields (ComplexF64 directly)
         response_group = haskey(pe_group, "Response") ? pe_group["Response"] : create_group(pe_group, "Response")
@@ -215,11 +178,11 @@ function write_outputs_to_HDF5(
         coupling_group = haskey(pe_group, "SingularCoupling") ? pe_group["SingularCoupling"] : create_group(pe_group, "SingularCoupling")
 
         # Coupling matrices [n_rational × numpert_total]
-        !isempty(state.C_resonant_area_weighted_field) && (coupling_group["C_resonant_area_weighted_field"] = state.C_resonant_area_weighted_field)
-        !isempty(state.C_resonant_current) && (coupling_group["C_resonant_current"] = state.C_resonant_current)
-        !isempty(state.C_island_width_sq) && (coupling_group["C_island_width_sq"] = state.C_island_width_sq)
-        !isempty(state.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = state.C_penetrated_area_weighted_field)
-        !isempty(state.C_delta_prime) && (coupling_group["C_Delta_prime"] = state.C_delta_prime)
+        !isempty(resp.C_resonant_area_weighted_field) && (coupling_group["C_resonant_area_weighted_field"] = resp.C_resonant_area_weighted_field)
+        !isempty(resp.C_resonant_current) && (coupling_group["C_resonant_current"] = resp.C_resonant_current)
+        !isempty(resp.C_island_width_sq) && (coupling_group["C_island_width_sq"] = resp.C_island_width_sq)
+        !isempty(resp.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = resp.C_penetrated_area_weighted_field)
+        !isempty(resp.C_delta_prime) && (coupling_group["C_Delta_prime"] = resp.C_delta_prime)
 
         # Applied resonant vectors [n_rational]
         !isempty(state.resonant_area_weighted_field) && (coupling_group["resonant_area_weighted_field"] = state.resonant_area_weighted_field)
@@ -228,23 +191,23 @@ function write_outputs_to_HDF5(
         !isempty(state.penetrated_area_weighted_field) && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
         !isempty(state.delta_prime) && (coupling_group["Delta_prime"] = state.delta_prime)
         !isempty(state.forcing_solution_weights) && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
-        !isempty(state.rational_area) && (coupling_group["rational_area"] = state.rational_area)
+        !isempty(resp.rational_area) && (coupling_group["rational_area"] = resp.rational_area)
         !isempty(state.island_half_width) && (coupling_group["island_half_width"] = state.island_half_width)
         !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)
 
         # Metadata [n_rational]
-        !isempty(state.rational_psi) && (coupling_group["rational_psi"] = state.rational_psi)
-        !isempty(state.rational_q) && (coupling_group["rational_q"] = state.rational_q)
-        !isempty(state.rational_m_res) && (coupling_group["rational_m"] = state.rational_m_res)
-        !isempty(state.rational_n) && (coupling_group["rational_n"] = state.rational_n)
+        !isempty(resp.rational_psi) && (coupling_group["rational_psi"] = resp.rational_psi)
+        !isempty(resp.rational_q) && (coupling_group["rational_q"] = resp.rational_q)
+        !isempty(resp.rational_m_res) && (coupling_group["rational_m"] = resp.rational_m_res)
+        !isempty(resp.rational_n) && (coupling_group["rational_n"] = resp.rational_n)
 
         # Dominant resonant-coupling modes (SVD of the b̃-space coupling matrix over the retained rows)
-        if !isempty(state.dominant_singular_values)
+        if !isempty(resp.dominant_singular_values)
             dominant_group = haskey(coupling_group, "DominantMode") ? coupling_group["DominantMode"] : create_group(coupling_group, "DominantMode")
-            dominant_group["singular_values"] = state.dominant_singular_values
-            dominant_group["right_singular_vectors"] = state.dominant_right_singular_vectors
-            dominant_group["left_singular_vectors"] = state.dominant_left_singular_vectors
-            dominant_group["rational_index"] = state.dominant_rational_index
+            dominant_group["singular_values"] = resp.dominant_singular_values
+            dominant_group["right_singular_vectors"] = resp.dominant_right_singular_vectors
+            dominant_group["left_singular_vectors"] = resp.dominant_left_singular_vectors
+            dominant_group["rational_index"] = resp.dominant_rational_index
             !isempty(state.dominant_forcing_overlap) && (dominant_group["forcing_overlap"] = state.dominant_forcing_overlap)
         end
 

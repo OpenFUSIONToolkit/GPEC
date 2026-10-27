@@ -273,7 +273,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     ymat=nothing, zmat=nothing,
     nlmda::Int=128, ntheta::Int=128,
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+    nufac::Float64=1.0, qt::Bool=false,
     energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
     pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
     rex_override::Union{Nothing,Float64}=nothing,
@@ -351,7 +351,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     lxint = integrate_pitch_gar_quadgk(
         wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
         fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
-        nutype, f0type, nufac, ximag, qt,
+        nutype, f0type, nufac, qt,
         energy_atol, energy_rtol, pitch_atol, pitch_rtol)
 
     # Scalar torque, Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013).
@@ -665,7 +665,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     intr::KineticForcesInternal;
     nlmda::Int=128, ntheta::Int=128,
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, ximag::Float64=0.0,
+    nufac::Float64=1.0,
     energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
     pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
     geometry::Union{Nothing,BounceGeometry}=nothing
@@ -736,7 +736,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         state.wdian, state.wdiat, state.welec, state.nuk,
         bo / state.bmax, state.epsr, state.q,
         fbnce, fbnce_norm, nqty, l, n, psi, "fwmm";
-        nutype, f0type, nufac, ximag, qt=false,
+        nutype, f0type, nufac, qt=false,
         energy_atol, energy_rtol, pitch_atol, pitch_rtol)
 
     # Torque → energy normalization, Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013).
@@ -797,7 +797,7 @@ end
 
 """
     compute_kinetic_matrices_at_psi!(kwmat, ktmat, psi, n, l, zi, mi,
-        wdfac, divxfac, electron, equil, intr, kinetic_profiles)
+        wdfac, electron, equil, intr, kinetic_profiles)
 
 Compute the six kinetic Euler-Lagrange coefficient matrices at a single
 flux surface and split them into `kwmat` and `ktmat` in the convention
@@ -825,8 +825,7 @@ Fortran `dcon/sing.f:967-1075` for non-Hermitian B_k, C_k, E_k.
 
   - `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), fwmm half, zeroed on entry
   - `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), ftmm half, zeroed on entry
-  - `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!` (divxfac unused
-    on the matrix path — retained for call-site compatibility)
+  - `psi, n, l, zi, mi, wdfac, electron`: Same as `tpsi!`
   - `equil`: PlasmaEquilibrium
   - `intr::KineticForcesInternal`: Internal state with mode indexing, geometric
     matrices (smats/tmats/xmats/ymats/zmats), and per-surface θ-grid buffers
@@ -838,7 +837,7 @@ function compute_kinetic_matrices_at_psi!(
     kwmat::Array{ComplexF64,3},
     ktmat::Array{ComplexF64,3},
     psi::Float64, n::Int, l::Int,
-    zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
+    zi::Int, mi::Int, wdfac::Float64,
     electron::Bool, equil::Equilibrium.PlasmaEquilibrium, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
     nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
