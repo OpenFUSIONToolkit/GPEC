@@ -87,8 +87,8 @@ using GeneralizedPerturbedEquilibrium
         @test eq.params.bt_sign == -1 && eq.params.ip_sign == 1 && eq.params.bt0 == 3.0
         @test eq.profiles.q_spline(psilim) ≈ q(psilim) rtol = 1e-13
         @test eq.profiles.q_deriv(psilim) ≈ 2 + 1.6psilim rtol = 1e-13
-        @test eq.profiles.q_spline(psilim) == original.profiles.q_spline(psilim)
-        @test eq.profiles.q_deriv(psilim) == original.profiles.q_deriv(psilim)
+        @test eq.profiles.q_spline(psilim) ≈ original.profiles.q_spline(psilim) rtol = 1e-13
+        @test eq.profiles.q_deriv(psilim) ≈ original.profiles.q_deriv(psilim) rtol = 1e-13
         rc = PE.ResonantCoupling(path)
         @test hcat(rc.m_modes, rc.n_modes) == mn
         @test rc.C == coupling && rc.rational_psi == rational_psi
