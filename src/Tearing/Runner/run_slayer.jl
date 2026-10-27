@@ -46,9 +46,11 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
         minimum(v) > 0 || error("run_slayer: kinetic file '$path' has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
         return cubic_interp(psi_xs, collect(Float64, v))
     end
-    chi_perp_e = _chi_spline("chi_e", data.chi_e)
-    chi_perp_i = _chi_spline("chi_i", data.chi_i)
-    chi_tor = _chi_spline("chi_phi", data.chi_phi)
+    model = control.P_perp_model
+    uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+    chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
+    chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
+    chi_tor = model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
     # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
@@ -68,7 +70,7 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
     return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
-        has_omega_E=data.omega_E !== nothing)
+        has_omega_E=(data.omega_E !== nothing))
 end
 
 # χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the control's
@@ -78,8 +80,12 @@ function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
     model = control.P_perp_model
     pick(f, s) = f === nothing ? s : f
     model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && control.chi_perp_i === nothing &&
-        throw(ArgumentError("SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
-                            "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."))
+        throw(
+            ArgumentError(
+                "SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
+                "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."
+            )
+        )
     if warn
         uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
         uses_i = model in (:chi_perp_i, :D_perp)
@@ -89,9 +95,9 @@ function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
         uses_i && loaded.chi_perp_i === nothing && push!(fallbacks, "chi_i → chi_perp_i = $(control.chi_perp_i)")
         uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_tor = $(control.chi_tor)")
         isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
-                                  "$(join(fallbacks, ", ")); using the scalar fallback."
+                                    "$(join(fallbacks, ", ")); using the scalar fallback."
         model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
-                                  "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
+              "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
     end
     return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
         chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
@@ -368,7 +374,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
     coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
-            "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
+        "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
     q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
