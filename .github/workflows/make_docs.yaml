@@ -8,6 +8,8 @@ on:
     tags:
       - '*'
   pull_request:
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   # Skip intermediate builds: always.
@@ -39,7 +41,7 @@ jobs:
       - name: Prepare docs environment (develop local package, then instantiate)
         run: julia --project=docs -e 'using Pkg; Pkg.activate("docs"); Pkg.develop(PackageSpec(path=".")); Pkg.instantiate(update_registry=false)'
 
-      - name: Build and deploy documentation
+      - name: Build documentation
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: julia --project=docs docs/make.jl

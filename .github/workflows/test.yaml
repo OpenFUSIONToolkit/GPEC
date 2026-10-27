@@ -4,6 +4,8 @@ on:
   # Every pull request, whatever its base, so a PR stacked on another feature branch
   # is tested too; it is tested again once retargeted, when it syncs with develop.
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches:
       - main
@@ -14,7 +16,7 @@ permissions:
 
 concurrency:
   # One in-flight run per branch/PR. Superseded pull request runs are cancelled;
-  # runs on main/develop are allowed to finish so every merged commit is verified.
+  # Push and queue runs finish independently on their own refs.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -35,6 +37,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -42,10 +45,10 @@ jobs:
           # `why did/didn't this run?` is answerable from either one.
           say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
 
-          # Pushes to main/develop always run: every merged commit gets verified.
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          # Pushes and queue candidates always run the full battery.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "julia=true" >> "$GITHUB_OUTPUT"
-            say "Not a pull request — running the full test suite."
+            say "Event $EVENT_NAME — running the full test suite."
             exit 0
           fi
 
