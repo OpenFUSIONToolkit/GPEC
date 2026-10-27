@@ -9,7 +9,7 @@
     function _ref_kwargs(; dr_val=0.0, dc_type=:none)
         return (
             n_e=5.0e19, t_e=1000.0, t_i=1000.0,
-            omega=0.0, omega_e=-1.0e4, omega_i=5.0e3,
+            omega_e=-1.0e4, omega_i=5.0e3,
             qval=2.0, sval_r=1.0, bt=2.0,
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
             chi_perp=1.0, chi_tor=1.0,
@@ -100,14 +100,14 @@
         @test p_none.dc_tmp == 0.0   # :none ignores dr_val
 
         p_lar = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:lar)...)
-        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:rfitzp)...)
+        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:fitzpatrick)...)
         p_tor = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:toroidal)...)
 
         @test isfinite(p_lar.dc_tmp)
         @test isfinite(p_rf.dc_tmp)
         @test isfinite(p_tor.dc_tmp)
         # dr_val > 0 with the (-dr_val) prefactor ⇒ negative dc_tmp for
-        # :lar, :rfitzp, :toroidal branches.
+        # :lar, :fitzpatrick, :toroidal branches.
         @test p_lar.dc_tmp < 0
         @test p_rf.dc_tmp < 0
         @test p_tor.dc_tmp < 0

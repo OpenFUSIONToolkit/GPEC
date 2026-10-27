@@ -58,7 +58,7 @@ for geqdsk_file in geqdsk_cases
     eq_dict = deepcopy(base_toml["Equilibrium"])
     eq_dict["eq_filename"] = geqdsk_file
     eq_config = Equilibrium.EquilibriumConfig(eq_dict, @__DIR__)
-    equil = Equilibrium.setup_equilibrium(eq_config)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config)
     psi_norm = Vector(equil.profiles.xs)
 
     # s and alpha profiles vs normalized flux

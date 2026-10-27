@@ -13,7 +13,7 @@
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
 #   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
-#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots
+#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame)
 #   │                           (flat-plus-offsets ragged encoding)
 #   ├── Scan/               -- optional: full Q/Δ scan data
 #   └── CriticalResonantField/ -- optional: torque-balance b_r/B_φ crit per surface
@@ -38,6 +38,7 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     # Which inner-layer model produced PerSurface/: the SLAYER and GGJ branches write
     # disjoint field sets, so readers must not have to infer it from the schema.
     attrs(g)["layer_model"] = result.enabled ? _layer_model_token(eltype(result.params)) : "none"
+    attrs(g)["inner_model"] = result.model === nothing ? "none" : InnerLayer.model_name(result.model)
 
     if !result.enabled    # nothing else to write
         _annotate_tearing!(g)
@@ -45,6 +46,9 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     end
 
     _write_per_surface!(g, result.params, result.dp_matrix)
+    # E×B rotation resolved per surface, and the Doppler offset it applies to the inner-layer Q.
+    g["PerSurface/omega_E"] = result.omega_E
+    g["PerSurface/q_shift"] = result.q_shift
     # Surface identity (absent when the analysis was built from bare parameters).
     isempty(result.rational_psi) || (g["PerSurface/rational_psi"] = result.rational_psi)
     isempty(result.rational_q) || (g["PerSurface/rational_q"] = result.rational_q)
@@ -63,10 +67,9 @@ end
 function _write_critical_resonant_field!(g, crf::CriticalResonantFieldResult)
     cg = create_group(g, "CriticalResonantField")
     cg["rational_index"] = crf.rational_index
-    cg["q_peak"] = crf.q_peak
+    cg["Q_peak"] = crf.Q_peak
     cg["br_crit"] = crf.br_crit
-    cg["q0"] = crf.q0
-    cg["p_phi"] = crf.p_phi
+    cg["Q0"] = crf.Q0
     isempty(crf.scan) && return nothing
     scan = create_group(cg, "Scan")
     for (k, sc) in enumerate(crf.scan)
@@ -103,6 +106,10 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/iota_e" => (; long_name="electron fraction ι_e = Q_e/(Q_e − Q_i) per surface", dims=("surface",)),
     "PerSurface/tau_k" =>
         (; long_name="Q-normalization time S^(1/3)·τ_H per surface (Q = τ_k·ω; diamagnetic inputs Q_e, Q_i carry the opposite sign by convention)", units="s", dims=("surface",)),
+    "PerSurface/omega_E" =>
+        (; long_name="E×B angular frequency Ω_E per unit n on each surface (kinetic file or omega_E_kHz override; NaN when neither gives one)", units="rad/s", dims=("surface",)),
+    "PerSurface/q_shift" =>
+        (; long_name="real E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E applied to each surface's inner-layer Q in the coupled determinant (0 in uncoupled mode)", dims=("surface",)),
     "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface", units="s", dims=("surface",)),
     "PerSurface/Delta_prime_norm" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
     "PerSurface/rs" => (; long_name="minor radius of each rational surface", units="m", dims=("surface",)),
@@ -135,9 +142,13 @@ const TEARING_H5_ANNOTATIONS = [
         long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)",
         dims=("surface_row", "surface_col")
     ),
-    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q (NaN = no root)", dims=("surface",)),
+    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q in the lab frame (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
-        (; long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root", units="rad/s", dims=("surface",)),
+        (;
+            long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root in the lab frame (an uncoupled root's E×B-frame value is ω − n·Ω_E)",
+            units="rad/s",
+            dims=("surface",)
+        ),
     "Roots/gamma" =>
         (; long_name="growth rate γ = Im(Q)/τ_k of each root, positive = unstable (an e-folding rate, so no 2π distinction applies)", units="1/s", dims=("surface",)),
     "Roots/no_root" => (; long_name="flag: no usable dispersion root found (Q_root is NaN, ω/γ are placeholders)", dims=("surface",)),
@@ -149,13 +160,13 @@ const TEARING_H5_ANNOTATIONS = [
     "LayerWidths/delta_s_abs" => (; long_name="physical resistive layer thickness |δ_s|", units="m", dims=("surface",)),
     "LayerWidths/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
     "CriticalResonantField/rational_index" => (; long_name="rational-surface index of each row", dims=("surface",)),
-    "CriticalResonantField/q_peak" =>
-        (; long_name="normalized frequency Q (Cole axis) at the torque-balance maximum (NaN = no maximum)", units="1", dims=("surface",)),
+    "CriticalResonantField/Q_peak" =>
+        (; long_name="normalized frequency Q (Cole axis) at the torque-balance maximum (NaN = no maximum or surface skipped)", units="1", dims=("surface",)),
     "CriticalResonantField/br_crit" =>
-        (; long_name="critical normalized resonant field b_r/B_φ for error-field penetration (Cole-Fitzpatrick 2006 Eq. 62; NaN = no maximum)",
+        (; long_name="critical normalized resonant field b_r/B_φ for error-field penetration (Cole-Fitzpatrick 2006 Eq. 62; NaN = no maximum or surface skipped)",
             units="1", dims=("surface",)),
-    "CriticalResonantField/q0" => (; long_name="normalized natural E×B rotation Q0 = τ_k·n·ω_E", units="1", dims=("surface",)),
-    "CriticalResonantField/p_phi" => (; long_name="magnetic Prandtl number used in the torque balance (the layer P_tor)", units="1", dims=("surface",))
+    "CriticalResonantField/Q0" =>
+        (; long_name="normalized natural E×B rotation Q0 = τ_k·n·Ω_E of the m/n mode (NaN where Ω_E is unknown)", units="1", dims=("surface",))
 ]
 
 const TEARING_CRF_SCAN_H5_ANNOTATIONS = [

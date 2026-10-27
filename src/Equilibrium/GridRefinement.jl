@@ -5,7 +5,7 @@ Pass 1 forms the equilibrium on a coarse grid; `refined_psi_grid` then derives a
 density from the measured nodal data (1D profiles, 2D geometry channels, and optional
 kinetic profiles) and equidistributes it, pinning mandatory knots (e.g. rational surfaces)
 via `merge_mandatory_nodes`. Pass 2 re-forms the equilibrium on the refined grid through
-the `override_psi_nodes` keyword of `setup_equilibrium`.
+the `override_psi_nodes` keyword of `PlasmaEquilibrium`.
 
 There is ONE sizing rule everywhere — the cubic *derivative* interpolation error model
 err(f′) ≈ h³|f''''|/24 ≤ τ·f_scale — applied to three sources of curvature |f''''|:
@@ -156,9 +156,9 @@ end
 # for the pass-1→pass-2 shift of ψ_s.
 const BRACKET_COEF = 4.0
 # Global minimum knot spacing. No grid — auto refinement, the near-surface bracket, or a fixed
-# ldp/pow1 grid packing its edge at high mpsi — may place nodes closer than this. Below it, cubic
+# core_edge_packed/pow1 grid packing its edge at high mpsi — may place nodes closer than this. Below it, cubic
 # high derivatives are dominated by field-line integration noise rather than curvature (e.g. an
-# ldp grid at mpsi=2048 packs the edge to ~6e-7, deep in noise). Chosen well under the spacing of a
+# core_edge_packed grid at mpsi=2048 packs the edge to ~6e-7, deep in noise). Chosen well under the spacing of a
 # converged uniform reference (~5e-4 at mpsi=2048) so it clips only pathological clustering.
 const MIN_KNOT_SPACING = 1.0e-4
 # Near-rational resolution patch. The Δ′ extraction samples the equilibrium splines' 3rd
@@ -169,7 +169,7 @@ const MIN_KNOT_SPACING = 1.0e-4
 # `bracket_mandatory_nodes` then centers the surface within. The spacing is **fixed** (τ-independent):
 # Δ′ is a property of the rational surface, so its accuracy must not depend on the global accuracy
 # target τ (that only sizes the pedestal/edge grid) — a τ-dependent patch would leave Δ′ far from
-# converged at the default τ. RATIONAL_RES_SPACING is set where the q‴ estimate converges (the ldp
+# converged at the default τ. RATIONAL_RES_SPACING is set where the q‴ estimate converges (the core_edge_packed
 # mpsi ladder converges the q=2 Δ′ by h ≈ 5e-4).
 const RATIONAL_RES_SPACING = 5.0e-4
 const RATIONAL_RES_RADIUS = 5.0e-3
@@ -439,7 +439,7 @@ end
 
 Drop interior nodes so no two kept nodes are closer than `hmin`, preserving both endpoints.
 Guards against noise-level packing from any generator — the auto-grid near-surface bracket, or a
-fixed `ldp`/`pow1` grid whose edge spacing collapses (`~(π/2·mpsi)⁻²` for `ldp`) at high mpsi,
+fixed `core_edge_packed`/`pow1` grid whose edge spacing collapses (`~(π/2·mpsi)⁻²` for `core_edge_packed`) at high mpsi,
 below which cubic high derivatives are integration noise, not curvature. A no-op when the grid is
 already coarser than `hmin` everywhere (e.g. a converged uniform reference).
 """
@@ -513,6 +513,7 @@ density (`_knot_density`), equidistribution, a global minimum-spacing floor
 (`enforce_min_spacing`), and rational-surface bracketing (`bracket_mandatory_nodes`). `tau` is
 the target interpolation accuracy (`psi_accuracy`); `kin` optionally supplies kinetic profiles
 whose pedestal gradients attract knots; `mandatory` lists rational-surface ψ values to bracket;
+`pinned` lists ψ values inserted as plain knots without a cleared zone (kinetic-resonance surfaces);
 `singfac_min` and `n_min` (smallest |n| in the run) set each surface's matching half-stencil
 `dpsi = singfac_min/(n_min·|q′|)`, and the bracket half-width is `bracket_coef·dpsi` (floored at
 `min_spacing`). Rational surfaces are bracketed, not pinned: a knot on the surface would make the
@@ -522,6 +523,7 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     tau::Float64,
     kin::Union{Nothing,KineticProfileSplines}=nothing,
     mandatory::Vector{Float64}=Float64[],
+    pinned::Vector{Float64}=Float64[],
     singfac_min::Float64=1e-4,
     n_min::Int=1,
     bracket_coef::Float64=BRACKET_COEF,
@@ -543,6 +545,9 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     N == N_cap && M_total > N_cap &&
         @warn "refined_psi_grid: knot count capped at $N_cap (density integral wants $(ceil(Int, M_total))); psi_accuracy=$tau may not be attainable"
     grid = enforce_min_spacing(_equidistribute(xs, rho, N), min_spacing)
+    # Pinned knots use knot-at-node semantics (no cleared zone); inserted before rational bracketing
+    # so a rational's bracket still wins locally where the two overlap.
+    grid = isempty(pinned) ? grid : merge_mandatory_nodes(grid, pinned)
     isempty(mandatory) && return grid
     min_half_widths = [max(bracket_coef * singfac_min / (n_min * abs(equil.profiles.q_deriv(m))), min_spacing) for m in mandatory]
     return bracket_mandatory_nodes(grid, mandatory, min_half_widths, min_spacing)

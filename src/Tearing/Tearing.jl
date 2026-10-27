@@ -14,8 +14,7 @@
 # `InnerLayer` itself lives at the top level (`src/InnerLayer/`) and is loaded
 # before `ForceFreeStates`, which depends on it for the matched-Δ′ Galerkin
 # solve. Tearing re-binds it here so `Dispersion` and `Runner` reach it via
-# `..InnerLayer`, and owns `build_ggj_inputs`, the equilibrium/ForceFreeStates
-# glue that cannot live inside `InnerLayer` without creating a dependency cycle.
+# `..InnerLayer`.
 
 module Tearing
 
@@ -23,7 +22,6 @@ using ..Utilities
 
 import ..InnerLayer as InnerLayer
 
-include("LayerInputs.jl")
 include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")
 include("CriticalResonantField/CriticalResonantField.jl")
@@ -34,7 +32,6 @@ import .CriticalResonantField as CriticalResonantField
 import .Runner as Runner
 
 export InnerLayer, Dispersion, CriticalResonantField, Runner
-export build_ggj_inputs
 export resistive_layer_overlap, LayerOverlapScan
 
 end # module Tearing

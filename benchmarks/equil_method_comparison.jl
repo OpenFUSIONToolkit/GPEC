@@ -50,9 +50,9 @@ for method in methods
     local t2 = 0.0
     local success = true
     try
-        setup_equilibrium(cfg)  # JIT warmup
-        t1 = @elapsed pe = setup_equilibrium(cfg)
-        t2 = @elapsed setup_equilibrium(cfg)
+        PlasmaEquilibrium(cfg)  # JIT warmup
+        t1 = @elapsed pe = PlasmaEquilibrium(cfg)
+        t2 = @elapsed PlasmaEquilibrium(cfg)
     catch e
         @warn "  FAILED: $e"
         success = false

@@ -15,25 +15,35 @@ mpsi = 0                       # Number of radial grid points (0 = auto-compute 
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
-etol = 1e-10                   # Error tolerance for equilibrium solver
+flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace each flux surface
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
 shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a = 0.2415                     # Distance from plasma (conformal) or shape parameter
-aw = 0.05                      # Half-thickness parameter for Dee-shaped walls
-bw = 1.5                       # Elongation parameter for wall shapes
-cw = 0                         # Offset of wall center from major radius
-dw = 0.5                       # Triangularity parameter for wall shapes
-tw = 0.05                      # Sharpness of wall corners (try 0.05 as initial value)
+standoff_fraction = 0.2415     # Wall standoff in plasma minor radii (conformal, dee)
+half_thickness = 0.05          # Half-thickness parameter for Dee-shaped walls
+elongation = 1.5               # Elongation parameter for wall shapes
+center_offset = 0              # Offset of wall center from major radius
+triangularity = 0.5            # Triangularity parameter for wall shapes
+corner_sharpness = 0.05        # Sharpness of wall corners (try 0.05 as initial value)
 equal_arc_wall = true          # Equal arc length distribution of nodes on wall
+
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+[LocalStability]
+theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
+alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+n_scan = 24                   # Resolution of the α scan for the first boundary
+max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
+alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
+psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
+verbose = true                # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 force_termination = true       # Run FFS + SLAYER, skip PerturbedEquilibrium
-local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+dW_edge_scan_start = 0.99      # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
@@ -42,19 +52,19 @@ nn_low = 1                     # Smallest toroidal mode number to include
 nn_high = 1                    # Largest toroidal mode number to include
 delta_mlow = 8                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 8                # Expands upper bound of Fourier harmonics
-mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+mtheta_vacuum = 512            # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
 kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 1              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e3                    # Column-norm threshold that triggers solution renormalization
+renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
 integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
-set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost
-dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n
+truncate_at_rational_offset = true # TRUE for diverted geqdsks — q → ∞ at separatrix, so rational_offset_fraction truncation avoids the δW kink instability at negligible domain cost
+rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n
 
 [SLAYER]
 # SLAYER tearing-mode growth-rate analysis on the DIII-D-like H-mode equilibrium.
@@ -67,15 +77,16 @@ dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmli
 # invalid, no Re/Im contour crossing polishes to a true zero, and the validity
 # gate correctly reports them as no_root rather than a spurious growth rate.
 enabled                 = true       # Run the SLAYER tearing-mode analysis
-inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: "slayer_fitzpatrick", "ggj_shooting", or "ggj_galerkin"
+inner_model             = "slayer_fitzpatrick" # Inner-layer Δ(Q) model: only "slayer_fitzpatrick" (GGJ tearing growth rates are not implemented)
 scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive refinement) or "brute_force"
 coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
-dc_type                 = "none"     # Critical-Δ offset selector: "none", "lar", "rfitzp", or "toroidal"
-mu_i                    = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
+D_c_type                = "none"     # Critical-Δ offset selector: "none", "lar", "fitzpatrick", or "toroidal"
+ion_mass                = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
 zeff                    = 1.0        # fallback only; Z_eff(ψ) comes from the kinetic file (its zeff profile, else n_i/n_e with zimp)
-zimp                    = 6.0        # Impurity charge closing quasi-neutrality when Z_eff(ψ) is derived from n_i/n_e (6.0 = carbon)
+impurity_charge         = 6.0        # Impurity charge closing quasi-neutrality when Z_eff(ψ) is derived from n_i/n_e (6.0 = carbon)
 chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
+# omega_E_kHz           = {"2/1" = 0.0, "3/1" = 3.0} # override of the E×B rotation Ω_E/2π per unit n [kHz], keyed by m/n; unlisted surfaces use the kinetic file
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
 filter_above_poles      = true       # Discard roots above the highest pole γ
 filter_outside_re       = true       # Condition the above-pole filter on the +γ step exiting the Re(Δ)=0 contour loop
@@ -93,8 +104,9 @@ nim        = 31                # Grid resolution along the Im(Q) axis
 
 [SLAYER.CriticalResonantField]
 # Critical resonant field b_r/B_φ for error-field penetration at each SLAYER surface, from the
-# Cole-Fitzpatrick 2006 torque balance with P = P_tor of each layer. Qmin/Qmax may be set to
-# override the per-surface scan window derived from Q0, Q_e and Q_i.
+# Cole-Fitzpatrick 2006 torque balance with P = P_tor of each layer and Q0 = τ_k·n·Ω_E, so it
+# needs the kinetic file's omega_E (or omega_E_kHz). b_crit is taken at the penetration fold met
+# walking from Q0 toward Q_e; Qmin/Qmax may be set to override the sampled range.
 enabled    = true      # run the analysis after SLAYER
 n          = 2000      # number of Q samples per surface
 store_scan = false     # write the per-surface Q, torque balance and Δ samples to gpec.h5

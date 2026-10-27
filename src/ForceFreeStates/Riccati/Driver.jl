@@ -48,7 +48,7 @@ recover S = U₁·U₂⁻¹ by renormalization. This achieves the same Riccati t
 
 This works because the EL ODE is **linear** in (U₁, U₂): the RHS does not grow with |S|,
 so relative error control is faithful even when S is large. Renormalization triggered by
-`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > ucrit) keeps
+`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > renorm_threshold) keeps
 both matrices bounded, preventing overflow and maintaining a well-conditioned state for the
 solver — exactly analogous to Gaussian reduction in the standard ODE.
 
@@ -69,7 +69,7 @@ During chunk integration (with sing_der! as ODE RHS):
   u[:,:,1] = U₁  (starts as S_prev, evolves toward new S)
   u[:,:,2] = U₂  (starts as I, evolves with EL dynamics)
 
-After renormalization (at crossing or when norms exceed ucrit):
+After renormalization (at crossing or when norms exceed renorm_threshold):
   u[:,:,1] = S = U₁ · U₂⁻¹
   u[:,:,2] = I
 
@@ -262,7 +262,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
         end
 
         if chunk.needs_crossing
-            ctrl.kinetic_factor > 0 && error("kinetic_factor > 0 not implemented yet in Riccati!")
+            ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
             # State is (S, I) from the renorm above — well-conditioned at the surface's left boundary.
             push!(S_at_surface_left, copy(odet.u[:, :, 1]))
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)

@@ -204,10 +204,10 @@ t_equil = @elapsed begin
         "mtheta"       => p.mtheta_equil,
         "grid_type"    => p.grid_type,
         "psi_accuracy" => 0.001,
-        "etol"         => 1e-7,
+        "flux_surface_rtol" => 1e-7,
     )
     eq_config = Equilibrium.EquilibriumConfig(eq_dict, run_dir)
-    equil = Equilibrium.setup_equilibrium(eq_config)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config)
 end
 @printf "    Done in %.1f s  (bt_sign=%d)\n" t_equil equil.params.bt_sign
 

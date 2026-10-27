@@ -102,7 +102,7 @@ end
 
 # Allowed dc_type values for the critical-Δ offset. `:none` is the default
 # `dc_tmp = 0` branch.
-const ALLOWED_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
+const ALLOWED_DC_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 
 """
     r_based_shear(rs, q, dq_dpsi, da_dpsi) -> Float64
@@ -169,7 +169,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
         return 0.5 * (-dr_val) * π^1.5 *
                (chi_par / chi_perp)^0.25 *
                sqrt((n_tor * abs(sval_r)) / (R0 * rs))
-    elseif dc_type === :rfitzp
+    elseif dc_type === :fitzpatrick
         return -(sqrt(2.0) * π^1.5 * dr_val) / Wd
     elseif dc_type === :toroidal
         return 0.5 * (-dr_val) * π^1.5 *
@@ -179,7 +179,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
 end
 
 """
-    slayer_parameters(; n_e, t_e, t_i, omega, omega_e, omega_i,
+    slayer_parameters(; n_e, t_e, t_i, omega_e, omega_i,
                         qval, sval_r, bt, rs, R0, mu_i, zeff,
                         chi_perp, chi_tor,
                         m, n,
@@ -201,7 +201,6 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `n_e` -- electron density [m⁻³]
   - `t_e` -- electron temperature [eV]
   - `t_i` -- ion temperature [eV]
-  - `omega`   -- toroidal rotation frequency at the surface [rad/s]
   - `omega_e` -- electron diamagnetic frequency [rad/s]
   - `omega_i` -- ion diamagnetic frequency [rad/s]
   - `qval`    -- safety factor q at the surface
@@ -217,7 +216,7 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
     the electron channel); one profile serves both for now, see the stability docs
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
-  - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
+  - `dc_type` -- one of `:none`, `:lar`, `:fitzpatrick`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
   - `k_ref`   -- reference-length ratio K = r_s·(dψ_N/dr) at the surface,
     used by the Tearing runner to convert the ψ_N-referenced outer Δ' to
@@ -264,7 +263,7 @@ dispersion relation.
 """
 function slayer_parameters(;
     n_e::Real, t_e::Real, t_i::Real,
-    omega::Real, omega_e::Real, omega_i::Real,
+    omega_e::Real, omega_i::Real,
     qval::Real, sval_r::Real, bt::Real,
     rs::Real, R0::Real, mu_i::Real, zeff::Real,
     chi_perp::Real, chi_tor::Real,

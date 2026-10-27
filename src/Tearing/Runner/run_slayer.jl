@@ -1,17 +1,7 @@
-# Runner.jl
+# run_slayer.jl
 #
-# Top-level orchestration for the SLAYER tearing-mode analysis. Given a
-# `ForceFreeStatesResult` (which supplies the equilibrium, the rational-surface
-# list and the outer-region Δ' matrix) + a
-# populated `SLAYERControl`, `run_slayer` loads kinetic profiles, builds
-# per-surface SLAYER parameters, runs the requested scan mode, extracts
-# growth rates by contour intersection, and returns a `SLAYERResult`.
-#
-# A secondary entry point `run_slayer_from_inputs` takes pre-built
-# per-surface parameters + a Δ' matrix and bypasses the
-# equilibrium-driven `build_slayer_inputs` step. This is what the test
-# suite drives; it keeps the end-to-end code covered without requiring a
-# full equilibrium solve in every test.
+# Tearing scan core: profile loading, the slab Δ′ reference conversion, and
+# `run_slayer_from_inputs` (scan + growth-rate extraction). `TearingProblem` builds its inputs.
 
 # ---------------------------------------------------------------------
 # Profile loading
@@ -23,7 +13,8 @@
 # case the caller falls back to the scalar `control.chi_perp`/`chi_tor`), and
 # a Z_eff(ψ) callable: the file's own `zeff` profile when it carries one, else
 # derived from its `n_i/n_e` (or `nothing` when the file carries neither, in which
-# case the caller falls back to the scalar `control.zeff`).
+# case the caller falls back to the scalar `control.zeff`), and whether the file
+# carries an `omega_E` profile.
 function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     isempty(control.profile_file) &&
         error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
@@ -37,14 +28,12 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
             error("run_slayer: kinetic file '$path' is missing required " *
                   "dataset '$name' for the SLAYER inner layer.")
     end
-    # ω_*e/ω_*i are recomputed per-surface from equilibrium gradients
-    # (compute_omega_star), so the diamagnetic-frequency inputs here are
-    # placeholders; `omega` carries the ExB rotation when present.
+    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the file has it, else zero (no shift);
+    # ω_*e/ω_*i are derived per surface from the density and temperature splines by `build_slayer_inputs`.
     npsi = length(data.psi)
-    omega = data.omega_E === nothing ? zeros(npsi) : data.omega_E
+    omega_E = data.omega_E === nothing ? zeros(npsi) : data.omega_E
     profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
-        T_i=data.T_i, omega=omega,
-        omega_e=zeros(npsi), omega_i=zeros(npsi))
+        T_i=data.T_i, omega_E=omega_E)
 
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
@@ -57,9 +46,9 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     chi_perp = _chi_spline(data.chi_e)
     chi_tor = _chi_spline(data.chi_phi)
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
-    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `zimp` and a
+    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
-    # Z_eff = zimp − (n_i/n_e)(zimp − 1).
+    # Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
     _usable(v) = v !== nothing && !all(iszero, v)
     zeff = if _usable(data.zeff)
         minimum(data.zeff) >= 1.0 - 1e-8 ||
@@ -68,13 +57,14 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     elseif !_usable(data.n_i)
         nothing
     else
-        z = [ne > 0 ? control.zimp - (ni / ne) * (control.zimp - 1.0) : control.zimp for (ni, ne) in zip(data.n_i, data.n_e)]
+        z = [ne > 0 ? control.impurity_charge - (ni / ne) * (control.impurity_charge - 1.0) : control.impurity_charge for (ni, ne) in zip(data.n_i, data.n_e)]
         minimum(z) >= 1.0 - 1e-8 ||
             error("run_slayer: kinetic file '$path' has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source)
+    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
+        has_omega_E=data.omega_E !== nothing)
 end
 
 # ---------------------------------------------------------------------
@@ -83,10 +73,6 @@ end
 function _build_inner_model(name::Symbol)
     if name === :slayer_fitzpatrick
         return SLAYERModel(; variant=:fitzpatrick)
-    elseif name === :ggj_shooting
-        return GGJModel(; solver=:shooting)
-    elseif name === :ggj_galerkin
-        return GGJModel(; solver=:galerkin)
     end
     throw(ArgumentError("_build_inner_model: unknown model $name"))
 end
@@ -160,17 +146,63 @@ end
 # ---------------------------------------------------------------------
 # SLAYER: scale = lu^(1/3), tauk from the surface, dc from the χ‖ proxy.
 function _build_surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-    dp_diag)
-    return surface_coupling(model, params, dp_diag; dc=params.dc_tmp)
+    dp_diag, q_shift::Real)
+    return surface_coupling(model, params, dp_diag; dc=params.dc_tmp, q_shift=q_shift)
 end
 
 # GGJ: scale = 1.0 (rescale_delta applied inside solve_inner), tauk = 1.0,
 # dc = 0 (the 4m×4m Pletzer-Dewar residual carries interchange stabilization
-# natively). See the GGJ `surface_coupling` method.
-function _build_surface_coupling(model::GGJModel, params::GGJParameters,
-    dp_diag)
-    return surface_coupling(model, params, dp_diag)
+# natively), and no E×B shift. See the GGJ `surface_coupling` method.
+_build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
+    surface_coupling(model, params, dp_diag)
+
+# "m/n" label keying `control.omega_E_kHz`; GGJ parameters carry no mode numbers.
+_mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
+_mn_label(::InnerLayerParameters) = nothing
+
+# Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
+# rational surface (NaN when there is none), replaced on every surface whose m/n `control.omega_E_kHz` lists.
+function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
+    n = length(params)
+    isempty(omega_E_file) || length(omega_E_file) == n ||
+        throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
+                            "$n rational surfaces were analysed."))
+    Ω_E = isempty(omega_E_file) ? fill(NaN, n) : Float64.(omega_E_file)
+    isempty(control.omega_E_kHz) && return Ω_E
+    labels = [_mn_label(p) for p in params]
+    any(isnothing, labels) &&
+        throw(ArgumentError("run_slayer: omega_E_kHz is keyed by m/n, which $(eltype(params)) surfaces do not carry."))
+    unknown = setdiff(keys(control.omega_E_kHz), labels)
+    isempty(unknown) ||
+        throw(ArgumentError("run_slayer: omega_E_kHz lists m/n $(sort(collect(unknown))) matching no analysed surface; " *
+                            "the analysed surfaces are $(labels)."))
+    for (k, label) in enumerate(labels)
+        haskey(control.omega_E_kHz, label) && (Ω_E[k] = 2π * 1e3 * control.omega_E_kHz[label])
+    end
+    return Ω_E
 end
+
+"""
+    _q_shift(p::SLAYERParameters, Ω_E) -> Float64
+
+Real offset added to a surface's scanned inner-layer `Q` for E×B rotation `Ω_E` per unit n [rad/s].
+The layer's `Q` is the mode frequency in the local E×B frame (Burgess et al. 2026, Table 1), while
+the coupled scan runs in the lab frame, so
+
+```
+Q_layer = τ_k·ω_lab − τ_k·n·Ω_E    ⇒    q_shift = −τ_k·n·Ω_E
+```
+
+The conjugated layer Δ and the opposite-sign diamagnetic inputs (`Q_e = −τ_k·ω_*e`) flip together
+and leave this sign unchanged.
+"""
+function _q_shift(p::SLAYERParameters, Ω_E::Real)
+    iszero(Ω_E) || p.n >= 1 ||
+        throw(ArgumentError("run_slayer: E×B rotation Ω_E=$(Ω_E) rad/s needs the toroidal mode number, but SLAYERParameters has n=$(p.n)"))
+    return -p.tauk * p.n * Ω_E
+end
+# GGJ carries no time normalization (tauk = 1), so a physical rotation has no Q-space image.
+_q_shift(::InnerLayerParameters, ::Real) = 0.0
 
 # ---------------------------------------------------------------------
 # Reference-length conversion of the outer Δ' for the slab layer
@@ -186,7 +218,7 @@ the `S^(1/3)` Δ(Q) scale, both built on r_s).
 
 Near surface `k` the outer solution combines the large and small Frobenius
 solutions with the Mercier exponent `α = √(−D_I)`, `D_I = E + F + H − 1/4`
-(Glasser, Greene & Johnson 1975, Eq. 48; STRIDE's `alpha`). The displacement
+(Glasser, Greene & Johnson 1975, Eqs. 16, 24; STRIDE's `alpha`). The displacement
 scales as `|x|^(−1/2 ± α)` (Glasser, Wang & Park 2016, Eq. 26), so the
 flux-like variable `ψ ∝ x·ξ` of the slab Δ' definition scales as
 `A_L·|x|^(1/2−α) + A_S·|x|^(1/2+α)`. Rescaling the radial variable
@@ -218,21 +250,28 @@ end
 # Core analysis entry point that takes pre-built parameters.
 # ---------------------------------------------------------------------
 """
-    run_slayer_from_inputs(params::Vector{SLAYERParameters},
-                            dp_matrix::AbstractMatrix,
-                            control::SLAYERControl) -> SLAYERResult
+    run_slayer_from_inputs(model::InnerLayerModel, params, dp_matrix, control;
+                           rational_psi, rational_q, omega_E) -> SLAYERResult
 
-Run the SLAYER tearing analysis given pre-built per-surface
-`SLAYERParameters` and the outer-region Δ' matrix. Bypasses the
-equilibrium-driven `build_slayer_inputs` step — use this when the
-parameters are already known (e.g. in unit tests or when rebuilding
-from cached HDF5 output).
+Run the tearing analysis scan core given the inner-layer dispatch `model`, the pre-built
+per-surface parameters, and the outer-region Δ' matrix. Bypasses the orchestration of the
+`TearingProblem` solve — use this when the parameters are already known (e.g. in unit
+tests or when rebuilding from cached HDF5 output). The model is a typed object end to
+end; nothing below this point reads `control.inner_model`. `omega_E` is the E×B angular
+frequency per unit n at each surface [rad/s], replaced on any surface whose m/n
+`control.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
+shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer Q; in
+both modes the resolved value is reported as `result.omega_E`. Roots are reported in the lab frame
+in both modes: an uncoupled layer is solved in its own E×B frame and its root is then moved by
+τ_k·n·Ω_E (Ω_E = 0 where it is unknown), so `γ` is the same and ω carries n·Ω_E.
 """
-function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
+function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
+    params::AbstractVector{<:InnerLayerParameters},
     dp_matrix::AbstractMatrix,
     control::SLAYERControl;
     rational_psi::Vector{Float64}=Float64[],
-    rational_q::Vector{Float64}=Float64[])
+    rational_q::Vector{Float64}=Float64[],
+    omega_E::Vector{Float64}=Float64[])
     validate(control)
     control.enabled || return empty_slayer_result(control)
     isempty(params) && return empty_slayer_result(control)
@@ -243,18 +282,16 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
                             "≠ ($n, $n)"))
     dp = Matrix{ComplexF64}(dp_matrix)
 
-    model = _build_inner_model(control.inner_model)
-
     # Guard: the inner-layer model and the parameter eltype must match, or
     # `_build_surface_coupling` throws an opaque MethodError downstream.
     expected_P = _is_ggj(model) ? GGJParameters : SLAYERParameters
     all(p -> p isa expected_P, params) ||
         throw(
             ArgumentError(
-                "run_slayer: inner_model=$(control.inner_model) requires " *
+                "run_slayer: a $(typeof(model)) inner model requires " *
                 "$(expected_P) per-surface parameters, but got eltype " *
                 "$(eltype(params)). Build inputs with the matching builder " *
-                "(build_slayer_inputs for SLAYER, build_ggj_inputs for GGJ).")
+                "(build_slayer_inputs for SLAYER, ggj_parameters for GGJ).")
         )
 
     # Slab-layer path: convert Δ' from its ψ_N reference length to the
@@ -293,8 +330,28 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         )
     end
 
-    # Per-surface SurfaceCoupling objects
-    scs = [_build_surface_coupling(model, params[k], dp[k, k]) for k in 1:n]
+    # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
+    # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
+    coupled = control.coupling_mode === :coupled
+    Ω_E = _omega_E_per_surface(control, params, omega_E)
+    # A surface with no known rotation applies no shift.
+    Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
+    coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
+            "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
+    q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
+    scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
+    # Coupled Q is scanned in the reference surface's normalization.
+    ref_idx = 1
+    # In the scanned Q, surface k's layer response moves by τ_ref·n·Ω_E,k. Heuristic check only:
+    # the root also carries the diamagnetic Re(Q), so a window can pass and still miss it.
+    if any(!iszero, q_shifts)
+        m_use = min(control.msing_max, n)
+        doppler = [-q_shifts[k] * scs[ref_idx].tauk / scs[k].tauk for k in 1:m_use]
+        lo, hi = control.Q_re_range
+        any(d -> !(lo <= d <= hi), doppler) && @warn(
+            "SLAYER: E×B Doppler offsets Re(Q)=$(round.(doppler; digits=3)) fall outside " *
+            "Q_re_range=$(control.Q_re_range); widen it or the coupled root may be missed.")
+    end
 
     # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
     # Independent of the dispersion scan / coupling mode — a pure diagnostic.
@@ -347,8 +404,10 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
                 "$(_surface_label(params[k])); reported γ=0 is a " *
                 "placeholder, not a physical result — check scan grid / " *
                 "pole_threshold.")
-            push!(Q_root, gr.Q_root)
-            push!(omega_Hz, gr.omega_Hz)
+            # The layer is solved in its own E×B frame; report the root in the lab frame, Q_lab = Q + τ_k·n·Ω_E.
+            q_lab = -_q_shift(params[k], Ω_shift[k])
+            push!(Q_root, gr.Q_root + q_lab)
+            push!(omega_Hz, :no_root in gr.warning_flags ? gr.omega_Hz : gr.omega_Hz + q_lab / params[k].tauk)
             push!(gamma_Hz, gr.gamma_Hz)
             push!(per_surface_extraction, gr)
             control.store_scan && push!(scan_data_list, scan)
@@ -356,16 +415,15 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
 
     elseif control.coupling_mode === :coupled
         m_use = min(control.msing_max, n)
-        mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use)
+        mc = multi_surface_coupling(scs, dp; ref_idx=ref_idx, msing_max=m_use)
         scan = _run_scan(mc, control)
         pthr = _pole_threshold_for(scan)
-        ref_tauk = scs[1].tauk
+        ref_tauk = scs[ref_idx].tauk
         # Coupled path: no root polishing / validity gate. The m×m coupled
         # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
         # above zero), so |det|-based polishing is a no-op and the residual-scale
-        # gate is unreliable. A σ_min-based coupled refinement is a dev follow-up;
-        # for now the coupled determinant uses the raw contour extraction (the
-        # BLAS pin in the scan still makes it thread-deterministic).
+        # gate is unreliable. The coupled root is therefore the raw contour
+        # intersection and carries the triangulation's interpolation error.
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
             filter_above_poles=control.filter_above_poles,
@@ -382,10 +440,53 @@ function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
         control.store_scan && push!(scan_data_list, scan)
     end
 
-    return SLAYERResult(true, control, params, rational_psi, rational_q, dp,
+    return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, scan_data_list, empty_critical_resonant_field_result())
+        layer_widths, Ω_E, q_shifts, scan_data_list,
+        run_critical_resonant_field(model, params, Ω_E, real.(diag(dp)), control.critical_resonant_field))
+end
+
+# ---------------------------------------------------------------------
+# Critical resonant field (torque balance)
+# ---------------------------------------------------------------------
+"""
+    run_critical_resonant_field(model, params, omega_E, dp_diag, ctrl) -> CriticalResonantFieldResult
+
+Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
+surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
+Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
+E×B frequency of the m/n mode, Q0 = τ_k·n·Ω_E, with `omega_E` the resolved Ω_E per unit n at
+each surface [rad/s]. The outer stability is α = S^(-1/3)·(Δ_crit − r_s Δ'), with `dp_diag` the
+r_s-referenced Δ' diagonal and Δ_crit the layer's critical-Δ offset, as in the dispersion relation.
+A surface whose Ω_E is unknown (NaN), or that is tearing-unstable (α ≤ 0), is skipped with a
+warning; if no surface has a known Ω_E, the analysis cannot run and this throws.
+"""
+function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::AbstractVector{<:InnerLayerParameters},
+    omega_E::AbstractVector{<:Real}, dp_diag::AbstractVector{<:Real}, ctrl::CriticalResonantFieldControl)
+    ctrl.enabled || return empty_critical_resonant_field_result()
+    model isa SLAYERModel{:fitzpatrick} && eltype(params) <: SLAYERParameters ||
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the SLAYER " *
+                            "fitzpatrick model and SLAYER parameters; got $(typeof(model))."))
+    nsurf = length(params)
+    length(dp_diag) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: dp_diag has $(length(dp_diag)) entries for $nsurf surfaces."))
+    length(omega_E) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: omega_E has $(length(omega_E)) entries for $nsurf surfaces."))
+    nsurf > 0 && all(isnan, omega_E) &&
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the E×B rotation, but the " *
+                            "kinetic file has no omega_E and no [SLAYER] omega_E_kHz entry covers the surfaces."))
+    Q_peak, br_crit = fill(NaN, nsurf), fill(NaN, nsurf)
+    # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
+    Q0 = Float64[p.tauk * p.n * Ω for (p, Ω) in zip(params, omega_E)]
+    scan = CriticalResonantFieldScan[]
+    for (k, p) in enumerate(params)
+        alpha = (p.dc_tmp - dp_diag[k]) / p.lu^(1 / 3)
+        tb = TorqueBalance(model, p, Q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2, alpha)
+        Qs, bal, Q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
+        ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Float64, Qs), bal, Δs))
+    end
+    return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, Q0, scan)
 end
 
 # ---------------------------------------------------------------------
@@ -398,7 +499,7 @@ end
 Evaluate both parity channels of the GGJ inner-layer matching data at the
 complex normalized growth rate `Q` for each rational surface. Returns a
 vector of `(ising, tearing, interchange)` named tuples, where `tearing`
-(GWP Δ_+) is the reconnecting channel and `interchange` (GWP Δ_−) the
+(GWP Δ₋, odd) is the reconnecting channel and `interchange` (GWP Δ₊, even) the
 non-reconnecting Glasser-stabilization channel (see `InnerLayerResponse`).
 
 This is the supported GGJ diagnostic: both parity Δ's are physical and
@@ -416,155 +517,4 @@ function ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
         out[k] = (ising=p.ising, tearing=r.tearing, interchange=r.interchange)
     end
     return out
-end
-
-# ---------------------------------------------------------------------
-# Critical resonant field (torque balance)
-# ---------------------------------------------------------------------
-"""
-    run_critical_resonant_field(params, rational_psi, profiles, ctrl) -> CriticalResonantFieldResult
-
-Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
-surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
-Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
-E×B frequency of the m/n mode, Q0 = τ_k·n·ω_E, with ω_E read from `profiles` at
-`rational_psi`.
-"""
-function run_critical_resonant_field(params::AbstractVector{SLAYERParameters}, rational_psi::AbstractVector{<:Real},
-    profiles::KineticProfiles, ctrl::CriticalResonantFieldControl)
-    ctrl.enabled || return empty_critical_resonant_field_result()
-    model = SLAYERModel{:fitzpatrick}()
-    nsurf = length(params)
-    q_peak, br_crit, q0 = fill(NaN, nsurf), fill(NaN, nsurf), zeros(nsurf)
-    scan = CriticalResonantFieldScan[]
-    for (k, p) in enumerate(params)
-        # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
-        q0[k] = p.tauk * p.n * profiles(rational_psi[k]).omega
-        tb = TorqueBalance(model, p, q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2)
-        Qs, bal, q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
-        ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Qs), bal, Δs))
-    end
-    return CriticalResonantFieldResult(true, Int[p.ising for p in params], q_peak, br_crit, q0,
-        Float64[p.P_tor for p in params], scan)
-end
-
-# ---------------------------------------------------------------------
-# Full pipeline: equilibrium + ForceFreeStates → parameters → analysis
-# ---------------------------------------------------------------------
-"""
-    run_slayer(result, control; dir_path="./") -> SLAYERResult
-
-Orchestrate the full SLAYER analysis against a `ForceFreeStates.ForceFreeStatesResult`,
-reading its equilibrium, singular surfaces and Δ' matrix. Kinetic profiles are
-read from `control.profile_file` (relative to `dir_path`) through the shared
-`Equilibrium.read_kinetic_file` reader; when the file carries `chi_e`/`chi_phi`
-profiles they set χ⊥(ψ)/χ_φ(ψ), otherwise the scalar `control.chi_perp`/
-`chi_tor` fallbacks are used.
-
-The toroidal field comes from `control.bt`; leaving it unset (the default) makes
-`build_slayer_inputs` evaluate the physical `B_T = F(ψ)/(2π·R₀)` per surface.
-
-Returns an `enabled=false` `SLAYERResult` when `control.enabled` is
-false.
-"""
-function run_slayer(result, control::SLAYERControl; dir_path::AbstractString="./")
-    dpm = result.delta_prime === nothing ? Matrix{ComplexF64}(undef, 0, 0) : result.delta_prime.matrix
-    return run_slayer(result.equil, result.surfaces, dpm, control; dir_path=dir_path)
-end
-
-"""
-    run_slayer(equil, surfaces, delta_prime_matrix, control; dir_path="./") -> SLAYERResult
-
-Loose-argument form of [`run_slayer`](@ref), taking the equilibrium, the singular-surface
-vector and the outer-region Δ' matrix directly. Per-surface parameters are built via
-`build_slayer_inputs`; an empty or wrong-sized `delta_prime_matrix` falls back to a diagonal
-built from the `sing.delta_prime` stubs.
-"""
-function run_slayer(equil, surfaces::AbstractVector, delta_prime_matrix::AbstractMatrix,
-    control::SLAYERControl; dir_path::AbstractString="./")
-    validate(control)
-    control.enabled || return empty_slayer_result(control)
-    isempty(surfaces) && return empty_slayer_result(control)
-
-    loaded = _load_profiles(control, dir_path)
-    profiles = loaded.profiles
-    # Z_eff(ψ) from the kinetic file when it carries n_i, else the scalar fallback.
-    zeff = loaded.zeff === nothing ? control.zeff : loaded.zeff
-    if loaded.zeff_source === :scalar
-        @warn "SLAYER: kinetic file has no usable zeff or n_i profile (dataset absent or all-zero); " *
-              "using the scalar control.zeff = $(control.zeff) at every surface."
-    else
-        zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with zimp = $(control.zimp)"
-        @info "SLAYER: Z_eff(ψ) from the kinetic file's $zeff_origin"
-    end
-
-    if control.inner_model in (:ggj_shooting, :ggj_galerkin)
-        # GGJ γ-extraction is future work; `run_slayer_from_inputs` emits the
-        # warning once the model is built (so direct callers see it too).
-        params = build_ggj_inputs(equil, surfaces, profiles;
-            mu_i=control.mu_i,
-            zeff=zeff,
-            resistivity_model=_build_resistivity_model(control.resistivity_model),
-            lnLambda_form=control.lnLambda_form)
-    else
-        # `equil.config.b0exp` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
-        # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
-        # control value through instead: `nothing` makes build_slayer_inputs compute the
-        # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
-        # what its docstring already prescribes.
-        bt = control.bt
-        # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
-        chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
-        chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
-        (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
-            "SLAYER: kinetic file has no usable chi_e/chi_phi profile(s) " *
-            "(dataset absent or all-zero); using the scalar " *
-            "control.chi_perp/chi_tor fallback for the missing one(s).")
-        params = build_slayer_inputs(equil, surfaces, profiles;
-            bt=bt,
-            mu_i=control.mu_i,
-            zeff=zeff,
-            chi_perp=chi_perp,
-            chi_tor=chi_tor,
-            dr_val=control.dr_val,
-            dgeo_val=control.dgeo_val,
-            dc_type=control.dc_type,
-            theta=control.theta_sample,
-            resistivity_model=_build_resistivity_model(control.resistivity_model),
-            lnLambda_form=control.lnLambda_form)
-    end
-
-    # Δ' matrix: prefer the full parallel-FM matrix; fall back to a
-    # diagonal built from each SingType's scalar delta_prime.
-    dp = if !isempty(delta_prime_matrix) &&
-       size(delta_prime_matrix) == (length(params), length(params))
-        Matrix{ComplexF64}(delta_prime_matrix)
-    else
-        # The full Δ' matrix is unavailable (e.g. the parallel-FM stage that
-        # populates it was not run). The scalar-diagonal fallback uses
-        # `sing.delta_prime`, which is a coarse per-surface stub; surfaces
-        # with no entry default to Δ'=0, giving γ computed from zero drive.
-        n_missing = count(s -> isempty(s.delta_prime), surfaces)
-        @warn(
-            "SLAYER: delta_prime_matrix is empty or wrong-sized " *
-            "($(size(delta_prime_matrix)) vs " *
-            "($(length(params)),$(length(params)))); falling back to the " *
-            "diagonal `sing.delta_prime` stub. Growth rates use a coarse " *
-            "per-surface Δ' and may be unreliable" *
-            (n_missing > 0 ? "; $n_missing surface(s) have NO Δ' entry and " *
-                             "default to Δ'=0 (zero tearing drive)." : ".")
-        )
-        M = zeros(ComplexF64, length(params), length(params))
-        for (k, s) in enumerate(surfaces)
-            M[k, k] = isempty(s.delta_prime) ? 0.0 + 0im : s.delta_prime[1]
-        end
-        M
-    end
-
-    rational_psi = Float64[surfaces[p.ising].psifac for p in params]
-    rational_q = Float64[surfaces[p.ising].q for p in params]
-    result = run_slayer_from_inputs(params, dp, control; rational_psi=rational_psi, rational_q=rational_q)
-    control.critical_resonant_field.enabled || return result
-    crf = run_critical_resonant_field(params, rational_psi, profiles, control.critical_resonant_field)
-    return SLAYERResult((f === :critical_resonant_field ? crf : getfield(result, f) for f in fieldnames(SLAYERResult))...)
 end

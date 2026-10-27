@@ -64,7 +64,7 @@ Defaults to the **outermost computed surface** `equil.rzphi_xs[end]` (i.e. `psih
 square root: `rfac = SQRT(crzphi_f(1))` (`coil/field.F:170`, where `crzphi_f(1)` is
 `rzphi_rsquared` and `crzphi_f(2)` is `rzphi_offset`); `coil/field.F:133` calls that mesh the
 "control surface mesh". `psilim = psihigh` (`dcon/sing.f:170`) and is only ever moved *inward*
-by `sas_flag`/`qhigh`/`psiedge` truncation. Since `psihigh` is the last knot of the radial
+by `sas_flag`/`qhigh`/`dW_edge_scan_start` truncation. Since `psihigh` is the last knot of the radial
 grid these splines are built on (`equil/inverse.f:142`), Fortran evaluates exactly ON the last
 knot and never extrapolates. The docs state it directly: the external field is specified "on
 the surface of the GPEC plasma boundary defined by the psihigh variable in equil.in"
@@ -85,7 +85,7 @@ auto grid was refined.
 
 NOTE ON THE DEFAULT: the physically correct control surface is `psilim`, the *integration*
 limit, not `psihigh`, the *equilibrium spline* limit. They are equal unless
-`dmlim`/`qhigh`/`psiedge` truncation fires, in which case `psilim < psihigh`. PPPL shipped a fix
+`rational_offset_fraction`/`qhigh`/`dW_edge_scan_start` truncation fires, in which case `psilim < psihigh`. PPPL shipped a fix
 for exactly this confusion (`docs/releases.rst:281`: "Fixes inappropriate uses of psihigh, which
 may not be the end of integration psilim if sas_flag, qhigh, or peak_flag are used").
 
@@ -401,100 +401,95 @@ function compute_coil_forcing_modes!(
 end
 
 """
-    convert_forcing_normalization!(modes, from_tag, equil, n, m_low, m_high; psi, mtheta, nzeta)
+    convert_forcing_normalization(modes, from_tag, equil, n, m_out; psi, mtheta) -> Vector{ForcingMode}
 
 Convert `ForcingMode` amplitudes from `from_tag` normalization to the internal
 unit-norm convention (= Fortran `Phi_x`), expected by `compute_plasma_response!`.
 
 If `from_tag == "sfl_flux_Wb"`, the user has provided amplitudes in the 2π-angle
-SFL-flux convention. These are scaled by (2π)² to reach unit-norm.
+SFL-flux convention. These are scaled by (2π)² to reach unit-norm, keeping their harmonics.
 
 If `from_tag == "normal_field_T"`, the amplitudes represent Fourier modes of B·n̂
 in Tesla (2π-angle convention). Conversion to unit-norm Phi_x:
 
-  - Inverse-Fourier reconstruct B·n̂(θ, ζ) from the input modes
-  - Multiply pointwise by 2π × R(θ) × |dr/dθ_norm(θ)|
-  - Re-Fourier transform to get unit-norm mode amplitudes
+  - Inverse-Fourier reconstruct B·n̂(θ) from every harmonic in the file
+  - Multiply pointwise by the area weight J|∇ψ| (`Equilibrium.compute_jac_delpsi`)
+  - Fourier transform onto every harmonic in `m_out`
 
-The 2π factor comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ.
-This conversion is a mode-mixing operation because R and |dr/dθ| vary poloidally.
+This conversion is a mode-mixing operation because J|∇ψ| varies poloidally, so the flux has
+sidebands beyond the file's own harmonics; `m_out` should be the run's full range. Each output
+harmonic is an exact projection of the full product, so a file wider than `m_out` loses nothing.
+The θ grid is widened past `mtheta` when the harmonics would otherwise alias.
+
+The file's spectrum is itself a truncation of the true field, and the missing harmonics would
+mix into `m_out` too. Following the last-coefficient rule of thumb for spectral series (Boyd,
+*Chebyshev and Fourier Spectral Methods*), the first missing harmonic is taken to be comparable to
+the last one kept, so the flux each edge harmonic drives estimates what the truncation loses.
+A warning is issued when that exceeds `truncation_tol` of the total flux. Files with fewer than
+three harmonics have no edge to judge and are not checked.
 
 ## Arguments
 
-  - `modes`: `Vector{ForcingMode}` with amplitudes to convert (modified in place)
+  - `modes`: `Vector{ForcingMode}` of one toroidal mode `n` (not modified)
   - `from_tag`: source normalization — `"normal_field_T"` or `"sfl_flux_Wb"`
   - `equil`: `PlasmaEquilibrium` providing boundary geometry
   - `n`: toroidal mode number
-  - `m_low`, `m_high`: poloidal mode range (must cover all modes in `modes`)
-  - `psi`: flux surface for boundary geometry (default 1.0)
-  - `mtheta`, `nzeta`: grid resolution for the conversion (defaults: 256, 64)
+  - `m_out`: poloidal harmonics of the converted flux
+  - `psi`: flux surface for boundary geometry (default `equil.rzphi_xs[end]`)
+  - `mtheta`: minimum θ grid resolution for the conversion (default 256)
+  - `truncation_tol`: relative flux change from one edge harmonic that triggers the warning
 """
-function convert_forcing_normalization!(
+function convert_forcing_normalization(
     modes::Vector{ForcingMode},
     from_tag::String,
     equil::Equilibrium.PlasmaEquilibrium,
     n::Int,
-    m_low::Int,
-    m_high::Int;
+    m_out::UnitRange{Int};
     psi::Float64=equil.rzphi_xs[end],   # outermost computed surface (psihigh), not ψ_N=1 — see sample_boundary_grid
     mtheta::Int=256,
-    nzeta::Int=64
+    truncation_tol::Float64=0.1
 )
     if from_tag == "sfl_flux_Wb"
         # User provided 2π-angle SFL flux; scale by (2π)² to reach unit-norm (= Phi_x)
-        for mode in modes
-            mode.amplitude *= (2π)^2
-        end
-        return
+        return [ForcingMode(; n=mode.n, m=mode.m, amplitude=(2π)^2 * mode.amplitude) for mode in modes]
     end
 
     if from_tag != "normal_field_T"
         error("Unknown forcing normalization: \"$from_tag\". Supported: \"normal_field_T\", \"sfl_flux_Wb\".")
     end
 
-    mpert = m_high - m_low + 1
-    grid = sample_boundary_grid(equil, mtheta, nzeta; psi=psi)
-
-    # Reconstruct real-space B·n̂(θ, ζ) from input Fourier modes
-    basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
-
-    # Build amplitude vector ordered m_low:m_high
-    amp = zeros(ComplexF64, mpert)
+    m_in = minimum(mode.m for mode in modes):maximum(mode.m for mode in modes)
+    amp = zeros(ComplexF64, length(m_in))
     for mode in modes
-        idx = mode.m - m_low + 1
-        1 <= idx <= mpert || continue
-        amp[idx] = mode.amplitude
+        amp[mode.m-first(m_in)+1] = mode.amplitude
     end
+    @info "Converting forcing file B·n̂ (normal_field_T) to flux: n=$n, file m=$m_in → run m=$m_out"
 
-    # Inverse DFT: reconstruct B·n̂(θ, ζ) at grid points
-    bn_hat = real.(adjoint(basis) * amp)  # length mtheta*nzeta
-    bn_field = reshape(bn_hat, mtheta, nzeta)
+    # Keep the product's harmonics, up to |m_in| + |m_out|, well inside the grid's Nyquist limit.
+    mtheta = max(mtheta, 4 * maximum(abs, (first(m_in), last(m_in), first(m_out), last(m_out))))
+    ft_in = FourierTransforms.FourierTransform(mtheta, length(m_in), first(m_in))
+    ft_out = FourierTransforms.FourierTransform(mtheta, length(m_out), first(m_out))
+    weight = Equilibrium.compute_jac_delpsi(equil, psi, mtheta)
+    to_flux(a) = ft_out(weight .* FourierTransforms.inverse(ft_in, a))
+    flux = to_flux(amp)
 
-    # Multiply by 2π × R × |dr/dθ_norm| to convert B·n̂ → unit-norm Phi_x integrand.
-    # The 2π is the toroidal Jacobian (∂r/∂ζ_norm = 2π·R·ê_φ); arc is the unit-norm
-    # arc length |dr/dθ_norm| from sample_boundary_grid.
-    arc = sqrt.(grid.dR_dtheta .^ 2 .+ grid.dZ_dtheta .^ 2)  # |dr/dθ_norm|
-    for j in 1:nzeta
-        for i in 1:mtheta
-            bn_field[i, j] *= 2π * grid.R[i] * arc[i]
+    if length(modes) >= 3 && norm(flux) > 0
+        for idx in (1, length(amp))
+            edge = zeros(ComplexF64, length(amp))
+            edge[idx] = amp[idx]
+            change = norm(to_flux(edge)) / norm(flux)
+            change > truncation_tol &&
+                @warn "Forcing file n=$n may be truncated: its edge harmonic m=$(m_in[idx]) carries " *
+                      "$(round(100change; digits=1))% of the converted flux on m=$m_out, so the harmonics " *
+                      "beyond it are likely not negligible. Extend the file's m range."
         end
     end
 
-    # Re-Fourier transform bn_field → unit-norm (Phi_x) mode amplitudes
-    bn_flat = vec(bn_field)
-    scale = 2.0 / (mtheta * nzeta)
-    bmn = scale .* (basis * bn_flat)
-
-    # Write back into modes vector (in place, same ordering)
-    for mode in modes
-        idx = mode.m - m_low + 1
-        1 <= idx <= mpert || continue
-        mode.amplitude = bmn[idx]
-    end
+    return [ForcingMode(; n=n, m=m, amplitude=flux[i]) for (i, m) in enumerate(m_out)]
 end
 
 export BoundaryGrid, sample_boundary_grid
 export project_normal_flux!, fourier_decompose_bn
 export CoilForcingGrid, coil_forcing_modes
 export compute_coil_forcing_modes!
-export convert_forcing_normalization!
+export convert_forcing_normalization

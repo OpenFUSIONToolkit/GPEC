@@ -71,7 +71,7 @@
         te = te_of(P)
         ne = ne_of(P)
         p = slayer_parameters(; n_e=ne, t_e=te, t_i=te,
-            omega=0.0, omega_e=1.0e4, omega_i=5.0e3,
+            omega_e=1.0e4, omega_i=5.0e3,
             qval=q_of(r), sval_r=s_of(r), bt=B0,
             rs=r * A_MIN, R0=R0, mu_i=MNUM, zeff=ZEFF,
             chi_perp=CHI, chi_tor=CHI, m=1, n=n,
@@ -151,12 +151,12 @@ end
 
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-    equil = Equilibrium.setup_equilibrium(
+    equil = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path),
         Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     _fresh() = (i = ForceFreeStatesInternal(); i.nlow = 1; i.nhigh = 1; i)
-    ctrl = ForceFreeStatesControl(; set_psilim_via_dmlim=false, qhigh=1e3)
+    ctrl = ForceFreeStatesControl(; truncate_at_rational_offset=false, qhigh=1e3)
 
     # Baseline: no cap.
     base = _fresh()
@@ -182,14 +182,14 @@ end
     @test none.qlim == base.qlim
     @test none.psilim == base.psilim
 
-    # With dmlim on, the (last rational + dmlim)/n offset must never step past qhigh or the cap.
-    ctrl_dm = ForceFreeStatesControl(; set_psilim_via_dmlim=true, dmlim=0.2, qhigh=1e3)
+    # With rational_offset_fraction on, the (last rational + rational_offset_fraction)/n offset must never step past qhigh or the cap.
+    ctrl_dm = ForceFreeStatesControl(; truncate_at_rational_offset=true, rational_offset_fraction=0.2, qhigh=1e3)
     dm_base = _fresh()
     sing_lim!(dm_base, ctrl_dm, equil)
     N = floor(Int, equil.params.qmax - 0.15)
     @test N >= 2
     for qh in (Float64(N), N + 0.1)
-        c = ForceFreeStatesControl(; set_psilim_via_dmlim=true, dmlim=0.2, qhigh=qh)
+        c = ForceFreeStatesControl(; truncate_at_rational_offset=true, rational_offset_fraction=0.2, qhigh=qh)
         i = _fresh()
         sing_lim!(i, c, equil)
         @test i.qlim ≈ N - 1 + 0.2
@@ -231,15 +231,23 @@ end
     slayer_section = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))["SLAYER"]
     slayer_inputs(over) = Dict{String,Any}("SLAYER" => merge(slayer_section, over))
     overlap_inputs(over; dir=trunc_dir) = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(slayer_inputs(over), dir)
-    oi = overlap_inputs(Dict("mu_i" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
+    oi = overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
     @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
+
+    # A disabled section feeds the scan whatever its inner model, and a missing or empty file only skips the scan;
+    # with tearing enabled the same file is an error, raised here rather than after every other stage.
+    @test overlap_inputs(Dict("inner_model" => "ggj_ray")) !== nothing
+    @test (@test_logs (:warn, r"Layer-overlap scan skipped") match_mode = :any overlap_inputs(Dict("profile_file" => "missing.h5"))) === nothing
+    @test (@test_logs overlap_inputs(Dict("profile_file" => ""))) === nothing
+    @test_throws ErrorException overlap_inputs(Dict("enabled" => true, "profile_file" => "missing.h5"))
+    @test_throws ErrorException overlap_inputs(Dict("enabled" => true, "profile_file" => ""))
 
     # Z_eff(psi) comes from the kinetic file's own n_i/n_e with the [SLAYER] impurity charge.
     kin_path = joinpath(trunc_dir, slayer_section["profile_file"])
     kin = Equilibrium.read_kinetic_file(kin_path)
     j = length(kin.psi) ÷ 2
     @test oi.zeff(kin.psi[j]) ≈ 6.0 - kin.n_i[j] / kin.n_e[j] * 5.0
-    @test overlap_inputs(Dict("zimp" => 10.0)).zeff(kin.psi[j]) ≈ 10.0 - kin.n_i[j] / kin.n_e[j] * 9.0
+    @test overlap_inputs(Dict("impurity_charge" => 10.0)).zeff(kin.psi[j]) ≈ 10.0 - kin.n_i[j] / kin.n_e[j] * 9.0
     @test 1.0 < oi.zeff(kin.psi[j]) < 6.0
     # A zeff profile supplied in the file overrides the n_i/n_e closure; a file with neither falls
     # back to the scalar [SLAYER] zeff.
@@ -248,7 +256,7 @@ end
         base = (; psi=kin.psi, n_e=kin.n_e, T_i=kin.T_i, T_e=kin.T_e, omega_E=kin.omega_E, chi_e=kin.chi_e, chi_phi=kin.chi_phi)
         Equilibrium.write_kinetic_h5(joinpath(tmp, "own_zeff.h5"), Equilibrium.KineticProfileData(; base..., n_i=kin.n_i, zeff=own))
         @test Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5")).zeff == own
-        @test overlap_inputs(Dict("profile_file" => "own_zeff.h5", "zimp" => 10.0, "zeff" => 2.5); dir=tmp).zeff(kin.psi[j]) ≈ 3.2
+        @test overlap_inputs(Dict("profile_file" => "own_zeff.h5", "impurity_charge" => 10.0, "zeff" => 2.5); dir=tmp).zeff(kin.psi[j]) ≈ 3.2
         Equilibrium.write_kinetic_h5(joinpath(tmp, "no_ni.h5"), Equilibrium.KineticProfileData(; base...))
         @test overlap_inputs(Dict("profile_file" => "no_ni.h5", "zeff" => 2.5); dir=tmp).zeff == 2.5
     end
@@ -256,13 +264,13 @@ end
     widths(over) = GeneralizedPerturbedEquilibrium._layer_overlap_scan(overlap_inputs(over), _fresh(), equil).width_dr
     w_ref = widths(Dict{String,Any}())
     @test !isempty(w_ref) && all(isfinite, w_ref)
-    for over in (Dict("zimp" => 10.0), Dict("resistivity_model" => "spitzer"), Dict("lnLambda_form" => "sauter"))
+    for over in (Dict("impurity_charge" => 10.0), Dict("resistivity_model" => "spitzer"), Dict("lnLambda_form" => "sauter"))
         @test all(.!isapprox.(widths(over), w_ref; rtol=1e-3))
     end
     # Ion mass and field strength cancel between the Lundquist number and the ion sound radius in
     # Eq. (100), so the criterion width does not depend on them; the scalar zeff is only a
     # fallback, so it is inert while the file carries n_i.
-    for over in (Dict("mu_i" => 1.0), Dict("bt" => 1.0), Dict("zeff" => 3.0))
+    for over in (Dict("ion_mass" => 1.0), Dict("bt" => 1.0), Dict("zeff" => 3.0))
         @test all(isapprox.(widths(over), w_ref; rtol=1e-10))
     end
 
@@ -274,7 +282,7 @@ end
         psi_grid = collect(range(0.0, 1.0; length=npsi))
         profs = Utilities.KineticProfiles(; psi=psi_grid,
             n_e=fill(1.0e19, npsi), T_e=fill(500.0, npsi), T_i=fill(500.0, npsi),
-            omega=zeros(npsi), omega_e=zeros(npsi), omega_i=zeros(npsi))
+            omega_E=zeros(npsi))
         scan = Tearing.resistive_layer_overlap(equil, profs; n_tor=1, m_max=0, extrapolate=false)
         @test scan isa Tearing.LayerOverlapScan
         @test isempty(scan.psi)
@@ -305,7 +313,7 @@ end
 
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
     trunc_inputs = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
-    diiid(psihigh) = Equilibrium.setup_equilibrium(
+    diiid(psihigh) = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh)), trunc_dir), nothing)
     long, short = diiid(0.9999), diiid(0.995)
 
@@ -345,7 +353,7 @@ end
     # No 2D flux, no X-point: an analytic equilibrium is not extrapolated.
     sol_dir = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     sol_inputs = TOML.parsefile(joinpath(sol_dir, "gpec.toml"))
-    solovev = Equilibrium.setup_equilibrium(
+    solovev = Equilibrium.PlasmaEquilibrium(
         Equilibrium.EquilibriumConfig(sol_inputs["Equilibrium"], sol_dir), Equilibrium.SolovevConfig(sol_inputs["SOL_INPUT"]))
     @test separatrix_q_law(solovev) === nothing
 end
