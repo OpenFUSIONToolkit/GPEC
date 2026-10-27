@@ -130,6 +130,14 @@ end
             end
         end
 
+        @testset "the LocalStability section replays" begin
+            mktempdir() do out_dir
+                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
+                @test haskey(inputs, "LocalStability")
+                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
+            end
+        end
+
         @testset "rerun refuses to overwrite its own source" begin
             # Default output is `<basename>_rerun.h5`, so clobbering only happens if the user
             # routes the rerun back onto the source file; exercise that guard.
@@ -325,7 +333,7 @@ end
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
 
-# Drift guard for the analytic-equilibrium registry: setup_equilibrium and the rerun builder both
+# Drift guard for the analytic-equilibrium registry: `run_input` and the rerun builder both
 # dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
 # empty section) would silently break one path. Asserting each entry is well-formed and that
 # build_analytic_config resolves it keeps adding a new analytic kind a one-row change.

@@ -12,6 +12,7 @@ and find the growth rate at which the inner layer matches it. Solve with
 `profile_file`. Without a full Δ′ matrix the per-surface Δ′ stubs are used, with a warning.
 
 ## Fields
+
   - `ffs` - The finished solve; duck-typed on `equil`, `surfaces`, `delta_prime`, `dir_path`, so tests can use stand-ins.
   - `control::SLAYERControl` - The tearing knobs.
 """
@@ -113,7 +114,7 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
     # E×B rotation per unit n at each surface, for the Doppler shifts and the lab-frame roots;
     # empty when the kinetic file carries none.
     omega_E = loaded.has_omega_E ? Float64[loaded.profiles.omega_E(ψ) for ψ in rational_psi] : Float64[]
-    loaded.has_omega_E || @warn "SLAYER: the kinetic file has no omega_E, so the roots assume Ω_E = 0 and their lab-frame ω equals the E×B-frame ω."
+    loaded.has_omega_E || @warn "SLAYER: the kinetic file has no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
     return run_slayer_from_inputs(model, params, dp, control;
         rational_psi=rational_psi, rational_q=rational_q, omega_E=omega_E)
 end

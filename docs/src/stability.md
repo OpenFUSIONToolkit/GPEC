@@ -156,8 +156,11 @@ integrator = "galerkin"
 
 ## Local stability: Mercier and ballooning (s–α)
 
-Setting `local_stability_flag = true` in `[ForceFreeStates]` runs a local high-``n``
-stability scan over every flux surface, in addition to the global ideal analysis above.
+A `[LocalStability]` section in the deck runs a local high-``n`` stability scan over every
+flux surface, as its own stage before the global ideal analysis above. The section's keys are
+the [`Ballooning`](@ref) keywords (the ballooning angle, ODE tolerance and the α-boundary scan
+knobs), and a script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning())`
+(see the [scripting API](api.md)).
 For the derivation and implementation details behind these diagnostics, see
 [Ballooning and Mercier Local Stability](ballooning.md).
 Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile
@@ -175,6 +178,10 @@ in normalized poloidal flux ``\psi``:
   stability index, obtained by integrating the ballooning equation along the field line and
   taking the jump in the logarithmic derivative of the solution between the two asymptotic
   ends.
+
+With `alpha_boundary_scan = true` the stage also writes the critical ballooning
+``\alpha`` boundary: `LocalStability/ballooning_psi`, `LocalStability/alpha` and
+`LocalStability/alpha_critical` (see the [scripting API](api.md)).
 
 !!! note "Two different Δ' quantities"
     `LocalStability/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
@@ -379,9 +386,6 @@ numsteps_init     = 200    # initial step budget per chunk
 numunorms_init    = 50     # renorm checkpoint budget
 reltol            = 1e-6   # ODE relative tolerance
 
-# Local stability
-local_stability_flag = false  # scan Mercier D_I, resistive D_R, and ballooning Δ' over ψ
-
 # Output
 verbose              = true
 write_outputs_to_HDF5 = true
@@ -414,7 +418,7 @@ inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
 
 ctrl  = FFS.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
 
 intr  = FFS.ForceFreeStatesInternal(; dir_path=ex)

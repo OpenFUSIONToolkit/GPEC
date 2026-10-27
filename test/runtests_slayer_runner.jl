@@ -112,8 +112,10 @@
 
     @testset "GGJ tearing is rejected until its growth-rate extraction exists" begin
         for name in ("ggj_ray", "ggj_shooting", "ggj_galerkin")
-            @test_throws ArgumentError Runner.validate(SLAYERControl(; inner_model=Symbol(name)))
+            @test_throws ArgumentError Runner.validate(SLAYERControl(; enabled=true, inner_model=Symbol(name)))
             @test_throws ArgumentError Runner.slayer_control_from_toml(Dict{String,Any}("enabled" => true, "inner_model" => name))
+            # A disabled section is never solved, so its inner model is not checked.
+            @test Runner.slayer_control_from_toml(Dict{String,Any}("inner_model" => name)).inner_model === Symbol(name)
         end
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing, dir_path=".")
@@ -192,6 +194,25 @@
         @test r_n2.q_shift ≈ [-1.0e-4 * 2 * 2.0e3]
         @test_throws "rational surfaces were analysed" run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
             SLAYERControl(; coupling_mode=:coupled, grid...); omega_E=[1.0])
+
+        # omega_E_kHz takes precedence over the file on the surfaces it lists; the rest keep the file value.
+        r_ovr = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("2/1" => 1.0), grid...); omega_E=Ω_E)
+        @test r_ovr.omega_E ≈ [2π * 1e3, Ω_E[2]]
+        @test r_ovr.q_shift ≈ [-1.0e-4 * 2π * 1e3, -1.2e-4 * Ω_E[2]]
+        # Without a file profile, surfaces the override does not list stay unknown: NaN and no shift.
+        r_part = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("2/1" => 1.0), grid...))
+        @test r_part.omega_E[1] ≈ 2π * 1e3
+        @test isnan(r_part.omega_E[2])
+        @test r_part.q_shift ≈ [-1.0e-4 * 2π * 1e3, 0.0]
+        # Uncoupled, the override moves only its surface's lab-frame root; an unknown Ω_E moves nothing.
+        r_upart = run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
+            SLAYERControl(; coupling_mode=:uncoupled, omega_E_kHz=Dict("2/1" => 1.0), grid...))
+        @test isequal(r_upart.Q_root, r_unc0.Q_root .+ [1.0e-4 * 2π * 1e3, 0.0])
+        @test r_upart.gamma_Hz == r_unc0.gamma_Hz
+        @test_throws "matching no analysed surface" run_slayer_from_inputs(SLAYERModel(; variant=:fitzpatrick), params, dpm,
+            SLAYERControl(; coupling_mode=:coupled, omega_E_kHz=Dict("5/1" => 1.0), grid...); omega_E=Ω_E)
 
         # A Doppler offset beyond the scan box is flagged rather than silently losing the root:
         # τ_ref·n·Ω_E = 1e-4 · 3e4 = 3 lies outside Re(Q) ∈ [-1, 1].
