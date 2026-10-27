@@ -769,7 +769,7 @@ function cross_ideal_singular_surf!(
     # Compute direction-specific asymptotic power series for this singular surface
     singp = intr.sing[ising]
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
-    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
+    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0)
     dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
 
     # Get asymptotic coefficients before crossing (left side)

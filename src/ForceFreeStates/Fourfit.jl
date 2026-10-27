@@ -22,8 +22,7 @@ the Galerkin solver's variant of the same matrix.
   - `F_spline_lower` - reduced F̄ as its lower-triangular Cholesky factor L, F̄ = L·Lᴴ. The ideal
     Euler-Lagrange kernel only ever solves against F̄, so the factor is stored instead of F̄ itself.
   - `F_spline_prim` - primitive F before the Schur complement (for kinetic).
-  - `F_spline_gal` - reduced Hermitian F̄, un-factored, for the Galerkin solver, which needs F̄
-    directly rather than through a solve.
+  - `F_spline_gal` - independently interpolated reduced Hermitian F̄, retained for coefficient diagnostics.
   - `K_spline`, `G_spline` - reduced K̄ and Ḡ of the Euler-Lagrange system
     d/dψ(F̄·ξ′ + K̄·ξ) = K̄†·ξ′ + Ḡ·ξ (Eqs A5-A7).
   - `J_spline` - Jacobian Fourier band (2·mpert−1 conjugate-symmetric coefficients per surface), used

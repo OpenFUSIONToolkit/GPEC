@@ -565,20 +565,21 @@ function _overlap_slayer_inputs(inputs, dir_path::AbstractString)
     (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
     ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
     isempty(ctrl.profile_file) && !ctrl.enabled && return nothing
-    loaded = try
-        Runner._load_profiles(ctrl, dir_path)
-    catch err
-        ctrl.enabled && rethrow()
-        @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file." exception = err
-        return nothing
-    end
     # chi(psi) and Z_eff(psi) from the file where it carries them, else the control's scalar
     # fallbacks -- the same precedence run_slayer uses. Every other plasma parameter the layer
     # widths depend on is the run's own [SLAYER] setting, so the scan and the SLAYER stage see
     # one plasma.
+    loaded, chi = try
+        l = Runner._load_profiles(ctrl, dir_path)
+        l, Runner._slayer_chi_inputs(l, ctrl; warn=false)
+    catch err
+        ctrl.enabled && rethrow()
+        @warn "Layer-overlap scan skipped: could not read the [SLAYER] profile_file or the diffusivities its P_perp_model needs." exception = err
+        return nothing
+    end
     return (; profiles=loaded.profiles,
-        chi_perp=loaded.chi_perp === nothing ? ctrl.chi_perp : loaded.chi_perp,
-        chi_tor=loaded.chi_tor === nothing ? ctrl.chi_tor : loaded.chi_tor,
+        chi.chi_perp_e, chi.chi_perp_i, chi.chi_tor,
+        tau_E=ctrl.tau_E, P_perp_model=ctrl.P_perp_model,
         zeff=loaded.zeff === nothing ? ctrl.zeff : loaded.zeff,
         bt=ctrl.bt, mu_i=ctrl.ion_mass, theta=ctrl.theta_sample,
         resistivity_model=Runner._build_resistivity_model(ctrl.resistivity_model),
@@ -605,7 +606,8 @@ function _layer_overlap_scan(overlap_inputs, intr::ForceFreeStatesInternal, equi
     # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
     scans = [
         Tearing.resistive_layer_overlap(equil, overlap_inputs.profiles; n_tor=n, rs_method=:flux,
-            chi_perp=overlap_inputs.chi_perp, chi_tor=overlap_inputs.chi_tor,
+            chi_perp_e=overlap_inputs.chi_perp_e, chi_perp_i=overlap_inputs.chi_perp_i, chi_tor=overlap_inputs.chi_tor,
+            tau_E=overlap_inputs.tau_E, P_perp_model=overlap_inputs.P_perp_model,
             bt=overlap_inputs.bt, mu_i=overlap_inputs.mu_i, zeff=overlap_inputs.zeff, theta=overlap_inputs.theta,
             resistivity_model=overlap_inputs.resistivity_model, lnLambda_form=overlap_inputs.lnLambda_form)
         for n in intr.nlow:intr.nhigh
@@ -1324,7 +1326,9 @@ function efc_couplings(
     ψk = kp.xs
     ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
     ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
-    ω_star_n = [(n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk]
+    ω_star_n = [
+        (n=kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
+    ]
     ω_φ = ω_E .+ ω_star_n .+ ω_star_T
     # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
     w = [ψ <= ffs.psilim ? max(kp.ni_spline(ψ), 0.0) * equil.profiles.dVdpsi_spline(clamp(ψ, equil.profiles.xs[1], equil.profiles.xs[end])) : 0.0 for ψ in ψk]
