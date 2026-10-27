@@ -729,7 +729,7 @@ using TOML
         cp(joinpath(data_dir, "EQDSK_COCOS_02"), joinpath(dir, "EQDSK_COCOS_02"))
         config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(dir, "EQDSK_COCOS_02"), eq_type="efit", jac_type="boozer",
-            grid_type="ldp", psilow=0.01, psihigh=0.994)
+            grid_type="core_edge_packed", psilow=0.01, psihigh=0.994)
         eq = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(config)
         eq.params.diagnose_src = true
         GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_gse!(eq)
