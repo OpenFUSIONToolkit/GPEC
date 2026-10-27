@@ -11,7 +11,7 @@ using HDF5
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
-    equil = GPEC.Equilibrium.setup_equilibrium(
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
@@ -31,6 +31,7 @@ using HDF5
         inputs = TOML.parsefile(toml_path)
         merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
+        delete!(inputs, "LocalStability")
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir
@@ -389,7 +390,7 @@ using HDF5
         @testset "analytic equilibrium on the two-pass auto grid" begin
             # A coarse psi_accuracy and no local-stability scan keep the 1024-interval pass-1 grid cheap.
             eq_overrides = Dict{String,Any}("grid_type" => "auto", "mpsi" => 0, "psi_accuracy" => 3e-2)
-            ffs_overrides = Dict{String,Any}("local_stability_flag" => false, "vac_flag" => false)
+            ffs_overrides = Dict{String,Any}("vac_flag" => false)
             mktempdir() do dir
                 reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
                 pass1 = GPEC.Equilibrium.setup_equilibrium(

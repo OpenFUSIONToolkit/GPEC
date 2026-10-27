@@ -49,6 +49,8 @@ else
     include("./runtests_tj_analytic.jl")
     include("./runtests_kinetic_profiles.jl")
     include("./runtests_resist_eval.jl")
+    include("./runtests_localstability.jl")
+    include("./runtests_analysis_plots.jl")
     include("./runtests_slayer_params.jl")
     include("./runtests_slayer_riccati.jl")
     include("./runtests_slayer_inputs.jl")

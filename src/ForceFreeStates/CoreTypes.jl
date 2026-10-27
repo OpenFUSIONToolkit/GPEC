@@ -118,7 +118,6 @@ gpec.toml.
 ## Fields
 
   - `verbose::Bool` - Enable verbose output
-  - `local_stability_flag::Bool` - Enable local stability analysis (`D_I` and ballooning)
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mtheta_vacuum::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzeta_vacuum::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
@@ -153,7 +152,6 @@ gpec.toml.
 """
 @kwdef struct ForceFreeStatesControl
     verbose::Bool = true
-    local_stability_flag::Bool = false
     vac_flag::Bool = false
     mtheta_vacuum::Int = 480
     nzeta_vacuum::Int = 1
