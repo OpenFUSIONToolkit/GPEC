@@ -69,6 +69,7 @@ function _write_critical_resonant_field!(g, crf::CriticalResonantFieldResult)
     cg["rational_index"] = crf.rational_index
     cg["Q_peak"] = crf.Q_peak
     cg["br_crit"] = crf.br_crit
+    cg["br_crit_tesla"] = crf.br_crit_tesla
     cg["Q0"] = crf.Q0
     isempty(crf.scan) && return nothing
     scan = create_group(cg, "Scan")
@@ -165,6 +166,9 @@ const TEARING_H5_ANNOTATIONS = [
     "CriticalResonantField/br_crit" =>
         (; long_name="critical normalized resonant field b_r/B_φ for error-field penetration (Cole-Fitzpatrick 2006 Eq. 62; NaN = no maximum or surface skipped)",
             units="1", dims=("surface",)),
+    "CriticalResonantField/br_crit_tesla" =>
+        (; long_name="critical resonant field br_crit·|B0| with the layer's B0, approximately comparable to SingularCoupling/resonant_area_weighted_field (NaN = no maximum or surface skipped)",
+            units="T", dims=("surface",)),
     "CriticalResonantField/Q0" =>
         (; long_name="normalized natural E×B rotation Q0 = τ_k·n·Ω_E of the m/n mode (NaN where Ω_E is unknown)", units="1", dims=("surface",))
 ]

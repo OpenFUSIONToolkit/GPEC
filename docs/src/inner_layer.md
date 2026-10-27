@@ -245,8 +245,16 @@ and balance is lost above (Cole Eq. 62)
   window instead, which picks that spike. The search assumes Q_i ≤ 0 ≤ Q_e; a surface where
   that fails is skipped with a warning.
 
-Outputs go to `Tearing/CriticalResonantField/` (`br_crit` = b_r/B_φ, `Q_peak`, `Q0`, with P in
+Outputs go to `Tearing/CriticalResonantField/` (`br_crit` = b_r/B_φ, `br_crit_tesla`, `Q_peak`, `Q0`, with P in
 `PerSurface/P_tor`, and with `store_scan` the per-surface `Scan/Surface_<k>/{Q, balance, Delta}`).
+
+`br_crit` is normalized by the toroidal field, as in Cole and Fitzpatrick (2006, Eqs. 61–68) and
+Fitzpatrick, Phys. Plasmas **30**, 092512 (2023), Eq. 120. `br_crit_tesla` = `br_crit`·|B0|, with
+the layer's B0, is for comparison with `SingularCoupling/resonant_area_weighted_field`, the total
+resonant field with the ideal plasma response, which Park et al., Phys. Rev. Lett. **99**, 195003
+(2007) identify as the field that opens islands. The comparison is approximate: the theory's b_r is
+a cylindrical field at the layer, and no reference maps it onto the area-weighted toroidal field.
+`penetrated_area_weighted_field` already includes the layer response and is not the matching quantity.
 
 ### Benchmark against Fortran
 

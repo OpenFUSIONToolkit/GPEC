@@ -133,6 +133,7 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
                 g = f["Tearing/CriticalResonantField"]
                 @test read(g["Q0"]) ≈ r.Q0
                 @test read(g["br_crit"]) ≈ r.br_crit nans = true
+                @test read(g["br_crit_tesla"]) ≈ r.br_crit .* [abs(p.bt) for p in params] nans = true
                 @test !haskey(g, "p_phi")
                 @test haskey(g, "Scan/Surface_2/Delta")
             end

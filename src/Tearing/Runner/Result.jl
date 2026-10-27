@@ -32,6 +32,8 @@ Output of `run_critical_resonant_field`, one entry per SLAYER surface.
   - `rational_index` -- rational-surface index of each entry
   - `Q_peak`         -- normalized frequency Q at the torque-balance maximum (NaN if none or skipped)
   - `br_crit`        -- critical normalized resonant field b_r/B_φ (NaN if none or skipped)
+  - `br_crit_tesla`  -- `br_crit`·|B0| in tesla, with the layer's B0, approximately comparable to the total resonant field
+    `resonant_area_weighted_field` (Park et al., PRL 99, 195003 (2007))
   - `Q0`             -- normalized natural E×B rotation τ_k·n·Ω_E (NaN where Ω_E is unknown)
   - `scan`           -- per-surface Q scans; empty unless `store_scan`
 """
@@ -40,12 +42,13 @@ struct CriticalResonantFieldResult
     rational_index::Vector{Int}
     Q_peak::Vector{Float64}
     br_crit::Vector{Float64}
+    br_crit_tesla::Vector{Float64}
     Q0::Vector{Float64}
     scan::Vector{CriticalResonantFieldScan}
 end
 
 empty_critical_resonant_field_result() =
-    CriticalResonantFieldResult(false, Int[], Float64[], Float64[], Float64[], CriticalResonantFieldScan[])
+    CriticalResonantFieldResult(false, Int[], Float64[], Float64[], Float64[], Float64[], CriticalResonantFieldScan[])
 
 """
     SLAYERResult

@@ -523,7 +523,8 @@ function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::
         Qs, bal, Q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
         ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Float64, Qs), bal, Δs))
     end
-    return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, Q0, scan)
+    br_crit_tesla = br_crit .* Float64[abs(p.bt) for p in params]
+    return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, br_crit_tesla, Q0, scan)
 end
 
 # ---------------------------------------------------------------------
