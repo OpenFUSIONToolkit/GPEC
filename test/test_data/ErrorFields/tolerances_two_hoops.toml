@@ -1,0 +1,42 @@
+# Manufacturing tolerances for the two-hoop Solovev error-field test fixture: one coil with an
+# additive shift+tilt tolerance given in metres, one with the cylinder axis-line model, a
+# coherent group binding both, an uncorrectable coil, and an unattributed budget. Exercises
+# every table of the tolerance schema (see docs/src/error_fields.md).
+
+[ErrorFields.defaults]
+shift_sigma_mm = 0.1             # Gaussian uncertainty added to the sampled shift [mm]
+radial_shape = "flat"            # Radial sampling density on the disk: flat, uniform_area, hollow, or ring
+
+[[ErrorFields.coil]]
+name = "hoop_tilted"             # Coil set name; must match a [[ForcingTerms.coil_set]] of the run
+shift_tol_mm = 0.5               # Radius of the in-plane displacement disk the coil centre may lie in [mm]
+tilt_tol = 0.002                 # Tilt tolerance, in tilt_units
+tilt_sigma = 0.0005              # Gaussian uncertainty added to the sampled tilt, in tilt_units
+tilt_units = "m"                 # "deg", or "m" for a rim displacement converted through the nominal radius
+tolerance_model = "additive"     # "additive" (independent shift and tilt) or "cylinder" (correlated axis line)
+
+[[ErrorFields.coil]]
+name = "hoop_axi"                # Coil set name; must match a [[ForcingTerms.coil_set]] of the run
+shift_tol_mm = 2.0               # Cylinder radius the coil axis line must stay within [mm]
+tilt_tol = 0.019                 # Tilt tolerance, in tilt_units
+radial_shape = "hollow"          # Radial sampling density for each axis endpoint
+tolerance_model = "cylinder"     # Axis line confined to a cylinder; shift and tilt drawn together
+cylinder_half_height_m = 1.5     # Cylinder half-height; sets the tilt reachable at the given radius [m]
+
+[[ErrorFields.coherent_group]]
+name = "both_hoops"              # Label of the coherently moving group
+members = ["hoop_tilted", "hoop_axi"] # Coil sets sharing one random draw per sample
+shift_tol_mm = 1.0               # Coherent shift amplitude shared by the group [mm]
+tilt_tol = 0.01                  # Coherent tilt amplitude shared by the group, in tilt_units
+tilt_units = "deg"               # "deg" or "m"
+phase_group = "support"          # Groups naming the same phase_group share the random direction
+rotation_center_z_m = 0.2        # Height of the pivot of the group's rigid rotation on the machine axis [m]
+
+[ErrorFields.correctability]
+uncorrectable_coils = ["hoop_axi"] # Coil sets the error-field correction cannot reduce
+efc_factor = 2.0                 # Divisor applied to correctable contributions under error-field correction
+
+[ErrorFields.other_field]
+magnitude = 8.2e-6               # Overlap budget of sources not attributed to any coil
+sigma = 1.0e-6                   # Gaussian uncertainty on that budget
+radial_shape = "ring"            # Radial sampling density of the budget magnitude

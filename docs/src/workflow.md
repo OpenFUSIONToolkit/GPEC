@@ -32,6 +32,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 - Equilibrium data file in one of the supported formats:
   - `efit` — EFIT g-file from experimental reconstruction
   - `chease` / `chease2` — CHEASE equilibrium code output
+  - `ifile` — inverse i-file (e.g. TokaMaker `save_ifile`)
   - `lar` — Large aspect ratio analytical model
   - `sol` — Solov'ev analytical equilibrium
 - Kinetic profiles file (planned) — temperature and density profiles for the kinetic analysis path
@@ -112,14 +113,16 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Module**: `PerturbedEquilibrium`
 
-**Purpose**: Compute the self-consistent plasma response to the external perturbation specified in Stage 4. Uses the force-free eigenfunctions and vacuum matrices to project the response into mode space, then evaluates singular coupling diagnostics at each rational surface.
+**Purpose**: Compute the self-consistent plasma response to the external perturbation specified in Stage 4, in two steps:
+- `plasma_response(ffs)` builds the source-independent operators once from the force-free eigenfunctions and vacuum matrices: the permeability, inductance and reluctance matrices on the control surface, and the singular coupling matrices at each rational surface (`PlasmaResponse`).
+- `perturbed_equilibrium(resp, rmp)` applies them to one forcing field: it projects the response into mode space and evaluates the singular coupling diagnostics for that field. One response serves any number of fields.
 
 **Configuration**: `[PerturbedEquilibrium]` section of `gpec.toml`
 
 **Inputs**:
-- ForceFreeStates results from Stage 3 (eigenfunctions, singular surface data)
-- Vacuum response matrices from Stage 2
-- `ForcingMode` array from Stage 4
+- ForceFreeStates results from Stage 3 (eigenfunctions, singular surface data), for `plasma_response`
+- Vacuum response matrices from Stage 2, for `plasma_response`
+- The forcing field from Stage 4, for `perturbed_equilibrium`
 
 **Outputs** (`PerturbedEquilibriumState`):
 - Mode-space normal displacement ξ(m, ψ) across the plasma
@@ -165,6 +168,7 @@ Setting `force_termination = true` in any section stops the pipeline after that 
 Example configuration files are provided in:
 - `examples/Solov'ev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
+- `examples/DIIID-like_error_field_example/gpec.toml` (coil-forced run with the `[ErrorFields]` sensitivity stage)
 
 ---
 
@@ -174,7 +178,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 
 | Group | Contents |
 |---|---|
-| `Info/` | Run metadata: git version, mode-number ranges, ψ limit |
+| `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
 | `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
 | `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |

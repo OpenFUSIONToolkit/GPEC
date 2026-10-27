@@ -93,6 +93,62 @@ end
         @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
     end
 
+    @testset "truncate_integration! drops every trace of the old edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
+            GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+
+        mpert = 2
+        intr = F.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        intr.sing = [F.SingType(; psifac=p, q=q, m=[m], n=[1]) for (p, q, m) in ((0.30, 2.0, 2), (0.60, 3.0, 3), (0.90, 4.0, 4))]
+        intr.msing = 3
+        odet = F.OdeState(mpert, 10, 5, 3)
+        odet.step = 7
+        odet.psi_store[1:7] = [0.10, 0.25, 0.40, 0.55, 0.75, 0.85, 0.95]
+        odet.q_store[1:7] = 1 .+ odet.psi_store[1:7]
+        for i in 1:7
+            odet.u_store[:, :, 1, i] = ComplexF64[i 0; 0 i]
+            odet.u_store[:, :, 2, i] = ComplexF64[i+0.1 0; 0 i+0.1]
+        end
+        # Two fixups; the second lies past the new edge and is a singular-surface crossing with a zeroed column.
+        odet.ifix = 2
+        odet.fixstep[1:2] = [3, 6]
+        odet.sing_flag[1:2] = [false, true]
+        odet.zeroed_idx[1], odet.zeroed_idx[2] = Int[], [1]
+        for ifix in 1:2
+            odet.fixfac[:, :, ifix] = ComplexF64[1 0.5; 0 1]
+            odet.index[:, ifix] = [1, 2]
+        end
+
+        F.truncate_integration!(odet, intr, equil, 5)
+        @test odet.ifix == 1
+        @test intr.psilim == 0.75 && intr.msing == 2 && size(odet.ca_l, 4) == 2 && size(odet.ca_r, 4) == 2
+        @test intr.q1lim ≈ equil.profiles.q_deriv(0.75)
+
+        edge = copy(odet.u_store[:, :, 1, end])
+        F.transform_u!(odet, intr)
+        @test odet.u_store[:, :, 1, end] ≈ edge && rank(odet.u_store[:, :, 1, end]) == mpert  # rank-deficient before the fix
+    end
+
+    @testset "truncate_chunks! cuts the Riccati chunks back to the edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
+        chunks() = [
+            F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0)
+            for (i, (a, b)) in enumerate(((0.10, 0.29), (0.31, 0.59), (0.61, 0.89), (0.91, 0.99)))
+        ]
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.75, 2) == 3  # straddling chunk shortened, so re-integrate it
+        @test length(cs) == 3 && cs[3].psi_end == 0.75 && count(c -> c.needs_crossing, cs) == 2
+
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.89, 2) === nothing  # edge exactly at a chunk end: nothing to re-integrate
+        @test count(c -> c.needs_crossing, cs) == 2  # but its crossing onto the dropped surface is still cleared
+    end
+
     @testset "transform_u!" begin
         # Test transformation of solution vectors
         mpert = 2
@@ -249,11 +305,32 @@ end
         @test abs(odet.u[pivot_idx, 1, 1] - u_before[pivot_idx, 1, 1]) < 1e-10
     end
 
+    @testset "column_abstol" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        u = zeros(ComplexF64, 2, 2, 2)
+        u[:, 1, 1] .= [3.0, -4.0im]   # column 1: U₁ max 4, U₂ max 2
+        u[:, 1, 2] .= [2.0, 0.5]
+        u[:, 2, 2] .= [0.0, 1e-8]     # column 2: U₁ zero (fixed start), U₂ max 1e-8
+        tol = FFS.column_abstol(u, 1e-6)
+        @test size(tol) == size(u)
+        @test all(tol[:, 1, 1] .== 4e-6)
+        @test all(tol[:, 1, 2] .== 2e-6)
+        # A zero block takes its column's other block, so each column is controlled relative to its own scale
+        @test all(tol[:, 2, 1] .≈ 1e-14)
+        @test all(tol[:, 2, 2] .≈ 1e-14)
+        @test FFS.column_abstol!(tol, u, 1e-6) === tol
+        @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
+        # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
+        c = FFS.ForceFreeStatesControl()
+        @test c.renorm_threshold == 1e3
+        @test c.save_interval == 1
+    end
+
     @testset "compute_solution_norms!" begin
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; ucrit=10.0)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; renorm_threshold=10.0)
 
         # Case 1: Basic norm computation
         odet.u = zeros(ComplexF64, 2, 2, 2)
@@ -279,7 +356,7 @@ end
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         @test odet.unorm[1:intr.mpert] ≈ [1, 1]
 
-        # Case 4: Trigger fixup via ucrit
+        # Case 4: Trigger fixup via renorm_threshold
         odet.unorm0 = ones(intr.mpert)
         odet.u[:, 1, 1] .= [1000, 0]   # large norm
         odet.u[:, 2, 1] .= [1, 0]      # small norm
@@ -330,7 +407,7 @@ end
         @test length(odet.unorm0) == numpert_total
     end
 
-    @testset "interior start falls back to the fixed initialization" begin
+    @testset "axis start defaults to the fixed initialization" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
@@ -339,7 +416,7 @@ end
             eq_inputs = copy(inputs["Equilibrium"])
             eq_inputs["psilow"] = psilow
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(eq_inputs, ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
             ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., kwargs...)
             intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
             intr.nlow = ctrl.nn_low
@@ -355,19 +432,21 @@ end
             odet = FFS.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
             return odet, ctrl, mats, equil, intr
         end
-        # Near the axis the Frobenius start gives the regular solution: U₂ = I with a nonzero U₁.
+        # The default threshold is 0: near the axis the fixed start is used, with no warning.
         odet, ctrl, mats, equil, intr = axis_state(1e-4)
-        FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test ctrl.frobenius_psi_max == 0
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # A start above a positive threshold uses the fixed start, still with no warning.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.01)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # Raising the threshold to cover the start opts into the Frobenius start and warns.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.5)
+        @test_logs (:warn, r"Frobenius axis start") FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
         @test odet.u[:, :, 2] ≈ I
         @test any(!iszero, odet.u[:, :, 1])
-        # An interior start switches to the fixed start (U₁ = 0, U₂ = I) and says so.
-        odet, ctrl, mats, equil, intr = axis_state(0.3)
-        @test_logs (:warn, r"fixed start") FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
-        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
-        # The threshold is a control: raising it keeps the Frobenius start, and zero selects the fixed start silently.
-        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.5)
-        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
-        @test any(!iszero, odet.u[:, :, 1])
+        # An explicit zero selects the fixed start silently even near the axis.
         odet, ctrl, mats, equil, intr = axis_state(1e-4; frobenius_psi_max=0.0)
         @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
         @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
@@ -482,7 +561,7 @@ end
         ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
         sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config, sol_cfg)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, sol_cfg)
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
         FFS.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low
@@ -538,7 +617,7 @@ end
         # materialize after the Gaussian fixups and free-boundary normalization rather than
         # transforming stored derivatives alongside u_store.
         npert = intr.numpert_total
-        T = Matrix{ComplexF64}(I, npert, npert) .+ 0.25 .* ComplexF64.(reshape(sin.(1:npert^2), npert, npert))
+        T = Matrix{ComplexF64}(I, npert, npert) .+ 0.25 .* ComplexF64.(reshape(sin.(1:(npert^2)), npert, npert))
         odet_t = deepcopy(odet_pristine)
         for istep in 1:odet_t.step
             odet_t.u_store[:, :, 1, istep] = odet_t.u_store[:, :, 1, istep] * T
@@ -560,4 +639,13 @@ end
         @test isempty(odet.du_store)
         @test !odet.du_store_populated
     end
+end
+
+@testset "solve_el reports an aborted integration" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    # du/dψ = u² blows up at ψ = 1, so the solver stops short of the interval's end.
+    blowup = FFS.ODEProblem((du, u, p, t) -> (du .= u .^ 2), ones(ComplexF64, 1, 1, 2), (0.0, 2.0))
+    @test_throws "Euler-Lagrange integration aborted" FFS.solve_el(blowup, 1e-8)
+    calm = FFS.ODEProblem((du, u, p, t) -> (du .= -u), ones(ComplexF64, 1, 1, 2), (0.0, 1.0))
+    @test FFS.solve_el(calm, 1e-8).u[end] ≈ fill(exp(-1), 1, 1, 2) rtol = 1e-6
 end

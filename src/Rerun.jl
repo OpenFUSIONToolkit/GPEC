@@ -8,7 +8,7 @@
 # Analytic equilibria carry their parameters in an embedded TOML section rather than an ingest
 # array; replay regenerates them from that section. The eq_type -> section mapping (and which
 # kinds are analytic at all) lives in the `Equilibrium.ANALYTIC_EQ` registry, the single source
-# of truth shared with `setup_equilibrium`.
+# of truth shared with `Equilibrium.run_input`.
 
 """
     build_analytic_config(eq_type, inputs)
@@ -191,35 +191,36 @@ end
 
 """
     build_inputs_from_h5(args::Vector{String})
-        -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils)
+        -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_coils)
 
 Rerun input builder. Parses the rerun-specific CLI flags, reads the snapshot out of the
 source HDF5, applies any overrides, and reconstructs the pipeline inputs — a prebuilt
 `DirectRunInput`/`InverseRunInput` rebuilt from the stored ingest for file-based equilibria,
 or an analytic `*Config` for sol/lar/tj. Never touches the source file's original ingest
 paths. The returned tuple is fed straight into `main_from_inputs`.
+
+A file-forcing snapshot (`Input/RawInputs/ForcingTerms/`) is written next to the rerun output
+as `<stem>_forcing.h5` and `[ForcingTerms]` is pointed at it before overrides apply, so the
+replay reads and normalizes it against its own equilibrium exactly as a deck run reads its file.
 """
 function build_inputs_from_h5(args::Vector{String})
     cli = parse_rerun_cli(args)
     source_h5 = cli.source_h5
     isfile(source_h5) || error("Source HDF5 not found: $source_h5")
 
-    # Pull the stored TOML, equilibrium ingest, and (if present) forcing data out of the source
-    # file. Forcing modes are only written when the original run had a [PerturbedEquilibrium]
-    # section, so the group may be missing — we signal that with `nothing` and let
-    # main_from_inputs fall back to loading from `ft_ctrl.forcing_data_file`.
-    # `--coil-source coils` recomputes the coil field from stored geometry, so it deliberately
-    # ignores the frozen forcing-mode snapshot.
+    # Pull the stored TOML, equilibrium ingest, and (if present) file-forcing snapshot out of the
+    # source file. The snapshot exists only for a file-forced run with a [PerturbedEquilibrium]
+    # section.
     use_coils = cli.coil_source == "coils"
-    toml_raw, ingest, source_git, preloaded_forcing, preloaded_coils = h5open(source_h5, "r") do in_h5
+    toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils = h5open(source_h5, "r") do in_h5
         haskey(in_h5, "Input/gpec_toml_raw") ||
             error("Source HDF5 $source_h5 has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
-        forcing_modes = if use_coils || !haskey(in_h5, "Input/RawInputs/ForcingTerms")
+        forcing_modes = if !haskey(in_h5, "Input/RawInputs/ForcingTerms")
             nothing
         else
             modes = ForcingTerms.ForcingMode[]
-            ForcingTerms.load_forcing_from_h5_group!(modes, in_h5["Input/RawInputs/ForcingTerms"])
-            modes
+            normalization = ForcingTerms.load_forcing_from_h5_group!(modes, in_h5["Input/RawInputs/ForcingTerms"])
+            (modes, normalization)
         end
         coil_sets = if use_coils
             haskey(in_h5, "Input/RawInputs/Coils") ||
@@ -240,8 +241,25 @@ function build_inputs_from_h5(args::Vector{String})
         )
     end
 
-    # Parse TOML blob and fold in overrides: file overrides first, then CLI flags.
+    output_dir, output_name = resolve_rerun_output_path(source_h5, cli.output_dir, cli.output_name)
+    isdir(output_dir) || mkpath(output_dir)
+
+    # Parse TOML blob, replay the frozen forcing file, then fold in overrides: file overrides
+    # first, then CLI flags, so an overridden [ForcingTerms] still wins.
     inputs = TOML.parse(toml_raw)
+    # Overrides can set keys but not delete them, so a stored deck with retired keys cannot be replayed.
+    for (section, keys) in _DEPRECATED_KEYS
+        haskey(inputs, section) && _stop_on_deprecated_keys(inputs[section], keys, section;
+            remedy="$source_h5 was written by an older GPEC version; re-run from the original deck instead of replaying it")
+    end
+    if forcing_snapshot !== nothing
+        forcing_file = splitext(output_name)[1] * "_forcing.h5"
+        modes, normalization = forcing_snapshot
+        h5open(f -> ForcingTerms.save_forcing_to_h5(modes, f; normalization), joinpath(output_dir, forcing_file), "w")
+        ft = get!(inputs, "ForcingTerms", Dict{String,Any}())
+        ft["forcing_data_file"] = forcing_file
+        ft["forcing_data_format"] = "hdf5"
+    end
     if cli.override_file !== nothing
         isfile(cli.override_file) || error("Override file not found: $(cli.override_file)")
         file_overrides = TOML.parsefile(cli.override_file)
@@ -250,9 +268,6 @@ function build_inputs_from_h5(args::Vector{String})
     if !isempty(cli.overrides)
         apply_toml_overrides!(inputs, cli.overrides)
     end
-
-    output_dir, output_name = resolve_rerun_output_path(source_h5, cli.output_dir, cli.output_name)
-    isdir(output_dir) || mkpath(output_dir)
 
     # Force the rerun output file name so the source is never overwritten.
     if haskey(inputs, "ForceFreeStates")
@@ -269,14 +284,27 @@ function build_inputs_from_h5(args::Vector{String})
           "  source: $(abspath(source_h5))\n" *
           "  output: $(abspath(joinpath(output_dir, output_name)))\n$_BANNER"
 
-    _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
+    eq_config, additional_input = rebuild_equilibrium_inputs(inputs, ingest, output_dir)
+
+    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_coils
+end
+
+"""
+    rebuild_equilibrium_inputs(inputs, ingest, output_dir) -> (eq_config, additional_input)
+
+The equilibrium configuration and the input `PlasmaEquilibrium` consumes, rebuilt from a stored
+TOML `inputs` dict and the equilibrium `ingest` read from a `gpec.h5`. Analytic kinds regenerate
+from their TOML section; file-based kinds rebuild splines from the stored ingest. A file-based
+run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Stops on
+deprecated equilibrium keys.
+"""
+function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir::AbstractString)
+    _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
     # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))
-    eq_config = Equilibrium.EquilibriumConfig(equil_dict, output_dir)
+    eq_config = Equilibrium.EquilibriumConfig(equil_dict, String(output_dir))
 
-    # Analytic kinds regenerate from their TOML section; file-based kinds rebuild splines from
-    # the stored ingest. A file-based run with no ingest can only come from a pre-ingest gpec.h5.
     additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
         build_analytic_config(eq_config.eq_type, inputs)
     elseif ingest isa Equilibrium.DirectIngest
@@ -290,6 +318,82 @@ function build_inputs_from_h5(args::Vector{String})
             "registered in Equilibrium.ANALYTIC_EQ."
         )
     end
+    return eq_config, additional_input
+end
 
-    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing, preloaded_coils
+"""
+    equilibrium_from_h5(h5path) -> (; equil, inputs, psilim)
+
+Rebuild the `PlasmaEquilibrium` of a finished run from its `gpec.h5` alone — the stored TOML
+and equilibrium ingest, through `PlasmaEquilibrium` on the ψ_N grid the run ended with
+(`Equilibrium/Geometry/psi`) — without running any stage or writing anything. `inputs` is the
+parsed TOML the run used and `psilim` the control surface the solve integrated to
+(`Info/psilim`), so post-hoc analyses can evaluate new coil geometry on the surface the stored
+response matrices describe.
+
+Rebuilding on the stored grid reproduces the run's equilibrium exactly, including a two-pass
+run (`mpsi = 0`) that re-formed its equilibrium on a refined grid.
+"""
+function equilibrium_from_h5(h5path::AbstractString)
+    isfile(h5path) || error("HDF5 file not found: $h5path")
+    toml_raw, ingest, psilim, psi_nodes = h5open(h5path, "r") do f
+        haskey(f, "Input/gpec_toml_raw") || error("$h5path has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
+        haskey(f, "Info/psilim") || error("$h5path has no Info/psilim")
+        nodes = haskey(f, "Equilibrium/Geometry/psi") ? Vector{Float64}(read(f, "Equilibrium/Geometry/psi")) : nothing
+        read(f, "Input/gpec_toml_raw"), read_equilibrium_ingest(f), Float64(read(f, "Info/psilim")), nodes
+    end
+    inputs = TOML.parse(toml_raw)
+    eq_config, additional_input = rebuild_equilibrium_inputs(inputs, ingest, dirname(abspath(h5path)))
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, additional_input; override_psi_nodes=psi_nodes)
+    return (; equil, inputs, psilim)
+end
+
+"""
+    ErrorFields.compute_coil_sensitivities(h5path, coil_sets; kwargs...) -> CoilSensitivities
+
+Post-hoc coil linearization against a finished run: the resonant coupling and control-surface
+conform come from `gpec.h5` ([`PerturbedEquilibrium.ResonantCoupling`](@ref)), the equilibrium
+is rebuilt with [`equilibrium_from_h5`](@ref), and `coil_sets` — any geometry, not necessarily
+the run's — are swept on the run's own control surface. Keyword arguments are
+`ErrorFields.ErrorFieldsControl` fields; the boundary-grid resolution follows the run's
+`[ForcingTerms]` section when present. Nothing is written.
+"""
+function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_sets::Vector{ForcingTerms.CoilSet}; kwargs...)
+    ctrl_fields = fieldnames(ErrorFields.ErrorFieldsControl)
+    ctrl = ErrorFields.ErrorFieldsControl(; (k => v for (k, v) in kwargs if k in ctrl_fields)...)
+    ctx = ErrorFields.ResonantDriveContext(h5path; (k => v for (k, v) in kwargs if !(k in ctrl_fields))...)
+    return ErrorFields.compute_coil_sensitivities(ctx, coil_sets, ctrl)
+end
+
+"""
+    ErrorFields.ResonantDriveContext(h5path; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH,
+                               mtheta_coil=nothing, nzeta_coil=nothing, dat_dir=nothing) -> ResonantDriveContext
+
+Gather everything a post-hoc coil analysis needs from a finished run: the resonant coupling read
+from `gpec.h5`, the equilibrium rebuilt by [`equilibrium_from_h5`](@ref), the deck's coil
+configuration, and the boundary grids. Nothing is written.
+
+A stored deck records the absolute path its own machine read coil files from, which need not exist
+here, so a missing `dat_dir` is warned about rather than failing later inside the loader; pass
+`dat_dir` to point somewhere else. `mtheta_coil` and `nzeta_coil` override the boundary resolution
+the deck supplies, which is otherwise inherited silently.
+"""
+function ErrorFields.ResonantDriveContext(h5path::AbstractString; dat_dir=nothing, kwargs...)
+    rc = PerturbedEquilibrium.ResonantCoupling(h5path)
+    equil, inputs, psilim = equilibrium_from_h5(h5path)
+    cfg = ForcingTerms.CoilConfig(forcing_terms_control(inputs))
+    cfg = ErrorFields.regrid(cfg; dat_dir)
+    isempty(cfg.dat_dir) || isdir(cfg.dat_dir) ||
+        @warn "Coil geometry directory from the stored deck does not exist here: $(cfg.dat_dir). Pass dat_dir to point at a local copy."
+    return ErrorFields.ResonantDriveContext(equil, rc, cfg; psilim, b_t0=equil.params.bt0, inputs, kwargs...)
+end
+
+"""
+    ErrorFields.coil_overlaps(h5path, coil_sets; mode=1, kwargs...) -> Vector{CoilOverlap}
+
+Resonant overlap of each coil set against a finished run, with the context built from `h5path`.
+Keyword arguments beyond `mode` are [`ErrorFields.ResonantDriveContext`](@ref)'s.
+"""
+function ErrorFields.coil_overlaps(h5path::AbstractString, coil_sets::AbstractVector{ForcingTerms.CoilSet}; mode::Int=1, kwargs...)
+    return ErrorFields.coil_overlaps(ErrorFields.ResonantDriveContext(h5path; kwargs...), coil_sets; mode)
 end

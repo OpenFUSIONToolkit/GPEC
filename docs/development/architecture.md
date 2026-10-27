@@ -26,18 +26,22 @@ Splines are provided by the external `FastInterpolations` package rather than by
 ### Core Physics Modules
 
 2. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
-   - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
+   - Main entry point: `PlasmaEquilibrium(file; eq_type)`, `PlasmaEquilibrium(analytic_config)`, `PlasmaEquilibrium(dd)`, or `PlasmaEquilibrium(config, source)`
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
      - `chease`, `chease2` - CHEASE equilibrium code formats
      - `lar` - Large Aspect Ratio analytical model
      - `sol` - Solovev analytical equilibrium
-   - Key files:
-     - `EquilibriumTypes.jl` - Core data structures
-     - `ReadEquilibrium.jl` - Parsing equilibrium files
-     - `DirectEquilibrium.jl` - Direct Grad-Shafranov solver
-     - `InverseEquilibrium.jl` - Inverse equilibrium solver
-     - `AnalyticEquilibrium.jl` - Analytical solutions
+   - Key files, by pipeline stage:
+     - `Config.jl` - `EquilibriumConfig`, `EquilibriumParameters`
+     - `PlasmaEquilibrium.jl` - The result type and its profile and geometry splines
+     - `Construction.jl` - Solver input for each source type, the `PlasmaEquilibrium` constructors, `reform`
+     - `Sources/` - One file per input format (`GFile.jl`, `Chease.jl`, `IFile.jl`, `IMAS.jl`), the ingest and
+       run-input types (`Ingest.jl`), and `Analytic/` (the analytic registry plus one file per model with its config and solver)
+     - `Grid/` - First-pass ψ grids (`PsiGrid.jl`) and the two-pass refinement (`GridRefinement.jl`)
+     - `Axisymmetric/` - The 2D solvers (`Direct.jl`, `DirectArcLength.jl`, `DirectByInversion.jl`, `Inverse.jl`),
+       the Grad-Shafranov residual, and separatrix finding
+     - `Derived/` - Global parameters and q extrema, flux-surface metrics, geometry profiles, coordinate-invariant weights
    - Status: Stable and feature-complete
 
 3. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
@@ -63,7 +67,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
      - `Surfaces/` - Singular-surface finding, Frobenius asymptotics, and GGJ coefficients
      - `Riccati/` - Chunked fundamental-matrix (STRIDE) driver and Δ' boundary-value problem
      - `Galerkin/` - RDCON outer-region singular Galerkin Δ' solver
-     - `Matching/` - Outer↔inner resistive matching (`DeltaPrimeData`, `resonant_match_rpec`)
+     - `Matching/` - Outer↔inner resistive matching (`DeltaPrimeData`, `MatchProblem`, `MatchResult`)
      - `Fourfit.jl` - Fourier fitting routines (`MatrixSplines`)
      - `FixedBoundaryStability.jl` - Fixed boundary analysis
      - `Free.jl` - Free boundary stability
@@ -72,7 +76,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
 5. **LocalStability** (`src/LocalStability/`) - Local high-n stability
    - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Depends only on Equilibrium (plus math libraries); carries no stability-solver state
-   - Main entry points: `compute_local_stability`, `ballooning_alpha_boundary`
+   - `Problem.jl` - `solve(LocalStabilityProblem(equil), Ballooning())` → `LocalStabilityResult`; a deck's `[LocalStability]` section runs the same solve
+   - Kernels: `compute_ballooning_stability!`, `ballooning_alpha_boundary`
    - Status: Stable
 
 ### Perturbed Equilibrium Modules
@@ -98,6 +103,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
        - Island half-widths and Chirikov parameters
        - Green's functions at interior flux surfaces
        - Surface inductance for singular surfaces
+     - `ResonantCoupling.jl` - `ResonantCoupling` (in-memory or from gpec.h5): windowed SVD for the dominant applied-field mode, and the normalization/overlap helpers that project coil spectra onto it
      - `Utils.jl` - Helper functions
    - Status: Core plasma response and singular coupling calculations implemented; active area of development
 
@@ -117,9 +123,14 @@ Splines are provided by the external `FastInterpolations` package rather than by
     - Neoclassical toroidal viscosity (NTV) torque and kinetic energy contributions
     - Reads kinetic profiles configured under `[KineticForces]`
 
+11. **ErrorFields** (`src/ErrorFields/`) - Error-field sensitivity to coil misalignment
+    - `Sensitivity.jl` - central-difference linearization of every coil set's control-surface spectrum with respect to its rigid shifts and tilts, on one shared boundary grid
+    - `sensitivity_table` projects that linearization onto any windowed dominant mode post hoc (in memory or from `gpec.h5`); consumes `PerturbedEquilibrium.ResonantCoupling` and `ForcingTerms.coil_forcing_modes`
+    - Configured under `[ErrorFields]`; writes `ErrorFields/CoilSensitivities/`
+
 ### Post-processing
 
-11. **Analysis** (`src/Analysis/`) - Plotting and post-processing
+12. **Analysis** (`src/Analysis/`) - Plotting and post-processing
     - Submodules mirror the physics modules they visualize, so their names shadow them
     - Not part of the solve path; consumes `gpec.h5`
 
@@ -143,14 +154,14 @@ Example configuration files are provided in:
 - `examples/Solovev_ideal_example/gpec.toml`
 - `examples/DIIID-like_ideal_example/gpec.toml`
 
-**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are deprecated.
+**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are not read; `gpec.toml` is the only input deck.
 
 ## Data Flow
 
 The complete GPEC analysis pipeline:
 
 1. **Equilibrium Setup**:
-   - `setup_equilibrium(config)` reads configuration from `gpec.toml`
+   - `PlasmaEquilibrium(config, source)` forms the equilibrium from the `[Equilibrium]` section of `gpec.toml`
    - Parses equilibrium data (EFIT, CHEASE, or analytical)
    - Runs Grad-Shafranov solver (direct or inverse)
    - Computes global parameters: q-profile, pressure, current density, β
@@ -183,7 +194,7 @@ The complete GPEC analysis pipeline:
 
 5. **Output**:
    - All results saved to single HDF5 file (default: `gpec.h5`)
-   - Top-level HDF5 groups: `Info/`, `Input/`, `Equilibrium/`, `ForceFreeStates/`, `LocalStability/`, `SingularSurfaces/`, `PerturbedEquilibrium/`, `KineticForces/`, `Tearing/`, `SurfaceGeometries/` (see `docs/development/hdf5-conventions.md`)
+   - Top-level HDF5 groups: `Info/`, `Input/`, `Equilibrium/`, `ForceFreeStates/`, `LocalStability/`, `SingularSurfaces/`, `PerturbedEquilibrium/`, `KineticForces/`, `ErrorFields/`, `Tearing/`, `SurfaceGeometries/` (see `docs/development/hdf5-conventions.md`)
 
 ## Key Data Structures
 
@@ -208,12 +219,12 @@ The complete GPEC analysis pipeline:
   is built
 
 ### Perturbed Equilibrium
-- `PerturbedEquilibriumControl` - User-facing TOML configuration parameters
-- `PerturbedEquilibriumInternal` - Internal state with mode arrays
-- `PerturbedEquilibriumState` - Results including:
+- `PlasmaResponse` - Source-independent operators of one FFS result (`plasma_response`): inductances,
+  permeability and reluctance, the singular coupling matrices [n_rational × numpert_total] and their
+  dominant modes; applied to any number of external fields
+- `PerturbedEquilibriumState` - The perturbed equilibrium driven by one field (`perturbed_equilibrium`), including:
   - Response fields (ξ_modes, b_modes) in mode space
-  - Singular coupling matrices [msing × numpert_total]
-  - Island diagnostics (half-widths, Chirikov parameters)
+  - Applied resonant vectors and island diagnostics (half-widths, Chirikov parameters)
 - `ForcingMode` - External forcing specification (m, n, amplitude, phase)
 
 ## Module Dependencies
@@ -228,5 +239,6 @@ GeneralizedPerturbedEquilibrium
 ├── Vacuum (uses Splines, Equilibrium, Utilities)
 ├── ForcingTerms (data I/O)
 ├── ForceFreeStates (uses Equilibrium, Vacuum, Splines)
-└── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
+├── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
+└── ErrorFields (uses PerturbedEquilibrium, ForcingTerms, Equilibrium, Utilities)
 ```

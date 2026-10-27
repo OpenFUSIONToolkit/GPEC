@@ -57,6 +57,7 @@ Modules, with the abbreviation to use in prose:
 |---|---|---|
 | `Analysis` | — | `src/Analysis/` |
 | `Equilibrium` | EQUIL | `src/Equilibrium/` |
+| `ErrorFields` | EF | `src/ErrorFields/` |
 | `ForceFreeStates` | FFS | `src/ForceFreeStates/` |
 | `ForcingTerms` | FT | `src/ForcingTerms/` |
 | `HDF5Schema` | — | `src/HDF5Schema.jl` |
@@ -64,6 +65,7 @@ Modules, with the abbreviation to use in prose:
 | `KineticForces` | KF | `src/KineticForces/` |
 | `LocalStability` | LS | `src/LocalStability/` |
 | `PerturbedEquilibrium` | PE | `src/PerturbedEquilibrium/` |
+| `Precompile` | — | `src/Precompile.jl` |
 | `Rerun` | — | `src/Rerun.jl` |
 | `Tearing` | — | `src/Tearing/` |
 | `Utilities` | — | `src/Utilities/` |
@@ -100,7 +102,7 @@ Every PR body carries one:
 
 These three fields are the things a reader of the diff cannot work out for themselves, which is why they are asked for rather than inferred.
 
-**Numerical impact** comes from the regression harness, which every PR must run anyway (see [`regression-harness.md`](regression-harness.md)). Record the commit it ran at. Review changes code, and a report from five commits ago may no longer be true — so CI re-checks on every push and fails if anything under `src/` changed after the stamped commit. Commits touching only docs, tests, or examples never trip it.
+**Numerical impact** comes from the regression harness, which every PR must run anyway (see [`regression-harness.md`](regression-harness.md)). Record the commit it ran at. Review changes code, and a report from five commits ago may no longer be true — so CI re-checks on every push and fails if anything under `src/` changed after the stamped commit. Commits touching only docs, tests, or examples never trip it. A PR stacked on another PR's branch is checked more narrowly — only its own `src/` changes must match those at the stamp — and strictly again once it targets `develop` (see [`git-workflow.md`](git-workflow.md#stacked-pull-requests)).
 
 **Migration** must say something real when the title carries `!`.
 

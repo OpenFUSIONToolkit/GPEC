@@ -72,7 +72,7 @@ Three things follow. First, convergence is per-surface: the outer surface
 to about 1% — while `dpm[2,2]` is marginal and `dpm[1,1]` (q=2) never settles,
 still moving ~7% between the two tightest grids. A plateau detector must
 therefore report per-surface rather than pass/fail for the whole diagonal.
-(As the `ldp` scan below shows, q=2 is not inherently unconvergeable — it is the
+(As the `core_edge_packed` scan below shows, q=2 is not inherently unconvergeable — it is the
 auto grid that prevents it from settling.)
 
 Second, the growth rate is linear in Δ′: `gamma/dpm[1,1]` is 24.1 to within 0.5%
@@ -86,7 +86,7 @@ after pass 2, so tightening `psi_accuracy` moves it *further* from
 self-consistency rather than closer, and the warning's advice to "consider
 tightening psi_accuracy" is counterproductive in this regime.
 
-The same deck on a deterministic `ldp` grid, which skips the measure-and-re-form
+The same deck on a deterministic `core_edge_packed` grid, which skips the measure-and-re-form
 step entirely, converges:
 
 | mpsi | dpm[1,1] | dpm[2,2] | dpm[3,3] | gamma 2/1 (Hz) |
@@ -105,18 +105,18 @@ value should do. The non-convergence under the auto grid is an artifact of the
 generator, not of the Δ′ extraction.
 
 Two consequences. A plateau criterion is implementable today against a fixed
-`ldp` grid, without waiting on the auto-grid work. And the auto grid's answers
+`core_edge_packed` grid, without waiting on the auto-grid work. And the auto grid's answers
 are biased in both directions relative to the converged value: at its default
 `psi_accuracy` it gave 6.39 (28% low), at its tightest 9.51 (7% high). Anything
 pinned on the auto grid should be read with that in mind.
 
 This is not implemented. Doing it properly needs:
 
-  - either a fixed `ldp` grid (which already converges, see above) or knot
+  - either a fixed `core_edge_packed` grid (which already converges, see above) or knot
     refinement iterated to a fixed point (repeat the measure-and-re-form
     step until `implied_knot_count` stops exceeding the grid in use), since
     without it the scan target keeps moving;
-  - a scan driver over `psi_accuracy` × truncation (`psihigh`, `dmlim`, `qhigh`)
+  - a scan driver over `psi_accuracy` × truncation (`psihigh`, `rational_offset_fraction`, `qhigh`)
     that records the Δ′ diagonal per configuration;
   - a plateau/mode detector with an explicit stationarity tolerance, plus a
     defined failure mode for surfaces where no plateau exists (the
@@ -143,6 +143,8 @@ Available regression cases:
 ----------------------------------------------------------------
   diiid_n1                 DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
                            dir: examples/DIIID-like_ideal_example  (24 quantities)
+  diiid_multi_n            DIII-D-like equilibrium, n = 1, 2, ideal + perturbed equilibrium
+                           dir: examples/DIIID-like_ideal_multi_n_example  (21 quantities)
   solovev_multi_n          Solovev analytical equilibrium, multi-n, ideal stability
                            dir: examples/Solovev_ideal_example_multi_n  (12 quantities)
   solovev_n1               Solovev analytical equilibrium, n=1, ideal stability

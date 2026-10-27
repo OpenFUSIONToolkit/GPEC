@@ -48,7 +48,7 @@ recover S = U₁·U₂⁻¹ by renormalization. This achieves the same Riccati t
 
 This works because the EL ODE is **linear** in (U₁, U₂): the RHS does not grow with |S|,
 so relative error control is faithful even when S is large. Renormalization triggered by
-`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > ucrit) keeps
+`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > renorm_threshold) keeps
 both matrices bounded, preventing overflow and maintaining a well-conditioned state for the
 solver — exactly analogous to Gaussian reduction in the standard ODE.
 
@@ -69,17 +69,17 @@ During chunk integration (with sing_der! as ODE RHS):
   u[:,:,1] = U₁  (starts as S_prev, evolves toward new S)
   u[:,:,2] = U₂  (starts as I, evolves with EL dynamics)
 
-After renormalization (at crossing or when norms exceed ucrit):
+After renormalization (at crossing or when norms exceed renorm_threshold):
   u[:,:,1] = S = U₁ · U₂⁻¹
   u[:,:,2] = I
 
 This is compatible with downstream code (which uses U₁/U₂ ratio):
   - Free.jl:     wp = u[:,:,2] / u[:,:,1] = I · S⁻¹ = P  ✓  (post-renorm)
   - FixedBoundaryStability.jl: crit = min_eigval(u[:,:,1] / u[:,:,2]) = min_eigval(S)  ✓
-  - Axis init:   determined by `ctrl.frobenius_psi_max`. When the start lies above it (or it is 0), U₁=0, U₂=I → S(ψ₀)=0 (original
-    Glasser fixed-axis BC). Otherwise (default near the axis), Frobenius eigenvalue init [Glasser 2016 Eq. 51]
-    sets U₂=I and U₁ to the regular Frobenius eigenvector per mode → S(ψ₀) = U₁_Frobenius is
-    nonzero in general. Riccati S-evolution remains well-defined either way.
+  - Axis init:   determined by `ctrl.frobenius_psi_max`. The default 0, and any start above a positive threshold,
+    uses U₁=0, U₂=I → S(ψ₀)=0 (Fortran DCON's fixed-axis BC). A positive threshold at or above the start
+    opts into the diagonal Frobenius init, which sets U₂=I and a per-mode U₁, so S(ψ₀) is nonzero.
+    Riccati S-evolution remains well-defined either way.
 
 ## Key Differences from Standard Integration
 
@@ -105,7 +105,7 @@ chunks concurrently using `Threads.@threads`, then re-integrates the outer plasm
     to sub-divide chunks for load balancing. The chunk count depends only on `intr.msing` and
     `ctrl.nchunks`, never on the thread count, so results are thread-independent.
  2. **Propagator phase**: `integrate_propagator_chunk!` integrates each chunk independently
-    from identity initial conditions (no accumulated state, no normalization/callback).
+    from identity initial conditions (no accumulated state, normalization or storage).
     Each thread uses a private `OdeState` proxy for `sing_der!` side effects.
  3. **Serial assembly**: propagators are applied sequentially with `apply_propagator!`.
     Rational surface crossings use `riccati_cross_ideal_singular_surf!` (no Gaussian
@@ -159,11 +159,10 @@ function riccati_eulerlagrange_integration(
     _reintegrate_outer_plasma!(odet, last_crossing_step, ctrl, equil, mats, intr)
 
     chunks, propagators = _handle_edge_dW_scan!(odet, chunks, propagators, ctrl, equil, mats, intr)
+    resize!(S_at_surface_left, intr.msing)  # one per surviving surface, as the Δ' BVP requires
 
-    # compute_delta_prime_matrix! is called from the main pipeline (after free_run) so
-    # that vacuum response wv is available for the edge BC. With self-consistent truncation,
-    # the propagators/chunks returned here match intr.psilim exactly, so Δ' is well-defined
-    # for both truncate_at_dW_peak=false (full domain) and =true (peak).
+    # compute_delta_prime_matrix! runs later in the pipeline (after free_run), once the vacuum
+    # response wv for the edge BC is available.
     if ctrl.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
@@ -263,7 +262,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
         end
 
         if chunk.needs_crossing
-            ctrl.kinetic_factor > 0 && error("kinetic_factor > 0 not implemented yet in Riccati!")
+            ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
             # State is (S, I) from the renorm above — well-conditioned at the surface's left boundary.
             push!(S_at_surface_left, copy(odet.u[:, :, 1]))
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
@@ -306,14 +305,7 @@ function _reintegrate_outer_plasma!(odet::OdeState, last_crossing_step::Int,
     # Post: odet.u is in (S, I) form; odet.step points to next empty slot.
 end
 
-# Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5. By default
-# (truncate_at_dW_peak=false) it's diagnostic-only: integration domain is unchanged.
-# When truncate_at_dW_peak=true, the dW peak becomes the new physical edge: intr.psilim,
-# odet, propagators, and chunks are made self-consistent (straddling chunk rebuilt with
-# shorter psi_end; chunks past the new boundary dropped). Without that rebuild, the Δ' BVP
-# would apply the edge BC at the truncated psilim to a propagator still extending to the
-# original psilim — silently shifting the outermost rational's Δ' by tens of percent.
-# Returns the (possibly truncated) chunks and propagators arrays.
+# Edge-dW scan; on truncation, also cut the Δ' chunks and propagators back to the new edge.
 function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
     propagators::Vector{ChunkPropagator},
     ctrl::ForceFreeStatesControl,
@@ -322,56 +314,35 @@ function _handle_edge_dW_scan!(odet::OdeState, chunks::Vector{IntegrationChunk},
     N = intr.numpert_total
     odet.step -= 1
     trim_storage!(odet)
-    ctrl.psiedge < intr.psilim || return chunks, propagators
+    scan_edge_dW!(odet, ctrl, equil, mats, intr) || return chunks, propagators
 
-    saved_psifac, saved_u = odet.psifac, copy(odet.u)
-    peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
-
-    if !ctrl.truncate_at_dW_peak
-        odet.psifac = saved_psifac
-        odet.u .= saved_u
-        if ctrl.verbose
-            @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.2f" odet.psi_store[peak_step])),  q = $((@sprintf "%.2f" odet.q_store[peak_step])); integration domain unchanged"
-        end
-        return chunks, propagators
-    end
-
-    # Truncate to dW peak: relocate intr.psilim and rebuild Δ' BVP self-consistently.
-    n_chunks_before = length(chunks)
-    odet.step = peak_step
-    trim_storage!(odet)
-    intr.psilim = odet.psi_store[end]
-    intr.qlim = odet.q_store[end]
-    odet.u .= odet.u_store[:, :, :, end]
     renormalize_riccati_inplace!(odet.u, N)  # stored snapshot may be pre-renorm
-
-    peak_psi = odet.psi_store[end]
-    last_chunk_idx = findlast(c -> c.psi_start < peak_psi, chunks)
-    if last_chunk_idx === nothing
-        error("truncate_at_dW_peak: peak ψ=$peak_psi lies before all chunk starts")
-    end
-    straddling = chunks[last_chunk_idx]
-    if straddling.psi_end > peak_psi
-        new_chunk = IntegrationChunk(;
-            psi_start=straddling.psi_start,
-            psi_end=peak_psi,
-            needs_crossing=straddling.needs_crossing,
-            ising=straddling.ising,
-            direction=straddling.direction
-        )
-        chunks[last_chunk_idx] = new_chunk
-        odet_proxy = OdeState(N, 1, 1, 0)
-        integrate_propagator_chunk!(propagators[last_chunk_idx], new_chunk,
-            ctrl, equil, mats, intr, odet_proxy)
-    end
-    n_dropped = 0
-    if last_chunk_idx < length(chunks)
-        n_dropped = length(chunks) - last_chunk_idx
-        chunks = chunks[1:last_chunk_idx]
-        propagators = propagators[1:last_chunk_idx]
-    end
-    if ctrl.verbose
-        @info "Truncating integration at peak edge dW (self-consistent): ψ = $((@sprintf "%.4f" peak_psi)),  q = $((@sprintf "%.3f" odet.q_store[end])).  Rebuilt chunk $last_chunk_idx; dropped $n_dropped of $n_chunks_before outer chunks."
+    rebuild = truncate_chunks!(chunks, intr.psilim, intr.msing)
+    resize!(propagators, length(chunks))
+    if rebuild !== nothing
+        integrate_propagator_chunk!(propagators[rebuild], chunks[rebuild], ctrl, equil, mats, intr, OdeState(N, 1, 1, 0))
     end
     return chunks, propagators
+end
+
+"""
+    truncate_chunks!(chunks, psi_edge, msing) -> Union{Int,Nothing}
+
+Cut `chunks` back to an edge at `psi_edge`: drop those past it, end the straddling one at it, and
+clear any crossing onto a surface no longer in the plasma. Returns the index of a chunk that was
+shortened and so must be re-integrated.
+"""
+function truncate_chunks!(chunks::Vector{IntegrationChunk}, psi_edge::Real, msing::Int)
+    last = findlast(c -> c.psi_start < psi_edge, chunks)
+    last === nothing && error("truncate_chunks!: edge ψ=$psi_edge lies before all chunk starts")
+    resize!(chunks, last)
+    c = chunks[last]
+    shortened = c.psi_end > psi_edge
+    # ising <= msing means the surface survived: edge truncation drops surfaces from the outside only.
+    crosses = c.needs_crossing && c.ising <= msing
+    if shortened || crosses != c.needs_crossing
+        chunks[last] = IntegrationChunk(; psi_start=c.psi_start, psi_end=min(c.psi_end, psi_edge),
+            needs_crossing=crosses, ising=crosses ? c.ising : 0, direction=c.direction)
+    end
+    return shortened ? last : nothing
 end

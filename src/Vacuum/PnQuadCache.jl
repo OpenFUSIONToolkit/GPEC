@@ -11,9 +11,8 @@
 #     but not on the Legendre argument s. Since n is fixed per vacuum run, we
 #     cache them on first use and serve millions of subsequent calls from reads.
 #
-# Thread safety: Dict + SpinLock for storage, atomic last-used entry for
-# lock-free fast path. Since n is constant within a vacuum run, the fast
-# path (same n as last call) hits ~100% of the time.
+# Thread safety: Dict + SpinLock. Callers look the entry up once per kernel
+# call (n is fixed there) and pass it down, so the lock stays off the hot path.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Quadrature node constants (integration limits: xl=0, xu=5) ───────────────
@@ -26,7 +25,7 @@ const _PN_BGAUS = 2.5
 const (_PN_TG02, _PN_WANUMR) = let
     x32, w32 = gausslegendre(32)
     tg0 = [_PN_AGAUS + x32[i] * _PN_BGAUS for i in 1:32]
-    tg02   = NTuple{32,Float64}(t * t for t in tg0)
+    tg02 = NTuple{32,Float64}(t * t for t in tg0)
     wanumr = NTuple{32,Float64}(w32[i] * tg0[i] * exp(-tg0[i]^2) for i in 1:32)
     (tg02, wanumr)
 end
@@ -62,49 +61,42 @@ end
 const _PN_CACHE = Dict{Int,PnQuadEntry}()
 const _PN_CACHE_LOCK = Threads.SpinLock()
 
-# Fast-path: last-used n. Since n is constant within a vacuum run,
-# this avoids Dict lookup + lock for ~100% of calls.
-#
-# Thread safety: _PN_LAST_ENTRY (plain Ref) is safe because the slow path
-# always writes the entry *before* updating the atomic sentinel _PN_LAST_N.
-# A reader that sees _PN_LAST_N == n is therefore guaranteed to see a valid
-# entry — the atomic store acts as a release fence for the preceding write.
-const _PN_LAST_N = Threads.Atomic{Int}(0)
-const _PN_LAST_ENTRY = Ref{PnQuadEntry}(PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0))
+"""
+    reset_caches!()
+
+Empty Vacuum's run-filled module-level caches: the per-n Legendre quadrature entries and the
+singular-quadrature data. Called after the precompile workload so no run state is serialized
+into the package image.
+"""
+function reset_caches!()
+    @lock _PN_CACHE_LOCK empty!(_PN_CACHE)
+    SINGULAR_QUAD_CACHE[] = nothing
+    return nothing
+end
 
 """
     get_pn_quad_cache(n::Int) -> PnQuadEntry
 
 Return cached sinh/cosh values for toroidal mode `n`, computing on first access.
-Works for any `n ≥ 1` with no upper limit.
-
-The fast path (same `n` as last call) is lock-free: one atomic read + comparison.
+Takes a lock, so call it once per kernel call and pass the entry down.
 """
-@inline function get_pn_quad_cache(n::Int)
-    _PN_LAST_N[] == n && return _PN_LAST_ENTRY[]
-    return _get_pn_quad_cache_slow(n)
-end
-
-@noinline function _get_pn_quad_cache_slow(n::Int)
-    entry = @lock _PN_CACHE_LOCK get!(() -> _make_pn_quad_entry(n), _PN_CACHE, n)
-    _PN_LAST_ENTRY[] = entry   # plain store (data) — must precede sentinel
-    _PN_LAST_N[] = n           # seq_cst store-release — makes data visible
-    return entry
-end
+get_pn_quad_cache(n::Int) = @lock _PN_CACHE_LOCK get!(() -> _make_pn_quad_entry(n), _PN_CACHE, n)
 
 function _make_pn_quad_entry(n::Int)
     @assert n >= 1 "PnQuadEntry is only defined for n ≥ 1 (Γ(1/2 - n) diverges at n = 0)"
-    inv_2n   = 1.0 / (2.0 * n)
+    inv_2n = 1.0 / (2.0 * n)
     inv_2np2 = 1.0 / (2.0 * n + 2.0)
-    sh  = Vector{Float64}(undef, 32)
-    ch  = Vector{Float64}(undef, 32)
+    sh = Vector{Float64}(undef, 32)
+    ch = Vector{Float64}(undef, 32)
     shp = Vector{Float64}(undef, 32)
     chp = Vector{Float64}(undef, 32)
     @inbounds for ig in 1:32
-        x  = _PN_TG02[ig] * inv_2n
+        x = _PN_TG02[ig] * inv_2n
         xp = _PN_TG02[ig] * inv_2np2
-        sh[ig]  = sinh(x);  ch[ig]  = cosh(x)
-        shp[ig] = sinh(xp); chp[ig] = cosh(xp)
+        sh[ig] = sinh(x)
+        ch[ig] = cosh(x)
+        shp[ig] = sinh(xp)
+        chp[ig] = cosh(xp)
     end
 
     # Compute the Gamma function Γ(1/2 - n) via the product formula.
@@ -117,7 +109,7 @@ function _make_pn_quad_entry(n::Int)
     # Combine into scale factors used in the final Legendre function assembly.
     # Pre-computing these once per n avoids repeating the Gamma product on every s-call.
     sqtwo = sqrt(2.0)
-    gauss_norm_n   = sqtwo / (n * sqpi * gamn)
+    gauss_norm_n = sqtwo / (n * sqpi * gamn)
     gauss_norm_np1 = sqtwo / ((n + 1.0) * sqpi * gamp)
 
     return PnQuadEntry(sh, ch, shp, chp, gauss_norm_n, gauss_norm_np1)

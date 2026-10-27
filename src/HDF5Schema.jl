@@ -136,6 +136,33 @@ const MAIN_H5_ANNOTATIONS = [
         (; long_name="Glasser-Greene-Johnson resistive interchange criterion D_R", dims=("psi",), attach=(1 => "LocalStability/psi",)),
     "LocalStability/ballooning_Delta_prime" =>
         (; long_name="high-n ballooning Δ' (distinct from the tearing Δ')", dims=("psi",), attach=(1 => "LocalStability/psi",)),
+    # Resistive-layer overlap scan (Fitzpatrick, Nucl. Fusion 2025, Sect. 5.9). Its own surface
+    # axis: the list includes surfaces extrapolated beyond the integration domain, so it does not
+    # align with the SingularSurfaces/ axis.
+    "ForceFreeStates/LayerOverlap/psi" =>
+        (; long_name="rational-surface location scanned for resistive-layer overlap", scale="surface_overlap"),
+    "ForceFreeStates/LayerOverlap/m" =>
+        (; long_name="poloidal mode number of each scanned surface", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/n" =>
+        (; long_name="toroidal mode number of each scanned surface", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/r_s" =>
+        (; long_name="minor radius of each scanned surface in the Fitzpatrick flux label", units="m", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/delta_s_abs" =>
+        (; long_name="Riccati resistive layer thickness |δ_s|", units="m", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/width_delta_s" =>
+        (; long_name="|δ_s| expressed as a normalized-flux width", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/width_visco" =>
+        (; long_name="visco-resistive comparison scale as a normalized-flux width", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/width_dr" =>
+        (; long_name="diffusive-resistive layer width (Fitzpatrick 2025 Eq. 100) as a normalized-flux width; the channel the criterion uses", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/extrapolated" =>
+        (; long_name="1 where the surface was located beyond the equilibrium grid via the separatrix edge q-law", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+    "ForceFreeStates/LayerOverlap/psilim_overlap" =>
+        (; long_name="domain limit implied by the first layer overlap, at the last surface with a well-separated inner region (NaN when no overlap was found in range)"),
+    "ForceFreeStates/LayerOverlap/first_overlap_index" =>
+        (; long_name="index into this group's surface axis of the first surface overlapping its inner neighbour (-1 when none do)"),
+    "ForceFreeStates/LayerOverlap/applied" =>
+        (; long_name="1 when the overlap bound was handed to sing_lim! as an active cap on qlim (rational_offset_fraction/qhigh may still truncate deeper); 0 when recorded only"),
     "LocalStability/ballooning_psi" =>
         (; long_name="normalized poloidal flux ψ_N of the ballooning α boundary scan", scale="psi_ballooning"),
     "LocalStability/alpha" =>
@@ -248,6 +275,19 @@ const MAIN_H5_ANNOTATIONS = [
     "SurfaceGeometries/Wall/x" => (; long_name="Cartesian x of wall point cloud", units="m"),
     "SurfaceGeometries/Wall/y" => (; long_name="Cartesian y of wall point cloud", units="m"),
     "SurfaceGeometries/Wall/z" => (; long_name="Cartesian z of wall point cloud", units="m")
+]
+
+# Per-stage wall-clock records written by `_write_runtimes!` after every stage has run.
+# Stages that did not run leave their path absent and are skipped by `annotate!`.
+const RUNTIME_H5_ANNOTATIONS = [
+    "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
+    "Info/Runtimes/local_stability" => (; long_name="wall-clock time of the LocalStability stage (Mercier, resistive interchange and ballooning scans)", units="s"),
+    "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
+    "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
+    "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
+    "Info/Runtimes/kinetic_forces" => (; long_name="wall-clock time of the KineticForces (NTV) stage", units="s"),
+    "Info/Runtimes/error_fields" => (; long_name="wall-clock time of the ErrorFields stage (coil sensitivities, Monte Carlo, locking risk)", units="s"),
+    "Info/Runtimes/total" => (; long_name="wall-clock time of the full GPEC run, including the work between stages", units="s")
 ]
 
 # Euler-Lagrange operator matrices: same wording per letter, Ideal/ and Kinetic/ variants.

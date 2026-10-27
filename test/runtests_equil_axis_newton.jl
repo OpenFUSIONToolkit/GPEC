@@ -16,7 +16,8 @@
     function cusp_solovev(; ncell, nr=96, r_in=1.4, r_out=1.6, z_shift=0.0)
         sol = SolovevConfig(; mr=nr, mz=nr)
         cfg = EquilibriumConfig(; eq_type="sol")
-        (; e, a, r0, q0, b0fac) = sol
+        (; elongation, a, r0, q0, b0fac) = sol
+        e = elongation
         psio = e * r0 * b0fac * a^2 / (2 * q0 * r0)
         psifac = psio / (a * r0)^2
         rs = collect(range(r0 - r_in * a, r0 + r_out * a; length=nr + 1))
@@ -90,7 +91,8 @@
     @testset "axis outside the R-bracket of the midplane march is found" begin
         # Off the axis's midplane the Solovev B_z changes sign at R² = r0² - 2Z²/e², inboard of the axis, and the
         # march stops between that point and the axis, so the axis lies outside the march's last step.
-        (; e, a) = SolovevConfig()
+        (; elongation, a) = SolovevConfig()
+        e = elongation
         rp, r0, h = cusp_solovev(; ncell=0.0, r_in=1.7, r_out=1.3, z_shift=0.7)
         r_mid, z_mid, dr = (rp.rmin + rp.rmax) / 2, (rp.zmin + rp.zmax) / 2, (rp.rmax - rp.rmin) / 20
         @test r_mid < sqrt(r0^2 - 2 * z_mid^2 / e^2) < r_mid + dr < r0

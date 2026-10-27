@@ -7,10 +7,11 @@ using TOML
 
 # Collect every leaf dataset path under an open HDF5 file, skipping the groups/paths that
 # legitimately differ between a source run and its replay (`Input/` is re-emitted with the
-# rerun's own filename/TOML blob; `Info/git_version` reflects the running commit).
+# rerun's own filename/TOML blob; `Info/git_version` reflects the running commit;
+# `Info/Runtimes/` records wall-clock seconds, which never repeat).
 function _rerun_leaf_paths(h5)
     skip_toplevel = Set(["Input"])
-    skip_paths = Set(["Info/git_version"])
+    skip_paths = Set(["Info/git_version", "Info/Runtimes"])
     paths = String[]
     function walk(node, prefix)
         for k in keys(node)
@@ -49,10 +50,10 @@ function _rerun_dataset_mismatches(source_h5, rerun_h5)
     return n_compared, n_mismatched
 end
 
-# Analytic (Solovev) equilibrium: the single end-to-end source + replay. The replay runs from a
-# temp directory containing nothing but the captured gpec.h5, proving the snapshot is
-# self-contained (no g-file or forcing data needed), and reproduces the source
-# bit-for-bit across every output dataset.
+# Analytic (Solovev) equilibrium with ASCII file forcing: the single end-to-end source + replay.
+# The forcing file is deleted before replay and the replay runs from a temp directory, proving
+# the snapshot is self-contained (no g-file or forcing data needed), and reproduces the source
+# bit-for-bit across every output dataset, the normalized perturbed equilibrium included.
 @testset "Rerun from gpec.h5 (analytic Solovev)" begin
     template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
@@ -60,19 +61,33 @@ end
         for name in readdir(template_dir)
             cp(joinpath(template_dir, name), joinpath(snapshot_dir, name))
         end
+        forcing_dat = joinpath(snapshot_dir, "forcing.dat")
+        cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), forcing_dat)
         toml_path = joinpath(snapshot_dir, "gpec.toml")
-        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_outputs_to_HDF5 = true"))
+        inputs = TOML.parsefile(toml_path)
+        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
+        inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
+        inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+            "compute_singular_coupling" => true,
+            "verbose" => false, "write_outputs_to_HDF5" => true)
+        open(io -> TOML.print(io, inputs), toml_path, "w")
 
         @info "Generating source gpec.h5 for rerun tests"
         GeneralizedPerturbedEquilibrium.main([snapshot_dir])
         source_h5 = joinpath(snapshot_dir, "gpec.h5")
         @test isfile(source_h5)
+        h5open(source_h5, "r") do h5
+            @test HDF5.attrs(h5["Input/RawInputs/ForcingTerms"])["normalization"] == "normal_field_T"
+        end
+        rm(forcing_dat)
 
         @testset "self-contained replay matches source across all datasets" begin
             mktempdir() do replay_dir
                 GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", replay_dir])
                 replay_h5 = joinpath(replay_dir, "gpec_rerun.h5")
                 @test isfile(replay_h5)
+                @test isfile(joinpath(replay_dir, "gpec_rerun_forcing.h5"))
+                @test "PerturbedEquilibrium" in h5open(keys, replay_h5, "r")
 
                 n_compared, n_mismatched = _rerun_dataset_mismatches(source_h5, replay_h5)
                 @test n_compared > 0
@@ -94,20 +109,33 @@ end
             end
         end
 
-        # A gpec.h5 written before the integrator refactor embeds retired keys such as
-        # `use_parallel` in its gpec_toml_raw, so a replay must warn and drop them rather than
-        # failing on an unknown keyword. The override flag stands in for that stale blob.
-        @testset "retired ForceFreeStates keys are warned and ignored on replay" begin
+        # An override that sets a retired key stops the replay before any solve.
+        @testset "retired ForceFreeStates keys stop a replay" begin
             mktempdir() do out_dir
-                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
-                @test inputs["ForceFreeStates"]["use_parallel"] == true
+                @test_throws r"`use_parallel`" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
+            end
+        end
 
-                @test_logs (:warn,) GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(inputs["ForceFreeStates"], GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
-                @test !haskey(inputs["ForceFreeStates"], "use_parallel")
+        # A gpec.h5 from an older GPEC stores a deck with retired keys, which the replay cannot delete.
+        @testset "a stored deck with retired keys stops the replay" begin
+            mktempdir() do out_dir
+                old_h5 = joinpath(out_dir, "old.h5")
+                cp(source_h5, old_h5)
+                h5open(old_h5, "r+") do h5
+                    inputs = TOML.parse(read(h5, "Input/gpec_toml_raw"))
+                    inputs["PerturbedEquilibrium"]["fixed_boundary"] = false
+                    delete_object(h5, "Input/gpec_toml_raw")
+                    h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                end
+                @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+            end
+        end
 
-                # With the key gone the control struct builds again, on the default integrator.
-                ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-                @test ctrl.integrator in ("forward", "riccati")
+        @testset "the LocalStability section replays" begin
+            mktempdir() do out_dir
+                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
+                @test haskey(inputs, "LocalStability")
+                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
             end
         end
 
@@ -267,8 +295,8 @@ end
     Equil = GeneralizedPerturbedEquilibrium.Equilibrium
     config = Equil.EquilibriumConfig(;
         eq_filename=joinpath(@__DIR__, "test_data", "CHEASE_test_data", "INP1_ascii"),
-        eq_type="chease_ascii", jac_type="boozer", grid_type="ldp",
-        psilow=0.01, psihigh=0.994, r0exp=6.8, b0exp=7.4
+        eq_type="chease_ascii", jac_type="boozer", grid_type="core_edge_packed",
+        psilow=0.01, psihigh=0.994, r0_norm=6.8, b0_norm=7.4
     )
     src = Equil.read_chease_ascii(config)
     @test src isa Equil.InverseRunInput
@@ -303,7 +331,7 @@ end
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
 
-# Drift guard for the analytic-equilibrium registry: setup_equilibrium and the rerun builder both
+# Drift guard for the analytic-equilibrium registry: `run_input` and the rerun builder both
 # dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
 # empty section) would silently break one path. Asserting each entry is well-formed and that
 # build_analytic_config resolves it keeps adding a new analytic kind a one-row change.
