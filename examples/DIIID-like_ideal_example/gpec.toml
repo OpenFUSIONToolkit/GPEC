@@ -5,6 +5,7 @@
 
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
+kinetic_file = "TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "auto"             # Radial grid packing type ("auto" = two-pass measured-curvature grid)
@@ -88,7 +89,6 @@ write_outputs_to_HDF5 = true            # Write ErrorFields/CoilSensitivities/ t
 verbose = true                          # Log per-coil-set progress and linearity diagnostics
 
 [KineticForces]
-kinetic_file = "TkMkr_D3Dlike_Hmode_kinetic.h5"  # GPEC HDF5 kinetic schema (psi,n_i,n_e,T_i,T_e,omega_E,+chi_e,chi_phi). Legacy .gpeckf/.kin still readable.
 nn = 1                                  # Toroidal mode number (matches nn_low/nn_high)
 bounce_harmonic_max = 6                 # Bounce harmonics retained
 ion_charge = 1                          # Main-ion charge (deuterium)

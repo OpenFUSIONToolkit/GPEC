@@ -80,7 +80,8 @@ include("h5_metadata_check.jl")
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
             # Kinetic profiles consistent with this Solovev pressure, for the NTV torque couplings.
             cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), joinpath(dir, "kinetic.dat"))
-            inputs["KineticForces"] = Dict{String,Any}("kinetic_file" => "kinetic.dat", "verbose" => false, "write_outputs_to_HDF5" => true)
+            inputs["Equilibrium"]["kinetic_file"] = "kinetic.dat"
+            inputs["KineticForces"] = Dict{String,Any}("verbose" => false, "write_outputs_to_HDF5" => true)
             inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
                 "MonteCarlo" => Dict{String,Any}("nsample" => 20_000, "nbatch" => 2, "seed" => 5, "nbins" => 100),
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
@@ -533,7 +534,10 @@ include("h5_metadata_check.jl")
             @test length(with_profiles.subplots) == 3                       # and the deposition profile its own panel
             @test with_profiles[3].series_list[1][:y] == c.torque_full_profile[:, 2]
             @test with_profiles[3].series_list[2][:y] == c.torque_residual_profile[:, 2]
-            @test_throws ErrorException GPEC.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl(), nothing)
+            attached = pe.response.ffs.equil.kinetic
+            pe.response.ffs.equil.kinetic = nothing
+            @test_throws "needs kinetic profiles" GPEC.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
+            pe.response.ffs.equil.kinetic = attached
 
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,

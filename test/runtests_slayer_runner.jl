@@ -58,6 +58,7 @@
             "bt" => 1.8,
             "ion_mass" => 2.0,
             "D_R" => 0.01,
+            "P_perp_model" => "D_perp",
             "scan_grid" => Dict{String,Any}(
                 "Q_re_range" => [-5.0, 5.0],
                 "Q_im_range" => [-1.0, 3.0],
@@ -68,8 +69,7 @@
                 "max_cells" => 50_000),
             "growth_rate_filter" => Dict{String,Any}(
                 "pole_threshold" => 1e5,
-                "filter_above_poles" => false),
-            "profile_file" => "profiles.h5"
+                "filter_above_poles" => false)
         )
         c = slayer_control_from_toml(section)
         @test c.enabled
@@ -80,6 +80,7 @@
         @test c.msing_max == 2
         @test c.bt === 1.8
         @test c.D_R == 0.01
+        @test c.P_perp_model === :D_perp
         @test c.Q_re_range == (-5.0, 5.0)
         @test c.Q_im_range == (-1.0, 3.0)
         @test c.nre == 50
@@ -88,25 +89,63 @@
         @test c.amr_max_cells == 50_000
         @test c.pole_threshold == 1e5
         @test c.filter_above_poles == false
-        @test c.profile_file == "profiles.h5"
 
         # Unknown keys should raise
         bad = merge(section, Dict{String,Any}("mistyped_key" => 42))
         @test_throws ArgumentError slayer_control_from_toml(bad)
+        # The renamed χ⊥,e key and bad P_perp_model values are rejected
+        @test_throws "chi_perp` is now `chi_perp_e" slayer_control_from_toml(merge(section, Dict{String,Any}("chi_perp" => 1.0)))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "bogus"))))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E"))))
+        @test_throws ArgumentError Runner.validate(slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => Inf))))
+        c_te = slayer_control_from_toml(merge(section, Dict{String,Any}("P_perp_model" => "tau_E", "tau_E" => 0.05)))
+        @test c_te.tau_E == 0.05 && Runner.validate(c_te) === c_te
+        # D_perp is the default, and it refuses to run without an ion diffusivity from the file or the deck.
+        @test SLAYERControl().P_perp_model === :D_perp
+        no_chi = (; chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing)
+        @test_throws "needs the ion diffusivity" Runner._slayer_chi_inputs(no_chi, SLAYERControl(); warn=false)
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7); warn=false).chi_perp_i == 0.7
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; P_perp_model=:chi_perp_e); warn=false).chi_perp_i === nothing
+        # Scalar diffusivities must be positive.
+        @test_throws "chi_perp_i must be positive" Runner.validate(SLAYERControl(; chi_perp_i=-0.5))
+        @test_throws "chi_perp_e must be positive" Runner.validate(SLAYERControl(; chi_perp_e=0.0))
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin
         # A result with no singular surfaces short-circuits before any equilibrium access,
         # so a stand-in result is enough to pin the forwarding of surfaces / delta_prime.
-        c = SLAYERControl(; enabled=true, profile_file="unused.h5")
+        c = SLAYERControl(; enabled=true)
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing)
         r = solve(TearingProblem(no_surfaces, c), SLAYERModel())
         @test isempty(r.params)
 
         # A disabled control never looks at the result at all.
-        r_off = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=false, profile_file="unused.h5")), SLAYERModel())
+        r_off = solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=false)), SLAYERModel())
         @test r_off.enabled == false
+
+        # With surfaces to analyse, the profiles must come from the equilibrium.
+        bare = (equil=(; kinetic=nothing), surfaces=[nothing], delta_prime=nothing)
+        @test_throws "carries no kinetic profiles" solve(TearingProblem(bare, c), SLAYERModel())
+    end
+
+    @testset "SLAYER view of the kinetic profiles" begin
+        kin_path = joinpath(dirname(@__DIR__), "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode_kinetic.h5")
+        data = GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(kin_path)
+        view = Runner._slayer_profiles(data, SLAYERControl())
+        j = length(data.psi) ÷ 2
+        @test view.profiles.n_e(data.psi[j]) ≈ data.n_e[j]
+        @test view.profiles.omega_E(data.psi[j]) ≈ data.omega_E[j]
+        @test view.chi_perp_e(data.psi[j]) ≈ data.chi_e[j]
+        @test view.chi_perp_i(data.psi[j]) ≈ data.chi_i[j]
+        @test view.has_omega_E
+        # Without an E×B rotation profile the view records its absence and carries zero rotation.
+        no_rotation = GeneralizedPerturbedEquilibrium.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_e=data.T_e, T_i=data.T_i)
+        bare_view = Runner._slayer_profiles(no_rotation, SLAYERControl())
+        @test !bare_view.has_omega_E
+        @test bare_view.profiles.omega_E(data.psi[j]) == 0.0
+        @test_throws "missing required dataset 'T_i'" Runner._slayer_profiles(
+            GeneralizedPerturbedEquilibrium.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_e=data.T_e), SLAYERControl())
     end
 
     @testset "GGJ tearing is rejected until its growth-rate extraction exists" begin
@@ -118,7 +157,7 @@
         end
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
             delta_prime=nothing, dir_path=".")
-        @test_throws ErrorException solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true, profile_file="unused.h5")), GGJModel())
+        @test_throws ErrorException solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true)), GGJModel())
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one

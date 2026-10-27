@@ -46,10 +46,17 @@ constructor.
   - `impurity_charge` -- charge of the single impurity species that closes quasi-neutrality when
     `Z_eff(ψ)` is derived from `n_i/n_e` (default 6.0, carbon); the main ion has charge 1.
     Unused when the file supplies a `zeff` profile
-  - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
-    diffusivity [m²/s], used only when the kinetic file carries no usable
-    `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
-    file's χ⊥(ψ)/χ_φ(ψ) take precedence
+  - `chi_perp_e`, `chi_perp_i`, `chi_tor` -- fallback electron / ion perpendicular heat and
+    toroidal momentum diffusivity [m²/s], used only when the kinetic file carries no usable
+    `chi_e`/`chi_i`/`chi_phi` profile (dataset absent or all-zero); otherwise the file's
+    χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) take precedence. `chi_perp_i` defaults to `nothing`, so a model that
+    needs χ⊥,i fails loudly when neither the file nor the deck supplies it. Each must be positive
+  - `tau_E`    -- whole-plasma energy confinement time τ̄_E [s], required by
+    `P_perp_model = :tau_E` (default `nothing`)
+  - `P_perp_model` -- how the perpendicular Prandtl number is built: `:D_perp` (default; needs
+    χ⊥,i), `:chi_perp_e`, `:chi_perp_i`, `:P_phi`, `:c_beta` or `:tau_E`; see
+    `InnerLayer.SLAYER.slayer_parameters`. `:tau_E` sets both P_perp and P_tor from τ̄_E, so it
+    ignores `chi_phi`/`chi_tor`. `chi_perp_e` still sets the critical-Δ width in every mode
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
@@ -90,17 +97,12 @@ constructor.
 
 # Kinetic-profile source
 
-SLAYER reads kinetic profiles through the shared `Equilibrium.read_kinetic_file`
-reader (the same standardized object used by the kinetic/NTV physics), so
-there is one consistent interface for resistive and kinetic profiles.
-
-  - `profile_file`   -- path to a kinetic-profile file (relative to the run
-    dir), required when SLAYER is enabled. HDF5 (`.h5`) files use the GPEC
-    kinetic schema and may carry `chi_e` (χ⊥) and `chi_phi` (χ_φ); ASCII
-    tables are also accepted but carry no χ. When a χ dataset is absent or
-    all-zero, the scalar `chi_perp`/`chi_tor` fallbacks below are used (so a
-    file can keep the χ keys set to 0 to defer to the scalars).
-  - `profile_group`  -- group within the HDF5 file (default `"/"`)
+SLAYER takes its kinetic profiles from the equilibrium (`[Equilibrium] kinetic_file`,
+read once into `equil.kinetic`), the same object the kinetic/NTV physics reads.
+They need `n_e`, `T_e`, `T_i` and `omega_E`. HDF5 files may also carry `chi_e` (χ⊥,e),
+`chi_i` (χ⊥,i) and `chi_phi` (χ_φ); ASCII tables carry no χ. When a χ dataset is absent or
+all-zero, the scalar `chi_perp_e`/`chi_perp_i`/`chi_tor` fallbacks below are used (so a
+file can keep the χ keys set to 0 to defer to the scalars).
 
 # Output control
 
@@ -120,8 +122,11 @@ there is one consistent interface for resistive and kinetic profiles.
     ion_mass::Float64 = 2.0
     zeff::Float64 = 1.0
     impurity_charge::Float64 = 6.0
-    chi_perp::Float64 = 1.0
+    chi_perp_e::Float64 = 1.0
+    chi_perp_i::Union{Float64,Nothing} = nothing
     chi_tor::Float64 = 1.0
+    tau_E::Union{Float64,Nothing} = nothing
+    P_perp_model::Symbol = :D_perp
     D_R::Union{Float64,Nothing} = nothing
     D_geo::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0
@@ -166,9 +171,6 @@ there is one consistent interface for resistive and kinetic profiles.
 
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
 
-    profile_file::String = ""
-    profile_group::String = "/"
-
     store_scan::Bool = false
 end
 
@@ -177,6 +179,7 @@ const _UNSUPPORTED_INNER_MODELS = (:ggj_ray, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_D_C_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
+const _VALID_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
@@ -197,6 +200,15 @@ function validate(ctrl::SLAYERControl)
     ctrl.D_c_type in _VALID_D_C_TYPES ||
         throw(ArgumentError("SLAYERControl: D_c_type=$(ctrl.D_c_type) " *
                             "not in $(_VALID_D_C_TYPES)"))
+    ctrl.P_perp_model in _VALID_P_PERP_MODELS ||
+        throw(ArgumentError("SLAYERControl: P_perp_model=$(ctrl.P_perp_model) " *
+                            "not in $(_VALID_P_PERP_MODELS)"))
+    for (name, v) in (("chi_perp_e", ctrl.chi_perp_e), ("chi_perp_i", ctrl.chi_perp_i), ("chi_tor", ctrl.chi_tor))
+        v === nothing || (isfinite(v) && v > 0) ||
+            throw(ArgumentError("SLAYERControl: $name must be positive and finite [m²/s]; got $v"))
+    end
+    ctrl.P_perp_model !== :tau_E || (ctrl.tau_E !== nothing && isfinite(ctrl.tau_E) && ctrl.tau_E > 0) ||
+        throw(ArgumentError("SLAYERControl: P_perp_model=tau_E requires a positive, finite tau_E [s]"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
         throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
                             "not in $(_VALID_RESISTIVITY_MODELS)"))
@@ -257,9 +269,10 @@ function slayer_control_from_toml(section::AbstractDict)
     # Validate keys against the struct fields
     field_names = Set(String.(fieldnames(SLAYERControl)))
     unknown = [k for k in keys(flat) if !(k in field_names)]
+    hint = "chi_perp" in unknown ? " (`chi_perp` is now `chi_perp_e`.)" : ""
     isempty(unknown) ||
         throw(ArgumentError("slayer_control_from_toml: unknown keys " *
-                            "$(unknown) in [SLAYER] section. Known: " *
+                            "$(unknown) in [SLAYER] section.$hint Known: " *
                             "$(sort(collect(field_names)))."))
 
     # Coerce types where needed
@@ -267,11 +280,11 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :D_c_type,
-            :resistivity_model, :lnLambda_form)
+            :resistivity_model, :lnLambda_form, :P_perp_model)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym in (:bt, :D_R, :D_geo)
+        elseif sym in (:bt, :D_R, :D_geo, :tau_E, :chi_perp_i)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :omega_E_kHz

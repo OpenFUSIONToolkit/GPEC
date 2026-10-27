@@ -12,8 +12,9 @@ extension:
   - **HDF5 (`.h5`/`.hdf5`)** — the GPEC kinetic schema (recommended). Datasets
     at the file root: required `psi` (normalized poloidal flux), `n_e`, `T_i`,
     `T_e`, `omega_E` (and `n_i`, defaulting to `n_e` if omitted); optional
-    `omega_tor`, `chi_e` (perpendicular heat diffusivity ``\chi_\perp``),
-    `chi_phi` (toroidal momentum diffusivity ``\chi_\phi``), and `zeff`
+    `omega_tor`, `chi_e` and `chi_i` (electron and ion perpendicular heat diffusivities
+    ``\chi_{\perp,e}``, ``\chi_{\perp,i}``), `chi_phi` (toroidal momentum diffusivity
+    ``\chi_\phi``), and `zeff`
     (effective charge ``Z_\mathrm{eff}``, dimensionless). Each dataset
     carries a `units` attribute; the root carries `schema_version` and
     `provenance`. Densities are m⁻³, temperatures eV, frequencies rad/s,
@@ -25,7 +26,7 @@ extension:
     `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`, retained for backward
     compatibility. Header rows are skipped.
 
-The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_phi`/`zeff`,
+The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_i`/`chi_phi`/`zeff`,
 when present, are carried for the resistive-layer (SLAYER) analysis and ignored
 here. That analysis takes ``Z_\mathrm{eff}(\psi)`` from the `zeff` dataset when the file
 has one, otherwise from `n_i/n_e` with the `[SLAYER]` `impurity_charge`, otherwise
@@ -42,8 +43,10 @@ paths: the post-PE ψ-quadrature diagnostic and the self-consistent
 `kinetic_source = "calculated"` matrices.
 
 ```toml
-[KineticForces]
+[Equilibrium]
 kinetic_file = "kinetic.h5"    # n_i column/dataset = TOTAL main-ion density
+
+[KineticForces]
 electron = true                # add electron NTV in addition to the ion species
 impurity_charge = 6            # impurity charge (closes quasineutrality)
 impurity_mass = 12             # impurity mass
@@ -94,8 +97,8 @@ profiles and physics parameters for sensitivity studies:
 
 ### Profile-loader knobs (`density_factor`, `temperature_factor`, `ExB_rotation_factor`, `toroidal_rotation_factor`)
 
-These four knobs are applied during kinetic profile loading in
-`load_kinetic_profiles`, before any physics evaluation. The physical model is:
+These four knobs are applied when the NTV view of the kinetic profiles is built by
+`kinetic_profile_splines`, before any physics evaluation. The physical model is:
 
 ```math
 \omega_\phi = \omega_E + \omega_{*n,i} + \omega_{*T,i}

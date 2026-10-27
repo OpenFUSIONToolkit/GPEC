@@ -6,6 +6,7 @@
 
 [Equilibrium]
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
+kinetic_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc)
 grid_type = "log_asymptotic"   # Radial grid packing type
@@ -82,19 +83,19 @@ scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive re
 coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
 D_c_type                = "none"     # Critical-Δ offset selector: "none", "lar", "fitzpatrick", or "toroidal"
 ion_mass                = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
-zeff                    = 1.0        # fallback only; Z_eff(ψ) comes from the kinetic file (its zeff profile, else n_i/n_e with zimp)
+zeff                    = 1.0        # fallback only; Z_eff(ψ) comes from the kinetic file (its zeff profile, else n_i/n_e with impurity_charge)
 impurity_charge         = 6.0        # Impurity charge closing quasi-neutrality when Z_eff(ψ) is derived from n_i/n_e (6.0 = carbon)
-chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
+chi_perp_e              = 1.0       # fallback only; the kinetic file supplies χ⊥,e(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
+P_perp_model            = "D_perp"   # Perpendicular Prandtl number model: "D_perp" (default), "chi_perp_e", "chi_perp_i", "P_phi", "c_beta", or "tau_E" (needs tau_E [s]; also replaces the χ_φ-based P_tor)
 # omega_E_kHz           = {"2/1" = 0.0, "3/1" = 3.0} # override of the E×B rotation Ω_E/2π per unit n [kHz], keyed by m/n; unlisted surfaces use the kinetic file
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
 filter_above_poles      = true       # Discard roots above the highest pole γ
 filter_outside_re       = true       # Condition the above-pole filter on the +γ step exiting the Re(Δ)=0 contour loop
 polish_roots            = true       # refine each root to the true zero; enables the validity gate
 store_scan              = false      # per-surface scans omitted from HDF5 (uncoupled has one per surface)
-# Standardized kinetic-profile file (GPEC HDF5 kinetic schema), shared with the
-# sibling ideal example; carries n_e, T_e, T_i, omega_E, chi_e (χ⊥), chi_phi (χ_φ).
-profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (relative to the run dir), required when SLAYER is enabled
+# Kinetic profiles come from the [Equilibrium] kinetic_file (GPEC HDF5 kinetic schema), shared with the
+# sibling ideal example; it carries n_e, T_e, T_i, omega_E, chi_e (χ⊥,e), chi_i (χ⊥,i), chi_phi (χ_φ).
 
 [SLAYER.scan_grid]
 Q_re_range = [-2.0, 2.0]       # Scan box in the normalized Q plane, Re(Q) axis

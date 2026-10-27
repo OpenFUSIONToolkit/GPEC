@@ -122,6 +122,7 @@ function build_benchmark_tomldir(eq_file::String, kin_file::String)
 
 [Equilibrium]
 eq_filename = "$eq_name"
+kinetic_file = "$kin_file"
 eq_type = "efit"
 jac_type = "hamada"
 grid_type = "pow1"             # Matches Fortran DIIID_kinetic_example (equil/grid.f90 powspace)
@@ -161,7 +162,6 @@ renorm_threshold = 1e4
 write_outputs_to_HDF5 = true
 
 [KineticForces]
-kinetic_file = "$kin_file"
 nn = 1
 nl = 4
 zi = 1
