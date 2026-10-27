@@ -33,6 +33,7 @@ const TEST_SUITES = [
     "runtests_slayer_params.jl" => "errorfields",
     "runtests_slayer_riccati.jl" => "errorfields",
     "runtests_slayer_inputs.jl" => "errorfields",
+    "runtests_slayer_profile_transport.jl" => "errorfields",
     "runtests_layer_overlap_fitzpatrick.jl" => "core",
     "runtests_dispersion_residual.jl" => "errorfields",
     "runtests_dispersion_coupled.jl" => "errorfields",
