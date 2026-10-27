@@ -9,10 +9,10 @@
     function _ref_kwargs(; dr_val=0.0, dc_type=:none)
         return (
             n_e=5.0e19, t_e=1000.0, t_i=1000.0,
-            omega=0.0, omega_e=-1.0e4, omega_i=5.0e3,
+            omega_e=-1.0e4, omega_i=5.0e3,
             qval=2.0, sval_r=1.0, bt=2.0,
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
-            chi_perp=1.0, chi_tor=1.0,
+            chi_perp_e=1.0, chi_tor=1.0,
             m=2, n=1,
             dr_val=dr_val, dgeo_val=0.5, dc_type=dc_type,
             ising=3
@@ -21,7 +21,7 @@
 
     @testset "Test 1: round-trip from dimensional inputs" begin
         @info "Building SLAYERParameters from a reference deuterium case"
-        p = slayer_parameters(; _ref_kwargs()...)
+        p = slayer_parameters(; P_perp_model=:chi_perp_e, _ref_kwargs()...)
 
         # Identity / passthrough
         @test p.ising == 3
@@ -47,7 +47,7 @@
         # Default resistivity closure is neoclassical (Sauter F_33). The
         # trapped-particle correction raises η above plain Spitzer at the
         # same lnΛ: η_neo = η_Sp / F_33 with F_33 ∈ (0,1).
-        p_spitzer = slayer_parameters(; _ref_kwargs()...,
+        p_spitzer = slayer_parameters(; P_perp_model=:chi_perp_e, _ref_kwargs()...,
             resistivity_model=SpitzerModel(), lnLambda_form=:nrl)
         @test p.eta > p_spitzer.eta
         @test 1.1 < p.eta / p_spitzer.eta < 4.0    # banana-regime F_33 ≈ 0.3–0.9
@@ -57,7 +57,7 @@
         # formulas), so this is a genuine cross-check, not a tautology.
         lnLamb_wesson = 24.0 + 3.0 * log(10.0) - 0.5 * log(5.0e19) + log(1000.0)
         eta_wesson = 1.65e-9 * lnLamb_wesson / (1000.0 / 1e3)^1.5
-        p_legacy = slayer_parameters(; _ref_kwargs()...,
+        p_legacy = slayer_parameters(; P_perp_model=:chi_perp_e, _ref_kwargs()...,
             resistivity_model=SpitzerHarmModel(), lnLambda_form=:wesson)
         @test p_legacy.eta ≈ eta_wesson rtol = 3e-2
 
@@ -79,7 +79,7 @@
         # Compressibility is in (0,1) for finite β
         @test 0.0 < p.c_beta < 1.0
 
-        # Prandtl-like ratios are positive and equal here (chi_perp=chi_tor=1)
+        # Prandtl-like ratios are positive and equal here (chi_perp_e=chi_tor=1)
         @test p.P_perp ≈ p.P_tor
         @test p.P_perp > 0
 
@@ -96,29 +96,29 @@
         # All four dc_type branches must produce finite, non-NaN values
         # and respect the signs/structure of the formulas in
         # the SLAYER params dc_tmp formulas.
-        p_none = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:none)...)
+        p_none = slayer_parameters(; P_perp_model=:chi_perp_e, _ref_kwargs(; dr_val=0.01, dc_type=:none)...)
         @test p_none.dc_tmp == 0.0   # :none ignores dr_val
 
-        p_lar = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:lar)...)
-        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:rfitzp)...)
-        p_tor = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:toroidal)...)
+        p_lar = slayer_parameters(; P_perp_model=:chi_perp_e, _ref_kwargs(; dr_val=0.01, dc_type=:lar)...)
+        p_rf = slayer_parameters(; P_perp_model=:chi_perp_e, _ref_kwargs(; dr_val=0.01, dc_type=:fitzpatrick)...)
+        p_tor = slayer_parameters(; P_perp_model=:chi_perp_e, _ref_kwargs(; dr_val=0.01, dc_type=:toroidal)...)
 
         @test isfinite(p_lar.dc_tmp)
         @test isfinite(p_rf.dc_tmp)
         @test isfinite(p_tor.dc_tmp)
         # dr_val > 0 with the (-dr_val) prefactor ⇒ negative dc_tmp for
-        # :lar, :rfitzp, :toroidal branches.
+        # :lar, :fitzpatrick, :toroidal branches.
         @test p_lar.dc_tmp < 0
         @test p_rf.dc_tmp < 0
         @test p_tor.dc_tmp < 0
 
         # Sign flips with sign of dr_val
-        p_lar_neg = slayer_parameters(;
+        p_lar_neg = slayer_parameters(; P_perp_model=:chi_perp_e,
             _ref_kwargs(; dr_val=-0.01, dc_type=:lar)...)
         @test sign(p_lar_neg.dc_tmp) == -sign(p_lar.dc_tmp)
 
         # Reject unknown dc_type
-        @test_throws ArgumentError slayer_parameters(;
+        @test_throws ArgumentError slayer_parameters(; P_perp_model=:chi_perp_e,
             _ref_kwargs(; dr_val=0.01, dc_type=:bogus)...)
     end
 
@@ -143,9 +143,9 @@
     @testset "Test 1d: reject diamagnetic frequencies that leave D undefined" begin
         # iota_e = ω_*e/(ω_*e − ω_*i) must be finite and positive for D ∝ √iota_e.
         _drifts(ωe, ωi) = merge(_ref_kwargs(), (omega_e=ωe, omega_i=ωi))
-        @test_throws ArgumentError slayer_parameters(; _drifts(-1.0e4, -1.0e4)...)   # degenerate: iota_e singular
-        @test_throws ArgumentError slayer_parameters(; _drifts(-1.0e4, -2.0e4)...)   # same sign, |ω_*i| > |ω_*e|: iota_e = -1
-        @test_throws ArgumentError slayer_parameters(; _drifts(0.0, 5.0e3)...)       # no electron drift: iota_e = 0
+        @test_throws ArgumentError slayer_parameters(; P_perp_model=:chi_perp_e, _drifts(-1.0e4, -1.0e4)...)   # degenerate: iota_e singular
+        @test_throws ArgumentError slayer_parameters(; P_perp_model=:chi_perp_e, _drifts(-1.0e4, -2.0e4)...)   # same sign, |ω_*i| > |ω_*e|: iota_e = -1
+        @test_throws ArgumentError slayer_parameters(; P_perp_model=:chi_perp_e, _drifts(0.0, 5.0e3)...)       # no electron drift: iota_e = 0
     end
 
     @testset "Test 2: r-based shear conversion" begin
@@ -181,8 +181,8 @@
         # diagnostic keeping the sign. dc_type=:lar with nonzero dr_val exercises the Wd
         # iteration and the critical-Δ square roots as well as tau_h.
         base = _ref_kwargs(; dr_val=-0.1, dc_type=:lar)
-        pos = slayer_parameters(; base...)
-        neg = slayer_parameters(; merge(base, (; sval_r=-1.0))...)
+        pos = slayer_parameters(; P_perp_model=:chi_perp_e, base...)
+        neg = slayer_parameters(; P_perp_model=:chi_perp_e, merge(base, (; sval_r=-1.0))...)
 
         # The sign survives where it is a diagnostic, not a magnitude.
         @test pos.sval_r == 1.0
@@ -198,5 +198,46 @@
         # tau_h > 0 keeps the Lundquist number positive, so S^(1/3) is defined on reverse shear.
         @test neg.lu > 0
         @test neg.tauk > 0
+    end
+
+    @testset "Test 4: P_perp_model options" begin
+        base = merge(_ref_kwargs(), (chi_tor=1.7,))
+        ref = slayer_parameters(; P_perp_model=:chi_perp_e, base...)
+        @test ref.P_perp ≈ ref.tau_r * 1.0 / ref.rs^2 rtol = 1e-14
+        @test slayer_parameters(; base..., P_perp_model=:chi_perp_i, chi_perp_i=2.0).P_perp ≈ 2 * ref.P_perp
+        @test slayer_parameters(; base..., P_perp_model=:P_phi).P_perp == ref.P_tor
+        # Eq. 16: with flat temperatures the χ terms vanish and only c_β²η/μ₀ survives, so P_perp = c_β²
+        grads = (dlnn=-1.0, dlnTe=-2.0, dlnTi=-3.0)
+        d0 = slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=-1.0, dlnTe=0.0, dlnTi=0.0, chi_perp_i=2.0)
+        @test d0.P_perp ≈ d0.c_beta^2 rtol = 1e-12
+        # η_e = 2, η_i = 3, T_e = T_i ⇒ τ = 3/4, τ_e = 3/7, τ_i = 4/7
+        d1 = slayer_parameters(; base..., P_perp_model=:D_perp, grads..., chi_perp_i=2.0)
+        D_hand = d1.c_beta^2 * d1.eta / MU_0 + (2 / 3) * (1 - d1.c_beta^2) * ((2 / 3) * (3 / 7) * 1.0 + (3 / 4) * (4 / 7) * 2.0)
+        @test d1.P_perp ≈ d1.tau_r * D_hand / d1.rs^2 rtol = 1e-12
+        # T_e = 2T_i ⇒ τ = 3/2, τ_e = 3/5, τ_i = 2/5: fixes the orientation of the temperature ratio
+        d2 = slayer_parameters(; base..., t_e=2000.0, P_perp_model=:D_perp, grads..., chi_perp_i=2.0)
+        D_hand2 = d2.c_beta^2 * d2.eta / MU_0 + (2 / 3) * (1 - d2.c_beta^2) * ((2 / 3) * (3 / 5) * 1.0 + (3 / 4) * (2 / 5) * 2.0)
+        @test d2.P_perp ≈ d2.tau_r * D_hand2 / d2.rs^2 rtol = 1e-12
+        # A flat ion profile is finite (no 0·∞); a vanishing pressure gradient or a missing gradient is a clear error
+        @test_throws "pressure gradient vanishes" slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=0.0, dlnTe=0.0, dlnTi=0.0, chi_perp_i=2.0)
+        @test_throws "needs finite dlnn" slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=-1.0, chi_perp_i=2.0)
+        @test_throws "positive, finite chi_perp_e" slayer_parameters(; base..., P_perp_model=:chi_perp_e, chi_perp_e=-1.0)
+        @test isfinite(slayer_parameters(; base..., P_perp_model=:D_perp, dlnn=0.0, dlnTe=-2.0, dlnTi=0.0, chi_perp_i=2.0).P_perp)
+        # A non-positive or missing χ⊥,i is an error in every model that uses it
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:chi_perp_i)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:chi_perp_i, chi_perp_i=0.0)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:D_perp)
+        @test slayer_parameters(; base..., P_perp_model=:c_beta).P_perp == ref.c_beta^2
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:bogus)
+        # τ̄_E = 0.1 s and a = 0.6 m ⇒ uniform χ_E = (3/16)·0.36/0.1 m²/s sets both Prandtl numbers
+        te = slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1, a_minor=0.6)
+        @test te.P_tor ≈ te.tau_r * ((3 / 16) * 0.6^2 / 0.1) / te.rs^2 rtol = 1e-14
+        @test te.P_perp == te.P_tor
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:tau_E)
+        @test_throws ArgumentError slayer_parameters(; base..., P_perp_model=:tau_E, tau_E=0.1)
+        # Only P_perp moves; the critical-Δ offset keeps using chi_perp_e.
+        cb = slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))..., P_perp_model=:c_beta)
+        @test cb.dc_tmp == slayer_parameters(; P_perp_model=:chi_perp_e, merge(base, (dr_val=-1.0, dc_type=:lar))...).dc_tmp
+        @test cb.P_tor == ref.P_tor
     end
 end
