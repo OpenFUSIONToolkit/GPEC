@@ -466,8 +466,7 @@ robustness.
 
   - `raw_profile`: A `DirectRunInput` object containing the initial splines (`psi_in`, `sq_in`)
     and run parameters (`equil_input`).
-  - `fieldline_int`: the flux-surface tracer, called as `fieldline_int(psifac, raw_profile, ro, zo,
-    rs2, theta_nodes) -> (y_out, bfield)` with `y_out` already sampled at `theta_nodes` through
+  - `fieldline_int`: the flux-surface tracer, called as `fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)` with `y_out` already sampled at `theta_nodes` through
     `sample_trace_at_sfl_angles`.
 
 ## Returns:
@@ -588,6 +587,29 @@ robustness.
     rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
     rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
 
+    eqfun_B, eqfun_metric1, eqfun_metric2 = _eqfun_from_geometry(
+        profiles, rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac, ro, psio, grid2d, opts2d)
+
+    geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
+
+    params = EquilibriumParameters()
+    params.bt_sign = raw_profile.bt_sign
+    params.ip_sign = raw_profile.ip_sign
+    params.psihigh_resolved = psihigh
+
+    return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
+        rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
+        eqfun_B, eqfun_metric1, eqfun_metric2,
+        ro, zo, psio)
+end
+
+# Reuse the processed geometry when restoring a frozen equilibrium snapshot.
+function _eqfun_from_geometry(profiles, rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac, ro, psio, grid2d, opts2d)
+    mpsi = length(grid2d[1]) - 1
+    theta_nodes = grid2d[2]
+    mtheta = length(theta_nodes) - 1
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
@@ -652,17 +674,5 @@ robustness.
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
 
-    geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
-        rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
-
-    params = EquilibriumParameters()
-    params.bt_sign = raw_profile.bt_sign
-    params.ip_sign = raw_profile.ip_sign
-    params.psihigh_resolved = psihigh
-
-    return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
-        rzphi_xs, rzphi_ys,
-        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2,
-        ro, zo, psio)
+    return eqfun_B, eqfun_metric1, eqfun_metric2
 end
