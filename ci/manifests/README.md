@@ -22,18 +22,18 @@ settings, so incompatible images are not restored. Existing production caches re
 
 CI restores the dependency depot first, then overlays GPEC's compiled package directory from a
 smaller cache keyed by Julia version, runner architecture, dependency pins, source contents, and
-the test compilation settings. Successful runs save a missing GPEC entry on pull requests as well
-as pushes. A dependency-key miss also saves a refreshed depot after a prefix restore, so newly
-compiled dependency images are retained on pull requests. This lets test-only updates reuse the current package image without storing a new copy
-of the full depot for each source change. The dependency cache alone is immutable and cannot
-refresh GPEC after a source edit when its dependency key still matches.
+build settings. Cache writes have a run-specific suffix to avoid stale reservations; restores
+match the compatible prefix. A compatible snapshot is reused without saving another copy.
+Missing or incompatible snapshots are refreshed after successful compilation. Cache saves are
+best-effort and limited to three minutes, so a stalled upload cannot block the workflow indefinitely.
 
-For each Julia version, a production precompile job builds and caches the package before releasing
-three parallel test groups (`core`, `api`, `errorfields`). Each group restores the exact depot and
-source-cache keys published by that job, along with its resolved `Manifest.toml` and Julia version.
-A missing cache fails the handoff rather than silently rebuilding dependencies in every group.
-The two Julia versions progress independently. Cold compilation is paid once per version; warm
-runs reuse the existing production images.
+For each Julia version, a production precompile job prepares the environment before releasing
+three parallel test groups (`core`, `api`, `errorfields`). On hosted runners it uploads a one-day
+workflow artifact containing the resolved manifest and a compressed depot archive. Test groups
+restore that artifact, preserving permissions and symlinks through tar. They do not depend on
+cache availability: a cache reservation failure or eviction cannot invalidate the job handoff.
+Artifact publication is required for precompile to pass. The two Julia versions progress independently.
+Cold compilation is paid once per version; warm runs reuse the existing production images.
 
 Test jobs use optimization level 1 to reduce first-use compilation. Julia can still reuse cached
 package images built at level 2; the production build job keeps that default optimization level.
@@ -47,7 +47,7 @@ seconds per file to distinguish this startup cost from work inside the tests.
 ## Local cache on self-hosted runners
 
 Set the repository variable `GPEC_LOCAL_CACHE_DIR` to a shared directory on the runner host.
-On self-hosted runners this replaces GitHub cache and manifest-artifact transfers with local
+On self-hosted runners this replaces GitHub cache and environment-artifact transfers with local
 snapshots keyed by the exact Julia version, dependencies, source, architecture, and build flags.
 Hosted runners continue using GitHub storage.
 
