@@ -204,7 +204,7 @@
             omega_e=-1.0e4, omega_i=5.0e3,
             qval=3.0, sval_r=1.5, bt=2.0,
             rs=0.6, R0=1.7, mu_i=2.0, zeff=1.0,
-            chi_perp=1.0, chi_tor=1.0, m=3, n=1)
+            chi_perp_e=1.0, chi_tor=1.0, m=3, n=1)
         m = SLAYERModel()
         sc1 = surface_coupling(m, p_a, 0.0 + 0im)
         sc2 = surface_coupling(m, p_b, 0.0 + 0im)
