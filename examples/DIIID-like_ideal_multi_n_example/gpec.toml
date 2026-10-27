@@ -77,10 +77,7 @@ name = "c"                              # Coil set; resolves to coil_geometries/
 currents = [1800.0, -50.0, -450.0, -800.0, -450.0, -50.0]  # Sum of n=1, 2, 3 cosine phasings with 1000, 500, 300 A peaks; n=3 lies outside nn_high [A]
 
 [PerturbedEquilibrium]
-fixed_boundary = false                  # Use fixed boundary conditions
-output_eigenmodes = true                # Output eigenmode fields as b-fields
-compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = false                         # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
-regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
+regularization_width = 0.0              # Regularization width for singular surfaces (0 = disabled)

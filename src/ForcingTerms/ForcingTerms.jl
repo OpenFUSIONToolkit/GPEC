@@ -268,12 +268,14 @@ several solves.
     RMPField(path; format=..., scale=1.0, kwargs...)
     RMPField(coil_sets::Vector{Dict{String,Any}}; scale=1.0, kwargs...)
     RMPField(ctrl::ForcingTermsControl; scale=1.0)
+    RMPField(modes::Vector{ForcingMode}; scale=1.0)
 
 The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
 or `.hdf5` extension and `"ascii"` otherwise. The second form takes TOML-shaped coil blocks
 (the `[[ForcingTerms.coil_set]]` layout) and selects the coil format. Remaining `kwargs` are
-[`ForcingTermsControl`](@ref) fields. All three return a single-source leaf
-([`RMPSource`](@ref)).
+[`ForcingTermsControl`](@ref) fields. These three return a single-source leaf
+([`RMPSource`](@ref)). The last form takes a control-surface spectrum computed elsewhere, already in
+the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`RMPSpectrum`](@ref)).
 
 ## Algebra
 
@@ -287,7 +289,7 @@ evaluated on the control surface and the mode amplitudes are summed.
 nominal = RMPField("nominal_efc.dat")
 weld_field = RMPField("weld_fields.h5"; scale=0.5)
 total = 2.0 * nominal + weld_field       # lazy: records terms and weights, computes nothing
-pe = perturbed_equilibrium(ffs, total)   # materializes each term, sums, drives PE
+pe = perturbed_equilibrium(plasma_response(ffs), total)   # materializes each term, sums, drives PE
 ```
 
 Amplitude lives with the forcing description itself: per-conductor currents for the coil
@@ -320,19 +322,36 @@ struct RMPSource <: RMPField
 end
 
 """
+    RMPSpectrum
+
+A spectrum-literal [`RMPField`](@ref) leaf: control-surface forcing modes computed elsewhere, in the
+unit-norm `Φ_x` convention the response consumes, plus a complex weight. Built by
+`RMPField(modes::Vector{ForcingMode})`; scalar multiplication rescales the weight.
+
+## Fields
+
+  - `modes::Vector{ForcingMode}` - The control-surface spectrum, copied at construction.
+  - `scale::ComplexF64` - The leaf's weight in a linear combination, as for [`RMPSource`](@ref).
+"""
+struct RMPSpectrum <: RMPField
+    modes::Vector{ForcingMode}
+    scale::ComplexF64
+end
+
+"""
     RMPFieldSum
 
-A lazy linear combination of [`RMPSource`](@ref) leaves, built by `+`/`-` on
+A lazy linear combination of [`RMPSource`](@ref) and [`RMPSpectrum`](@ref) leaves, built by `+`/`-` on
 [`RMPField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
 the leaves. Materialization evaluates each term against the equilibrium and sums the mode
 amplitudes — valid because the perturbed-equilibrium response is linear in the forcing.
 
 ## Fields
 
-  - `terms::Vector{RMPSource}` - The flattened weighted sources.
+  - `terms::Vector{Union{RMPSource,RMPSpectrum}}` - The flattened weighted leaves.
 """
 struct RMPFieldSum <: RMPField
-    terms::Vector{RMPSource}
+    terms::Vector{Union{RMPSource,RMPSpectrum}}
 end
 
 """
@@ -354,14 +373,18 @@ function RMPField(coil_sets::Vector{Dict{String,Any}}; scale::Number=1.0, kwargs
     return RMPSource(ctrl, ComplexF64(scale))
 end
 
+RMPField(modes::Vector{ForcingMode}; scale::Number=1.0) =
+    RMPSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
+
 "Flattened weighted-leaf list of any [`RMPField`](@ref)."
-_rmp_terms(f::RMPSource) = [f]
+_rmp_terms(f::Union{RMPSource,RMPSpectrum}) = Union{RMPSource,RMPSpectrum}[f]
 _rmp_terms(f::RMPFieldSum) = f.terms
 
 Base.:+(a::RMPField, b::RMPField) = RMPFieldSum(vcat(_rmp_terms(a), _rmp_terms(b)))
 Base.:-(a::RMPField) = -1 * a
 Base.:-(a::RMPField, b::RMPField) = a + (-1 * b)
 Base.:*(c::Number, f::RMPSource) = RMPSource(f.ctrl, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::RMPSpectrum) = RMPSpectrum(f.modes, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::RMPFieldSum) = RMPFieldSum([c * t for t in f.terms])
 Base.:*(f::RMPField, c::Number) = c * f
 

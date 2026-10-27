@@ -247,6 +247,11 @@ function build_inputs_from_h5(args::Vector{String})
     # Parse TOML blob, replay the frozen forcing file, then fold in overrides: file overrides
     # first, then CLI flags, so an overridden [ForcingTerms] still wins.
     inputs = TOML.parse(toml_raw)
+    # Overrides can set keys but not delete them, so a stored deck with retired keys cannot be replayed.
+    for (section, keys) in _DEPRECATED_KEYS
+        haskey(inputs, section) && _stop_on_deprecated_keys(inputs[section], keys, section;
+            remedy="$source_h5 was written by an older GPEC version; re-run from the original deck instead of replaying it")
+    end
     if forcing_snapshot !== nothing
         forcing_file = splitext(output_name)[1] * "_forcing.h5"
         modes, normalization = forcing_snapshot
@@ -290,11 +295,11 @@ end
 The equilibrium configuration and the input `PlasmaEquilibrium` consumes, rebuilt from a stored
 TOML `inputs` dict and the equilibrium `ingest` read from a `gpec.h5`. Analytic kinds regenerate
 from their TOML section; file-based kinds rebuild splines from the stored ingest. A file-based
-run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Mutates `inputs`
-only to drop deprecated equilibrium keys.
+run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Stops on
+deprecated equilibrium keys.
 """
 function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir::AbstractString)
-    _drop_deprecated_keys!(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
+    _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
     # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
     # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))

@@ -34,7 +34,6 @@ Produced by `compute_bounce_data()`, consumed by pitch integration.
 struct BounceData
     nlmda::Int
     lambda::Vector{Float64}           # pitch angle grid points
-    dlambda::Vector{Float64}          # weights (dx/dnorm from powspace)
     sigma::Vector{Int}                # 0=trapped, 1=passing
     wb::Vector{Float64}               # bounce frequency ωb(λ) [rad/s]
     wd::Vector{Float64}               # precession drift ωd(λ) [rad/s]
@@ -54,7 +53,7 @@ sub-grid samples that every ℓ reuses. Produced by `compute_bounce_geometry`, c
 
 ## Fields
 
-  - `nlmda`, `lambda`, `dlambda`, `sigma`: the λ grid, as in `BounceData`
+  - `nlmda`, `lambda`, `sigma`: the λ grid, as in `BounceData`
   - `wb`, `wd`: bounce and precession frequencies [rad/s]
   - `wbbar::Vector{Float64}`: normalized bounce frequency per λ (`wb = wbbar·bhat`)
   - `total_wb::Vector{Float64}`: full bounce-action integral per λ, the phase normalization
@@ -66,7 +65,6 @@ sub-grid samples that every ℓ reuses. Produced by `compute_bounce_geometry`, c
 struct BounceGeometry
     nlmda::Int
     lambda::Vector{Float64}
-    dlambda::Vector{Float64}
     sigma::Vector{Int}
     wb::Vector{Float64}
     wd::Vector{Float64}
@@ -310,7 +308,7 @@ function compute_bounce_geometry(
 
     # Build λ grid based on method variant (Fortran lines 569-585)
     method_char = method[1]
-    lambda, dlambda = _build_lambda_grid(method_char, lmdatpb, lmdamax, nlmda)
+    lambda = _build_lambda_grid(method_char, lmdatpb, lmdamax, nlmda)
 
     wb_arr = zeros(Float64, nlmda)
     wd_arr = zeros(Float64, nlmda)
@@ -366,7 +364,7 @@ function compute_bounce_geometry(
         wd_arr[ilmda] = wdbar * dhat
     end
 
-    return BounceGeometry(nlmda, lambda, dlambda, sigma_arr, wb_arr, wd_arr, wbbar_arr, total_wb_arr,
+    return BounceGeometry(nlmda, lambda, sigma_arr, wb_arr, wd_arr, wbbar_arr, total_wb_arr,
         fsi_wb, jvtheta, wmu_mt, wen_mt, valid)
 end
 
@@ -412,7 +410,7 @@ function bounce_harmonic(geometry::BounceGeometry, l::Int, n::Int, q::Float64, r
         end
     end
 
-    return BounceData(nlmda, geometry.lambda, geometry.dlambda, geometry.sigma,
+    return BounceData(nlmda, geometry.lambda, geometry.sigma,
         geometry.wb, geometry.wd, dJdJ_arr, wmats_arr)
 end
 
@@ -538,21 +536,20 @@ end
 # ============================================================================
 
 """
-Build λ grid based on method character (f/t/p).
-Returns (lambda, dlambda) with endpoints excluded.
+Build λ grid based on method character (f/t/p), with endpoints excluded.
 """
 function _build_lambda_grid(method_char::Char, lmdatpb::Float64, lmdamax::Float64, nlmda::Int)
     lmdamin = 0.0
 
     if method_char == 't'
         # Trapped only: λ ∈ (lmdatpb, lmdamax), exclude endpoints
-        pts_inc, wts_inc = powspace(lmdatpb, lmdamax, 1, 2 + nlmda, "both")
-        return pts_inc[2:end-1], wts_inc[2:end-1]
+        pts_inc, _ = powspace(lmdatpb, lmdamax, 1, 2 + nlmda, "both")
+        return pts_inc[2:end-1]
 
     elseif method_char == 'p'
         # Passing only: λ ∈ (lmdamin, lmdatpb), exclude endpoints
-        pts_inc, wts_inc = powspace(lmdamin, lmdatpb, 1, 2 + nlmda, "both")
-        return pts_inc[2:end-1], wts_inc[2:end-1]
+        pts_inc, _ = powspace(lmdamin, lmdatpb, 1, 2 + nlmda, "both")
+        return pts_inc[2:end-1]
 
     else  # 'f' = full
         if lmdatpb ≈ lmdamax
@@ -561,12 +558,10 @@ function _build_lambda_grid(method_char::Char, lmdatpb::Float64, lmdamax::Float6
         # Passing half with refinement near upper boundary
         nhalf_p = nlmda ÷ 2
         nhalf_t = nlmda - nhalf_p
-        pts_p, wts_p = powspace(lmdamin, lmdatpb, 2, 2 + nhalf_p, "upper")
-        pts_t, wts_t = powspace(lmdatpb, lmdamax, 2, 2 + nhalf_t, "lower")
+        pts_p, _ = powspace(lmdamin, lmdatpb, 2, 2 + nhalf_p, "upper")
+        pts_t, _ = powspace(lmdatpb, lmdamax, 2, 2 + nhalf_t, "lower")
         # Exclude boundary points
-        lambda = vcat(pts_p[2:end-1], pts_t[2:end-1])
-        dlambda = vcat(wts_p[2:end-1], wts_t[2:end-1])
-        return lambda, dlambda
+        return vcat(pts_p[2:end-1], pts_t[2:end-1])
     end
 end
 

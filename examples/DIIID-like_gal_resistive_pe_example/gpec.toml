@@ -1,9 +1,9 @@
 # DIII-D-like H-mode DRIVEN resistive example: gal Δ′ + inner-layer matching, with DIII-D
-# C-coil forcing (n=1 cosine phasing) staged for PerturbedEquilibrium. The response and the
-# singular coupling are switched off: they require the free-boundary δW, which the Galerkin
-# formalism does not yet produce, and PE refuses them on a Galerkin or matched result. The
-# gal-matched resistive ξ and penetrated field are carried on the result for when gal-side
-# δW lands. Same equilibrium and Galerkin settings as the sibling
+# C-coil forcing (n=1 cosine phasing) staged for PerturbedEquilibrium. The run stops at the
+# PerturbedEquilibrium stage for now: the plasma response needs the free-boundary δW, which the
+# Galerkin formalism does not yet produce, and a follow-up makes it run. The gal-matched
+# resistive ξ and penetrated field are carried on the result for when gal-side δW lands.
+# Same equilibrium and Galerkin settings as the sibling
 # DIIID-like_gal_resistive_example; differences start at [ForcingTerms].
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
@@ -103,10 +103,7 @@ name = "c"                              # DIII-D C-coil (6 coils); resolves to c
 currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
 
 [PerturbedEquilibrium]
-fixed_boundary = false                  # Use fixed boundary conditions
-output_eigenmodes = true                # Output eigenmode fields as b-fields
-compute_response = false                # Compute plasma response to forcing
-compute_singular_coupling = false       # Compute singular layer coupling metrics
+compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
-regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
+regularization_width = 0.0              # Regularization width for singular surfaces (0 = disabled)
