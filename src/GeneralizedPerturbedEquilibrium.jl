@@ -243,6 +243,12 @@ function main_from_inputs(
     resolve_mode_space!(intr, ctrl)
 
     equil = Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
+    # GPEC differentiates the spline of F, so single-precision FPOL rounding becomes noise in Δ′.
+    if eq_config.eq_type in Equilibrium.EFIT_KINDS && ctrl.integrator in ("riccati", "galerkin") &&
+       Equilibrium.gfile_fpol_single_precision(eq_config.eq_filename)
+        @warn "The g-file's FPOL is single precision. Its rounding puts noise of order ±2–3 on Δ′ at 257 radial " *
+              "nodes; regenerate the file in double precision for converged Δ′." file = eq_config.eq_filename
+    end
 
     kf_ctrl = kinetic_forces_control(inputs, ctrl, equil)
     equil = maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl=kf_ctrl)

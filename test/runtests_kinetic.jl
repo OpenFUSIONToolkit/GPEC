@@ -131,6 +131,24 @@ using TOML
             # qt multiplies by (x - 2.5) = 0.5
             @test val_qt ≈ (x - 2.5) * val_no atol = 1e-14
         end
+
+        @testset "small collisions damp for either rotation sign" begin
+            # Match a positive Krook width for either rotation direction.
+            for we in (2.0, -2.0)
+                p_small = KF.EnergyParams(
+                    1.0, 0.5, we, 0.5, 1.0, 0.0, 1.0, 1,
+                    "small", "maxwellian", 1.0, false
+                )
+                p_krook = KF.EnergyParams(
+                    1.0, 0.5, we, 0.5, 1.0, 1e-5 * abs(we), 1.0, 1,
+                    "krook", "maxwellian", 1.0, false
+                )
+                for x in (0.3, 1.0, 3.0)
+                    @test KF.energy_integrand_scalar(x, p_small) ≈
+                          KF.energy_integrand_scalar(x, p_krook) rtol = 1e-14
+                end
+            end
+        end
     end
 
     # =========================================================================
