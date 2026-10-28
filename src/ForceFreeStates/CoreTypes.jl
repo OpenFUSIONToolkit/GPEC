@@ -118,7 +118,6 @@ gpec.toml.
 ## Fields
 
   - `verbose::Bool` - Enable verbose output
-  - `local_stability_flag::Bool` - Enable local stability analysis (`D_I` and ballooning)
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mtheta_vacuum::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzeta_vacuum::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
@@ -138,7 +137,7 @@ gpec.toml.
   - `rational_offset_fraction::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `truncate_at_rational_offset` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
   - `frobenius_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
+  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (the drift-kinetic matrices of the KineticForces model, evaluated on the `[KineticForces]` profiles; needs `integrator = "forward"` and is deck-driven through `main`)
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
@@ -149,11 +148,10 @@ gpec.toml.
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
   - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
-  - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
+  - `extended_precision_bvp::Bool` - Solve the Δ' BVP and its PEST3 combination in `Complex{Double64}` (~31 digits). Default `true`, guarding the cancellation in the PEST3 combination. Set `false` to use Float64 after checking the complex Δ' matrix against Double64 at the chosen matching distance.
 """
 @kwdef struct ForceFreeStatesControl
     verbose::Bool = true
-    local_stability_flag::Bool = false
     vac_flag::Bool = false
     mtheta_vacuum::Int = 480
     nzeta_vacuum::Int = 1
@@ -183,10 +181,10 @@ gpec.toml.
     force_termination::Bool = false
     integrator::String = "riccati"   # Default: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream. Use "forward" for dense ξ (PerturbedEquilibrium) or kinetic runs.
     nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
-    extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
+    extended_precision_bvp::Bool = true
 
     # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port); selected by integrator = "galerkin" ---
-    gal_solver::String = "LU"       # "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs)
+    gal_solver::String = "auto"     # "auto" (banded Cholesky if the matrix is positive definite, else LU), "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs, error if not positive definite)
     gal_nx::Int = 256               # elements per interval between singular surfaces
     gal_nq::Int = 6                 # Gauss-Lobatto quadrature order per element
     gal_pfac::Float64 = 0.001       # grid packing ratio near singular surfaces
@@ -201,9 +199,8 @@ gpec.toml.
     gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
     gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
     gal_edge_onesided::Bool = false # pack the two end intervals one-sided toward their single rational end (vs the Fortran symmetric "both" pack); avoids the fine edge cell that inflates cond(A). Default false = faithful to gal.f.
-    gal_cut_solution::Bool = false  # also keep the cut solution for a later match's composite inner profiles; implied by gal_match_flag
     # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
-    gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
+    gal_match_flag::Bool = false    # match the inner layer on the finished solve (coil-driven ξ from Δ′ + inner Δ(Q)); needs gal_rpec_flag=true, or riccati with vac_flag=true
     gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
     gal_inner_solver::String = "ray" # inner-layer Δ backend for the match: "ray" (rotated contour + inward march; recommended for every Q) or "galerkin" (real-axis Hermite FEM; accuracy depends on the surface and arg Q)
     # --- Inner-layer "galerkin" backend overrides (gal_inner_solver = "galerkin"; unset keeps the backend default) ---

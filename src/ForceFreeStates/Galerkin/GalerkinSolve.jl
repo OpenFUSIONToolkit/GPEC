@@ -39,14 +39,16 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
     return ws
 end
 
-"""Empty `GalerkinResult` for a domain with no resonant surfaces."""
+"""
+Empty `GalerkinResult` for a domain with no resonant surfaces.
+"""
 function empty_galerkin_result()
-    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing)
+    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, "none")
 end
 
 """
     galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
-                   intr::ForceFreeStatesInternal; wv=nothing) -> (GalerkinResult, Union{Nothing,DeltaPrimeData})
+                   intr::ForceFreeStatesInternal; wv=nothing, cut_solution=false) -> (GalerkinResult, Union{Nothing,DeltaPrimeData})
 
 Compute the outer-region Δ′ matching matrix by the singular Galerkin method. Port of `gal_solve`
 (gal.f). Single toroidal mode only (`intr.npert == 1`). Returns the solver internals as a
@@ -54,13 +56,15 @@ Compute the outer-region Δ′ matching matrix by the singular Galerkin method. 
 resonant surfaces in the domain it returns an empty result and `nothing`.
 
 `wv` is the vacuum energy matrix from `free_run`, which supplies the free-boundary edge term
-`wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge.
+`wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge. `cut_solution` also keeps the
+cut solution, for a later `MatchProblem`'s composite inner profiles.
 """
 function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
-    intr::ForceFreeStatesInternal; wv=nothing)
+    intr::ForceFreeStatesInternal; wv=nothing, cut_solution::Bool=false)
 
     intr.npert == 1 || error("galerkin_solve: only single-n (npert == 1) is supported")
-    ctrl.gal_solver in ("LU", "cholesky") || error("galerkin_solve: gal_solver must be \"LU\" or \"cholesky\"")
+    ctrl.gal_solver in ("auto", "LU", "cholesky") ||
+        error("galerkin_solve: gal_solver must be \"auto\", \"LU\" or \"cholesky\"")
     nn = intr.nlow
     mpert = intr.numpert_total
     np = GAL_NP
@@ -74,22 +78,20 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
 
-    # Per-surface two-sided asymptotic series matching Fortran sing.f vmatr/vmatl:
-    # right = sig=+1, left = sig=-1, no √det normalization. The Mercier exponent α is a
-    # property of the surface, so the left series reuses the right's α (alpha_override). The order is
-    # raised to gal_sing_order + ceil(2·Re(α)) for high-Mercier-index surfaces (Fortran sing1_vmat).
+    # Per-surface two-sided asymptotic series (sig = ±1). Each side uses its own resonant block.
     asymps = GalSingAsymp[]
     for s in sings
         sing_order = ctrl.gal_sing_order
         ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
         if ctrl.gal_sing_order_ceiling
+            # The order is raised for high-Mercier-index surfaces
             order = ctrl.gal_sing_order + ceil(Int, 2 * real(ar.alpha[1]))
             if order > ctrl.gal_sing_order
                 sing_order = order
                 ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
             end
         end
-        al = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=-1.0, alpha_override=ar.alpha, sing_order=sing_order)
+        al = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=-1.0, sing_order=sing_order)
         push!(asymps, GalSingAsymp(ar, al))
     end
 
@@ -97,14 +99,10 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     nx = ctrl.gal_nx
     kl = mpert * (np + 1)
     ku = kl
-    ldab = ctrl.gal_solver == "LU" ? 2kl + ku + 1 : kl + 1
+    ldab = 2kl + ku + 1
     # rpec_flag (RDCON, gal.f): append mpert coil-response columns. Each is a unit source at
     # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
-    # Cholesky's lower-only edge zeroing can't represent the rpec identity edge, so require LU.
     ncoil = ctrl.gal_rpec_flag ? mpert : 0
-    if ncoil > 0 && ctrl.gal_solver != "LU"
-        error("galerkin_solve: gal_rpec_flag=true requires gal_solver=\"LU\" (coil edge BC needs the full-band path)")
-    end
     nsol = 2 * msing + ncoil
     intvl = [GalInterval(zeros(Float64, nx + 1), zeros(Float64, nx + 1), [GalCell(mpert) for _ in 1:nx])
              for _ in 0:msing]
@@ -131,7 +129,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
 
     if ctrl.verbose
-        offdbg = ws.solver == "LU" ? ws.kl + ws.ku + 1 : 1
+        offdbg = ws.kl + ws.ku + 1
         @info "Galerkin assembly: ndim=$(ws.ndim) nsol=$nsol kl=$(ws.kl) ldab=$(ws.ldab) |rhs|=$(norm(ws.rhs))"
         for ising in 0:msing
             for cell in ws.intvl[ising+1].cells
@@ -144,14 +142,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     # --- banded solve (gal.f) ---
     ws.sol .= ws.rhs
-    if ws.solver == "LU"
-        ctrl.verbose && @info "Galerkin LU banded factorization + solve"
-        gal_scaled_lu_solve!(ws.mat, ws.sol, ws.kl, ws.ku)
-    else
-        ctrl.verbose && @info "Galerkin Cholesky banded factorization + solve"
-        LinearAlgebra.LAPACK.pbtrf!('L', ws.kl, ws.mat)
-        LinearAlgebra.LAPACK.pbtrs!('L', ws.kl, ws.mat, ws.sol)
-    end
+    ws.solver = gal_banded_solve!(ws.mat, ws.sol, ws.kl, ws.ku, ctrl.gal_solver)
+    ctrl.verbose && @info "Galerkin banded solve: $(ws.solver)"
 
     # --- extract Δ′ from the small resonant coefficients (gal.f) ---
     delta = zeros(ComplexF64, nsol, 2 * msing)
@@ -167,8 +159,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     Ap, Bp, Gammap, Deltap = gal_pest3_blocks(delta, msing)
 
-    # Mercier index D_I = -Re(α²); α is the small/large solution exponent (a surface property, taken
-    # from the right series — the left series reuses the same α via alpha_override above).
+    # Mercier index D_I = -Re(α²). α is the half-separation of the resonant exponents.
     di = [real(-asymps[i].right.alpha[1]^2) for i in 1:msing]
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
 
@@ -183,13 +174,13 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     # solution only when a later match needs the composite inner profiles.
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
-        delta=((ctrl.gal_cut_solution || ctrl.gal_match_flag) ? delta : nothing))
+        delta=(cut_solution ? delta : nothing))
 
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
-    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution), dp
+    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, ws.solver), dp
 end
 
 """
@@ -204,7 +195,7 @@ function gal_scaled_lu_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{Com
     n = size(mat, 2)
     off = kl + ku + 1  # band row holding the diagonal
     d = [iszero(mat[off, j]) ? 1.0 : 1 / sqrt(abs(mat[off, j])) for j in 1:n]
-    for j in 1:n, i in max(1, j - ku):min(n, j + kl)
+    for j in 1:n, i in max(1, j-ku):min(n, j+kl)
         mat[off+i-j, j] *= d[i] * d[j]
     end
     sol .*= d
@@ -254,6 +245,7 @@ are dumped under `Basis/` in the shared axis order. Replaces the Fortran
 function write_galerkin!(out_h5, result::GalerkinResult; basis_output::Bool=false)
     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
     out_h5["$gal/rational_count"] = result.msing
+    out_h5["$gal/solver"] = result.solver
     if result.msing == 0
         annotate_galerkin!(out_h5)
         return nothing
@@ -280,15 +272,25 @@ end
 # Metadata tables for the Galerkin outputs (see docs/development/hdf5-conventions.md).
 const GALERKIN_H5_ANNOTATIONS = [
     "ForceFreeStates/Solutions/GalerkinIntegration/rational_count" => (; long_name="number of rational (singular) surfaces in the Galerkin solve"),
+    "ForceFreeStates/Solutions/GalerkinIntegration/solver" =>
+        (; long_name="banded solver used for the Galerkin system: cholesky, LU, or none when no rational surfaces were present"),
     "ForceFreeStates/Solutions/GalerkinIntegration/psi" => (; long_name="normalized poloidal flux ψ_N grid of the closed Galerkin solution", scale="psi_gal"),
     "ForceFreeStates/Solutions/GalerkinIntegration/q" =>
         (; long_name="safety factor q on the Galerkin solution grid", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
     "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi" =>
-        (; long_name="closed axis-to-edge ξ^ψ profiles (ideal or inner-layer closure; identity-at-edge basis)", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+        (;
+            long_name="closed axis-to-edge ξ^ψ profiles (ideal or inner-layer closure; identity-at-edge basis)",
+            dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)
+        ),
     "ForceFreeStates/Solutions/GalerkinIntegration/dxi_psidpsi" =>
         (; long_name="analytic ψ_N derivative of the closed ξ^ψ profiles", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
     "ForceFreeStates/Solutions/GalerkinIntegration/xi_s" =>
-        (; long_name="surface displacement ξ_s from the outer ideal-MHD relation", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+        (;
+            long_name="surface displacement ξ_s from the outer ideal-MHD relation",
+            dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)
+        ),
     "ForceFreeStates/Solutions/GalerkinIntegration/Basis/psi" => (; long_name="normalized poloidal flux ψ_N grid of the raw Galerkin basis", scale="psi_gal_basis"),
     "ForceFreeStates/Solutions/GalerkinIntegration/Basis/is_rational" =>
         (; long_name="flag: grid node lies on a rational surface", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/Basis/psi",)),
@@ -324,4 +326,91 @@ const GALERKIN_H5_ANNOTATIONS = [
 function annotate_galerkin!(out_h5)
     Utilities.HDF5Annotations.annotate!(out_h5, GALERKIN_H5_ANNOTATIONS)
     return nothing
+end
+
+"""
+    gal_banded_solve!(mat, sol, kl, ku, solver) -> String
+
+Solve the full-band system `mat` (LAPACK `gbtrf` storage) in place of `sol` and return the
+solver used. `"auto"` tries `gal_cholesky_solve!` and reports a fallback to
+`gal_scaled_lu_solve!` for unequal bandwidths, asymmetric off-diagonal entries, or a
+non-positive-definite real-diagonal system. `"cholesky"` errors instead of falling back.
+"""
+function gal_banded_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int, solver::String)
+    if solver != "LU"
+        if kl != ku
+            solver == "cholesky" && throw(ArgumentError("gal_solver=\"cholesky\" requires equal lower and upper bandwidths (kl=$kl, ku=$ku)"))
+            @info "Galerkin Cholesky requires equal lower and upper bandwidths; solving by LU" kl ku
+        else
+            gal_cholesky_solve!(mat, sol, kl, ku) && return "cholesky"
+            solver == "cholesky" &&
+                error("gal_solver=\"cholesky\": off-diagonal entries are not Hermitian or the real-diagonal system is not positive definite; use \"auto\" or \"LU\"")
+            @info "Galerkin off-diagonal entries are not Hermitian or the real-diagonal system is not positive definite; solving by LU"
+        end
+    end
+    gal_scaled_lu_solve!(mat, sol, kl, ku)
+    return "LU"
+end
+
+"""
+    gal_cholesky_solve!(mat, sol, kl, ku) -> Bool
+
+Banded Cholesky solve of the full-band system `mat`, leaving `mat` untouched. Rows that are
+identity rows (Dirichlet DOFs: axis, fixed or coil edge) have their columns moved to the
+right-hand side. The free block's off-diagonal entries must agree with their conjugate
+partners within `1e-10 * sqrt(abs(A_ii)) * sqrt(abs(A_jj))`. Cholesky uses the lower band
+and deliberately projects the diagonal onto its real part. Returns `false`, with `sol`
+unchanged, for unequal bandwidths, nonfinite entries, off-diagonal asymmetry, or a
+non-positive-definite projected matrix.
+"""
+function gal_cholesky_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int)
+    kl == ku || return false
+    n = size(mat, 2)
+    off = 2kl + 1
+    a(i, j) = mat[off+i-j, j]
+    band(i) = max(1, i-kl):min(n, i+kl)
+    fixed = [all(j == i ? a(i, j) == 1 : iszero(a(i, j)) for j in band(i)) for i in 1:n]
+    for j in 1:n
+        isfinite(a(j, j)) || return false
+        for i in (j+1):min(n, j+kl)
+            isfinite(a(i, j)) && isfinite(a(j, i)) || return false
+            fixed[i] || fixed[j] ||
+                abs(a(i, j) - conj(a(j, i))) <= 1e-10 * sqrt(abs(a(i, i))) * sqrt(abs(a(j, j))) || return false
+        end
+    end
+    ab = zeros(ComplexF64, kl + 1, n)
+    for j in 1:n, i in j:min(n, j+kl)
+        ab[1+i-j, j] = fixed[i] || fixed[j] ? (i == j ? one(ComplexF64) : zero(ComplexF64)) : a(i, j)
+    end
+    gal_zpbtrf!(ab, kl) || return false
+    for c in 1:n
+        fixed[c] || continue
+        for r in band(c)
+            r == c || fixed[r] || (@views sol[r, :] .-= a(r, c) .* sol[c, :])
+        end
+    end
+    gal_zpbtrs!(ab, kl, sol)
+    return true
+end
+
+# Lower-band Hermitian Cholesky (LAPACK zpbtrf/zpbtrs, 'L'). LinearAlgebra.LAPACK has no
+# pbtrf!/pbtrs! wrapper, so call LAPACK directly. Returns false if not positive definite.
+function gal_zpbtrf!(AB::Matrix{ComplexF64}, kd::Int)
+    info = Ref{LinearAlgebra.BlasInt}()
+    ccall((LinearAlgebra.BLAS.@blasfunc(zpbtrf_), LinearAlgebra.libblastrampoline), Cvoid,
+        (Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt},
+            Ref{LinearAlgebra.BlasInt}, Clong),
+        'L', size(AB, 2), kd, AB, max(1, stride(AB, 2)), info, 1)
+    LAPACK.chklapackerror(min(info[], 0))
+    return info[] == 0
+end
+
+function gal_zpbtrs!(AB::Matrix{ComplexF64}, kd::Int, B::AbstractVecOrMat{ComplexF64})
+    info = Ref{LinearAlgebra.BlasInt}()
+    ccall((LinearAlgebra.BLAS.@blasfunc(zpbtrs_), LinearAlgebra.libblastrampoline), Cvoid,
+        (Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Ptr{ComplexF64},
+            Ref{LinearAlgebra.BlasInt}, Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}, Clong),
+        'L', size(AB, 2), kd, size(B, 2), AB, max(1, stride(AB, 2)), B, max(1, stride(B, 2)), info, 1)
+    LAPACK.chklapackerror(info[])
+    return B
 end

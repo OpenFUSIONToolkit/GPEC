@@ -2,7 +2,7 @@
 #
 # Inner-layer Δ via the Fitzpatrick two-fluid drift-MHD layer Riccati ODE
 # (Fitzpatrick, Tearing Mode Dynamics in Tokamak Plasmas, IOP 2023; Park
-# et al. 2022, Phys. Plasmas 29, 122505; Burgess et al. 2026), for the
+# 2022, Phys. Plasmas 29, 072506; Burgess et al. 2026), for the
 # pressureless tearing channel (no parallel flow, pe = 0). The A, B, C
 # coefficients, the dW/dp Riccati equation, the large-p asymptotic boundary
 # conditions, the regime test D² > ι_e P_⊥/P_tor^(2/3), the small-p
@@ -169,7 +169,7 @@ pressureless layer produces only the tearing channel.
 # Algorithm
 
 Implements the Fitzpatrick two-fluid drift-MHD layer formulation
-(Fitzpatrick 2023; Park et al. 2022) for the pressureless tearing channel
+(Fitzpatrick 2023; Park 2022) for the pressureless tearing channel
 (no parallel flow, pe = 0). Integrates
 `dW/dp = -(fA'/p)·W − W²/p + (fB/(fA·fC))·p³` from a large `p_start`
 (selected by `_riccati_f_initial` according to whether

@@ -26,7 +26,7 @@ The ForceFreeStates module (ideal MHD stability analysis) implements methods fro
 
 - **Glasser (2016)**: "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma"
   - Location: `docs/resources/2016-Glasser-The_direct_criterion_of_Newcomb_for_the_ideal_MHD_stability_of_an_axisymmetric_toroidal_plasma.pdf`
-  - Published: Physics of Plasmas **23**, 112506 (2016)
+  - Published: Physics of Plasmas **23**, 072505 (2016)
   - **Describes: FUNDAMENTAL PAPER - Newcomb's criterion for ideal MHD stability (current implementation)**
 
 - **Glasser (2018)**: "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control"
@@ -77,6 +77,16 @@ The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are
   - Published: Plasma Physics and Controlled Fusion **68**, 065017 (2026), doi 10.1088/1361-6587/ae7156
   - Describes: The two-fluid slab layer, its four regimes, and the `S^(1/3)` outer-inner matching
 
+- **Fitzpatrick (2022)**: "Influence of anomalous perpendicular transport on linear tearing mode dynamics in tokamak plasmas"
+  - Location: `docs/resources/2022-Fitzpatrick-Influence of anomalous perpendicular transport on linear tearing mode dynamics in tokamak plasmas.pdf`
+  - Published: Physics of Plasmas **29**, 032507 (2022)
+  - Describes: The perpendicular particle diffusivity D_⊥ built from the electron and ion energy diffusivities (Eqs. 4-6, 16), used by `P_perp_model = :D_perp`
+
+- **Fitzpatrick (2023)**: "Error-field penetration thresholds in ohmically heated ITER and SPARC plasmas"
+  - Location: `docs/resources/2023-Fitzpatrick-Error-field penetration thresholds in ohmically heated ITER and SPARC plasmas.pdf`
+  - Published: Physics of Plasmas **30**, 092512 (2023)
+  - Describes: P_⊥ = P_φ = τ_R/τ_E with the local τ_E = r²/χ_E (Eqs. 81-83, 131, 143) and the whole-plasma τ̄_E = κ_e a²/χ_E (Eqs. 37-38), used by `P_perp_model = :P_phi` and `:tau_E`
+
 - **Fitzpatrick (2025)**: "Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation"
   - Location: `docs/resources/2025-Fitzpatrick-Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation.pdf`
   - Published: Nuclear Fusion (2025), doi 10.1088/1741-4326/ae4fdd (open access: arXiv:2511.07666)
@@ -88,7 +98,7 @@ GPEC will eventually implement resistive MHD stability analysis based on:
 
 - **Glasser (2016)**: "Computation of resistive instabilities by matched asymptotic expansions"
   - Location: `docs/resources/2016-Glasser-Computation_of_resistive_instabilities_by_matched_asymptotic_expansions-compressed.pdf`
-  - Published: Physics of Plasmas **23**, 072505 (2016)
+  - Published: Physics of Plasmas **23**, 112506 (2016)
   - Describes: Resistive stability analysis and Δ' calculation via matched asymptotic expansions
 
 - **Glasser (2018)**: "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time"

@@ -7,7 +7,9 @@ field perturbations in mode space, following the GPEC gpeq module approach.
 Displacement components from ODE integration (u_store/du_store/xi_s_store):
 - ξ_ψ: radial displacement (u_store[:,:,1,:])
 - dξ_ψ/dψ: radial derivative (du_store)
-- ξ_s: toroidal displacement (xi_s_store, Glasser 2016 eq. 18)
+- ξ_s: surface displacement ξ_s = J(ξ×B)·(∇θ×∇ζ) = χ₁(q ξ^θ - ξ^ζ), the in-surface
+  displacement across B (binormal Clebsch component); it is not a toroidal displacement
+  (xi_s_store; Glasser 2016 Phys. Plasmas 23, 072505, eqs. 9 and 18)
 
 Contravariant perturbed field from ideal MHD (matches Fortran gpeq_sol):
     b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
@@ -19,7 +21,7 @@ where χ₁ = 2π·Ψ₀ [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10].
 Clebsch displacement components for PENTRC (matches Fortran gpout_xclebsch):
     ξ^ψ         = xsp_mn    (unregularized)
     ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + reg_spot²))
-                           regularization_width = 0 in kinetic runs — no ideal singularity to smooth
+                           unregularized at the default regularization_width = 0
     ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp) ideal, ξ_s·singfac factor kinetic; divided by χ₁ in output)
 
 Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contra):
@@ -45,7 +47,7 @@ _mode_mn(ffs::ForceFreeStatesResult, j::Int) = (ffs.mlow + (j - 1) % ffs.mpert, 
 """
     reconstruct_physical_fields(
         response_vector, flux_matrix, solution,
-        equil, ffs, intr, metric, mats, ctrl
+        equil, ffs, metric, mats, regularization_width
     ) -> (xi_modes, b_modes)
 
 Reconstruct displacement and perturbed magnetic field from eigenmode response.
@@ -80,10 +82,9 @@ function reconstruct_physical_fields(
     solution::SolutionProfiles,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
-    intr::PerturbedEquilibriumInternal,
     metric::MetricData,
     mats::MatrixSplines,
-    ctrl::PerturbedEquilibriumControl
+    regularization_width::Float64
 )
     npsi = size(solution.u_store, 4)
     psi_grid = solution.psi_store[1:npsi]
@@ -114,7 +115,7 @@ function reconstruct_physical_fields(
         # Compute Clebsch displacements with regularization (matches Fortran gpeq_sol + gpout_xclebsch)
         clebsch_psi, clebsch_psi1, clebsch_alpha = compute_clebsch_displacements(
             xi_psi_modes, xi_psi1_modes, xi_s_modes,
-            psi_grid, equil, ffs, mats, ctrl
+            psi_grid, equil, ffs, mats, regularization_width
         )
 
         # Compute regularized (modified) b-field components (matches Fortran gpeq_sol bmt/bmz)
@@ -126,7 +127,7 @@ function reconstruct_physical_fields(
         # Compute contravariant displacement via Jacobian convolution (matches Fortran gpeq_contra)
         xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes = compute_contra_displacements(
             xi_psi_modes, clebsch_psi1, clebsch_alpha,
-            psi_grid, equil, ffs, metric, ctrl
+            psi_grid, equil, ffs, metric, regularization_width
         )
 
         # Compute covariant components via metric tensor contraction (matches Fortran gpeq_cova)
@@ -228,13 +229,13 @@ alpha = flux_matrix \\ response_vector
 Then sum eigenmode contributions at each radial point (matches Fortran gpeq_sol):
 xi_psi[ipsi, :]  = u_store[:, :, 1, ipsi]  * alpha   # Ξ_ψ
 xi_psi1[ipsi, :] = du_store[:, :, ipsi] * alpha   # dΞ_ψ/dψ
-xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (toroidal, Glasser 2016 eq. 18)
+xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (surface displacement, Glasser 2016 eqs. 9, 18)
 
 # Returns
 
   - `xi_psi_modes`: Radial displacement ξ_ψ(ψ, m) [npsi, numpert_total]
   - `xi_psi1_modes`: Radial derivative dξ_ψ/dψ(ψ, m) [npsi, numpert_total]
-  - `xi_s_modes`: Toroidal displacement ξ_s(ψ, m) = -A⁻¹(B·dξ_ψ/dψ + C·ξ_ψ) [npsi, numpert_total]
+  - `xi_s_modes`: Surface displacement ξ_s(ψ, m) = χ₁(q ξ^θ - ξ^ζ) = -A⁻¹(B·dξ_ψ/dψ + C·ξ_ψ) [npsi, numpert_total]
 """
 function sum_eigenmode_contributions(
     response_vector::Vector{ComplexF64},
@@ -263,7 +264,7 @@ function sum_eigenmode_contributions(
         mul!(view(xi_psi1_modes, ipsi, :),
             @view(solution.du_store[:, :, ipsi]),
             alpha)
-        # xi_s_store = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
+        # xi_s_store = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (surface displacement, Glasser 2016 eqs. 9, 18)
         mul!(view(xi_s_modes, ipsi, :),
             @view(solution.xi_s_store[:, :, ipsi]),
             alpha)
@@ -327,7 +328,7 @@ end
 """
     compute_clebsch_displacements(
         xi_psi_modes, xi_psi1_modes, xi_s_modes,
-        psi_grid, equil, ffs, mats, ctrl
+        psi_grid, equil, ffs, mats, regularization_width
     ) -> (clebsch_psi, clebsch_psi1, clebsch_alpha)
 
 Compute Clebsch displacement components for PENTRC output.
@@ -351,7 +352,7 @@ function compute_clebsch_displacements(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
     mats::MatrixSplines,
-    ctrl::PerturbedEquilibriumControl
+    regularization_width::Float64
 )
     npsi, mpert = size(xi_psi_modes)
     chi1 = 2π * equil.psio
@@ -361,7 +362,7 @@ function compute_clebsch_displacements(
     clebsch_psi1 = copy(xi_psi1_modes)        # will be regularized below
     clebsch_alpha = xi_s_modes ./ chi1         # ξ^α/χ₁ (will be regularized below)
 
-    reg_spot = ctrl.regularization_width  # Fortran gpec reg_spot
+    reg_spot = regularization_width  # Fortran gpec reg_spot
     @assert reg_spot >= 0 "regularization_width must be non-negative (got $reg_spot)"
 
     if reg_spot == 0
@@ -423,7 +424,7 @@ function compute_clebsch_displacements(
         # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
-        mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
+        mul!(xms_vec, cmat_buf, xsp_vec, 1.0 + 0.0im, 1.0 + 0.0im)  # xms += C*xsp
         # ideal A only; the kinetic A is non-Hermitian and is treated separately above
         amat_fact = cholesky!(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
@@ -484,7 +485,7 @@ end
 """
     compute_contra_displacements(
         xi_psi_modes, clebsch_psi1, clebsch_alpha,
-        psi_grid, equil, ffs, metric, ctrl
+        psi_grid, equil, ffs, metric, regularization_width
     ) -> (xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes)
 
 Compute contravariant displacement via Jacobian mode coupling convolution.
@@ -507,12 +508,12 @@ function compute_contra_displacements(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs::ForceFreeStatesResult,
     metric::MetricData,
-    ctrl::PerturbedEquilibriumControl
+    regularization_width::Float64
 )
     npsi, numpert_total = size(xi_psi_modes)
     (; mpert, mlow, nlow, npert) = ffs
     chi1 = 2π * equil.psio
-    reg_spot = ctrl.regularization_width  # Fortran gpec reg_spot
+    reg_spot = regularization_width  # Fortran gpec reg_spot
     fc = metric.fourier_coeffs
 
     xwp_modes = zeros(ComplexF64, npsi, numpert_total)
@@ -832,7 +833,7 @@ function compute_b_n_xi_n_modes(
         jd = jacs .* delpsis
 
         for in in 1:npert
-            blk = ((in - 1) * mpert + 1):(in * mpert)
+            blk = ((in-1)*mpert+1):(in*mpert)
             # IDFT: mode space → theta space
             bwp_fun = phase_fwd * b_psi_modes[ipsi, blk]   # [mthsurf] — b^ψ (not J-weighted)
             xwp_fun = phase_fwd * xwp_modes[ipsi, blk]     # [mthsurf] — J·ξ^ψ (J-weighted from gpeq_contra)
@@ -1021,7 +1022,7 @@ function _apply_rzphi_transform(
         zeta_fn = buf.ze
 
         for in in 1:npert
-            blk = ((in - 1) * mpert + 1):(in * mpert)
+            blk = ((in-1)*mpert+1):(in*mpert)
             # Inverse DFT: modes → theta-space (in place)
             Utilities.FourierTransforms.inverse_transform!(psi_fun, ft, view(psi_input, ipsi, blk))
             Utilities.FourierTransforms.inverse_transform!(theta_fn, ft, view(theta_input, ipsi, blk))
