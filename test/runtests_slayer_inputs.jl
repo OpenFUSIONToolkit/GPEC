@@ -232,8 +232,9 @@
             bt=2.0, dc_type=:toroidal, dr_val=0.01)
 
         sing.restype = resist_geometry(equil, psi_s, q1_s)
+        # Pin the label so the reference k_ref below does not depend on the build_slayer_inputs default.
         p = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
-            bt=2.0, dc_type=:toroidal, dr_val=0.01)[1]
+            bt=2.0, dc_type=:toroidal, dr_val=0.01, rs_method=:flux)[1]
         @test isfinite(p.dgeo_val) && p.dgeo_val > 0
         @test isfinite(p.dc_tmp) && p.dc_tmp < 0
         # An interchange-stable surface (D_R < 0) gets a positive, stabilizing critical-Δ.
@@ -243,8 +244,8 @@
 
         # Wiring check, not physics: the derivation reaches toroidal_dgeo and toroidal_kpar with the surface's inputs.
         rg = sing.restype
-        rs = surface_minor_radius(equil, psi_s)
-        k_ref = rs / surface_da_dpsi(equil, psi_s)
+        r_at, dr_at = radial_label(equil; rs_method=:flux)
+        k_ref = r_at(psi_s) / dr_at(psi_s)
         dgeo_ref = toroidal_dgeo(; chi1=2π * equil.psio, v1=rg.v1_local, q=q_s, q1=q1_s, n=1,
             avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=k_ref)
         kpar_ref = toroidal_kpar(; chi1=2π * equil.psio, v1=rg.v1_local, q=q_s, q1=q1_s, n=1, avg_bsq=rg.avg_bsq, k_ref=k_ref)
@@ -257,19 +258,19 @@
 
         # An explicit dgeo_val still overrides the derivation; K∥ stays derived.
         p_fix = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
-            bt=2.0, dc_type=:toroidal, dr_val=0.01, dgeo_val=0.3)[1]
+            bt=2.0, dc_type=:toroidal, dr_val=0.01, dgeo_val=0.3, rs_method=:flux)[1]
         @test p_fix.dgeo_val == 0.3
         @test p_fix.kpar_val ≈ kpar_ref rtol = 1e-12
 
         # The factors are derived for every dc_type once a ResistGeometry is present.
         p_rf = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
-            bt=2.0, dc_type=:fitzpatrick, dr_val=0.01)[1]
+            bt=2.0, dc_type=:fitzpatrick, dr_val=0.01, rs_method=:flux)[1]
         @test p_rf.dgeo_val ≈ dgeo_ref rtol = 1e-12
         @test p_rf.kpar_val ≈ kpar_ref rtol = 1e-12
 
         # The radial label reaches the geometry only through k_ref, and the whole toroidal critical-Δ, closure
         # included, scales with k_ref like the converted outer Δ' (exact up to the W_d iteration's 1e-10).
-        for lab in (:flux, :volume)
+        for lab in (:midplane, :volume)
             p_lab = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
                 bt=2.0, dc_type=:toroidal, dr_val=0.01, rs_method=lab)[1]
             @test p_lab.k_ref != p.k_ref
