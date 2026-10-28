@@ -107,4 +107,46 @@
         @test rp.rmin > r0
         @test_throws r"outside the ψ grid" direct_position!(rp)
     end
+
+    # Quadratic ψ = ψ₀ − c (x² + 2b·x·y + y²/e²) about (r0, 0), exact on the cubic spline; `sgn = -1` turns the
+    # axis into a minimum of ψ. With b·e near 1 the Hessian is strongly tilted (ψ_RZ ≠ 0), where the Gauss–Seidel
+    # bisection sweep contracts by (b e)² per pass.
+    function quadratic_psi(; b, sgn=1.0, nr=64)
+        sol = SolovevConfig(; mr=nr, mz=nr)
+        cfg = EquilibriumConfig(; eq_type="sol")
+        (; elongation, a, r0) = sol
+        e = elongation
+        psio = 1.0
+        c = psio / a^2
+        rs = collect(range(r0 - 1.5a, r0 + 1.5a; length=nr + 1))
+        zs = collect(range(-1.5e * a, 1.5e * a; length=nr + 1))
+        psi = [psio - sgn * c * ((R - r0)^2 + 2b * (R - r0) * Z + Z^2 / e^2) for R in rs, Z in zs]
+        psi_in = cubic_interp((rs, zs), psi; extrap=ExtendExtrap())
+        rp = DirectRunInput(cfg, sol_run(cfg, sol).sq_in, psi_in, rs, zs, rs[1], rs[end], zs[1], zs[end], psio, 1, 1, nothing)
+        return rp, r0, rs[2] - rs[1], e
+    end
+
+    @testset "axis checks reject a minimum of ψ and accept the maximum" begin
+        EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+        rp, r0, _, e = quadratic_psi(; b=0.0)
+        @test EQ._axis_failure(rp, EQ.DirectBField(), deriv1(rp.sq_in), r0, 0.0; bound_residual=true) === nothing
+        rp_min, _, _, _ = quadratic_psi(; b=0.0, sgn=-1.0)
+        msg = EQ._axis_failure(rp_min, EQ.DirectBField(), deriv1(rp_min.sq_in), r0, 0.0; bound_residual=false)
+        @test msg isa String && occursin("not the maximum of ψ", msg)
+    end
+
+    @testset "restart seed and capped Newton recover a tilted axis" begin
+        EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+        rp, r0, h, e = quadratic_psi(; b=0.9 / 1.6)
+        bf, sqd = EQ.DirectBField(), deriv1(rp.sq_in)
+        w = (rp.rmax - rp.rmin) / 20
+        # Start ten cells away in both directions; four fixed passes at (b e)² = 0.81 would leave it several cells off.
+        seed = EQ._axis_bisection_seed(rp, bf, sqd, r0 + 10h, 10h, w)
+        @test seed isa Tuple
+        rb, zb = seed
+        @test hypot(rb - r0, zb) < h
+        ro, zo, status = EQ._axis_newton(rp, bf, sqd, rb, zb, w)
+        @test status === :converged
+        @test abs(ro - r0) < 1e-10 && abs(zo) < 1e-10
+    end
 end
