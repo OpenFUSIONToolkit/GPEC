@@ -17,9 +17,6 @@ mpsi         = 128             # Number of radial grid intervals (0 = two-pass a
 mtheta       = 256             # Number of poloidal grid points
 imas_cocos   = 11              # Expected COCOS convention of the input IMAS dd (11 = IMAS standard)
 
-[Wall]
-shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-
 [ForceFreeStates]
 nn_low               = 1       # Smallest toroidal mode number to include
 nn_high              = 1       # Largest toroidal mode number to include

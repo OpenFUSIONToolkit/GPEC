@@ -15,7 +15,7 @@ using HDF5
         GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
-    wall = GPEC.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in deck["Wall"])...)
+    wall = GPEC.Vacuum.parse_wall(get(deck, "Wall", nothing))
 
     # The deck's `[ForceFreeStates]` block as `solve` keywords: everything except the knobs the
     # integrator object and the `nn` keyword own.
@@ -115,7 +115,7 @@ using HDF5
             GPEC.Equilibrium.SolovevConfig(kdeck["SOL_INPUT"])
         )
         @test kequil.kinetic !== nothing
-        kwall = GPEC.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in kdeck["Wall"])...)
+        kwall = GPEC.Vacuum.parse_wall(get(kdeck, "Wall", nothing))
         kkwargs = Dict(Symbol(k) => v for (k, v) in kdeck["ForceFreeStates"] if !(k in ("integrator", "nn_low", "nn_high")))
         mktempdir() do dir
             for name in readdir(kin_template)

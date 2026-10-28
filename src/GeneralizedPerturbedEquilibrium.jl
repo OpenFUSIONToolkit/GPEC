@@ -263,11 +263,7 @@ function main_from_inputs(
         return
     end
 
-    if "Wall" in keys(inputs)
-        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    else
-        intr.wall_settings = Vacuum.WallShapeSettings()
-    end
+    intr.wall_settings = Vacuum.parse_wall(get(inputs, "Wall", nothing))
 
     if "DEBUG" in keys(inputs)
         intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
@@ -773,7 +769,7 @@ function run_force_free_states(
         # Compute free boundary energies.
         if ctrl.vac_flag
             if ctrl.verbose
-                wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
+                wall_desc = intr.wall_settings === nothing ? "no wall" : nameof(typeof(intr.wall_settings))
                 @info "Computing free boundary energies ($wall_desc)"
             end
             free_energies = free_run(odet, ctrl, equil, mats, intr)
@@ -840,7 +836,7 @@ function run_deck_match(result::ForceFreeStatesResult, ctrl::ForceFreeStatesCont
 end
 
 """
-    EulerLagrangeProblem(equil; nn, wall=Vacuum.WallShapeSettings(),
+    EulerLagrangeProblem(equil; nn, wall=nothing,
                          dir_path=".", debug=DebugSettings(), kwargs...)
 
 The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
@@ -859,14 +855,14 @@ come from `nn`.
 ## Fields
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
-  - `wall::Vacuum.WallShapeSettings` - Vacuum wall shape for the free-boundary energies.
+  - `wall::Union{Nothing,Vacuum.WallSettings}` - Vacuum wall shape for the free-boundary energies.
   - `dir_path::String` - Working directory for outputs.
   - `debug::DebugSettings` - Diagnostic dump settings.
   - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
 """
 struct EulerLagrangeProblem
     equil::Equilibrium.PlasmaEquilibrium
-    wall::Vacuum.WallShapeSettings
+    wall::Union{Nothing,Vacuum.WallSettings}
     dir_path::String
     debug::DebugSettings
     ctrl_kwargs::Dict{Symbol,Any}
@@ -875,7 +871,7 @@ end
 function EulerLagrangeProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
-    wall::Vacuum.WallShapeSettings=Vacuum.WallShapeSettings(),
+    wall::Union{Nothing,Vacuum.WallSettings}=nothing,
     dir_path::AbstractString=".",
     debug::DebugSettings=DebugSettings(),
     kwargs...

@@ -51,7 +51,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
-  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
+  - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape settings for vacuum calculations
 """
 @kwdef mutable struct ForceFreeStatesInternal <: ModeSpace
     dir_path::String = ""
@@ -74,7 +74,7 @@ A mutable struct holding internal state variables for stability calculations.
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     debug_settings::DebugSettings = DebugSettings()
-    wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
+    wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
     """
     Inter-surface Δ' matrix of shape (msing × msing) in PEST3 convention.
     Computed by `compute_delta_prime_matrix!` (parallel FM path only) using the STRIDE

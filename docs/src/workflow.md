@@ -52,7 +52,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Purpose**: Compute the magnetostatic vacuum response matrices that couple the plasma boundary to external fields. These matrices are used by ForceFreeStates and PerturbedEquilibrium to apply boundary conditions and decompose fields in poloidal mode space.
 
-**Configuration**: `[Wall]` section of `gpec.toml`
+**Configuration**: optional `[Wall]` section of `gpec.toml`; omit it for no wall
 
 **Inputs**:
 - `PlasmaEquilibrium` from Stage 1 (plasma boundary coordinates, toroidal mode number n)
@@ -148,7 +148,7 @@ eq_filename = "g-file.txt"
 
 [Wall]
 shape = "conformal"
-a = 0.3
+standoff_fraction = 0.3
 
 [ForceFreeStates]
 mlow = -3

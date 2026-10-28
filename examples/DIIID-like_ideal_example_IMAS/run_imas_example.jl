@@ -22,7 +22,7 @@ using EFIT
 const GEQDSK = joinpath(@__DIR__, "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk")
 @assert isfile(GEQDSK) "G-file not found at $GEQDSK"
 
-# Shared settings: both runs use identical ForceFreeStates and Wall config.
+# Shared settings: both runs use identical ForceFreeStates config and no wall.
 # Only the [Equilibrium] section differs between IMAS and g-file paths.
 const SHARED_CONFIG = Dict(
     "ForceFreeStates" => Dict(
@@ -33,8 +33,7 @@ const SHARED_CONFIG = Dict(
         "verbose" => false,
         "delta_mhigh" => 16,
         "qlow" => 1.02
-    ),
-    "Wall" => Dict("shape" => "nowall")
+    )
 )
 
 const EQ_COMMON = Dict(

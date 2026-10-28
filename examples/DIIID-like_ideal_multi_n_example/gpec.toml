@@ -18,16 +18,6 @@ newq0 = 0                      # Target on-axis safety factor q(0) (0 = use inpu
 flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace each flux surface
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
-[Wall]
-shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-standoff_fraction = 0.2415     # Wall standoff in plasma minor radii (conformal, dee)
-half_thickness = 0.05          # Half-thickness parameter for Dee-shaped walls
-elongation = 1.5               # Elongation parameter for wall shapes
-center_offset = 0              # Offset of wall center from major radius
-triangularity = 0.5            # Triangularity parameter for wall shapes
-corner_sharpness = 0.05        # Sharpness of wall corners (try 0.05 as initial value)
-equal_arc_wall = true          # Equal arc length distribution of nodes on wall
-
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan

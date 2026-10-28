@@ -204,7 +204,7 @@ The complete GPEC analysis pipeline:
 
 ### Vacuum
 - `VacuumInput` - Input parameters for vacuum calculations
-- `WallShapeSettings` - Wall geometry configuration
+- `WallSettings` - Wall geometry configuration
 
 ### Stability
 - `SingType` - Singular surface data including:

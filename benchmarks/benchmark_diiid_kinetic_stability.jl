@@ -133,9 +133,6 @@ mtheta = 256
 newq0 = 0
 flux_surface_rtol = 1e-7
 
-[Wall]
-shape = "nowall"
-
 [LocalStability]
 
 [ForceFreeStates]

@@ -295,8 +295,7 @@ end
                 eq_config,
                 haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
             )
-            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-                (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
@@ -357,8 +356,7 @@ end
                 rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
                 equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
             end
-            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-                (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
@@ -465,8 +463,7 @@ end
                 eq_config,
                 haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
             )
-            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-                (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
             intr.nlow = ctrl.nn_low;
             intr.nhigh = ctrl.nn_high;
             intr.npert = 1
@@ -530,8 +527,7 @@ end
             rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
         end
-        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-            (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1

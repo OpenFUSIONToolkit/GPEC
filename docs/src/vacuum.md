@@ -22,11 +22,12 @@ Contains plasma boundary data and calculation parameters including:
 - Grid resolution (mtheta) for vacuum calculations
 - Optional kernel sign and symmetry flags
 
-### WallShapeSettings
-Specifies wall geometry configuration with options for:
-- No wall, conformal, elliptical, dee-shaped, or custom walls
-- Geometric parameters (a, aw, bw, cw, dw, tw)
-- Equal arc length spacing option
+### WallSettings
+The abstract wall type has five concrete shapes: `Vacuum.ConformalWall`, `Vacuum.EllipticalWall`,
+`Vacuum.DeeWall`, `Vacuum.ModDeeWall`, and `Vacuum.FileWall`. Each accepts only its shape's
+parameters and `equal_arc_wall`. Pass `nothing` for no wall; a deck omits `[Wall]` in that case.
+A wall section selects `shape = "conformal"`, `"elliptical"`, `"dee"`, `"mod_dee"`, or `"file"`.
+Unknown or unused parameters error, listing the selected shape's allowed keys.
 
 ## API Reference
 
@@ -62,10 +63,9 @@ inputs = GeneralizedPerturbedEquilibrium.Vacuum.VacuumInput(
 )
 
 # Define wall settings
-wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(
-    shape = "conformal",      # Wall shape type
-    a = 0.3,                  # Wall distance parameter
-    equal_arc_wall = true     # Use equal arc length spacing
+wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.ConformalWall(;
+    standoff_fraction=0.3,    # Wall standoff in plasma minor radii
+    equal_arc_wall=true     # Use equal arc length spacing
 )
 
 # Compute vacuum response; returns a VacuumResponse with wv, I_v, plasma_pts, wall_pts
@@ -77,5 +77,5 @@ vac = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wal
 - The Julia implementation uses Bulirsch's algorithm for elliptic integrals, providing improved accuracy over polynomial approximations
 - For large mode numbers (nρ̂ ≥ 0.1), 32-point Gaussian quadrature is used for Legendre function evaluation
 - For n=0 modes with closed walls, automatic regularization is applied
-- Wall shapes support: nowall, conformal, elliptical, dee, mod_dee, or custom from file
+- Use `nothing` for no wall, or a concrete wall shape for a conducting boundary
 - The vacuum response matrix wv is scaled by the singular factor (m - nq)(m' - nq) per [Chance Phys. Plasmas 1997]

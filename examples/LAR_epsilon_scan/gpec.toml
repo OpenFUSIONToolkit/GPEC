@@ -31,8 +31,8 @@ ma               = 128         # TJ-analytic internal radial grid resolution (sh
 mtheta           = 128         # TJ-analytic internal poloidal grid resolution (θ-spline nodes)
 
 [Wall]
-shape = "conformal"            # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-standoff_fraction = 20         # Wall standoff in plasma minor radii (conformal, dee) (20× → effectively no wall)
+shape = "conformal"            # Wall shape (conformal, elliptical, dee, mod_dee, file)
+standoff_fraction = 20         # Wall standoff in plasma minor radii
 
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
 [LocalStability]

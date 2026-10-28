@@ -22,13 +22,8 @@ force_termination = false               # Terminate after equilibrium setup (ski
 # (dpm magnitudes ~ 10¹¹, |Im/Re| ≫ 1). This fixture's role is integration-pipeline
 # smoke testing + et[1] regression, NOT BVP Δ' regression — DIIID-like is the canonical
 # Δ'-matrix fixture (stable et[1] = +1.6, clean BVP Δ').
-shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-standoff_fraction = 0.2415              # Wall standoff in plasma minor radii (conformal, dee)
-half_thickness = 0.05                   # Half-thickness parameter for Dee-shaped walls
-elongation = 1.5                        # Elongation parameter for wall shapes
-center_offset = 0                       # Offset of wall center from major radius
-triangularity = 0.5                     # Triangularity parameter for wall shapes
-corner_sharpness = 0.05                 # Sharpness of wall corners (try 0.05 as initial value)
+shape = "conformal"                     # Wall shape (conformal, elliptical, dee, mod_dee, file)
+standoff_fraction = 0.2415              # Wall standoff in plasma minor radii
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
 [ForcingTerms]
