@@ -49,7 +49,6 @@ function load_case(filepath::String)::CaseSpec
                     qty_data["extract"],
                     get(qty_data, "label", qty_name),
                     get(qty_data, "noise_threshold", 1e-10),
-                    get(qty_data, "relative_threshold", 0.0),
                     get(qty_data, "order", 1000)
                 )
             )

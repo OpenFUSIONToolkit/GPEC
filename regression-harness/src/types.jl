@@ -12,7 +12,6 @@ struct QuantitySpec
     extract::String         # "value", "real_first", "imag_first", "abs_first", "norm", "all_real", "all_complex", "checksum"
     label::String           # Human-readable label for reports
     noise_threshold::Float64 # Absolute changes below this are noise
-    relative_threshold::Float64 # Changes below this fraction of the first ref's magnitude are also noise
     order::Int              # Display order in reports (lower = earlier)
 end
 
@@ -50,7 +49,6 @@ struct ExtractedQuantity
     value_text::Union{String,Nothing}  # JSON for arrays, hex for checksums
     value_type::String                  # "real", "integer", "json_array", "checksum", "missing"
     noise_threshold::Float64
-    relative_threshold::Float64
 end
 
 """

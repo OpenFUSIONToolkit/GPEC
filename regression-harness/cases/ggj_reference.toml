@@ -1,8 +1,7 @@
 # Regression case: GGJ inner-layer Galerkin solver reference (Glasser & Wang 2020, Eq. 55).
 # A "computed" case (kind = "computed", no example_dir) that calls solve_inner directly and
 # tracks the interchange (Δ₊) / tearing (Δ₋) inner-layer coefficients. Each [quantities.*] block names an
-# HDF5 path in the computed output, how to extract it, and the noise floor for diffs. The
-# Δ₊ values are ~1e3–1e4, so the floors are relative: a change below 1e-10 of the value is noise.
+# HDF5 path in the computed output, how to extract it, and the noise floor for diffs.
 [case]
 name = "ggj_reference"
 description = "GGJ inner-layer Galerkin solver, Glasser & Wang 2020 Eq. 55 with physical τ_A, τ_R, 1 kHz rotation (Q ≈ 0.22i)"
@@ -15,7 +14,6 @@ type = "real_scalar"
 extract = "value"
 label = "Re(Δ₊ interchange)"
 noise_threshold = 1e-10
-relative_threshold = 1e-10
 order = 10
 
 [quantities.delta_interchange_imag]
@@ -24,7 +22,6 @@ type = "real_scalar"
 extract = "value"
 label = "Im(Δ₊ interchange)"
 noise_threshold = 1e-10
-relative_threshold = 1e-10
 order = 11
 
 [quantities.delta_tearing_real]
@@ -33,7 +30,6 @@ type = "real_scalar"
 extract = "value"
 label = "Re(Δ₋ tearing)"
 noise_threshold = 1e-10
-relative_threshold = 1e-10
 order = 12
 
 [quantities.delta_tearing_imag]
@@ -42,7 +38,6 @@ type = "real_scalar"
 extract = "value"
 label = "Im(Δ₋ tearing)"
 noise_threshold = 1e-10
-relative_threshold = 1e-10
 order = 13
 
 [quantities.runtime]

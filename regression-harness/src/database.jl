@@ -35,7 +35,6 @@ CREATE TABLE IF NOT EXISTS quantities (
     value_text  TEXT,
     value_type  TEXT NOT NULL,
     noise_threshold REAL NOT NULL DEFAULT 0.0,
-    relative_threshold REAL NOT NULL DEFAULT 0.0,
     UNIQUE(run_id, qty_name)
 );
 
@@ -75,7 +74,7 @@ const ENV_COLUMNS = [
 ]
 
 """
-Add any `runs` and `quantities` columns missing from a database created by an earlier harness version.
+Add any `runs` columns missing from a database created by an earlier harness version.
 """
 function migrate_schema!(db::SQLite.DB)
     existing = Set(String[])
@@ -86,9 +85,6 @@ function migrate_schema!(db::SQLite.DB)
         col in existing && continue
         DBInterface.execute(db, "ALTER TABLE runs ADD COLUMN $col $sqltype")
     end
-    qcols = Set(String(something(row.name, "")) for row in query_rows(db, "PRAGMA table_info(quantities)"))
-    "relative_threshold" in qcols ||
-        DBInterface.execute(db, "ALTER TABLE quantities ADD COLUMN relative_threshold REAL NOT NULL DEFAULT 0.0")
 end
 
 function open_database(path::String)::SQLite.DB
@@ -174,11 +170,10 @@ function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::Abs
         for eq in extracted
             DBInterface.execute(db,
                 """INSERT INTO quantities
-                   (run_id, qty_name, qty_label, value_real, value_int, value_text, value_type, noise_threshold,
-                    relative_threshold)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (run_id, qty_name, qty_label, value_real, value_int, value_text, value_type, noise_threshold)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (run_id, eq.name, eq.label, eq.value_real, eq.value_int, eq.value_text,
-                    eq.value_type, eq.noise_threshold, eq.relative_threshold))
+                    eq.value_type, eq.noise_threshold))
         end
     end
 end
@@ -203,7 +198,7 @@ function get_quantities(db::SQLite.DB, commit_hash::String, case_name::String)
     results = Dict{String,NamedTuple}()
     rows = query_rows(db,
         """SELECT q.qty_name, q.qty_label, q.value_real, q.value_int, q.value_text,
-                  q.value_type, q.noise_threshold, q.relative_threshold
+                  q.value_type, q.noise_threshold
            FROM quantities q
            JOIN runs r ON q.run_id = r.id
            WHERE r.commit_hash = ? AND r.case_name = ?""",
@@ -217,8 +212,7 @@ function get_quantities(db::SQLite.DB, commit_hash::String, case_name::String)
             value_int=row.value_int,
             value_text=row.value_text,
             value_type=something(row.value_type, "missing"),
-            noise_threshold=something(row.noise_threshold, 0.0),
-            relative_threshold=_column(row.relative_threshold, 0.0)
+            noise_threshold=something(row.noise_threshold, 0.0)
         )
     end
     return results

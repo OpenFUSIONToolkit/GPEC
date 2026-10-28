@@ -338,7 +338,8 @@ decayed 45 e-folds from the origin, from the local spectrum, scaled by `sm_fac`.
 these rates, not refined against a residual, and no run-time error estimate is returned: at small |Q|
 the cubic BVP gives Δ to about 1e-8–2e-7 relative, so pass a smaller `cfl` or larger `min_cells`
 when more is needed, or [`delta_convergence`](@ref) for an error bar. A grid of more than
-`warn_cells` cells, which only very large |Q| reaches, warns. `march_rtol`
+`warn_cells` cells warns once, as a cost guard: it is set by `cfl`, `min_cells` and the local rates,
+which grow with |Q|. `march_rtol`
 is [`march_boundary`](@ref)'s `rtol`; `growth`, `seed`, `ztrk`, `purge_budget`, `dp_res` go to
 `march_boundary`/[`decaying_pair`](@ref); `handoff` (diagnostic) supplies (Us, Ub) at S.
 """
@@ -397,7 +398,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     bc_cond < 1e12 || @warn "boundary basis poorly conditioned (cond ≈ $bc_cond)"
 
     breaks = ray_breaks(params, Q, θ, Sbvp; cfl=cfl, min_cells=min_cells)
-    length(breaks) - 1 > warn_cells && @warn "GGJ ray: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells; the solve is slow at this |Q|" Q
+    length(breaks) - 1 > warn_cells && @warn "GGJ ray: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells, so the solve is slow; the grid follows cfl = $cfl, min_cells = $min_cells and the local rates at this Q" Q maxlog = 1 _id = (:ggj_ray_cells, warn_cells)
     ws = _galerkin_workspace(breaks, fill(CT_NONE, length(breaks) - 1))
     Δraw, cexp = _assemble_and_solve_point!(ws, params, Q, θ, Us, Ub, E; nq=nq)
     verbose && @printf("  BVP: %d Hermite cells on [0, %.4g], Δraw[1] = %.6e %+.6eim\n",
@@ -423,7 +424,7 @@ when the full [`RaySolveResult`](@ref) is wanted. `real_profiles`, `npc` and `ce
 profile-only model options (see `solve_inner_profile`) and are ignored here.
 """
 function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
-    real_profiles::Bool=false, npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
+    real_profiles=nothing, npc=nothing, certify_rtol=nothing, kwargs...)
     res = solve_ray(params, inner_Q(params, γ); kwargs...)
     return InnerLayerResponse(; interchange=res.Δ[1], tearing=res.Δ[2])
 end
