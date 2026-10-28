@@ -208,6 +208,13 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         @test_throws ErrorException FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=2.0), equil)
         @test FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=1.5), equil) === nothing
         @test FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=q0 + 0.1), equil) === nothing
+        # qlow equal to the axis value still leaves a ring below it.
+        @test_throws ErrorException FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=q0), equil)
+
+        # A qhigh below the axis value is crossed on both legs; the domain ends on the outer one.
+        intr_lim = FFS.ForceFreeStatesInternal()
+        FFS.sing_lim!(intr_lim, FFS.ForceFreeStatesControl(; qhigh=2.0, truncate_at_rational_offset=false), equil)
+        @test isapprox(intr_lim.psilim, psi_q2[2]; atol=1e-6)
     end
 
     # ---------------------------------

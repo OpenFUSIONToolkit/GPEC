@@ -166,8 +166,10 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 
     # If truncate_at_rational_offset decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
-        # Find nearest ψ index where q ≈ qlim
-        _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
+        # Seed from the edge inward at the outermost node with q ≤ qlim, so a reversed-shear profile, which crosses
+        # qlim on both legs of its minimum, gets the outer crossing.
+        qy = profiles.q_spline.y
+        jpsi = something(findlast(<=(intr.qlim), qy), argmin(abs.(qy .- intr.qlim)))
         jpsi = min(jpsi, length(profiles.xs) - 1)
 
         hint = Ref(jpsi)
@@ -183,22 +185,23 @@ end
 """
     check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
-Error when `qmin < qlow < q0`. On such a reversed-shear profile the q < qlow region is a ring
-around q_min rather than a core, so there is no single lower bound that excludes it: `sing_min!`
-places `psilow` on the outer leg, while `initialize_el_at_axis!` starts at the axis because
-`qlow < q0`, and the two disagree about the integration domain.
+Error unless the region `q < qlow` on the ψ grid is empty or one interval starting at the axis.
+On a reversed-shear profile with `q_min < qlow ≤ q0` it is instead a ring around q_min, and with
+several minima it can be several intervals; no single lower bound excludes either: `sing_min!`
+places `psilow` on the outermost leg, while `initialize_el_at_axis!` starts at the axis, and the
+two disagree about the integration domain.
 """
 function check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
-    q0 = equil.profiles.q_spline.y[1]
-    qmin = equil.params.qmin
-    if ctrl.qlow > qmin && q0 > ctrl.qlow
-        error(
-            "qlow=$(ctrl.qlow) lies between qmin=$qmin and the axis value q0=$q0 of a reversed-shear q profile: " *
-            "the q < qlow region is a ring around q_min, not a core, so no single lower integration bound excludes it. " *
-            "Set qlow ≤ qmin to integrate from the axis, or qlow ≥ q0 to start outside q_min."
-        )
-    end
-    return nothing
+    qy = equil.profiles.q_spline.y
+    below = qy .< ctrl.qlow
+    # A core: below on the first node and on every node up to the first one at or above qlow, then never again.
+    (!any(below) || (below[1] && issorted(below; rev=true))) && return nothing
+    error(
+        "qlow=$(ctrl.qlow): the region q < qlow is not a single core around the axis (q on the axis is $(qy[1]), " *
+        "the grid minimum is $(minimum(qy))); on a reversed-shear profile it is a ring around q_min, so no single " *
+        "lower integration bound excludes it. Set qlow below the q minimum to integrate from the axis, or above " *
+        "the axis value to start outside it."
+    )
 end
 
 """
