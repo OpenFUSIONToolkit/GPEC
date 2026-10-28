@@ -2,13 +2,18 @@ using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.InnerLayer
 using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel
 
-# Layer stub returning a prescribed torque balance, to test the maximum selection.
-struct _CRFStubLayer <: InnerLayerModel end
+# Layer stub returning a prescribed torque balance `target(Q)`, to test the maximum selection.
+struct _CRFStubLayer{F} <: InnerLayerModel
+    target::F
+end
 const _CRF_Q0_STUB = 10.0
 _crf_target(Q) = 0.1 + exp(-(Q - 1)^2 / 0.01) + 2exp(-(Q - 3)^2 / 0.01)
-function InnerLayer.solve_inner(::_CRFStubLayer, p, Q::Number)
+_CRFStubLayer() = _CRFStubLayer(_crf_target)
+# A fold at Q = 3, then a dip, then a rise past the fold's height toward Q_e = 0.5.
+_crf_target_rising(Q) = 0.1 + exp(-(Q - 3)^2 / 0.01) + 0.6 * max(2.5 - Q, 0.0)
+function InnerLayer.solve_inner(s::_CRFStubLayer, p, Q::Number)
     Qc = -real(Q)   # undo the axis mirror cole_delta applies
-    jxb = 2 * (_CRF_Q0_STUB - Qc) / _crf_target(Qc)
+    jxb = 2 * (_CRF_Q0_STUB - Qc) / s.target(Qc)
     return (; tearing=conj(im / jxb - 1e-2))
 end
 
@@ -65,6 +70,11 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         tb_e3 = TorqueBalance(_CRFStubLayer(), _mk(; Q_e=3.0, Q_i=-50.0), _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
         _, _, Qnone, brnone, inone, _ = @test_logs (:warn, r"no penetration fold") torque_balance_scan(tb_e3; n=401)
         @test isnan(Qnone) && isnan(brnone) && inone == 0
+        # The first fold from Q0 is the threshold even when the balance later climbs higher toward Q_e.
+        tb_r = TorqueBalance(_CRFStubLayer(_crf_target_rising), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
+        _, bal_r, Qpeak_r, _, idx_r, _ = torque_balance_scan(tb_r; n=4001)
+        @test Qpeak_r ≈ 3.0 atol = 0.005
+        @test maximum(bal_r) > bal_r[idx_r]
         # The path ends at Q_i when it lies between Q0 and Q_e.
         @test fold_search_range(-2.0, 1.0, -0.5) == (-2.0, -0.5)
         @test fold_search_range(5.0, 1.0, -0.5) == (5.0, 1.0)

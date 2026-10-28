@@ -82,11 +82,11 @@ end
         -> (Qs, bal, Qpeak, br_crit, idx_peak, Δs)
 
 Sample `torque_balance_value` on `n` uniform real Q points and return the critical normalized
-field `br_crit = b_r/B_φ` (Cole Eq. 62) at the penetration fold: the largest `bal` on the path
-from `Q0` along `fold_search_range`, above which no shielded steady state remains as the field
-grows, provided the balance drops by more than `TORQUE_BALANCE_FOLD_DROP` after it. Points where
-|Δ| ≤ α, the unshielded zone next to Q_e, are not on the path. With no fold the rotation slows
-smoothly and there is no discrete threshold. `Qmin`/`Qmax` override the
+field `br_crit = b_r/B_φ` (Cole Eq. 62) at the penetration fold: the first maximum of `bal` on
+the path from `Q0` along `fold_search_range` after which the balance drops by more than
+`TORQUE_BALANCE_FOLD_DROP`, above which the shielded branch followed from `Q0` no longer exists as
+the field grows. Points where |Δ| ≤ α, the unshielded zone next to Q_e, are not on the path. With
+no resolved fold there is no discrete threshold. `Qmin`/`Qmax` override the
 sampled range, but the fold is only sought between `Q0` and the end of `fold_search_range`.
 Returns NaN for `Qpeak`, `br_crit` and 0 for `idx_peak`, with a warning, when there is no fold,
 when `Q0` is not finite, when the surface is tearing-unstable (α ≤ 0), or when the diamagnetic
@@ -105,18 +105,24 @@ function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::I
     bal = first.(out)
     Δs = last.(out)
 
-    # Along the shielded path from Q0 toward Qb, the threshold is the largest balance, provided the
-    # path drops below it afterwards; a maximum at the end means the field rises smoothly into Q_e.
+    # Following the shielded branch from Q0 toward Qb, the threshold is the first saddle-node: the first
+    # running maximum of the balance that the path then drops below by more than the fold criterion.
     path = [i for i in sort(eachindex(Qs); by=i -> abs(Qs[i] - Qa))
             if min(Qa, Qb) < Qs[i] < max(Qa, Qb) && isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha]
     idx = 0
-    if length(path) >= 3
-        j = argmax(bal[path])
-        1 < j < length(path) && minimum(bal[path[(j+1):end]]) < (1 - TORQUE_BALANCE_FOLD_DROP) * bal[path[j]] && (idx = path[j])
+    peak = isempty(path) ? 0 : path[1]
+    for i in path
+        if bal[i] > bal[peak]
+            peak = i
+        elseif bal[i] < (1 - TORQUE_BALANCE_FOLD_DROP) * bal[peak]
+            peak == path[1] || (idx = peak; break)
+            peak = i   # a fall from the first sample is not a fold; restart the running maximum
+        end
     end
     if idx == 0
         @warn "CriticalResonantField: no penetration fold between Q0 = $(tb.Q0) and Q = $Qb at the $(p.m)/$(p.n) " *
-              "surface: the required field rises monotonically, so the rotation slows smoothly with no discrete threshold."
+              "surface: the balance never falls more than $(100 * TORQUE_BALANCE_FOLD_DROP) % below a maximum on the " *
+              "sampled path, so no discrete threshold is resolved."
         return Qs, bal, NaN, NaN, 0, Δs
     end
     br_crit = sqrt(bal[idx] / (tb.lu * tb.kappa_hat))
