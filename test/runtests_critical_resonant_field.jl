@@ -56,7 +56,7 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         @test isapprox(br_fine, br; rtol=5e-3)
     end
 
-    @testset "fold selection: the largest balance on the path from Q0 toward Q_e" begin
+    @testset "saddle-node selection follows the path from Q0 toward Q_e" begin
         # The stub's balance peaks at Q = 3 and Q = 1; walking down from Q0 = 10 the fold is the higher one at 3.
         p = _mk(; Q_e=0.5, Q_i=-50.0)
         tb = TorqueBalance(_CRFStubLayer(), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
@@ -68,7 +68,7 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         @test torque_balance_scan(tb_e2; Qmin=0.0, Qmax=4.0, n=401)[3] ≈ 3.0 atol = 0.011
         # With the electron fluid at Q = 3 the balance rises all the way along the path: no fold, no threshold.
         tb_e3 = TorqueBalance(_CRFStubLayer(), _mk(; Q_e=3.0, Q_i=-50.0), _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
-        _, _, Qnone, brnone, inone, _ = @test_logs (:warn, r"no penetration fold") torque_balance_scan(tb_e3; n=401)
+        _, _, Qnone, brnone, inone, _ = @test_logs (:warn, r"no penetration") torque_balance_scan(tb_e3; n=401)
         @test isnan(Qnone) && isnan(brnone) && inone == 0
         # The first fold from Q0 is the threshold even when the balance later climbs higher toward Q_e.
         tb_r = TorqueBalance(_CRFStubLayer(_crf_target_rising), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
@@ -78,6 +78,42 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         # The path ends at Q_i when it lies between Q0 and Q_e.
         @test fold_search_range(-2.0, 1.0, -0.5) == (-2.0, -0.5)
         @test fold_search_range(5.0, 1.0, -0.5) == (5.0, 1.0)
+    end
+
+    @testset "saddle-node selection requires a resolved interior maximum" begin
+        p = _mk(; Q_e=0.5, Q_i=-50.0)
+        targets = (
+            Q -> Q,
+            Q -> 10.0 - Q,
+            Q -> 1.0,
+            Q -> 1.0 + 5e-4 * exp(-(Q - 3)^2 / 0.01) - 0.1 * max(2.8 - Q, 0.0)
+        )
+        # Monotonic windows, flat windows and a subthreshold bump followed by a large fall have no resolved saddle-node bifurcation.
+        for target in targets, (Qmin, Qmax) in ((4.0, 2.0), (2.0, 4.0))
+            tb = TorqueBalance(_CRFStubLayer(target), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
+            _, _, Qpeak, br, idx, _ = @test_logs (:warn, r"no penetration") torque_balance_scan(tb; Qmin=Qmin, Qmax=Qmax, n=401)
+            @test isnan(Qpeak) && isnan(br) && idx == 0
+        end
+
+        # An initial decline does not prevent resolving a later interior maximum.
+        target = Q -> 1.0 + 0.5 * exp(-(Q - 2)^2 / 0.04) + 0.2 * max(Q - 3.0, 0.0)
+        tb = TorqueBalance(_CRFStubLayer(target), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
+        _, _, Qpeak, br, _, _ = torque_balance_scan(tb; Qmin=4.0, Qmax=1.0, n=401)
+        @test Qpeak ≈ 2.0 atol = 0.01
+        @test isfinite(br) && br > 0
+
+        # A missing interval must not turn a rising segment and a lower plateau into a maximum.
+        target = Q -> 2.9 < Q < 3.1 ? NaN : Q > 3.0 ? 1.0 + 0.1 * (4.0 - Q) : 1.0
+        tb = TorqueBalance(_CRFStubLayer(target), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
+        _, _, Qpeak, br, idx, _ = @test_logs (:warn, r"no penetration") torque_balance_scan(tb; Qmin=4.0, Qmax=2.0, n=401)
+        @test isnan(Qpeak) && isnan(br) && idx == 0
+
+        # A later, higher maximum does not replace the first saddle-node bifurcation.
+        target = Q -> 0.1 + exp(-(Q - 3)^2 / 0.01) + 2 * exp(-(Q - 1)^2 / 0.01)
+        tb = TorqueBalance(_CRFStubLayer(target), p, _CRF_Q0_STUB, 1.0, p.lu, 1.0, 1e-2)
+        _, bal, Qpeak, _, idx, _ = torque_balance_scan(tb; n=4001)
+        @test Qpeak ≈ 3.0 atol = 0.005
+        @test maximum(bal) > bal[idx]
     end
 
     @testset "fold reproduces Cole's visco-resistive thresholds" begin

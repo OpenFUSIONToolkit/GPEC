@@ -63,7 +63,7 @@ function torque_balance_value(tb::TorqueBalance, Q::Real)
     return 2.0 * tb.prandtl * (tb.Q0 - Q) / jxb, Δ
 end
 
-# A maximum counts as a fold only if the balance drops by more than this fraction after it, above sampling noise.
+# A resolved saddle-node bifurcation requires a rise and fall exceeding this fraction of the maximum.
 const TORQUE_BALANCE_FOLD_DROP = 1e-3
 
 """
@@ -82,13 +82,14 @@ end
         -> (Qs, bal, Qpeak, br_crit, idx_peak, Δs)
 
 Sample `torque_balance_value` on `n` uniform real Q points and return the critical normalized
-field `br_crit = b_r/B_φ` (Cole Eq. 62) at the penetration fold: the first maximum of `bal` on
-the path from `Q0` along `fold_search_range` after which the balance drops by more than
-`TORQUE_BALANCE_FOLD_DROP`, above which the shielded branch followed from `Q0` no longer exists as
-the field grows. Points where |Δ| ≤ α, the unshielded zone next to Q_e, are not on the path. With
-no resolved fold there is no discrete threshold. `Qmin`/`Qmax` override the
-sampled range, but the fold is only sought between `Q0` and the end of `fold_search_range`.
-Returns NaN for `Qpeak`, `br_crit` and 0 for `idx_peak`, with a warning, when there is no fold,
+field `br_crit = b_r/B_φ` (Cole Eq. 62) at the first resolved saddle-node bifurcation on the
+path from `Q0` along `fold_search_range`. Both the rise to and fall from an interior maximum
+must exceed `TORQUE_BALANCE_FOLD_DROP` times its value within a contiguous retained interval.
+Above this threshold the shielded branch followed from `Q0` no longer exists as the field grows.
+Points where |Δ| ≤ α, the unshielded zone next to Q_e, are not on the path. With no resolved
+saddle-node bifurcation there is no discrete threshold. `Qmin`/`Qmax` override the sampled range,
+but the search stays between `Q0` and the end of `fold_search_range`.
+Returns NaN for `Qpeak`, `br_crit` and 0 for `idx_peak`, with a warning, when no saddle-node bifurcation is resolved,
 when `Q0` is not finite, when the surface is tearing-unstable (α ≤ 0), or when the diamagnetic
 ordering Q_i ≤ 0 ≤ Q_e does not hold.
 """
@@ -105,24 +106,31 @@ function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::I
     bal = first.(out)
     Δs = last.(out)
 
-    # Following the shielded branch from Q0 toward Qb, the threshold is the first saddle-node: the first
-    # running maximum of the balance that the path then drops below by more than the fold criterion.
+    # Follow the first resolved interior maximum without joining samples across excluded intervals.
     path = [i for i in sort(eachindex(Qs); by=i -> abs(Qs[i] - Qa))
-            if min(Qa, Qb) < Qs[i] < max(Qa, Qb) && isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha]
+                  if min(Qa, Qb) < Qs[i] < max(Qa, Qb) && isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha]
     idx = 0
-    peak = isempty(path) ? 0 : path[1]
+    valley = peak = previous = 0
     for i in path
-        if bal[i] > bal[peak]
+        if previous == 0 || abs(i - previous) != 1
+            valley = peak = i
+        elseif bal[i] > bal[peak]
             peak = i
         elseif bal[i] < (1 - TORQUE_BALANCE_FOLD_DROP) * bal[peak]
-            peak == path[1] || (idx = peak; break)
-            peak = i   # a fall from the first sample is not a fold; restart the running maximum
+            if bal[valley] < (1 - TORQUE_BALANCE_FOLD_DROP) * bal[peak]
+                idx = peak
+                break
+            end
+            valley = peak = i
+        elseif bal[i] < bal[valley]
+            valley = peak = i
         end
+        previous = i
     end
     if idx == 0
-        @warn "CriticalResonantField: no penetration fold between Q0 = $(tb.Q0) and Q = $Qb at the $(p.m)/$(p.n) " *
-              "surface: the balance never falls more than $(100 * TORQUE_BALANCE_FOLD_DROP) % below a maximum on the " *
-              "sampled path, so no discrete threshold is resolved."
+        @warn "CriticalResonantField: no penetration saddle-node bifurcation between Q0 = $(tb.Q0) and Q = $Qb at the $(p.m)/$(p.n) " *
+              "surface: no interior maximum with a rise and fall exceeding $(100 * TORQUE_BALANCE_FOLD_DROP) % was resolved " *
+              "on a contiguous sampled interval, so no discrete threshold is resolved."
         return Qs, bal, NaN, NaN, 0, Δs
     end
     br_crit = sqrt(bal[idx] / (tb.lu * tb.kappa_hat))

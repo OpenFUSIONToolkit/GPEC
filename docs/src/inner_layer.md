@@ -237,14 +237,16 @@ and balance is lost above (Cole Eq. 62)
   threshold needs a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
 - **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; `solve_inner`
   mirrors the real axis, so the scan uses conj(Δ(−Q)).
-- **Threshold.** Penetration is a fold (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
+- **Threshold.** Penetration is associated with a saddle-node bifurcation (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
   as the field grows, Q moves from Q0 toward the electron fluid at Q_e, where the torque
-  vanishes, and the threshold is the first saddle-node on that path: the first maximum of the
-  balance that the path then drops more than 0.1 % below, above which the shielded branch
-  followed from Q0 no longer exists. The 0.1 % drop keeps sampling noise from counting as a
-  fold, and a later, higher balance does not replace the first fold. Points where |Δ̂| ≤ α, the
+  vanishes, and the threshold is the first resolved saddle-node bifurcation on that path, above
+  which the shielded branch followed from Q0 no longer exists. Both the rise to and fall from
+  an interior maximum must exceed 0.1 % of its value within a contiguous retained interval.
+  This excludes monotonic clipped windows and small numerical extrema; excluded samples do
+  not connect separate intervals. A later, higher maximum does not replace the first resolved
+  saddle-node bifurcation. Points where |Δ̂| ≤ α, the
   unshielded zone next to Q_e, are not candidates, so the balance spike there is never taken.
-  With no resolved fold no discrete threshold is reported (NaN). Fortran takes the global maximum on a
+  With no resolved saddle-node bifurcation no discrete threshold is reported (NaN). Fortran takes the global maximum on a
   window instead, which picks that spike. The search assumes Q_i ≤ 0 ≤ Q_e; a surface where
   that fails is skipped with a warning.
 
