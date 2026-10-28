@@ -49,9 +49,9 @@ using GeneralizedPerturbedEquilibrium
             f["Info/dqdpsi_lim"] = 2 + 1.6psilim
             f["Info/mn_index"] = mn
             for field in fieldnames(Eq.EquilibriumParameters)
-                field in GPEC.EQUIL_H5_SKIP && continue
+                field in GPEC.Utilities.EQUIL_H5_SKIP && continue
                 value = getfield(params, field)
-                value === nothing || (f["Equilibrium/$(get(GPEC.EQUIL_H5_NAMES, field, String(field)))"] = value)
+                value === nothing || (f["Equilibrium/$(get(GPEC.Utilities.EQUIL_H5_NAMES, field, String(field)))"] = value)
             end
             for (name, value) in zip(("psi", "2piF", "mu0p", "dVdpsi", "q"), (xs, profile_values...))
                 f["Equilibrium/Profiles/$name"] = value

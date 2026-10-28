@@ -24,7 +24,18 @@ problem type keeps `solve` unambiguous as other problem classes appear.
 ```julia
 prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
 ffs  = solve(prob, Riccati())
+save_to_hdf5("gpec.h5", ffs)
 ```
+
+`solve` returns its result without writing a file. Call `save_to_hdf5(path, ffs)`
+or pass an open HDF5 file or group to save it explicitly. The deck driver saves its
+FFS result after the solve.
+
+The same `save_to_hdf5(target, result)` function saves an equilibrium, local-stability
+result, perturbed-equilibrium state, kinetic-force state, tearing result, or error-field
+result. Each module owns the datasets for its result. Paths open or create an HDF5
+file; an open file or group remains owned by the caller. Stage computations return
+results, and the deck driver applies the configured output switches and filenames.
 
 The objects map one-to-one onto the pipeline stages:
 
@@ -52,7 +63,7 @@ The objects map one-to-one onto the pipeline stages:
 The equilibrium carries the kinetic profiles. Name the file with the `kinetic_file` (and,
 for HDF5, `kinetic_group`) keyword, the same keys as the `[Equilibrium]` deck section, and it
 is read once into `equil.kinetic`; every kinetic stage derives its own view from it.
-[`attach_kinetic_profiles!`](@ref) attaches a file or in-memory `KineticProfileData` to an
+[`attach_kinetic_profiles!`](@ref GeneralizedPerturbedEquilibrium.Equilibrium.attach_kinetic_profiles!) attaches a file or in-memory `KineticProfileData` to an
 equilibrium built without one, such as an analytic equilibrium.
 
 ```julia

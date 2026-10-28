@@ -340,8 +340,8 @@ function equilibrium_from_h5(h5path::AbstractString)
         config = Equilibrium.EquilibriumConfig(merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => "")), dirname(abspath(h5path)))
         params = Equilibrium.EquilibriumParameters()
         for field in fieldnames(Equilibrium.EquilibriumParameters)
-            field in EQUIL_H5_SKIP && continue
-            path = "Equilibrium/$(get(EQUIL_H5_NAMES, field, String(field)))"
+            field in Utilities.EQUIL_H5_SKIP && continue
+            path = "Equilibrium/$(get(Utilities.EQUIL_H5_NAMES, field, String(field)))"
             haskey(f, path) && setfield!(params, field, read(f, path))
         end
         params.ro === nothing && error("$h5path has no Equilibrium/R_axis")

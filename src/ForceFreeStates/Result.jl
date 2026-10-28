@@ -53,6 +53,7 @@ so bpen and closure are always present.
   - `mlow`, `mhigh`, `mpert`, `nlow`, `nhigh`, `npert`, `numpert_total` - Resolved (m, n) mode space; see `ModeSpace`.
   - `psilow`, `psilim`, `qlim`, `q1lim` - Integration bounds, and q with its ψ-derivative at `psilim`.
   - `dir_path::String` - Working directory of the run.
+  - `problem`, `algorithm` - Problem and integrator retained by the public solve for reproducible output.
   - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape used by the vacuum calculation.
   - `debug_settings::DebugSettings` - Diagnostic dump settings (the `[DEBUG]` deck section / `debug=` API keyword).
   - `metric::MetricData`, `mats::MatrixSplines` - Metric data and Euler-Lagrange matrix interpolants.
@@ -78,7 +79,9 @@ so bpen and closure are always present.
   - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solver internals and FEM
     diagnostics. Its Δ′ payload lives in `delta_prime`, not here.
 """
-struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} <: ModeSpace
+struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P,A} <: ModeSpace
+    problem::P
+    algorithm::A
     integrator::Symbol
     control::ForceFreeStatesControl
     equil::E
@@ -241,7 +244,7 @@ function build_result(
     end
 
     return ForceFreeStatesResult(
-        integrator, ctrl, equil,
+        nothing, nothing, integrator, ctrl, equil,
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
         intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
         metric, mats, intr.sing, kinetic,

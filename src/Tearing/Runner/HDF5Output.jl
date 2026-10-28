@@ -1,3 +1,6 @@
+import ..Utilities: save_to_hdf5
+import ..Utilities.HDF5Annotations: replace_group!, write_ragged!
+
 # HDF5Output.jl
 #
 # Write a `SLAYERResult` into an HDF5 group. Designed to be called by the
@@ -20,19 +23,16 @@
 using HDF5
 
 """
-    write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
+    save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
                         result::SLAYERResult)
 
 Write `result` into a `Tearing/` subgroup of `parent`. The subgroup is
 created if missing and overwritten if it already exists (keeps the
 output file reproducible across reruns).
 """
-function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
+function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     result::SLAYERResult)
-    if haskey(parent, "Tearing")
-        delete_object(parent, "Tearing")
-    end
-    g = create_group(parent, "Tearing")
+    g = replace_group!(parent, "Tearing")
     g["enabled"] = Int(result.enabled)
     # Which inner-layer model produced PerSurface/: the SLAYER and GGJ branches write
     # disjoint field sets, so readers must not have to infer it from the schema.
@@ -156,7 +156,7 @@ const TEARING_SCAN_H5_ANNOTATIONS = [
     "truncated" => (; long_name="flag: AMR refinement stopped at the cell cap")
 ]
 
-# Attach long_name/units/dims to everything write_slayer_hdf5! wrote.
+# Attach long_name/units/dims to everything save_to_hdf5 wrote.
 function _annotate_tearing!(g)
     ann = Utilities.HDF5Annotations
     ann.annotate!(g, TEARING_H5_ANNOTATIONS)
@@ -276,29 +276,12 @@ function _write_diagnostics!(g, r::SLAYERResult)
         r.per_surface_extraction
     end
 
-    _write_ragged_complex!(diag, "ValidRoots",
+    write_ragged!(diag, "ValidRoots",
         [gr.valid_roots for gr in extractions])
-    _write_ragged_complex!(diag, "Poles",
+    write_ragged!(diag, "Poles",
         [gr.poles for gr in extractions])
-    _write_ragged_complex!(diag, "FilteredRoots",
+    write_ragged!(diag, "FilteredRoots",
         [gr.filtered_roots for gr in extractions])
-    return nothing
-end
-
-# Write a ragged vector-of-vectors of ComplexF64 as (flat, offsets) —
-# `offsets[k+1] - offsets[k]` is the length of row `k`. This avoids HDF5 VLEN
-# types, which have patchy cross-language support.
-function _write_ragged_complex!(parent, name::String,
-    data::Vector{Vector{ComplexF64}})
-    g = create_group(parent, name)
-    flat = ComplexF64[]
-    offsets = Int[0]
-    for v in data
-        append!(flat, v)
-        push!(offsets, offsets[end] + length(v))
-    end
-    g["flat"] = flat
-    g["offsets"] = offsets
     return nothing
 end
 

@@ -73,7 +73,7 @@ function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::
 end
 
 # Write `m` under SingularSurfaces/Match/, annotated per the metadata contract.
-function write_match!(out_h5, m::MatchResult)
+function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, m::MatchResult)
     g = "SingularSurfaces/Match"
     out_h5["$g/cout"] = m.cout
     out_h5["$g/cin"] = m.cin

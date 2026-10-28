@@ -230,9 +230,9 @@ using HDF5
         )
         h5 = tempname() * ".h5"
         HDF5.h5open(h5, "cw") do f
-            KF.write_to_hdf5!(f, mk(1.0); species_label="ion_z1_m2")
-            KF.write_to_hdf5!(f, mk(2.0); species_label="electron")
-            KF.write_to_hdf5!(f, mk(3.0))          # summed total
+            KF.save_to_hdf5(f, mk(1.0); species_label="ion_z1_m2")
+            KF.save_to_hdf5(f, mk(2.0); species_label="electron")
+            KF.save_to_hdf5(f, mk(3.0))          # summed total
         end
         HDF5.h5open(h5, "r") do f
             @test sort(collect(keys(f["KineticForces"]))) == ["PerSpecies", "fgar"]

@@ -60,7 +60,7 @@ Modules, with the abbreviation to use in prose:
 | `ErrorFields` | EF | `src/ErrorFields/` |
 | `ForceFreeStates` | FFS | `src/ForceFreeStates/` |
 | `ForcingTerms` | FT | `src/ForcingTerms/` |
-| `HDF5Schema` | — | `src/HDF5Schema.jl` |
+| `HDF5Schema` | — | `src/Utilities/HDF5Schema.jl` |
 | `InnerLayer` | IL | `src/InnerLayer/` |
 | `KineticForces` | KF | `src/KineticForces/` |
 | `LocalStability` | LS | `src/LocalStability/` |

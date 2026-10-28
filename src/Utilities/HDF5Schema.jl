@@ -1,5 +1,5 @@
-# Metadata tables for the datasets written by write_outputs_to_HDF5 (the main gpec.h5
-# writer), applied post-write by Utilities.HDF5Annotations.annotate!. Sub-writers
+# Metadata tables for the datasets written by save_to_hdf5 (the main gpec.h5
+# writer), applied post-write by HDF5Annotations.annotate!. Sub-writers
 # (Galerkin, PerturbedEquilibrium, KineticForces, Tearing) keep their tables next to
 # their own writers. Paths absent from a given run are skipped automatically.
 #
@@ -326,15 +326,15 @@ const ELM_H5_ANNOTATIONS = vcat(
 )
 
 """
-    apply_main_h5_metadata!(out_h5, intr)
+    apply_main_h5_metadata!(out_h5)
 
 Apply the self-describing metadata contract to the datasets written by
-`write_outputs_to_HDF5`: `long_name`/`units`/`dims` attributes plus HDF5 Dimension
+`save_to_hdf5`: `long_name`/`units`/`dims` attributes plus HDF5 Dimension
 Scales for the shared coordinate datasets (ψ_N grids, rational-surface ψ).
 """
-function apply_main_h5_metadata!(out_h5, intr)
+function apply_main_h5_metadata!(out_h5)
     # Scales and attachments are declared in-table via the scale/attach entry fields.
-    Utilities.HDF5Annotations.annotate!(out_h5, MAIN_H5_ANNOTATIONS)
-    Utilities.HDF5Annotations.annotate!(out_h5, ELM_H5_ANNOTATIONS)
+    HDF5Annotations.annotate!(out_h5, MAIN_H5_ANNOTATIONS)
+    HDF5Annotations.annotate!(out_h5, ELM_H5_ANNOTATIONS)
     return out_h5
 end

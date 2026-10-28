@@ -17,6 +17,7 @@ import CommonSolve
 
 import ..Equilibrium
 import ..Utilities
+import ..Utilities: save_to_hdf5
 import ..Vacuum
 import ..InnerLayer
 using Printf
@@ -68,6 +69,8 @@ include("Result.jl")
 # Post-solve inner-layer matching: consumes and produces ForceFreeStatesResult, so it loads
 # after the result machinery.
 include("Matching/MatchProblem.jl")
+include("InputSnapshot.jl")
+include("Output.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10

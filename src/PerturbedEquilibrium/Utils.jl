@@ -1,3 +1,6 @@
+import ..Utilities: save_to_hdf5
+import ..Utilities.HDF5Annotations: ensure_group, replace_group!, write_fields!
+
 """
     mode_arrays(ffs::ForceFreeStatesResult) -> (m_modes, n_modes)
 
@@ -13,7 +16,7 @@ function mode_arrays(ffs::ForceFreeStatesResult)
 end
 
 """
-    write_outputs_to_HDF5(state::PerturbedEquilibriumState, filename::String)
+    save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilibriumState)
 
 Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeStates output).
 
@@ -82,162 +85,165 @@ PerturbedEquilibrium/
     └── total_torque          # Re T_applied at the control surface [N·m]
 ```
 """
-function write_outputs_to_HDF5(state::PerturbedEquilibriumState, filename::String)
+function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilibriumState)
     resp = state.response
-    h5open(filename, "cw") do file
-        pe_group = haskey(file, "PerturbedEquilibrium") ? file["PerturbedEquilibrium"] : create_group(file, "PerturbedEquilibrium")
+    pe_group = replace_group!(file, "PerturbedEquilibrium")
 
-        # Forcing modes
-        forcing_group = haskey(pe_group, "ForcingModes") ? pe_group["ForcingModes"] : create_group(pe_group, "ForcingModes")
-        forcing_group["n"] = [mode.n for mode in state.forcing_modes]
-        forcing_group["m"] = [mode.m for mode in state.forcing_modes]
-        forcing_group["amplitude"] = [mode.amplitude for mode in state.forcing_modes]
+    # Forcing modes
+    forcing_group = haskey(pe_group, "ForcingModes") ? pe_group["ForcingModes"] : create_group(pe_group, "ForcingModes")
+    forcing_group["n"] = [mode.n for mode in state.forcing_modes]
+    forcing_group["m"] = [mode.m for mode in state.forcing_modes]
+    forcing_group["amplitude"] = [mode.amplitude for mode in state.forcing_modes]
 
-        # Labels of the mode axis shared by the spectra, matrices and profiles below
-        !isempty(resp.m_modes) && (pe_group["mode_m"] = resp.m_modes)
-        !isempty(resp.n_modes) && (pe_group["mode_n"] = resp.n_modes)
+    # Labels of the mode axis shared by the spectra, matrices and profiles below
+    !isempty(resp.m_modes) && (pe_group["mode_m"] = resp.m_modes)
+    !isempty(resp.n_modes) && (pe_group["mode_n"] = resp.n_modes)
 
-        # Control-surface forcing/response spectra in the three Pharr field representations
-        # (all tesla; flux/weber is never stored). b̃ = root-area-weighted (coordinate-invariant).
-        !isempty(state.forcing_b) && (pe_group["forcing_b"] = state.forcing_b)
-        !isempty(state.forcing_b_rootarea) && (pe_group["forcing_b_root_area"] = state.forcing_b_rootarea)
-        !isempty(state.forcing_b_area) && (pe_group["forcing_b_area"] = state.forcing_b_area)
-        !isempty(state.response_b) && (pe_group["response_b"] = state.response_b)
-        !isempty(state.response_b_rootarea) && (pe_group["response_b_root_area"] = state.response_b_rootarea)
-        !isempty(state.response_b_area) && (pe_group["response_b_area"] = state.response_b_area)
+    # Control-surface forcing/response spectra in the three Pharr field representations
+    # (all tesla; flux/weber is never stored). b̃ = root-area-weighted (coordinate-invariant).
+    !isempty(state.forcing_b) && (pe_group["forcing_b"] = state.forcing_b)
+    !isempty(state.forcing_b_rootarea) && (pe_group["forcing_b_root_area"] = state.forcing_b_rootarea)
+    !isempty(state.forcing_b_area) && (pe_group["forcing_b_area"] = state.forcing_b_area)
+    !isempty(state.response_b) && (pe_group["response_b"] = state.response_b)
+    !isempty(state.response_b_rootarea) && (pe_group["response_b_root_area"] = state.response_b_rootarea)
+    !isempty(state.response_b_area) && (pe_group["response_b_area"] = state.response_b_area)
 
-        # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
-        # root-area-weighted field (b̃) space. Recover the area-weighted field b̄ with the stored
-        # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
-        # scalar surface_area A: Φ = A·b̄  (internally R = S·A, Φ = R·b̃). [Pharr 2026]
-        mat_group = haskey(pe_group, "ResponseMatrices") ? pe_group["ResponseMatrices"] : create_group(pe_group, "ResponseMatrices")
-        !isempty(resp.plasma_inductance) && (mat_group["plasma_inductance"] = resp.plasma_inductance)
-        !isempty(resp.surface_inductance) && (mat_group["surface_inductance"] = resp.surface_inductance)
-        !isempty(resp.permeability) && (mat_group["permeability"] = resp.permeability)
-        !isempty(resp.reluctance) && (mat_group["reluctance"] = resp.reluctance)
-        !isempty(resp.rootarea_to_area_weight) && (mat_group["rootarea_to_area_weight_operator"] = resp.rootarea_to_area_weight)
-        (resp.surface_area != 0.0) && (mat_group["surface_area"] = resp.surface_area)
+    # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
+    # root-area-weighted field (b̃) space. Recover the area-weighted field b̄ with the stored
+    # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
+    # scalar surface_area A: Φ = A·b̄  (internally R = S·A, Φ = R·b̃). [Pharr 2026]
+    mat_group = haskey(pe_group, "ResponseMatrices") ? pe_group["ResponseMatrices"] : create_group(pe_group, "ResponseMatrices")
+    !isempty(resp.plasma_inductance) && (mat_group["plasma_inductance"] = resp.plasma_inductance)
+    !isempty(resp.surface_inductance) && (mat_group["surface_inductance"] = resp.surface_inductance)
+    !isempty(resp.permeability) && (mat_group["permeability"] = resp.permeability)
+    !isempty(resp.reluctance) && (mat_group["reluctance"] = resp.reluctance)
+    !isempty(resp.rootarea_to_area_weight) && (mat_group["rootarea_to_area_weight_operator"] = resp.rootarea_to_area_weight)
+    (resp.surface_area != 0.0) && (mat_group["surface_area"] = resp.surface_area)
 
-        # Response fields (ComplexF64 directly)
-        response_group = haskey(pe_group, "Response") ? pe_group["Response"] : create_group(pe_group, "Response")
-        !isempty(state.psi_grid) && (response_group["psi"] = state.psi_grid)
-        have_xi = !isnothing(state.xi_modes)
-        have_b = have_xi && !isnothing(state.b_modes)
-        response_group["xi_psi"] = have_xi ? state.xi_modes.psi : ComplexF64[]
-        response_group["b_psi_area_weighted"] = have_b ? state.b_modes.b_psi_area_weighted : ComplexF64[]
-        response_group["Jb_theta"] = have_b ? state.b_modes.theta : ComplexF64[]
-        response_group["Jb_zeta"] = have_b ? state.b_modes.zeta : ComplexF64[]
-        response_group["b_n"] = !isnothing(state.b_n_modes) ? state.b_n_modes : ComplexF64[]
-        response_group["xi_n"] = !isnothing(state.xi_n_modes) ? state.xi_n_modes : ComplexF64[]
+    # Response fields (ComplexF64 directly)
+    response_group = haskey(pe_group, "Response") ? pe_group["Response"] : create_group(pe_group, "Response")
+    !isempty(state.psi_grid) && (response_group["psi"] = state.psi_grid)
+    have_xi = !isnothing(state.xi_modes)
+    have_b = have_xi && !isnothing(state.b_modes)
+    response_group["xi_psi"] = have_xi ? state.xi_modes.psi : ComplexF64[]
+    response_group["b_psi_area_weighted"] = have_b ? state.b_modes.b_psi_area_weighted : ComplexF64[]
+    response_group["Jb_theta"] = have_b ? state.b_modes.theta : ComplexF64[]
+    response_group["Jb_zeta"] = have_b ? state.b_modes.zeta : ComplexF64[]
+    response_group["b_n"] = !isnothing(state.b_n_modes) ? state.b_n_modes : ComplexF64[]
+    response_group["xi_n"] = !isnothing(state.xi_n_modes) ? state.xi_n_modes : ComplexF64[]
 
-        # Clebsch displacements for PENTRC (matches Fortran gpout_xclebsch)
-        if have_xi
-            response_group["xi_clebsch_psi"] = state.xi_modes.clebsch_psi
-            response_group["dxi_clebsch_psidpsi"] = state.xi_modes.clebsch_psi1
-            response_group["xi_clebsch_alpha"] = state.xi_modes.clebsch_alpha
-        end
-
-        # Contravariant displacement (from gpeq_contra, all J-weighted)
-        if have_xi
-            response_group["Jxi_psi"] = state.xi_modes.psi_J
-            response_group["Jxi_theta"] = state.xi_modes.theta
-            response_group["Jxi_zeta"] = state.xi_modes.zeta
-        end
-
-        # Covariant components (from gpeq_cova)
-        if have_xi
-            response_group["xi_cov_psi"] = state.xi_modes.cova_psi
-            response_group["xi_cov_theta"] = state.xi_modes.cova_theta
-            response_group["xi_cov_zeta"] = state.xi_modes.cova_zeta
-        end
-        if have_xi
-            response_group["Jxi_theta_reg"] = state.xi_modes.theta_reg
-            response_group["Jxi_zeta_reg"] = state.xi_modes.zeta_reg
-        end
-        if have_b
-            response_group["Jb_theta_reg"] = state.b_modes.theta_reg
-            response_group["Jb_zeta_reg"] = state.b_modes.zeta_reg
-            response_group["b_cov_psi"] = state.b_modes.cova_psi
-            response_group["b_cov_theta"] = state.b_modes.cova_theta
-            response_group["b_cov_zeta"] = state.b_modes.cova_zeta
-        end
-
-        # R,Z,φ cylindrical components in mode-space (from gpeq_rzphi)
-        if have_xi
-            response_group["xi_R"] = state.xi_modes.R
-            response_group["xi_Z"] = state.xi_modes.Z
-            response_group["xi_phi"] = state.xi_modes.phi
-        end
-        if have_b
-            response_group["b_R"] = state.b_modes.R
-            response_group["b_Z"] = state.b_modes.Z
-            response_group["b_phi"] = state.b_modes.phi
-        end
-
-        # Singular coupling
-        coupling_group = haskey(pe_group, "SingularCoupling") ? pe_group["SingularCoupling"] : create_group(pe_group, "SingularCoupling")
-
-        # Coupling matrices [n_rational × numpert_total]
-        !isempty(resp.C_resonant_area_weighted_field) && (coupling_group["C_resonant_area_weighted_field"] = resp.C_resonant_area_weighted_field)
-        !isempty(resp.C_resonant_current) && (coupling_group["C_resonant_current"] = resp.C_resonant_current)
-        !isempty(resp.C_island_width_sq) && (coupling_group["C_island_width_sq"] = resp.C_island_width_sq)
-        !isempty(resp.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = resp.C_penetrated_area_weighted_field)
-        !isempty(resp.C_delta_prime) && (coupling_group["C_Delta_prime"] = resp.C_delta_prime)
-
-        # Applied resonant vectors [n_rational]
-        !isempty(state.resonant_area_weighted_field) && (coupling_group["resonant_area_weighted_field"] = state.resonant_area_weighted_field)
-        !isempty(state.resonant_current) && (coupling_group["resonant_current"] = state.resonant_current)
-        !isempty(state.island_width_sq) && (coupling_group["island_width_sq"] = state.island_width_sq)
-        !isempty(state.penetrated_area_weighted_field) && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
-        !isempty(state.delta_prime) && (coupling_group["Delta_prime"] = state.delta_prime)
-        !isempty(state.forcing_solution_weights) && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
-        !isempty(resp.rational_area) && (coupling_group["rational_area"] = resp.rational_area)
-        !isempty(state.island_half_width) && (coupling_group["island_half_width"] = state.island_half_width)
-        !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)
-
-        # Metadata [n_rational]
-        !isempty(resp.rational_psi) && (coupling_group["rational_psi"] = resp.rational_psi)
-        !isempty(resp.rational_q) && (coupling_group["rational_q"] = resp.rational_q)
-        !isempty(resp.rational_m_res) && (coupling_group["rational_m"] = resp.rational_m_res)
-        !isempty(resp.rational_n) && (coupling_group["rational_n"] = resp.rational_n)
-
-        # Dominant resonant-coupling modes (SVD of the b̃-space coupling matrix over the retained rows)
-        if !isempty(resp.dominant_singular_values)
-            dominant_group = haskey(coupling_group, "DominantMode") ? coupling_group["DominantMode"] : create_group(coupling_group, "DominantMode")
-            dominant_group["singular_values"] = resp.dominant_singular_values
-            dominant_group["right_singular_vectors"] = resp.dominant_right_singular_vectors
-            dominant_group["left_singular_vectors"] = resp.dominant_left_singular_vectors
-            dominant_group["rational_index"] = resp.dominant_rational_index
-            !isempty(state.dominant_forcing_overlap) && (dominant_group["forcing_overlap"] = state.dominant_forcing_overlap)
-        end
-
-        # Energies
-        energy_group = haskey(pe_group, "Energies") ? pe_group["Energies"] : create_group(pe_group, "Energies")
-        energy_group["vacuum_energy"] = state.vacuum_energy
-        energy_group["surface_energy"] = state.surface_energy
-        energy_group["plasma_energy"] = state.plasma_energy
-        energy_group["toroidal_torque"] = state.toroidal_torque
-
-        # Torque response matrices (kinetic forward solves only)
-        tr = state.torque_response
-        if tr !== nothing
-            tr_group = haskey(pe_group, "TorqueResponse") ? pe_group["TorqueResponse"] : create_group(pe_group, "TorqueResponse")
-            tr_group["psi"] = tr.psi
-            tr_group["m"] = tr.m_modes
-            tr_group["n"] = tr.n_modes
-            tr_group["T_xe"] = tr.T_xe
-            if !isempty(tr.source_names)
-                tr_group["source_name"] = tr.source_names
-                tr_group["T_source"] = tr.T_source
-            end
-            if !isempty(tr.T_applied)
-                tr_group["T_applied"] = tr.T_applied
-                tr_group["total_torque"] = real(tr.T_applied[end])
-            end
-        end
-
-        annotate_pe!(pe_group)
+    # Clebsch displacements for PENTRC (matches Fortran gpout_xclebsch)
+    if have_xi
+        response_group["xi_clebsch_psi"] = state.xi_modes.clebsch_psi
+        response_group["dxi_clebsch_psidpsi"] = state.xi_modes.clebsch_psi1
+        response_group["xi_clebsch_alpha"] = state.xi_modes.clebsch_alpha
     end
+
+    # Contravariant displacement (from gpeq_contra, all J-weighted)
+    if have_xi
+        response_group["Jxi_psi"] = state.xi_modes.psi_J
+        response_group["Jxi_theta"] = state.xi_modes.theta
+        response_group["Jxi_zeta"] = state.xi_modes.zeta
+    end
+
+    # Covariant components (from gpeq_cova)
+    if have_xi
+        response_group["xi_cov_psi"] = state.xi_modes.cova_psi
+        response_group["xi_cov_theta"] = state.xi_modes.cova_theta
+        response_group["xi_cov_zeta"] = state.xi_modes.cova_zeta
+    end
+    if have_xi
+        response_group["Jxi_theta_reg"] = state.xi_modes.theta_reg
+        response_group["Jxi_zeta_reg"] = state.xi_modes.zeta_reg
+    end
+    if have_b
+        response_group["Jb_theta_reg"] = state.b_modes.theta_reg
+        response_group["Jb_zeta_reg"] = state.b_modes.zeta_reg
+        response_group["b_cov_psi"] = state.b_modes.cova_psi
+        response_group["b_cov_theta"] = state.b_modes.cova_theta
+        response_group["b_cov_zeta"] = state.b_modes.cova_zeta
+    end
+
+    # R,Z,φ cylindrical components in mode-space (from gpeq_rzphi)
+    if have_xi
+        response_group["xi_R"] = state.xi_modes.R
+        response_group["xi_Z"] = state.xi_modes.Z
+        response_group["xi_phi"] = state.xi_modes.phi
+    end
+    if have_b
+        response_group["b_R"] = state.b_modes.R
+        response_group["b_Z"] = state.b_modes.Z
+        response_group["b_phi"] = state.b_modes.phi
+    end
+
+    # Singular coupling
+    coupling_group = haskey(pe_group, "SingularCoupling") ? pe_group["SingularCoupling"] : create_group(pe_group, "SingularCoupling")
+
+    # Coupling matrices [n_rational × numpert_total]
+    !isempty(resp.C_resonant_area_weighted_field) && (coupling_group["C_resonant_area_weighted_field"] = resp.C_resonant_area_weighted_field)
+    !isempty(resp.C_resonant_current) && (coupling_group["C_resonant_current"] = resp.C_resonant_current)
+    !isempty(resp.C_island_width_sq) && (coupling_group["C_island_width_sq"] = resp.C_island_width_sq)
+    !isempty(resp.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = resp.C_penetrated_area_weighted_field)
+    !isempty(resp.C_delta_prime) && (coupling_group["C_Delta_prime"] = resp.C_delta_prime)
+
+    # Applied resonant vectors [n_rational]
+    !isempty(state.resonant_area_weighted_field) && (coupling_group["resonant_area_weighted_field"] = state.resonant_area_weighted_field)
+    !isempty(state.resonant_current) && (coupling_group["resonant_current"] = state.resonant_current)
+    !isempty(state.island_width_sq) && (coupling_group["island_width_sq"] = state.island_width_sq)
+    !isempty(state.penetrated_area_weighted_field) && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
+    !isempty(state.delta_prime) && (coupling_group["Delta_prime"] = state.delta_prime)
+    !isempty(state.forcing_solution_weights) && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
+    !isempty(resp.rational_area) && (coupling_group["rational_area"] = resp.rational_area)
+    !isempty(state.island_half_width) && (coupling_group["island_half_width"] = state.island_half_width)
+    !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)
+
+    # Metadata [n_rational]
+    !isempty(resp.rational_psi) && (coupling_group["rational_psi"] = resp.rational_psi)
+    !isempty(resp.rational_q) && (coupling_group["rational_q"] = resp.rational_q)
+    !isempty(resp.rational_m_res) && (coupling_group["rational_m"] = resp.rational_m_res)
+    !isempty(resp.rational_n) && (coupling_group["rational_n"] = resp.rational_n)
+
+    # Dominant resonant-coupling modes (SVD of the b̃-space coupling matrix over the retained rows)
+    if !isempty(resp.dominant_singular_values)
+        dominant_group = haskey(coupling_group, "DominantMode") ? coupling_group["DominantMode"] : create_group(coupling_group, "DominantMode")
+        dominant_group["singular_values"] = resp.dominant_singular_values
+        dominant_group["right_singular_vectors"] = resp.dominant_right_singular_vectors
+        dominant_group["left_singular_vectors"] = resp.dominant_left_singular_vectors
+        dominant_group["rational_index"] = resp.dominant_rational_index
+        !isempty(state.dominant_forcing_overlap) && (dominant_group["forcing_overlap"] = state.dominant_forcing_overlap)
+    end
+
+    # Energies
+    energy_group = haskey(pe_group, "Energies") ? pe_group["Energies"] : create_group(pe_group, "Energies")
+    energy_group["vacuum_energy"] = state.vacuum_energy
+    energy_group["surface_energy"] = state.surface_energy
+    energy_group["plasma_energy"] = state.plasma_energy
+    energy_group["toroidal_torque"] = state.toroidal_torque
+
+    # Torque response matrices (kinetic forward solves only)
+    tr = state.torque_response
+    if tr !== nothing
+        tr_group = haskey(pe_group, "TorqueResponse") ? pe_group["TorqueResponse"] : create_group(pe_group, "TorqueResponse")
+        tr_group["psi"] = tr.psi
+        tr_group["m"] = tr.m_modes
+        tr_group["n"] = tr.n_modes
+        tr_group["T_xe"] = tr.T_xe
+        if !isempty(tr.source_names)
+            tr_group["source_name"] = tr.source_names
+            tr_group["T_source"] = tr.T_source
+        end
+        if !isempty(tr.T_applied)
+            tr_group["T_applied"] = tr.T_applied
+            tr_group["total_torque"] = real(tr.T_applied[end])
+        end
+    end
+
+    annotate_pe!(pe_group)
+    if !isempty(state.coil_sets)
+        coils = replace_group!(file, "Input/RawInputs/Coils")
+        ForcingTerms.save_coils_to_h5(state.coil_sets, coils)
+    end
+    return nothing
 end
 
 # Metadata tables for the PerturbedEquilibrium group, applied post-write (paths are

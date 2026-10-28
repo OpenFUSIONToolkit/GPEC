@@ -55,6 +55,6 @@ include("HDF5Output.jl")
 export SLAYERControl, slayer_control_from_toml, validate
 export SLAYERResult, empty_slayer_result
 export TearingProblem, run_slayer_from_inputs, ggj_inner_deltas
-export write_slayer_hdf5!
+export save_to_hdf5
 
 end # module Runner

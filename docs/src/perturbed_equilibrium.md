@@ -17,8 +17,9 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 ```@docs
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibrium
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.write_outputs_to_HDF5
 ```
+
+Save a computed state with [`save_to_hdf5`](@ref); computing the response does not write a file.
 
 ## Several toroidal modes
 

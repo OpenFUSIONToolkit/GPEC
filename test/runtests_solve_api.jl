@@ -181,7 +181,7 @@ using HDF5
             "compute_singular_coupling" => true,
             "verbose" => false,
             "write_outputs_to_HDF5" => false)
-        pe_kw = (; verbose=false, write_outputs_to_HDF5=false)
+        pe_kw = (; verbose=false)
 
         mktempdir() do dir
             _stage_deck(dir;
@@ -397,7 +397,7 @@ using HDF5
             # The tearing model is the solve argument, never a TearingProblem keyword.
             @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
             # The deck's tearing stage propagates errors rather than finishing without a Tearing/ group.
-            @test_throws ArgumentError GPEC.run_slayer_stage(gal, Dict{String,Any}("SLAYER" => Dict{String,Any}("enabled" => true, "inner_model" => "ggj_ray")), nothing)
+            @test_throws ArgumentError GPEC.run_slayer_stage(gal, Dict{String,Any}("SLAYER" => Dict{String,Any}("enabled" => true, "inner_model" => "ggj_ray")))
             # The ideal reference match keeps the ideal closure and replaces the solution with
             # the bare coil columns in the identity-at-edge basis.
             matched = solve(prob, GGJModel())
@@ -413,7 +413,7 @@ using HDF5
     # A known drift is `@test_broken`, so the change that removes it surfaces as an unexpected pass.
     @testset "deck and API parity" begin
         @testset "hdf5 file forcing" begin
-            pe_kwargs = (compute_singular_coupling=true, verbose=false, write_outputs_to_HDF5=false)
+            pe_kwargs = (compute_singular_coupling=true, verbose=false)
             mktempdir() do dir
                 modes = GPEC.ForcingTerms.ForcingMode[]
                 GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example"), "forcing.dat", "ascii", false)
@@ -424,7 +424,7 @@ using HDF5
                         "PerturbedEquilibrium" => Dict{String,Any}(String(k) => v for (k, v) in pairs(pe_kwargs))))
                 reference = GPEC.main([dir])
                 resp = plasma_response(reference.ffs; compute_singular_coupling=true, verbose=false)
-                pe = perturbed_equilibrium(resp, RMPField(joinpath(dir, "forcing.h5")); verbose=false, write_outputs_to_HDF5=false)
+                pe = perturbed_equilibrium(resp, RMPField(joinpath(dir, "forcing.h5")); verbose=false)
 
                 @test pe.response.permeability ≈ reference.pe.response.permeability rtol = 1e-10
                 # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.

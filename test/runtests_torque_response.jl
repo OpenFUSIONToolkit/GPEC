@@ -157,7 +157,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             # No regularization by default; an explicit width still reaches the regularized profiles.
             @test pe.regularization_width == 0.0
             reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.RMPField(ft_ctrl); regularization_width=0.05,
-                coil_sets=pe.coil_sets, verbose=false, write_outputs_to_HDF5=false)
+                coil_sets=pe.coil_sets, verbose=false)
             @test reg.regularization_width == 0.05
             @test reg.forcing_b ≈ pe.forcing_b rtol = 1e-12
             @test !(reg.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
@@ -169,7 +169,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             @test_throws ArgumentError _PE_TR.build_torque_response!(_PE_TR.PlasmaResponse(; ffs))
             # The torque response is opt-in: a response built without it contracts nothing.
             plain = perturbed_equilibrium(plasma_response(ffs; compute_singular_coupling=false, verbose=false), _GPE_TR.ForcingTerms.RMPField(ft_ctrl);
-                coil_sets=pe.coil_sets, verbose=false, write_outputs_to_HDF5=false)
+                coil_sets=pe.coil_sets, verbose=false)
             @test isempty(plain.response.T_xe) && plain.torque_response === nothing
         end
     end

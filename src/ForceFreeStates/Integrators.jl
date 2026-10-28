@@ -127,3 +127,9 @@ function _apply_alg!(kwargs::Dict{Symbol,Any}, alg::Galerkin)
     end
     return kwargs
 end
+
+function algorithm_from_control(ctrl::ForceFreeStatesControl)
+    ctrl.integrator == "forward" && return Forward()
+    ctrl.integrator == "riccati" && return Riccati(; nchunks=ctrl.nchunks)
+    return Galerkin(; (f => getfield(ctrl, Symbol(:gal_, f)) for f in fieldnames(Galerkin) if f !== :cut_solution)...)
+end

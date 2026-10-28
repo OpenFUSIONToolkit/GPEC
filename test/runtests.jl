@@ -35,6 +35,7 @@ else
     include("./runtests_parallel_integration.jl")
     include("./runtests_result_struct.jl")
     include("./runtests_solve_api.jl")
+    include("./runtests_ffs_output.jl")
     include("./runtests_galerkin_cholesky.jl")
     include("./runtests_matching_models.jl")
     include("./runtests_dominant_coupling.jl")

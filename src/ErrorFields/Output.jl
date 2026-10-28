@@ -1,3 +1,6 @@
+import ..Utilities: save_to_hdf5
+import ..Utilities.HDF5Annotations: ensure_group, replace_group!, write_fields!
+
 """
     Output
 
@@ -34,16 +37,15 @@ const EF_H5_ANNOTATIONS = [
 ]
 
 """
-    write_to_hdf5!(h5file::HDF5.File, sens::CoilSensitivities, dom::DominantCoupling)
+    save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, sens::CoilSensitivities; dom::DominantCoupling)
 
 Write the coil linearization to `ErrorFields/CoilSensitivities/` — the spectra and their
 derivatives, plus a `DominantMode/` summary projected onto mode 1 of `dom` (the run's
 full-window decomposition). An existing group is replaced. The mode labels are the file's
 `Info/mn_index` and the field normalization its `Equilibrium/B_T_axis`, neither duplicated here.
 """
-function write_to_hdf5!(h5file::HDF5.File, sens::CoilSensitivities, dom::DominantCoupling)
-    haskey(h5file, _H5_GROUP) && delete_object(h5file, _H5_GROUP)
-    g = create_group(h5file, _H5_GROUP)
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, sens::CoilSensitivities; dom::DominantCoupling)
+    g = replace_group!(h5file, _H5_GROUP)
     g["coil_name"] = sens.coil_names
     g["field_as_designed"] = sens.field_as_designed
     g["shift_sensitivity_per_m"] = sens.shift_sensitivity_per_m
@@ -99,7 +101,7 @@ const _TOLERANCE_SNAPSHOT = "Input/RawInputs/ErrorFields/tolerance_toml_raw"
 Echo the tolerance file's text into `Input/RawInputs/ErrorFields/tolerance_toml_raw`, the raw
 input snapshot a replay reads back with [`read_tolerance_snapshot`](@ref). Replaces an existing echo.
 """
-function write_tolerance_snapshot!(h5file::HDF5.File, ts::ToleranceSet)
+function write_tolerance_snapshot!(h5file::Union{HDF5.File,HDF5.Group}, ts::ToleranceSet)
     haskey(h5file, _TOLERANCE_SNAPSHOT) && delete_object(h5file, _TOLERANCE_SNAPSHOT)
     h5file[_TOLERANCE_SNAPSHOT] = ts.raw
     return h5file
@@ -137,16 +139,15 @@ const MC_H5_ANNOTATIONS = [
 ]
 
 """
-    write_to_hdf5!(h5file::HDF5.File, mc::MonteCarloResult)
+    save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, mc::MonteCarloResult)
 
 Write the tolerance Monte Carlo histograms to `ErrorFields/MonteCarlo/`. The sampling settings
 (`nsample`, `nbatch`, `seed`) live in the run's `[ErrorFields.MonteCarlo]` table under
 `Input/gpec_toml_raw`; the tolerances in `Input/RawInputs/ErrorFields/tolerance_toml_raw`.
 An existing group is replaced.
 """
-function write_to_hdf5!(h5file::HDF5.File, mc::MonteCarloResult)
-    haskey(h5file, _MC_GROUP) && delete_object(h5file, _MC_GROUP)
-    g = create_group(h5file, _MC_GROUP)
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, mc::MonteCarloResult)
+    g = replace_group!(h5file, _MC_GROUP)
     g["abs_delta_bin_edges"] = mc.abs_delta_bin_edges
     g["abs_delta_pdf"] = mc.abs_delta_pdf
     g["abs_delta_efc_pdf"] = mc.abs_delta_efc_pdf
@@ -213,16 +214,15 @@ const RISK_H5_ANNOTATIONS = [
 ]
 
 """
-    write_to_hdf5!(h5file::HDF5.File, risk::RiskResult; scan=nothing)
+    save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, risk::RiskResult; scan=nothing)
 
 Write the locking risk to `ErrorFields/Risk/`, with the tolerance scan under
 `ErrorFields/Risk/ToleranceScan/` when given. The threshold fit, scenario and sampling settings
 live in the run's `[ErrorFields.Risk]` and `[ErrorFields.scenario]` tables under
 `Input/gpec_toml_raw`. An existing group is replaced.
 """
-function write_to_hdf5!(h5file::HDF5.File, risk::RiskResult; scan::Union{Nothing,ToleranceScan}=nothing)
-    haskey(h5file, _RISK_GROUP) && delete_object(h5file, _RISK_GROUP)
-    g = create_group(h5file, _RISK_GROUP)
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, risk::RiskResult; scan::Union{Nothing,ToleranceScan}=nothing)
+    g = replace_group!(h5file, _RISK_GROUP)
     g["threshold_pdf"] = risk.threshold_pdf
     g["locking_probability_given_delta"] = risk.locking_probability_given_delta
     g["threshold_fit"] = risk.threshold_fit
@@ -302,7 +302,7 @@ const NTV_SCAN_H5_ANNOTATIONS = [
 ]
 
 """
-    write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
+    save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, couplings::Vector{EFCCoupling})
 
 Write the correction-coil couplings to `ErrorFields/NTV/`, and the torque-versus-rotation tables
 of the arrays that have one to `ErrorFields/NTV/RotationScan/` (one column per array, shorter
@@ -310,9 +310,8 @@ scans NaN-padded). The torque budget, threshold, rotation exponent and safety fa
 them into a correction-current curve are analysis choices left to [`efc_current_curve`](@ref).
 An existing group is replaced.
 """
-function write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
-    haskey(h5file, _NTV_GROUP) && delete_object(h5file, _NTV_GROUP)
-    g = create_group(h5file, _NTV_GROUP)
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, couplings::Vector{EFCCoupling})
+    g = replace_group!(h5file, _NTV_GROUP)
     g["coil_name"] = [c.coil_name for c in couplings]
     g["delta_per_kat"] = [c.delta_per_kat for c in couplings]
     g["resonant_fraction_percent"] = [c.resonant_fraction_percent for c in couplings]
@@ -325,7 +324,7 @@ function write_to_hdf5!(h5file::HDF5.File, couplings::Vector{EFCCoupling})
     if !isempty(scanned)
         nmax = maximum(length(c.rotation_shift) for c in scanned)
         ψ = scanned[1].psi
-        all(c.psi == ψ for c in scanned) || error("write_to_hdf5!: the rotation scans of the arrays are on different ψ grids")
+        all(c.psi == ψ for c in scanned) || error("save_to_hdf5: the rotation scans of the arrays are on different ψ grids")
         pad(v) = vcat(Float64.(v), fill(NaN, nmax - length(v)))
         padm(m) = hcat(Float64.(m), fill(NaN, size(m, 1), nmax - size(m, 2)))
         sg = create_group(g, "RotationScan")

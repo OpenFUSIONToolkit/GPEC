@@ -345,7 +345,7 @@
         @test isempty(r.per_surface_extraction)
     end
 
-    @testset "write_slayer_hdf5!: round-trip structure" begin
+    @testset "save_to_hdf5: round-trip structure" begin
         p1 = _mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, ising=1)
         p2 = _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, ising=2)
         params = [p1, p2]
@@ -372,7 +372,7 @@
         mktemp() do path, io
             close(io)
             h5open(path, "w") do f
-                write_slayer_hdf5!(f, r)
+                save_to_hdf5(f, r)
             end
 
             # Metadata contract must hold for Tearing/ too — the full-run schema test
@@ -447,13 +447,13 @@
         end
     end
 
-    @testset "write_slayer_hdf5!: disabled result still emits enabled=0" begin
+    @testset "save_to_hdf5: disabled result still emits enabled=0" begin
         c = SLAYERControl(; enabled=false)
         r = empty_slayer_result(c)
         mktemp() do path, io
             close(io)
             h5open(path, "w") do f
-                write_slayer_hdf5!(f, r)
+                save_to_hdf5(f, r)
             end
             h5open(path, "r") do f
                 g = f["Tearing"]
