@@ -1,7 +1,7 @@
 """
 EdgeScanState
 
-Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
+Holds the state and results for the edge dW stability scan over ψ ∈ [dW_edge_scan_start, psilim].
 Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`.
 The energies are generalized (W, N) pencil values: power-normalized and invariant to the
 working (Jacobian) coordinate (see `power_norm_matrix!`).
@@ -126,10 +126,10 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `index::Array{Int,2}` - Index matrix used for sorting solution norms with shape `(numpert_total, numunorms_init)`.
 
-  - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+  - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when dW_edge_scan_start >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
 
-    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+    # Edge dW scan state and results (disabled sentinel when dW_edge_scan_start >= psilim, i.e. no edge scan)
 
     # Initialization parameters
 
@@ -161,7 +161,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ca_l::Array{ComplexF64,4} = zeros(ComplexF64, numpert_total, numpert_total, 2, msing)
     ca_populated::Bool = false
 
-    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+    # Edge dW scan state and results (disabled sentinel when dW_edge_scan_start >= psilim, i.e. no edge scan)
     edge_scan::EdgeScanState = EdgeScanState(numpert_total, 0)
 
     # Data for integrator
@@ -361,7 +361,7 @@ for all three.
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     if ctrl.integrator == "riccati"
-        ctrl.kinetic_factor > 0 && error("kinetic runs require integrator=\"forward\"; the Riccati integrator has no kinetic crossing.")
+        ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.integrator == "forward"
         return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
@@ -376,7 +376,7 @@ end
     forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
-applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.ucrit` and undoing it
+applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.renorm_threshold` and undoing it
 via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
 directly to force this branch regardless of `ctrl.integrator`; `verbose` overrides
 `ctrl.verbose` for progress logging.
@@ -769,7 +769,7 @@ function cross_ideal_singular_surf!(
     # Compute direction-specific asymptotic power series for this singular surface
     singp = intr.sing[ising]
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
-    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
+    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0)
     dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
 
     # Get asymptotic coefficients before crossing (left side)
@@ -901,8 +901,15 @@ const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refr
 
 Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
 A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
+Errors when the solver stops short of the interval's end (e.g. the step size underflows), naming the ψ reached.
 """
-solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK) = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
+function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
+    SciMLBase.successful_retcode(sol) ||
+        error("Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
+              "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor.")
+    return sol
+end
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
@@ -962,7 +969,7 @@ function integrate_el_region!(
         near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
         near_end = abs(odet.q - q_end) < near_q_frac * q_range
         # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
-        in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
+        in_edge_scan = ctrl.dW_edge_scan_start < intr.psilim && integrator.t >= ctrl.dW_edge_scan_start
 
         if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
             # q at the accepted point, not the last internal Runge-Kutta stage
@@ -995,7 +1002,7 @@ Computes norms of the solution vectors of the array `u` and normalizes them
 if this is not the first call after a fixup. Formerly `ode_unorm!`.
 Throws an error if any vector norm is zero. It then compares the variation in norms
 relative to initial values after a fixup, and applies the Gaussian reduction via
-`apply_gaussian_reduction!` if the variation exceeds `ctrl.ucrit` or if `sing_flag` is true.
+`apply_gaussian_reduction!` if the variation exceeds `ctrl.renorm_threshold` or if `sing_flag` is true.
 Performs the same function as `ode_unorm` in the Fortran code, with minor differences in indexing
 and array handling.
 
@@ -1029,7 +1036,7 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     else
         odet.unorm ./= odet.unorm0
         uratio = maximum(odet.unorm) / minimum(odet.unorm)
-        if uratio > ctrl.ucrit || sing_flag
+        if uratio > ctrl.renorm_threshold || sing_flag
             # TODO: add resizing logic here as well
             if odet.ifix < ctrl.numunorms_init
                 odet.ifix += 1
@@ -1092,7 +1099,7 @@ end
 """
     findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
-Records the total dW in the integration region between `ctrl.psiedge` and
+Records the total dW in the integration region between `ctrl.dW_edge_scan_start` and
 `ctrl.psilim`. This performs the same function as `ode_record_edge` in the
 Fortran, but everything is now done post-integration which cleans up the logic,
 i.e. no "_edge" arrays.
@@ -1108,8 +1115,8 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
-    # Find the first ODE step at or past psiedge; all subsequent steps are contiguous edge steps
-    edge_start = findfirst(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
+    # Find the first ODE step at or past dW_edge_scan_start; all subsequent steps are contiguous edge steps
+    edge_start = findfirst(i -> odet.psi_store[i] >= ctrl.dW_edge_scan_start, 1:odet.step)
     N_edge = odet.step - edge_start + 1
 
     # Initialize EdgeScanState sized exactly to the number of edge steps
@@ -1119,7 +1126,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     es.psi .= odet.psi_store[edge_start:odet.step]
     es.q .= odet.q_store[edge_start:odet.step]
 
-    # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
+    # Create a rough spline for wv matrix between dW_edge_scan_start -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
@@ -1147,13 +1154,13 @@ end
 """
     scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose=ctrl.verbose) -> Bool
 
-Record the edge-dW scan over [psiedge, psilim] on `odet.edge_scan`. With `truncate_at_dW_peak`, the
+Record the edge-dW scan over [dW_edge_scan_start, psilim] on `odet.edge_scan`. With `truncate_at_dW_peak`, the
 scan's peak becomes the plasma edge via `truncate_integration!`; otherwise the integration is left
 untouched. Returns whether it truncated.
 """
 function scan_edge_dW!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
     mats::MatrixSplines, intr::ForceFreeStatesInternal; verbose::Bool=ctrl.verbose)
-    ctrl.psiedge < intr.psilim || return false
+    ctrl.dW_edge_scan_start < intr.psilim || return false
     saved_psifac, saved_u = odet.psifac, copy(odet.u)
     peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)
     psi_peak, q_peak = odet.psi_store[peak_step], odet.q_store[peak_step]

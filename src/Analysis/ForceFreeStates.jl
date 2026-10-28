@@ -162,7 +162,7 @@ end
 Plot the edge stability scan energy components (et, ep, ev, evonly) vs ψ_N.
 
 The edge scan evaluates `δW_total = δW_plasma + δW_vacuum` at each stored integration step
-in the region [psiedge, psilim], with the plasma boundary swept from psiedge to psilim.
+in the region [dW_edge_scan_start, psilim], with the plasma boundary swept from dW_edge_scan_start to psilim.
 A positive et indicates stability; the truncation point is chosen at the peak et.
 
 Four subplots are shown:
@@ -177,7 +177,7 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file produced with `psiedge < psilim`
+  - `h5path`: Path to a GPEC HDF5 output file produced with `dW_edge_scan_start < psilim`
 
 ### Keyword arguments
 
@@ -204,7 +204,7 @@ function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwar
     end
 
     if !has_scan
-        @warn "No edge_scan group in $h5path. Run with psiedge < psilim to generate it."
+        @warn "No edge_scan group in $h5path. Run with dW_edge_scan_start < psilim to generate it."
         return nothing
     end
 
@@ -377,8 +377,7 @@ Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
 pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
 normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
 are ballooning-unstable. Reads `LocalStability/ballooning_psi`, `LocalStability/alpha`, and
-`LocalStability/alpha_critical` (populated when ForceFreeStates runs with
-`local_stability_flag = true`).
+`LocalStability/alpha_critical` (populated when the deck has a `[LocalStability]` section).
 
 ### Arguments
 
@@ -400,7 +399,7 @@ function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
         read(fid["LocalStability/ballooning_psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
     end
 
-    isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
+    isempty(alpha) && return plot(; title="No local stability data (add a [LocalStability] section)", legend=false)
 
     p = plot(;
         xlims=(psi_min, 1),
@@ -466,7 +465,7 @@ function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
         (read(kg["scan_psi"]),
             read(kg["scan_cond"]),
             read(kg["scan_threshold"]),
-            read(kg["psi"]),
+            read(kg["rational_psi"]),
             read(fid["SingularSurfaces/rational_psi"]),
             read(fid["SingularSurfaces/rational_q"]),
             read(kg["rational_count"]))

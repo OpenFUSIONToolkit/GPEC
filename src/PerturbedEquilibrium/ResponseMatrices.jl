@@ -195,10 +195,10 @@ function build_flux_matrix(
     ffs::ForceFreeStatesResult
 )::Matrix{ComplexF64}
 
-    # Step 1: Extract boundary displacements and equilibrium quantities
+    # Boundary displacements and equilibrium quantities
     boundary_data = extract_boundary_displacements(equil, solution, ffs)
 
-    # Step 2: Compute normal magnetic field at plasma boundary
+    # Normal magnetic field at the plasma boundary
     # This is the actual implementation of GPEC's bwp_mn calculation
     # bwp_mn[i,j] = i * (dΨ/dρ) * (m[i] - n*q_boundary) * ξ_ψ[i,j]
     flxmats = compute_normal_magnetic_field(boundary_data, ffs)

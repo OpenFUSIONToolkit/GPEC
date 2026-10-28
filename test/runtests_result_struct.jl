@@ -1,5 +1,6 @@
 using TOML
 using HDF5
+include("h5_metadata_check.jl")
 
 # ForceFreeStatesResult: what each formalism publishes, and how consumers gate on it.
 # The Solovev fixture deck (mpsi=16, delta_m=0) is coarse but has two rational surfaces,
@@ -117,7 +118,6 @@ using HDF5
                         "forcing_data_file" => "forcing.dat",
                         "forcing_data_format" => "ascii"),
                     "PerturbedEquilibrium" => Dict{String,Any}(
-                        "compute_response" => true,
                         "compute_singular_coupling" => true,
                         "verbose" => false,
                         "write_outputs_to_HDF5" => false)))
@@ -128,8 +128,8 @@ using HDF5
             @test_logs (:warn,) match_mode = :any (ret = GeneralizedPerturbedEquilibrium.main([dir]))
             # The stage runs to completion; both sub-calculations are simply not populated.
             @test ret.pe !== nothing
-            @test isempty(ret.pe.permeability)
-            @test isempty(ret.pe.C_delta_prime)
+            @test isempty(ret.pe.response.permeability)
+            @test isempty(ret.pe.response.C_delta_prime)
         end
     end
 
@@ -144,7 +144,7 @@ using HDF5
 
                     @test ffs.integrator === :galerkin
                     @test ffs.galerkin !== nothing
-                    @test ffs.galerkin.match !== nothing
+                    @test ffs.match !== nothing
 
                     sol = ffs.solution
                     @test sol isa FFS.SolutionProfiles
@@ -184,22 +184,33 @@ using HDF5
                         @test iszero(ffs.bpen)
                     else
                         @test ffs.closure === :matched
-                        @test ffs.bpen == ffs.galerkin.match.bpen
+                        @test ffs.bpen == ffs.match.bpen
                         @test !iszero(ffs.bpen)
+                        # The ideal δW does not describe the matched plasma.
+                        @test ffs.wp === nothing && ffs.free_boundary === nothing
                     end
 
                     # The closed profiles land in the shared Solutions layout: same names and
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
                     HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                        @test ffs.galerkin.solver in ("cholesky", "LU")
+                        @test read(f["$gal/solver"]) == ffs.galerkin.solver
+                        @test haskey(attrs(f["$gal/solver"]), "long_name")
                         @test read(f["$gal/psi"]) == sol.psi_store
                         @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
                         @test read(f["$gal/dxi_psidpsi"]) == sol.du_store
                         @test read(f["$gal/xi_s"]) == sol.xi_s_store
-                        # Matching diagnostics keep their group; the profile datasets left it,
-                        # and the raw outer basis is debug-gated off by default.
-                        @test haskey(f, "$gal/Match/cout")
-                        @test !haskey(f, "$gal/Match/xi")
+                        # Matching diagnostics sit with the other per-surface results, and the
+                        # raw outer basis is debug-gated off by default.
+                        @test haskey(f, "SingularSurfaces/Match/cout")
+                        @test !haskey(f, "$gal/Match")
+                        # Match/ is self-describing: rows follow SingularSurfaces/rational_psi, and it names the model that ran.
+                        mg = f["SingularSurfaces/Match"]
+                        @test size(read(mg["bpen"]), 1) == length(read(f["SingularSurfaces/rational_psi"]))
+                        @test read(mg["reconnected_flux"]) == ffs.match.reconnected_flux
+                        @test attrs(mg)["inner_model"] == GeneralizedPerturbedEquilibrium.InnerLayer.model_name(ffs.match.model)
+                        @test isempty(_collect_metadata_violations(mg))
                         @test !haskey(f, "$gal/Basis")
                         @test !haskey(f, "$gal/Solution")
                     end

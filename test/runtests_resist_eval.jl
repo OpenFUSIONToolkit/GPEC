@@ -6,7 +6,7 @@
     using GeneralizedPerturbedEquilibrium.LocalStability
     using GeneralizedPerturbedEquilibrium.Utilities
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.Tearing: build_ggj_inputs
+    using GeneralizedPerturbedEquilibrium.ForceFreeStates: ggj_parameters
     using FastInterpolations
     using TOML
 
@@ -15,7 +15,10 @@
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
     eq_cfg = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path)
     sol_cfg = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
-    equil = Equilibrium.setup_equilibrium(eq_cfg, sol_cfg)
+    equil = Equilibrium.PlasmaEquilibrium(eq_cfg, sol_cfg)
+
+    # Spitzer-like η at ~1 keV and deuterium ρ at n_e = 5e19 m⁻³.
+    eta, rho = 3e-8, 2 * Utilities.PhysicalConstants.M_P * 5e19
 
     @testset "resist_geometry: returns finite values with expected signs" begin
         # Pick a few interior surfaces; compute q1 from the equilibrium
@@ -98,17 +101,7 @@
         @test intr.sing[1].restype === rg_first
     end
 
-    @testset "build_ggj_inputs: builds GGJParameters from sings + profiles" begin
-        # Synthetic profiles
-        psi_pts = collect(0.0:0.1:1.0)
-        profiles = KineticProfiles(; psi=psi_pts,
-            n_e=fill(5.0e19, length(psi_pts)),
-            T_e=1000.0 .* (1.0 .- 0.7 .* psi_pts),
-            T_i=1000.0 .* (1.0 .- 0.6 .* psi_pts),
-            omega=fill(0.0, length(psi_pts)),
-            omega_e=fill(1.0e4, length(psi_pts)),
-            omega_i=fill(5.0e3, length(psi_pts)))
-
+    @testset "ggj_parameters: builds GGJParameters from a surface + η, ρ" begin
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
@@ -120,8 +113,7 @@
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
 
-        gs = build_ggj_inputs(equil, intr.sing, profiles; mu_i=2.0, zeff=1.0)
-        @test length(gs) == 1
+        gs = [ggj_parameters(intr.sing[1], equil; eta=eta, rho=rho, ising=1)]
         @test gs[1] isa GGJParameters
 
         # Geometric coefficients flow through unchanged from restype
@@ -143,14 +135,7 @@
         @test gs[1].ising == 1
     end
 
-    @testset "build_ggj_inputs: errors when restype not populated" begin
-        # Need ≥4 points for the cubic spline
-        psi_pts = collect(0.0:0.25:1.0)
-        n = length(psi_pts)
-        profiles = KineticProfiles(; psi=psi_pts,
-            n_e=fill(5.0e19, n), T_e=fill(1000.0, n), T_i=fill(1000.0, n),
-            omega=fill(0.0, n), omega_e=fill(1.0e4, n), omega_i=fill(5.0e3, n))
-
+    @testset "ggj_parameters: errors when restype not populated" begin
         s_unpop = SingType(; psifac=0.5, rho=sqrt(0.5), m=[2], n=[1],
             q=2.0, q1=1.0,
             delta_prime=ComplexF64[],
@@ -159,19 +144,10 @@
             ua_right=zeros(ComplexF64, 0, 0, 0),
             psi_ua_left=0.0, psi_ua_right=0.0)
         @test s_unpop.restype === nothing
-        @test_throws ArgumentError build_ggj_inputs(equil, [s_unpop], profiles)
+        @test_throws ArgumentError ggj_parameters(s_unpop, equil; eta=1e-7, rho=1e-7)
     end
 
     @testset "GGJ solve_inner runs on built parameters" begin
-        psi_pts = collect(0.0:0.1:1.0)
-        profiles = KineticProfiles(; psi=psi_pts,
-            n_e=fill(5.0e19, length(psi_pts)),
-            T_e=1000.0 .* (1.0 .- 0.7 .* psi_pts),
-            T_i=fill(1000.0, length(psi_pts)),
-            omega=fill(0.0, length(psi_pts)),
-            omega_e=fill(0.0, length(psi_pts)),
-            omega_i=fill(0.0, length(psi_pts)))
-
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
@@ -182,7 +158,7 @@
             psi_ua_left=0.0, psi_ua_right=0.0)
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
-        gs = build_ggj_inputs(equil, intr.sing, profiles; mu_i=2.0)
+        gs = [ggj_parameters(intr.sing[1], equil; eta=eta, rho=rho, ising=1)]
 
         # Verify D_I < 0 so the GGJ shooting solver doesn't bail
         @test mercier_di(gs[1]) < 0

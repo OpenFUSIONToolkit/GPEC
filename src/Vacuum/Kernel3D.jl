@@ -1,3 +1,25 @@
+# Polar singular-correction quadrature for the 3D vacuum kernels
+# [Malhotra et al., J. Comput. Phys. 397 (2019) 108791, Sec. 3.2].
+#
+# Translated to Julia from BIEST (https://github.com/dmalhotra/BIEST):
+#   include/biest/singular_correction.hpp  SingularCorrection::InitPrecomp, Setup, SetPatch
+#   include/biest/surface_op.txx           SurfaceOp::SetupSingularCorrection, EvalSurfInteg
+# Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+# Original implementation: Dhairya Malhotra
+#
+# Modifications Copyright (C) 2026 Columbia Fusion Research Center and Seoul National University:
+#   - Julia translation; runtime patch, quadrature and interpolation orders (default Lagrange
+#     order 5), with the patch clamped on coarse grids
+#   - stencil corner by rounding, so odd orders are equivariant under the patch's pi-rotation
+#   - one sparse interpolation matrix, applied forward to the geometry and transposed to scatter weights
+#   - VACUUM kernel convention: 1/r and n.grad'(1/r) over 2pi, unit Green's-identity diagonal
+#   - far field by the trapezoidal rule on the collocation grid, without upsampling
+#   - singular correction applied to plasma-wall cross-surface blocks
+#   - dense operator row assembly, field-period folding, stellarator-symmetric basis, threading
+#
+# SPDX-License-Identifier: Apache-2.0
+# Full text in LICENSES/Apache-2.0.txt; attribution in NOTICE.
+
 """
     SingularQuadratureData
 
@@ -268,7 +290,7 @@ end
 """
     compute_3D_kernel_matrices!(grad_blocks, green_blocks, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis=nothing)
 
-3D single- and double-layer kernels with Malhotra's polar singular correction (PPCF 2019 024004).
+3D single- and double-layer kernels with Malhotra's polar singular correction (PPCF 62 (2020) 024004).
 
 Far field: trapezoidal rule. Near field: polar quadrature blended by a partition of unity.
 

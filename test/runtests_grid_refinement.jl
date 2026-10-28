@@ -153,7 +153,7 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
             eq_type="sol", grid_type="log_asymptotic", mpsi=0, psi_accuracy=1e-3)
         @test GridRef.wants_two_pass(alias_config)
 
-        equil1 = GridRef.setup_equilibrium(eq_config, sol_config)
+        equil1 = GridRef.PlasmaEquilibrium(eq_config, sol_config)
 
         # Rational nodes land exactly on q = m/n surfaces
         rat = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_nodes(equil1; nlow=1, nhigh=2)
@@ -179,8 +179,46 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         @test minimum(diff(grid)) > 0
 
         # Pass 2 honors the refined grid exactly
-        equil2 = GridRef.setup_equilibrium(eq_config, sol_config; override_psi_nodes=grid)
+        equil2 = GridRef.PlasmaEquilibrium(eq_config, sol_config; override_psi_nodes=grid)
         @test equil2.profiles.xs == grid
         @test equil2.rzphi_xs == grid
+
+        # The equilibrium keeps a private copy of its config, so reform needs no input and
+        # ignores later edits to the caller's config.
+        @test equil1.analytic isa GridRef.SolovevConfig && equil1.analytic !== sol_config
+        sol_config.elongation += 0.1
+        equil2r = GridRef.reform(equil1, grid)
+        sol_config.elongation -= 0.1
+        @test equil2r.rzphi_xs == equil2.rzphi_xs
+        @test map(equil2r.profiles.q_spline, grid) == map(equil2.profiles.q_spline, grid)
+        @test equil2r.rzphi_rsquared((0.5, 0.3)) == equil2.rzphi_rsquared((0.5, 0.3))
+
+        # The one-call constructor implies eq_type from the config type and gives the same pass 1.
+        equil1c = GridRef.PlasmaEquilibrium(sol_config; grid_type="auto", mpsi=0, psi_accuracy=1e-3, psilow=0.01, psihigh=0.995)
+        @test equil1c.config.eq_type == "sol" && equil1c.rzphi_xs == equil1.rzphi_xs
+        @test_throws ErrorException GridRef.PlasmaEquilibrium(sol_config; eq_type="lar")
+        @test_throws ErrorException GridRef.PlasmaEquilibrium(eq_config)  # analytic kind without its config
+        @test GridRef._analytic_eq_type(GridRef.TJAnalyticConfig()) == "tj_analytic"
+
+        # Solovev has finite edge q, so the auto grid must classify it as limited: no separatrix
+        # log law, on either pass, even with the absolute r² floor disabled (the relative
+        # log-vs-linear comparison is what rejects it).
+        @test GridRef.edge_q_law(equil1) === nothing
+        @test GridRef.edge_q_law(equil2) === nothing
+        @test GridRef.edge_q_law(equil1; min_r2=-Inf) === nothing
+    end
+
+    @testset "edge_q_law accepts a diverted edge" begin
+        using TOML
+        dir_path = joinpath(dirname(@__DIR__), "examples", "DIIID-like_ideal_example")
+        inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
+        equil = GridRef.PlasmaEquilibrium(GridRef.EquilibriumConfig(inputs["Equilibrium"], dir_path), nothing)
+        fit = GridRef.edge_q_law(equil)
+        @test fit !== nothing
+        @test fit.A < 0
+        @test fit.r2_log > fit.r2_linear
+        # The shear-consistency check is live: this fit's slope is ~5% off the measured
+        # -(1-psi)q', so a tolerance tighter than that must reject it.
+        @test GridRef.edge_q_law(equil; shear_ratio=1.01) === nothing
     end
 end

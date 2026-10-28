@@ -1,10 +1,9 @@
 # Shared metadata-contract walker (docs/development/hdf5-conventions.md): every
 # dataset carries long_name + units, and rank ≥ 2 datasets carry a dims axis-name
-# attribute. Exempt: the Input/ raw snapshot and the debug-only GalerkinIntegration
-# Match/ group. Included by runtests_h5_schema.jl (full-run walk) and
+# attribute. Exempt: the Input/ raw snapshot. Included by runtests_h5_schema.jl (full-run walk) and
 # runtests_slayer_runner.jl (Tearing/ writer walk, which no full-run test deck covers).
 
-_metadata_exempt(path) = startswith(path, "Input/") || occursin("/Match/", path)
+_metadata_exempt(path) = startswith(path, "Input/")
 
 function _collect_metadata_violations(h5)
     bad = String[]
