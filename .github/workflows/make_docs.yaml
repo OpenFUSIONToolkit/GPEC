@@ -30,6 +30,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Disable the solver precompile workload
+        run: |
+          printf '[GeneralizedPerturbedEquilibrium]\nprecompile_workload = false\n' > docs/LocalPreferences.toml
+
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
