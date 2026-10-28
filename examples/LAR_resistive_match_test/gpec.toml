@@ -2,7 +2,7 @@
 #
 # A different equilibrium from the DIII-D-like validation case, used to check that the
 # outer-region Galerkin Delta-prime solve and the driven (RPEC) outer-inner match stay self-consistent
-# on a second geometry: matching residual near machine precision and convergence under gal_sing_order
+# on a second geometry: matching residual near machine precision and convergence under frobenius_order
 # refinement. For n = 1 with q in [1.5, 3.6] the rational surfaces are q = 2 and q = 3, so msing = 2
 # and the per-surface resistive arrays below have length 2 (core to edge). This run terminates after
 # the stability stage. The companion LAR_ideal_match_test case is the ideal-limit reference.
@@ -68,7 +68,6 @@ force_termination     = true   # Terminate after the stability stage (no perturb
 write_outputs_to_HDF5 = true   # Write stability outputs to HDF5
 
 # Outer-region singular Galerkin Delta-prime solver with rpec coil columns.
-gal_solver             = "LU"  # Banded solver: "auto" (Cholesky if Hermitian positive definite, else LU), "LU" or "cholesky"
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element
 gal_pfac               = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)
@@ -79,7 +78,6 @@ gal_cutoff             = 10    # Number of elements carrying the large (driving)
 gal_tol                = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tolerance
 gal_gnstep             = 5000  # Maximum resonant-integration steps
 gal_dx1dx2_flag        = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
-gal_sing_order         = 6     # Base power-series order for the Galerkin singular asymptotics
 gal_sing_order_ceiling = true  # Auto-raise the series order by ceil(2*Re(alpha)) on high-Mercier-index surfaces
 gal_rpec_flag          = true  # Append mpert coil-response columns (unit edge sources) to the solve, giving the delta_coil block
 

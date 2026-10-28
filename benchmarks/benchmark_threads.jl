@@ -14,8 +14,7 @@ function run_ffs(ex; integrator)
     inputs["ForceFreeStates"]["integrator"] = integrator
     inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
     intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-    ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-        (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
     eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))

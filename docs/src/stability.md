@@ -437,8 +437,7 @@ const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 ex     = "examples/Solovev_ideal_example"
 inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
 
-ctrl  = FFS.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+ctrl  = FFS.control_from_deck(inputs["ForceFreeStates"])
 equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
 

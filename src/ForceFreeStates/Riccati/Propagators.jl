@@ -2,7 +2,7 @@
 
 # Save-frequency thresholds for `riccati_integrator_callback!`. Near the right endpoint of
 # a segment we save every step so that the crossing / chunk boundary captures fine detail;
-# elsewhere we save every `ctrl.save_interval`-th step. The relative band catches normal-
+# elsewhere we save every `ctrl.algorithm.save_interval`-th step. The relative band catches normal-
 # length chunks; the absolute floor catches short chunks where 5% of the span would be
 # smaller than the typical ODE step.
 const SAVE_NEAR_END_FRAC = 0.05
@@ -201,7 +201,7 @@ Callback function for the Riccati ODE integrator. Handles tolerance updates,
 renormalization, and storage at each step.
 
 Uses `sing_der!` as the ODE RHS: u[:,:,1] = U₁ (starts as S), u[:,:,2] = U₂ (starts as I).
-When max(|U₁|) or max(|U₂|) exceeds `ctrl.renorm_threshold`, applies `renormalize_riccati_inplace!`
+When max(|U₁|) or max(|U₂|) exceeds `ctrl.algorithm.renorm_threshold`, applies `renormalize_riccati_inplace!`
 to compute S = U₁·U₂⁻¹ and reset U₂ = I. This is the Riccati analogue of Gaussian
 reduction in the standard `integrator_callback!`, and keeps the ODE inputs bounded.
 """
@@ -214,13 +214,13 @@ function riccati_integrator_callback!(integrator)
     # Renormalize when norms exceed renorm_threshold (analogous to Gaussian reduction in integrator_callback!)
     # During sing_der! integration: u[:,:,1]=U₁ (grows), u[:,:,2]=U₂ (grows).
     # Renorm computes S = U₁·U₂⁻¹ and resets U₂ = I, keeping inputs bounded.
-    if maximum(abs, @view(integrator.u[:, :, 1])) > ctrl.renorm_threshold ||
-       maximum(abs, @view(integrator.u[:, :, 2])) > ctrl.renorm_threshold
+    if maximum(abs, @view(integrator.u[:, :, 1])) > ctrl.algorithm.renorm_threshold ||
+       maximum(abs, @view(integrator.u[:, :, 2])) > ctrl.algorithm.renorm_threshold
         renormalize_riccati_inplace!(integrator.u, intr.numpert_total)
     end
 
     # Refresh after any renorm so the tolerance matches the current state.
-    column_abstol!(integrator.opts.abstol, integrator.u, ctrl.eulerlagrange_tolerance)
+    column_abstol!(integrator.opts.abstol, integrator.u, ctrl.algorithm.eulerlagrange_tolerance)
 
     # Determine if we should save this step. Always save the first 1-2 steps of a segment
     # and the last few steps near the right endpoint (relative band SAVE_NEAR_END_FRAC of the
@@ -231,7 +231,7 @@ function riccati_integrator_callback!(integrator)
     near_end = psi_remaining < SAVE_NEAR_END_FRAC * psi_range || psi_remaining < SAVE_NEAR_END_PSI
     steps_in_segment = length(integrator.sol.t)
     near_start = steps_in_segment <= 2
-    should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
+    should_save = near_start || near_end || (odet.step % ctrl.algorithm.save_interval == 0)
 
     if should_save
         store_ode_data!(odet, integrator.t, integrator.u)
@@ -253,7 +253,7 @@ function riccati_integrate_chunk!(
     mats::MatrixSplines, intr::ForceFreeStatesInternal, chunk::IntegrationChunk
 )
     cb = DiscreteCallback((u, t, integrator) -> true, riccati_integrator_callback!)
-    rtol = ctrl.eulerlagrange_tolerance
+    rtol = ctrl.algorithm.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
                       (ctrl, equil, mats, intr, odet, chunk))
     sol = solve_el(prob, rtol; callback=cb)
@@ -302,7 +302,7 @@ In-place Riccati renormalization on an arbitrary N×N×2 array:
   u[:,:,2] = I
 
 Used in `riccati_integrator_callback!` to renormalize the integrator's live state
-when column norms grow beyond `ctrl.renorm_threshold`, analogous to Gaussian reduction in the
+when column norms grow beyond `ctrl.algorithm.renorm_threshold`, analogous to Gaussian reduction in the
 standard ODE. This keeps the inputs to `sing_der!` bounded, preventing the same
 exponential growth that occurs in the standard (non-Riccati) ODE without Gaussian reduction.
 """
@@ -349,7 +349,7 @@ function integrate_propagator_chunk!(
     tspan = chunk.direction == 1 ?
         (chunk.psi_start, chunk.psi_end) :
         (chunk.psi_end,   chunk.psi_start)
-    rtol = ctrl.eulerlagrange_tolerance
+    rtol = ctrl.algorithm.eulerlagrange_tolerance
     params = (ctrl, equil, mats, intr, odet_proxy, chunk)
 
     # Upper block IC: U₁ = I, U₂ = 0
@@ -418,7 +418,7 @@ function integrate_fm_with_ua_ic(
     end
     # For backward integration: start at psi_end (where ua lives), integrate to psi_start
     tspan = backward ? (psi_end, psi_start) : (psi_start, psi_end)
-    rtol = ctrl.eulerlagrange_tolerance
+    rtol = ctrl.algorithm.eulerlagrange_tolerance
 
     result = zeros(ComplexF64, 2N, 2N)
     odet_proxy = OdeState(N, 1, 1, 0)

@@ -97,7 +97,7 @@ using .PerturbedEquilibrium: plasma_response, PlasmaResponse
 
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag")
+    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag", "gal_solver", "gal_sing_order")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 const _DEPRECATED_KF_KEYS = ("moment", "eq_out", "theta_out", "xlmda_out", "eqpsi_out", "save_records", "gpec_file",
     "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha")
@@ -238,14 +238,14 @@ function main_from_inputs(
     _stop_on_deprecated_keys(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     haskey(inputs, "KineticForces") && _stop_on_deprecated_keys(inputs["KineticForces"], _DEPRECATED_KF_KEYS, "KineticForces")
     haskey(inputs, "PerturbedEquilibrium") && _stop_on_deprecated_keys(inputs["PerturbedEquilibrium"], _DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
+    ctrl = ForceFreeStates.control_from_deck(ffs_table, get(inputs, "DEBUG", Dict{String,Any}()))
     local_stability_alg = local_stability_algorithm(inputs)
 
     resolve_mode_space!(intr, ctrl)
 
     equil = Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
     # GPEC differentiates the spline of F, so single-precision FPOL rounding becomes noise in Δ′.
-    if eq_config.eq_type in Equilibrium.EFIT_KINDS && ctrl.integrator in ("riccati", "galerkin") &&
+    if eq_config.eq_type in Equilibrium.EFIT_KINDS && ctrl.algorithm isa Union{Riccati,Galerkin} &&
        Equilibrium.gfile_fpol_single_precision(eq_config.eq_filename)
         @warn "The g-file's FPOL is single precision. Its rounding puts noise of order ±2–3 on Δ′ at 257 radial " *
               "nodes; regenerate the file in double precision for converged Δ′." file = eq_config.eq_filename
@@ -267,7 +267,7 @@ function main_from_inputs(
     intr.wall_settings = Vacuum.parse_wall(get(inputs, "Wall", nothing))
 
     if "DEBUG" in keys(inputs)
-        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"] if k != "gal_basis_output")...)
     else
         intr.debug_settings = DebugSettings()
     end
@@ -294,11 +294,8 @@ function main_from_inputs(
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl;
         overlap_inputs=_overlap_slayer_inputs(inputs, equil.kinetic))
     ffs_result = run_deck_match(run_force_free_states(ctrl, equil, mats, intr, metric), ctrl)
-    alg = ForceFreeStates.algorithm_from_control(ctrl)
-    algorithm_keys = Set([:integrator])
-    alg isa Riccati && push!(algorithm_keys, :nchunks)
-    alg isa Galerkin && union!(algorithm_keys, (Symbol(:gal_, f) for f in fieldnames(Galerkin) if f !== :cut_solution))
-    problem_kwargs = Dict(f => getfield(ctrl, f) for f in fieldnames(typeof(ctrl)) if !(f in (:nn_low, :nn_high)) && !(f in algorithm_keys))
+    alg = ctrl.algorithm
+    problem_kwargs = ForceFreeStates.problem_keywords(ctrl)
     problem = ForceBalanceProblem(equil; nn=ctrl.nn_low:ctrl.nn_high, wall=intr.wall_settings, dir_path=intr.dir_path,
         debug=intr.debug_settings, problem_kwargs...)
     ffs_result = ForceFreeStates._with(ffs_result; problem=problem, algorithm=alg)
@@ -664,7 +661,7 @@ function prepare_force_free_states!(
     # surfaces) by raising psilow to where q = qlow (RDCON sing_min). Without this, the gal FEM
     # integrates through the unhandled q≤1 ideal singularity and contaminates Δ′ at the innermost
     # kept surface when q0 < qlow. No-op (keeps the axis bound) when qlow ≤ qmin.
-    if ctrl.integrator == "galerkin"
+    if ctrl.algorithm isa ForceFreeStates.Galerkin
         sing_min!(intr, ctrl, equil)
     end
 
@@ -750,7 +747,7 @@ end
 """
     run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=false) -> ForceFreeStatesResult
 
-Run the formalism selected by `ctrl.integrator` — the standalone Galerkin solve, or the
+Run the formalism selected by `ctrl.algorithm` — the standalone Galerkin solve, or the
 Euler-Lagrange sweep with its free-boundary energies and Δ′ BVP — and publish its products as a
 `ForceFreeStatesResult`. `cut_solution` is the scripting-only `Galerkin(; cut_solution)` option.
 """
@@ -771,7 +768,7 @@ function run_force_free_states(
     free_energies = nothing
     gal_data = nothing
     gal_dp = nothing
-    if ctrl.integrator == "galerkin"
+    if ctrl.algorithm isa ForceFreeStates.Galerkin
         ctrl.kinetic_factor == 0 ||
             error("integrator = \"galerkin\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         gal_start = time()
@@ -822,7 +819,7 @@ function run_force_free_states(
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    result = build_result(Symbol(ctrl.integrator), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+    result = build_result(ForceFreeStates._integrator_symbol(ctrl.algorithm), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
 
     return result
 end
@@ -873,8 +870,8 @@ matching is a separate problem posed on the finished solve: see `MatchProblem`.
 
 `nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `dir_path` the
 working directory outputs are written to, and `debug` the diagnostic dump settings of the
-DEBUG deck section. Any remaining keyword is a `ForceFreeStatesControl` field, so the TOML
-keys and the problem keywords are the same knobs. `nn_low`/`nn_high` are rejected — they
+DEBUG deck section. Remaining keywords describe physics and workflow controls;
+numerical settings belong on the integrator passed to `solve`. `nn_low`/`nn_high` are rejected — they
 come from `nn`.
 
 ## Fields
@@ -902,6 +899,10 @@ function ForceBalanceProblem(
     kwargs...
 )
     ctrl_kwargs = Dict{Symbol,Any}(kwargs)
+    allowed = setdiff(fieldnames(ForceFreeStatesControl), (:algorithm,))
+    for name in keys(ctrl_kwargs)
+        name in allowed || throw(ArgumentError("`$name` is not a ForceBalanceProblem keyword; numerical settings belong on the integrator."))
+    end
     (haskey(ctrl_kwargs, :nn_low) || haskey(ctrl_kwargs, :nn_high)) &&
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
@@ -936,8 +937,8 @@ function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrato
 
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
-    ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
-    ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
+    ctrl = ForceFreeStatesControl(; algorithm=alg, ctrl_kwargs...)
+    ForceFreeStates.validate_algorithm(ctrl)
 
     ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && equil.kinetic === nothing &&
         error("kinetic_source = \"calculated\" needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")

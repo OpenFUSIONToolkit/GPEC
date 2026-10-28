@@ -43,7 +43,7 @@ function save_to_hdf5(
 
     # Outer-region Galerkin solver outputs (RDCON), if it ran
     if gal_data !== nothing
-        write_galerkin!(out_h5, gal_data; basis_output=result.debug_settings.gal_basis_output)
+        write_galerkin!(out_h5, gal_data; basis_output=result.control.algorithm.basis_output)
     end
 
     if gal_solution !== nothing

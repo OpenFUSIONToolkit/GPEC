@@ -26,7 +26,9 @@ import StaticArrays: @MMatrix
 
 # Types with cross-subsystem consumers, loaded before the code that dispatches on them
 include("Surfaces/Types.jl")
+include("Integrators.jl")
 include("CoreTypes.jl")
+include("DeckControl.jl")
 include("Riccati/Types.jl")
 include("Fourfit.jl")
 include("Matching/DeltaPrime.jl")
@@ -60,8 +62,6 @@ include("Galerkin/GalerkinAssembly.jl")
 include("Galerkin/GalerkinSolution.jl")
 include("Galerkin/GalerkinSolve.jl")
 
-# Scripting-API integrator selectors: pure configuration translated onto ForceFreeStatesControl.
-include("Integrators.jl")
 
 # The published solve product; last, so it can name every type the stages above define.
 include("Result.jl")

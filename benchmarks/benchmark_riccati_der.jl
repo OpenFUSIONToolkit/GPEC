@@ -26,8 +26,7 @@ function setup_solovev()
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
-    ctrl = FFS.ForceFreeStatesControl(;
-        (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
     eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
@@ -79,7 +78,7 @@ println("Test state: Hermitian S (physical constraint). Expected error: ~machine
 ctrl, equil, mats, intr = setup_solovev()
 N = intr.numpert_total
 
-odet = FFS.OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+odet = FFS.OdeState(N, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
 FFS.initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
 chunks = FFS.chunk_el_integration_bounds(odet, ctrl, intr)
 

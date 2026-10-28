@@ -98,8 +98,7 @@ end
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
 
-    ctrl = FFS.ForceFreeStatesControl(;
-        (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
         GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
         GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
@@ -163,7 +162,7 @@ end
         # See benchmarks/benchmark_riccati_der.jl for the extended version with output.
 
         # Use an initialized OdeState just for spline_hint and chunk bounds
-        odet_tmp = FFS.OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr_ric.msing)
+        odet_tmp = FFS.OdeState(N, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr_ric.msing)
         FFS.initialize_el_at_axis!(odet_tmp, ctrl, mats, equil.profiles, intr_ric)
         chunks = FFS.chunk_el_integration_bounds(odet_tmp, ctrl, intr_ric)
 

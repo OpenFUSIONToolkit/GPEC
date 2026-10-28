@@ -76,12 +76,12 @@ upper-surface scale uses `|q1|` without `nn` (gal.f). Identical for `nn = 1`.
 function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vector{SingType},
     nn::Int, psilow::Float64, psihigh::Float64, ctrl::ForceFreeStatesControl)
 
-    nx = ctrl.gal_nx
-    dx0 = ctrl.gal_dx0
-    dx1 = ctrl.gal_dx1
-    dx2 = ctrl.gal_dx2
-    pfac = ctrl.gal_pfac
-    cutoff = ctrl.gal_cutoff
+    nx = ctrl.algorithm.nx
+    dx0 = ctrl.algorithm.dx0
+    dx1 = ctrl.algorithm.dx1
+    dx2 = ctrl.algorithm.dx2
+    pfac = ctrl.algorithm.pfac
+    cutoff = ctrl.algorithm.cutoff
     xn = intvl.x
     cells = intvl.cells
 
@@ -101,7 +101,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
         nq1 = abs(nn * sings[ising].q1)
         xn[0+1] = x0
         cells[1].x_lsode = x0 + dx0 / nq1
-        if ctrl.gal_dx1dx2_flag
+        if ctrl.algorithm.dx1dx2_flag
             xn[1+1] = x0 + dx1 / nq1
             xn[2+1] = x0 + (dx1 + dx2) / nq1
             ixmin = 2
@@ -133,7 +133,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
         nq1 = abs(nn * sings[ising+1].q1)
         xn[nx+1] = x1
         cells[nx].x_lsode = x1 - dx0 / nq1
-        if ctrl.gal_dx1dx2_flag
+        if ctrl.algorithm.dx1dx2_flag
             xn[(nx-1)+1] = x1 - dx1 / nq1
             xn[(nx-2)+1] = x1 - (dx1 + dx2) / nq1
             ixmax = nx - 2
@@ -165,7 +165,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
     # intervals pack only toward their single rational end, leaving the regular boundary (psilow at
     # interval 0, psihigh at interval msing) at coarse spacing — removes the gratuitous fine edge cell.
     side = "both"
-    if ctrl.gal_edge_onesided && msing > 0
+    if ctrl.algorithm.edge_onesided && msing > 0
         if ising == 0
             side = "right"   # rational sits at the upper (ixmax) end
         elseif ising == msing

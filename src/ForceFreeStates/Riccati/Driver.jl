@@ -103,7 +103,7 @@ chunks concurrently using `Threads.@threads`, then re-integrates the outer plasm
 
  1. **Chunk generation**: calls `chunk_el_integration_bounds`, then `balance_integration_chunks`
     to sub-divide chunks for load balancing. The chunk count depends only on `intr.msing` and
-    `ctrl.nchunks`, never on the thread count, so results are thread-independent.
+    `ctrl.algorithm.nchunks`, never on the thread count, so results are thread-independent.
  2. **Propagator phase**: `integrate_propagator_chunk!` integrates each chunk independently
     from identity initial conditions (no accumulated state, normalization or storage).
     Each thread uses a private `OdeState` proxy for `sing_der!` side effects.
@@ -117,7 +117,7 @@ chunks concurrently using `Threads.@threads`, then re-integrates the outer plasm
     checkpoints for `findmax_dW_edge!`.
 
 Select via `integrator = "riccati"` in `[ForceFreeStates]` of gpec.toml. Requires
-`singfac_min != 0`. Uses whatever threads `julia -t` provides; `ctrl.nchunks` is the only
+`singfac_min != 0`. Uses whatever threads `julia -t` provides; `ctrl.algorithm.nchunks` is the only
 tunable.
 
 **Key differences from the forward integrator:**
@@ -177,7 +177,7 @@ function _initialize_parallel_odet(ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal)
-    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+    odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing

@@ -99,11 +99,12 @@ with a failed conductor is `nominal - failed_coil`, not `0.9 * nominal`.
 ## Choosing an integrator
 
 The second argument of `solve` picks the formalism, and its fields are that formalism's
-tunables. Everything else is a `ForceFreeStatesControl` keyword, so the TOML keys and the
-`solve` keywords are the same knobs:
+numerical settings. Physical inputs belong on `ForceBalanceProblem`; ODE tolerances and
+storage settings belong on `Forward` or `Riccati`, and `extended_precision_bvp` belongs only
+on `Riccati`. The current deck reader translates its existing section layout into those objects:
 
 ```julia
-ffs = solve(eq, Forward(); nn=1, vac_flag=true)                 # dense ξ profiles for PerturbedEquilibrium
+ffs = solve(eq, Forward(; eulerlagrange_tolerance=1e-8); nn=1, vac_flag=true) # dense ξ profiles for PerturbedEquilibrium
 ffs = solve(eq, Riccati(; nchunks=40); nn=1, vac_flag=true)     # chunked propagators, Δ′ matrix
 ffs = solve(eq, Galerkin(; nx=512); nn=1)                       # RDCON outer-region Galerkin Δ′
 ```
@@ -111,6 +112,11 @@ ffs = solve(eq, Galerkin(; nx=512); nn=1)                       # RDCON outer-re
 Which products each formalism can supply differs; a result carries `nothing` in the fields
 its integrator does not produce and consumers warn and skip rather than erroring. See the
 [Stability Analysis](stability.md) page for the result struct and its capability gates.
+
+`singfac_min`, `frobenius_order`, `frobenius_psi_max`, `truncate_at_dW_peak`, and
+`dW_edge_scan_start` remain problem settings. `Galerkin` rejects non-default values of the
+last three. Its per-surface order adjustment is controlled by `frobenius_order_ceiling`,
+and its factorization is selected automatically.
 
 ## Inner-layer matching
 

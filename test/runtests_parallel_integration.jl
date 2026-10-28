@@ -18,7 +18,7 @@ using TOML
     end
     default = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, nothing, false)
     extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(), false)
-    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; extended_precision_bvp=false), false)
+    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; algorithm=Riccati(; extended_precision_bvp=false)), false)
     @test default == reference
     @test extended == reference
     @test ordinary != reference
@@ -134,8 +134,7 @@ end
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
@@ -154,7 +153,7 @@ end
         metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
         mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
 
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
@@ -203,15 +202,13 @@ end
         @test all(balanced_again[i].psi_end == balanced[i].psi_end for i in eachindex(balanced))
 
         # An explicit nchunks steers the target count directly.
-        ctrl_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., nchunks=target_n + 7)
+        ctrl_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(merge(inputs["ForceFreeStates"], Dict("nchunks" => target_n + 7)))
         balanced_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_more, intr)
         @test length(balanced_more) == target_n + 7
 
         # An nchunks below the singular-surface floor is clamped up, with a warning.
         min_chunks = 2 * intr.msing + 3
-        ctrl_few = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., nchunks=1)
+        ctrl_few = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(merge(inputs["ForceFreeStates"], Dict("nchunks" => 1)))
         balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
         @test length(balanced_few) == max(min_chunks, length(base_chunks))
     end
@@ -224,8 +221,7 @@ end
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
@@ -244,7 +240,7 @@ end
         metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
         mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
 
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
         # Default (bidirectional=false): all chunks should have direction=+1
@@ -288,8 +284,7 @@ end
             inputs["ForceFreeStates"]["verbose"] = false
             inputs["ForceFreeStates"]["integrator"] = integrator
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
                 eq_config,
@@ -339,8 +334,7 @@ end
             inputs["ForceFreeStates"]["integrator"] = integrator
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
                 eq_config,
@@ -402,8 +396,7 @@ end
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
@@ -456,8 +449,7 @@ end
             inputs["ForceFreeStates"]["integrator"] = integrator
             inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_dir)
-            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
                 eq_config,
@@ -511,8 +503,7 @@ end
         inputs["ForceFreeStates"]["integrator"] = "riccati"
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
@@ -597,9 +588,8 @@ end
         @test isapprox(real(dpm[3, 3]), -1.590034e+01; rtol=1e-1)   # q=4
 
         # Compare Float64 against the default Double64 solve, including complex off-diagonal entries.
-        @test ctrl.extended_precision_bvp
-        ctrl_float = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., extended_precision_bvp=false)
+        @test ctrl.algorithm.extended_precision_bvp
+        ctrl_float = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(merge(inputs["ForceFreeStates"], Dict("extended_precision_bvp" => false)))
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
             intr, fm_propagators, fm_chunks;
             wv=vac.wv, psio=equil.psio,

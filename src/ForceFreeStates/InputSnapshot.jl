@@ -27,8 +27,11 @@ function result_inputs(result::ForceFreeStatesResult, inputs)
     for key in ("power_bp", "power_b", "power_r", "power_rc")
         delete!(snapshot["Equilibrium"], key)
     end
-    snapshot["ForceFreeStates"] = _input_fields(result.control)
+    snapshot["ForceFreeStates"] = control_to_deck(result.control)
     snapshot["DEBUG"] = _input_fields(result.debug_settings)
+    if result.control.algorithm isa Galerkin
+        snapshot["DEBUG"]["gal_basis_output"] = result.control.algorithm.basis_output
+    end
     if result.equil.analytic !== nothing
         section = Equilibrium.ANALYTIC_EQ[result.equil.config.eq_type].section
         snapshot[section] = _input_fields(result.equil.analytic)

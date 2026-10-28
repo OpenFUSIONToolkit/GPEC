@@ -44,7 +44,7 @@ See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematica
 
   - `singp::SingType`: Singular surface parameters
   - `sing_order`: Expansion order, defaulting to `ctrl.frobenius_order`. The Galerkin path overrides it
-    per surface (`gal_sing_order`, raised for high-Mercier-index surfaces).
+    per surface (`frobenius_order`, raised for high-Mercier-index surfaces).
 
 A trace diagnostic warns once per surface per solve when `abs(tr(M₀))/2` exceeds both
 `1e-3 * abs(α)` and a round-off floor of `64 * Base.eps(Float64) * opnorm(M₀, Inf)`. It is not

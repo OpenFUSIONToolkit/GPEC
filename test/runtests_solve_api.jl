@@ -19,8 +19,11 @@ using HDF5
 
     # The deck's `[ForceFreeStates]` block as `solve` keywords: everything except the knobs the
     # integrator object and the `nn` keyword own.
-    ffs_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"]
-                      if !(k in ("integrator", "nn_low", "nn_high")))
+    fixture_ctrl = FFS.control_from_deck(deck["ForceFreeStates"])
+    ffs_kwargs = FFS.problem_keywords(fixture_ctrl)
+    ode_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"] if Symbol(k) in FFS._ODE_KEYS)
+    forward = Forward(; ode_kwargs...)
+    riccati = Riccati(; ode_kwargs...)
 
     # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
     function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
@@ -40,7 +43,7 @@ using HDF5
     @testset "forward solve matches the TOML-driven run" begin
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir)]).ffs
-            api = solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+            api = solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
 
             @test api isa FFS.ForceFreeStatesResult
             @test api.integrator === :forward
@@ -63,10 +66,10 @@ using HDF5
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "riccati"))]).ffs
             prob = ForceBalanceProblem(equil; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
-            api = solve(prob, Riccati(; nchunks=40))
+            api = solve(prob, Riccati(; ode_kwargs..., nchunks=40))
 
             @test api.integrator === :riccati
-            @test api.control.nchunks == 40
+            @test api.control.algorithm.nchunks == 40
             @test api.solution === nothing
             @test api.delta_prime !== nothing
             msing = length(api.surfaces)
@@ -78,7 +81,7 @@ using HDF5
             @test api.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-6
 
             # With the deck's own (auto) chunking the two runs are the same computation.
-            same = solve(prob, Riccati())
+            same = solve(prob, riccati)
             @test same.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
             @test same.delta_prime.raw ≈ reference.delta_prime.raw rtol = 1e-12
             @test same.delta_prime.coil ≈ reference.delta_prime.coil rtol = 1e-12
@@ -90,7 +93,7 @@ using HDF5
         kf = 1e-3
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_factor" => kf))]).ffs
-            api = solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=kf, kinetic_source="fixed")
+            api = solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=kf, kinetic_source="fixed")
 
             @test api.mats.kinetic !== nothing
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
@@ -102,7 +105,7 @@ using HDF5
             @test [s.psifac for s in api.kinetic.kinsing] ≈ [s.psifac for s in reference.kinetic.kinsing]
 
             # Too large a factor for this coarse deck: the integration aborts near ψ = 0.4 and says so.
-            @test_throws "Euler-Lagrange integration aborted" solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=0.1)
+            @test_throws "Euler-Lagrange integration aborted" solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=0.1)
         end
     end
 
@@ -116,13 +119,14 @@ using HDF5
         )
         @test kequil.kinetic !== nothing
         kwall = GPEC.Vacuum.parse_wall(get(kdeck, "Wall", nothing))
-        kkwargs = Dict(Symbol(k) => v for (k, v) in kdeck["ForceFreeStates"] if !(k in ("integrator", "nn_low", "nn_high")))
+        kctrl = FFS.control_from_deck(kdeck["ForceFreeStates"])
+        kkwargs = FFS.problem_keywords(kctrl)
         mktempdir() do dir
             for name in readdir(kin_template)
                 cp(joinpath(kin_template, name), joinpath(dir, name))
             end
             reference = GPEC.main([dir]).ffs
-            api = solve(kequil, Forward(); nn=1, wall=kwall, dir_path=dir, kkwargs...)
+            api = solve(kequil, kctrl.algorithm; nn=1, wall=kwall, dir_path=dir, kkwargs...)
             @test api.mats.kinetic !== nothing
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-10
             @test api.diagnostics.nzero == reference.diagnostics.nzero
@@ -139,7 +143,7 @@ using HDF5
         sl_config = GPEC.Equilibrium.EquilibriumConfig(sl_deck["Equilibrium"], sl_dir)
         pass1 = GPEC.Equilibrium.PlasmaEquilibrium(sl_config)
         @test pass1.kinetic !== nothing
-        sl_ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in sl_deck["ForceFreeStates"])...)
+        sl_ctrl = FFS.control_from_deck(sl_deck["ForceFreeStates"])
         sl_intr = FFS.ForceFreeStatesInternal()
         GPEC.resolve_mode_space!(sl_intr, sl_ctrl)
         refined = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
@@ -156,7 +160,7 @@ using HDF5
             api = solve(equil, Galerkin(; nx=32); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
 
             @test api.integrator === :galerkin
-            @test api.control.gal_nx == 32
+            @test api.control.algorithm.nx == 32
             @test api.galerkin !== nothing
             @test api.free_boundary === nothing        # galerkin computes no free-boundary energies
             dp = api.delta_prime
@@ -193,7 +197,7 @@ using HDF5
             cp(forcing, joinpath(dir, "forcing.dat"))
             reference = GPEC.main([dir]).pe
 
-            ffs = solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+            ffs = solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
             resp = plasma_response(ffs; verbose=false)
             pe = perturbed_equilibrium(resp, RMPField(forcing); pe_kw...)
 
@@ -271,25 +275,32 @@ using HDF5
         @test length(coil_field.ctrl.coil_sets_raw) == 1
     end
 
-    @testset "integrator objects translate onto the control keys" begin
-        kwargs = Dict{Symbol,Any}()
-        FFS._apply_alg!(kwargs, Galerkin(; nx=64, rpec_flag=true))
-        @test kwargs[:integrator] == "galerkin"
-        @test kwargs[:gal_nx] == 64
-        @test kwargs[:gal_rpec_flag]
-
-        # Every key the objects own is a `ForceFreeStatesControl` field.
-        @test all(in(fieldnames(FFS.ForceFreeStatesControl)), keys(kwargs))
+    @testset "integrators own numerical settings" begin
+        alg = Galerkin(; nx=64, rpec_flag=true)
+        ctrl = FFS.ForceFreeStatesControl(; algorithm=alg)
+        @test ctrl.algorithm === alg
+        @test !hasfield(typeof(ctrl), :gal_nx)
+        @test !hasfield(typeof(ctrl), :eulerlagrange_tolerance)
+        @test !hasfield(Galerkin, :solver)
+        @test !hasfield(Galerkin, :sing_order)
+        @test !hasfield(Forward, :extended_precision_bvp)
+        @test_throws MethodError Forward(; extended_precision_bvp=false)
+        @test_throws MethodError Galerkin(; solver="LU")
+        @test_throws MethodError Galerkin(; sing_order=4)
+        @test Riccati(; extended_precision_bvp=false).extended_precision_bvp == false
+        for (key, value) in ((:frobenius_psi_max, 0.1), (:truncate_at_dW_peak, true), (:dW_edge_scan_start, 0.9))
+            @test_throws ArgumentError solve(equil, Galerkin(); nn=1, ffs_kwargs..., (key => value,)...)
+        end
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws "needs kinetic profiles on the equilibrium" solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5,
+        @test_throws "needs kinetic profiles on the equilibrium" solve(equil, forward; nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5,
             kinetic_source="calculated")
-        @test_throws "does not support kinetic runs" solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
+        @test_throws "does not support kinetic runs" solve(equil, riccati; nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
         @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
-        @test_throws ErrorException solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
-        @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
+        @test_throws ArgumentError solve(equil, forward; nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
+        @test_throws ArgumentError solve(equil, riccati; nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
+        @test_throws ErrorException solve(equil, forward; nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
         @test_throws ErrorException solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=".", ffs_kwargs..., gal_match_flag=true)
     end
 
@@ -368,7 +379,7 @@ using HDF5
 
     @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
         mktempdir() do dir
-            ric = solve(equil, Riccati(); nn=1, dir_path=dir, ffs_kwargs...)
+            ric = solve(equil, riccati; nn=1, dir_path=dir, ffs_kwargs...)
             @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.coil)
             matched = solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             @test matched.closure === :matched
@@ -385,7 +396,7 @@ using HDF5
     @testset "MatchProblem gates on its inputs" begin
         mktempdir() do dir
             # A Forward result carries no Δ′ payload, so the problem is unconstructible.
-            fwd = solve(equil, Forward(); nn=1, dir_path=dir, ffs_kwargs...)
+            fwd = solve(equil, forward; nn=1, dir_path=dir, ffs_kwargs...)
             @test_throws ErrorException MatchProblem(fwd; ideal=true)
             # A slab model can never close a matched solution.
             gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=dir, ffs_kwargs...)
@@ -445,7 +456,7 @@ using HDF5
                 @test reference.equil.rzphi_xs != pass1.rzphi_xs    # the deck re-formed on a refined grid
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
-                api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
+                api = solve(pass1, forward; nn=1, wall=wall, dir_path=dir, kwargs...)
                 # The equilibrium stores its analytic config, so `solve` re-forms it on the deck's grid.
                 @test api.equil.rzphi_xs == reference.equil.rzphi_xs
             end
@@ -475,7 +486,7 @@ using HDF5
             end
 
             mktempdir() do dir
-                ric = solve(equil, Riccati(); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                ric = solve(equil, riccati; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
                 api = solve(MatchProblem(ric; layer...), GGJModel(; solver=:ray))
                 overrides = merge(Dict{String,Any}("integrator" => "riccati"), match_keys(length(ric.surfaces), "ray"))
                 reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
@@ -499,7 +510,7 @@ using HDF5
 
                 kwargs = merge(ffs_kwargs, Dict(:kinetic_factor => 1e-9))
                 # The fixed source needs no profiles, so `solve` runs it as the deck does.
-                @test solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...).free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
+                @test solve(equil, forward; nn=1, wall=wall, dir_path=dir, kwargs...).free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
             end
         end
     end

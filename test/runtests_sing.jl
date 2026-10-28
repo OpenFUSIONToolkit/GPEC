@@ -103,7 +103,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         intr.nhigh = 1
         intr.npert = intr.nhigh - intr.nlow + 1
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(; numpert_total=intr.numpert_total,
-            numsteps_init=ctrl.numsteps_init, numunorms_init=ctrl.numunorms_init, msing=intr.msing)
+            numsteps_init=ctrl.algorithm.numsteps_init, numunorms_init=ctrl.algorithm.numunorms_init, msing=intr.msing)
 
         psifac_dummy = collect(range(0, 1, 10));
         points = length(psifac_dummy)

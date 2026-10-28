@@ -79,11 +79,11 @@ so bpen and closure are always present.
   - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solver internals and FEM
     diagnostics. Its Δ′ payload lives in `delta_prime`, not here.
 """
-struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P,A} <: ModeSpace
+struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P,A,C<:ForceFreeStatesControl} <: ModeSpace
     problem::P
     algorithm::A
     integrator::Symbol
-    control::ForceFreeStatesControl
+    control::C
     equil::E
 
     # Mode space and integration domain, copied out of the solve-time scratch.

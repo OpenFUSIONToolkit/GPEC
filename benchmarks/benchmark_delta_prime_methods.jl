@@ -25,8 +25,7 @@ function setup_and_run_solovev()
     inputs["ForceFreeStates"]["verbose"] = false
     inputs["ForceFreeStates"]["integrator"] = "riccati"
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
-    ctrl = FFS.ForceFreeStatesControl(;
-        (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
     eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))

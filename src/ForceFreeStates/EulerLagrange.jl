@@ -272,7 +272,7 @@ end
 Sub-divide integration chunks to produce a load-balanced set for the Riccati BVP.
 Starts from the output of `chunk_el_integration_bounds` and iteratively splits the
 highest-cost chunk (by `ode_itime_cost`) until the total chunk count reaches the target
-set by `ctrl.nchunks` (`0` = auto). The target is derived from problem structure only —
+set by `ctrl.algorithm.nchunks` (`0` = auto). The target is derived from problem structure only —
 never from `Threads.nthreads()` — so the chunk list, and hence every Riccati output, is
 identical whatever thread count `julia -t` provides.
 
@@ -291,11 +291,11 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
     # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
     # because single long-span propagators may already have cond ~ 10²⁴.
     min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
-    if ctrl.nchunks > 0
-        if ctrl.nchunks < min_chunks
-            @warn "nchunks = $(ctrl.nchunks) is below the $min_chunks chunks required by $(intr.msing) singular surfaces; clamping up."
+    if ctrl.algorithm.nchunks > 0
+        if ctrl.algorithm.nchunks < min_chunks
+            @warn "nchunks = $(ctrl.algorithm.nchunks) is below the $min_chunks chunks required by $(intr.msing) singular surfaces; clamping up."
         end
-        target_n = max(ctrl.nchunks, min_chunks)
+        target_n = max(ctrl.algorithm.nchunks, min_chunks)
     else
         target_n = max(min_chunks, min_bvp_intervals)
     end
@@ -350,7 +350,7 @@ end
     eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, propagators, chunks, S_left)
 
 Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
-surface on the way (Fortran `ode_run`). Dispatches on `ctrl.integrator` to
+surface on the way (Fortran `ode_run`). Dispatches on `ctrl.algorithm` to
 [`riccati_eulerlagrange_integration`](@ref) (the chunked propagator BVP) or
 [`forward_eulerlagrange_integration`](@ref).
 
@@ -360,32 +360,32 @@ for all three.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
-    if ctrl.integrator == "riccati"
+    if ctrl.algorithm isa Riccati
         ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
         return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
-    elseif ctrl.integrator == "forward"
+    elseif ctrl.algorithm isa Forward
         return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
-    elseif ctrl.integrator == "galerkin"
+    elseif ctrl.algorithm isa Galerkin
         error("integrator = \"galerkin\" solves the Euler-Lagrange system variationally, not by ODE integration; " *
               "it is dispatched to galerkin_solve.")
     end
-    error("Unknown integrator: $(ctrl.integrator). Expected \"forward\", \"riccati\", or \"galerkin\".")
+    error("Unknown integrator: $(typeof(ctrl.algorithm)). Expected \"forward\", \"riccati\", or \"galerkin\".")
 end
 
 """
     forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
-applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.renorm_threshold` and undoing it
+applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.algorithm.renorm_threshold` and undoing it
 via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
-directly to force this branch regardless of `ctrl.integrator`; `verbose` overrides
+directly to force this branch regardless of `ctrl.algorithm`; `verbose` overrides
 `ctrl.verbose` for progress logging.
 """
 function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal;
     verbose::Bool=ctrl.verbose)
 
     # Initialization
-    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+    odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
@@ -971,7 +971,7 @@ function integrate_el_region!(
         # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
         in_edge_scan = ctrl.dW_edge_scan_start < intr.psilim && integrator.t >= ctrl.dW_edge_scan_start
 
-        if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
+        if near_start || near_end || (odet.total_steps % ctrl.algorithm.save_interval == 0) || in_edge_scan
             # q at the accepted point, not the last internal Runge-Kutta stage
             odet.q = equil.profiles.q_spline(integrator.t; hint=odet.spline_hint)
             store_ode_data!(odet, integrator.t, integrator.u)
@@ -980,7 +980,7 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, mats, intr, odet, chunk))
-    rtol = ctrl.eulerlagrange_tolerance
+    rtol = ctrl.algorithm.eulerlagrange_tolerance
     sol = solve_el(prob, rtol; callback=cb)
 
     # Unconditionally save the final step if the callback did not already capture it.
@@ -1002,7 +1002,7 @@ Computes norms of the solution vectors of the array `u` and normalizes them
 if this is not the first call after a fixup. Formerly `ode_unorm!`.
 Throws an error if any vector norm is zero. It then compares the variation in norms
 relative to initial values after a fixup, and applies the Gaussian reduction via
-`apply_gaussian_reduction!` if the variation exceeds `ctrl.renorm_threshold` or if `sing_flag` is true.
+`apply_gaussian_reduction!` if the variation exceeds `ctrl.algorithm.renorm_threshold` or if `sing_flag` is true.
 Performs the same function as `ode_unorm` in the Fortran code, with minor differences in indexing
 and array handling.
 
@@ -1036,9 +1036,9 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     else
         odet.unorm ./= odet.unorm0
         uratio = maximum(odet.unorm) / minimum(odet.unorm)
-        if uratio > ctrl.renorm_threshold || sing_flag
+        if uratio > ctrl.algorithm.renorm_threshold || sing_flag
             # TODO: add resizing logic here as well
-            if odet.ifix < ctrl.numunorms_init
+            if odet.ifix < ctrl.algorithm.numunorms_init
                 odet.ifix += 1
             else
                 @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
