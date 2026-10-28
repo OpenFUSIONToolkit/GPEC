@@ -74,6 +74,7 @@ The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are
 
 - **Burgess et al. (2026)**: "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer"
   - Location: `docs/resources/2026-Burgess-Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer.pdf`
+  - Published: Plasma Physics and Controlled Fusion **68**, 065017 (2026), doi 10.1088/1361-6587/ae7156
   - Describes: The two-fluid slab layer, its four regimes, and the `S^(1/3)` outer-inner matching
 
 - **Fitzpatrick (2022)**: "Influence of anomalous perpendicular transport on linear tearing mode dynamics in tokamak plasmas"
@@ -90,6 +91,15 @@ The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are
   - Location: `docs/resources/2025-Fitzpatrick-Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation.pdf`
   - Published: Nuclear Fusion (2025), doi 10.1088/1741-4326/ae4fdd (open access: arXiv:2511.07666)
   - Describes: Diffusive-resistive layer width (Eq. 100) and the resistive-layer-overlap truncation `0 < Ψ < 1 − ε_c` (Sect. 5.9)
+
+- **Cole & Fitzpatrick (2006)**: "Drift-magnetohydrodynamical model of error-field penetration in tokamak plasmas"
+  - Location: not in `docs/resources/`
+  - Published: Physics of Plasmas 13, 032503 (2006), doi 10.1063/1.2178167
+  - Describes: Steady-state torque balance at a rational surface (Eq. 61) and the critical resonant field for error-field penetration (Eq. 62), used by `Tearing.CriticalResonantField`
+- **Fitzpatrick (1993)**: "Interaction of tearing modes with external structures in cylindrical geometry"
+  - Location: not in `docs/resources/`
+  - Published: Nuclear Fusion 33, 1049 (1993)
+  - Describes: Bifurcated rotating states and the fold at which an error field penetrates (Sec. 7.4), the threshold definition used by `Tearing.CriticalResonantField`
 
 ## Resistive MHD Stability Analysis (Future Work)
 

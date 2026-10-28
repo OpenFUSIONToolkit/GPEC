@@ -29,7 +29,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `c_beta`   | Compressibility √(β_local / (1 + β_local))                        |
 | `D_norm`   | (d_β/r_s) · S^(1/3) · √ι_e  (Fitzpatrick normalized scale)        |
 | `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥ (set by `P_perp_model`)    |
-| `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
+| `P_tor`    | Momentum Prandtl number τ_R / τ_φ, τ_φ = r_s²/χ_φ                 |
 | `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
 | `Q_i`      | Normalized ion diamagnetic:      −tauk · ω_*i                     |
 | `iota_e`   | Q_e / (Q_e − Q_i)                                                 |

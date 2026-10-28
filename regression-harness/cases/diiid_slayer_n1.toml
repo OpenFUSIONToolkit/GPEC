@@ -152,6 +152,40 @@ label = "SLAYER no_root flags [2/1,3/1,4/1]"
 noise_threshold = 0
 order = 34
 
+# Critical resonant field (torque balance) for the inner three surfaces, matching the root pins
+# above, and the natural rotation Q0 = τ_k·n·Ω_E it is computed from.
+[quantities.crf_br_crit]
+h5path = "Tearing/CriticalResonantField/br_crit"
+type = "real_vector"
+extract = "first_3"
+label = "CRF b_r/B_φ crit [2/1,3/1,4/1]"
+noise_threshold = 1e-9
+order = 40
+
+[quantities.crf_br_crit_tesla]
+h5path = "Tearing/CriticalResonantField/br_crit_tesla"
+type = "real_vector"
+extract = "first_3"
+label = "CRF b_r crit in tesla [2/1,3/1,4/1]"
+noise_threshold = 1e-9
+order = 43
+
+[quantities.crf_Q_peak]
+h5path = "Tearing/CriticalResonantField/Q_peak"
+type = "real_vector"
+extract = "first_3"
+label = "CRF Q_peak [2/1,3/1,4/1]"
+noise_threshold = 1e-6
+order = 41
+
+[quantities.crf_Q0]
+h5path = "Tearing/CriticalResonantField/Q0"
+type = "real_vector"
+extract = "first_3"
+label = "CRF Q0 [2/1,3/1,4/1]"
+noise_threshold = 1e-10
+order = 42
+
 # Settings (catches accidental config drift)
 [quantities.slayer_enabled]
 h5path = "Tearing/enabled"
