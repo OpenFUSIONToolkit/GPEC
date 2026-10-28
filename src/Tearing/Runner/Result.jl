@@ -7,7 +7,7 @@
 """
     SLAYERResult
 
-Output of `run_slayer`. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
+Output of the tearing solve. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
 full diagnostic detail (valid roots, poles, filtered roots, contours) for
 downstream inspection and HDF5 output.
 
@@ -15,6 +15,7 @@ downstream inspection and HDF5 output.
 
   - `enabled`             -- `true` only when the analysis actually ran
   - `control`             -- the `SLAYERControl` used (frozen snapshot)
+  - `model`               -- the inner-layer model solved; `nothing` when the analysis did not run
   - `params`              -- `Vector{SLAYERParameters}`, one per surface
   - `rational_psi`, `rational_q` -- normalized poloidal flux ψ_N and safety
     factor q of each analyzed surface, aligned with `params`. Empty when the
@@ -25,24 +26,33 @@ downstream inspection and HDF5 output.
     `delta_prime_to_rs_reference`, written as `PerSurface/Delta_prime_matrix_rs`);
     GGJ path: the ψ_N matrix unchanged (written as `PerSurface/Delta_prime_matrix`)
   - `Q_root`              -- tearing eigenvalue(s) in normalized Q
-    * length `nsurfaces` in `:uncoupled` mode
-    * length `1` in `:coupled` mode (global eigenvalue normalized by
-      `params[1].tauk`)
-  - `omega_Hz`, `gamma_Hz` -- physical rotation frequency / growth rate
+
+      + length `nsurfaces` in `:uncoupled` mode
+      + length `1` in `:coupled` mode (global eigenvalue normalized by
+        `params[1].tauk`)
+  - `omega_Hz`, `gamma_Hz` -- rotation angular frequency Re(Q)/τ_k [rad/s] and growth rate
+    Im(Q)/τ_k [1/s]. `Q_root` and `omega_Hz` are in the lab frame in both modes; an uncoupled
+    root is moved from its layer's E×B frame by τ_k·n·Ω_E, with Ω_E = 0 where it is unknown
   - `per_surface_extraction` -- `Vector{GrowthRateResult}` of length
     `nsurfaces` in uncoupled mode (each includes polelines, pole list,
-    valid roots, filtered roots). Empty in coupled mode.
+    valid roots, filtered roots), in each surface's E×B frame. Empty in coupled mode.
   - `coupled_extraction`  -- single `GrowthRateResult` in coupled mode.
     `nothing` otherwise.
   - `layer_widths`        -- `Vector{LayerWidths}`, one per surface: the
     resistive layer thickness (in meters) from the `del_s` Riccati solve
     plus FKR / visco-resistive sanity scales. Empty when disabled.
+  - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] resolved on each
+    surface: the kinetic file's value, or the `control.omega_E_kHz` override for that m/n;
+    NaN where neither gives one. Recorded in both coupling modes
+  - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
+    inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
   - `scan_data`           -- scan results (per-surface in uncoupled, single
     entry in coupled). Empty unless `control.store_scan == true`.
 """
 struct SLAYERResult
     enabled::Bool
     control::SLAYERControl
+    model::Union{Nothing,InnerLayer.InnerLayerModel}
     params::AbstractVector{<:InnerLayerParameters}
     rational_psi::Vector{Float64}
     rational_q::Vector{Float64}
@@ -53,17 +63,20 @@ struct SLAYERResult
     per_surface_extraction::Vector{GrowthRateResult}
     coupled_extraction::Union{Nothing,GrowthRateResult}
     layer_widths::Vector{LayerWidths}
+    omega_E::Vector{Float64}
+    q_shift::Vector{Float64}
     scan_data::Vector{Union{ScanResult,AMRResult}}
 end
 
 # Empty result (enabled=false path)
 function empty_slayer_result(control::SLAYERControl)
-    return SLAYERResult(false, control,
-                        SLAYERParameters[],
-                        Float64[], Float64[],
-                        zeros(ComplexF64, 0, 0),
-                        ComplexF64[], Float64[], Float64[],
-                        GrowthRateResult[], nothing,
-                        LayerWidths[],
-                        Union{ScanResult,AMRResult}[])
+    return SLAYERResult(false, control, nothing,
+        SLAYERParameters[],
+        Float64[], Float64[],
+        zeros(ComplexF64, 0, 0),
+        ComplexF64[], Float64[], Float64[],
+        GrowthRateResult[], nothing,
+        LayerWidths[],
+        Float64[], Float64[],
+        Union{ScanResult,AMRResult}[])
 end

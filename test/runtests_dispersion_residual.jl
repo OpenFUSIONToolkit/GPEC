@@ -1,6 +1,7 @@
 @testset "Dispersion residual (SurfaceCoupling)" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
+    using GeneralizedPerturbedEquilibrium.InnerLayer.GGJ: glasser_wang_2020_eq55
     using GeneralizedPerturbedEquilibrium.Dispersion
     using StaticArrays
 
@@ -21,10 +22,10 @@
     function _slayer_ref()
         return slayer_parameters(
             n_e=5.0e19, t_e=1000.0, t_i=1000.0,
-            omega=0.0, omega_e=-1.0e4, omega_i=5.0e3,
+            omega_e=-1.0e4, omega_i=5.0e3,
             qval=2.0, sval_r=1.0, bt=2.0,
             rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
-            chi_perp=1.0, chi_tor=1.0, m=2, n=1)
+            chi_perp_e=1.0, chi_tor=1.0, m=2, n=1; P_perp_model=:chi_perp_e)
     end
 
     @testset "Constructor scale defaults" begin
@@ -97,7 +98,7 @@
         p_ggj  = glasser_wang_2020_eq55()
         sc_ggj = surface_coupling(GGJModel(solver=:shooting), p_ggj,
                                    -1.0 + 0.0im)
-        @test sc_ggj isa SurfaceCoupling{GGJModel{:shooting},GGJParameters}
+        @test sc_ggj isa SurfaceCoupling{<:GGJModel{:shooting},GGJParameters}
         @test sc_ggj(1e-3 + 0.0im) isa ComplexF64
     end
 

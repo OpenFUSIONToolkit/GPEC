@@ -10,9 +10,9 @@ const MATCHING_POINT = 1e-3
 # mid-radius and pedestal; the packed axis and far-edge surfaces only add scan cost.
 const BALLOONING_SCAN_PSI_WINDOW = (0.1, 0.99)
 
-# Effective window [0.1, min(0.99, ψ_edge)]; the grid never extends past psihigh/psi_edge.
-_in_ballooning_scan_window(psi::Float64, psi_edge::Float64) =
-    BALLOONING_SCAN_PSI_WINDOW[1] <= psi <= min(BALLOONING_SCAN_PSI_WINDOW[2], psi_edge)
+# Effective window [lo, min(hi, ψ_edge)]; the grid never extends past psihigh/psi_edge.
+_in_ballooning_scan_window(psi::Float64, psi_edge::Float64, window=BALLOONING_SCAN_PSI_WINDOW) =
+    window[1] <= psi <= min(window[2], psi_edge)
 
 """
     compute_ballooning_stability!(locstab_fs, plasma_eq)
@@ -26,6 +26,7 @@ to compute Delta Prime.
 
   - `locstab_fs::Matrix{Float64}`: Local stability matrix to store results (modified in place).
   - `plasma_eq::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data.
+  - `ode_tol::Float64`: Relative and absolute tolerance of the ballooning ODE integration.
   - `verbose::Bool`: Print progress messages.
 
 This function modifies `locstab_fs` in place with:
@@ -40,6 +41,7 @@ function compute_ballooning_stability!(
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
     compute_delta_prime::Bool=true,
+    ode_tol::Float64=1e-8,
     verbose::Bool=false
 )
 
@@ -64,7 +66,8 @@ function compute_ballooning_stability!(
         if compute_delta_prime && plasma_eq.profiles.xs[flux_surface_index] <= 1.0
             result = integrate_ballooning_ode(
                 coeff_data.ode_coefficient_spline;
-                theta_k=theta_k
+                theta_k=theta_k,
+                tol=ode_tol
             )
             locstab_fs[flux_surface_index, 4] = result.value
         end
@@ -74,19 +77,6 @@ function compute_ballooning_stability!(
         println("Ballooning analysis complete.")
     end
 
-end
-
-"""
-    compute_local_stability(plasma_eq; verbose=false) -> CubicSeriesInterpolant
-
-Local stability profile spline over `plasma_eq.profiles.xs`, with the columns filled by
-[`compute_ballooning_stability!`](@ref): 1 = `D_I·ψ`, 2 = `D_R·ψ`, 4 = ballooning `Δ'`.
-"""
-function compute_local_stability(plasma_eq::Equilibrium.PlasmaEquilibrium; verbose::Bool=false)
-    xs = plasma_eq.profiles.xs
-    locstab_fs = zeros(Float64, length(xs), 5)
-    compute_ballooning_stability!(locstab_fs, plasma_eq; verbose=verbose)
-    return cubic_interp(xs, Series(locstab_fs); extrap=ExtendExtrap())
 end
 
 """
@@ -839,7 +829,8 @@ function critical_ballooning_alpha(
 end
 
 """
-    ballooning_alpha_boundary(plasma_eq; theta_k=0.0, n_scan=24, verbose=false)
+    ballooning_alpha_boundary(plasma_eq; theta_k=0.0, n_scan=24, max_alpha_scale=8.0, tol=1e-3,
+                              psi_window=BALLOONING_SCAN_PSI_WINDOW, verbose=false)
 
 Profile driver for the BALOO-style ballooning stability diagram. Loops over flux
 surfaces returning the experimental pressure gradient `alpha` (from
@@ -852,8 +843,9 @@ first crossing, so cost scales with the boundary location rather than the full �
 Use this (not [`ballooning_alpha_boundaries`](@ref)) when only the 1st boundary is
 needed, e.g. a pedestal-stability constraint. `n_scan` sets the scan resolution; raise
 it (e.g. 64) on edge surfaces where Δ' poles can shift a coarse first crossing.
+`max_alpha_scale` and `tol` bound and resolve the search, as in [`critical_ballooning_alpha`](@ref).
 
-The scan is evaluated only inside `BALLOONING_SCAN_PSI_WINDOW` — ballooning boundaries
+The scan is evaluated only inside `psi_window` (default `BALLOONING_SCAN_PSI_WINDOW`) — ballooning boundaries
 are physically relevant in the mid-radius and pedestal, and the tightly packed axis and
 far-edge surfaces dominate the scan cost. Per-surface failures, skipped surfaces, and
 surfaces with no boundary within range are returned as `NaN`.
@@ -862,6 +854,9 @@ function ballooning_alpha_boundary(
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
     n_scan::Int=24,
+    max_alpha_scale::Float64=8.0,
+    tol::Float64=1e-3,
+    psi_window::Tuple{Float64,Float64}=BALLOONING_SCAN_PSI_WINDOW,
     verbose::Bool=false
 )
     xs = plasma_eq.profiles.xs
@@ -871,10 +866,11 @@ function ballooning_alpha_boundary(
     alpha_critical = fill(NaN, npsi)
 
     Threads.@threads :greedy for i in 1:npsi
-        _in_ballooning_scan_window(xs[i], xs[end]) || continue
+        _in_ballooning_scan_window(xs[i], xs[end], psi_window) || continue
         try
             alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
-            alpha_critical[i] = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k, n_scan=n_scan).alpha_crit
+            alpha_critical[i] = critical_ballooning_alpha(i, plasma_eq;
+                theta_k=theta_k, n_scan=n_scan, max_alpha_scale=max_alpha_scale, tol=tol).alpha_crit
         catch err
             if verbose
                 @warn "ballooning alpha boundary failed" psi_idx = i exception = err
@@ -1140,17 +1136,16 @@ end
 #   Integrates the ideal marginal ballooning equations
 # ======================================================================
 """
-    integrate_ballooning_ode(ode_coefficient_spline; theta_k=0.0)
+    integrate_ballooning_ode(ode_coefficient_spline; theta_k=0.0, tol=1e-8)
 
 Integrates the ballooning ODE from `-Infinity` to `-1e-3` and `+Infinity` to `+1e-3`.
-Computes Delta' = (y'/y)_right - (y'/y)_left.
+Computes Delta' = (y'/y)_right - (y'/y)_left. `tol` is the relative and absolute ODE tolerance.
 
 ## Returns
 
   - `delta_prime`: The stability index Δ'.
 """
-function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
-    TOLERANCE = 1e-8
+function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0, tol::Float64=1e-8)
     MINIMUM_STEP = 1e-10
     theta_max = max(ode_coefficient_spline.theta_max, 10.0 * MATCHING_POINT)
 
@@ -1179,8 +1174,8 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     sol_left = solve(
         problem_left,
         DP5();
-        reltol=TOLERANCE,
-        abstol=TOLERANCE,
+        reltol=tol,
+        abstol=tol,
         dtmin=MINIMUM_STEP,
         adaptive=true,
         save_everystep=false,
@@ -1200,8 +1195,8 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     sol_right = solve(
         problem_right,
         DP5();
-        reltol=TOLERANCE,
-        abstol=TOLERANCE,
+        reltol=tol,
+        abstol=tol,
         dtmin=MINIMUM_STEP,
         adaptive=true,
         save_everystep=false,

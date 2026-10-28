@@ -6,6 +6,7 @@ using HDF5
 using LinearAlgebra
 
 import ..Equilibrium
+import ..Utilities.FourierTransforms
 import ..Utilities.FourierTransforms: compute_fourier_coefficients
 
 """
@@ -194,32 +195,7 @@ function load_forcing_hdf5!(
     if !isfile(filepath)
         error("Forcing data file not found: $filepath")
     end
-
-    norm_tag = h5open(filepath, "r") do file
-        tag = haskey(HDF5.attrs(file), "normalization") ?
-              read(HDF5.attrs(file)["normalization"]) : "normal_field_T"
-
-        n_array = read(file, "n")
-        m_array = read(file, "m")
-        amp_real = read(file, "amplitude_real")
-        amp_imag = read(file, "amplitude_imag")
-
-        if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
-            error("Inconsistent array lengths in HDF5 forcing file")
-        end
-
-        empty!(forcing_modes)
-
-        for i in eachindex(n_array)
-            push!(forcing_modes, ForcingMode(;
-                n=Int(n_array[i]),
-                m=Int(m_array[i]),
-                amplitude=complex(amp_real[i], amp_imag[i])
-            ))
-        end
-        return tag
-    end
-    return norm_tag
+    return h5open(file -> load_forcing_from_h5_group!(forcing_modes, file), filepath, "r")
 end
 
 # Coil-forcing helpers; these depend on ForcingTermsControl and ForcingMode defined above.
@@ -228,35 +204,32 @@ include("BiotSavart.jl")
 include("CoilFourier.jl")
 
 """
-    save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
+    save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group; normalization="normal_field_T")
 
-Write forcing modes to an open HDF5 group using the same layout that
-`load_forcing_hdf5!` consumes: datasets `n`, `m`, `amplitude_real`,
-`amplitude_imag`. Used by the gpec.h5 snapshot writer so the replay path can
-re-read forcing data from the output file with no reference to the original
-ASCII/HDF5 ingest file.
+Write forcing modes to an open HDF5 group (or file root) in the layout `load_forcing_hdf5!`
+consumes: datasets `n`, `m`, `amplitude_real`, `amplitude_imag` and the `normalization`
+attribute. Used by the gpec.h5 snapshot writer so the replay path can re-read forcing data
+from the output file with no reference to the original ASCII/HDF5 ingest file.
 """
-function save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
-    n_arr = Int[mode.n for mode in forcing_modes]
-    m_arr = Int[mode.m for mode in forcing_modes]
-    re_arr = Float64[real(mode.amplitude) for mode in forcing_modes]
-    im_arr = Float64[imag(mode.amplitude) for mode in forcing_modes]
-    group["n"] = n_arr
-    group["m"] = m_arr
-    group["amplitude_real"] = re_arr
-    group["amplitude_imag"] = im_arr
+function save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group; normalization::String="normal_field_T")
+    group["n"] = Int[mode.n for mode in forcing_modes]
+    group["m"] = Int[mode.m for mode in forcing_modes]
+    group["amplitude_real"] = Float64[real(mode.amplitude) for mode in forcing_modes]
+    group["amplitude_imag"] = Float64[imag(mode.amplitude) for mode in forcing_modes]
+    HDF5.attrs(group)["normalization"] = normalization
     return nothing
 end
 
 """
-    load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+    load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group) -> String
 
-Populate `forcing_modes` from an already-open HDF5 group with datasets `n`,
-`m`, `amplitude_real`, `amplitude_imag`. Mirror of `save_forcing_to_h5` for the
-rerun path — deliberately accepts an open group rather than a file path so
-the snapshot data can live inside `gpec.h5/Input/RawInputs/ForcingTerms/`.
+Populate `forcing_modes` from an already-open HDF5 group (or file root) with datasets `n`,
+`m`, `amplitude_real`, `amplitude_imag`, and return its `normalization` attribute
+(`"normal_field_T"` when absent). Mirror of `save_forcing_to_h5`, shared by the forcing-file
+reader and the rerun path that reads `gpec.h5/Input/RawInputs/ForcingTerms/`.
 """
-function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)::String
+    tag = haskey(HDF5.attrs(group), "normalization") ? HDF5.attrs(group)["normalization"] : "normal_field_T"
     n_array = read(group, "n")
     m_array = read(group, "m")
     amp_real = read(group, "amplitude_real")
@@ -274,7 +247,7 @@ function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
             amplitude=complex(amp_real[i], amp_imag[i])
         ))
     end
-    return forcing_modes
+    return tag
 end
 
 """
@@ -295,12 +268,14 @@ several solves.
     RMPField(path; format=..., scale=1.0, kwargs...)
     RMPField(coil_sets::Vector{Dict{String,Any}}; scale=1.0, kwargs...)
     RMPField(ctrl::ForcingTermsControl; scale=1.0)
+    RMPField(modes::Vector{ForcingMode}; scale=1.0)
 
 The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
 or `.hdf5` extension and `"ascii"` otherwise. The second form takes TOML-shaped coil blocks
 (the `[[ForcingTerms.coil_set]]` layout) and selects the coil format. Remaining `kwargs` are
-[`ForcingTermsControl`](@ref) fields. All three return a single-source leaf
-([`RMPSource`](@ref)).
+[`ForcingTermsControl`](@ref) fields. These three return a single-source leaf
+([`RMPSource`](@ref)). The last form takes a control-surface spectrum computed elsewhere, already in
+the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`RMPSpectrum`](@ref)).
 
 ## Algebra
 
@@ -314,7 +289,7 @@ evaluated on the control surface and the mode amplitudes are summed.
 nominal = RMPField("nominal_efc.dat")
 weld_field = RMPField("weld_fields.h5"; scale=0.5)
 total = 2.0 * nominal + weld_field       # lazy: records terms and weights, computes nothing
-pe = perturbed_equilibrium(ffs, total)   # materializes each term, sums, drives PE
+pe = perturbed_equilibrium(plasma_response(ffs), total)   # materializes each term, sums, drives PE
 ```
 
 Amplitude lives with the forcing description itself: per-conductor currents for the coil
@@ -347,19 +322,36 @@ struct RMPSource <: RMPField
 end
 
 """
+    RMPSpectrum
+
+A spectrum-literal [`RMPField`](@ref) leaf: control-surface forcing modes computed elsewhere, in the
+unit-norm `Φ_x` convention the response consumes, plus a complex weight. Built by
+`RMPField(modes::Vector{ForcingMode})`; scalar multiplication rescales the weight.
+
+## Fields
+
+  - `modes::Vector{ForcingMode}` - The control-surface spectrum, copied at construction.
+  - `scale::ComplexF64` - The leaf's weight in a linear combination, as for [`RMPSource`](@ref).
+"""
+struct RMPSpectrum <: RMPField
+    modes::Vector{ForcingMode}
+    scale::ComplexF64
+end
+
+"""
     RMPFieldSum
 
-A lazy linear combination of [`RMPSource`](@ref) leaves, built by `+`/`-` on
+A lazy linear combination of [`RMPSource`](@ref) and [`RMPSpectrum`](@ref) leaves, built by `+`/`-` on
 [`RMPField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
 the leaves. Materialization evaluates each term against the equilibrium and sums the mode
 amplitudes — valid because the perturbed-equilibrium response is linear in the forcing.
 
 ## Fields
 
-  - `terms::Vector{RMPSource}` - The flattened weighted sources.
+  - `terms::Vector{Union{RMPSource,RMPSpectrum}}` - The flattened weighted leaves.
 """
 struct RMPFieldSum <: RMPField
-    terms::Vector{RMPSource}
+    terms::Vector{Union{RMPSource,RMPSpectrum}}
 end
 
 """
@@ -381,14 +373,18 @@ function RMPField(coil_sets::Vector{Dict{String,Any}}; scale::Number=1.0, kwargs
     return RMPSource(ctrl, ComplexF64(scale))
 end
 
+RMPField(modes::Vector{ForcingMode}; scale::Number=1.0) =
+    RMPSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
+
 "Flattened weighted-leaf list of any [`RMPField`](@ref)."
-_rmp_terms(f::RMPSource) = [f]
+_rmp_terms(f::Union{RMPSource,RMPSpectrum}) = Union{RMPSource,RMPSpectrum}[f]
 _rmp_terms(f::RMPFieldSum) = f.terms
 
 Base.:+(a::RMPField, b::RMPField) = RMPFieldSum(vcat(_rmp_terms(a), _rmp_terms(b)))
 Base.:-(a::RMPField) = -1 * a
 Base.:-(a::RMPField, b::RMPField) = a + (-1 * b)
 Base.:*(c::Number, f::RMPSource) = RMPSource(f.ctrl, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::RMPSpectrum) = RMPSpectrum(f.modes, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::RMPFieldSum) = RMPFieldSum([c * t for t in f.terms])
 Base.:*(f::RMPField, c::Number) = c * f
 

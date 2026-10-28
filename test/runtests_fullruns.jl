@@ -15,8 +15,8 @@ using TOML
     @testset "et[1] is independent of the reduction frequency" begin
         deck = TOML.parsefile(joinpath(ex1, "gpec.toml"))
         deck["ForceFreeStates"]["write_outputs_to_HDF5"] = true
-        function total_energy(ucrit)
-            deck["ForceFreeStates"]["ucrit"] = ucrit
+        function total_energy(renorm_threshold)
+            deck["ForceFreeStates"]["renorm_threshold"] = renorm_threshold
             return mktempdir() do workdir
                 open(io -> TOML.print(io, deck), joinpath(workdir, "gpec.toml"), "w")
                 GeneralizedPerturbedEquilibrium.main([workdir])
@@ -24,8 +24,8 @@ using TOML
             end
         end
         et_ref = total_energy(1e3)
-        for ucrit in (3.0, 10.0, 1e2, 1e6)
-            @test total_energy(ucrit) ≈ et_ref rtol = 1e-6
+        for renorm_threshold in (3.0, 10.0, 1e2, 1e6)
+            @test total_energy(renorm_threshold) ≈ et_ref rtol = 1e-6
         end
     end
 

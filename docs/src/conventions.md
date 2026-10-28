@@ -40,7 +40,7 @@ kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\t
 
 - Normalized from 0 (magnetic axis) to 1 (plasma boundary).
 - ``\psi_0 = |\psi_\mathrm{bry} - \psi_\mathrm{axis}|`` is **forced positive** on read
-  (`read_eq_efit` in `src/Equilibrium/ReadEquilibrium.jl`). If the EQDSK has
+  (`read_eq_efit` in `src/Equilibrium/Sources/GFile.jl`). If the EQDSK has
   ``\psi_\mathrm{bry} < \psi_\mathrm{axis}``, the 2D flux array is sign-flipped so that ``\psi``
   increases from axis to edge.
 - The internal ``\psi`` carries **no** factor of ``2\pi`` (poloidal flux per radian). IMAS inputs,
@@ -57,9 +57,9 @@ kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\t
 
 ### Toroidal Coordinate ``\zeta`` and ``\phi``
 
-- The magnetic coordinate toroidal angle is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
-  a single-valued straight-field-line offset that depends on the working coordinate. PEST
-  coordinates have ``\nu = 0``.
+- The magnetic coordinate toroidal angle is ``\zeta = (\phi - \nu(\psi,\theta))/(2\pi)``, where ``\phi`` is GPEC's internal
+  toroidal angle (the physical angle is ``-\mathrm{helicity}\,\phi``, below) and ``\nu`` is a single-valued
+  straight-field-line offset that depends on the working coordinate. PEST coordinates have ``\nu = 0``.
 - The physical toroidal angle is reconstructed as
   ``\phi = -\,\mathrm{helicity}\,(2\pi\zeta + \nu)`` (`sample_boundary_grid` in
   `src/ForcingTerms/CoilFourier.jl`). Thus ``\phi`` is effectively **counter-clockwise** (viewed
@@ -83,8 +83,8 @@ field magnitude, ``B`` is the total field magnitude, ``R`` is the major radius, 
 | Park | 0 | 1 | 0 | 0 |
 
 The powers are set automatically from `jac_type` (`EquilibriumConfig` in
-`src/Equilibrium/EquilibriumTypes.jl`) and applied in the field-line Jacobian
-(`direct_fieldline_der!` in `src/Equilibrium/DirectEquilibrium.jl`). Setting `jac_type = "custom"`
+`src/Equilibrium/Config.jl`) and applied in the field-line Jacobian
+(`direct_fieldline_der!` in `src/Equilibrium/Axisymmetric/Direct.jl`). Setting `jac_type = "custom"`
 lets you specify the four exponents manually via `jac_custom_power_bp`, `jac_custom_power_b`,
 `jac_custom_power_r`, and `jac_custom_power_rc`.
 
@@ -106,7 +106,7 @@ helicity = bt_sign * Int(sign(crnt))   # src/ForcingTerms/CoilFourier.jl
 ## ``F = R B_\phi``
 
 The poloidal-current function ``F = R B_\phi`` from the Grad-Shafranov equation is **forced
-positive** via `abs` (`read_eq_efit` in `src/Equilibrium/ReadEquilibrium.jl`):
+positive** via `abs` (`read_eq_efit` in `src/Equilibrium/Sources/GFile.jl`):
 
 ```julia
 abs.(fpol_data)
@@ -118,7 +118,7 @@ The code always works with ``|F|``; the sign of ``B_t`` is carried separately (`
 ## Safety Factor ``q``
 
 The direct solver **computes** ``q`` by field-line integration for direct (EFIT) equilibria and
-overwrites the file profile (`direct_run` in `src/Equilibrium/DirectEquilibrium.jl`):
+overwrites the file profile (`direct_run` in `src/Equilibrium/Axisymmetric/Direct.jl`):
 
 ```math
 q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p .
@@ -129,7 +129,7 @@ q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p .
   extrapolation yields ``q_0 \le 0``, treating it as a spline artifact rather than a physical
   result.
 - **Inverse** equilibria, for which only CHEASE and analytic options are currently supported, instead use the ``q`` profile supplied with the input
-  (`src/Equilibrium/InverseEquilibrium.jl`). This follows the fortran GPEC CHEASE reading convention.
+  (`src/Equilibrium/Axisymmetric/Inverse.jl`). This follows the fortran GPEC CHEASE reading convention.
 
 ## Mode Numbers ``m`` and ``n``
 
@@ -196,8 +196,11 @@ conjugate is taken.
 
 ### Interfacing with Vacuum
 
-The Vacuum code uses CCW ``\phi`` and downward-outboard ``\theta``. GPEC uses the complex conjugate
-of RH configurations when interfacing with Vacuum.
+Unlike the Fortran VACUUM code, the GPEC Vacuum module works in the same angles as the rest of the code: ``\theta`` upward-outboard (counter-clockwise in the
+``(R, Z)`` plane) and the Fourier basis ``\exp(-i(m\theta - 2\pi n\zeta))``. A plasma contour passed in clockwise is rejected;
+a clockwise wall file is reversed with a warning. The ``\nu`` passed to Vacuum is GPEC's ``\nu = \phi - 2\pi\zeta``.
+Chance 1997 eq. 97 writes ``\zeta = \phi + \nu`` for the same ``\nu`` because the Fortran VACUUM code's ``\theta`` and ``\phi`` both
+run opposite to GPEC's.
 
 ## Field Amplitudes and Units
 
@@ -402,7 +405,7 @@ The conventions above are GPEC-native and predate the COCOS standard, as defined
 - ``q > 0`` and ``n > 0`` in standard operation; ``F = |F|``.
 
 The code labels this internal convention **COCOS 2** (`read_imas` in
-`src/Equilibrium/ReadEquilibrium.jl`) and converts IMAS inputs accordingly:
+`src/Equilibrium/Sources/IMAS.jl`) and converts IMAS inputs accordingly:
 
 ```julia
 imas_cocos = 11   # default: IMAS standard, ψ divided by 2π on read
