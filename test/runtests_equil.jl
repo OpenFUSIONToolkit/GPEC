@@ -22,6 +22,13 @@ using TOML
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
     end
 
+    @testset "Single-precision g-file FPOL is detected" begin
+        single_precision = GeneralizedPerturbedEquilibrium.Equilibrium.gfile_fpol_single_precision
+        @test single_precision(joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk"))
+        @test !single_precision(joinpath(@__DIR__, "test_data", "TokaMaker_ifile", "g65.geqdsk"))
+        @test !single_precision(joinpath(data_dir, "EQDSK_COCOS_02"))
+    end
+
     @testset "Load EFIT Data (arclength)" begin
         arclength_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),

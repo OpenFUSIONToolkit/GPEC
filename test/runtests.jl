@@ -36,6 +36,7 @@ else
     include("./runtests_parallel_integration.jl")
     include("./runtests_result_struct.jl")
     include("./runtests_solve_api.jl")
+    include("./runtests_galerkin_cholesky.jl")
     include("./runtests_matching_models.jl")
     include("./runtests_dominant_coupling.jl")
     include("./runtests_error_fields.jl")
@@ -73,5 +74,6 @@ else
     include("./runtests_coils.jl")
     include("./runtests_imas.jl")
     include("./runtests_rerun_from_h5.jl")
+    include("./runtests_frozen_equilibrium.jl")
     include("./runtests_h5_schema.jl")
 end
