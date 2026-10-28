@@ -1,7 +1,7 @@
 # make_solution_profiles.jl
 #
 # Figure: the inner-layer fields (Ψ, Ξ, Υ) reconstructed on the rotated ray for
-# the q=4 benchmark surface. The collocation solution on [0, s_m] (solid) and
+# the q=4 benchmark surface. The Hermite BVP solution on [0, s_m] (solid) and
 # the analytic u_small + Δ·u_big asymptotic representation for s ≥ S (dashed)
 # share the same power-law tail — the numeric↔asymptotic overlap the outer-
 # region matching relies on. One BVP solve; a few minutes at large imaginary Q.
@@ -16,19 +16,19 @@ using Printf
 const IL = GeneralizedPerturbedEquilibrium.InnerLayer
 const GGJ = IL.GGJ
 
-p = IL.q4_surface_benchmark()
+p = IL.GGJ.q4_surface_benchmark()
 Q = 2.0im                  # imaginary axis, beyond the |Q|≪1 shooting regime,
-#                            small enough that the collocation domain reaches
+#                            small enough that the BVP domain reaches
 #                            the series radius directly (no march) — so the
 #                            numeric and asymptotic segments join seamlessly.
-isol = 1                   # "odd" parity solution (Ψ'(0)=Ξ(0)=Υ(0)=0)
+isol = 2                   # odd-parity (tearing, Δ₋) solution: Ψ'(0)=Ξ(0)=Υ(0)=0
 
 res = IL.solve_ray(p, Q)
 s_m = res.breaks[end]
-@printf("solve_ray: Q=%s  θ=%.3f  S=%.4g  s_m=%.4g  resid=%.1e\n",
-    string(Q), res.θ, res.S, s_m, res.resid)
+@printf("solve_ray: Q=%s  θ=%.3f  S=%.4g  s_m=%.4g  cells=%d\n",
+    string(Q), res.θ, res.S, s_m, length(res.breaks) - 1)
 
-# Collocation solution over the BVP domain [0, s_m].
+# BVP solution over [0, s_m].
 prof = IL.solution_profile(res; npc=8)
 
 # Analytic tail on [S, few·S] where the inps series is trusted.
@@ -39,13 +39,13 @@ fields = ((:Ψ, prof.Ψ, asy.Ψ, 1), (:Ξ, prof.Ξ, asy.Ξ, 2), (:Υ, prof.Υ, a
 
 plt = plot(; size=(760, 560), legend=:bottomleft, xscale=:log10, yscale=:log10,
     ylims=(1e-3, 1e2),
-    xlabel="ray parameter s   (x = e^{iθ}s)", ylabel="|field|  (odd parity)",
+    xlabel="ray parameter s   (x = e^{iθ}s)", ylabel="|field|  (odd parity, tearing)",
     title=@sprintf("Inner-layer fields on the rotated ray, Q = %gi  (q=4)", imag(Q)),
     left_margin=8Plots.mm, bottom_margin=5Plots.mm)
 
 for (nm, col, acol, ci) in fields
     plot!(plt, prof.s[2:end], abs.(col[2:end, isol]); lw=2.5, color=ci,
-        label="|$(nm)|  collocation")
+        label="|$(nm)|  BVP")
     plot!(plt, asy.s, abs.(acol[:, isol]); lw=2, ls=:dash, color=ci, label="|$(nm)|  asymptotic")
 end
 
@@ -56,5 +56,4 @@ vline!(plt, [res.S]; color=:black, ls=:dot, lw=1,
 
 save_doc_figure(plt, "inner_layer", "solution_profiles";
     script=basename(@__FILE__),
-    depends=["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/RayAsymptotics.jl",
-        "src/InnerLayer/GGJ/InnerAsymptotics.jl"])
+    depends=["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/InnerAsymptotics.jl"])
