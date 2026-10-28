@@ -16,13 +16,13 @@ pe   = perturbed_equilibrium(resp, rmp)
 ```
 
 `solve(eq, alg; kwargs...)` is sugar for the canonical problem form: a
-[`EulerLagrangeProblem`](@ref) names WHAT is being solved (the perturbed-plasma
+[`ForceBalanceProblem`](@ref) names WHAT is being solved (the perturbed-plasma
 Euler-Lagrange system posed on this equilibrium, with this mode range, wall and closure)
 and the integrator names HOW. A `PlasmaEquilibrium` hosts many possible problems; the
 problem type keeps `solve` unambiguous as other problem classes appear.
 
 ```julia
-prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
+prob = ForceBalanceProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
 ffs  = solve(prob, Riccati())
 save_to_hdf5("gpec.h5", ffs)
 ```
@@ -177,7 +177,7 @@ ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundar
 ## Entry points
 
 ```@docs
-GeneralizedPerturbedEquilibrium.EulerLagrangeProblem
+GeneralizedPerturbedEquilibrium.ForceBalanceProblem
 GeneralizedPerturbedEquilibrium.solve
 GeneralizedPerturbedEquilibrium.perturbed_equilibrium
 ```

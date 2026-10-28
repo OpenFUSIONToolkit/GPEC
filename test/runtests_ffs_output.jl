@@ -18,7 +18,7 @@ using TOML, HDF5
         eq = PlasmaEquilibrium(config, analytic)
         kwargs = Dict(Symbol(k) => v for (k, v) in inputs["ForceFreeStates"] if !(k in ("nn_low", "nn_high", "integrator")))
         mktempdir() do api_dir
-            prob = EulerLagrangeProblem(eq; nn=1, wall=GPEC.Vacuum.parse_wall(get(inputs, "Wall", nothing)), dir_path=api_dir, kwargs...)
+            prob = ForceBalanceProblem(eq; nn=1, wall=GPEC.Vacuum.parse_wall(get(inputs, "Wall", nothing)), dir_path=api_dir, kwargs...)
             alg = Forward()
             result = solve(prob, alg)
             @test result.problem === prob

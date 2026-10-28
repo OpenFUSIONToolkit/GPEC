@@ -299,7 +299,7 @@ function main_from_inputs(
     alg isa Riccati && push!(algorithm_keys, :nchunks)
     alg isa Galerkin && union!(algorithm_keys, (Symbol(:gal_, f) for f in fieldnames(Galerkin) if f !== :cut_solution))
     problem_kwargs = Dict(f => getfield(ctrl, f) for f in fieldnames(typeof(ctrl)) if !(f in (:nn_low, :nn_high)) && !(f in algorithm_keys))
-    problem = EulerLagrangeProblem(equil; nn=ctrl.nn_low:ctrl.nn_high, wall=intr.wall_settings, dir_path=intr.dir_path,
+    problem = ForceBalanceProblem(equil; nn=ctrl.nn_low:ctrl.nn_high, wall=intr.wall_settings, dir_path=intr.dir_path,
         debug=intr.debug_settings, problem_kwargs...)
     ffs_result = ForceFreeStates._with(ffs_result; problem=problem, algorithm=alg)
 
@@ -859,12 +859,14 @@ function run_deck_match(result::ForceFreeStatesResult, ctrl::ForceFreeStatesCont
 end
 
 """
-    EulerLagrangeProblem(equil; nn, wall=nothing,
-                         dir_path=".", debug=DebugSettings(), kwargs...)
+    ForceBalanceProblem(equil; nn, wall=nothing,
+                        dir_path=".", debug=DebugSettings(), kwargs...)
 
-The perturbed-plasma Euler-Lagrange problem posed on an equilibrium: the extremization of
-the perturbed potential energy whose solutions are the force-free (or, with `kinetic_factor > 0`,
-kinetic) perturbed states. This is the WHAT of a stability solve; the integrator passed to
+The perturbed force-balance problem posed on an equilibrium, whose solutions are the force-free
+(or, with `kinetic_factor > 0`, kinetic) perturbed states. With kinetic terms the force operator
+is not self-adjoint, so this is not always an energy extremization.
+
+This is the WHAT of a stability solve; the integrator passed to
 [`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
 names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
 matching is a separate problem posed on the finished solve: see `MatchProblem`.
@@ -883,7 +885,7 @@ come from `nn`.
   - `debug::DebugSettings` - Diagnostic dump settings.
   - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
 """
-struct EulerLagrangeProblem
+struct ForceBalanceProblem
     equil::Equilibrium.PlasmaEquilibrium
     wall::Union{Nothing,Vacuum.WallSettings}
     dir_path::String
@@ -891,7 +893,7 @@ struct EulerLagrangeProblem
     ctrl_kwargs::Dict{Symbol,Any}
 end
 
-function EulerLagrangeProblem(
+function ForceBalanceProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
     wall::Union{Nothing,Vacuum.WallSettings}=nothing,
@@ -904,14 +906,14 @@ function EulerLagrangeProblem(
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
     ctrl_kwargs[:nn_high] = last(nn)
-    return EulerLagrangeProblem(equil, wall, String(dir_path), debug, ctrl_kwargs)
+    return ForceBalanceProblem(equil, wall, String(dir_path), debug, ctrl_kwargs)
 end
 
 """
-    solve(prob::EulerLagrangeProblem, alg) -> ForceFreeStatesResult
+    solve(prob::ForceBalanceProblem, alg) -> ForceFreeStatesResult
     solve(equil, alg; nn, kwargs...) -> ForceFreeStatesResult
 
-Solve the perturbed-plasma [`EulerLagrangeProblem`](@ref) with the formalism `alg` —
+Solve the perturbed-plasma [`ForceBalanceProblem`](@ref) with the formalism `alg` —
 [`Forward`](@ref), [`Riccati`](@ref) or [`Galerkin`](@ref) — and return the published
 [`ForceFreeStatesResult`](@ref). This is the scripting entry point; it runs the same stages
 a `gpec.toml` run of `main` does and produces the same result object. The second form is
@@ -924,12 +926,12 @@ equilibrium (`kinetic_file`, or `attach_kinetic_profiles!`) and uses the default
 
 ```julia
 eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
-prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
+prob = ForceBalanceProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
 ffs = solve(prob, Riccati())
 ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
-function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrator)
+function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrator)
     total_start = time()
 
     equil = prob.equil
@@ -967,11 +969,11 @@ end
 """
     solve(equil::PlasmaEquilibrium, alg; nn, kwargs...) -> ForceFreeStatesResult
 
-Convenience form of [`solve`](@ref): builds the [`EulerLagrangeProblem`](@ref) from the
+Convenience form of [`solve`](@ref): builds the [`ForceBalanceProblem`](@ref) from the
 equilibrium and the problem keywords, then solves it with `alg`.
 """
 solve(equil::Equilibrium.PlasmaEquilibrium, alg::ForceFreeStates.AbstractIntegrator; kwargs...) =
-    solve(EulerLagrangeProblem(equil; kwargs...), alg)
+    solve(ForceBalanceProblem(equil; kwargs...), alg)
 
 """
     run_perturbed_equilibrium(result, inputs, preloaded_coil_sets) -> pe_state
@@ -1440,7 +1442,7 @@ end
 
 export main, write_imas
 export solve, plasma_response, perturbed_equilibrium
-export PlasmaEquilibrium, EulerLagrangeProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField, PlasmaResponse
+export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField, PlasmaResponse
 export MatchProblem, TearingProblem, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 

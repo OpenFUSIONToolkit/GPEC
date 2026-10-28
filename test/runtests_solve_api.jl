@@ -62,7 +62,7 @@ using HDF5
     @testset "riccati solve produces the unified delta_prime" begin
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "riccati"))]).ffs
-            prob = EulerLagrangeProblem(equil; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+            prob = ForceBalanceProblem(equil; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
             api = solve(prob, Riccati(; nchunks=40))
 
             @test api.integrator === :riccati
