@@ -74,6 +74,7 @@ The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are
 
 - **Burgess et al. (2026)**: "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer"
   - Location: `docs/resources/2026-Burgess-Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer.pdf`
+  - Published: Plasma Physics and Controlled Fusion **68**, 065017 (2026), doi 10.1088/1361-6587/ae7156
   - Describes: The two-fluid slab layer, its four regimes, and the `S^(1/3)` outer-inner matching
 
 - **Fitzpatrick (2022)**: "Influence of anomalous perpendicular transport on linear tearing mode dynamics in tokamak plasmas"
