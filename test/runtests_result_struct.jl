@@ -202,6 +202,9 @@ include("h5_metadata_check.jl")
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
                     HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                        @test ffs.galerkin.solver in ("cholesky", "LU")
+                        @test read(f["$gal/solver"]) == ffs.galerkin.solver
+                        @test haskey(attrs(f["$gal/solver"]), "long_name")
                         @test read(f["$gal/psi"]) == sol.psi_store
                         @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
                         @test read(f["$gal/dxi_psidpsi"]) == sol.du_store

@@ -11,6 +11,7 @@ const TEST_SUITES = [
     "runtests_eulerlagrange.jl" => "core",
     "runtests_riccati.jl" => "core",
     "runtests_galerkin.jl" => "core",
+    "runtests_galerkin_cholesky.jl" => "core",
     "runtests_parallel_integration.jl" => "core",
     "runtests_result_struct.jl" => "api",
     "runtests_solve_api.jl" => "api",
@@ -51,5 +52,6 @@ const TEST_SUITES = [
     "runtests_coils.jl" => "api",
     "runtests_imas.jl" => "api",
     "runtests_rerun_from_h5.jl" => "api",
+    "runtests_frozen_equilibrium.jl" => "api",
     "runtests_h5_schema.jl" => "api"
 ]

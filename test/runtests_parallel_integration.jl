@@ -1,6 +1,29 @@
 using LinearAlgebra
 using TOML
 
+@testset "BVP without controls preserves extended precision" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    M = ComplexF64[1 / (i + j - 1) + 0.02im / (i + j) for i in 1:6, j in 1:6]
+    reference = setprecision(BigFloat, 256) do
+        factor = lu(Complex{BigFloat}.(M))
+        raw = zeros(Complex{BigFloat}, 2, 2)
+        for row in 1:2
+            rhs = zeros(Complex{BigFloat}, 6)
+            rhs[4+row] = 1
+            x = factor \ rhs
+            raw[row, :] = x[[3, 5]]
+        end
+        delta = reshape([raw[2, 2] - raw[2, 1] - raw[1, 2] + raw[1, 1]], 1, 1)
+        return ComplexF64.(delta), ComplexF64.(raw)
+    end
+    default = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, nothing, false)
+    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(), false)
+    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; extended_precision_bvp=false), false)
+    @test default == reference
+    @test extended == reference
+    @test ordinary != reference
+end
+
 @testset "Riccati FM Integration Tests" begin
 
     @testset "ChunkPropagator identity on trivial interval" begin

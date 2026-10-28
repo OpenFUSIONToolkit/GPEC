@@ -37,7 +37,7 @@ and never depends on the thread count. Maps onto `integrator = "riccati"`.
 end
 
 """
-    Galerkin(; solver="LU", nx=256, ...)
+    Galerkin(; solver="auto", nx=256, ...)
 
 RDCON outer-region singular Galerkin solver: solves the same Euler-Lagrange system
 variationally on a finite-element grid packed around the rational surfaces, producing Δ′
@@ -46,7 +46,7 @@ matching `gal_*` control key without the prefix.
 
 ## Fields
 
-  - `solver::String` - Banded linear solver, `"LU"` (zgbtrf/zgbtrs) or `"cholesky"` (zpbtrf/zpbtrs). Matching requires `"LU"`.
+  - `solver::String` - Banded linear solver: `"auto"` (Cholesky, zpbtrf/zpbtrs, when the matrix is positive definite, else LU), `"LU"` (zgbtrf/zgbtrs) or `"cholesky"` (error if not positive definite).
   - `nx::Int` - Elements per interval between singular surfaces.
   - `nq::Int` - Gauss-Lobatto quadrature order per element.
   - `pfac::Float64` - Grid packing ratio near singular surfaces.
@@ -64,7 +64,7 @@ matching `gal_*` control key without the prefix.
   - `cut_solution::Bool` - Also keep the cut solution, for a later `MatchProblem`'s composite inner profiles.
 """
 @kwdef struct Galerkin <: AbstractIntegrator
-    solver::String = "LU"
+    solver::String = "auto"
     nx::Int = 256
     nq::Int = 6
     pfac::Float64 = 0.001
@@ -127,4 +127,3 @@ function _apply_alg!(kwargs::Dict{Symbol,Any}, alg::Galerkin)
     end
     return kwargs
 end
-

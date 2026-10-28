@@ -67,7 +67,7 @@ rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rati
 
 # Outer-region singular Galerkin Δ′ solver with rpec coil columns.
 # This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
-gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
+gal_solver             = "auto"  # Banded solver: "auto" (Cholesky if Hermitian positive definite, else LU), "LU" or "cholesky"
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element
 gal_pfac               = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)
