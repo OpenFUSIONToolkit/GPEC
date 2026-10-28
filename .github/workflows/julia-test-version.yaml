@@ -37,10 +37,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Disable the solver precompile workload
-        run: |
-          printf '[GeneralizedPerturbedEquilibrium]\nprecompile_workload = false\n' > LocalPreferences.toml
-
       - name: Fingerprint tracked package inputs
         id: inputs
         shell: bash
@@ -66,8 +62,8 @@ jobs:
       - name: Select cache keys and storage
         id: cache-keys
         env:
-          DEPOT_KEY: julia-depot-v4-generic-jit-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
-          GPEC_KEY: gpec-images-v6-generic-jit-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ steps.inputs.outputs.gpec }}
+          DEPOT_KEY: julia-depot-v3-generic-aot-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+          GPEC_KEY: gpec-images-v5-generic-aot-o2-bounds-yes-${{ runner.os }}-${{ runner.arch }}-${{ steps.julia.outputs.julia-version }}-${{ steps.inputs.outputs.gpec }}
           RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
           echo "depot=$DEPOT_KEY" >> "$GITHUB_OUTPUT"
@@ -84,8 +80,7 @@ jobs:
         env:
           CACHE_KEY: ${{ steps.cache-keys.outputs.gpec }}
 
-      # Reuse old dependency downloads on the first JIT run; Julia invalidates images whose preferences differ.
-      # A unique write key avoids stale reservations.
+      # The prefix identifies compatible dependencies; a unique write key avoids stale reservations.
       - name: Restore the Julia depot
         id: depot
         if: steps.cache-keys.outputs.local != 'true'
@@ -95,9 +90,9 @@ jobs:
           key: ${{ steps.cache-keys.outputs.depot }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ${{ steps.cache-keys.outputs.depot }}
-            julia-depot-v4-generic-jit-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-
-            julia-depot-v4-generic-jit-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-
             julia-depot-v3-generic-aot-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-
+            julia-depot-v3-generic-aot-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-
+            julia-depot-v4-generic-jit-ubuntu-latest-${{ runner.arch }}-${{ inputs.version }}-${{ steps.julia.outputs.julia-version }}-
 
       # The dependency cache is immutable and intentionally independent of src/. Layer
       # a small source-keyed package cache over it so source changes can refresh GPEC
@@ -141,8 +136,7 @@ jobs:
       # gitignored and never uploaded), and instrumenting slows compute-heavy
       # numerical code noticeably. Set coverage: true and add a Codecov upload
       # step together if coverage reporting is ever wanted.
-      # Compile package definitions here; solver first-use compilation runs in parallel groups.
-      - name: Precompile the CI environment
+      - name: Check the production precompile workload
         run: julia --check-bounds=yes --depwarn=yes --project=. -e 'using Pkg; Pkg.precompile(; strict=true); using GeneralizedPerturbedEquilibrium'
 
       - name: Save GPEC compilation
@@ -229,10 +223,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-
-      - name: Disable the solver precompile workload
-        run: |
-          printf '[GeneralizedPerturbedEquilibrium]\nprecompile_workload = false\n' > LocalPreferences.toml
 
       - name: Set up the precompiled Julia version
         uses: julia-actions/setup-julia@v2
