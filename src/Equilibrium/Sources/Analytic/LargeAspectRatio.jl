@@ -11,7 +11,8 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
   - `q0`: The safety factor on axis.
   - `p_pres`: The exponent for the pressure profile, defined as `p00 * (1 - (r / a)^2)^p_pres`.
   - `p_sig`: The exponent that determines the shape of the current-related function profile.
-  - `sigma_type`: The type of sigma profile, can be "default" or "wesson". If "wesson", the sigma profile is defined as `sigma0 * (1 - (r / a)^2)^p_sig`.
+  - `sigma_type`: The type of sigma profile, can be "default", "wesson" or "hollow". If "wesson", the sigma profile is defined as `sigma0 * (1 - (r / a)^2)^p_sig`. If "hollow", it is `sigma0 * (1 + hollow * (r / a)^2) * (1 - (r / a)^2)^p_sig`, an off-axis current peak that makes q fall from `q0` to a minimum before rising (reversed shear) when `hollow` is large enough.
+  - `hollow`: The off-axis current enhancement of the "hollow" sigma profile (unused by the other profiles).
   - `mtheta`: The number of grid points in the poloidal direction.
   - `ma`: The number of grid points in the radial direction.
   - `zeroth`: If set to true, it neglects the Shafranov shift
@@ -26,6 +27,7 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     p_pres::Float64 = 2.0
     p_sig::Float64 = 1.0
     sigma_type::String = "default"
+    hollow::Float64 = 0.0
     mtheta::Int = 128
     ma::Int = 128
     zeroth::Bool = false
@@ -86,6 +88,14 @@ function lar_init_conditions(rmin::Float64, lar_input::LargeAspectRatioConfig)
     return r, y
 end
 
+# Current profile σ(x), x = r/a, with σ(0) = sigma0 for every `sigma_type`.
+function _lar_sigma(x::Float64, sigma0::Float64, lar_input::LargeAspectRatioConfig)
+    p_sig = lar_input.p_sig
+    lar_input.sigma_type == "wesson" && return sigma0 * (1 - x^2)^p_sig
+    lar_input.sigma_type == "hollow" && return sigma0 * (1 + lar_input.hollow * x^2) * (1 - x^2)^p_sig
+    return sigma0 / (1 + x^(2 * p_sig))^(1 + 1 / p_sig)
+end
+
 """
     lar_der(dy, r, y, lar_input)
 
@@ -111,19 +121,13 @@ function lar_der(dy::Vector{Float64}, r::Float64, y::Vector{Float64}, lar_input:
     beta0 = lar_input.beta0
     p00 = beta0 / 2.0
     p_pres = lar_input.p_pres
-    p_sig = lar_input.p_sig
 
-    sigma_type = lar_input.sigma_type
     x = r / lar_a
     xfac = 1 - x^2
     pp = -2 * p_pres * p00 * x * xfac^(p_pres - 1)  # p'
     sigma0 = 2.0 / (q0 * lar_r0)
 
-    sigma = if sigma_type == "wesson"
-        sigma0 * xfac^p_sig
-    else
-        sigma0 / (1 + x^(2 * p_sig))^(1 + 1 / p_sig)
-    end
+    sigma = _lar_sigma(x, sigma0, lar_input)
 
     # LAR equations have singularities at r=0; ensure we never evaluate there
     @assert r > 0.0 "LAR equations require r > 0 (called with r=$r)"
@@ -159,7 +163,6 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     lar_r0 = lar_input.r0
     q0 = lar_input.q0
     beta0 = lar_input.beta0
-    sigma_type = lar_input.sigma_type
 
     p00 = beta0 / 2.0
     lar_input.p_pres = max(lar_input.p_pres, 1.001)
@@ -194,9 +197,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         x = r / lar_a
         xfac = 1 - x^2
         pval = p00 * xfac^lar_input.p_pres
-        sigma = (sigma_type == "wesson") ?
-                sigma0 * xfac^lar_input.p_sig :
-                sigma0 / (1 + x^(2 * lar_input.p_sig))^(1 + 1 / lar_input.p_sig)
+        sigma = _lar_sigma(x, sigma0, lar_input)
         q = r^2 * y[2] / (lar_r0 * y[1])
         temp[i, 1] = r
         temp[i, 2] = y[1]
