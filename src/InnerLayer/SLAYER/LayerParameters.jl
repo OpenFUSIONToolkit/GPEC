@@ -16,7 +16,7 @@
 
 Dimensionless layer-physics parameters at one rational surface for the
 Fitzpatrick two-fluid drift-MHD SLAYER inner-layer model (Fitzpatrick
-2023; Park et al. 2022), plus dimensional auxiliaries required for
+2023; Park 2022), plus dimensional auxiliaries required for
 de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 `D_norm` (not the older `pr`/`pe`/`ds` set).
 
@@ -28,7 +28,7 @@ de-normalization. The parametrization uses `P_perp`, `P_tor`, and
 | `lu`       | Lundquist number S = τ_R / τ_H                                    |
 | `c_beta`   | Compressibility √(β_local / (1 + β_local))                        |
 | `D_norm`   | (d_β/r_s) · S^(1/3) · √ι_e  (Fitzpatrick normalized scale)        |
-| `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥                            |
+| `P_perp`   | Perpendicular Prandtl number τ_R / τ_⊥ (set by `P_perp_model`)    |
 | `P_tor`    | Toroidal-direction Prandtl number τ_R / τ_‖tor                    |
 | `Q_e`      | Normalized electron diamagnetic: −tauk · ω_*e                     |
 | `Q_i`      | Normalized ion diamagnetic:      −tauk · ω_*i                     |
@@ -104,6 +104,9 @@ end
 # `dc_tmp = 0` branch.
 const ALLOWED_DC_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 
+# Allowed P_perp_model values selecting how P_perp is built. `:chi_perp_e` is the default.
+const ALLOWED_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
+
 """
     r_based_shear(rs, q, dq_dpsi, da_dpsi) -> Float64
 
@@ -134,7 +137,7 @@ end
 # large-aspect-ratio offsets are Connor, Ham, Hastie & Liu, PPCF 57, 065001 (2015) Eqs. (59) and (61),
 # after Lütjens, Luciani & Garbet, Phys. Plasmas 8, 4267 (2001). Returns dc_tmp as a Float64.
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
-    chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
+    chi_perp_e::Real, t_e::Real, zeff::Real, tau_ee::Real,
     rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
     max_iter::Integer=100, tol::Real=1e-10)
     dc_type in ALLOWED_DC_TYPES ||
@@ -151,7 +154,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
         chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * abs(sval_r) * Wd)
         chi_par = (chi_par_smfp * chi_par_lmfp) /
                   (chi_par_smfp + chi_par_lmfp)
-        Wd_new = sqrt(8.0) * (chi_perp / chi_par)^0.25 *
+        Wd_new = sqrt(8.0) * (chi_perp_e / chi_par)^0.25 *
                  (1.0 / sqrt((rs / R0) * abs(sval_r) * n_tor))
         if abs(Wd_new - Wd) / max(abs(Wd), 1e-30) < tol
             Wd = Wd_new
@@ -167,22 +170,25 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
 
     if dc_type === :lar
         return 0.5 * (-dr_val) * π^1.5 *
-               (chi_par / chi_perp)^0.25 *
+               (chi_par / chi_perp_e)^0.25 *
                sqrt((n_tor * abs(sval_r)) / (R0 * rs))
     elseif dc_type === :fitzpatrick
         return -(sqrt(2.0) * π^1.5 * dr_val) / Wd
     elseif dc_type === :toroidal
         return 0.5 * (-dr_val) * π^1.5 *
-               (chi_par / chi_perp)^0.25 * dgeo_val
+               (chi_par / chi_perp_e)^0.25 * dgeo_val
     end
     return 0.0
 end
 
 """
-    slayer_parameters(; n_e, t_e, t_i, omega, omega_e, omega_i,
+    slayer_parameters(; n_e, t_e, t_i, omega_e, omega_i,
                         qval, sval_r, bt, rs, R0, mu_i, zeff,
-                        chi_perp, chi_tor,
+                        chi_perp_e, chi_tor,
                         m, n,
+                        chi_perp_i=nothing, tau_E=nothing, a_minor=nothing,
+                        dlnn=nothing, dlnTe=nothing, dlnTi=nothing,
+                        P_perp_model=:D_perp,
                         dr_val=0.0, dgeo_val=0.0,
                         dc_type=:none, ising=0,
                         resistivity_model=SauterNeoModel(),
@@ -201,7 +207,6 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `n_e` -- electron density [m⁻³]
   - `t_e` -- electron temperature [eV]
   - `t_i` -- ion temperature [eV]
-  - `omega`   -- toroidal rotation frequency at the surface [rad/s]
   - `omega_e` -- electron diamagnetic frequency [rad/s]
   - `omega_i` -- ion diamagnetic frequency [rad/s]
   - `qval`    -- safety factor q at the surface
@@ -212,9 +217,29 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
   - `R0`      -- major radius [m]
   - `mu_i`    -- ion mass in proton-mass units (e.g. 2.0 for D)
   - `zeff`    -- effective charge
-  - `chi_perp`, `chi_tor` -- perpendicular / toroidal heat diffusivity [m²/s]. `chi_perp` feeds both
-    `P_perp` (which wants the one-fluid energy diffusivity χ_E) and the critical-Δ `W_d` (which wants
-    the electron channel); one profile serves both for now, see the stability docs
+  - `chi_perp_e`, `chi_tor` -- electron perpendicular heat / toroidal momentum diffusivity [m²/s]
+  - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], required by `P_perp_model=:chi_perp_i` and `:D_perp`
+  - `dlnn`, `dlnTe`, `dlnTi` -- radial log-gradients of n, T_e, T_i in any common radial variable
+    (only their ratios enter; required by `P_perp_model=:D_perp`)
+  - `tau_E`   -- whole-plasma energy confinement time τ̄_E [s], required by `P_perp_model=:tau_E`
+  - `a_minor` -- plasma minor radius `a` [m], required by `P_perp_model=:tau_E` (`build_slayer_inputs` takes it from the flux label)
+
+  An input a model does not use may be left as `nothing`; one it uses must be given.
+  - `P_perp_model` -- how `P_perp` is built (default `:D_perp`, as in the `[SLAYER]` deck):
+      + `:D_perp` -- τ_R/τ_⊥ with τ_⊥ = r_s²/D_⊥, D_⊥ the perpendicular particle diffusivity of
+        Fitzpatrick, Phys. Plasmas 29, 032507 (2022), Eq. 16 (with Eqs. 4-6 and η_⊥ = η_∥). Its
+        τ = (T_e/T_i)(1+η_e)/(1+η_i) is the inverse orientation of the `tau` = T_i/T_e field
+        of `SLAYERParameters`. With flat temperatures it falls to the `:c_beta` value
+      + `:chi_perp_e` -- τ_R·χ⊥,e/r_s²
+      + `:chi_perp_i` -- τ_R·χ⊥,i/r_s²
+      + `:P_phi`  -- P_perp = P_tor (Fitzpatrick, Phys. Plasmas 30, 092512 (2023), Eq. 143)
+      + `:c_beta` -- P_perp = c_β² (J.-K. Park, Phys. Plasmas 29, 072506 (2022), Eq. 9 with K = 0),
+        the χ⊥ → 0 limit of `:D_perp`
+      + `:tau_E`  -- P_perp = P_tor = τ_R/τ_E(r_s) (Fitzpatrick 2023, Eqs. 37-38, 81-83 and 131), from
+        a uniform χ_E = κ_e a²/τ̄_E with κ_e = 3/16, the value for T_e ∝ 1 − r̂² (Eq. 38). Other
+        profile shapes change κ_e by a factor of order 2-3. Both Prandtl numbers come from χ_E, so
+        `chi_tor` is ignored in this mode
+    `chi_perp_e` still sets the critical-Δ `dc_tmp` in every mode.
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
   - `dc_type` -- one of `:none`, `:lar`, `:fitzpatrick`, `:toroidal`
@@ -264,11 +289,14 @@ dispersion relation.
 """
 function slayer_parameters(;
     n_e::Real, t_e::Real, t_i::Real,
-    omega::Real, omega_e::Real, omega_i::Real,
+    omega_e::Real, omega_i::Real,
     qval::Real, sval_r::Real, bt::Real,
     rs::Real, R0::Real, mu_i::Real, zeff::Real,
-    chi_perp::Real, chi_tor::Real,
+    chi_perp_e::Real, chi_tor::Real,
     m::Integer, n::Integer,
+    chi_perp_i::Union{Real,Nothing}=nothing, tau_E::Union{Real,Nothing}=nothing, a_minor::Union{Real,Nothing}=nothing,
+    dlnn::Union{Real,Nothing}=nothing, dlnTe::Union{Real,Nothing}=nothing, dlnTi::Union{Real,Nothing}=nothing,
+    P_perp_model::Symbol=:D_perp,
     dr_val::Real=0.0, dgeo_val::Real=0.0,
     dc_type::Symbol=:none, ising::Integer=0,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
@@ -369,11 +397,46 @@ function slayer_parameters(;
     lbeta = (5.0 / 3.0) * MU_0 * n_e * E_CHG * (t_e + t_i) / bt^2
     c_beta = sqrt(lbeta / (1.0 + lbeta))
 
-    # Effective Prandtl-like transport ratios
-    tau_perp = rs^2 / chi_perp
-    P_perp = tau_r / tau_perp
+    # Effective Prandtl-like transport ratios. A diffusivity the model uses must be given, finite and positive.
+    _need(name, v) = (v !== nothing && isfinite(v) && v > 0) ||
+                     throw(ArgumentError("slayer_parameters: P_perp_model=:$P_perp_model needs a positive, finite $name; got $v"))
+    _need("chi_perp_e", chi_perp_e)
+    P_perp_model === :tau_E || _need("chi_tor", chi_tor)
+    P_perp_model in (:chi_perp_i, :D_perp) && _need("chi_perp_i", chi_perp_i)
     tau_tor = rs^2 / chi_tor
     P_tor = tau_r / tau_tor
+    if P_perp_model === :tau_E
+        _need("tau_E", tau_E)
+        _need("a_minor", a_minor)
+        # Fitzpatrick 2023, Eqs. 37-38, 81-83 and 131.
+        chi_E = (3 / 16) * a_minor^2 / tau_E
+        P_tor = tau_r / (rs^2 / chi_E)
+    end
+    P_perp = if P_perp_model === :chi_perp_e
+        tau_r / (rs^2 / chi_perp_e)
+    elseif P_perp_model === :chi_perp_i
+        tau_r / (rs^2 / chi_perp_i)
+    elseif P_perp_model === :P_phi || P_perp_model === :tau_E
+        P_tor
+    elseif P_perp_model === :D_perp
+        # Fitzpatrick, Phys. Plasmas 29, 032507 (2022), Eqs. 4-6 and 16 with η_⊥ = η_∥, written over the pressure gradient p′/n.
+        all(x -> x !== nothing && isfinite(x), (dlnn, dlnTe, dlnTi)) ||
+            throw(ArgumentError("slayer_parameters: P_perp_model=:D_perp needs finite dlnn, dlnTe and dlnTi; got $dlnn, $dlnTe, $dlnTi"))
+        dp = t_e * (dlnn + dlnTe) + t_i * (dlnn + dlnTi)
+        dp != 0 || throw(ArgumentError("slayer_parameters: P_perp_model=:D_perp is undefined where the pressure gradient vanishes " *
+                                       "(t_e(dlnn+dlnTe) + t_i(dlnn+dlnTi) = 0); choose another P_perp_model for this surface"))
+        D_perp = c_beta^2 * eta / MU_0 +
+                 (2 / 3) * (1 - c_beta^2) * (t_e * dlnTe * chi_perp_e + t_i * dlnTi * chi_perp_i) / dp
+        tau_r / (rs^2 / D_perp)
+    elseif P_perp_model === :c_beta
+        c_beta^2
+    else
+        throw(ArgumentError("slayer_parameters: unknown P_perp_model=$P_perp_model. " *
+                            "Allowed: $(ALLOWED_P_PERP_MODELS)"))
+    end
+    isfinite(P_perp) && P_perp > 0 ||
+        throw(ArgumentError("slayer_parameters: P_perp_model=:$P_perp_model gave P_perp=$P_perp; check its inputs " *
+                            "(chi_perp_e=$chi_perp_e, chi_perp_i=$chi_perp_i, dlnn=$dlnn, dlnTe=$dlnTe, dlnTi=$dlnTi)"))
 
     # Normalized beta-related width and Δ-normalization
     d_beta = c_beta * d_i
@@ -382,7 +445,7 @@ function slayer_parameters(;
 
     # Critical-Δ offset from chi_parallel matching
     dc_tmp = _solve_dc_tmp(; dc_type=dc_type, dr_val=dr_val, dgeo_val=dgeo_val,
-        chi_perp=chi_perp, t_e=t_e, zeff=zeff,
+        chi_perp_e=chi_perp_e, t_e=t_e, zeff=zeff,
         tau_ee=tau_ee, rs=rs, R0=R0, sval_r=sval_r,
         n_tor=n)
 

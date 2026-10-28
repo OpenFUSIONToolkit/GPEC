@@ -1,18 +1,21 @@
 # Perturbed Equilibrium
 
-The `PerturbedEquilibrium` module computes the plasma response to external magnetic perturbations.
+The `PerturbedEquilibrium` module computes the plasma response to external magnetic perturbations,
+in two stages: `plasma_response(ffs)` builds the source-independent response and singular-coupling
+operators of a force-free-states result once, and `perturbed_equilibrium(resp, rmp)` drives them with
+one external field. A scan over fields reuses one response.
 
 ## Types
 
 ```@docs
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumControl
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumInternal
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PlasmaResponse
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 ```
 
 ## Functions
 
 ```@docs
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibrium
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.write_outputs_to_HDF5
 ```
@@ -53,7 +56,7 @@ the same way from a finished run in memory or from its `gpec.h5`:
 ```julia
 using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 
-rc = ResonantCoupling("gpec.h5")                 # post hoc; or ResonantCoupling(pe_state, ffs) in memory
+rc = ResonantCoupling("gpec.h5")                 # post hoc; or ResonantCoupling(resp) in memory
 dom = dominant_coupling(rc; psi_low=0.0, psi_high=0.9)   # SVD over the surfaces in the window
 
 b̃ = rootarea_field(rc, coil_modes)               # unit-norm forcing modes → root-area-weighted field
@@ -78,7 +81,59 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.CORE_PSI_HIGH
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.rootarea_field
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.coupling_overlap
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.check_mode_basis
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_dominant_coupling!
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_dominant_coupling!
+```
+
+## Torque response matrices
+
+A kinetic forward solve (`integrator = "forward"`, `kinetic_factor > 0`) carries the
+drift-kinetic response inside its Euler-Lagrange energy: the complex plasma energy inside a
+flux surface, `δW(ψ) = ξ†·U₂(ψ)·U₁(ψ)⁻¹·ξ/(2μ₀)`, has an anti-Hermitian part that is the
+neoclassical toroidal viscosity torque (Logan & Park 2013, eq. 19). On request,
+`plasma_response(ffs; compute_torque_response=true)` (deck: `compute_torque_response = true`
+in `[PerturbedEquilibrium]`) refers that quadratic form back to the
+applied root-area-weighted control-surface field b̃ — through the permeability, the
+boundary flux-to-displacement factor `χ₁(m − n·q_lim)·2πi` and the b̃ → Φ conform `R` — and
+stores the result at every stored node as the **torque response matrix** `T_xe(ψ)`, cumulative
+in ψ, in `PerturbedEquilibrium/TorqueResponse/`. It is the Fortran GPEC `T_xe`
+(`gpout_dw_matrix`), in the same basis as the stored response matrices, with units N·m/T².
+
+Two conventions are worth stating explicitly:
+
+  - **Factor of 2.** `T_xe` matches the Fortran array, whose quadratic form is built on the `+n`
+    harmonic alone and is therefore twice the physical value. The physical cumulative complex
+    torque of an applied spectrum is `T(ψ) = b̃†·T_xe(ψ)·b̃/2` — `torque_profile` applies the
+    1/2 — with `real(T)` the toroidal torque on the plasma inside ψ and `imag(T)` its `2n·δW`
+    (ideal plus kinetic). At the control surface `real(T)` equals `Energies/toroidal_torque`.
+  - **Hermitian part.** Only the Hermitian part `(T_xe + T_xe†)/2` contributes to the torque;
+    its eigenvectors are the applied spectra of extremal torque and its eigenvalues their torque
+    per unit `‖b̃‖²/2`. The anti-Hermitian part carries the energy.
+
+Each `perturbed_equilibrium(resp, rmp)` call contracts it with that field into a `TorqueResponse`:
+the applied torque `T_applied` and the forcing-source form `T_source(ψ) = M†·T·M`, with one column
+of `M` per forcing source, each as built: every coil set at its deck currents,
+or the forcing file's spectrum as a single source. Driving the sources at scale factors `s` gives
+`s†·T_source·s/2`.
+
+```julia
+using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+using LinearAlgebra
+
+tr = pe_state.torque_response                       # a TorqueResponse
+T = torque_profile(tr, pe_state.forcing_b_rootarea) # cumulative complex torque of the run's forcing
+real(T[end])                                        # total toroidal torque [N·m]
+
+T_h = Hermitian((tr.T_xe[:, :, end] + tr.T_xe[:, :, end]') / 2)
+λ, V = eigen(T_h)                                   # V[:, end]: applied b̃ of maximum torque
+```
+
+```@docs
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.TorqueResponse
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_response_matrix
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_profile
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.coil_flux_spectra
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_torque_response!
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.apply_torque_response!
 ```
 
 ## Plotting per-surface results against ψ or q

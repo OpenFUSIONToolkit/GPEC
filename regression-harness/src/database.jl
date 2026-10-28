@@ -93,7 +93,7 @@ end
 
 function open_database(path::String)::SQLite.DB
     db = SQLite.DB(path)
-    DBInterface.execute(db, "PRAGMA journal_mode=WAL")
+    query_rows(db, "PRAGMA journal_mode=WAL")
     DBInterface.execute(db, "PRAGMA foreign_keys=ON")
     for stmt in split(SCHEMA_SQL, ";")
         s = strip(stmt)

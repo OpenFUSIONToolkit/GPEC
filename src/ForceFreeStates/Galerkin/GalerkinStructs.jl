@@ -84,10 +84,8 @@ end
 Global workspace for the Galerkin solve. Port of Fortran `gal_type` (gal.f).
 
 `intvl` has length `msing+1` (Fortran `intvl(0:msing)`, accessed as `intvl[ising+1]`).
-`kl = ku = mpert*(np+1)`. The banded `mat` storage layout depends on `solver` (gal.f):
-
-  - `"LU"`       → `ldab = 2*kl + ku + 1`, full band (LAPACK `gbtrf!`/`gbtrs!`)
-  - `"cholesky"` → `ldab = kl + 1`, lower band only (LAPACK `pbtrf!`/`pbtrs!`, `'L'`)
+`kl = ku = mpert*(np+1)`. `mat` is stored full band, `ldab = 2*kl + ku + 1` (LAPACK `gbtrf!`
+layout); `solver` records the factorization `gal_banded_solve!` used (`"cholesky"` or `"LU"`).
 """
 mutable struct GalWorkspace
     solver::String
@@ -163,6 +161,7 @@ published as `ForceFreeStatesResult.delta_prime`.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
   - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
     gal-native grid; `nothing` if no resonant surfaces.
+  - `solver::String` — factorization actually used: `"cholesky"`, `"LU"`, or `"none"` when no resonant surfaces were present.
 """
 struct GalerkinResult
     msing::Int
@@ -173,4 +172,5 @@ struct GalerkinResult
     di::Vector{Float64}
     alpha::Vector{ComplexF64}
     solution::Union{Nothing,GalerkinSolution}
+    solver::String
 end

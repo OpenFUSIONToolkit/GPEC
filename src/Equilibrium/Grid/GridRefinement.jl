@@ -5,7 +5,7 @@ Pass 1 forms the equilibrium on a coarse grid; `refined_psi_grid` then derives a
 density from the measured nodal data (1D profiles, 2D geometry channels, and optional
 kinetic profiles) and equidistributes it, pinning mandatory knots (e.g. rational surfaces)
 via `merge_mandatory_nodes`. Pass 2 re-forms the equilibrium on the refined grid through
-the `override_psi_nodes` keyword of `setup_equilibrium`.
+the `override_psi_nodes` keyword of `PlasmaEquilibrium`.
 
 There is ONE sizing rule everywhere — the cubic *derivative* interpolation error model
 err(f′) ≈ h³|f''''|/24 ≤ τ·f_scale — applied to three sources of curvature |f''''|:
