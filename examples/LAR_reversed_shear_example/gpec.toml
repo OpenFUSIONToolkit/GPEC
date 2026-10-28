@@ -1,0 +1,44 @@
+# Large-aspect-ratio equilibrium with reversed shear: n=1 ideal stability.
+# A hollow current profile makes q fall from 2.35 on the axis to a minimum of 1.82 at ψ_N ≈ 0.37
+# and rise to 2.84 at the edge, so q = 2 is crossed twice, with q′ < 0 on the inner crossing and
+# q′ > 0 on the outer one. Regression fixture for keeping both crossings as separate surfaces; the
+# equilibrium is generated analytically from the embedded [LAR_INPUT] section, with no wall.
+
+[Equilibrium]
+eq_type = "lar"                         # Type of the input 2D equilibrium file
+jac_type = "hamada"                     # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "core_edge_packed"          # Radial grid packing type
+psilow = 0.01                           # Lower limit of normalized poloidal flux
+psihigh = 0.99                          # Upper limit of normalized poloidal flux
+mpsi = 128                              # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+mtheta = 256                            # Number of poloidal grid points
+
+[Wall]
+shape = "nowall"                        # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+
+[ForceFreeStates]
+vac_flag = true                         # Compute plasma, vacuum, and total energies for free-boundary modes
+qlow = 1.02                             # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                             # Integration terminated at q limit determined by min(qa, qhigh)
+nn_low = 1                              # Smallest toroidal mode number to include
+nn_high = 1                             # Largest toroidal mode number to include
+delta_mlow = 8                          # Expands lower bound of Fourier harmonics
+delta_mhigh = 8                         # Expands upper bound of Fourier harmonics
+mtheta_vacuum = 960                     # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+eulerlagrange_tolerance = 1e-9          # Relative tolerance for ODE integration of Euler-Lagrange equations
+singfac_min = 1e-4                      # Fractional distance from rational q at which ideal jump enforced
+integrator = "forward"                  # Integration formalism: "forward" (dense ξ), "riccati" (chunked propagator BVP, singular-surface Δ′), or "galerkin" (outer-region singular Galerkin Δ′)
+truncate_at_rational_offset = false     # Truncate integration at (last_rational_q + rational_offset_fraction)/n; false for analytic equilibria
+
+# Large-aspect-ratio analytic equilibrium parameters (eq_type = "lar"); see LargeAspectRatioConfig in src/Equilibrium.
+[LAR_INPUT]
+r0 = 10.0                               # Major radius of the plasma [m]
+a = 1.0                                 # Minor radius of the plasma [m]
+beta0 = 1e-3                            # Beta on axis (normalized pressure)
+q0 = 2.4                                # Safety factor on axis
+p_pres = 2.0                            # Exponent of the pressure profile p00·(1 − (r/a)²)^p_pres
+p_sig = 2.0                             # Exponent of the current-related profile
+sigma_type = "hollow"                   # Current profile: "default", "wesson" or "hollow" (off-axis peak, reversed shear)
+hollow = 6.0                            # Off-axis current enhancement of the "hollow" profile
+mtheta = 128                            # Number of grid points in the poloidal direction
+ma = 128                                # Number of grid points in the radial direction
