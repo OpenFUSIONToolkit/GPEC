@@ -195,8 +195,9 @@ profiles, without an intermediate file round-trip.
     `:flux` label, whatever `rs_method` is.
   - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
     (default `:D_perp`, as in the `[SLAYER]` deck).
-  - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
-    of `psi` (default `1.0`).
+  - `chi_tor`   -- toroidal momentum diffusivity χ_φ [m²/s], setting the momentum
+    Prandtl number `P_tor` = τ_R/τ_φ with τ_φ = r_s²/χ_φ (Fitzpatrick, Phys. Plasmas
+    30, 092512 (2023)). Scalar or a callable of `psi` (default `1.0`).
 
   - `dr_val`    -- resistive interchange index `D_R = E + F + H²`
     (Glasser-Greene-Johnson 1975) feeding the critical-Δ formulas
