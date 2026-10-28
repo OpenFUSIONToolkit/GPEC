@@ -14,7 +14,7 @@
         @test improved
         @test abs(Qp - r) < 1e-10
         @test abs(f(Qp)) < 1e-10
-        @test nev <= 3 * 8 + 2             # bounded eval budget
+        @test nev <= 1 + 6                 # one iteration: 2 differences, the trial step, ≤ 3 backtracks
     end
 
     @testset "_polish_root: nonlinear residual converges" begin
@@ -23,6 +23,14 @@
         Qp, _, improved = D._polish_root(f, r + 0.02 - 0.015im, 0.15)
         @test improved
         @test abs(Qp - r) < 1e-7
+    end
+
+    @testset "_polish_root: residual that is neither holomorphic nor anti-holomorphic converges" begin
+        r = 0.15 - 0.35im
+        f(Q) = (ComplexF64(Q) - r) + 0.5 * conj(ComplexF64(Q) - r)   # zero only at r
+        Qp, _, improved = D._polish_root(f, r + 0.01 + 0.012im, 0.1)
+        @test improved
+        @test abs(Qp - r) < 1e-10
     end
 
     # The SLAYER residual is a function of conj(Q) (solve_inner evaluates

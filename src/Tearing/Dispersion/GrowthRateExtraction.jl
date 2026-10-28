@@ -507,15 +507,8 @@ end
 # |f|-decrease backtracking keep it strictly "improve-or-no-op": it cannot
 # diverge, jump to another root, or be pulled into a pole.
 #
-# The local linear model is the REAL 2×2 Jacobian of (Re f, Im f) with respect
-# to (Re Q, Im Q), from forward differences along both axes, not a complex
-# derivative. A complex slope assumes `f` is holomorphic, but the SLAYER
-# tearing residual is a function of conj(Q) (`solve_inner` evaluates
-# conj(Δ̂(ĝ)); see Riccati.jl). On such a residual a complex-secant step is
-# the mirror image of the true step, so the polish stalls and the validity
-# gate rejects the root, most often the steep, weakly damped root at the
-# diamagnetic frequency. The real Jacobian is exact for holomorphic and
-# anti-holomorphic residuals alike.
+# The local model is the real 2×2 forward-difference Jacobian of (Re f, Im f), exact for holomorphic
+# and anti-holomorphic f alike; SLAYER's residual is a function of conj(Q) (see Riccati.jl).
 function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
     tol_step::Float64=1e-12, tol_f::Float64=1e-8)
     (R > 0) || return (Q0, 0, false)
@@ -536,10 +529,10 @@ function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
         (isfinite(fx) && isfinite(fy)) || break
         j11, j12 = real(fx - fk) / h, real(fy - fk) / h
         j21, j22 = imag(fx - fk) / h, imag(fy - fk) / h
-        det = j11 * j22 - j12 * j21
-        (isfinite(det) && det != 0) || break
+        jdet = j11 * j22 - j12 * j21
+        (isfinite(jdet) && jdet != 0) || break
         # zero of the local linear model: J * [dRe, dIm] = -[Re f, Im f]
-        step = complex((-real(fk) * j22 + j12 * imag(fk)) / det, (-j11 * imag(fk) + j21 * real(fk)) / det)
+        step = complex((-real(fk) * j22 + j12 * imag(fk)) / jdet, (-j11 * imag(fk) + j21 * real(fk)) / jdet)
         Qt = Qk + step
         if abs(Qt - Q0) > R                               # project into trust region
             Qt = Q0 + R * (Qt - Q0) / abs(Qt - Q0)
