@@ -469,31 +469,35 @@ surface (no knot-on-surface jump) and *stable across* grid refinement — a narr
 wide neighbors would be consistent but noisy. Non-bracket knots within `w` of the center, or
 within `min_spacing` of either new bracket knot, are dropped; endpoints always win; bracket knots
 outside the open domain are dropped, and knots closer than `collapse_atol` are collapsed to keep
-the grid strictly increasing. Errors if adjacent brackets overlap (`c₂ − w₂ ≤ c₁ + w₁`) or a
-half-width is non-finite (a tangent surface, q′ = 0).
+the grid strictly increasing. Each half-width is capped at half the distance to the neighboring
+centers, so adjacent brackets never interleave and every center keeps its own interval, and the
+stencil part of it also at half the distance to the nearer domain edge, so a near-tangent surface
+(q′ → 0, a huge stencil) cannot clear the grid. A cap that cuts a bracket below its stencil floor
+warns, since Δ′ there is sampled on a narrower stencil than intended.
 """
 function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}, min_half_widths::Vector{Float64}, min_spacing::Float64; collapse_atol::Float64=1e-7)
     isempty(centers) && return copy(grid)
     length(centers) == length(min_half_widths) || error("bracket_mandatory_nodes: centers and min_half_widths length mismatch")
     lo, hi = grid[1], grid[end]
-    order = sortperm(centers)
-    kept = Tuple{Float64,Bool}[(g, false) for g in grid]  # (value, is_bracket_knot)
-    last_c, last_w = -Inf, 0.0
-    for idx in order
-        c, hw = centers[idx], min_half_widths[idx]
+    # In-domain centers in increasing order; centers closer than collapse_atol share one bracket.
+    cs, hws = Float64[], Float64[]
+    for idx in sortperm(centers)
+        c = centers[idx]
         (lo < c < hi) || continue
-        c - last_c < collapse_atol && continue  # centers closer than collapse_atol share one bracket
+        (isempty(cs) || c - cs[end] >= collapse_atol) || continue
+        push!(cs, c)
+        push!(hws, min_half_widths[idx])
+    end
+    kept = Tuple{Float64,Bool}[(g, false) for g in grid]  # (value, is_bracket_knot)
+    for (i, c) in enumerate(cs)
         k = clamp(searchsortedlast(grid, c), 1, length(grid) - 1)
-        w = max(hw, 0.5 * (grid[k+1] - grid[k]))  # blend to half the local spacing
+        cap_nb = 0.5 * min(i > 1 ? c - cs[i-1] : Inf, i < length(cs) ? cs[i+1] - c : Inf)
+        cap_edge = 0.5 * min(c - lo, hi - c)
+        # Stencil floor capped by neighbors and edges; blend to half the local spacing capped by neighbors only.
+        w = max(min(hws[i], cap_nb, cap_edge), min(0.5 * (grid[k+1] - grid[k]), cap_nb))
+        w < hws[i] && @warn "Rational surface at ψ=$c: grid bracket half-width capped at $w, below its Δ′ stencil $(hws[i]) " *
+                            "(neighboring surface or domain edge too close, or a near-tangent surface with q′ ≈ 0); Δ′ there is less accurate."
         left, right = c - w, c + w
-        # Overlapping brackets would interleave their knots and leave a surface off-center or sharing an interval.
-        isfinite(w) || error("Rational surface at ψ=$c: its grid bracket half-width $w is not finite (tangent surface, q′ = 0).")
-        if left <= last_c + last_w
-            error(
-                "Rational surface at ψ=$c: its grid bracket half-width $w reaches back past the bracket " *
-                "of the previous rational surface at ψ=$last_c (half-width $last_w)."
-            )
-        end
         # Drop non-bracket, non-endpoint knots inside the zone or crowding a new bracket knot.
         filter!(kept) do t
             t[2] || t[1] == lo || t[1] == hi ||
@@ -501,7 +505,6 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
         end
         left > lo && push!(kept, (left, true))
         right < hi && push!(kept, (right, true))
-        last_c, last_w = c, w
     end
     sort!(kept; by=first)
     merged = Float64[]
