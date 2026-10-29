@@ -492,6 +492,17 @@ using TOML
         q_lar = plasma_eq_lar.profiles.q_spline.y
         @test all(>(0), q_lar)
         @test issorted(q_lar)
+
+        # The "hollow" current profile keeps q(0) = q0 but drives an off-axis current peak, giving reversed shear:
+        # q falls to an interior minimum and rises again, crossing q = 2 on both legs.
+        hollow_input = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(;
+            r0=10.0, a=1.0, q0=2.4, beta0=1e-3, p_sig=2.0, sigma_type="hollow", hollow=6.0, mtheta=64, ma=64
+        )
+        q_rs = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(lar_config, hollow_input).profiles.q_spline.y
+        jmin = argmin(q_rs)
+        @test 1 < jmin < length(q_rs)
+        @test q_rs[jmin] < 2 < min(q_rs[1], q_rs[end])
+        @test isapprox(q_rs[1], 2.4; rtol=0.05)
     end
 
     @testset "Solovev Equilibrium" begin
