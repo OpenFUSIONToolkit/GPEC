@@ -98,9 +98,12 @@ constructor.
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
-    toroidal geometric factor (required only by `D_c_type=:toroidal`). Supply a
-    scalar only to override the auto-derivation; an explicit `0.0` disables the
-    critical-Δ offset (Δ_crit ≡ 0)
+    Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s` reference
+    (consumed only by `D_c_type=:toroidal`). Supply a scalar only to override
+    the auto-derivation. An explicit `D_R = 0.0` disables the critical-Δ
+    offset (Δ_crit ≡ 0) for every `D_c_type`; `D_geo = 0.0` does so only for
+    `:toroidal`. `:toroidal` also takes the χ∥ closure's parallel wavenumber
+    from the equilibrium (`toroidal_kpar`), which has no override
   - `theta_sample` -- poloidal angle of the minor-radius chord of the
     `:midplane` radial label, used only by API callers that pass
     `rs_method = :midplane`; the default toroidal-flux label does not depend
@@ -242,14 +245,18 @@ const _VALID_ROOT_CLASSIFICATIONS = (:threshold, :winding)
 
 function validate(ctrl::SLAYERControl)
     iszero(ctrl.theta_sample) || @warn "SLAYERControl: theta_sample = $(ctrl.theta_sample) has no effect: the layer quantities " *
-                                       "use the toroidal-flux radial label, which does not depend on poloidal angle." maxlog = 1
+          "use the toroidal-flux radial label, which does not depend on poloidal angle." maxlog = 1
     ctrl.inner_model in _VALID_INNER_MODELS || ctrl.inner_model in _UNSUPPORTED_INNER_MODELS ||
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) " *
                             "not in $(_VALID_INNER_MODELS)"))
     # A disabled section is never solved, so it may keep a GGJ model while serving only its profiles.
     !ctrl.enabled || ctrl.inner_model in _VALID_INNER_MODELS ||
-        throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
-                            "growth rates are not implemented; use inner_model=slayer_fitzpatrick"))
+        throw(
+            ArgumentError(
+                "SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
+                "growth rates are not implemented; use inner_model=slayer_fitzpatrick"
+            )
+        )
     ctrl.scan_mode in _VALID_SCAN_MODES ||
         throw(ArgumentError("SLAYERControl: scan_mode=$(ctrl.scan_mode) " *
                             "not in $(_VALID_SCAN_MODES)"))

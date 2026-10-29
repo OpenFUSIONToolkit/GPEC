@@ -4,7 +4,7 @@
     using GeneralizedPerturbedEquilibrium.Utilities
     using GeneralizedPerturbedEquilibrium.Utilities: MU_0
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.ForceFreeStates: SingType
+    using GeneralizedPerturbedEquilibrium.ForceFreeStates: SingType, resist_geometry
     using TOML
 
     # Load the Solovev analytic equilibrium shipped with the examples.
@@ -222,6 +222,69 @@
             bt=2.0, dc_type=:fitzpatrick, dr_val=0.01)
         @test sl_rf[1].dc_tmp < 0
         @test isfinite(sl_rf[1].dc_tmp)
+    end
+
+    @testset "build_slayer_inputs: toroidal dgeo_val derived from ResistGeometry" begin
+        psi_s, q_s, q1_s = 0.5, 2.4, 1.2
+        sing = _mk_sing(; psi=psi_s, q=q_s, q1=q1_s, m=2, n=1)
+
+        # Without a ResistGeometry the toroidal factor cannot be derived.
+        @test_throws ArgumentError build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
+            bt=2.0, dc_type=:toroidal, dr_val=0.01)
+
+        sing.restype = resist_geometry(equil, psi_s, q1_s)
+        # Pin the label so the reference k_ref below does not depend on the build_slayer_inputs default.
+        p = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
+            bt=2.0, dc_type=:toroidal, dr_val=0.01, rs_method=:flux)[1]
+        @test isfinite(p.dgeo_val) && p.dgeo_val > 0
+        @test isfinite(p.dc_tmp) && p.dc_tmp < 0
+        # An interchange-stable surface (D_R < 0) gets a positive, stabilizing critical-Δ.
+        p_stable = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
+            bt=2.0, dc_type=:toroidal, dr_val=-0.01)[1]
+        @test p_stable.dc_tmp > 0
+
+        # Wiring check, not physics: the derivation reaches toroidal_dgeo and toroidal_kpar with the surface's inputs.
+        rg = sing.restype
+        r_at, dr_at = radial_label(equil; rs_method=:flux)
+        k_ref = r_at(psi_s) / dr_at(psi_s)
+        dgeo_ref = toroidal_dgeo(; chi1=2π * equil.psio, v1=rg.v1_local, q=q_s, q1=q1_s, n=1,
+            avg_bsq=rg.avg_bsq, avg_dpsisq=rg.avg_dpsisq, k_ref=k_ref)
+        kpar_ref = toroidal_kpar(; chi1=2π * equil.psio, v1=rg.v1_local, q=q_s, q1=q1_s, n=1, avg_bsq=rg.avg_bsq, k_ref=k_ref)
+        @test p.dgeo_val ≈ dgeo_ref rtol = 1e-12
+        @test p.kpar_val ≈ kpar_ref rtol = 1e-12
+        @test p.k_ref ≈ k_ref rtol = 1e-12
+
+        # K∥ is not D_geo²/r_s outside a cylinder: the metric factor r_s·√⟨|∇ψ_N|²⟩/k_ref enters.
+        @test p.kpar_val ≈ p.dgeo_val^2 * sqrt(rg.avg_dpsisq) / k_ref rtol = 1e-10
+
+        # An explicit dgeo_val still overrides the derivation; K∥ stays derived.
+        p_fix = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
+            bt=2.0, dc_type=:toroidal, dr_val=0.01, dgeo_val=0.3, rs_method=:flux)[1]
+        @test p_fix.dgeo_val == 0.3
+        @test p_fix.kpar_val ≈ kpar_ref rtol = 1e-12
+
+        # The factors are derived for every dc_type once a ResistGeometry is present.
+        p_rf = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
+            bt=2.0, dc_type=:fitzpatrick, dr_val=0.01, rs_method=:flux)[1]
+        @test p_rf.dgeo_val ≈ dgeo_ref rtol = 1e-12
+        @test p_rf.kpar_val ≈ kpar_ref rtol = 1e-12
+
+        # The radial label reaches the geometry only through k_ref, and the whole toroidal critical-Δ, closure
+        # included, scales with k_ref like the converted outer Δ' (exact up to the W_d iteration's 1e-10).
+        for lab in (:midplane, :volume)
+            p_lab = build_slayer_inputs(equil, [sing], profiles; P_perp_model=:chi_perp_e,
+                bt=2.0, dc_type=:toroidal, dr_val=0.01, rs_method=lab)[1]
+            @test p_lab.k_ref != p.k_ref
+            @test p_lab.dgeo_val / p_lab.k_ref ≈ p.dgeo_val / p.k_ref rtol = 1e-10
+            @test p_lab.kpar_val / p_lab.k_ref ≈ p.kpar_val / p.k_ref rtol = 1e-10
+            @test p_lab.dc_tmp / p_lab.k_ref ≈ p.dc_tmp / p.k_ref rtol = 1e-8
+        end
+
+        # Without a ResistGeometry a prescribed dgeo_val runs with the cylindrical K∥, and says so.
+        sing_bare = _mk_sing(; psi=psi_s, q=q_s, q1=q1_s, m=2, n=1)
+        p_bare = (@test_logs (:warn, r"cylindrical") match_mode = :any build_slayer_inputs(equil, [sing_bare], profiles; P_perp_model=:chi_perp_e,
+            bt=2.0, dc_type=:toroidal, dr_val=0.01, dgeo_val=0.3))[1]
+        @test p_bare.kpar_val ≈ p_bare.n * abs(p_bare.sval_r) / p_bare.R0 rtol = 1e-14
     end
 
     @testset "build_slayer_inputs: empty sings returns empty vector" begin
