@@ -8,7 +8,6 @@ using TOML
     @info "Running Solovev ideal example with frequent Gaussian reductions"
     @testset "et[1] is independent of the reduction frequency" begin
         deck = TOML.parsefile(joinpath(ex1, "gpec.toml"))
-        deck["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         function total_energy(renorm_threshold)
             deck["ForceFreeStates"]["renorm_threshold"] = renorm_threshold
             return mktempdir() do workdir

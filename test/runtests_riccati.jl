@@ -96,7 +96,6 @@ end
 
     ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-    inputs["ForceFreeStates"]["verbose"] = false
 
     ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(

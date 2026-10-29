@@ -46,8 +46,6 @@ coupling:
 fd_step_shift_m = 1e-3          # Central-difference step for the rigid shifts [m]
 fd_step_tilt_deg = 0.1          # Central-difference step for the rigid tilts [degrees]
 rotation_center = "conductor"   # Tilt pivot: each conductor's own centre ("conductor") or the whole set's ("set")
-write_outputs_to_HDF5 = true    # Write ErrorFields/CoilSensitivities/ to the output file
-verbose = false                 # Log per-coil-set progress and linearity diagnostics
 exclude_coils = []              # Coil sets that are not error-field sources (the NTV efc_coils are excluded automatically)
 ```
 

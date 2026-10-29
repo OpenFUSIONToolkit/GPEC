@@ -23,9 +23,6 @@ never inputs: the full spectra are stored and projected post hoc with [`sensitiv
     tabulated, but they are left out of the as-designed error field, the tolerance Monte Carlo,
     the worst-case bound and the tolerance scans, and no tolerance may name them. The correction
     arrays in `[ErrorFields.NTV] efc_coils` are excluded whether or not they are listed here
-  - `output_filename`: HDF5 file the results are appended to; empty means the run's main output
-  - `write_outputs_to_HDF5`: write `ErrorFields/CoilSensitivities/` when true
-  - `verbose`: log per-coil-set progress and the linearity diagnostics
 """
 Base.@kwdef struct ErrorFieldsControl
     fd_step_shift_m::Float64 = 1e-3
@@ -33,9 +30,6 @@ Base.@kwdef struct ErrorFieldsControl
     rotation_center::String = "conductor"
     tolerance_file::String = ""
     exclude_coils::Vector{String} = String[]
-    output_filename::String = ""
-    write_outputs_to_HDF5::Bool = true
-    verbose::Bool = false
 end
 
 """

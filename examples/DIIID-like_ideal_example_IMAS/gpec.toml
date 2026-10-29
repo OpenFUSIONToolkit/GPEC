@@ -7,6 +7,9 @@
 #
 # See run_imas_example.jl for a full workflow.
 
+[Run]
+verbose = true                 # Log each stage's progress
+
 [Equilibrium]
 eq_type      = "imas"          # Type of the input 2D equilibrium file
 eq_filename  = "from_dd"       # Path to equilibrium file (placeholder: equilibrium comes from the runtime dd argument)
@@ -21,7 +24,5 @@ imas_cocos   = 11              # Expected COCOS convention of the input IMAS dd 
 nn_low               = 1       # Smallest toroidal mode number to include
 nn_high              = 1       # Largest toroidal mode number to include
 vac_flag             = true    # Compute plasma, vacuum, and total energies for free-boundary modes
-write_outputs_to_HDF5 = false  # Write outputs to the HDF5 file
-verbose              = false   # Enable verbose logging
 delta_mhigh          = 16      # Expands upper bound of Fourier harmonics
 qlow                 = 1.02    # Integration initiated at q determined by min(q0, qlow)

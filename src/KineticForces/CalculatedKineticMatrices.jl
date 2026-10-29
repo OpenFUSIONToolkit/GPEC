@@ -74,7 +74,7 @@ function compute_calculated_kinetic_matrices(
     kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
 
     # Build the KineticForces internal state from equilibrium + ForceFreeStates mode indexing.
-    kf_intr = KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
+    kf_intr = KineticForcesInternal(equil; verbose=ffs_intr.verbose)
     kf_intr.mlow = ffs_intr.mlow
     kf_intr.mhigh = ffs_intr.mhigh
     kf_intr.mpert = mpert

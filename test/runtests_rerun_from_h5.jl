@@ -65,11 +65,9 @@ end
         cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), forcing_dat)
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_singular_coupling" => true,
-            "verbose" => false, "write_outputs_to_HDF5" => true)
+            "compute_singular_coupling" => true)
         open(io -> TOML.print(io, inputs), toml_path, "w")
 
         @info "Generating source gpec.h5 for rerun tests"
@@ -192,10 +190,8 @@ end
 
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_singular_coupling" => true,
-            "verbose" => false, "write_outputs_to_HDF5" => true)
+            "compute_singular_coupling" => true)
         inputs["ForcingTerms"] = Dict{String,Any}(
             "forcing_data_format" => "coil", "mtheta_coil" => 64, "nzeta_coil" => 32,
             "coil_set" => [Dict{String,Any}(

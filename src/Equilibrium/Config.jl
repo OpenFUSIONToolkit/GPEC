@@ -41,7 +41,6 @@ specified in the input.
     meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
   - `flux_surface_rtol::Float64` - Relative tolerance of the ODE solves that trace each flux surface; their absolute tolerance
     is `equil_abstol(flux_surface_rtol)`, i.e. `flux_surface_rtol` capped at `EQUIL_ABSTOL_MAX`
-  - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `imas_cocos::Int` - Expected COCOS convention of an IMAS `dd.equilibrium` input (11 = IMAS standard, 2 = GPEC internal)
   - `kinetic_file::String` - Kinetic-profile file read once into `PlasmaEquilibrium.kinetic` (see [`read_kinetic_file`](@ref));
     empty for none. Every kinetic consumer (NTV, tearing, the layer-overlap scan, grid refinement) derives its view from it.
@@ -74,8 +73,6 @@ specified in the input.
     newq0::Float64 = 0.0
     flux_surface_rtol::Float64 = 1e-10
 
-    force_termination::Bool = false
-
     # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
     imas_cocos::Int = 11
 
@@ -91,7 +88,7 @@ specified in the input.
     function EquilibriumConfig(eq_type, eq_filename, r0_norm, b0_norm, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-        force_termination, imas_cocos, kinetic_file, kinetic_group)
+        imas_cocos, kinetic_file, kinetic_group)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -158,7 +155,7 @@ specified in the input.
         return new(eq_type, eq_filename, r0_norm, b0_norm, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-            force_termination, imas_cocos, kinetic_file, kinetic_group)
+            imas_cocos, kinetic_file, kinetic_group)
     end
 end
 

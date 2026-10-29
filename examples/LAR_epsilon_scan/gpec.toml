@@ -7,6 +7,9 @@
 # and varies only TJ_ANALYTIC_INPUT.lar_r0 = lar_a / ε per point, writing a fresh gpec.toml
 # into each tempdir. Every equilibrium parameter is embedded in [TJ_ANALYTIC_INPUT] below.
 
+[Run]
+verbose = true                 # Log each stage's progress
+
 [Equilibrium]
 eq_type   = "tj_analytic"      # TJ-analytic model (inverse pipeline; overridden to "tj_analytic_direct" by run_scan.jl)
 jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
@@ -43,7 +46,6 @@ n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = true                # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
@@ -66,7 +68,4 @@ frobenius_order         = 6    # Order of the singular-surface (Frobenius) serie
 integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 truncate_at_rational_offset = false # FALSE for limited/analytical equilibria — rationals sparse, rational_offset_fraction would chop too much edge
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction)/n (used when truncate_at_rational_offset = true)
-force_termination     = true   # Stop after force-free states (skip perturbed equilibrium)
-write_outputs_to_HDF5 = true   # Write outputs to the HDF5 file
-HDF5_filename         = "gpec.h5"  # Output HDF5 filename (run_scan.jl overrides this per scan point)
 save_interval         = 1      # Save every Nth ODE step (1=all). Always saves near rational surfaces.

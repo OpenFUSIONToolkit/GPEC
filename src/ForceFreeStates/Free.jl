@@ -195,7 +195,7 @@ calculations and data dumping.
     ev = diag(wvt)
 
     # Write energies to screen
-    if ctrl.verbose
+    if intr.verbose
         @info "Least Stable Eigenmode Energies:\n" *
               "  Plasma = $((@sprintf "%+.3e %+.3ei" real(ep[1]) imag(ep[1])))\n" *
               "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(ev[1]) imag(ev[1])))\n" *

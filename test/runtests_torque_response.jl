@@ -37,8 +37,6 @@ currents = [1000.0, 0.0, -1000.0, -1000.0, 0.0, 1000.0]  # n=1 phasing shifted b
 [PerturbedEquilibrium]
 compute_singular_coupling = false       # Compute singular layer coupling metrics
 compute_torque_response = true          # Build the ψ-resolved torque response matrices T_xe and T_source
-verbose = false                         # Enable verbose logging
-write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 """
 
 @testset "Torque response matrices" begin
@@ -50,7 +48,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
         end
         toml = joinpath(dir, "gpec.toml")
         # Opt in to the Euler-Lagrange matrices so the kinetic set is written and checked by the metadata walk.
-        deck = replace(read(toml, String), "write_outputs_to_HDF5 = true" => "write_outputs_to_HDF5 = true\nwrite_el_matrices = true"; count=1)
+        deck = replace(read(toml, String), "[ForceFreeStates]\n" => "[ForceFreeStates]\nwrite_el_matrices = true\n")
         write(toml, deck * _TORQUE_RESPONSE_SECTIONS)
 
         res = _GPE_TR.main([dir])

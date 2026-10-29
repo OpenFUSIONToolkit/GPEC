@@ -448,7 +448,6 @@ end
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
         function axis_state(psilow; kwargs...)
             eq_inputs = copy(inputs["Equilibrium"])
             eq_inputs["psilow"] = psilow
@@ -591,9 +590,7 @@ end
     function setup_solovev_run()
         example_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
         inputs["ForceFreeStates"]["integrator"] = "forward"
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
         intr = FFS.ForceFreeStatesInternal(; dir_path=example_dir)
         ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)

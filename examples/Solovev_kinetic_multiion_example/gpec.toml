@@ -5,6 +5,9 @@
 # The kinetic profiles (kinetic.dat) are constructed to be consistent with this equilibrium's
 # pressure; the equilibrium is generated analytically from the embedded [SOL_INPUT] section.
 
+[Run]
+verbose = true                 # Log each stage's progress
+
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
 kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
@@ -16,7 +19,6 @@ mpsi = 128                              # Number of radial grid points (0 = auto
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 flux_surface_rtol = 1e-7                # Relative tolerance of the ODE solves that trace each flux surface
-force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
 # Close conformal wall is required to stabilize this Solovev fixture's n=1 external kink:
@@ -35,8 +37,6 @@ forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Bi
 
 [PerturbedEquilibrium]
 compute_singular_coupling = true        # Compute singular layer coupling metrics
-verbose = true                          # Enable verbose logging
-write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
 
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
@@ -48,7 +48,6 @@ n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = true                # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 integrator = "forward"        # Dense ξ profiles required by PerturbedEquilibrium and kinetic torque diagnostics

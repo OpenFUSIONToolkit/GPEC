@@ -87,7 +87,6 @@ using TOML
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
         delete!(inputs, "LocalStability")
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         merge!(inputs["ForceFreeStates"], ffs_extra)
         merge!(inputs, sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
@@ -97,11 +96,11 @@ using TOML
         h5open(joinpath(dir, "gpec.h5"), "r") do f
             Dict(k => read(f, "LocalStability/$k") for k in keys(f["LocalStability"]))
         end
-    quiet_section = Dict{String,Any}("LocalStability" => Dict{String,Any}("verbose" => false))
+    ls_section = Dict{String,Any}("LocalStability" => Dict{String,Any}())
 
     @testset "deck section and solve give identical results" begin
         mktempdir() do dir
-            run = GPEC.main([_deck(dir; sections=quiet_section)])
+            run = GPEC.main([_deck(dir; sections=ls_section)])
             for name in fieldnames(LocalStabilityResult)
                 name === :di_psi && continue
                 @test isequal(getfield(run.local_stability, name), getfield(res, name))
@@ -116,7 +115,7 @@ using TOML
     end
 
     @testset "deck preserves problem settings" begin
-        section = Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false, "verbose" => false)
+        section = Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false)
         expected = solve(LocalStabilityProblem(equil; theta_k=0.25, alpha_boundary_scan=false), Ballooning())
         mktempdir() do dir
             run = GPEC.main([_deck(dir; sections=Dict("LocalStability" => section))])
@@ -139,7 +138,7 @@ using TOML
         @test alg.psi_window === (0.2, 0.8)
         @test alg.n_scan == 32
         @test GPEC.local_stability_algorithm(Dict{String,Any}()) === nothing
-        section = Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false, "verbose" => true, "n_scan" => 32)
+        section = Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false, "n_scan" => 32)
         @test GPEC.local_stability_algorithm(Dict("LocalStability" => section)) == Ballooning(; n_scan=32)
     end
 end

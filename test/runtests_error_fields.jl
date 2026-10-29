@@ -69,7 +69,6 @@ include("h5_metadata_check.jl")
             end
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
             # Three PF hoops outside the plasma (Solovev R ≈ 0.67–1.33 m): one tilted so the run has
             # a nominal n=1 forcing, one axisymmetric so its rigid-motion response is known exactly,
             # and one tilted the other way as the correction array, which is swept but is not an
@@ -82,19 +81,17 @@ include("h5_metadata_check.jl")
                     Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_singular_coupling" => true,
-                "verbose" => false, "write_outputs_to_HDF5" => true)
+                "compute_singular_coupling" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
             # Kinetic profiles consistent with this Solovev pressure, for the NTV torque couplings.
             cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), joinpath(dir, "kinetic.dat"))
             inputs["Equilibrium"]["kinetic_file"] = "kinetic.dat"
             # Exercise the kinetic pipeline at smoke-test precision, retaining all bounce harmonics.
             inputs["KineticForces"] = Dict{String,Any}(
-                "verbose" => false, "write_outputs_to_HDF5" => true,
                 "rtol_psi" => 0.2, "rtol_pitch" => 1e-2, "atol_pitch" => 1e-5,
                 "rtol_x" => 1e-3, "atol_x" => 1e-6)
             # Small batches exercise orchestration; distribution accuracy is tested on synthetic inputs.
-            inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
+            inputs["ErrorFields"] = Dict{String,Any}("tolerance_file" => "tolerances.toml",
                 "MonteCarlo" => Dict{String,Any}("nsample" => 512, "nbatch" => 2, "seed" => 5, "nbins" => 16),
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 512, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
@@ -635,9 +632,7 @@ include("h5_metadata_check.jl")
         end
     end
 
-    @testset "runtimes follow the ErrorFields output file when it is the only writer" begin
-        # With every other write switched off, the timings must still land in the file ErrorFields
-        # wrote. Before the orchestrator mirrored this write gate they were dropped silently.
+    @testset "[Run] output_file holds every stage and the runtimes" begin
         template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         mktempdir() do dir
             for name in readdir(template)
@@ -645,7 +640,6 @@ include("h5_metadata_check.jl")
             end
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             inputs["ForcingTerms"] = Dict{String,Any}(
                 "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                 "coil_set" => [
@@ -653,17 +647,18 @@ include("h5_metadata_check.jl")
                         "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_singular_coupling" => true,
-                "verbose" => false, "write_outputs_to_HDF5" => false)
-            inputs["ErrorFields"] = Dict{String,Any}(
-                "verbose" => false, "output_filename" => "ef_only.h5")
+                "compute_singular_coupling" => true)
+            inputs["ErrorFields"] = Dict{String,Any}()
+            inputs["Run"] = Dict{String,Any}("output_file" => "run.h5")
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             GPEC.main([dir])
 
-            h5open(joinpath(dir, "ef_only.h5"), "r") do h5
+            h5open(joinpath(dir, "run.h5"), "r") do h5
+                @test haskey(h5, "ForceFreeStates") && haskey(h5, "ErrorFields/CoilSensitivities")
                 @test haskey(h5, "Info/Runtimes/error_fields")
             end
+            @test !isfile(joinpath(dir, "gpec.h5"))
         end
     end
 end

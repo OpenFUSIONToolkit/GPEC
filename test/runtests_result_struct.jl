@@ -126,9 +126,7 @@ include("h5_metadata_check.jl")
                         "forcing_data_file" => "forcing.dat",
                         "forcing_data_format" => "ascii"),
                     "PerturbedEquilibrium" => Dict{String,Any}(
-                        "compute_singular_coupling" => true,
-                        "verbose" => false,
-                        "write_outputs_to_HDF5" => false)))
+                        "compute_singular_coupling" => true)))
             cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"),
                 joinpath(dir, "forcing.dat"))
 
@@ -201,7 +199,7 @@ include("h5_metadata_check.jl")
                     # The closed profiles land in the shared Solutions layout: same names and
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-                    HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                    HDF5.h5open(joinpath(dir, "gpec.h5"), "r") do f
                         @test ffs.galerkin.solver in ("cholesky", "LU")
                         @test read(f["$gal/solver"]) == ffs.galerkin.solver
                         @test haskey(attrs(f["$gal/solver"]), "long_name")
@@ -232,7 +230,7 @@ include("h5_metadata_check.jl")
                 extra_sections=Dict{String,Any}("DEBUG" => Dict{String,Any}("gal_basis_output" => true)))
             ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
             gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-            HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+            HDF5.h5open(joinpath(dir, "gpec.h5"), "r") do f
                 @test haskey(f, "$gal/Basis/xi_psi")
                 basis = read(f["$gal/Basis/xi_psi"])
                 # (mode, solution, psi) on the FULL gal grid, on-surface nodes included; the

@@ -129,7 +129,6 @@ flux_surface_rtol = 1e-7
 
 [ForceFreeStates]
 vac_flag = true
-force_termination = false
 
 dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02

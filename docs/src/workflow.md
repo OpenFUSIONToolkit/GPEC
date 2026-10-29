@@ -142,6 +142,10 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 All stages are controlled by a single TOML file. A minimal example structure:
 
 ```toml
+[Run]
+output_file = "gpec.h5"
+verbose = true
+
 [Equilibrium]
 eq_type = "efit"
 eq_filename = "g-file.txt"
@@ -151,19 +155,20 @@ shape = "conformal"
 standoff_fraction = 0.3
 
 [ForceFreeStates]
-mlow = -3
-mpert = 7
-n = 1
-force_termination = false
+nn_low = 1
+nn_high = 1
+vac_flag = true
 
 [PerturbedEquilibrium]
-output_file = "gpec.h5"
+compute_singular_coupling = true
 
 [ForcingTerms]
-forcing_filename = "coil_fields.h5"
+forcing_data_file = "forcing.dat"
+forcing_data_format = "ascii"
 ```
 
-Setting `force_termination = true` in any section stops the pipeline after that stage (useful for equilibrium-only or stability-only runs).
+A stage runs when its section is present, so omitting the later sections stops the pipeline early
+(an equilibrium-only deck has no `[ForceFreeStates]`). Every stage saves into the `[Run] output_file`.
 
 Example configuration files are provided in:
 - `examples/Solov'ev_ideal_example/gpec.toml`

@@ -1,5 +1,5 @@
 """
-    compute_coil_sensitivities(coil_sets, rc, equil, cfg, ctrl=ErrorFieldsControl(); psi, b_t0) -> CoilSensitivities
+    compute_coil_sensitivities(coil_sets, rc, equil, cfg, ctrl=ErrorFieldsControl(); psi, b_t0, verbose=false) -> CoilSensitivities
 
 Linearize the control-surface spectrum of every coil set in `coil_sets` with respect to its six
 rigid-body degrees of freedom, by central differences of the Biot-Savart spectrum on the surface
@@ -24,7 +24,8 @@ function compute_coil_sensitivities(
     cfg::CoilConfig,
     ctrl::ErrorFieldsControl=ErrorFieldsControl();
     psi::Float64,
-    b_t0::Float64
+    b_t0::Float64,
+    verbose::Bool=false
 )
     isempty(coil_sets) && throw(ArgumentError("compute_coil_sensitivities: no coil sets given"))
     ctrl.rotation_center in ("conductor", "set") ||
@@ -76,7 +77,7 @@ function compute_coil_sensitivities(
         worst = maximum(resid)
         worst > 1e-2 &&
             @warn "Coil set \"$(cs.name)\": finite-difference curvature $(@sprintf("%.2e", worst)) of the first difference; reduce fd_step_shift_m / fd_step_tilt_deg"
-        ctrl.verbose &&
+        verbose &&
             @info "  $(cs.name): |b̃| = $(@sprintf("%.3e", norm(b0))) T, " *
                   "max |∂b̃/∂x| = $(@sprintf("%.3e", maximum(norm, eachslice(shift[:, :, j]; dims=2)))) T/m, " *
                   "max |∂b̃/∂θ| = $(@sprintf("%.3e", maximum(norm, eachslice(tilt[:, :, j]; dims=2)))) T/deg, curvature $(@sprintf("%.1e", worst)) ($(@sprintf("%.2f", time() - t_start)) s)"
@@ -91,13 +92,13 @@ function compute_coil_sensitivities(
 end
 
 """
-    compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets, ctrl=ErrorFieldsControl()) -> CoilSensitivities
+    compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets, ctrl=ErrorFieldsControl(); verbose=false) -> CoilSensitivities
 
 Sweep `coil_sets` against an already-assembled [`ResonantDriveContext`](@ref), reusing its boundary grids.
 Equivalent to the five-argument method and the way to apply a grid or ψ-window override.
 """
-function compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets::Vector{CoilSet}, ctrl::ErrorFieldsControl=ErrorFieldsControl())
-    return compute_coil_sensitivities(coil_sets, ctx.rc, ctx.equil, ctx.cfg, ctrl; psi=ctx.psilim, b_t0=ctx.b_t0)
+function compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets::Vector{CoilSet}, ctrl::ErrorFieldsControl=ErrorFieldsControl(); verbose::Bool=false)
+    return compute_coil_sensitivities(coil_sets, ctx.rc, ctx.equil, ctx.cfg, ctrl; psi=ctx.psilim, b_t0=ctx.b_t0, verbose)
 end
 
 """

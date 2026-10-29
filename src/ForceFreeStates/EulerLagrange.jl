@@ -373,16 +373,16 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
+    forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=intr.verbose) -> (odet, nothing, nothing, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
 applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.algorithm.renorm_threshold` and undoing it
 via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
 directly to force this branch regardless of `ctrl.algorithm`; `verbose` overrides
-`ctrl.verbose` for progress logging.
+`intr.verbose` for progress logging.
 """
 function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal;
-    verbose::Bool=ctrl.verbose)
+    verbose::Bool=intr.verbose)
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
@@ -1166,14 +1166,14 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
 end
 
 """
-    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose=ctrl.verbose) -> Bool
+    scan_edge_dW!(odet, ctrl, equil, mats, intr; verbose=intr.verbose) -> Bool
 
 Record the edge-dW scan over [dW_edge_scan_start, psilim] on `odet.edge_scan`. With `truncate_at_dW_peak`, the
 scan's peak becomes the plasma edge via `truncate_integration!`; otherwise the integration is left
 untouched. Returns whether it truncated.
 """
 function scan_edge_dW!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
-    mats::MatrixSplines, intr::ForceFreeStatesInternal; verbose::Bool=ctrl.verbose)
+    mats::MatrixSplines, intr::ForceFreeStatesInternal; verbose::Bool=intr.verbose)
     ctrl.dW_edge_scan_start < intr.psilim || return false
     saved_psifac, saved_u = odet.psifac, copy(odet.u)
     peak_step = findmax_dW_edge!(odet, ctrl, equil, mats, intr)

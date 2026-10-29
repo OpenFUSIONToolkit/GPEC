@@ -50,6 +50,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape settings for vacuum calculations
+  - `verbose::Bool` - Log solve progress; set from the `verbose` keyword of `solve`
 """
 @kwdef mutable struct ForceFreeStatesInternal <: ModeSpace
     dir_path::String = ""
@@ -73,6 +74,7 @@ A mutable struct holding internal state variables for stability calculations.
     q1lim::Float64 = 0.0
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
+    verbose::Bool = false
     """
     Inter-surface Δ' matrix of shape (msing × msing) in PEST3 convention.
     Computed by `compute_delta_prime_matrix!` (parallel FM path only) using the STRIDE
@@ -115,8 +117,6 @@ Physical and workflow controls for a force-balance solve, together with its sele
 ## Fields
 
   - `algorithm::AbstractIntegrator` - Selected integrator and its numerical settings.
-
-  - `verbose::Bool` - Enable verbose output
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mtheta_vacuum::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzeta_vacuum::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
@@ -137,14 +137,10 @@ Physical and workflow controls for a force-balance solve, together with its sele
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
   - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `rational_offset_fraction`.
-  - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
-  - `write_el_matrices::Bool` - Write the Euler-Lagrange matrices (`ForceFreeStates/EulerLagrangeMatrices`: the ideal A, B, C, D, E, H, F, K and G and, on a kinetic run, the kinetic set) sampled on the ψ grid. Each is `numpert_total × numpert_total` complex at every ψ, so the group scales as numpert_total²·npsi and dominates the file size. Needs `write_outputs_to_HDF5`. Default `false`.
-  - `HDF5_filename::String` - Name of HDF5 output file
-  - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
+  - `write_el_matrices::Bool` - Write the Euler-Lagrange matrices (`ForceFreeStates/EulerLagrangeMatrices`: the ideal A, B, C, D, E, H, F, K and G and, on a kinetic run, the kinetic set) sampled on the ψ grid. Each is `numpert_total × numpert_total` complex at every ψ, so the group scales as numpert_total²·npsi and dominates the file size. Default `false`.
 """
 @kwdef struct ForceFreeStatesControl{A<:AbstractIntegrator}
     algorithm::A = Riccati()
-    verbose::Bool = true
     vac_flag::Bool = false
     mtheta_vacuum::Int = 480
     nzeta_vacuum::Int = 1
@@ -164,10 +160,7 @@ Physical and workflow controls for a force-balance solve, together with its sele
     qlow::Float64 = 0.0
     dW_edge_scan_start::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
-    write_outputs_to_HDF5::Bool = true
     write_el_matrices::Bool = false
-    HDF5_filename::String = "gpec.h5"
-    force_termination::Bool = false
 
     # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
     gal_match_flag::Bool = false    # match the inner layer on the finished solve (coil-driven ξ from Δ′ + inner Δ(Q)); needs Galerkin(rpec_flag=true), or riccati with vac_flag=true

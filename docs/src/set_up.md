@@ -319,11 +319,11 @@ The script will:
 2. Load or generate the equilibrium based on the `[Equilibrium]` section
 3. Compute force-free states (stability analysis) based on the `[ForceFreeStates]` section
 4. If a `[PerturbedEquilibrium]` section exists, compute the plasma response to external perturbations
-5. Write output to HDF5 files as configured
+5. Save every stage into the one output file named by `[Run] output_file` (default `gpec.h5`)
 
-**Early Termination:** You can stop execution early by setting:
-- `force_termination = true` in `[Equilibrium]` to stop after equilibrium setup
-- `force_termination = true` in `[ForceFreeStates]` to stop after stability analysis (before perturbed equilibrium)
+**Early Termination:** a stage runs only when its section is present. A deck without
+`[ForceFreeStates]` stops after the equilibrium; one without `[PerturbedEquilibrium]` stops after
+the stability analysis.
 
 ### As a Julia Library
 

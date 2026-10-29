@@ -17,7 +17,6 @@ using TOML
         end
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         merge!(inputs, sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
         GPEC.main([dir])
@@ -32,8 +31,7 @@ using TOML
                 "ForcingTerms" => Dict{String,Any}("forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                     "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4,
                         "currents" => [2.0e3], "tiltx" => [3.0])]),
-                "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true,
-                    "verbose" => false, "write_outputs_to_HDF5" => true)))
+                "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true)))
 
             for f in (A.Equilibrium.plot_qprofile, A.Equilibrium.plot_pressure_profile, A.Equilibrium.plot_f_profile,
                 A.Equilibrium.plot_flux_surfaces, A.Equilibrium.plot_equilibrium_summary)

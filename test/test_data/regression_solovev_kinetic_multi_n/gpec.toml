@@ -12,7 +12,6 @@ mpsi = 16                               # Number of radial grid intervals (0 = t
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 flux_surface_rtol = 1e-7                # Relative tolerance of the ODE solves that trace each flux surface
-force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
 shape = "conformal"                     # Wall shape (conformal, elliptical, dee, mod_dee, file)
@@ -28,7 +27,6 @@ n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = false               # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
@@ -55,8 +53,6 @@ integrator            = "forward" # Integration formalism: "forward" (dense ξ, 
 truncate_at_rational_offset  = false  # FALSE for multi-n — rational_offset_fraction truncation is ambiguous when n varies (sing_lim! skips anyway)
 rational_offset_fraction                 = 0.2    # Truncate integration at (last_rational_q + rational_offset_fraction)/n (used when truncate_at_rational_offset = true)
 
-write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
-verbose = false               # Enable verbose logging
 # Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
 [SOL_INPUT]
 mr = 128       # Number of radial grid zones

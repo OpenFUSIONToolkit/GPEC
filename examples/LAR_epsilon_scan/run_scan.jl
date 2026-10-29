@@ -64,7 +64,6 @@ function run_single(epsilon::Float64)
         config = deepcopy(GPEC_BASE)
         config["TJ_ANALYTIC_INPUT"]["r0"] = GPEC_BASE["TJ_ANALYTIC_INPUT"]["a"] / epsilon
         config["Equilibrium"]["eq_type"] = "tj_analytic_direct"
-        config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
         GeneralizedPerturbedEquilibrium.main([run_dir])

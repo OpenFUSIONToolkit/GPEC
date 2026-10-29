@@ -56,8 +56,7 @@ end
     KineticForcesControl
 
 User-facing control parameters from the TOML `[KineticForces]` section.
-Configures which NTV methods to run, whether electrons join the species sum, tolerances, and output
-options. The plasma's species composition is read from the equilibrium's kinetic data (`equil.kinetic`).
+Configures which NTV methods to run, whether electrons join the species sum, and tolerances. The plasma's species composition is read from the equilibrium's kinetic data (`equil.kinetic`).
 
 Constructed via keyword arguments or from a TOML dict:
 
@@ -143,13 +142,6 @@ builds a second control for its differing tolerance).
 
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi
-
-    # Output configuration
-    write_outputs_to_HDF5::Bool = true
-    HDF5_filename::String = "gpec.h5"
-
-    # Debugging
-    verbose::Bool = false
 end
 
 """

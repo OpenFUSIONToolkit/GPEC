@@ -413,8 +413,6 @@ numunorms_init    = 50     # renorm checkpoint budget
 reltol            = 1e-6   # ODE relative tolerance
 
 # Output
-verbose              = true
-write_outputs_to_HDF5 = true
 write_el_matrices    = false  # also write ForceFreeStates/EulerLagrangeMatrices (mpert² × npsi per matrix)
 ```
 

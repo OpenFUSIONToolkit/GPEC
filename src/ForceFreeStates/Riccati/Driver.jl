@@ -145,7 +145,7 @@ function riccati_eulerlagrange_integration(
 )
     odet = _initialize_parallel_odet(ctrl, equil, mats, intr)
     chunks, propagators, odet_proxies = _setup_parallel_chunks_and_proxies(odet, ctrl, intr)
-    _log_parallel_start(ctrl, odet, equil, chunks)
+    intr.verbose && _log_parallel_start(odet, equil, chunks)
 
     _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, mats, intr, odet_proxies)
 
@@ -163,7 +163,7 @@ function riccati_eulerlagrange_integration(
 
     # compute_delta_prime_matrix! runs later in the pipeline (after free_run), once the vacuum
     # response wv for the edge BC is available.
-    if ctrl.verbose
+    if intr.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
@@ -208,10 +208,7 @@ function _setup_parallel_chunks_and_proxies(odet::OdeState, ctrl::ForceFreeState
     return chunks, propagators, odet_proxies
 end
 
-function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
-    equil::Equilibrium.PlasmaEquilibrium,
-    chunks::Vector{IntegrationChunk})
-    ctrl.verbose || return
+function _log_parallel_start(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium, chunks::Vector{IntegrationChunk})
     @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     @info "   Riccati FM: $(length(chunks)) chunks over $(Threads.nthreads()) thread$(Threads.nthreads() == 1 ? "" : "s")"
 end
@@ -257,7 +254,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
         odet.psifac = chunk.psi_end
         odet.q = equil.profiles.q_spline(odet.psifac)
 
-        if ctrl.verbose
+        if intr.verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)"
         end
 

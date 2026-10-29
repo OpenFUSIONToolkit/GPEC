@@ -24,7 +24,6 @@ const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 function setup_solovev()
     ex = joinpath(@__DIR__, "..", "test", "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-    inputs["ForceFreeStates"]["verbose"] = false
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
     ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
     eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)

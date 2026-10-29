@@ -11,7 +11,6 @@ using TOML, HDF5
         for section in ("LocalStability", "PerturbedEquilibrium", "ForcingTerms", "KineticForces", "SLAYER")
             pop!(deck, section, nothing)
         end
-        deck["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
         reference = GPEC.main([dir]).ffs
         inputs, config, analytic = GPEC.build_inputs_from_toml(dir)
@@ -24,11 +23,11 @@ using TOML, HDF5
             result = solve(prob, alg)
             @test result.problem === prob
             @test result.algorithm === alg
-            @test !isfile(joinpath(api_dir, result.control.HDF5_filename))
+            @test !isfile(joinpath(api_dir, "gpec.h5"))
             path = joinpath(api_dir, "saved.h5")
             save_to_hdf5(path, result)
             h5open(path, "r") do saved
-                h5open(joinpath(dir, reference.control.HDF5_filename), "r") do expected
+                h5open(joinpath(dir, "gpec.h5"), "r") do expected
                     @test read(saved["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"]) == read(expected["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
                     @test TOML.parse(read(saved["Input/gpec_toml_raw"])) == TOML.parse(read(expected["Input/gpec_toml_raw"]))
                 end

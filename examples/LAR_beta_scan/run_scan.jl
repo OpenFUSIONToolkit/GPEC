@@ -57,7 +57,6 @@ function run_single(pc::Float64)
         # Per-point gpec.toml = baseline gpec.toml with TJ_ANALYTIC_INPUT.p0 overridden.
         config = deepcopy(GPEC_BASE)
         config["TJ_ANALYTIC_INPUT"]["p0"] = pc
-        config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
         GeneralizedPerturbedEquilibrium.main([run_dir])

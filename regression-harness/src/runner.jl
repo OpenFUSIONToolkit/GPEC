@@ -29,16 +29,17 @@ end
 """
 Materialize the directory GPEC will actually run in.
 
-With no `overrides`, the example deck runs in place (returns it untouched). With overrides,
+With no `overrides` and no `remove_sections`, the example deck runs in place (returns it untouched). Otherwise
 the deck is copied to a uniquely named throwaway sibling of the example dir and the named gpec.toml keys are
 patched there, so one shared example can serve several cases (e.g. a collisionless variant via
 `"KineticForces.nutype" => "zero"`). The copy sits beside the original so relative file
 references in the deck (e.g. `Equilibrium.kinetic_file = "../<other_example>/..."`) still resolve.
-Override keys are dotted paths into the TOML; missing intermediate tables are created.
+Override keys are dotted paths into the TOML; missing intermediate tables are created. Each
+top-level section named in `remove_sections` is dropped, so a run can stop before that stage.
 Returns `(rundir, is_temp)`; the caller removes `rundir` when `is_temp`.
 """
-function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
-    isempty(overrides) && return (example_path, false)
+function _materialize_rundir(example_path::String, overrides::Dict{String,Any}, remove_sections::Vector{String}=String[])
+    isempty(overrides) && isempty(remove_sections) && return (example_path, false)
     # Unique per invocation, so concurrent runs from one checkout cannot share (and race on) a rundir.
     rundir = mktempdir(dirname(example_path); prefix=".regress-override-" * basename(example_path) * "-", cleanup=false)
     cp(example_path, rundir; force=true)
@@ -52,6 +53,7 @@ function _materialize_rundir(example_path::String, overrides::Dict{String,Any})
         end
         d[ks[end]] = val
     end
+    foreach(section -> delete!(cfg, section), remove_sections)
     open(joinpath(rundir, "gpec.toml"), "w") do io
         TOML.print(io, cfg)
     end
@@ -504,7 +506,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     stderr_buf = IOBuffer()
 
     try
-        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides, case_spec.remove_sections)
         rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output would mask a failed run
 
         script_content = _render_script(RUNNER_SCRIPT_TEMPLATE; no_instantiate=no_instantiate)
@@ -619,7 +621,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             return
         end
 
-        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides)
+        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides, case_spec.remove_sections)
         rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output (e.g. from an earlier case sharing the worktree) would mask a failed run
 
         # Write temp runner script

@@ -26,7 +26,7 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
             swap_edge = (ising == msing && ix == ws.nx)
             gal_gauss_quad!(cell, mats, profiles, intr, nodes, weights, swap_edge)
             if cell.etype == GCT_RES
-                gal_resonant!(cell, ising, mats, profiles, intr, asymps, sings, nn, ctrl.algorithm.tol, ctrl.algorithm.gnstep, ctrl.verbose)
+                gal_resonant!(cell, ising, mats, profiles, intr, asymps, sings, nn, ctrl.algorithm.tol, ctrl.algorithm.gnstep, intr.verbose)
             elseif cell.etype == GCT_EXT || cell.etype == GCT_EXT1 || cell.etype == GCT_EXT2
                 gal_extension!(cell, ising, mats, profiles, intr, asymps, sings, nn, nodes, weights)
             end
@@ -71,11 +71,11 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     sings, psilow, psihigh = gal_resonant_surfaces(intr, equil)
     msing = length(sings)
     if msing == 0
-        ctrl.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
+        intr.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
         return empty_galerkin_result(), nothing
     end
 
-    ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, automatic factorization)"
+    intr.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, automatic factorization)"
 
     # Per-surface two-sided asymptotic series (sig = ±1). Each side uses its own resonant block.
     asymps = GalSingAsymp[]
@@ -127,7 +127,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
 
-    if ctrl.verbose
+    if intr.verbose
         offdbg = ws.kl + ws.ku + 1
         @info "Galerkin assembly: ndim=$(ws.ndim) nsol=$nsol kl=$(ws.kl) ldab=$(ws.ldab) |rhs|=$(norm(ws.rhs))"
         for ising in 0:msing
@@ -142,7 +142,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     # --- banded solve (gal.f) ---
     ws.sol .= ws.rhs
     ws.solver = gal_banded_solve!(ws.mat, ws.sol, ws.kl, ws.ku, "auto")
-    ctrl.verbose && @info "Galerkin banded solve: $(ws.solver)"
+    intr.verbose && @info "Galerkin banded solve: $(ws.solver)"
 
     # --- extract Δ′ from the small resonant coefficients (gal.f) ---
     delta = zeros(ComplexF64, nsol, 2 * msing)
@@ -171,7 +171,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution); the cut
     # solution only when a later match needs the composite inner profiles.
-    ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
+    intr.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
         delta=(cut_solution ? delta : nothing))
 

@@ -146,9 +146,9 @@ All GPEC modules are configured via a single TOML file with the following sectio
 - `[PerturbedEquilibrium]` - Perturbed equilibrium settings
 - `[ForcingTerms]` - External field specification
 
-Key parameters:
-- `force_termination` - Set to `true` to exit after equilibrium/stability (skip perturbed equilibrium)
-- `output_file` - Output filename (default: `gpec.h5`)
+The `[Run]` section holds the run-wide settings: `output_file` (default `gpec.h5`), the one file every
+stage saves into, and `verbose`. A stage runs when its section is present, so a deck stops early by
+omitting the later sections.
 
 Example configuration files are provided in:
 - `examples/Solovev_ideal_example/gpec.toml`

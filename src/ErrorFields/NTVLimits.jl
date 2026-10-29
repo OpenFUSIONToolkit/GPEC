@@ -58,7 +58,6 @@ Settings of the correction-coil NTV evaluation, the `[ErrorFields.NTV]` TOML tab
   - `rotation_scan_tolerance`: refinement stops when every interval's midpoint prediction error is below this fraction of the torque range
   - `rotation_span_factor`: the scan covers `±span_factor × max(|ω_E|, offset_factor·|ω_*T|)` evaluated at the innermost kinetic surface
   - `rotation_offset_factor`: rough neoclassical offset as a multiple of the ion temperature-gradient diamagnetic frequency `ω_*T` (about 2 after Park, Boozer and Menard 2009), used only to size the scan
-  - `verbose`: log per-array couplings and every scan point
 """
 Base.@kwdef struct NTVControl
     efc_coils::Vector{String} = String[]
@@ -69,7 +68,6 @@ Base.@kwdef struct NTVControl
     rotation_scan_tolerance::Float64 = 0.05
     rotation_span_factor::Float64 = 1.0
     rotation_offset_factor::Float64 = 2.0
-    verbose::Bool = false
 end
 
 """

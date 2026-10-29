@@ -137,7 +137,6 @@ flux_surface_rtol = 1e-7
 
 [ForceFreeStates]
 vac_flag = true
-force_termination = true       # Skip PE+KF post-processing — we only need FFS eigenvalues
 
 dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
@@ -156,7 +155,6 @@ kinetic_factor = 1.0
 eulerlagrange_tolerance = 1e-7
 singfac_min = 1e-4
 renorm_threshold = 1e4
-write_outputs_to_HDF5 = true
 
 [KineticForces]
 nn = 1

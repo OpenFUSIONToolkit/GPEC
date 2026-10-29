@@ -41,7 +41,7 @@ export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, co
 export TorqueResponse, torque_response_matrix, torque_profile
 
 """
-    plasma_response(ffs; compute_singular_coupling=true, compute_torque_response=false, verbose=true) -> PlasmaResponse
+    plasma_response(ffs; compute_singular_coupling=true, compute_torque_response=false, verbose=false) -> PlasmaResponse
 
 Build the source-independent half of a perturbed equilibrium from a force-free-states result: the
 control-surface response operators (inductances, permeability, reluctance; Park et al., Phys.
@@ -55,7 +55,7 @@ corresponding operators empty: the step warns and is skipped. Galerkin and `:mat
 no free-boundary δW yet, so building a response from one is an error.
 """
 function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::Bool=true, compute_torque_response::Bool=false,
-    verbose::Bool=true)::PlasmaResponse
+    verbose::Bool=false)::PlasmaResponse
     # Galerkin and matched results publish no plasma edge response wp, so no operator could be built.
     if ffs.free_boundary === nothing && (ffs.integrator === :galerkin || ffs.closure === :matched)
         error("plasma_response needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *

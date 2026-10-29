@@ -182,9 +182,7 @@ using HDF5
     @testset "perturbed_equilibrium round-trips a forward result" begin
         forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
         pe_section = Dict{String,Any}(
-            "compute_singular_coupling" => true,
-            "verbose" => false,
-            "write_outputs_to_HDF5" => false)
+            "compute_singular_coupling" => true)
         pe_kw = (; verbose=false)
 
         mktempdir() do dir

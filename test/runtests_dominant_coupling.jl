@@ -71,11 +71,9 @@ include("h5_metadata_check.jl")
             cp(forcing, joinpath(dir, "forcing.dat"))
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
             inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_singular_coupling" => true,
-                "verbose" => false, "write_outputs_to_HDF5" => true)
+                "compute_singular_coupling" => true)
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             run = GPEC.main([dir])

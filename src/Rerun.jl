@@ -248,10 +248,8 @@ function build_inputs_from_h5(args::Vector{String})
     # first, then CLI flags, so an overridden [ForcingTerms] still wins.
     inputs = TOML.parse(toml_raw)
     # Overrides can set keys but not delete them, so a stored deck with retired keys cannot be replayed.
-    for (section, keys) in _DEPRECATED_KEYS
-        haskey(inputs, section) && _stop_on_deprecated_keys(inputs[section], keys, section;
-            remedy="$source_h5 was written by an older GPEC version; re-run from the original deck instead of replaying it")
-    end
+    _stop_on_deprecated_deck_keys(inputs;
+        remedy="$source_h5 was written by an older GPEC version; re-run from the original deck instead of replaying it")
     if forcing_snapshot !== nothing
         forcing_file = splitext(output_name)[1] * "_forcing.h5"
         modes, normalization = forcing_snapshot
@@ -270,9 +268,7 @@ function build_inputs_from_h5(args::Vector{String})
     end
 
     # Force the rerun output file name so the source is never overwritten.
-    if haskey(inputs, "ForceFreeStates")
-        inputs["ForceFreeStates"]["HDF5_filename"] = output_name
-    end
+    get!(inputs, "Run", Dict{String,Any}())["output_file"] = output_name
 
     current_git = try
         String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
@@ -377,14 +373,14 @@ Post-hoc coil linearization against a finished run: the resonant coupling and co
 conform come from `gpec.h5` ([`PerturbedEquilibrium.ResonantCoupling`](@ref)), the equilibrium
 is rebuilt with [`equilibrium_from_h5`](@ref), and `coil_sets` — any geometry, not necessarily
 the run's — are swept on the run's own control surface. Keyword arguments are
-`ErrorFields.ErrorFieldsControl` fields; the boundary-grid resolution follows the run's
+`ErrorFields.ErrorFieldsControl` fields and `verbose`; the boundary-grid resolution follows the run's
 `[ForcingTerms]` section when present. Nothing is written.
 """
-function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_sets::Vector{ForcingTerms.CoilSet}; kwargs...)
+function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_sets::Vector{ForcingTerms.CoilSet}; verbose::Bool=false, kwargs...)
     ctrl_fields = fieldnames(ErrorFields.ErrorFieldsControl)
     ctrl = ErrorFields.ErrorFieldsControl(; (k => v for (k, v) in kwargs if k in ctrl_fields)...)
     ctx = ErrorFields.ResonantDriveContext(h5path; (k => v for (k, v) in kwargs if !(k in ctrl_fields))...)
-    return ErrorFields.compute_coil_sensitivities(ctx, coil_sets, ctrl)
+    return ErrorFields.compute_coil_sensitivities(ctx, coil_sets, ctrl; verbose)
 end
 
 """

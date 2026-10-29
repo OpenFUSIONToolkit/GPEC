@@ -372,7 +372,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         intr.method = method
         is_matrix_method = occursin("mm", method)
 
-        if ctrl.verbose
+        if intr.verbose
             println("---------------------------------------------")
             println("$method - $(entry.doc)")
         end
@@ -459,7 +459,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             state.kinetic_matrices[method] = op_wmats_full
         end
 
-        if ctrl.verbose
+        if intr.verbose
             @printf("%-24s%11.3e\n", "Total torque = ", real(total_torque))
             @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(total_torque) / (2 * ctrl.nn))
             if imag(total_torque) != 0.0

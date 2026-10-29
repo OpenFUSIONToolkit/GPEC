@@ -7,6 +7,10 @@
 # and the per-surface resistive arrays below have length 2 (core to edge). This run terminates after
 # the stability stage. The companion LAR_ideal_match_test case is the ideal-limit reference.
 
+[Run]
+output_file = "gpec_lar_resistive.h5"# HDF5 file every stage saves into, relative to this deck's directory
+verbose = true                 # Log each stage's progress
+
 [Equilibrium]
 eq_type   = "tj_analytic"      # Type of the input 2D equilibrium (analytic large-aspect-ratio model)
 jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
@@ -40,10 +44,8 @@ n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = true                # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
-HDF5_filename        = "gpec_lar_resistive.h5"  # Output filename for the stability-stage results
 vac_flag             = true    # Compute plasma, vacuum, and total energies for free-boundary modes
 
 qlow        = 1.02             # Integration initiated at q determined by min(q0, qlow)
@@ -64,8 +66,6 @@ save_interval           = 1     # Save every Nth ODE step (1=all). Always saves 
 integrator            = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 truncate_at_rational_offset = false # Keep psilim at psihigh (do not truncate at last_rational_q + rational_offset_fraction)
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n (only used when truncate_at_rational_offset = true)
-force_termination     = true   # Terminate after the stability stage (no perturbed-equilibrium section here)
-write_outputs_to_HDF5 = true   # Write stability outputs to HDF5
 
 # Outer-region singular Galerkin Delta-prime solver with rpec coil columns.
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces

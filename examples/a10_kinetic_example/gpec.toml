@@ -3,8 +3,11 @@
 # (neoclassical toroidal viscosity) energy matrices at full strength, so the
 # free-boundary stability includes drift-kinetic effects from a single deuterium ion
 # species with a Maxwellian distribution and a harmonic collision operator.
-# force_termination stops the run after the kinetic stability eigenvalues.
+# The run stops after the kinetic stability eigenvalues (no [PerturbedEquilibrium] section).
 # The equilibrium g-file and kinetic profile are bundled in this directory.
+
+[Run]
+verbose = true                 # Log each stage's progress
 
 [Equilibrium]
 eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
@@ -28,7 +31,6 @@ n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = true                # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
@@ -51,8 +53,6 @@ integrator = "forward"         # Integration formalism: "forward" (dense ξ, nee
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-6             # Fractional distance from rational q at which ideal jump enforced
 renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
-write_outputs_to_HDF5 = true   # Write outputs to the HDF5 file
-force_termination = true       # Stop after force-free states — the kinetic stability eigenvalues are the result of interest
 
 [KineticForces]
 nn = 1                         # Toroidal mode number

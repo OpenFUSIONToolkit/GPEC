@@ -132,7 +132,6 @@ end
         # max(2*msing+3, 8*(msing+1)+msing) chunks from a small set of base chunks.
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
@@ -219,7 +218,6 @@ end
         # the right sub-chunk inherits direction from the parent, the left sub-chunk is always +1.
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
@@ -281,7 +279,6 @@ end
 
         function run_solovev(integrator)
             inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-            inputs["ForceFreeStates"]["verbose"] = false
             inputs["ForceFreeStates"]["integrator"] = integrator
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
@@ -324,7 +321,6 @@ end
         # surfaces in its interior.
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
@@ -375,9 +371,7 @@ end
         # be fed by the forward integrator; this test pins that contract.
         function run_and_capture(example_dir, integrator)
             inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
-            inputs["ForceFreeStates"]["verbose"] = false
             inputs["ForceFreeStates"]["integrator"] = integrator
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_dir)
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)

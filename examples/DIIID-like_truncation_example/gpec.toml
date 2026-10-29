@@ -6,6 +6,9 @@
 # stability, forcing or perturbed equilibrium: the energies are kept so a regression case can pin
 # what the capped domain does to the physics, not just to the bookkeeping.
 
+[Run]
+verbose = true                 # Log each stage's progress
+
 [Equilibrium]
 eq_filename = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 kinetic_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
@@ -19,11 +22,9 @@ psi_accuracy = 0.001           # Target relative accuracy of splined profile der
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace each flux surface
-force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
 [ForceFreeStates]
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
-force_termination = true       # Terminate after force-free states (skip perturbed equilibrium calculations)
 
 dW_edge_scan_start = 1.0       # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)

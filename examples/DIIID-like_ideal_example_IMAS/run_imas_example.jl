@@ -29,8 +29,6 @@ const SHARED_CONFIG = Dict(
         "nn_low" => 1,
         "nn_high" => 1,
         "vac_flag" => true,
-        "write_outputs_to_HDF5" => false,
-        "verbose" => false,
         "delta_mhigh" => 16,
         "qlow" => 1.02
     )
