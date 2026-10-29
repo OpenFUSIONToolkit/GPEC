@@ -98,9 +98,12 @@ constructor.
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
-    toroidal geometric factor (required only by `D_c_type=:toroidal`). Supply a
-    scalar only to override the auto-derivation; an explicit `0.0` disables the
-    critical-Δ offset (Δ_crit ≡ 0)
+    Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s` reference
+    (consumed only by `D_c_type=:toroidal`). Supply a scalar only to override
+    the auto-derivation. An explicit `D_R = 0.0` disables the critical-Δ
+    offset (Δ_crit ≡ 0) for every `D_c_type`; `D_geo = 0.0` does so only for
+    `:toroidal`. `:toroidal` also takes the χ∥ closure's parallel wavenumber
+    from the equilibrium (`toroidal_kpar`), which has no override
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
