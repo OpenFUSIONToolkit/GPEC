@@ -51,12 +51,24 @@ winding number; see `find_growth_rates`. The result is in the units of the
 SLAYER extraction: `gamma_Hz` is γ [s⁻¹], `omega_Hz` is −ω [rad/s], and
 `Q_root` is the normalized `(−ω + iγ)/Q₀`. The reported root is the least
 stable zero in the box. Without drifts the GGJ roots come in ±ω pairs, so
-either member of a pair can be reported.
+either member of a pair can be reported. GGJ surfaces carry no time
+normalization, so no E×B Doppler shift is applied and the roots are in the
+plasma frame.
+
+`gamma_range` must lie at γ > 0: the GGJ layer is evaluated on the principal
+branch of a square root in s, whose cut runs along γ ≤ 0, so a box reaching
+there is not scanning one analytic function. Stable roots therefore need an
+analytic continuation that is not implemented. A solver failure inside the
+layer (for example a degenerate Frobenius pair near Mercier marginality) is
+not caught and stops the scan.
 
 `nre0` × `nim0` is the initial AMR grid and `passes` the number of refinement
-passes. Each determinant evaluation solves the inner layer at every surface,
-so cost scales with the number of AMR points plus a few hundred evaluations per
-intersection for the classification.
+passes. Each determinant evaluation solves the inner layer at every surface:
+the default 40 × 40 grid alone is about 1,600 evaluations, and each contour
+intersection adds 64–4096 more for its classifying circles plus up to about
+120 for the polish. Size the grid for the cost of one inner-layer solve.
+`:no_root` and `:winding_unresolved` results warn; `gamma_Hz` is then not a
+growth rate.
 """
 function ggj_growth_rates(mc::MultiSurfaceCouplingFull;
     gamma_range::NTuple{2,<:Real}, omega_range::NTuple{2,<:Real},
@@ -64,6 +76,11 @@ function ggj_growth_rates(mc::MultiSurfaceCouplingFull;
     max_cells::Integer=2_000_000,
     polish::Bool=true, winding_rfrac::Real=0.5,
     parallel::Bool=Threads.nthreads() > 1)
+    gamma_range[1] > 0 && gamma_range[2] > gamma_range[1] ||
+        throw(ArgumentError("ggj_growth_rates: gamma_range must satisfy 0 < γ_min < γ_max; got $(gamma_range). " *
+                            "The GGJ layer's branch cut runs along γ ≤ 0."))
+    omega_range[2] > omega_range[1] ||
+        throw(ArgumentError("ggj_growth_rates: omega_range must be increasing; got $(omega_range)"))
     g = GGJDispersion(mc)
     τ = 1 / g.Q0
     re_range = (-Float64(omega_range[2]) * τ, -Float64(omega_range[1]) * τ)
@@ -72,5 +89,8 @@ function ggj_growth_rates(mc::MultiSurfaceCouplingFull;
         max_cells=max_cells, parallel=parallel)
     gr = find_growth_rates(amr, τ; residual=g, polish=polish,
         classification=:winding, zero_winding=1, winding_rfrac=winding_rfrac)
+    :no_root in gr.warning_flags && @warn "ggj_growth_rates: no root found in the box; gamma_Hz = 0 is a placeholder"
+    :winding_unresolved in gr.warning_flags &&
+        @warn "ggj_growth_rates: some contour intersections could not be classified (the determinant failed or had a zero or pole on the circle)"
     return gr, amr
 end

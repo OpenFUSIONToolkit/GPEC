@@ -128,8 +128,7 @@ end
 _surface_label(p::SLAYERParameters) = "m=$(p.m), n=$(p.n)"
 _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 
-# Is this an unvalidated GGJ inner-layer model? Used to gate the γ-extraction
-# future-work warning.
+# Is this a GGJ inner-layer model? Its growth rates come from `ggj_growth_rates`, not this runner.
 _is_ggj(::GGJModel) = true
 _is_ggj(::Any) = false
 
@@ -193,12 +192,6 @@ function _build_surface_coupling(model::SLAYERModel, params::SLAYERParameters,
     dp_diag, q_shift::Real)
     return surface_coupling(model, params, dp_diag; dc=params.dc_tmp, q_shift=q_shift)
 end
-
-# GGJ: scale = 1.0 (rescale_delta applied inside solve_inner), tauk = 1.0,
-# dc = 0 (the 4m×4m Pletzer-Dewar residual carries interchange stabilization
-# natively), and no E×B shift. See the GGJ `surface_coupling` method.
-_build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
-    surface_coupling(model, params, dp_diag)
 
 # "m/n" label keying `control.omega_E_kHz`; GGJ parameters carry no mode numbers.
 _mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
@@ -317,6 +310,10 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     rational_q::Vector{Float64}=Float64[],
     omega_E::Vector{Float64}=Float64[])
     validate(control)
+    _is_ggj(model) && throw(ArgumentError(
+        "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no GGJ growth rate. " *
+        "Use Dispersion.ggj_growth_rates on multi_surface_coupling_full, which matches both parity channels, and " *
+        "ggj_inner_deltas for the GGJ layer's Δ."))
     control.enabled || return empty_slayer_result(control)
     isempty(params) && return empty_slayer_result(control)
 
@@ -328,51 +325,18 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
 
     # Guard: the inner-layer model and the parameter eltype must match, or
     # `_build_surface_coupling` throws an opaque MethodError downstream.
-    expected_P = _is_ggj(model) ? GGJParameters : SLAYERParameters
+    expected_P = SLAYERParameters
     all(p -> p isa expected_P, params) ||
         throw(
             ArgumentError(
                 "run_slayer: a $(typeof(model)) inner model requires " *
                 "$(expected_P) per-surface parameters, but got eltype " *
-                "$(eltype(params)). Build inputs with the matching builder " *
-                "(build_slayer_inputs for SLAYER, ggj_parameters for GGJ).")
+                "$(eltype(params)). Build them with build_slayer_inputs.")
         )
 
-    # Slab-layer path: convert Δ' from its ψ_N reference length to the
-    # r_s-based convention shared by the layer Δ(Q) and the critical-Δ (see
-    # `delta_prime_to_rs_reference`). GGJ is genuinely toroidal/ψ-based
-    # (its `rescale_delta` handles inner→outer units natively) — no conversion.
-    if !_is_ggj(model)
-        dp = delta_prime_to_rs_reference(dp, params)
-    end
-
-    # The coupled determinant uses the reduced m×m (tearing-only) form, which
-    # drops the interchange channel. For GGJ that channel carries the Glasser
-    # interchange stabilization, so coupled-GGJ results omit real physics.
-    if _is_ggj(model) && control.coupling_mode === :coupled
-        @warn(
-            "SLAYER: coupling_mode=:coupled with a GGJ inner model uses the " *
-            "reduced m×m tearing-only determinant, which DROPS the GGJ " *
-            "interchange (Glasser stabilization) channel — results are " *
-            "physically incomplete. Use the full Pletzer-Dewar matching " *
-            "(multi_surface_coupling_full + ggj_growth_rates) for coupled GGJ studies."
-        )
-    end
-
-    # This runner's GGJ path scans the tearing-only residual in the SLAYER Q
-    # plane, which neither keeps the interchange channel nor uses the GGJ
-    # growth-rate normalization, so its γ is not a GGJ growth rate. The scan
-    # still runs so the user can inspect the contours and both parity Δ
-    # channels (`ggj_inner_deltas`). GGJ growth rates come from
-    # `Dispersion.ggj_growth_rates` on the full 4m×4m determinant.
-    if _is_ggj(model)
-        @warn(
-            "SLAYER: the runner's GGJ path scans the tearing-only residual; " *
-            "its reported growth rates are unvalidated placeholders. Use " *
-            "Dispersion.ggj_growth_rates on multi_surface_coupling_full for " *
-            "GGJ growth rates."
-        )
-    end
+    # Convert Δ' from its ψ_N reference length to the r_s-based convention shared by the layer Δ(Q) and the
+    # critical-Δ (see `delta_prime_to_rs_reference`).
+    dp = delta_prime_to_rs_reference(dp, params)
 
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
@@ -380,8 +344,6 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     Ω_E = _omega_E_per_surface(control, params, omega_E)
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
-    coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
-        "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
     q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
