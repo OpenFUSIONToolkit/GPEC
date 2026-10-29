@@ -175,11 +175,12 @@ rather than estimated. An intersection is a root when the count has the sign of
 `zero_winding`, a pole when it has the opposite sign, and is moved to
 `filtered_roots` (flag `:spurious`) when the count is zero, e.g. a contour
 near-miss or an unresolved pole-zero pair. A zero count is checked once more on
-a circle eight times wider (still clear of every other intersection), because
-the contour estimate of a pole can lie outside the small circle. A non-finite
+a circle eight times wider, reaching up to 0.9 of the distance to the nearest
+other intersection, because the contour estimate of a pole can lie outside the
+small circle. A non-finite
 circle (the residual failed on it) is retried at half and a quarter of the
-radius, and a zero count must agree on the half-radius circle; a circle that
-stays unresolved is filtered too and flags `:winding_unresolved`. The count is
+radius; a circle that stays unresolved is filtered too and flags
+`:winding_unresolved`. The count is
 exact only for a residual that is single-valued and meromorphic on the circle:
 a branch cut crossing it, or a jump in the residual, can change the count.
 The classification replaces the pole threshold, the validity gate and the
@@ -188,8 +189,8 @@ above-pole/outside-Re filter, so `pole_threshold`, `validity_rtol`,
 selection of `Q_root`, the `:geom`/`:gap` warnings and the secondary root are
 the same as in `:threshold` mode. With `polish = true` a root is polished inside
 its classifying circle, which is proven to contain it. `residual` is required.
-Each intersection costs between about 130 and a few thousand residual
-evaluations (two circles of 64–4096 samples). Only zeros that the scan resolves
+Each intersection costs between 64 and a few thousand residual evaluations
+(one or two circles of 64–4096 samples). Only zeros that the scan resolves
 as contour crossings are found, as in `:threshold` mode.
 
 # Spurious-root recursion
@@ -969,9 +970,9 @@ end
 # Classify intersection `i` of `pts` by the winding number of `residual` on a circle around it: `(kind, W, r)` with kind
 # `:root`, `:pole`, `:none` (zero count) or `:unresolved`, the count W and the circle radius r. The circle is a fraction
 # `rfrac` of the local contour resolution and under half the distance to every other intersection; a non-finite circle is
-# retried at r/2 and r/4. A zero count must agree on the half-radius circle (the contour estimate of a zero is accurate, so a
-# disagreement means a second zero or a pole near the circle), and a zero count is checked once on a circle eight times
-# wider, because the contour estimate of a pole can lie outside the small one.
+# retried at r/2 and r/4, and a zero count is checked once on a circle eight times wider, because the contour estimate of a
+# pole can lie outside the small one; that circle only has to exclude the other intersections, so it may reach 0.9 of the
+# distance to the nearest.
 function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, im_paths, h_grid::Float64;
     zero_winding::Int, rfrac::Float64)
     pt = pts[i]
@@ -985,11 +986,8 @@ function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, 
     end
     isfinite(W) || return (:unresolved, NaN, r)
     n = round(Int, W)
-    if n * zero_winding >= 1
-        W_half, _ = _winding_number(residual, pt, r / 2)
-        (isfinite(W_half) && round(Int, W_half) == n) || return (:unresolved, NaN, r)
-    elseif n == 0
-        r_wide = _polish_trust_radius(pts, i, h_loc; k_cell=8rfrac, nn_frac=0.45)
+    if n == 0
+        r_wide = _polish_trust_radius(pts, i, h_loc; k_cell=8rfrac, nn_frac=0.9)
         if r_wide > r
             W_wide, _ = _winding_number(residual, pt, r_wide)
             if isfinite(W_wide) && round(Int, W_wide) != 0

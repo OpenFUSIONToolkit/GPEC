@@ -441,11 +441,11 @@
                 @test abs(r.Q_root[2] - Q2) < 1e-3
                 @test maximum(abs.(r.Q_root .- ref.Q_root)) < 1e-3
             else
-                # zeros at Q1 and Q2·τ_k2/τ_k1 in the reference normalization
-                # (surface k sees Q·τ_k1/τ_kk); the least stable is reported,
+                # zeros at Q1 and Q2·τ_k1/τ_k2 in the reference normalization
+                # (surface k sees Q·τ_kk/τ_k1); the least stable is reported,
                 # unpolished since the coupled path does not polish
                 @test length(r.coupled_extraction.valid_roots) == 2
-                @test abs(r.Q_root[1] - Q2 * p2.tauk / p1.tauk) < 2e-2    # grid-resolution limited
+                @test abs(r.Q_root[1] - Q2 * p1.tauk / p2.tauk) < 2e-2    # grid-resolution limited
                 @test r.Q_root == ref.Q_root
             end
             if mode === :coupled

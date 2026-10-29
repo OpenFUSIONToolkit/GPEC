@@ -125,14 +125,12 @@
     end
 
     @testset "a coupled two-surface determinant with an off-diagonal term" begin
-        # det of [d1 − a(Q)  c; c  d2 − b(Q)] with a, b functions of conj(Q) and real d1, d2, c is itself a function of
-        # conj(Q); its zeros solve (d1 − Q̄)(d2 − 2Q̄) = c² and are not those of either diagonal entry alone.
+        # The conjugate of det [d1 − Q  c; c  d2 − 2Q], a function of conj(Q) like the SLAYER coupled determinant; its zeros
+        # solve (d1 − Q)(d2 − 2Q) = c² and are not those of either diagonal entry alone.
         d1, d2, c = 0.31 + 0.12im, 0.18 - 0.05im, 0.07
         det2(Q) = conj((d1 - ComplexF64(Q)) * (d2 - 2ComplexF64(Q)) - c^2)
-        # (d1 − x)(d2 − 2x) − c² = 0 for x = Q̄
         A, B, C = 2.0, -(d2 + 2d1), d1 * d2 - c^2
-        xs = [(-B + sqrt(B^2 - 4A * C)) / 2A, (-B - sqrt(B^2 - 4A * C)) / 2A]
-        zs = conj.(xs)
+        zs = [(-B + sqrt(B^2 - 4A * C)) / 2A, (-B - sqrt(B^2 - 4A * C)) / 2A]
         scan = brute_force_scan(det2, (-0.5, 0.8), (-0.6, 0.6); nre=53, nim=49, threaded=false)
         r = find_growth_rates(scan, 1.0; residual=det2, classification=:winding, zero_winding=-1)
         @test length(r.valid_roots) == 2
