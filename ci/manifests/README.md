@@ -14,12 +14,64 @@ an unpinned resolve makes every run non-reproducible and quietly wastes time:
 minor version into `Manifest.toml` before building. The copy exists only inside
 the CI runner and never reaches a developer's working tree.
 
+## Compilation caches
+
+CI uses `JULIA_CPU_TARGET=generic` for portable package images across runner CPUs of the same
+architecture. The production depot and source-cache keys record the optimization and bounds-checking
+settings, so incompatible images are not restored. Existing production caches remain reusable.
+
+CI restores the dependency depot first, then overlays GPEC's compiled package directory from a
+smaller cache keyed by Julia version, runner architecture, dependency pins, source contents, and
+build settings. Cache writes have a run-specific suffix to avoid stale reservations; restores
+match the compatible prefix. A compatible snapshot is reused without saving another copy.
+Missing or incompatible snapshots are refreshed after successful compilation. Cache saves are
+best-effort and limited to three minutes, so a stalled upload cannot block the workflow indefinitely.
+
+For each Julia version, a production precompile job prepares the environment before releasing
+three parallel test groups (`core`, `api`, `errorfields`). On hosted runners it uploads a one-day
+workflow artifact containing the resolved manifest and a compressed depot archive. Test groups
+first try the compatible depot and exact source-image caches. When either is missing or its restore
+fails, they restore the artifact into a fresh depot, preserving permissions and symlinks through tar
+and avoiding partially restored read-only files. Its `JULIA_DEPOT_PATH` keeps a trailing `:` to retain
+Julia's bundled depots. The small manifest
+artifact is always restored. Cache availability therefore affects speed rather than correctness:
+a reservation failure or eviction cannot invalidate the job handoff. Artifact publication is required
+for precompile to pass. The two Julia versions progress independently.
+Cold compilation is paid once per version; warm runs reuse the existing production images.
+
+Test jobs use optimization level 1 to reduce first-use compilation. Julia can still reuse cached
+package images built at level 2; the production build job keeps that default optimization level.
+Only the test orchestration modules disable optimization entirely.
+
+Bounds checking remains enabled. A source change still requires compiling a new GPEC image;
+the source cache helps subsequent runs of that source, not the first build. Cache eviction or a
+new Julia version likewise requires rebuilding. The test runner logs elapsed and compilation
+seconds per file to distinguish this startup cost from work inside the tests.
+
+## Local cache on self-hosted runners
+
+Set the repository variable `GPEC_LOCAL_CACHE_DIR` to a shared directory on the runner host.
+On self-hosted runners this replaces GitHub cache and environment-artifact transfers with local
+snapshots keyed by the exact Julia version, dependencies, source, architecture, and build flags.
+Hosted runners continue using GitHub storage.
+
+The precompile job copies its depot and resolved manifest into a staging directory, then publishes
+the complete snapshot with an atomic rename. A lock serializes publishers. Test jobs copy from
+that immutable snapshot into their private depots, so concurrent jobs do not write shared images.
+An absent test snapshot fails the handoff. Existing snapshots are reused between workflow runs;
+obsolete snapshots can be removed when no jobs need them. Snapshots use reflinks when supported.
+
+All runners eligible for these jobs must have access to the configured directory. On
+`pharr-desktop` it is `/home/pharr/Projects/github/julia-cache`; each new runner has its own home
+and depot. Unset the variable to return to GitHub storage.
+
 ## Files
 
 | File | Purpose |
 | --- | --- |
 | `Manifest-v1.11.toml` | Dependency set for the `1.11` matrix job |
-| `Manifest-v1.12.toml` | Dependency set for the `1.x` matrix job |
+| `Manifest-v1.12.toml` | Dependency set for local Julia 1.12 runs |
+| `Manifest-v1.13.toml` | Dependency set for the `1.x` matrix job |
 | `project.sha256` | `Project.toml` checksum when the pins were generated |
 | `update.jl` | Regenerates the above |
 
@@ -31,6 +83,7 @@ repository:
 ```bash
 julia +1.11 ci/manifests/update.jl
 julia +1.12 ci/manifests/update.jl
+julia +1.13 ci/manifests/update.jl
 ```
 
 Each run resolves a bare copy of `Project.toml` in a temporary directory, so your

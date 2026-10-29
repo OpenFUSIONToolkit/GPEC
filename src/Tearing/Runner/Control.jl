@@ -98,9 +98,12 @@ constructor.
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
-    toroidal geometric factor (required only by `D_c_type=:toroidal`). Supply a
-    scalar only to override the auto-derivation; an explicit `0.0` disables the
-    critical-Δ offset (Δ_crit ≡ 0)
+    Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s` reference
+    (consumed only by `D_c_type=:toroidal`). Supply a scalar only to override
+    the auto-derivation. An explicit `D_R = 0.0` disables the critical-Δ
+    offset (Δ_crit ≡ 0) for every `D_c_type`; `D_geo = 0.0` does so only for
+    `:toroidal`. `:toroidal` also takes the χ∥ closure's parallel wavenumber
+    from the equilibrium (`toroidal_kpar`), which has no override
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
@@ -140,17 +143,12 @@ constructor.
 
 # Kinetic-profile source
 
-SLAYER reads kinetic profiles through the shared `Equilibrium.read_kinetic_file`
-reader (the same standardized object used by the kinetic/NTV physics), so
-there is one consistent interface for resistive and kinetic profiles.
-
-  - `profile_file`   -- path to a kinetic-profile file (relative to the run
-    dir), required when SLAYER is enabled. HDF5 (`.h5`) files use the GPEC
-    kinetic schema and may carry `chi_e` (χ⊥,e), `chi_i` (χ⊥,i) and `chi_phi` (χ_φ); ASCII
-    tables are also accepted but carry no χ. When a χ dataset is absent or
-    all-zero, the scalar `chi_perp_e`/`chi_perp_i`/`chi_tor` fallbacks below are used (so a
-    file can keep the χ keys set to 0 to defer to the scalars).
-  - `profile_group`  -- group within the HDF5 file (default `"/"`)
+SLAYER takes its kinetic profiles from the equilibrium (`[Equilibrium] kinetic_file`,
+read once into `equil.kinetic`), the same object the kinetic/NTV physics reads.
+They need `n_e`, `T_e`, `T_i` and `omega_E`. HDF5 files may also carry `chi_e` (χ⊥,e),
+`chi_i` (χ⊥,i) and `chi_phi` (χ_φ); ASCII tables carry no χ. When a χ dataset is absent or
+all-zero, the scalar `chi_perp_e`/`chi_perp_i`/`chi_tor` fallbacks below are used (so a
+file can keep the χ keys set to 0 to defer to the scalars).
 
 # Output control
 
@@ -227,9 +225,6 @@ there is one consistent interface for resistive and kinetic profiles.
     root_classification::Symbol = :threshold
 
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
-
-    profile_file::String = ""
-    profile_group::String = "/"
 
     store_scan::Bool = false
 
