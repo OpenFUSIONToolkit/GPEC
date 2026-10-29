@@ -16,7 +16,8 @@ import ..Utilities.HDF5Annotations: replace_group!, write_ragged!
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
 #   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
-#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame)
+#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame;
+#   │                          + *Winding when root_classification = :winding)
 #   │                           (flat-plus-offsets ragged encoding)
 #   ├── Scan/               -- optional: full Q/Δ scan data
 #   └── CriticalResonantField/ -- optional: torque-balance b_r/B_φ crit per surface
@@ -184,6 +185,11 @@ const TEARING_RAGGED_H5_ANNOTATIONS = [
     "offsets" => (; long_name="ragged-array offsets: row k spans offsets[k]+1:offsets[k+1]")
 ]
 
+const TEARING_RAGGED_WINDING_H5_ANNOTATIONS = [
+    "flat" => (; long_name="winding number of the dispersion residual around each entry of the matching root list (NaN: circle unresolved)"),
+    "offsets" => (; long_name="ragged-array offsets: row k spans offsets[k]+1:offsets[k+1]")
+]
+
 const TEARING_SCAN_H5_ANNOTATIONS = [
     "kind" => (; long_name="scan kind: brute_force or amr"),
     "Q" => (; long_name="sampled complex normalized frequency Q"),
@@ -200,7 +206,8 @@ function _annotate_tearing!(g)
     ann.annotate!(g, TEARING_H5_ANNOTATIONS)
     if haskey(g, "Diagnostics")
         for sub in keys(g["Diagnostics"])
-            ann.annotate!(g["Diagnostics"][sub], TEARING_RAGGED_H5_ANNOTATIONS)
+            ann.annotate!(g["Diagnostics"][sub],
+                endswith(sub, "Winding") ? TEARING_RAGGED_WINDING_H5_ANNOTATIONS : TEARING_RAGGED_H5_ANNOTATIONS)
         end
     end
     if haskey(g, "CriticalResonantField/Scan")
@@ -325,6 +332,14 @@ function _write_diagnostics!(g, r::SLAYERResult)
         [gr.poles for gr in extractions])
     write_ragged!(diag, "FilteredRoots",
         [gr.filtered_roots for gr in extractions])
+    if any(gr -> gr.classification === :winding, extractions)
+        write_ragged!(diag, "ValidRootsWinding",
+            [gr.valid_roots_winding for gr in extractions])
+        write_ragged!(diag, "PolesWinding",
+            [gr.poles_winding for gr in extractions])
+        write_ragged!(diag, "FilteredRootsWinding",
+            [gr.filtered_roots_winding for gr in extractions])
+    end
     return nothing
 end
 

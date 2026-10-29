@@ -410,6 +410,7 @@ reltol            = 1e-6   # ODE relative tolerance
 # Output
 verbose              = true
 write_outputs_to_HDF5 = true
+write_el_matrices    = false  # also write ForceFreeStates/EulerLagrangeMatrices (mpert² × npsi per matrix)
 ```
 
 The number of Julia threads is controlled at startup via `-t N` or the `JULIA_NUM_THREADS`
@@ -455,7 +456,7 @@ metric = FFS.make_metric(equil, intr.mpert)
 mats   = FFS.build_matrix_splines(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
-# on ctrl.integrator and always returns a 4-tuple
+# on ctrl.algorithm and always returns a 4-tuple
 # (odet, propagators, chunks, S_at_surface_left).  The trailing three are `nothing`
 # on the forward path.
 odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)

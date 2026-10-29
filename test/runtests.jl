@@ -65,6 +65,8 @@ else
     include("./runtests_dispersion_amr.jl")
     include("./runtests_dispersion_polish.jl")
     include("./runtests_slayer_profile_transport.jl")
+    include("./runtests_dispersion_winding.jl")
+    include("./runtests_dispersion_ggj.jl")
     include("./runtests_slayer_runner.jl")
     include("./runtests_critical_resonant_field.jl")
     include("./runtests_kinetic.jl")
