@@ -1,0 +1,10 @@
+# Regression case: the diiid_slayer_n1 deck with SLAYER roots classified by winding number instead of the
+# pole threshold. Pins the winding path's roots and growth rates on a real DIII-D-like layer, and its
+# runtime row tracks the cost of the classifying circles against the threshold case.
+[case]
+name = "diiid_slayer_n1_winding"
+base = "diiid_slayer_n1"   # Inherit example_dir, [quantities.*] and [overrides] from this case
+description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis with root_classification = winding"
+
+[overrides]
+"SLAYER.root_classification" = "winding"   # Classify contour intersections by the argument principle

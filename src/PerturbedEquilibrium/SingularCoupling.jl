@@ -225,6 +225,15 @@ Build the singular-layer coupling matrices of `resp.ffs` onto `resp`, matching F
 resonant area-weighted field, current, (w/2)², penetrated field and Δ' per unit forcing mode, plus
 the rational-surface metadata and the edge-to-solution coefficients `C_coeffs`. The matrices are
 stored acting on b̃_x, with flux-space copies in `resp.coupling_flux` for applying a forcing.
+
+## Normalization
+
+  - Rows: the resonant and penetrated rows are a resonant flux divided by that surface's own area
+    `rational_area[row]`, so both are fields in T. `C_resonant_current`, `C_island_width_sq` and
+    `C_delta_prime` carry their own normalizations.
+  - Columns: each field-space coupling matrix is right-multiplied by the control-surface `flux_conform`, so it
+    acts on the root-area-weighted field b̃ in T and its singular values do not depend on `jac_type`.
+    Applied vectors use the flux-space copies in `resp.coupling_flux` on the run's own forcing flux.
 """
 function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
     ffs = resp.ffs

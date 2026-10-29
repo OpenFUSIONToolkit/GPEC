@@ -46,7 +46,7 @@ Top level (11 groups):
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, `TorqueResponse/` (kinetic forward solves: ψ-resolved `T_xe`, `T_source`), control-surface spectra |
 | `KineticForces/` | `<method>/` (torque/energy profiles, `dTdpsi_ell` resolved by bounce harmonic on the `ell` scale, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `ErrorFields/` | `CoilSensitivities/` (per-coil-set control-surface spectra and their rigid shift/tilt derivatives, `DominantMode/` full-window projection); `MonteCarlo/` (intrinsic and corrected `\|δ\|` histograms over the sampled tolerances, per batch and averaged); `Risk/` (threshold density, `P(lock\|δ)`, locking probabilities, `ToleranceScan/`); `NTV/` (correction-coil overlap and NTV torque couplings per kAt) |
-| `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/`, `CriticalResonantField/` (+ `Scan/Surface_<k>/`) |
+| `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}` (+ `*Winding` with `root_classification = winding`), `Scan/Surface_<k>/`, `CriticalResonantField/` (+ `Scan/Surface_<k>/`) |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
 
 Reserved (documented, not yet written): `ForceFreeStates/Solutions/RiccatiIntegration/` — the third integrator backend slot alongside `ForwardIntegration` and `GalerkinIntegration`.
