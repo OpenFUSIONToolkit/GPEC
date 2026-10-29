@@ -31,7 +31,7 @@ import CommonSolve
 using FastInterpolations: cubic_interp
 using ..Utilities
 using ..Utilities: KineticProfiles
-using ...Equilibrium: read_kinetic_file, KineticProfileData
+using ...Equilibrium: KineticProfileData
 using ...ForceFreeStates: ForceFreeStatesResult
 using ..InnerLayer
 using ..InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,

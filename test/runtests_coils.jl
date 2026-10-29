@@ -739,7 +739,7 @@ end
     open(flipped, "w") do io
         for (i, l) in enumerate(lines)
             if i == 4   # header line 4 starts with the plasma current
-                vals = [l[j:min(j + 15, end)] for j in 1:16:length(l)]
+                vals = [l[j:min(j+15, end)] for j in 1:16:length(l)]
                 cur = -parse(Float64, strip(vals[1]))
                 l = @sprintf("%16.9E", cur) * l[17:end]
             end

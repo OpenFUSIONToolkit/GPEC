@@ -47,6 +47,18 @@ The objects map one-to-one onto the pipeline stages:
     `ForceFreeStatesResult` once, and `perturbed_equilibrium(resp, rmp)` drives them with one field —
     together the `[PerturbedEquilibrium]` section.
 
+## Kinetic profiles
+
+The equilibrium carries the kinetic profiles. Name the file with the `kinetic_file` (and,
+for HDF5, `kinetic_group`) keyword, the same keys as the `[Equilibrium]` deck section, and it
+is read once into `equil.kinetic`; every kinetic stage derives its own view from it.
+[`Equilibrium.attach_kinetic_profiles!`](@ref) attaches a file or in-memory `KineticProfileData` to an
+equilibrium built without one, such as an analytic equilibrium.
+
+```julia
+eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada", kinetic_file="kinetic.h5")
+```
+
 ## Combining forcing sources
 
 `RMPField`s form a vector space: `+`, `-` and scalar `*` build lazy linear combinations that
@@ -125,16 +137,17 @@ extraction is not implemented yet, so `GGJModel()` errors here.
 
 ```julia
 ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
-tear = solve(TearingProblem(ffs; profile_file="kin.h5"), SLAYERModel())  # coupling_mode=:coupled returns one global root instead
+tear = solve(TearingProblem(ffs), SLAYERModel())            # coupling_mode=:coupled returns one global root instead
 tear.gamma_Hz, tear.rational_q                               # root-found rate at each rational surface
 ```
 
 Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedure knobs
 (scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
-kinetic profiles come from `profile_file`, relative to the run directory.
+kinetic profiles come from the equilibrium the solve was posed on (see Kinetic profiles above).
 
-Kinetic runs (`kinetic_factor > 0`) take `Forward()` and the `"fixed"` kinetic source;
-the `"calculated"` source needs the `[KineticForces]` profiles and remains TOML-driven.
+Kinetic runs (`kinetic_factor > 0`) take `Forward()`. The `"calculated"` source reads the
+equilibrium's kinetic profiles, with the default `KineticForcesControl` species and collision
+settings.
 
 ## Local stability
 

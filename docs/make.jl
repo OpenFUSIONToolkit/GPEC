@@ -41,16 +41,19 @@ makedocs(;
             "Tearing" => "inner_layer.md",
             "Analysis" => "analysis.md",
             "Utilities" => "utilities.md"
-       ],
+        ],
         "Citations" => "citations.md",
-        "Developer Notes" => "developer_notes.md",
+        "Developer Notes" => "developer_notes.md"
     ],
     checkdocs=:exports
 )
 
-deploydocs(;
-    repo="github.com/OpenFUSIONToolkit/GPEC.git",
-    branch="gh-pages",
-    devbranch="develop",
-    push_preview=true
-)
+# Queue candidates validate the build; previews and published docs come from PRs and pushes.
+if get(ENV, "GITHUB_EVENT_NAME", "") != "merge_group"
+    deploydocs(;
+        repo="github.com/OpenFUSIONToolkit/GPEC.git",
+        branch="gh-pages",
+        devbranch="develop",
+        push_preview=true
+    )
+end

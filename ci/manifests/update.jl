@@ -6,6 +6,7 @@ anywhere:
 
     julia +1.11 ci/manifests/update.jl
     julia +1.12 ci/manifests/update.jl
+    julia +1.13 ci/manifests/update.jl
 
 Each run resolves `Project.toml` for the running Julia version and writes
 `ci/manifests/Manifest-v<major>.<minor>.toml`, then refreshes

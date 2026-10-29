@@ -4,12 +4,6 @@ using TOML
 # Run GeneralizedPerturbedEquilibrium.main on the provided example directories and assert it completes without throwing.
 @testset "Full ForceFreeStates runs" begin
     ex1 = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-    @info "Running Solovev ideal example"
-    @test begin
-        GeneralizedPerturbedEquilibrium.main([ex1])
-        true
-    end
-
     # A renorm_threshold reduction landing just before an ideal crossing must not change which solution the crossing removes.
     @info "Running Solovev ideal example with frequent Gaussian reductions"
     @testset "et[1] is independent of the reduction frequency" begin
@@ -55,6 +49,8 @@ using TOML
             # emit deterministic zero-extent sentinels, not uninitialized memory.
             @test isempty(read(h5["SingularSurfaces/ca_left"]))
             @test isempty(read(h5["SingularSurfaces/ca_right"]))
+            # The Euler-Lagrange matrices are opt-in; a default deck writes no group.
+            @test !haskey(h5, "ForceFreeStates/EulerLagrangeMatrices")
         end
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true

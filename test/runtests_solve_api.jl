@@ -20,7 +20,7 @@ using HDF5
     # The deck's `[ForceFreeStates]` block as `solve` keywords: everything except the knobs the
     # integrator object and the `nn` keyword own.
     ffs_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"]
-                      if !(k in ("integrator", "nn_low", "nn_high")))
+                                         if !(k in ("integrator", "nn_low", "nn_high")))
 
     # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
     function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
@@ -104,6 +104,51 @@ using HDF5
             # Too large a factor for this coarse deck: the integration aborts near ψ = 0.4 and says so.
             @test_throws "Euler-Lagrange integration aborted" solve(equil, Forward(); nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=0.1)
         end
+    end
+
+    @testset "calculated kinetic solve matches the TOML-driven run" begin
+        # The equilibrium carries the deck's kinetic profiles, so the API solves the same kinetic problem.
+        kin_template = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_calculated")
+        kdeck = TOML.parsefile(joinpath(kin_template, "gpec.toml"))
+        kequil = GPEC.Equilibrium.PlasmaEquilibrium(
+            GPEC.Equilibrium.EquilibriumConfig(kdeck["Equilibrium"], kin_template),
+            GPEC.Equilibrium.SolovevConfig(kdeck["SOL_INPUT"])
+        )
+        @test kequil.kinetic !== nothing
+        kwall = GPEC.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in kdeck["Wall"])...)
+        kkwargs = Dict(Symbol(k) => v for (k, v) in kdeck["ForceFreeStates"] if !(k in ("integrator", "nn_low", "nn_high")))
+        mktempdir() do dir
+            for name in readdir(kin_template)
+                cp(joinpath(kin_template, name), joinpath(dir, name))
+            end
+            reference = GPEC.main([dir]).ffs
+            api = solve(kequil, Forward(); nn=1, wall=kwall, dir_path=dir, kkwargs...)
+            @test api.mats.kinetic !== nothing
+            @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-10
+            @test api.diagnostics.nzero == reference.diagnostics.nzero
+            @test api.kinetic.kmsing == reference.kinetic.kmsing
+        end
+    end
+
+    @testset "attached kinetic profiles refine the two-pass grid" begin
+        # main and solve both re-form through maybe_reform_equilibrium, which reads equil.kinetic, so
+        # the attached profiles shape the grid the same way on either path. The DIII-D-like profiles
+        # add knots over the ideal ones.
+        sl_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_SLAYER_example")
+        sl_deck = TOML.parsefile(joinpath(sl_dir, "gpec.toml"))
+        sl_config = GPEC.Equilibrium.EquilibriumConfig(sl_deck["Equilibrium"], sl_dir)
+        pass1 = GPEC.Equilibrium.PlasmaEquilibrium(sl_config)
+        @test pass1.kinetic !== nothing
+        sl_ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in sl_deck["ForceFreeStates"])...)
+        sl_intr = FFS.ForceFreeStatesInternal()
+        GPEC.resolve_mode_space!(sl_intr, sl_ctrl)
+        refined = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
+        @test refined.kinetic === pass1.kinetic        # carried through the re-form, not re-read
+        kinetic = pass1.kinetic
+        pass1.kinetic = nothing
+        ideal = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
+        pass1.kinetic = kinetic
+        @test refined.rzphi_xs != ideal.rzphi_xs
     end
 
     @testset "galerkin solve returns a gal result with a unified delta_prime" begin
@@ -239,7 +284,8 @@ using HDF5
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws "kinetic_source = \"calculated\"" solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5, kinetic_source="calculated")
+        @test_throws "needs kinetic profiles on the equilibrium" solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5,
+            kinetic_source="calculated")
         @test_throws "does not support kinetic runs" solve(equil, Riccati(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
         @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
         @test_throws ErrorException solve(equil, Forward(); nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
@@ -401,7 +447,7 @@ using HDF5
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
                 api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
-                # The equilibrium stores its analytic config, so `solve` re-forms it on the deck's grid.
+                # The API and deck reform the same analytic source on the same refined grid.
                 @test api.equil.rzphi_xs == reference.equil.rzphi_xs
             end
         end

@@ -8,12 +8,13 @@
 Tearing-mode growth rates from a finished force-free-states solve: hold the outer Δ′ fixed
 and find the growth rate at which the inner layer matches it. Solve with
 `solve(prob, SLAYERModel())`; GGJ growth-rate extraction is not implemented yet. Keywords are
-[`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs; kinetic profiles come from
-`profile_file`. Without a full Δ′ matrix the per-surface Δ′ stubs are used, with a warning.
+[`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs; kinetic profiles come from the
+equilibrium (`ffs.equil.kinetic`, see `attach_kinetic_profiles!`). Without a full Δ′ matrix the
+per-surface Δ′ stubs are used, with a warning.
 
 ## Fields
 
-  - `ffs` - The finished solve; duck-typed on `equil`, `surfaces`, `delta_prime`, `dir_path`, so tests can use stand-ins.
+  - `ffs` - The finished solve; duck-typed on `equil` (with its `kinetic` profiles), `surfaces` and `delta_prime`, so tests can use stand-ins.
   - `control::SLAYERControl` - The tearing knobs.
 """
 struct TearingProblem{R}
@@ -77,7 +78,9 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
     control.enabled || return empty_slayer_result(control)
     isempty(surfaces) && return empty_slayer_result(control)
 
-    loaded = _load_profiles(control, ffs.dir_path)
+    equil.kinetic === nothing &&
+        error("TearingProblem: the equilibrium carries no kinetic profiles; set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
+    loaded = _slayer_profiles(equil.kinetic, control)
 
     params = _tearing_params(model, equil, surfaces, loaded, control)
 
