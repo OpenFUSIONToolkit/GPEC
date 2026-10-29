@@ -126,6 +126,53 @@ function GeometryProfileSplines(xs::Vector{Float64},
 end
 
 """
+    KineticProfileData
+
+Raw kinetic-profile columns read from a kinetic file (HDF5 or ASCII), before
+resampling and spline construction. `psi` (normalized poloidal flux) is always
+present; every profile field is `nothing` when the source omits it, so each
+consumer validates only the fields it needs. Units: densities m⁻³,
+temperatures eV, frequencies rad/s, diffusivities m²/s.
+
+| field               | meaning                                                                                                           |
+|:------------------- |:----------------------------------------------------------------------------------------------------------------- |
+| `n_i`               | main-ion density                                                                                                  |
+| `n_e`               | electron density                                                                                                  |
+| `T_i`/`T_e`         | ion / electron temperature                                                                                        |
+| `omega_E`           | ExB rotation                                                                                                      |
+| `omega_tor`         | toroidal rotation (optional)                                                                                      |
+| `chi_e`             | electron perpendicular heat diffusivity χ⊥,e                                                                      |
+| `chi_i`             | ion perpendicular heat diffusivity χ⊥,i                                                                           |
+| `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
+| `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
+| `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
+| `provenance`        | short string recording the source file/format                                                                     |
+"""
+struct KineticProfileData
+    psi::Vector{Float64}
+    n_i::Union{Nothing,Vector{Float64}}
+    n_e::Union{Nothing,Vector{Float64}}
+    T_i::Union{Nothing,Vector{Float64}}
+    T_e::Union{Nothing,Vector{Float64}}
+    omega_E::Union{Nothing,Vector{Float64}}
+    omega_tor::Union{Nothing,Vector{Float64}}
+    chi_e::Union{Nothing,Vector{Float64}}
+    chi_i::Union{Nothing,Vector{Float64}}
+    chi_phi::Union{Nothing,Vector{Float64}}
+    zeff::Union{Nothing,Vector{Float64}}
+    species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
+    provenance::String
+end
+
+function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
+    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_i=nothing, chi_phi=nothing, zeff=nothing,
+    species_densities=nothing, provenance="")
+    _v(x) = x === nothing ? nothing : Float64.(collect(x))
+    return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_i), _v(chi_phi), _v(zeff), species_densities, String(provenance))
+end
+
+"""
     KineticProfileSplines
 
 Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures,
@@ -255,6 +302,8 @@ This object provides a complete representation of the processed plasma equilibri
     (`sol`, `lar`, `tj_analytic`, `tj_analytic_direct`) was solved from, so [`reform`](@ref) can
     re-solve it on a new grid; `nothing` for file-based and IMAS equilibria. A defensive copy, so
     later edits to the caller's config do not reach it.
+  - `kinetic::Union{Nothing,KineticProfileData}`: the raw kinetic profiles of `config.kinetic_file` (or of
+    [`attach_kinetic_profiles!`](@ref)), on the file's own ψ grid; `nothing` when none are attached
 """
 mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -283,13 +332,14 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D
 
     ingest::EquilibriumIngest
     analytic::Union{Nothing,AnalyticEquilibriumConfig}
+    kinetic::Union{Nothing,KineticProfileData}
 end
 
-# Solvers build the equilibrium before PlasmaEquilibrium records its source, so allow
-# construction without it; ingest and analytic default to nothing and are assigned post-construction.
+# Solvers build the equilibrium before PlasmaEquilibrium records its source and attaches the kinetic
+# profiles, so allow construction without them; ingest, analytic and kinetic default to nothing.
 PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
     rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
     eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
     PlasmaEquilibrium(config, params, profiles, geometry, rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
-        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing, nothing)
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, nothing, nothing, nothing)

@@ -33,7 +33,7 @@ With no `overrides`, the example deck runs in place (returns it untouched). With
 the deck is copied to a uniquely named throwaway sibling of the example dir and the named gpec.toml keys are
 patched there, so one shared example can serve several cases (e.g. a collisionless variant via
 `"KineticForces.nutype" => "zero"`). The copy sits beside the original so relative file
-references in the deck (e.g. `SLAYER.profile_file = "../<other_example>/..."`) still resolve.
+references in the deck (e.g. `Equilibrium.kinetic_file = "../<other_example>/..."`) still resolve.
 Override keys are dotted paths into the TOML; missing intermediate tables are created.
 Returns `(rundir, is_temp)`; the caller removes `rundir` when `is_temp`.
 """

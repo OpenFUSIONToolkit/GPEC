@@ -115,6 +115,20 @@ using GeneralizedPerturbedEquilibrium
         @test analytic_snapshot.analytic isa Eq.SolovevConfig
         @test analytic_snapshot.analytic.elongation == 1.8
         @test analytic_snapshot.profiles.q_spline.y == profile_values[4]
+        # The stored deck's kinetic_file resolves against the h5's directory and is re-read; a missing file warns and leaves none.
+        kinetic_path = joinpath(dir, "kinetic.dat")
+        cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), kinetic_path)
+        analytic_inputs["Equilibrium"]["kinetic_file"] = "kinetic.dat"
+        h5open(path, "r+") do f
+            delete_object(f, "Input/gpec_toml_raw")
+            f["Input/gpec_toml_raw"] = sprint(io -> TOML.print(io, analytic_inputs))
+        end
+        with_kinetic = GPEC.equilibrium_from_h5(path).equil
+        @test with_kinetic.kinetic.n_e == Eq.read_kinetic_file(kinetic_path).n_e
+        @test with_kinetic.config.kinetic_file == kinetic_path
+        rm(kinetic_path)
+        without = @test_logs (:warn, r"kinetic_file is not readable") match_mode = :any GPEC.equilibrium_from_h5(path).equil
+        @test without.kinetic === nothing
         h5open(path, "r+") do f
             delete_object(f, "Equilibrium/Profiles/q")
         end
