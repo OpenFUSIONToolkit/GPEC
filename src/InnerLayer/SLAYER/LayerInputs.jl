@@ -7,10 +7,9 @@
 # round-trip.
 #
 # Geometry extraction:
-#   - Minor radius at the outboard midplane (θ = 0) via
-#     `equil.rzphi_rsquared((ψ, 0.0))`.
-#   - `da/dψ` from the interpolant's own analytic ψ-derivative.
-#   - r-based magnetic shear via `r_based_shear(rs, q, q1, da/dψ)` (defined
+#   - r_s and dr/dψ from one radial label (`radial_label`; by default the
+#     toroidal-flux label r = √(2ψ_t/B₀)), both analytic.
+#   - r-based magnetic shear via `r_based_shear(rs, q, q1, dr/dψ)` (defined
 #     in LayerParameters.jl).
 
 using ..Utilities: KineticProfiles

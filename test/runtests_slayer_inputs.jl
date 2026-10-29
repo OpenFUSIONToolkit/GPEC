@@ -94,8 +94,8 @@
         @test sl[1].R0 ≈ equil.ro
         @test sl[1].bt == 2.0
 
-        # Minor radius and r-based shear recovered from the equilibrium in the default label
-        r_at, dr_at = radial_label(equil)
+        # Minor radius and r-based shear recovered from the equilibrium in the default, toroidal-flux label
+        r_at, dr_at = radial_label(equil; rs_method=:flux)
         rs1 = r_at(0.3)
         da1 = dr_at(0.3)
         @test sl[1].rs ≈ rs1

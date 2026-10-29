@@ -101,8 +101,10 @@ constructor.
     toroidal geometric factor (required only by `D_c_type=:toroidal`). Supply a
     scalar only to override the auto-derivation; an explicit `0.0` disables the
     critical-Δ offset (Δ_crit ≡ 0)
-  - `theta_sample` -- poloidal angle at which to sample minor radius
-    (default 0.0, outboard midplane)
+  - `theta_sample` -- poloidal angle of the minor-radius chord of the
+    `:midplane` radial label, used only by API callers that pass
+    `rs_method = :midplane`; the default toroidal-flux label does not depend
+    on angle, so a nonzero value warns (default 0.0)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
     (default, neoclassical F_33), `:redl`, `:spitzer` (Sauter 18a, no
     trapped correction), or `:spitzer_harm` (legacy Fitzpatrick σ_∥)
@@ -238,6 +240,8 @@ const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
 function validate(ctrl::SLAYERControl)
+    iszero(ctrl.theta_sample) || @warn "SLAYERControl: theta_sample = $(ctrl.theta_sample) has no effect: the layer quantities " *
+                                       "use the toroidal-flux radial label, which does not depend on poloidal angle." maxlog = 1
     ctrl.inner_model in _VALID_INNER_MODELS || ctrl.inner_model in _UNSUPPORTED_INNER_MODELS ||
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) " *
                             "not in $(_VALID_INNER_MODELS)"))
