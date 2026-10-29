@@ -1,8 +1,8 @@
 # Result.jl
 #
-# `SLAYERResult` packages the output of a full SLAYER analysis run:
+# `TearingResult` packages the output of a tearing solve:
 # per-surface layer parameters, the extracted tearing eigenvalues, and (if
-# `control.store_scan`) the full Q-plane scan data for plotting.
+# `config.store_scan`) the full Q-plane scan data for plotting.
 
 """
     CriticalResonantFieldScan
@@ -51,18 +51,19 @@ empty_critical_resonant_field_result() =
     CriticalResonantFieldResult(false, Int[], Float64[], Float64[], Float64[], Float64[], CriticalResonantFieldScan[])
 
 """
-    SLAYERResult
+    TearingResult
 
-Output of the tearing solve. Carries both summary eigenvalues (ω_Hz, γ_Hz) and
+Output of the tearing solve. Carries both summary eigenvalues (ω, γ) and
 full diagnostic detail (valid roots, poles, filtered roots, contours) for
 downstream inspection and HDF5 output.
 
 # Fields
 
   - `enabled`             -- `true` only when the analysis actually ran
-  - `control`             -- the `SLAYERControl` used (frozen snapshot)
+  - `problem`             -- producing TearingProblem, or nothing for a low-level scan
+  - `config`              -- resolved scan configuration used by the model
   - `model`               -- the inner-layer model solved; `nothing` when the analysis did not run
-  - `params`              -- `Vector{SLAYERParameters}`, one per surface
+  - `params`              -- SLAYER or GGJ layer parameters, one per surface
   - `rational_psi`, `rational_q` -- normalized poloidal flux ψ_N and safety
     factor q of each analyzed surface, aligned with `params`. Empty when the
     analysis was built from bare parameters (`run_slayer_from_inputs` without
@@ -76,9 +77,11 @@ downstream inspection and HDF5 output.
       + length `nsurfaces` in `:uncoupled` mode
       + length `1` in `:coupled` mode (global eigenvalue normalized by
         `params[1].tauk`)
-  - `omega_Hz`, `gamma_Hz` -- rotation angular frequency Re(Q)/τ_k [rad/s] and growth rate
-    Im(Q)/τ_k [1/s]. `Q_root` and `omega_Hz` are in the lab frame in both modes; an uncoupled
-    root is moved from its layer's E×B frame by τ_k·n·Ω_E, with Ω_E = 0 where it is unknown
+  - `omega`, `gamma` -- rotation angular frequency Re(Q)/τ_k [rad/s] and growth rate
+    Im(Q)/τ_k [1/s] for SLAYER. SLAYER roots are in the lab frame; an uncoupled root is
+    moved from its layer's E×B frame by τ_k·n·Ω_E, with Ω_E = 0 where unknown.
+    GGJ uses its reference growth-rate scale and retains the existing common plasma frame,
+    without differential-rotation coupling. Positive gamma means instability.
   - `per_surface_extraction` -- `Vector{GrowthRateResult}` of length
     `nsurfaces` in uncoupled mode (each includes polelines, pole list,
     valid roots, filtered roots), in each surface's E×B frame. Empty in coupled mode.
@@ -88,26 +91,27 @@ downstream inspection and HDF5 output.
     resistive layer thickness (in meters) from the `del_s` Riccati solve
     plus FKR / visco-resistive sanity scales. Empty when disabled.
   - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] resolved on each
-    surface: the kinetic file's value, or the `control.omega_E_kHz` override for that m/n;
+    surface: the kinetic file's value, or the `problem.omega_E_kHz` override for that m/n;
     NaN where neither gives one. Recorded in both coupling modes
   - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
     inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
   - `scan_data`           -- scan results (per-surface in uncoupled, single
-    entry in coupled). Empty unless `control.store_scan == true`.
+    entry in coupled). Empty unless `config.store_scan == true`.
   - `critical_resonant_field` -- `CriticalResonantFieldResult`; `enabled=false`
-    unless `control.critical_resonant_field.enabled`
+    unless `problem.critical_resonant_field.enabled`
 """
-struct SLAYERResult
+struct TearingResult{P,C}
+    problem::P
     enabled::Bool
-    control::SLAYERControl
+    config::C
     model::Union{Nothing,InnerLayer.InnerLayerModel}
     params::AbstractVector{<:InnerLayerParameters}
     rational_psi::Vector{Float64}
     rational_q::Vector{Float64}
     dp_matrix::Matrix{ComplexF64}
     Q_root::Vector{ComplexF64}
-    omega_Hz::Vector{Float64}
-    gamma_Hz::Vector{Float64}
+    omega::Vector{Float64}
+    gamma::Vector{Float64}
     per_surface_extraction::Vector{GrowthRateResult}
     coupled_extraction::Union{Nothing,GrowthRateResult}
     layer_widths::Vector{LayerWidths}
@@ -118,8 +122,8 @@ struct SLAYERResult
 end
 
 # Empty result (enabled=false path)
-function empty_slayer_result(control::SLAYERControl)
-    return SLAYERResult(false, control, nothing,
+function empty_tearing_result(problem, config::TearingConfig, model)
+    return TearingResult(problem, false, config, model,
         SLAYERParameters[],
         Float64[], Float64[],
         zeros(ComplexF64, 0, 0),

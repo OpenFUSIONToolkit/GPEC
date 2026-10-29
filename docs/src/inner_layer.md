@@ -4,12 +4,11 @@ The `Tearing` module groups the resistive tearing-mode analysis stack:
 `InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
 SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
 contour-intersection root extraction), `CriticalResonantField` (torque-balance
-error-field penetration threshold), and `Runner` (user-facing TOML
-configuration, profile loading, and HDF5 output).
+error-field penetration threshold), and the tearing solve itself,
+`solve(TearingProblem(ffs; ...), model; config=TearingConfig(...))`, with its
+`TearingResult` and HDF5 output.
 
-## Layer Inputs
-
-Equilibrium/ForceFreeStates glue that assembles per-surface inner-layer inputs.
+## Tearing solve and layer inputs
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing]
@@ -300,17 +299,11 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
 ## Dispersion
 
 ```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.Dispersion]
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.Dispersion]
 ```
 
 ## CriticalResonantField
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
-```
-
-## Runner
-
-```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.Runner]
 ```

@@ -41,18 +41,18 @@ Output of `find_growth_rates`.
 | field                    | meaning                                               |
 |:------------------------ |:----------------------------------------------------- |
 | `Q_root`                 | Best (highest-γ surviving) root, normalized           |
-| `omega_Hz`               | `Re(Q_root) / tauk` — physical rotation frequency     |
-| `gamma_Hz`               | `Im(Q_root) / tauk` — physical growth rate            |
+| `omega`               | `Re(Q_root) / tauk` — physical rotation frequency     |
+| `gamma`               | `Im(Q_root) / tauk` — physical growth rate            |
 | `Q_root_secondary`       | Second-most-unstable root flagged for ambiguity, or   |
 |                          | `NaN+NaNim` if the primary root was unambiguous.      |
-| `omega_Hz_secondary`     | physical ω of the secondary root, or 0 if none        |
-| `gamma_Hz_secondary`     | physical γ of the secondary root, or 0 if none        |
+| `omega_secondary`     | physical ω of the secondary root, or 0 if none        |
+| `gamma_secondary`     | physical γ of the secondary root, or 0 if none        |
 | `warning_flags`          | `Vector{Symbol}` of warnings raised on `Q_root`:      |
 |                          | `:geom`, `:gap` (root accepted with caveat);          |
 |                          | `:spurious` when ≥1 contour near-miss was dropped by  |
 |                          | the validity gate (parked in `filtered_roots`); or    |
 |                          | `:no_root` when NO usable root was found (`Q_root` is |
-|                          | `NaN`; `omega_Hz`/`gamma_Hz` fall back to 0 — check   |
+|                          | `NaN`; `omega`/`gamma` fall back to 0 — check   |
 |                          | this flag to tell that apart from a true γ≈0 result). |
 |                          | Empty if root is clean.                               |
 | `valid_roots`            | Intersections classified as roots (threshold: not a   |
@@ -75,11 +75,11 @@ Output of `find_growth_rates`.
 """
 struct GrowthRateResult
     Q_root::ComplexF64
-    omega_Hz::Float64
-    gamma_Hz::Float64
+    omega::Float64
+    gamma::Float64
     Q_root_secondary::ComplexF64
-    omega_Hz_secondary::Float64
-    gamma_Hz_secondary::Float64
+    omega_secondary::Float64
+    gamma_secondary::Float64
     warning_flags::Vector{Symbol}
     valid_roots::Vector{ComplexF64}
     poles::Vector{ComplexF64}
@@ -95,11 +95,11 @@ end
 
 # Threshold-mode constructor (no winding numbers), the form used before
 # winding classification existed.
-GrowthRateResult(Q_root, omega_Hz, gamma_Hz, Q_root_secondary, omega_Hz_secondary,
-    gamma_Hz_secondary, warning_flags, valid_roots, poles, filtered_roots,
+GrowthRateResult(Q_root, omega, gamma, Q_root_secondary, omega_secondary,
+    gamma_secondary, warning_flags, valid_roots, poles, filtered_roots,
     re_contours, im_contours, pole_threshold) =
-    GrowthRateResult(Q_root, omega_Hz, gamma_Hz, Q_root_secondary, omega_Hz_secondary,
-        gamma_Hz_secondary, warning_flags, valid_roots, poles, filtered_roots,
+    GrowthRateResult(Q_root, omega, gamma, Q_root_secondary, omega_secondary,
+        gamma_secondary, warning_flags, valid_roots, poles, filtered_roots,
         re_contours, im_contours, pole_threshold, :threshold,
         Float64[], Float64[], Float64[])
 
@@ -109,11 +109,11 @@ GrowthRateResult(Q_root, omega_Hz, gamma_Hz, Q_root_secondary, omega_Hz_secondar
                        pole_threshold=10.0,
                        filter_above_poles=true,
                        filter_outside_re=true,
-                       gap_kHz_threshold=1.0) -> GrowthRateResult
+                       gamma_gap_threshold=1e3) -> GrowthRateResult
 
 Extract tearing growth-rate eigenvalues from a brute-force `ScanResult` by
 contour-intersection analysis. `tauk` is the per-surface time normalization
-used to convert `Q` back to physical (Hz) units (`SurfaceCoupling.tauk` for
+used to convert `Q` back to physical angular-frequency and growth-rate units (`SurfaceCoupling.tauk` for
 single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
 
 # Keyword arguments
@@ -131,9 +131,9 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
     Re=0 contour is OPEN (e.g., exits the Q box edge), letting spurious
     upper-branch roots through; the `:geom` and `:gap` flags below cover
     that case.
-  - `gap_kHz_threshold` -- if the highest-γ root is unstable (γ > 0) AND its
-    γ exceeds the next root by more than this many kHz, it is flagged as
-    a `:gap` warning. Default 1.0 kHz.
+  - `gamma_gap_threshold` -- if the highest-γ root is unstable (γ > 0) AND its
+    γ exceeds the next root by more than this many inverse seconds, it is flagged as
+    a `:gap` warning. Default 1e3 s⁻¹.
   - `residual` -- optional dispersion-residual callable `f(Q::Complex)`. When
     supplied, each contour-intersection root is POLISHED to the true zero of
     `f` by a bounded, neighbour-aware local solve (see `_polish_root`), making
@@ -204,7 +204,7 @@ each candidate evaluates two flags:
   - `:geom` — Re(Δ)=0 contour is locally a downward-concave "hill" at the
     candidate (clean polyline-following quadratic fit).
   - `:gap`  — candidate is unstable AND its γ exceeds the next root's by
-    more than `gap_kHz_threshold` kHz.
+    more than `gamma_gap_threshold` in 1/s.
 
 If BOTH fire, the candidate is discarded as spurious and the next-most-
 unstable root is tried. If exactly ONE fires, the candidate is accepted as
@@ -217,7 +217,7 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
     pole_threshold::Real=10.0,
     filter_above_poles::Bool=true,
     filter_outside_re::Bool=true,
-    gap_kHz_threshold::Real=1.0,
+    gamma_gap_threshold::Real=1e3,
     residual=nothing,
     polish_maxit::Integer=20,
     validity_rtol::Real=1e-3,
@@ -233,7 +233,7 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
         pole_threshold=Float64(pole_threshold),
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=Float64(gap_kHz_threshold),
+        gamma_gap_threshold=Float64(gamma_gap_threshold),
         residual=residual,
         polish_maxit=Int(polish_maxit),
         validity_scale=_residual_scale(scan.Δ),
@@ -254,7 +254,7 @@ end
 Extract tearing growth-rate eigenvalues from an AMR `AMRResult` via Delaunay
 triangulation + marching triangles on the scattered evaluation points. The
 pipeline after contour extraction (segment intersection, pole classification,
-outside-Re filter, physical-Hz conversion) is identical to the brute-force
+outside-Re filter, physical-unit conversion) is identical to the brute-force
 grid path — only the contour extractor changes. Hanging-node issues from the
 quadtree's mixed refinement levels are resolved by the triangulation
 respecting every evaluated point uniformly.
@@ -264,7 +264,7 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
     pole_threshold::Real=10.0,
     filter_above_poles::Bool=true,
     filter_outside_re::Bool=true,
-    gap_kHz_threshold::Real=1.0,
+    gamma_gap_threshold::Real=1e3,
     residual=nothing,
     polish_maxit::Integer=20,
     validity_rtol::Real=1e-3,
@@ -279,7 +279,7 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
         pole_threshold=Float64(pole_threshold),
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=Float64(gap_kHz_threshold),
+        gamma_gap_threshold=Float64(gamma_gap_threshold),
         residual=residual,
         polish_maxit=Int(polish_maxit),
         validity_scale=_residual_scale(amr.Δ),
@@ -529,14 +529,14 @@ end
 
 # γ-gap separation: the candidate at `idx` (in γ-descending order) is unstable
 # AND clearly separated above the next-most-unstable candidate by more than
-# `gap_kHz_threshold` kHz. Flags an outlier "lone peak" root.
+# `gamma_gap_threshold` in 1/s. Flags an outlier "lone peak" root.
 function _is_gap_spurious(sorted_roots::Vector{ComplexF64}, idx::Int,
-    tauk::Float64, gap_kHz_threshold::Float64)
-    γ_idx = imag(sorted_roots[idx]) / tauk * 1e-3   # kHz
+    tauk::Float64, gamma_gap_threshold::Float64)
+    γ_idx = imag(sorted_roots[idx]) / tauk
     γ_idx > 0.0 || return false                       # only suspicious if unstable
     idx >= length(sorted_roots) && return false       # nothing below to compare
-    γ_next = imag(sorted_roots[idx+1]) / tauk * 1e-3
-    return (γ_idx - γ_next) > gap_kHz_threshold
+    γ_next = imag(sorted_roots[idx+1]) / tauk
+    return (γ_idx - γ_next) > gamma_gap_threshold
 end
 
 # ---------------------------------------------------------------------
@@ -676,7 +676,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     pole_threshold::Float64,
     filter_above_poles::Bool,
     filter_outside_re::Bool,
-    gap_kHz_threshold::Float64=1.0,
+    gamma_gap_threshold::Float64=1e3,
     residual=nothing,
     polish_maxit::Int=20,
     validity_scale::Float64=0.0,
@@ -854,7 +854,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             # outside-Re reject branch only.
             geom_flag = _is_geom_spurious(cand, re_paths)
             gap_flag = _is_gap_spurious(sorted_pts, k, tauk,
-                gap_kHz_threshold)
+                gamma_gap_threshold)
             chosen_idx = k
             geom_flag && push!(warning_flags, :geom)
             gap_flag && push!(warning_flags, :gap)
@@ -876,16 +876,16 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     # (`valid_roots` empty) or every candidate was rejected by the legacy
     # above-pole filter (`chosen_idx == 0`). Flag this explicitly so callers
     # can distinguish a genuine marginally-stable result (γ ≈ 0) from a failed
-    # extraction — both otherwise surface as `gamma_Hz == 0.0` below.
+    # extraction — both otherwise surface as `gamma == 0.0` below.
     isnan(real(Q_root)) && push!(warning_flags, :no_root)
 
-    omega_Hz = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
-    gamma_Hz = isnan(imag(Q_root)) ? 0.0 : imag(Q_root) / tauk
-    omega_Hz_2nd = isnan(real(Q_root_2nd)) ? 0.0 : real(Q_root_2nd) / tauk
-    gamma_Hz_2nd = isnan(imag(Q_root_2nd)) ? 0.0 : imag(Q_root_2nd) / tauk
+    omega = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
+    gamma = isnan(imag(Q_root)) ? 0.0 : imag(Q_root) / tauk
+    omega_2nd = isnan(real(Q_root_2nd)) ? 0.0 : real(Q_root_2nd) / tauk
+    gamma_2nd = isnan(imag(Q_root_2nd)) ? 0.0 : imag(Q_root_2nd) / tauk
 
-    return GrowthRateResult(Q_root, omega_Hz, gamma_Hz,
-        Q_root_2nd, omega_Hz_2nd, gamma_Hz_2nd,
+    return GrowthRateResult(Q_root, omega, gamma,
+        Q_root_2nd, omega_2nd, gamma_2nd,
         warning_flags,
         valid_roots, poles, filtered_roots,
         re_paths, im_paths, pole_threshold,
@@ -1016,7 +1016,7 @@ function _extract_growth_rates(re_axis::Vector{Float64},
     pole_threshold::Float64,
     filter_above_poles::Bool,
     filter_outside_re::Bool,
-    gap_kHz_threshold::Float64=1.0,
+    gamma_gap_threshold::Float64=1e3,
     residual=nothing,
     polish_maxit::Int=20,
     validity_scale::Float64=0.0,
@@ -1040,7 +1040,7 @@ function _extract_growth_rates(re_axis::Vector{Float64},
         pole_threshold=pole_threshold,
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=gap_kHz_threshold,
+        gamma_gap_threshold=gamma_gap_threshold,
         residual=residual,
         polish_maxit=polish_maxit,
         validity_scale=validity_scale,
@@ -1199,7 +1199,7 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
     pole_threshold::Float64,
     filter_above_poles::Bool,
     filter_outside_re::Bool,
-    gap_kHz_threshold::Float64=1.0,
+    gamma_gap_threshold::Float64=1e3,
     residual=nothing,
     polish_maxit::Int=20,
     validity_scale::Float64=0.0,
@@ -1245,7 +1245,7 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
         pole_threshold=pole_threshold,
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=gap_kHz_threshold,
+        gamma_gap_threshold=gamma_gap_threshold,
         residual=residual,
         polish_maxit=polish_maxit,
         validity_scale=validity_scale,

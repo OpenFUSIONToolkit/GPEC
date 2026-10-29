@@ -10,7 +10,7 @@
 # s = γ + iω [s⁻¹]. The SLAYER scans use Q = τ·(−ω + iγ), so s = −i·Q/τ; with
 # τ = 1/Q₀ of the reference surface (Q₀ = S^(−1/3)/τ_A, GWP2016 Eq. A16) the
 # scanned variable is the GGJ scaled growth rate rotated by a quarter turn,
-# Im Q = γ/Q₀ and Re Q = −ω/Q₀, and `GrowthRateResult.gamma_Hz` is γ in s⁻¹.
+# Im Q = γ/Q₀ and Re Q = −ω/Q₀, and `GrowthRateResult.gamma` is γ in s⁻¹.
 # s ↦ Q is holomorphic, so a zero of the determinant winds +1 (the SLAYER
 # residual, a function of conj(Q), winds −1).
 
@@ -51,7 +51,7 @@ its own 2 × 2 block of the raw Δ'). The box `gamma_range` × `omega_range`
 (physical: γ in s⁻¹, ω in rad/s) is scanned adaptively in the plane of
 [`GGJDispersion`](@ref) and every contour intersection is classified by its
 winding number; see `find_growth_rates`. The result is in the units of the
-SLAYER extraction: `gamma_Hz` is γ [s⁻¹], `omega_Hz` is −ω [rad/s], and
+SLAYER extraction: `gamma` is γ [s⁻¹], `omega` is −ω [rad/s], and
 `Q_root` is the normalized `(−ω + iγ)/Q₀`. The reported root is the least
 stable zero in the box. Without drifts the GGJ roots come in ±ω pairs, so
 either member of a pair can be reported. GGJ surfaces carry no time
@@ -71,7 +71,7 @@ passes. Each determinant evaluation solves the inner layer at every surface:
 the default 40 × 40 grid alone is about 1,600 evaluations, and each contour
 intersection adds 64–4096 more for its classifying circles plus up to about
 120 for the polish. Size the grid for the cost of one inner-layer solve.
-`:no_root` and `:winding_unresolved` results warn; `gamma_Hz` is then not a
+`:no_root` and `:winding_unresolved` results warn; `gamma` is then not a
 growth rate.
 """
 function ggj_growth_rates(mc::MultiSurfaceCouplingFull;
@@ -93,7 +93,7 @@ function ggj_growth_rates(mc::MultiSurfaceCouplingFull;
         max_cells=max_cells, parallel=parallel)
     gr = find_growth_rates(amr, τ; residual=g, polish=polish,
         classification=:winding, zero_winding=1, winding_rfrac=winding_rfrac)
-    :no_root in gr.warning_flags && @warn "ggj_growth_rates: no root found in the box; gamma_Hz = 0 is a placeholder"
+    :no_root in gr.warning_flags && @warn "ggj_growth_rates: no root found in the box; gamma = 0 is a placeholder"
     :winding_unresolved in gr.warning_flags &&
         @warn "ggj_growth_rates: some contour intersections could not be classified (the determinant failed or had a zero or pole on the circle)"
     return gr, amr

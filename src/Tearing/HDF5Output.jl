@@ -3,7 +3,7 @@ import ..Utilities.HDF5Annotations: replace_group!, write_ragged!
 
 # HDF5Output.jl
 #
-# Write a `SLAYERResult` into an HDF5 group. Designed to be called by the
+# Write a `TearingResult` into an HDF5 group. Designed to be called by the
 # existing `PerturbedEquilibrium.write_outputs_to_HDF5` path — the
 # top-level GPEC runner wires that up; this file only defines the pure
 # writer.
@@ -15,7 +15,7 @@ import ..Utilities.HDF5Annotations: replace_group!, write_ragged!
 #   ├── PerSurface/         -- struct-of-arrays for SLAYERParameters fields
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
-#   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
+#   ├── Roots/              -- complex Q_root, omega, gamma
 #   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame;
 #   │                          + *Winding when root_classification = :winding)
 #   │                           (flat-plus-offsets ragged encoding)
@@ -26,14 +26,14 @@ using HDF5
 
 """
     save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
-                        result::SLAYERResult)
+                        result::TearingResult)
 
 Write `result` into a `Tearing/` subgroup of `parent`. The subgroup is
 created if missing and overwritten if it already exists (keeps the
 output file reproducible across reruns).
 """
 function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
-    result::SLAYERResult)
+    result::TearingResult)
     g = replace_group!(parent, "Tearing")
     g["enabled"] = Int(result.enabled)
     # Which inner-layer model produced PerSurface/: the SLAYER and GGJ branches write
@@ -47,6 +47,9 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     end
 
     _write_per_surface!(g, result.params, result.dp_matrix)
+    if result.model isa GGJModel && result.problem !== nothing
+        g["PerSurface/Delta_prime_raw"] = result.problem.ffs.delta_prime.raw
+    end
     # E×B rotation resolved per surface, and the Doppler offset it applies to the inner-layer Q.
     g["PerSurface/omega_E"] = result.omega_E
     g["PerSurface/q_shift"] = result.q_shift
@@ -56,7 +59,7 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     _write_roots!(g, result)
     _write_layer_widths!(g, result.layer_widths)
     _write_diagnostics!(g, result)
-    if result.control.store_scan && !isempty(result.scan_data)
+    if result.config.store_scan && !isempty(result.scan_data)
         _write_scan_data!(g, result)
     end
     result.critical_resonant_field.enabled && _write_critical_resonant_field!(g, result.critical_resonant_field)
@@ -144,10 +147,11 @@ const TEARING_H5_ANNOTATIONS = [
         long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)",
         dims=("surface_row", "surface_col")
     ),
-    "Roots/Q_root" => (; long_name="complex dispersion-root normalized frequency Q in the lab frame (NaN = no root)", dims=("surface",)),
+    "PerSurface/Delta_prime_raw" => (; long_name="raw side-major outer matching matrix used by the full GGJ determinant", dims=("surface_side_row", "surface_side_col")),
+    "Roots/Q_root" => (; long_name="complex normalized root in the declared frequency_frame (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
         (;
-            long_name="mode rotation angular frequency ω = Re(Q)/τ_k of each root in the lab frame (an uncoupled root's E×B-frame value is ω − n·Ω_E)",
+            long_name="mode angular frequency omega in the declared frequency_frame",
             units="rad/s",
             dims=("surface",)
         ),
@@ -285,14 +289,15 @@ function _write_per_surface!(g, params::AbstractVector{GGJParameters},
 end
 
 # ---------- eigenvalue roots ----------
-function _write_roots!(g, r::SLAYERResult)
+function _write_roots!(g, r::TearingResult)
     roots = create_group(g, "Roots")
+    attrs(roots)["frequency_frame"] = r.model isa GGJModel ? "plasma" : "lab"
     roots["Q_root"] = r.Q_root
-    roots["omega"] = r.omega_Hz
-    roots["gamma"] = r.gamma_Hz
+    roots["omega"] = r.omega
+    roots["gamma"] = r.gamma
     # `no_root[k] == 1` flags entries where the extraction found NO usable
-    # root (Q_root is NaN; omega_Hz/gamma_Hz are 0 placeholders, not a true
-    # γ≈0 result). Aligned element-wise with Q_root/omega_Hz/gamma_Hz.
+    # root (Q_root is NaN; omega/gamma are 0 placeholders, not a true
+    # γ≈0 result). Aligned element-wise with Q_root/omega/gamma.
     extractions = r.coupled_extraction !== nothing ? [r.coupled_extraction] :
                   r.per_surface_extraction
     roots["no_root"] = Int[(:no_root in gr.warning_flags) ? 1 : 0
@@ -317,7 +322,7 @@ function _write_layer_widths!(g, widths::Vector{LayerWidths})
 end
 
 # ---------- diagnostics: valid roots, poles, filtered roots ----------
-function _write_diagnostics!(g, r::SLAYERResult)
+function _write_diagnostics!(g, r::TearingResult)
     diag = create_group(g, "Diagnostics")
     # Uncoupled: one GrowthRateResult per surface. Coupled: one total.
     extractions = if r.coupled_extraction !== nothing
@@ -344,7 +349,7 @@ function _write_diagnostics!(g, r::SLAYERResult)
 end
 
 # ---------- full scan data (optional) ----------
-function _write_scan_data!(g, r::SLAYERResult)
+function _write_scan_data!(g, r::TearingResult)
     sc = create_group(g, "Scan")
     for (k, data) in enumerate(r.scan_data)
         sk = create_group(sc, "Surface_$(k)")

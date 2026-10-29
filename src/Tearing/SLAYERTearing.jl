@@ -12,7 +12,7 @@
 # `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), a Z_eff(ψ) callable: the data's own `zeff` profile when
 # they carry one, else derived from `n_i/n_e` (or `nothing` when they carry neither, in which case the
 # caller falls back to the scalar `control.zeff`), and whether the data carry an `omega_E` profile.
-function _slayer_profiles(data::KineticProfileData, control::SLAYERControl)
+function _slayer_profiles(data::KineticProfileData, control)
     source = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
     for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))
         v === nothing &&
@@ -65,7 +65,7 @@ end
 # χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the control's
 # scalar fallbacks. With `warn`, a fallback is reported only for a χ the selected P_perp model
 # (and, for χ⊥,e, the critical Δ) actually uses.
-function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
+function _slayer_chi_inputs(loaded, control; warn::Bool=true)
     model = control.P_perp_model
     pick(f, s) = f === nothing ? s : f
     model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && control.chi_perp_i === nothing &&
@@ -91,16 +91,6 @@ function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
     return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
         chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
         chi_tor=pick(loaded.chi_tor, control.chi_tor))
-end
-
-# ---------------------------------------------------------------------
-# Inner-layer model factory
-# ---------------------------------------------------------------------
-function _build_inner_model(name::Symbol)
-    if name === :slayer_fitzpatrick
-        return SLAYERModel(; variant=:fitzpatrick)
-    end
-    throw(ArgumentError("_build_inner_model: unknown model $name"))
 end
 
 # Map the TOML resistivity_model symbol to a NeoResistivityModel instance.
@@ -131,7 +121,7 @@ _zero_winding(model) =
 # ---------------------------------------------------------------------
 # Scan dispatch
 # ---------------------------------------------------------------------
-function _run_scan(f, control::SLAYERControl)
+function _run_scan(f, control::TearingConfig)
     if control.scan_mode === :brute_force
         return brute_force_scan(f, control.Q_re_range, control.Q_im_range;
             nre=control.nre, nim=control.nim)
@@ -187,8 +177,8 @@ _mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
 _mn_label(::InnerLayerParameters) = nothing
 
 # Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
-# rational surface (NaN when there is none), replaced on every surface whose m/n `control.omega_E_kHz` lists.
-function _omega_E_per_surface(control::SLAYERControl, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
+# rational surface (NaN when there is none), replaced on every surface whose m/n `problem.omega_E_kHz` lists.
+function _omega_E_per_surface(control, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
     n = length(params)
     isempty(omega_E_file) || length(omega_E_file) == n ||
         throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
@@ -276,16 +266,16 @@ end
 # Core analysis entry point that takes pre-built parameters.
 # ---------------------------------------------------------------------
 """
-    run_slayer_from_inputs(model::InnerLayerModel, params, dp_matrix, control;
-                           rational_psi, rational_q, omega_E) -> SLAYERResult
+    run_slayer_from_inputs(model::InnerLayerModel, params, dp_matrix, problem, config;
+                           rational_psi, rational_q, omega_E) -> TearingResult
 
 Run the tearing analysis scan core given the inner-layer dispatch `model`, the pre-built
 per-surface parameters, and the outer-region Δ' matrix. Bypasses the orchestration of the
 `TearingProblem` solve — use this when the parameters are already known (e.g. in unit
 tests or when rebuilding from cached HDF5 output). The model is a typed object end to
-end; nothing below this point reads `control.inner_model`. `omega_E` is the E×B angular
+end. `omega_E` is the E×B angular
 frequency per unit n at each surface [rad/s], replaced on any surface whose m/n
-`control.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
+`problem.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
 shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer Q; in
 both modes the resolved value is reported as `result.omega_E`. Roots are reported in the lab frame
 in both modes: an uncoupled layer is solved in its own E×B frame and its root is then moved by
@@ -294,17 +284,16 @@ in both modes: an uncoupled layer is solved in its own E×B frame and its root i
 function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     params::AbstractVector{<:InnerLayerParameters},
     dp_matrix::AbstractMatrix,
-    control::SLAYERControl;
+    problem::TearingProblem, config::TearingConfig;
     rational_psi::Vector{Float64}=Float64[],
     rational_q::Vector{Float64}=Float64[],
     omega_E::Vector{Float64}=Float64[])
-    validate(control)
+    validate(problem, config)
     _is_ggj(model) && throw(ArgumentError(
         "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no GGJ growth rate. " *
         "Use Dispersion.ggj_growth_rates on multi_surface_coupling_full, which matches both parity channels, and " *
         "ggj_inner_deltas for the GGJ layer's Δ."))
-    control.enabled || return empty_slayer_result(control)
-    isempty(params) && return empty_slayer_result(control)
+    isempty(params) && return empty_tearing_result(problem, config, model)
 
     n = length(params)
     size(dp_matrix) == (n, n) ||
@@ -329,8 +318,8 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
 
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
-    coupled = control.coupling_mode === :coupled
-    Ω_E = _omega_E_per_surface(control, params, omega_E)
+    coupled = problem.coupling_mode === :coupled
+    Ω_E = _omega_E_per_surface(problem, params, omega_E)
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
     q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
@@ -340,12 +329,12 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # In the scanned Q, surface k's layer response moves by τ_ref·n·Ω_E,k. Heuristic check only:
     # the root also carries the diamagnetic Re(Q), so a window can pass and still miss it.
     if any(!iszero, q_shifts)
-        m_use = min(control.msing_max, n)
+        m_use = min(problem.msing_max, n)
         doppler = [-q_shifts[k] * scs[ref_idx].tauk / scs[k].tauk for k in 1:m_use]
-        lo, hi = control.Q_re_range
+        lo, hi = config.Q_re_range
         any(d -> !(lo <= d <= hi), doppler) && @warn(
             "SLAYER: E×B Doppler offsets Re(Q)=$(round.(doppler; digits=3)) fall outside " *
-            "Q_re_range=$(control.Q_re_range); widen it or the coupled root may be missed.")
+            "Q_re_range=$(config.Q_re_range); widen it or the coupled root may be missed.")
     end
 
     # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
@@ -357,14 +346,14 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                    LayerWidths[]
 
     Q_root = ComplexF64[]
-    omega_Hz = Float64[]
-    gamma_Hz = Float64[]
+    omega = Float64[]
+    gamma = Float64[]
     per_surface_extraction = GrowthRateResult[]
     coupled_extraction = nothing
     scan_data_list = Union{ScanResult,AMRResult}[]
 
     # Helper: compute the pole_threshold actually passed to find_growth_rates.
-    # When `control.pole_threshold_adaptive` is true, override with
+    # When `config.pole_threshold_adaptive` is true, override with
     # `10 × median(|Δ|)` over the scan's dispersion residual array.
     #
     # The median formulation is robust against pre-screen samples landing
@@ -374,31 +363,32 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # "10× the typical residual magnitude" with median robust to both
     # pathologies.
     function _pole_threshold_for(scan)
-        control.pole_threshold_adaptive || return control.pole_threshold
+        config.pole_threshold_adaptive || return config.pole_threshold
         # ScanResult and AMRResult both carry `.Δ` — abstract over both
         Δ_arr = hasproperty(scan, :Δ) ? scan.Δ : nothing
-        Δ_arr === nothing && return control.pole_threshold
+        Δ_arr === nothing && return config.pole_threshold
         finite = filter(z -> isfinite(z) && abs(z) < 1e30, Δ_arr)
-        isempty(finite) && return control.pole_threshold
+        isempty(finite) && return config.pole_threshold
         return 10.0 * median(abs.(finite))
     end
 
-    winding = control.root_classification === :winding
+    classification = config.root_classification === :auto ? :threshold : config.root_classification
+    winding = classification === :winding
     zw = winding ? _zero_winding(model) : -1
 
-    if control.coupling_mode === :uncoupled
+    if problem.coupling_mode === :uncoupled
         for (k, sc) in enumerate(scs)
-            scan = _run_scan(sc, control)
+            scan = _run_scan(sc, config)
             pthr = _pole_threshold_for(scan)
             gr = find_growth_rates(scan, sc.tauk;
                 pole_threshold=pthr,
-                filter_above_poles=control.filter_above_poles,
-                filter_outside_re=control.filter_outside_re,
-                gap_kHz_threshold=control.gap_kHz_threshold,
-                residual=(control.polish_roots || winding) ? sc : nothing,
-                polish=control.polish_roots,
-                validity_rtol=control.validity_rtol,
-                classification=control.root_classification,
+                filter_above_poles=config.filter_above_poles,
+                filter_outside_re=config.filter_outside_re,
+                gamma_gap_threshold=config.gamma_gap_threshold,
+                residual=(config.polish_roots || winding) ? sc : nothing,
+                polish=config.polish_roots,
+                validity_rtol=config.validity_rtol,
+                classification=classification,
                 zero_winding=zw)
             :no_root in gr.warning_flags && @warn(
                 "SLAYER: no usable growth-rate root found for surface " *
@@ -408,16 +398,16 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
             # The layer is solved in its own E×B frame; report the root in the lab frame, Q_lab = Q + τ_k·n·Ω_E.
             q_lab = -_q_shift(params[k], Ω_shift[k])
             push!(Q_root, gr.Q_root + q_lab)
-            push!(omega_Hz, :no_root in gr.warning_flags ? gr.omega_Hz : gr.omega_Hz + q_lab / params[k].tauk)
-            push!(gamma_Hz, gr.gamma_Hz)
+            push!(omega, :no_root in gr.warning_flags ? gr.omega : gr.omega + q_lab / params[k].tauk)
+            push!(gamma, gr.gamma)
             push!(per_surface_extraction, gr)
-            control.store_scan && push!(scan_data_list, scan)
+            config.store_scan && push!(scan_data_list, scan)
         end
 
-    elseif control.coupling_mode === :coupled
-        m_use = min(control.msing_max, n)
+    elseif problem.coupling_mode === :coupled
+        m_use = min(problem.msing_max, n)
         mc = multi_surface_coupling(scs, dp; ref_idx=ref_idx, msing_max=m_use)
-        scan = _run_scan(mc, control)
+        scan = _run_scan(mc, config)
         pthr = _pole_threshold_for(scan)
         ref_tauk = scs[ref_idx].tauk
         # Coupled path: no root polishing / validity gate. The m×m coupled
@@ -429,29 +419,29 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         # each intersection only to count its zeros and poles.
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
-            filter_above_poles=control.filter_above_poles,
-            filter_outside_re=control.filter_outside_re,
-            gap_kHz_threshold=control.gap_kHz_threshold,
+            filter_above_poles=config.filter_above_poles,
+            filter_outside_re=config.filter_outside_re,
+            gamma_gap_threshold=config.gamma_gap_threshold,
             residual=winding ? mc : nothing,
             polish=false,
-            classification=control.root_classification,
+            classification=classification,
             zero_winding=zw)
         :no_root in gr.warning_flags && @warn(
             "SLAYER: no usable growth-rate root found for the coupled " *
             "$(m_use)-surface determinant; reported γ=0 is a placeholder, " *
             "not a physical result — check scan grid / pole_threshold.")
         push!(Q_root, gr.Q_root)
-        push!(omega_Hz, gr.omega_Hz)
-        push!(gamma_Hz, gr.gamma_Hz)
+        push!(omega, gr.omega)
+        push!(gamma, gr.gamma)
         coupled_extraction = gr
-        control.store_scan && push!(scan_data_list, scan)
+        config.store_scan && push!(scan_data_list, scan)
     end
 
-    return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
-        Q_root, omega_Hz, gamma_Hz,
+    return TearingResult(problem, true, config, model, params, rational_psi, rational_q, dp,
+        Q_root, omega, gamma,
         per_surface_extraction, coupled_extraction,
         layer_widths, Ω_E, q_shifts, scan_data_list,
-        run_critical_resonant_field(model, params, Ω_E, real.(diag(dp)), control.critical_resonant_field))
+        run_critical_resonant_field(model, params, Ω_E, real.(diag(dp)), problem.critical_resonant_field))
 end
 
 # ---------------------------------------------------------------------

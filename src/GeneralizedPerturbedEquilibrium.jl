@@ -51,12 +51,7 @@ export ForceFreeStates
 include("Tearing/Tearing.jl")
 import .Tearing as Tearing
 export Tearing
-# Backward-compat top-level aliases so callers can still reach these
-# directly; the canonical nested path is `Tearing.{Dispersion,Runner}`.
-import .Tearing.Dispersion as Dispersion
 import .Tearing.CriticalResonantField as CriticalResonantField
-import .Tearing.Runner as Runner
-export Dispersion, Runner
 
 include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
@@ -90,7 +85,7 @@ using .ForceFreeStates: galerkin_solve, write_galerkin!
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
-using .Tearing.Runner: TearingProblem
+using .Tearing: TearingProblem, TearingConfig, TearingResult
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium
 using .ForcingTerms: RMPField
@@ -557,7 +552,7 @@ end
 # profiles; with tearing enabled that is an error instead, so the run fails before the solve.
 function _overlap_slayer_inputs(inputs, kinetic::Union{Nothing,Equilibrium.KineticProfileData})
     (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
-    ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+    ctrl = Tearing.slayer_control_from_toml(inputs["SLAYER"])
     if kinetic === nothing
         ctrl.enabled && error("SLAYER needs kinetic profiles: set kinetic_file in [Equilibrium]")
         return nothing
@@ -567,8 +562,8 @@ function _overlap_slayer_inputs(inputs, kinetic::Union{Nothing,Equilibrium.Kinet
     # widths depend on is the run's own [SLAYER] setting, so the scan and the SLAYER stage see
     # one plasma.
     loaded, chi = try
-        l = Runner._slayer_profiles(kinetic, ctrl)
-        l, Runner._slayer_chi_inputs(l, ctrl; warn=false)
+        l = Tearing._slayer_profiles(kinetic, ctrl)
+        l, Tearing._slayer_chi_inputs(l, ctrl; warn=false)
     catch err
         ctrl.enabled && rethrow()
         @warn "Layer-overlap scan skipped: the kinetic profiles do not serve the SLAYER layer or its P_perp_model's diffusivities." exception = err
@@ -579,7 +574,7 @@ function _overlap_slayer_inputs(inputs, kinetic::Union{Nothing,Equilibrium.Kinet
         tau_E=ctrl.tau_E, P_perp_model=ctrl.P_perp_model,
         zeff=loaded.zeff === nothing ? ctrl.zeff : loaded.zeff,
         bt=ctrl.bt, mu_i=ctrl.ion_mass, theta=ctrl.theta_sample,
-        resistivity_model=Runner._build_resistivity_model(ctrl.resistivity_model),
+        resistivity_model=Tearing._build_resistivity_model(ctrl.resistivity_model),
         lnLambda_form=ctrl.lnLambda_form)
 end
 
@@ -1374,11 +1369,12 @@ It runs in both the `force_termination = true` path and the full pipeline.
 """
 function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any})
     ("SLAYER" in keys(inputs)) || return nothing
-    slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+    _stop_on_deprecated_keys(inputs["SLAYER"], ("gap_kHz_threshold",), "SLAYER")
+    slayer_ctrl = Tearing.slayer_control_from_toml(inputs["SLAYER"])
     slayer_ctrl.enabled || return nothing
     @info "\n  SLAYER\n$_SECTION"
-    model = Runner._build_inner_model(slayer_ctrl.inner_model)
-    slayer_result = solve(Runner.TearingProblem(result, slayer_ctrl), model)
+    model = Tearing._build_inner_model(slayer_ctrl.inner_model)
+    slayer_result = solve(Tearing.TearingProblem(result, slayer_ctrl), model)
     return slayer_result
 end
 
@@ -1450,7 +1446,7 @@ end
 export main, write_imas
 export solve, plasma_response, perturbed_equilibrium
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField, PlasmaResponse
-export MatchProblem, TearingProblem, GGJModel, SLAYERModel
+export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 
 include("Precompile.jl")

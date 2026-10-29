@@ -146,21 +146,26 @@ solve instead.
 
 ## Tearing stability
 
-The free-eigenvalue tearing solve is the second flavor of inner-layer matching: instead of
-prescribing the layer rotation, a `TearingProblem` holds the outer Δ′ fixed and root-finds
-the growth rate where the inner-layer response matches it. The same model slot applies —
-`SLAYERModel()` is the slab layer that exists for exactly this problem. GGJ growth-rate
-extraction is not implemented yet, so `GGJModel()` errors here.
+A `TearingProblem` holds the outer solution and physical inputs. `TearingConfig` holds
+scan and root-search settings; the inner-layer model owns its solver options.
 
 ```julia
-ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
-tear = solve(TearingProblem(ffs), SLAYERModel())            # coupling_mode=:coupled returns one global root instead
-tear.gamma_Hz, tear.rational_q                               # root-found rate at each rational surface
+problem = TearingProblem(ffs; coupling_mode=:coupled, eta=1e-7, rho=1e-7)
+config = TearingConfig(; gamma_range=(1.0, 1e4), omega_range=(-1e4, 1e4))
+tear = solve(problem, GGJModel(; solver=:ray); config=config)
+save_to_hdf5("gpec.h5", tear)
 ```
 
-Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedure knobs
-(scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
-kinetic profiles come from the equilibrium the solve was posed on (see Kinetic profiles above).
+GGJ derives its per-surface parameters from the equilibrium and validates the raw Delta-prime
+matrix and surface ordering. Omitted `eta` and `rho` are derived from attached kinetic profiles
+using Spitzer resistivity and main-ion mass density. The existing GGJ treatment assumes no
+differential rotation and reports plasma-frame frequencies. SLAYER reports lab-frame frequencies
+with its existing per-surface E×B shifts. Both expose `omega` in rad/s and `gamma` in 1/s,
+positive for instability; the HDF5 roots group records `frequency_frame`.
+
+SLAYER uses `solve(TearingProblem(ffs; physics...), SLAYERModel(); config=TearingConfig(...))`,
+with its normalized Q search box on the configuration. Deck construction is handled by the
+consolidated parser in the subsequent deck-switch work.
 
 Kinetic runs (`kinetic_factor > 0`) take `Forward()`. The `"calculated"` source reads the
 equilibrium's kinetic profiles, with the default `KineticForcesControl` species and collision
