@@ -1,5 +1,5 @@
 # Regression case: large-aspect-ratio reversed-shear n=1 ideal stability.
-# q falls from 2.35 on the axis to 1.82 and rises to 2.84 at the edge, so q = 2 is crossed twice;
+# q falls from 2.40 on the axis to 1.82 and rises to 2.84 at the edge, so q = 2 is crossed twice;
 # the two crossings must stay separate singular surfaces with opposite-sign q′. Tracks the
 # free-boundary energies, the singular surfaces and the integration for that fixture. Each
 # [quantities.*] block names an HDF5 path, how to extract it, and its noise floor.

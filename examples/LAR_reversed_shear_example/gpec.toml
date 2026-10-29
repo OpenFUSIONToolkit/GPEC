@@ -1,5 +1,5 @@
 # Large-aspect-ratio equilibrium with reversed shear: n=1 ideal stability.
-# A hollow current profile makes q fall from 2.35 on the axis to a minimum of 1.82 at ψ_N ≈ 0.37
+# A hollow current profile makes q fall from 2.40 on the axis to a minimum of 1.82 at ψ_N ≈ 0.37
 # and rise to 2.84 at the edge, so q = 2 is crossed twice, with q′ < 0 on the inner crossing and
 # q′ > 0 on the outer one. Regression fixture for keeping both crossings as separate surfaces; the
 # equilibrium is generated analytically from the embedded [LAR_INPUT] section, with no wall.
