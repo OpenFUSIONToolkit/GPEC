@@ -151,7 +151,7 @@ Riccati solve; `delta_s` is solved per surface as a reported comparison only.
     ψ = 1 on the real q. Geometry needs no clamp of its own -- `radial_label` derivatives are
     analytic and valid under extrapolation
   - `extrapolate` -- search past `psihigh_safe` on the separatrix q-law (default `true`)
-  - `theta` -- poloidal angle for the minor-radius chord (default `0.0`)
+  - `theta` -- poloidal angle for the minor-radius chord, used only by `rs_method=:midplane` (default `0.0`)
   - `rs_method` -- radial label the widths and their ψ-conversion Jacobian are taken in
     (default `:flux`; see `radial_label`). The caller wiring this scan into the domain
     truncation passes `:flux`, the label Fitzpatrick Eq. (100) is anchored to

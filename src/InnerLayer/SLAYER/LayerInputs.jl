@@ -230,8 +230,8 @@ profiles, without an intermediate file round-trip.
     together, so every option is self-consistent. Not exposed via TOML —
     programmatic use only.
 
-  - `theta`     -- poloidal angle at which to measure minor radius (default
-    `0.0`, outboard midplane).
+  - `theta`     -- poloidal angle of the minor-radius chord, used only by
+    `rs_method=:midplane` (default `0.0`, outboard midplane).
 
   - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`,
     `SpitzerModel()`, or `SpitzerHarmModel()` (legacy Fitzpatrick σ_∥).
