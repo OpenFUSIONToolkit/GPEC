@@ -34,6 +34,7 @@ The objects map one-to-one onto the pipeline stages:
 
     ```julia
     eq = PlasmaEquilibrium(Equilibrium.SolovevConfig(; elongation=1.5); mpsi=0)
+    eq = PlasmaEquilibrium(Equilibrium.CerfonConfig(; null="lsn"); psihigh=0.999)
     eq = PlasmaEquilibrium(dd; imas_cocos=11)
     ```
 

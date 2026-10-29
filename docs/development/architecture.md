@@ -32,12 +32,13 @@ Splines are provided by the external `FastInterpolations` package rather than by
      - `chease`, `chease2` - CHEASE equilibrium code formats
      - `lar` - Large Aspect Ratio analytical model
      - `sol` - Solovev analytical equilibrium
+     - `cerfon` - Cerfon-Freidberg diverted analytical equilibrium
    - Key files, by pipeline stage:
      - `Config.jl` - `EquilibriumConfig`, `EquilibriumParameters`
      - `PlasmaEquilibrium.jl` - The result type and its profile and geometry splines
      - `Construction.jl` - Solver input for each source type, the `PlasmaEquilibrium` constructors, `reform`
      - `Sources/` - One file per input format (`GFile.jl`, `Chease.jl`, `IFile.jl`, `IMAS.jl`), the ingest and
-       run-input types (`Ingest.jl`), and `Analytic/` (the analytic registry plus one file per model with its config and solver)
+       run-input types (`Ingest.jl`), and `Analytic/` (the registry plus `Solovev.jl`, `Cerfon.jl`, `LargeAspectRatio.jl` and `TJAnalytic.jl`, each with its config and solver)
      - `Grid/` - First-pass ψ grids (`PsiGrid.jl`) and the two-pass refinement (`GridRefinement.jl`)
      - `Axisymmetric/` - The 2D solvers (`Direct.jl`, `DirectArcLength.jl`, `DirectByInversion.jl`, `Inverse.jl`),
        the Grad-Shafranov residual, and separatrix finding
