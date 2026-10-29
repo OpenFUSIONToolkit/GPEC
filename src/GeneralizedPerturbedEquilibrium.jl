@@ -143,6 +143,17 @@ function run_settings(inputs::AbstractDict, path::AbstractString)
     return (; output_file=isabspath(file) ? file : normpath(joinpath(path, file)), verbose=Bool(get(table, "verbose", false)))
 end
 
+# A copy of a deck section with its relative path `keys` resolved against the deck directory `path`; absolute paths are kept.
+_deck_paths(::Nothing, path, keys) = nothing
+function _deck_paths(section::AbstractDict, path::AbstractString, keys)
+    resolved = Dict{String,Any}(section)
+    for k in keys
+        v = get(resolved, k, "")
+        isempty(v) || isabspath(v) || (resolved[k] = normpath(joinpath(path, v)))
+    end
+    return resolved
+end
+
 """
     local_stability_algorithm(inputs) -> Union{LocalStability.Ballooning,Nothing}
 
@@ -265,7 +276,7 @@ function main_from_inputs(
 
     # A deck without [ForceFreeStates] stops after the equilibrium.
     ffs_table = get(inputs, "ForceFreeStates", nothing)
-    intr = ForceFreeStatesInternal(; dir_path=path, verbose)
+    intr = ForceFreeStatesInternal(; verbose)
     ctrl = ffs_table === nothing ? nothing : _deck_layer_overlap(ForceFreeStates.control_from_deck(ffs_table, get(inputs, "DEBUG", Dict{String,Any}())), inputs)
     local_stability_alg = local_stability_algorithm(inputs)
 
@@ -292,7 +303,7 @@ function main_from_inputs(
     push!(runtimes, "equilibrium" => equil_dt)
     @info "Equilibrium construction completed in $(@sprintf("%.3f", equil_dt)) s"
 
-    intr.wall_settings = Vacuum.parse_wall(get(inputs, "Wall", nothing))
+    intr.wall_settings = Vacuum.parse_wall(_deck_paths(get(inputs, "Wall", nothing), path, ("file",)))
 
     if "DEBUG" in keys(inputs)
         intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"] if k != "gal_basis_output")...)
@@ -325,8 +336,7 @@ function main_from_inputs(
     ffs_result = run_deck_match(run_force_free_states(ctrl, equil, mats, intr, metric), ctrl; verbose)
     alg = ctrl.algorithm
     problem_kwargs = ForceFreeStates.problem_keywords(ctrl)
-    problem = ForceBalanceProblem(equil; nn=ctrl.nn_low:ctrl.nn_high, wall=intr.wall_settings, dir_path=intr.dir_path,
-        debug=intr.debug_settings, problem_kwargs...)
+    problem = ForceBalanceProblem(equil; nn=ctrl.nn_low:ctrl.nn_high, wall=intr.wall_settings, debug=intr.debug_settings, problem_kwargs...)
     ffs_result = ForceFreeStates._with(ffs_result; problem=problem, algorithm=alg, layer_overlap=layer_overlap)
 
     h5open(output_file, "w") do target
@@ -355,7 +365,7 @@ function main_from_inputs(
     pe_state = nothing
     if "PerturbedEquilibrium" in keys(inputs)
         pe_state = _timed_stage(runtimes, "perturbed_equilibrium", "Perturbed Equilibrium") do
-            run_perturbed_equilibrium(ffs_result, inputs, preloaded_coil_sets; verbose)
+            run_perturbed_equilibrium(ffs_result, inputs, path, preloaded_coil_sets; verbose)
         end
         save_to_hdf5(output_file, pe_state)
     end
@@ -377,7 +387,7 @@ function main_from_inputs(
     coil_sensitivities, monte_carlo, locking_risk, efc_couplings = nothing, nothing, nothing, nothing
     if "ErrorFields" in keys(inputs)
         error_fields = _timed_stage(runtimes, "error_fields", "ErrorFields") do
-            run_error_fields(inputs, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl; verbose)
+            run_error_fields(inputs, path, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl; verbose)
         end
         coil_sensitivities, monte_carlo = error_fields.sens, error_fields.monte_carlo
         locking_risk, efc_couplings = error_fields.risk, error_fields.couplings
@@ -567,10 +577,10 @@ the writer: the PE stage reads and normalizes the forcing file itself.
 function snapshot_forcing_modes(inputs::Dict{String,Any}, path::String; verbose::Bool=false)
     # Coil forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on replay.
     "PerturbedEquilibrium" in keys(inputs) || return nothing
-    ft_ctrl = forcing_terms_control(inputs)
+    ft_ctrl = forcing_terms_control(inputs, path)
     ft_ctrl.forcing_data_format in ("ascii", "hdf5") || return nothing
     modes = ForcingTerms.ForcingMode[]
-    normalization = ForcingTerms.load_forcing_data!(modes, path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, verbose)
+    normalization = ForcingTerms.load_forcing_data!(modes, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, verbose)
     return modes, normalization
 end
 
@@ -799,8 +809,7 @@ function run_deck_match(result::ForceFreeStatesResult, ctrl::ForceFreeStatesCont
 end
 
 """
-    ForceBalanceProblem(equil; nn, wall=nothing,
-                        dir_path=".", debug=DebugSettings(), kwargs...)
+    ForceBalanceProblem(equil; nn, wall=nothing, debug=DebugSettings(), kwargs...)
 
 The perturbed force-balance problem posed on an equilibrium, whose solutions are the force-free
 (or, with `kinetic_factor > 0`, kinetic) perturbed states. With kinetic terms the force operator
@@ -811,8 +820,7 @@ This is the WHAT of a stability solve; the integrator passed to
 names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
 matching is a separate problem posed on the finished solve: see `MatchProblem`.
 
-`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, `dir_path` the
-working directory outputs are written to, and `debug` the diagnostic dump settings of the
+`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, and `debug` the diagnostic dump settings of the
 DEBUG deck section. Remaining keywords describe physics and workflow controls;
 numerical settings belong on the integrator passed to `solve`. `nn_low`/`nn_high` are rejected — they
 come from `nn`.
@@ -821,14 +829,12 @@ come from `nn`.
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
   - `wall::Union{Nothing,Vacuum.WallSettings}` - Vacuum wall shape for the free-boundary energies.
-  - `dir_path::String` - Working directory for outputs.
   - `debug::DebugSettings` - Diagnostic dump settings.
   - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
 """
 struct ForceBalanceProblem
     equil::Equilibrium.PlasmaEquilibrium
     wall::Union{Nothing,Vacuum.WallSettings}
-    dir_path::String
     debug::DebugSettings
     ctrl_kwargs::Dict{Symbol,Any}
 end
@@ -837,7 +843,6 @@ function ForceBalanceProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
     wall::Union{Nothing,Vacuum.WallSettings}=nothing,
-    dir_path::AbstractString=".",
     debug::DebugSettings=DebugSettings(),
     kwargs...
 )
@@ -850,7 +855,7 @@ function ForceBalanceProblem(
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
     ctrl_kwargs[:nn_high] = last(nn)
-    return ForceBalanceProblem(equil, wall, String(dir_path), debug, ctrl_kwargs)
+    return ForceBalanceProblem(equil, wall, debug, ctrl_kwargs)
 end
 
 """
@@ -888,7 +893,7 @@ function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrato
     ctrl.kinetic_factor > 0 && !(alg isa ForceFreeStates.Forward) &&
         error("$(nameof(typeof(alg)))() does not support kinetic runs (kinetic_factor > 0); use Forward().")
 
-    intr = ForceFreeStatesInternal(; dir_path=prob.dir_path, verbose)
+    intr = ForceFreeStatesInternal(; verbose)
     intr.wall_settings = prob.wall
     intr.debug_settings = prob.debug
 
@@ -920,20 +925,21 @@ solve(equil::Equilibrium.PlasmaEquilibrium, alg::ForceFreeStates.AbstractIntegra
     solve(ForceBalanceProblem(equil; kwargs...), alg; verbose)
 
 """
-    run_perturbed_equilibrium(result, inputs, preloaded_coil_sets; verbose=false) -> pe_state
+    run_perturbed_equilibrium(result, inputs, path, preloaded_coil_sets; verbose=false) -> pe_state
 
 Run the perturbed-equilibrium stage against a published force-free-states `result`. Returns `nothing` when the deck carries no `[PerturbedEquilibrium]` section.
 """
 function run_perturbed_equilibrium(
     result::ForceFreeStatesResult,
     inputs::Dict{String,Any},
+    path::AbstractString,
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}};
     verbose::Bool=false
 )
     # Check for PerturbedEquilibrium section and run if present
     pe_state = nothing
     if "PerturbedEquilibrium" in keys(inputs)
-        ft_ctrl = forcing_terms_control(inputs)
+        ft_ctrl = forcing_terms_control(inputs, path)
         section = inputs["PerturbedEquilibrium"]
 
         # The deck's section feeds the two scripting calls, and its forcing block is an unscaled
@@ -1037,22 +1043,23 @@ function run_kinetic_forces(
 end
 
 """
-    forcing_terms_control(inputs) -> ForcingTermsControl
+    forcing_terms_control(inputs, path) -> ForcingTermsControl
 
-The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent. The
-`[[ForcingTerms.coil_set]]` array of tables is passed through as `coil_sets_raw` rather than
-splatted with the scalar keys.
+The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent, with its
+relative file paths resolved against the deck directory `path`. The `[[ForcingTerms.coil_set]]`
+array of tables is passed through as `coil_sets_raw` rather than splatted with the scalar keys.
 """
-function forcing_terms_control(inputs::Dict{String,Any})
-    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl()
-    forcing_raw = inputs["ForcingTerms"]
-    coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+function forcing_terms_control(inputs::Dict{String,Any}, path::AbstractString)
+    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl(; forcing_data_file=joinpath(path, "forcing.dat"))
+    forcing_raw = _deck_paths(inputs["ForcingTerms"], path, ("forcing_data_file", "dat_dir"))
+    haskey(forcing_raw, "forcing_data_file") || (forcing_raw["forcing_data_file"] = joinpath(path, "forcing.dat"))
+    coil_sets_raw = Dict{String,Any}[_deck_paths(d, path, ("dat_file", "h5_file")) for d in get(forcing_raw, "coil_set", Dict{String,Any}[])]
     scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
     return ForcingTerms.ForcingTermsControl(; (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw)
 end
 
 """
-    run_error_fields(inputs, result, pe_state, preloaded_coil_sets, kf_ctrl; verbose=false)
+    run_error_fields(inputs, path, result, pe_state, preloaded_coil_sets, kf_ctrl; verbose=false)
 
 Compute the requested coil sensitivities, tolerance Monte Carlo, locking risk, and NTV
 correction-coil couplings. Return `(; sens, monte_carlo, risk, couplings, dom, tolerances, scan)`;
@@ -1061,6 +1068,7 @@ function returns. Requires coil-format forcing and a perturbed-equilibrium respo
 """
 function run_error_fields(
     inputs::Dict{String,Any},
+    path::AbstractString,
     result::ForceFreeStatesResult,
     pe_state,
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}},
@@ -1081,7 +1089,7 @@ function run_error_fields(
     # Correction arrays and other excluded sets are swept like any coil but are not error-field sources.
     excluded = ErrorFields.excluded_coil_names(ef_raw)
     pe_state === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section with compute_singular_coupling = true")
-    ft_ctrl = forcing_terms_control(inputs)
+    ft_ctrl = forcing_terms_control(inputs, path)
     ft_ctrl.forcing_data_format == "coil" ||
         error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(ft_ctrl.forcing_data_format)\")")
 
@@ -1093,7 +1101,7 @@ function run_error_fields(
 
     tolerances = nothing
     if !isempty(ef_ctrl.tolerance_file)
-        tol_path = joinpath(result.dir_path, ef_ctrl.tolerance_file)
+        tol_path = isabspath(ef_ctrl.tolerance_file) ? ef_ctrl.tolerance_file : joinpath(path, ef_ctrl.tolerance_file)
         isfile(tol_path) || error("[ErrorFields] tolerance_file not found: $tol_path")
         tolerances = ErrorFields.validate_tolerances(ErrorFields.read_tolerance_toml(tol_path), sens.coil_names)
         ErrorFields.check_excluded_tolerances(tolerances, excluded)

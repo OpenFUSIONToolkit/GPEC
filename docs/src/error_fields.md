@@ -74,7 +74,7 @@ either way.
 
 Manufacturing tolerances are engineering data, reviewed and versioned independently of any
 run, so they live in their own TOML file named by `tolerance_file` in `[ErrorFields]` (a path
-relative to the run directory). The run validates the file, echoes its text into
+relative to the deck directory). The run validates the file, echoes its text into
 `Input/RawInputs/ErrorFields/tolerance_toml_raw` for replay, and leaves the device numbers
 where they belong: outside the repository. The sampling and Monte Carlo stages that consume
 these tolerances follow in later releases; this release fixes the format.
@@ -190,7 +190,7 @@ error. `without_coils(table, names)` is the same operation on a table in memory,
 
 ```toml
 [ErrorFields]
-tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the run directory
+tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the deck directory
 
 [ErrorFields.MonteCarlo]
 nsample = 1000000               # Samples per batch

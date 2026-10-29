@@ -105,7 +105,7 @@ function compute_perturbed_equilibrium(
     preloaded_coil_sets::Vector{CoilSet}=CoilSet[]
 )::PerturbedEquilibriumState
     ffs = resp.ffs
-    modes, coil_sets = materialize_forcing_modes(ffs, forcing; dir_path=ffs.dir_path, preloaded_coil_sets, verbose)
+    modes, coil_sets = materialize_forcing_modes(ffs, forcing; preloaded_coil_sets, verbose)
     state = PerturbedEquilibriumState(; response=resp, forcing_modes=modes,
         coil_sets=isempty(coil_sets) ? preloaded_coil_sets : coil_sets, regularization_width=Float64(regularization_width))
 
@@ -119,7 +119,7 @@ function compute_perturbed_equilibrium(
 end
 
 """
-    materialize_forcing_modes(ffs, forcing; dir_path, preloaded_coil_sets=CoilSet[], verbose=false)
+    materialize_forcing_modes(ffs, forcing; preloaded_coil_sets=CoilSet[], verbose=false)
         -> (modes::Vector{ForcingMode}, coil_sets::Vector{CoilSet})
 
 Pure computation of the control-surface forcing spectrum: turn a forcing description into
@@ -128,14 +128,13 @@ the response step consumes. Nothing is mutated — the caller owns where the res
 
 Coil formats build the geometry (or reuse `preloaded_coil_sets` from the gpec.h5 replay
 path) and integrate the Biot-Savart field on the control surface; file formats read the
-modes from `dir_path` and convert their normalization onto the run's `mlow:mhigh`. Both branches evaluate on
+modes from `forcing_data_file` and convert their normalization onto the run's `mlow:mhigh`. Both branches evaluate on
 `ffs.psilim`, the integration limit. The second return value is the coil geometry actually
 used (empty for file formats), which the writer snapshots for replay.
 """
 function materialize_forcing_modes(
     ffs::ForceFreeStatesResult,
     forcing::ForcingTerms.ForcingTermsControl;
-    dir_path::AbstractString,
     preloaded_coil_sets::Vector{ForcingTerms.CoilSet}=ForcingTerms.CoilSet[],
     verbose::Bool=false
 )
@@ -157,7 +156,7 @@ function materialize_forcing_modes(
         end
     else
         file_modes = ForcingMode[]
-        norm_tag = load_forcing_data!(file_modes, dir_path, forcing.forcing_data_file, forcing.forcing_data_format, verbose)
+        norm_tag = load_forcing_data!(file_modes, forcing.forcing_data_file, forcing.forcing_data_format, verbose)
         for n in ffs.nlow:ffs.nhigh
             modes_n = filter(m -> m.n == n, file_modes)
             isempty(modes_n) && continue
@@ -208,12 +207,12 @@ preloaded-geometry shortcut does not apply to sums (the replay path injects mate
 modes upstream and never materializes a sum).
 """
 function materialize_forcing_modes(ffs::ForceFreeStatesResult, rmp::ForcingTerms.RMPFieldSum;
-    dir_path::AbstractString, preloaded_coil_sets::Vector{ForcingTerms.CoilSet}=ForcingTerms.CoilSet[],
+    preloaded_coil_sets::Vector{ForcingTerms.CoilSet}=ForcingTerms.CoilSet[],
     verbose::Bool=false)
     amplitudes = Dict{Tuple{Int,Int},ComplexF64}()
     coil_sets = ForcingTerms.CoilSet[]
     for term in rmp.terms
-        term_modes, term_coils = materialize_forcing_modes(ffs, term; dir_path=dir_path, verbose=verbose)
+        term_modes, term_coils = materialize_forcing_modes(ffs, term; verbose=verbose)
         for mode in term_modes
             key = (mode.n, mode.m)
             amplitudes[key] = get(amplitudes, key, 0.0 + 0.0im) + mode.amplitude

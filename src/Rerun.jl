@@ -399,7 +399,7 @@ the deck supplies, which is otherwise inherited silently.
 function ErrorFields.ResonantDriveContext(h5path::AbstractString; dat_dir=nothing, kwargs...)
     rc = PerturbedEquilibrium.ResonantCoupling(h5path)
     equil, inputs, psilim = equilibrium_from_h5(h5path)
-    cfg = ForcingTerms.CoilConfig(forcing_terms_control(inputs))
+    cfg = ForcingTerms.CoilConfig(forcing_terms_control(inputs, dirname(abspath(h5path))))
     cfg = ErrorFields.regrid(cfg; dat_dir)
     isempty(cfg.dat_dir) || isdir(cfg.dat_dir) ||
         @warn "Coil geometry directory from the stored deck does not exist here: $(cfg.dat_dir). Pass dat_dir to point at a local copy."

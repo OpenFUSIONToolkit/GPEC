@@ -163,7 +163,7 @@
             @test Runner.slayer_control_from_toml(Dict{String,Any}("inner_model" => name)).inner_model === Symbol(name)
         end
         no_surfaces = (equil=nothing, surfaces=GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType[],
-            delta_prime=nothing, dir_path=".")
+            delta_prime=nothing)
         @test_throws ErrorException solve(TearingProblem(no_surfaces, SLAYERControl(; enabled=true)), GGJModel())
     end
 

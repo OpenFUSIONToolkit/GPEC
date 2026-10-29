@@ -74,8 +74,7 @@ include("h5_metadata_check.jl")
             @test ffs.numpert_total == ffs.mpert * ffs.npert
             @test 0 < ffs.psilim <= 1
             @test !isempty(ffs.surfaces)
-            @test ffs.control.integrator == "forward"
-            @test ffs.dir_path == dir
+            @test ffs.integrator === :forward
         end
     end
 
@@ -199,7 +198,7 @@ include("h5_metadata_check.jl")
                     # The closed profiles land in the shared Solutions layout: same names and
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-                    HDF5.h5open(joinpath(dir, "gpec.h5"), "r") do f
+                    HDF5.h5open(GeneralizedPerturbedEquilibrium.run_settings(TOML.parsefile(joinpath(dir, "gpec.toml")), dir).output_file, "r") do f
                         @test ffs.galerkin.solver in ("cholesky", "LU")
                         @test read(f["$gal/solver"]) == ffs.galerkin.solver
                         @test haskey(attrs(f["$gal/solver"]), "long_name")
@@ -230,7 +229,7 @@ include("h5_metadata_check.jl")
                 extra_sections=Dict{String,Any}("DEBUG" => Dict{String,Any}("gal_basis_output" => true)))
             ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
             gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-            HDF5.h5open(joinpath(dir, "gpec.h5"), "r") do f
+            HDF5.h5open(GeneralizedPerturbedEquilibrium.run_settings(TOML.parsefile(joinpath(dir, "gpec.toml")), dir).output_file, "r") do f
                 @test haskey(f, "$gal/Basis/xi_psi")
                 basis = read(f["$gal/Basis/xi_psi"])
                 # (mode, solution, psi) on the FULL gal grid, on-surface nodes included; the

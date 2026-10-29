@@ -6,7 +6,7 @@ const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 # Cheap (sing_lim! + sing_find! + field assignment). Separate from equil/mats
 # setup because intr is mutated by each integration (sing[s].delta_prime etc.).
 function make_solovev_intr(inputs, ctrl, equil, ex)
-    intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
+    intr = FFS.ForceFreeStatesInternal()
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
     intr.nlow = ctrl.nn_low;
     intr.nhigh = ctrl.nn_high;

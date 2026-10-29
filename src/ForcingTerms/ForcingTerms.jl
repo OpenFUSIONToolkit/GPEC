@@ -12,7 +12,8 @@ import ..Utilities.FourierTransforms: compute_fourier_coefficients
 """
     ForcingTermsControl
 
-User-facing control parameters from TOML [ForcingTerms] section.
+User-facing control parameters from TOML [ForcingTerms] section. A deck run resolves its relative
+file paths against the deck directory; a script's resolve against the working directory.
 
 ## Fields
 
@@ -66,7 +67,7 @@ Base.@kwdef mutable struct ForcingMode
 end
 
 """
-    load_forcing_data!(forcing_modes, dir_path, forcing_data_file, forcing_data_format, verbose) -> String
+    load_forcing_data!(forcing_modes, forcing_data_file, forcing_data_format, verbose) -> String
 
 Load forcing data from ASCII or HDF5 file. Returns the normalization tag read
 from the file (or `"normal_field_T"` by default if no tag is present).
@@ -97,12 +98,10 @@ Columns: n, m, amplitude_real, amplitude_imag
 """
 function load_forcing_data!(
     forcing_modes::Vector{ForcingMode},
-    dir_path::String,
-    forcing_data_file::String,
+    filepath::String,
     forcing_data_format::String,
     verbose::Bool=false
 )::String
-    filepath = joinpath(dir_path, forcing_data_file)
 
     if verbose
         @info "Loading forcing data from $filepath"

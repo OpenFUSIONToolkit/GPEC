@@ -18,7 +18,7 @@ using TOML, HDF5
         ctrl = GPEC.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
         kwargs = GPEC.ForceFreeStates.problem_keywords(ctrl)
         mktempdir() do api_dir
-            prob = ForceBalanceProblem(eq; nn=1, wall=GPEC.Vacuum.parse_wall(get(inputs, "Wall", nothing)), dir_path=api_dir, kwargs...)
+            prob = ForceBalanceProblem(eq; nn=1, wall=GPEC.Vacuum.parse_wall(get(inputs, "Wall", nothing)), kwargs...)
             alg = ctrl.algorithm
             result = solve(prob, alg)
             @test result.problem === prob

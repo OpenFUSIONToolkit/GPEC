@@ -35,7 +35,7 @@ function save_to_hdf5(
 
 
     # File-level metadata contract (schema_version, Conventions, title, date).
-    Utilities.HDF5Annotations.write_root_attrs!(out_h5; title="GPEC output: $(basename(abspath(result.dir_path)))")
+    Utilities.HDF5Annotations.write_root_attrs!(out_h5; title="GPEC output: $(basename(dirname(abspath(HDF5.filename(out_h5)))))")
 
     # Store git version for reproducibility
     out_h5["Info/git_version"] = git_version

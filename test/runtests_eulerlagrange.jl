@@ -454,7 +454,7 @@ end
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(eq_inputs, ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
             ctrl = FFS.control_from_deck(merge(inputs["ForceFreeStates"], Dict(String(k) => v for (k, v) in kwargs)))
-            intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
+            intr = FFS.ForceFreeStatesInternal()
             intr.nlow = ctrl.nn_low
             intr.nhigh = ctrl.nn_high
             intr.npert = 1
@@ -591,7 +591,7 @@ end
         example_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
         inputs["ForceFreeStates"]["integrator"] = "forward"
-        intr = FFS.ForceFreeStatesInternal(; dir_path=example_dir)
+        intr = FFS.ForceFreeStatesInternal()
         ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
         sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing

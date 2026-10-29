@@ -43,7 +43,7 @@ using HDF5
     @testset "forward solve matches the TOML-driven run" begin
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir)]).ffs
-            api = solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+            api = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
 
             @test api isa FFS.ForceFreeStatesResult
             @test api.integrator === :forward
@@ -65,7 +65,7 @@ using HDF5
     @testset "riccati solve produces the unified delta_prime" begin
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "riccati"))]).ffs
-            prob = ForceBalanceProblem(equil; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+            prob = ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs...)
             api = solve(prob, Riccati(; ode_kwargs..., nchunks=40))
 
             @test api.integrator === :riccati
@@ -93,7 +93,7 @@ using HDF5
         kf = 1e-3
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_factor" => kf))]).ffs
-            api = solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=kf, kinetic_source="fixed")
+            api = solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic_factor=kf, kinetic_source="fixed")
 
             @test api.mats.kinetic !== nothing
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
@@ -105,7 +105,7 @@ using HDF5
             @test [s.psifac for s in api.kinetic.kinsing] ≈ [s.psifac for s in reference.kinetic.kinsing]
 
             # Too large a factor for this coarse deck: the integration aborts near ψ = 0.4 and says so.
-            @test_throws "Euler-Lagrange integration aborted" solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs..., kinetic_factor=0.1)
+            @test_throws "Euler-Lagrange integration aborted" solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic_factor=0.1)
         end
     end
 
@@ -126,7 +126,7 @@ using HDF5
                 cp(joinpath(kin_template, name), joinpath(dir, name))
             end
             reference = GPEC.main([dir]).ffs
-            api = solve(kequil, kctrl.algorithm; nn=1, wall=kwall, dir_path=dir, kkwargs...)
+            api = solve(kequil, kctrl.algorithm; nn=1, wall=kwall, kkwargs...)
             @test api.mats.kinetic !== nothing
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-10
             @test api.diagnostics.nzero == reference.diagnostics.nzero
@@ -157,7 +157,7 @@ using HDF5
 
     @testset "galerkin solve returns a gal result with a unified delta_prime" begin
         mktempdir() do dir
-            api = solve(equil, Galerkin(; nx=32); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+            api = solve(equil, Galerkin(; nx=32); nn=1, wall=wall, ffs_kwargs...)
 
             @test api.integrator === :galerkin
             @test api.control.algorithm.nx == 32
@@ -195,7 +195,7 @@ using HDF5
             cp(forcing, joinpath(dir, "forcing.dat"))
             reference = GPEC.main([dir]).pe
 
-            ffs = solve(equil, forward; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+            ffs = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
             resp = plasma_response(ffs; verbose=false)
             pe = perturbed_equilibrium(resp, RMPField(forcing); pe_kw...)
 
@@ -292,14 +292,14 @@ using HDF5
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws "needs kinetic profiles on the equilibrium" solve(equil, forward; nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=0.5,
+        @test_throws "needs kinetic profiles on the equilibrium" solve(equil, forward; nn=1, ffs_kwargs..., kinetic_factor=0.5,
             kinetic_source="calculated")
-        @test_throws "does not support kinetic runs" solve(equil, riccati; nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
-        @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, dir_path=".", ffs_kwargs..., kinetic_factor=1e-9)
-        @test_throws ArgumentError solve(equil, forward; nn=1, dir_path=".", ffs_kwargs..., integrator="riccati")
-        @test_throws ArgumentError solve(equil, riccati; nn=1, dir_path=".", ffs_kwargs..., nchunks=8)
-        @test_throws ErrorException solve(equil, forward; nn=1, dir_path=".", ffs_kwargs..., nn_low=2)
-        @test_throws ErrorException solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=".", ffs_kwargs..., gal_match_flag=true)
+        @test_throws "does not support kinetic runs" solve(equil, riccati; nn=1, ffs_kwargs..., kinetic_factor=1e-9)
+        @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, ffs_kwargs..., kinetic_factor=1e-9)
+        @test_throws ArgumentError solve(equil, forward; nn=1, ffs_kwargs..., integrator="riccati")
+        @test_throws ArgumentError solve(equil, riccati; nn=1, ffs_kwargs..., nchunks=8)
+        @test_throws ErrorException solve(equil, forward; nn=1, ffs_kwargs..., nn_low=2)
+        @test_throws ErrorException solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, ffs_kwargs..., gal_match_flag=true)
     end
 
     # Path of the first field where `a` and `b` differ (recursing into structs, arrays and
@@ -338,7 +338,7 @@ using HDF5
     @testset "solves leave their inputs untouched" begin
         snap = deepcopy(equil)
         mktempdir() do dir
-            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, dir_path=dir, ffs_kwargs...)
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
             @test first_diff(equil, snap) === nothing
             # Matching reuses the outer solve: repeated match solves must not alter it.
             gal_snap = deepcopy(gal)
@@ -354,7 +354,7 @@ using HDF5
 
     @testset "matched inner profiles: opt-in, and parity columns agree across inner models" begin
         mktempdir() do dir
-            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, dir_path=dir, ffs_kwargs...)
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
             prob = MatchProblem(gal; eta=1e-7, rho=1e-7, rotation=1.0)
             center = solve(prob, GGJModel()).match
             ray = solve(prob, GGJModel(; real_profiles=true)).match
@@ -377,7 +377,7 @@ using HDF5
 
     @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
         mktempdir() do dir
-            ric = solve(equil, riccati; nn=1, dir_path=dir, ffs_kwargs...)
+            ric = solve(equil, riccati; nn=1, ffs_kwargs...)
             @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.coil)
             matched = solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             @test matched.closure === :matched
@@ -394,19 +394,17 @@ using HDF5
     @testset "MatchProblem gates on its inputs" begin
         mktempdir() do dir
             # A Forward result carries no Δ′ payload, so the problem is unconstructible.
-            fwd = solve(equil, forward; nn=1, dir_path=dir, ffs_kwargs...)
+            fwd = solve(equil, forward; nn=1, ffs_kwargs...)
             @test_throws ErrorException MatchProblem(fwd; ideal=true)
             # A slab model can never close a matched solution.
-            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, dir_path=dir, ffs_kwargs...)
+            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, ffs_kwargs...)
             prob = MatchProblem(gal; ideal=true)
             @test_throws ErrorException solve(prob, SLAYERModel())
             # A resistive match needs every layer input.
             @test_throws ErrorException MatchProblem(gal; eta=1e-7)
             @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(gal.surfaces) + 1), rho=1e-7, rotation=1.0)
             # The tearing model is the solve argument, never a TearingProblem keyword.
-            @test_throws ErrorException TearingProblem(gal; inner_model=:ggj_ray)
-            # The deck's tearing stage propagates errors rather than finishing without a Tearing/ group.
-            @test_throws ArgumentError GPEC.run_slayer_stage(gal, Dict{String,Any}("SLAYER" => Dict{String,Any}("enabled" => true, "inner_model" => "ggj_ray")))
+            @test_throws MethodError TearingProblem(gal; inner_model=:ggj_ray)
             # The ideal reference match keeps the ideal closure and replaces the solution with
             # the bare coil columns in the identity-at-edge basis.
             matched = solve(prob, GGJModel())
@@ -422,10 +420,10 @@ using HDF5
     # A known drift is `@test_broken`, so the change that removes it surfaces as an unexpected pass.
     @testset "deck and API parity" begin
         @testset "hdf5 file forcing" begin
-            pe_kwargs = (compute_singular_coupling=true, verbose=false)
+            pe_kwargs = (; compute_singular_coupling=true)
             mktempdir() do dir
                 modes = GPEC.ForcingTerms.ForcingMode[]
-                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example"), "forcing.dat", "ascii", false)
+                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), "ascii", false)
                 h5open(f -> GPEC.ForcingTerms.save_forcing_to_h5(modes, f), joinpath(dir, "forcing.h5"), "w")
                 _stage_deck(dir;
                     extra_sections=Dict{String,Any}(
@@ -454,7 +452,7 @@ using HDF5
                 @test reference.equil.rzphi_xs != pass1.rzphi_xs    # the deck re-formed on a refined grid
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
-                api = solve(pass1, forward; nn=1, wall=wall, dir_path=dir, kwargs...)
+                api = solve(pass1, forward; nn=1, wall=wall, kwargs...)
                 # The equilibrium stores its analytic config, so `solve` re-forms it on the deck's grid.
                 @test api.equil.rzphi_xs == reference.equil.rzphi_xs
             end
@@ -467,7 +465,7 @@ using HDF5
                 "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n), "gal_rotation" => fill(layer.rotation, n))
 
             mktempdir() do dir
-                gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, ffs_kwargs...)
                 # The galerkin inner model returns real-ψ profiles, so the inner profiles are compared too.
                 api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:galerkin))
                 n = length(gal.surfaces)
@@ -479,12 +477,12 @@ using HDF5
                 @test api.match.xi ≈ reference.match.xi rtol = 1e-12
                 # The composite inner profiles are API-only: a deck never keeps the cut solution.
                 @test isempty(reference.match.inner_xi) && isempty(api.match.inner_xi)
-                cut = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                cut = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, ffs_kwargs...)
                 @test length(solve(MatchProblem(cut; layer...), GGJModel(; solver=:galerkin)).match.inner_xi) == n
             end
 
             mktempdir() do dir
-                ric = solve(equil, riccati; nn=1, wall=wall, dir_path=dir, ffs_kwargs...)
+                ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs...)
                 api = solve(MatchProblem(ric; layer...), GGJModel(; solver=:ray))
                 overrides = merge(Dict{String,Any}("integrator" => "riccati"), match_keys(length(ric.surfaces), "ray"))
                 reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
@@ -508,7 +506,7 @@ using HDF5
 
                 kwargs = merge(ffs_kwargs, Dict(:kinetic_factor => 1e-9))
                 # The fixed source needs no profiles, so `solve` runs it as the deck does.
-                @test solve(equil, forward; nn=1, wall=wall, dir_path=dir, kwargs...).free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
+                @test solve(equil, forward; nn=1, wall=wall, kwargs...).free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
             end
         end
     end

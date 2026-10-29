@@ -15,7 +15,7 @@ never inputs: the full spectra are stored and projected post hoc with [`sensitiv
     about its own arc-length centre (the Fortran `coil_read` convention the OMFIT tolerance tool
     inherited), `"set"` rotates the whole set rigidly about its common arc-length centre (a
     winding pack moving as one body, which is what an axis-line tolerance constrains)
-  - `tolerance_file`: manufacturing-tolerance TOML (see `ToleranceTOML`), relative to the run
+  - `tolerance_file`: manufacturing-tolerance TOML (see `ToleranceTOML`), relative to the deck
     directory; empty means none. It is validated against the run's coil sets and echoed into
     `Input/RawInputs/ErrorFields/tolerance_toml_raw`
   - `exclude_coils`: coil sets of the run that are not error-field sources, such as a correction

@@ -11,7 +11,7 @@ using GeneralizedPerturbedEquilibrium, TOML, Printf, Statistics
 function run_ffs(ex; integrator)
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["integrator"] = integrator
-    intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
+    intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
     ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
     eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config)

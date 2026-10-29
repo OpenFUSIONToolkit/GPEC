@@ -445,7 +445,7 @@ ctrl  = FFS.control_from_deck(inputs["ForceFreeStates"])
 equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
 
-intr  = FFS.ForceFreeStatesInternal(; dir_path=ex)
+intr  = FFS.ForceFreeStatesInternal()
 intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
 intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
 FFS.sing_lim!(intr, ctrl, equil)

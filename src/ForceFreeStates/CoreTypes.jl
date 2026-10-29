@@ -31,7 +31,6 @@ A mutable struct holding internal state variables for stability calculations.
 
 ## Fields
 
-  - `dir_path::String` - Directory path for input/output files
   - `mlow::Int` - Lowest poloidal mode number
   - `mhigh::Int` - Highest poloidal mode number
   - `mpert::Int` - Number of poloidal modes (mhigh - mlow + 1)
@@ -53,7 +52,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `verbose::Bool` - Log solve progress; set from the `verbose` keyword of `solve`
 """
 @kwdef mutable struct ForceFreeStatesInternal <: ModeSpace
-    dir_path::String = ""
     mlow::Int = 0
     mhigh::Int = 0
     mpert::Int = 0

@@ -52,7 +52,6 @@ so bpen and closure are always present.
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium actually integrated against (the re-formed one on the two-pass path).
   - `mlow`, `mhigh`, `mpert`, `nlow`, `nhigh`, `npert`, `numpert_total` - Resolved (m, n) mode space; see `ModeSpace`.
   - `psilow`, `psilim`, `qlim`, `q1lim` - Integration bounds, and q with its ψ-derivative at `psilim`.
-  - `dir_path::String` - Working directory of the run.
   - `problem`, `algorithm` - Problem and integrator retained by the public solve for reproducible output.
   - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape used by the vacuum calculation.
   - `debug_settings::DebugSettings` - Diagnostic dump settings (the `[DEBUG]` deck section / `debug=` API keyword).
@@ -100,7 +99,6 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P
     psilim::Float64
     qlim::Float64
     q1lim::Float64
-    dir_path::String
     wall_settings::Union{Nothing,Vacuum.WallSettings}
     debug_settings::DebugSettings
 
@@ -249,7 +247,7 @@ function build_result(
     return ForceFreeStatesResult(
         nothing, nothing, integrator, ctrl, equil,
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
-        intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
+        intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.wall_settings, intr.debug_settings,
         metric, mats, intr.sing, kinetic,
         closure, bpen, nothing,
         solution, odet, wp, free_energies, delta_prime, gal_data, nothing
