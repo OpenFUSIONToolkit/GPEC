@@ -536,22 +536,8 @@ below it.
 function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, mats::MatrixSplines,
     profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
-    # Default psifac to minimum equilibrium psi value
-    odet.psifac = profiles.xs[1]
-
-    # Use Newton iteration to find starting psi if qlow is above q0
-    if ctrl.qlow > profiles.q_spline.y[1]
-        # Find last index where q < qlow
-        idx = findlast(jpsi -> profiles.q_spline.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
-        if idx !== nothing
-            odet.psifac = profiles.xs[idx]
-        end
-        odet.psifac = find_zero(
-            (psi -> profiles.q_spline(psi) - ctrl.qlow,
-                psi -> profiles.q_deriv(psi)),
-            odet.psifac, Roots.Newton()
-        )
-    end
+    # Start at the qlow bound sing_min! set (`qlow_start_psi`), or the first grid node when it was not run.
+    odet.psifac = max(intr.psilow, profiles.xs[1])
 
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))
     # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
@@ -712,7 +698,8 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                 sg = intr.sing[ising_current]
                 error(
                     "Singular surface q=$(sg.q) at ψ=$(sg.psifac) (q'=$(sg.q1)): its crossing standoff " *
-                    "singfac_min/|n q'| = $(sg.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current."
+                    "singfac_min/|n q'| = $(sg.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current. " *
+                    "Move the domain start (psilow, or a qlow that lands on this surface) off it, or lower singfac_min if a neighboring crossing is too close."
                 )
             end
             @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"

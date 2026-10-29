@@ -78,7 +78,7 @@ include("Rerun.jl")
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings
 using .ForceFreeStates: ForceFreeStatesResult, build_result
-using .ForceFreeStates: sing_lim!, check_qlow_domain, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run, normalize_eigenfunctions!
@@ -657,7 +657,6 @@ function prepare_force_free_states!(
 
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil; psilim_cap=psilim_cap)
-    check_qlow_domain(ctrl, equil)
 
     # Fires whether or not the cap was applied: past the overlap point no surface retains a
     # well-separated inner region, so a domain reaching beyond it is worth flagging even when
@@ -672,16 +671,10 @@ function prepare_force_free_states!(
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
-    # Keep only surfaces inside the integration domain [qlow, qlim], so the Δ' BVP sees only crossable ones.
-    remove_singular_surfs!(intr; qmin=max(ctrl.qlow, equil.params.qmin))
-
-    # For the outer-region Galerkin solve, exclude the q < qlow core (incl. any q≤1 sawtooth
-    # surfaces) by raising psilow to where q = qlow (RDCON sing_min). Without this, the gal FEM
-    # integrates through the unhandled q≤1 ideal singularity and contaminates Δ′ at the innermost
-    # kept surface when q0 < qlow. No-op (keeps the axis bound) when qlow ≤ qmin.
-    if ctrl.integrator == "galerkin"
-        sing_min!(intr, ctrl, equil)
-    end
+    # Lower bound from qlow for every integrator, then keep only surfaces inside [psilow, psilim],
+    # so the Δ' BVP sees only crossable ones.
+    sing_min!(intr, ctrl, equil)
+    remove_singular_surfs!(intr; psimin=intr.psilow)
 
     # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H, K, M) for each
     # surviving singular surface; `ggj_parameters` layers τ_A / τ_R on top.

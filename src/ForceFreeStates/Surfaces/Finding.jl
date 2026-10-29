@@ -183,35 +183,13 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
-    check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+    remove_singular_surfs!(intr; psimin=-Inf, psimax=intr.psilim) -> keep
 
-Error unless the region `q < qlow` on the ψ grid is empty or one interval starting at the axis.
-On a reversed-shear profile with `q_min < qlow ≤ q0` it is instead a ring around q_min, and with
-several minima it can be several intervals; no single lower bound excludes either: `sing_min!`
-places `psilow` on the outermost leg, while `initialize_el_at_axis!` starts at the axis, and the
-two disagree about the integration domain.
-"""
-function check_qlow_domain(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
-    qy = equil.profiles.q_spline.y
-    below = qy .< ctrl.qlow
-    # A core: below on the first node and on every node up to the first one at or above qlow, then never again.
-    (!any(below) || (below[1] && issorted(below; rev=true))) && return nothing
-    error(
-        "qlow=$(ctrl.qlow): the region q < qlow is not a single core around the axis (q on the axis is $(qy[1]), " *
-        "the grid minimum is $(minimum(qy))); on a reversed-shear profile it is a ring around q_min, so no single " *
-        "lower integration bound excludes it. Set qlow below the q minimum to integrate from the axis, or above " *
-        "the axis value to start outside it."
-    )
-end
-
-"""
-    remove_singular_surfs!(intr; qmin=-Inf, psimax=intr.psilim) -> keep
-
-Drop rational surfaces with `q < qmin` or `psifac > psimax` from `intr.sing`, logging any dropped,
+Drop rational surfaces outside `psimin ≤ psifac ≤ psimax` from `intr.sing`, logging any dropped,
 and return the indices of those kept.
 """
-function remove_singular_surfs!(intr::ForceFreeStatesInternal; qmin::Real=-Inf, psimax::Real=intr.psilim)
-    keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin && intr.sing[j].psifac <= psimax]
+function remove_singular_surfs!(intr::ForceFreeStatesInternal; psimin::Real=-Inf, psimax::Real=intr.psilim)
+    keep = [j for j in 1:intr.msing if psimin <= intr.sing[j].psifac <= psimax]
     if length(keep) < intr.msing
         excluded = [(intr.sing[j].m, intr.sing[j].q) for j in setdiff(1:intr.msing, keep)]
         @info "Filtered $(length(excluded)) singular surface(s) outside integration domain: $(excluded)"
@@ -222,38 +200,36 @@ function remove_singular_surfs!(intr::ForceFreeStatesInternal; qmin::Real=-Inf, 
 end
 
 """
+    qlow_start_psi(qlow, equil) -> ψ
+
+Lower integration bound set by `qlow`: the outermost crossing of q = qlow, so the whole q < qlow
+region inside it is excluded, whether a monotonic core (q ≤ 1 sawtooth surfaces) or a reversed-shear
+ring around q_min. Read from the same spline q extrema `sing_find!` brackets its roots with, so a dip
+between grid nodes counts; the root is bracketed on the monotone stretch past the outermost extremum
+below qlow. Returns the first grid node when q ≥ qlow everywhere.
+"""
+function qlow_start_psi(qlow::Real, equil::Equilibrium.PlasmaEquilibrium)
+    psiex, qex = equil.params.qextrema_psi, equil.params.qextrema_q
+    k = findlast(<(qlow), qex)
+    k === nothing && return equil.profiles.xs[1]
+    k < length(qex) || error("qlow=$qlow: q < qlow up to the edge of the ψ grid (q there is $(qex[end])), so no integration domain remains.")
+    return find_zero(psi -> equil.profiles.q_spline(psi) - qlow, (psiex[k], psiex[k+1]), Roots.Brent())
+end
+
+"""
     sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
-Set the lower integration bound `intr.psilow`. Port of Fortran RDCON `sing_min` (sing.f):
-when `qlow > qmin`, the q < qlow core (including any q ≤ 1 sawtooth/internal-kink surfaces) must be
-excluded from the outer-region Galerkin domain — otherwise the Hermite FEM integrates through those
-ideal singularities without imposing the ideal constraint, contaminating Δ′ at the innermost kept
-surface. A Newton iteration locates ψ where q = qlow; scanning starts from the edge inward for
-robustness in reverse-shear cores. When `qlow ≤ qmin` the axis value is kept.
+Set the lower integration bound `intr.psilow` to `qlow_start_psi`, the one bound every
+integrator starts from. Excluding the q < qlow region matters most for the outer-region Galerkin
+solve, whose Hermite FEM would otherwise integrate through unhandled q ≤ 1 ideal singularities and
+contaminate Δ′ at the innermost kept surface.
 """
 function sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
     profiles = equil.profiles
-    intr.psilow = profiles.xs[1]   # default: equilibrium axis-side bound
-    ctrl.qlow > equil.params.qmin || return intr.psilow
-
-    # Scan from the edge inward for the first node with q < qlow (robust for reverse-shear q).
-    qy = profiles.q_spline.y
-    jpsi = 1
-    for j in (length(profiles.xs)-1):-1:1
-        if qy[j] < ctrl.qlow
-            jpsi = j
-            break
-        end
-    end
-
-    hint = Ref(jpsi)
-    intr.psilow = find_zero(
-        (psi -> profiles.q_spline(psi; hint=hint) - ctrl.qlow,
-            psi -> profiles.q_deriv(psi; hint=hint)),
-        profiles.xs[jpsi], Roots.Newton()
-    )
-    @info "sing_min: qlow=$(@sprintf("%.3f", ctrl.qlow)) > qmin=$(@sprintf("%.3f", equil.params.qmin)); " *
-          "raising psilow from $(@sprintf("%.5f", profiles.xs[1])) to $(@sprintf("%.5f", intr.psilow)) (excludes q<qlow core)"
+    intr.psilow = qlow_start_psi(ctrl.qlow, equil)
+    intr.psilow > profiles.xs[1] &&
+        @info "sing_min: qlow=$(@sprintf("%.3f", ctrl.qlow)); raising psilow from $(@sprintf("%.5f", profiles.xs[1])) " *
+              "to $(@sprintf("%.5f", intr.psilow)) (excludes the q < qlow region)"
     return intr.psilow
 end
 

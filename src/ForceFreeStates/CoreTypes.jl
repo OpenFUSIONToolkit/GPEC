@@ -70,7 +70,7 @@ A mutable struct holding internal state variables for stability calculations.
     kinsing_scan_cond::Vector{Float64} = Float64[]
     kinsing_scan_threshold::Float64 = 0.0
     psilim::Float64 = 0.0
-    psilow::Float64 = 0.0   # lower integration bound; raised above the axis by sing_min! when qlow > qmin (RDCON gal)
+    psilow::Float64 = 0.0   # lower integration bound; the outermost crossing of q = qlow (sing_min!), else the first grid node
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     debug_settings::DebugSettings = DebugSettings()
@@ -139,7 +139,7 @@ gpec.toml.
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (the drift-kinetic matrices of the KineticForces model, evaluated on the `[KineticForces]` profiles; needs `integrator = "forward"` and is deck-driven through `main`)
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
-  - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
+  - `qlow::Float64` - Integration starts at the outermost crossing of q = qlow, excluding the q < qlow region inside it (a core, or a reversed-shear ring); no effect when q ≥ qlow everywhere
   - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
   - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `rational_offset_fraction`.
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format

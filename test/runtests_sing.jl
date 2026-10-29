@@ -202,14 +202,19 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         @test count(p -> any(isapprox.(p, psi_q2; atol=1e-6)), nodes) == 2
         @test length(nodes) == intr.msing
 
-        # qmin < qlow < q0 makes the q < qlow region a ring around q_min, which no single lower bound excludes.
+        # qlow sets one lower bound, the outermost crossing of q = qlow, for every q_min < qlow: a qlow between q_min and q0
+        # excludes the reversed-shear ring and the core inside it, and the surfaces there are dropped by ψ.
         q0 = equil.profiles.q_spline.y[1]
-        @test equil.params.qmin < 2.0 < q0
-        @test_throws ErrorException FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=2.0), equil)
-        @test FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=1.5), equil) === nothing
-        @test FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=q0 + 0.1), equil) === nothing
-        # qlow equal to the axis value still leaves a ring below it.
-        @test_throws ErrorException FFS.check_qlow_domain(FFS.ForceFreeStatesControl(; qlow=q0), equil)
+        @test equil.params.qmin < 2.1 < q0
+        @test FFS.qlow_start_psi(1.5, equil) == equil.profiles.xs[1]
+        @test isapprox(FFS.qlow_start_psi(2.1, equil), 0.4 + sqrt(0.3 / 3); atol=1e-6)
+        @test isapprox(FFS.qlow_start_psi(q0 + 0.1, equil), 0.4 + sqrt((q0 + 0.1 - 1.8) / 3); atol=1e-6)
+        intr_min = FFS.ForceFreeStatesInternal()
+        FFS.sing_min!(intr_min, FFS.ForceFreeStatesControl(; qlow=2.1), equil)
+        intr.psilim = 1.0
+        FFS.remove_singular_surfs!(intr; psimin=intr_min.psilow)
+        @test intr.msing > 0 && all(s -> s.psifac >= intr_min.psilow, intr.sing)
+        @test !any(s -> isapprox(s.q, 2.0; atol=1e-8), intr.sing)
 
         # A qhigh below the axis value is crossed on both legs; the domain ends on the outer one.
         intr_lim = FFS.ForceFreeStatesInternal()
