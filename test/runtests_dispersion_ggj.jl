@@ -121,5 +121,34 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
             nre0=6, nim0=6, passes=3, parallel=false)
         @test length(gr2.valid_roots) == 1 && all(w -> w ≈ 1, gr2.valid_roots_winding)
         @test abs(gr2.Q_root - b) < 1e-8 * abs(b)
+
+        @testset "E×B rotation Doppler-shifts each surface's s" begin
+            # Rotation enters the plasma-frame GGJ layer as s_k = s + i·n·Ω_E,k on each surface.
+            mc_rot(Ω1, Ω2) = multi_surface_coupling_full([surface_coupling(model, p, r0.tearing; omega_E=Ω1, n=1),
+                    surface_coupling(model, p2, r02.tearing; omega_E=Ω2, n=1)], dp2)
+            Ω = 0.02 * Q0
+            s = 0.11 * Q0 + 0.03im * Q0
+            @test mc_rot(Ω, Ω)(s) == mc2(s + im * Ω)
+            @test_throws ArgumentError surface_coupling(model, p, r0.tearing; omega_E=Ω)
+            function secant_root(g, x0)
+                x1 = 1.01 * x0
+                f0, f1 = g(x0), g(x1)
+                for _ in 1:60
+                    x0, f0, x1 = x1, f1, x1 - f1 * (x1 - x0) / (f1 - f0)
+                    f1 = g(x1)
+                    abs(x1 - x0) < 1e-14 && break
+                end
+                return x1
+            end
+            # A common rotation is a change of frame: γ is unchanged and the lab ω shifts by n·Ω (Re Q by Ω/Q₀).
+            b_common = secant_root(GGJDispersion(mc_rot(Ω, Ω)), b + Ω / Q0)
+            @test abs(b_common - (b + Ω / Q0)) < 1e-8 * abs(b)
+            # Differential rotation moves the coupled growth rate; only the relative rotation matters.
+            Ω2 = 0.5 * Q0
+            b_diff = secant_root(GGJDispersion(mc_rot(0.0, Ω2)), b)
+            @test abs(imag(b_diff) - imag(b)) > 1e-4 * imag(b)
+            b_frame = secant_root(GGJDispersion(mc_rot(-Ω2, 0.0)), b - Ω2 / Q0)
+            @test abs(b_frame - (b_diff - Ω2 / Q0)) < 1e-8 * abs(b)
+        end
     end
 end

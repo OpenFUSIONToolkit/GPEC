@@ -15,7 +15,7 @@
 #   det = mc(Q::ComplexF64)
 #
 # At each evaluation, for k = 1 .. msing_max, the inner-layer Δ is computed
-# at a Q rescaled by `tauk_k / tauk_ref` and offset by that surface's real
+# at a Q rescaled by `tauk_k / tauk_ref` and offset by that surface's
 # Doppler shift `q_shift`, then subtracted (with the dc offset) from the
 # diagonal of an `msing_max × msing_max` upper-left submatrix of `dp_matrix`.
 # The off-diagonal Δ' couplings are passed through unchanged.
@@ -38,7 +38,8 @@ A root of `mc` in the complex `Q` plane is a coupled tearing eigenvalue.
 `ratio_k = tauk_k/tauk_ref`: `Q` is defined as `tauk·ω`, so one shared physical
 ω reaches surface `k` as `Q_k = tauk_k·ω`, on the same scaling as its `Q_e`/`Q_i`.
 
-`q_shift_k` is the real offset carried on each `SurfaceCoupling` (zero by default).
+`q_shift_k` is the E×B Doppler offset carried on each `SurfaceCoupling` (zero by default),
+applied in the layer's own frequency variable (see `SurfaceCoupling`).
 """
 struct MultiSurfaceCoupling{V<:AbstractVector{<:SurfaceCoupling}}
     surfaces::V
@@ -96,7 +97,7 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
     M = mc.dp_matrix[1:n, 1:n]
     @inbounds for k in 1:n
         sc = mc.surfaces[k]
-        Q_k = Qc * (sc.tauk / ref_tauk) + sc.q_shift
+        Q_k = layer_argument(sc, Qc * (sc.tauk / ref_tauk))
         # m×m scalar coupling: use only the tearing channel. The
         # interchange (Glasser-stabilization) channel is carried in the
         # full 4m×4m dispersion in `CoupledFullMatch.jl`; this reduced

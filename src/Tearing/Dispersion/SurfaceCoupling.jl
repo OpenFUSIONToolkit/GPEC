@@ -27,8 +27,10 @@ Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk, q_shift)
 r(Q) = dp_diag - scale * solve_inner(model, params, Q + q_shift).tearing - dc
 ```
 
-`q_shift` is a real offset on the layer's Q argument, zero by default. The Tearing runner
-sets it to the surface's E×B Doppler shift.
+`q_shift` is the surface's E×B Doppler shift, a real frequency offset in the layer's own
+frequency variable, zero by default. SLAYER's argument is the normalized Q, so the shift is added
+to Q; GGJ's argument is the growth rate s = γ + iω, so the shift is added to ω and enters as
+`s + i·q_shift`. The Tearing runner sets it for SLAYER surfaces.
 
 A root of `sc` in the complex `Q` plane is a **tearing** eigenvalue at
 this surface in the *uncoupled* approximation (only the tearing channel
@@ -48,9 +50,14 @@ struct SurfaceCoupling{M<:InnerLayerModel,P}
 end
 
 function (sc::SurfaceCoupling)(Q::Number)
-    Δ = solve_inner(sc.model, sc.params, ComplexF64(Q) + sc.q_shift).tearing
+    Δ = solve_inner(sc.model, sc.params, layer_argument(sc, Q)).tearing
     return sc.dp_diag - sc.scale * Δ - sc.dc
 end
+
+# The layer's own frequency argument for a scanned value already on this surface's normalization:
+# a real Doppler shift of SLAYER's Q, an imaginary one of GGJ's s = γ + iω.
+layer_argument(sc::SurfaceCoupling, Q::Number) = ComplexF64(Q) + sc.q_shift
+layer_argument(sc::SurfaceCoupling{<:GGJModel}, s::Number) = ComplexF64(s) + im * sc.q_shift
 
 """
     surface_coupling(model::SLAYERModel, params::SLAYERParameters,
@@ -74,7 +81,7 @@ end
 
 """
     surface_coupling(model::GGJModel, params::GGJParameters,
-                     dp_diag::Number) -> SurfaceCoupling
+                     dp_diag::Number; omega_E::Real=0.0, n::Integer=0) -> SurfaceCoupling
 
 GGJ convenience constructor. `scale` is `1.0` because GGJ's `solve_inner`
 applies its own `rescale_delta` (S^(2p₁/3)·v1^(2p₁)) internally, so the
@@ -82,16 +89,26 @@ returned Δ is already in outer units. `tauk` defaults to `1.0` (GGJ has no
 direct analogue of SLAYER's per-surface time normalization, so multi-surface
 Q rescaling is a no-op for GGJ surfaces unless overridden).
 
+`omega_E` is the surface's E×B rotation per unit toroidal mode number [rad/s] and `n` the
+toroidal mode number. GGJ is a plasma-frame layer: rotation enters only beyond the order its
+equations retain (Johnson & Greene 1967, Plasma Phys. 9, 611, Appendix B), so a rotating
+surface sees the lab-frame growth rate Doppler-shifted, `s_k = s + i·n·omega_E`, and
+`q_shift = n·omega_E`. With rotation set on every surface, the scanned `s` is in the lab
+frame; differential rotation between coupled surfaces changes the coupled γ, while a common
+rotation only shifts ω.
+
 **No `dc` kwarg**: GGJ's 4m×4m Pletzer-Dewar residual already includes the
 interchange channel, which provides Glasser (Mercier) stabilization
 natively. A Δ_crit proxy (χ_parallel-matching offset on the diagonal) is
 meaningful only for tearing-only slab-layer approximations like SLAYER;
 for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
-struct's `dc` field is hard-wired to 0 here, and so is `q_shift`.
+struct's `dc` field is hard-wired to 0 here.
 """
-function surface_coupling(model::GGJModel, params::GGJParameters, dp_diag::Number)
+function surface_coupling(model::GGJModel, params::GGJParameters, dp_diag::Number; omega_E::Real=0.0, n::Integer=0)
+    iszero(omega_E) || n >= 1 ||
+        throw(ArgumentError("surface_coupling: E×B rotation omega_E=$(omega_E) rad/s needs the toroidal mode number n ≥ 1; got n=$(n)"))
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-        0.0, 1.0, 1.0, 0.0)
+        0.0, 1.0, 1.0, Float64(n * omega_E))
 end
 
 """
