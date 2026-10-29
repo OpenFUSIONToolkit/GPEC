@@ -13,7 +13,19 @@ using TOML
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
     xs = equil.profiles.xs
-    res = solve(LocalStabilityProblem(equil), Ballooning(; verbose=false))
+    res = solve(LocalStabilityProblem(equil), Ballooning())
+
+    @testset "problem settings reach the kernels" begin
+        problem = LocalStabilityProblem(equil; theta_k=0.25, alpha_boundary_scan=false)
+        shifted = solve(problem, Ballooning(); verbose=false)
+        expected = zeros(Float64, length(xs), 5)
+        LS.compute_ballooning_stability!(expected, equil; theta_k=problem.theta_k, ode_tol=1e-8, verbose=false)
+        @test shifted.ballooning_Delta_prime == expected[:, 4]
+        @test isempty(shifted.alpha_critical)
+        @test_throws MethodError Ballooning(; theta_k=0.25)
+        @test_throws MethodError Ballooning(; alpha_boundary_scan=false)
+        @test_throws MethodError Ballooning(; verbose=true)
+    end
 
     @testset "profiles match their kernels" begin
         @test res isa LocalStabilityResult
@@ -38,20 +50,20 @@ using TOML
     end
 
     @testset "the α scan can be switched off" begin
-        quick = solve(LocalStabilityProblem(equil), Ballooning(; alpha_boundary_scan=false, verbose=false))
+        quick = solve(LocalStabilityProblem(equil; alpha_boundary_scan=false), Ballooning())
         @test isempty(quick.ballooning_psi) && isempty(quick.alpha) && isempty(quick.alpha_critical)
         @test quick.D_I == res.D_I
         @test quick.ballooning_Delta_prime == res.ballooning_Delta_prime
     end
 
     @testset "numerical knobs reach the kernels" begin
-        narrow = solve(LocalStabilityProblem(equil), Ballooning(; psi_window=(0.3, 0.7), verbose=false))
+        narrow = solve(LocalStabilityProblem(equil), Ballooning(; psi_window=(0.3, 0.7)); verbose=false)
         inside = [0.3 <= p <= 0.7 for p in xs]
         @test all(isfinite, narrow.alpha[inside])
         @test all(isnan, narrow.alpha[.!inside])
         @test narrow.alpha[inside] == res.alpha[inside]
 
-        loose = solve(LocalStabilityProblem(equil), Ballooning(; ode_tol=1e-6, alpha_boundary_scan=false, verbose=false))
+        loose = solve(LocalStabilityProblem(equil; alpha_boundary_scan=false), Ballooning(; ode_tol=1e-6))
         @test loose.D_I == res.D_I
         @test loose.ballooning_Delta_prime ≈ res.ballooning_Delta_prime rtol = 1e-3
         @test loose.ballooning_Delta_prime != res.ballooning_Delta_prime
@@ -60,7 +72,7 @@ using TOML
     @testset "solve writes no file" begin
         mktempdir() do dir
             cd(dir) do
-                solve(LocalStabilityProblem(equil), Ballooning(; alpha_boundary_scan=false, verbose=false))
+                solve(LocalStabilityProblem(equil; alpha_boundary_scan=false), Ballooning())
             end
             @test isempty(readdir(dir))
         end
@@ -102,6 +114,16 @@ using TOML
         end
     end
 
+    @testset "deck preserves problem settings" begin
+        section = Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false, "verbose" => false)
+        expected = solve(LocalStabilityProblem(equil; theta_k=0.25, alpha_boundary_scan=false), Ballooning())
+        mktempdir() do dir
+            run = GPEC.main([_deck(dir; sections=Dict("LocalStability" => section))])
+            @test run.local_stability.ballooning_Delta_prime == expected.ballooning_Delta_prime
+            @test isempty(run.local_stability.alpha_critical)
+        end
+    end
+
     @testset "no section, no stage" begin
         mktempdir() do dir
             run = GPEC.main([_deck(dir)])
@@ -116,5 +138,7 @@ using TOML
         @test alg.psi_window === (0.2, 0.8)
         @test alg.n_scan == 32
         @test GPEC.local_stability_algorithm(Dict{String,Any}()) === nothing
+        section = Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false, "verbose" => true, "n_scan" => 32)
+        @test GPEC.local_stability_algorithm(Dict("LocalStability" => section)) == Ballooning(; n_scan=32)
     end
 end

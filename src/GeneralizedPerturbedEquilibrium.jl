@@ -117,17 +117,19 @@ end
 """
     local_stability_algorithm(inputs) -> Union{LocalStability.Ballooning,Nothing}
 
-The [`Ballooning`](@ref) algorithm a deck's `[LocalStability]` section poses, its keys being the
-`Ballooning` keywords, or `nothing` when the deck has no such section. Unknown keys are an error.
+Read the numerical settings from the current `[LocalStability]` section, or return `nothing`
+when absent. Problem settings and verbosity are consumed separately by the driver.
+Unknown keys are an error.
 """
 function local_stability_algorithm(inputs)
     haskey(inputs, "LocalStability") || return nothing
     table = inputs["LocalStability"]
-    allowed = string.(fieldnames(LocalStability.Ballooning))
+    algorithm_keys = string.(fieldnames(LocalStability.Ballooning))
+    allowed = vcat(algorithm_keys, ["theta_k", "alpha_boundary_scan", "verbose"])
     for k in keys(table)
         k in allowed || throw(ArgumentError("unknown key \"$k\" in [LocalStability] (allowed: $(join(allowed, ", ")))"))
     end
-    kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in table)
+    kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in table if k in algorithm_keys)
     haskey(kwargs, :psi_window) && (kwargs[:psi_window] = Tuple{Float64,Float64}(kwargs[:psi_window]))
     return LocalStability.Ballooning(; kwargs...)
 end
@@ -281,7 +283,10 @@ function main_from_inputs(
     local_stability = nothing
     if local_stability_alg !== nothing
         local_stability = _timed_stage(runtimes, "local_stability", "Local Stability") do
-            solve(LocalStabilityProblem(equil), local_stability_alg)
+            section = inputs["LocalStability"]
+            problem = LocalStabilityProblem(equil;
+                (Symbol(k) => section[k] for k in ("theta_k", "alpha_boundary_scan") if haskey(section, k))...)
+            solve(problem, local_stability_alg; verbose=get(section, "verbose", false))
         end
     end
 

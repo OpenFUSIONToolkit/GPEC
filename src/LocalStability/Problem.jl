@@ -4,48 +4,50 @@
 # ballooning Δ' and the first ballooning α boundary over the equilibrium ψ grid.
 
 """
-    LocalStabilityProblem(equil)
+    LocalStabilityProblem(equil; theta_k=0.0, alpha_boundary_scan=true)
 
 Local high-n stability of an equilibrium: the Mercier and resistive interchange criteria and
 the ballooning Δ' on every flux surface, and the first ballooning α boundary. Solve with
-`solve(prob, Ballooning())` to get a [`LocalStabilityResult`](@ref). A deck poses the same
+`solve(prob, Ballooning(); verbose=false)` to get a [`LocalStabilityResult`](@ref). A deck poses the same
 problem through its `[LocalStability]` section.
 
 ## Fields
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the profiles are computed on.
+  - `theta_k::Float64` - Ballooning angle θ_k, used by both the profile scan and the α-boundary scan.
+  - `alpha_boundary_scan::Bool` - Run the α-boundary scan, a root find per ψ surface; `false` leaves the α fields empty.
 """
 struct LocalStabilityProblem
     equil::Equilibrium.PlasmaEquilibrium
+    theta_k::Float64
+    alpha_boundary_scan::Bool
 end
 
+LocalStabilityProblem(equil::Equilibrium.PlasmaEquilibrium; theta_k::Real=0.0, alpha_boundary_scan::Bool=true) =
+    LocalStabilityProblem(equil, Float64(theta_k), alpha_boundary_scan)
+
 """
-    Ballooning(; theta_k=0.0, ode_tol=1e-8, alpha_boundary_scan=true, n_scan=24, max_alpha_scale=8.0,
-               alpha_tol=1e-3, psi_window=(0.1, 0.99), verbose=true)
+    Ballooning(; ode_tol=1e-8, n_scan=24, max_alpha_scale=8.0, alpha_tol=1e-3, psi_window=(0.1, 0.99))
 
 The local-stability algorithm: the ballooning coefficient system per flux surface, plus the
-BALOO-style α-boundary scan. Its keywords are the `[LocalStability]` deck keys.
+BALOO-style α-boundary scan. Its fields control numerical accuracy and scan resolution;
+the angle and choice of outputs belong on [`LocalStabilityProblem`](@ref).
+Pass `verbose=true` to `solve` for progress and per-surface α-scan failures.
 
 ## Fields
 
-  - `theta_k::Float64` - Ballooning angle θ_k, used by both the profile scan and the α-boundary scan.
   - `ode_tol::Float64` - Relative and absolute tolerance of the ballooning ODE integration behind Δ'.
-  - `alpha_boundary_scan::Bool` - Run the α-boundary scan, a root find per ψ surface; `false` leaves the α fields empty.
   - `n_scan::Int` - Resolution of the α scan for the first boundary (see [`ballooning_alpha_boundary`](@ref)).
   - `max_alpha_scale::Float64` - Upper end of the α search, as a multiple of the experimental α; no crossing below it gives NaN.
   - `alpha_tol::Float64` - Bisection tolerance of the critical α, in the same multiples.
   - `psi_window::Tuple{Float64,Float64}` - ψ_N range of the α scan; surfaces outside it are NaN.
-  - `verbose::Bool` - Print progress and per-surface α-scan failures.
 """
 @kwdef struct Ballooning
-    theta_k::Float64 = 0.0
     ode_tol::Float64 = 1e-8
-    alpha_boundary_scan::Bool = true
     n_scan::Int = 24
     max_alpha_scale::Float64 = 8.0
     alpha_tol::Float64 = 1e-3
     psi_window::Tuple{Float64,Float64} = BALLOONING_SCAN_PSI_WINDOW
-    verbose::Bool = true
 end
 
 """
@@ -82,14 +84,14 @@ Mercier `D_I` at `psi`, interpolated through the smooth `D_I·ψ` profile rather
 """
 mercier_D_I(result::LocalStabilityResult, psi::Real) = result.di_psi(psi)[1] / psi
 
-function CommonSolve.solve(prob::LocalStabilityProblem, alg::Ballooning)
+function CommonSolve.solve(prob::LocalStabilityProblem, alg::Ballooning; verbose::Bool=false)
     equil = prob.equil
     xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(xs), 5)
-    compute_ballooning_stability!(locstab_fs, equil; theta_k=alg.theta_k, ode_tol=alg.ode_tol, verbose=alg.verbose)
-    boundary = if alg.alpha_boundary_scan
-        ballooning_alpha_boundary(equil; theta_k=alg.theta_k, n_scan=alg.n_scan, max_alpha_scale=alg.max_alpha_scale,
-            tol=alg.alpha_tol, psi_window=alg.psi_window, verbose=alg.verbose)
+    compute_ballooning_stability!(locstab_fs, equil; theta_k=prob.theta_k, ode_tol=alg.ode_tol, verbose=verbose)
+    boundary = if prob.alpha_boundary_scan
+        ballooning_alpha_boundary(equil; theta_k=prob.theta_k, n_scan=alg.n_scan, max_alpha_scale=alg.max_alpha_scale,
+            tol=alg.alpha_tol, psi_window=alg.psi_window, verbose=verbose)
     else
         (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     end

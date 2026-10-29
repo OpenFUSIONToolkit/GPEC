@@ -169,13 +169,14 @@ settings.
 ## Local stability
 
 The Mercier, resistive interchange and ballooning profiles are their own stage, posed on the
-equilibrium alone. A [`LocalStabilityProblem`](@ref) holds the equilibrium, the
-[`Ballooning`](@ref) algorithm holds the scan knobs, and `solve` returns a
-[`LocalStabilityResult`](@ref) with the profiles as named fields. A deck runs the same solve
-through its `[LocalStability]` section, whose keys are the `Ballooning` keywords.
+equilibrium. A [`LocalStabilityProblem`](@ref) holds the equilibrium, ballooning angle
+`theta_k`, and `alpha_boundary_scan` choice. [`Ballooning`](@ref) holds numerical tolerances
+and scan settings. `solve` returns a [`LocalStabilityResult`](@ref); its `verbose` keyword
+defaults to `false`. The current deck reader obtains all of these from `[LocalStability]`.
 
 ```julia
-ls = solve(LocalStabilityProblem(eq), Ballooning(; n_scan=64))
+problem = LocalStabilityProblem(eq; theta_k=0.0, alpha_boundary_scan=true)
+ls = solve(problem, Ballooning(; n_scan=64); verbose=false)
 ls.psi, ls.D_I, ls.D_R, ls.ballooning_Delta_prime     # profiles on the equilibrium ψ grid
 ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundary, NaN outside its scan window
 ```
