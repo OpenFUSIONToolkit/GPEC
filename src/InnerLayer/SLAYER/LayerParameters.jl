@@ -188,7 +188,7 @@ end
                         m, n,
                         chi_perp_i=nothing, tau_E=nothing, a_minor=nothing,
                         dlnn=nothing, dlnTe=nothing, dlnTi=nothing,
-                        P_perp_model=:D_perp,
+                        P_perp_model=:D_perp, chi_perp_Dc=nothing,
                         dr_val=0.0, dgeo_val=0.0,
                         dc_type=:none, ising=0,
                         resistivity_model=SauterNeoModel(),
@@ -239,7 +239,13 @@ parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
         a uniform χ_E = κ_e a²/τ̄_E with κ_e = 3/16, the value for T_e ∝ 1 − r̂² (Eq. 38). Other
         profile shapes change κ_e by a factor of order 2-3. Both Prandtl numbers come from χ_E, so
         `chi_tor` is ignored in this mode
-    `chi_perp_e` still sets the critical-Δ `dc_tmp` in every mode.
+    `chi_perp_e` still sets the critical-Δ `dc_tmp` in every mode, unless `chi_perp_Dc` is given.
+  - `chi_perp_Dc` -- electron perpendicular heat diffusivity [m²/s] used **only** by the critical Δ
+    (the W_d of the χ_∥ matching and the `(χ_∥/χ⊥)^(1/4)` factors of `:lar`/`:toroidal`). Default
+    `nothing` uses `chi_perp_e`, so the critical Δ and P_perp see one χ⊥,e as before. Set it when
+    the layer's P_perp is built from a different diffusivity than the electron channel the
+    critical Δ needs -- e.g. a one-fluid χ_eff in `:D_perp` when an interpretive power balance
+    splits the conducted heat between species unreliably. Must be positive and finite when given
   - `m`, `n`  -- poloidal / toroidal mode numbers at the surface
   - `dr_val`, `dgeo_val` -- inputs for the critical-Δ formula
   - `dc_type` -- one of `:none`, `:lar`, `:fitzpatrick`, `:toroidal`
@@ -296,7 +302,7 @@ function slayer_parameters(;
     m::Integer, n::Integer,
     chi_perp_i::Union{Real,Nothing}=nothing, tau_E::Union{Real,Nothing}=nothing, a_minor::Union{Real,Nothing}=nothing,
     dlnn::Union{Real,Nothing}=nothing, dlnTe::Union{Real,Nothing}=nothing, dlnTi::Union{Real,Nothing}=nothing,
-    P_perp_model::Symbol=:D_perp,
+    P_perp_model::Symbol=:D_perp, chi_perp_Dc::Union{Real,Nothing}=nothing,
     dr_val::Real=0.0, dgeo_val::Real=0.0,
     dc_type::Symbol=:none, ising::Integer=0,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
@@ -403,6 +409,8 @@ function slayer_parameters(;
     _need("chi_perp_e", chi_perp_e)
     P_perp_model === :tau_E || _need("chi_tor", chi_tor)
     P_perp_model in (:chi_perp_i, :D_perp) && _need("chi_perp_i", chi_perp_i)
+    chi_perp_Dc === nothing || (isfinite(chi_perp_Dc) && chi_perp_Dc > 0) ||
+        throw(ArgumentError("slayer_parameters: chi_perp_Dc must be positive and finite when given; got $chi_perp_Dc"))
     tau_tor = rs^2 / chi_tor
     P_tor = tau_r / tau_tor
     if P_perp_model === :tau_E
@@ -443,9 +451,9 @@ function slayer_parameters(;
     D_norm = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(iota_e)
     delta_n = lu^(1.0 / 3.0) / rs
 
-    # Critical-Δ offset from chi_parallel matching
+    # Critical-Δ offset from chi_parallel matching; its χ⊥,e is chi_perp_Dc when given
     dc_tmp = _solve_dc_tmp(; dc_type=dc_type, dr_val=dr_val, dgeo_val=dgeo_val,
-        chi_perp_e=chi_perp_e, t_e=t_e, zeff=zeff,
+        chi_perp_e=chi_perp_Dc === nothing ? chi_perp_e : chi_perp_Dc, t_e=t_e, zeff=zeff,
         tau_ee=tau_ee, rs=rs, R0=R0, sval_r=sval_r,
         n_tor=n)
 

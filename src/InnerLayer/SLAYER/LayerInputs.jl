@@ -190,6 +190,8 @@ profiles, without an intermediate file round-trip.
     callable of `psi` (default `1.0`).
   - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], scalar or callable of `psi`;
     required by `P_perp_model = :chi_perp_i` and `:D_perp` (default `nothing`).
+  - `chi_perp_Dc` -- electron perpendicular heat diffusivity [m²/s] used only by the critical Δ,
+    scalar or callable of `psi`; `nothing` (default) uses `chi_perp_e`. See [`slayer_parameters`](@ref).
   - `tau_E` -- whole-plasma energy confinement time τ̄_E [s], required by `P_perp_model = :tau_E`
     (default `nothing`). That mode takes the minor radius `a` of the ψ = 1 surface from the
     `:flux` label, whatever `rs_method` is.
@@ -255,6 +257,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     z_i::Real=1.0,
     chi_perp_e=1.0,
     chi_perp_i=nothing,
+    chi_perp_Dc=nothing,
     tau_E::Union{Real,Nothing}=nothing,
     P_perp_model::Symbol=:D_perp,
     chi_tor=1.0,
@@ -405,6 +408,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             chi_perp_e=_eval(chi_perp_e, psi),
             chi_tor=_eval(chi_tor, psi),
             chi_perp_i=_eval(chi_perp_i, psi),
+            chi_perp_Dc=_eval(chi_perp_Dc, psi),
             dlnn=kin.dn_e / kin.n_e, dlnTe=kin.dT_e / kin.T_e, dlnTi=kin.dT_i / kin.T_i,
             tau_E=tau_E, a_minor=a_minor,
             P_perp_model=P_perp_model,
