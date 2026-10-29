@@ -42,6 +42,10 @@ specified in the input.
   - `flux_surface_rtol::Float64` - Relative tolerance of the ODE solves that trace each flux surface; their absolute tolerance
     is `equil_abstol(flux_surface_rtol)`, i.e. `flux_surface_rtol` capped at `EQUIL_ABSTOL_MAX`
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
+  - `imas_cocos::Int` - Expected COCOS convention of an IMAS `dd.equilibrium` input (11 = IMAS standard, 2 = GPEC internal)
+  - `kinetic_file::String` - Kinetic-profile file read once into `PlasmaEquilibrium.kinetic` (see [`read_kinetic_file`](@ref));
+    empty for none. Every kinetic consumer (NTV, tearing, the layer-overlap scan, grid refinement) derives its view from it.
+  - `kinetic_group::String` - HDF5 group of `kinetic_file` holding the profiles
 """
 @kwdef struct EquilibriumConfig
     eq_type::String = "efit"
@@ -75,6 +79,9 @@ specified in the input.
     # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
     imas_cocos::Int = 11
 
+    kinetic_file::String = ""
+    kinetic_group::String = "/"
+
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
@@ -84,7 +91,7 @@ specified in the input.
     function EquilibriumConfig(eq_type, eq_filename, r0_norm, b0_norm, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-        force_termination, imas_cocos)
+        force_termination, imas_cocos, kinetic_file, kinetic_group)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -151,7 +158,7 @@ specified in the input.
         return new(eq_type, eq_filename, r0_norm, b0_norm, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-            force_termination, imas_cocos)
+            force_termination, imas_cocos, kinetic_file, kinetic_group)
     end
 end
 
@@ -184,6 +191,9 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
     # rerun path's "no input file" marker and must stay empty, not become `base_path`.
     if haskey(config_data, "eq_filename") && !isempty(config_data["eq_filename"]) && !isabspath(config_data["eq_filename"])
         config_data["eq_filename"] = normpath(joinpath(base_path, config_data["eq_filename"]))
+    end
+    if !isempty(get(config_data, "kinetic_file", "")) && !isabspath(config_data["kinetic_file"])
+        config_data["kinetic_file"] = normpath(joinpath(base_path, config_data["kinetic_file"]))
     end
 
     return EquilibriumConfig(; symbolize_keys(config_data)...)
