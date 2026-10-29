@@ -25,12 +25,13 @@ using HDF5
     end
 
     @testset "IonSpecies + TOML conversion" begin
-        # TOML.jl parses [[KineticForces.ion_species]] as a Vector{Any} of Dicts.
+        # TOML.jl parses [[Equilibrium.ion_species]] as a Vector{Any} of Dicts.
         v = Any[Dict("z" => 1, "m" => 2, "fraction" => 0.5), Dict("z" => 1, "m" => 3, "fraction" => 0.5)]
-        c = KF.KineticForcesControl(; ion_species=v)
+        c = GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" =>
+            Dict{String,Any}("eq_type" => "efit", "kinetic_file" => "k.h5", "ion_species" => v)), ".")
         @test length(c.ion_species) == 2
         @test (c.ion_species[1].z, c.ion_species[1].m, c.ion_species[1].fraction) == (1, 2, 0.5)
-        @test isempty(KF.KineticForcesControl().ion_species)     # default single-ion
+        @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig().ion_species === nothing     # default single-ion
     end
 
     @testset "resolve_ntv_species" begin

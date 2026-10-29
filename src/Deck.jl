@@ -22,6 +22,7 @@ const _ODE_DECK_KEYS = ("eulerlagrange_tolerance", "renorm_threshold", "numsteps
 const _SEARCH_DECK_KEYS = ("scan_mode", "Q_re_range", "Q_im_range", "nre", "nim", "amr_passes", "amr_max_cells", "boxes",
     "multi_box_prescreen_n", "pole_threshold", "pole_threshold_adaptive", "filter_above_poles", "filter_outside_re",
     "gamma_gap_threshold", "polish_roots", "validity_rtol", "root_classification", "store_scan")
+const _KINETIC_FILE_HOME = "name the kinetic-profile file once, as kinetic_file (and kinetic_group) in [Equilibrium]"
 const _MOVED_KEYS = Dict{String,Dict{String,String}}(
     "ForceFreeStates" => Dict{String,String}(
         "nn_low" => "set nn = n, or nn = [n1, n2, ...] for consecutive toroidal modes",
@@ -44,7 +45,8 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "ion_mass" => "state the main ions as [[Equilibrium.ion_species]] with z and m",
         "impurity_charge" => "moved to [Equilibrium]",
         "impurity_mass" => "moved to [Equilibrium]",
-        "nn" => "removed; KineticForces takes the toroidal mode number from the run"),
+        "nn" => "removed; KineticForces takes the toroidal mode number from the run",
+        "kinetic_file" => _KINETIC_FILE_HOME),
     "SLAYER" => Dict{String,String}(
         "enabled" => "a [Tearing] section with inner_model = \"SLAYER\" runs the tearing analysis",
         "inner_model" => "moved to [Tearing]; the SLAYER variant is [SLAYER] variant",
@@ -62,7 +64,8 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "tau_E" => "moved to [Equilibrium]",
         "resistivity_model" => "moved to [Equilibrium]",
         "lnLambda_form" => "moved to [Equilibrium]",
-        "bt" => "removed; B_T comes from the equilibrium's F"))
+        "bt" => "removed; B_T comes from the equilibrium's F",
+        "profile_file" => _KINETIC_FILE_HOME, "profile_group" => _KINETIC_FILE_HOME))
 const _RETIRED_SECTIONS = Dict("DEBUG" => "[DEBUG] is retired: output_benchmark_data was never read, and gal_basis_output is [Galerkin] basis_output")
 
 # Every section a deck may hold, besides the analytic-equilibrium sections.

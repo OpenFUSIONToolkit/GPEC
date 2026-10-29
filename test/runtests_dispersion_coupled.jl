@@ -2,7 +2,7 @@
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
     using GeneralizedPerturbedEquilibrium.InnerLayer.GGJ: glasser_wang_2020_eq55
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using LinearAlgebra
     using StaticArrays
 

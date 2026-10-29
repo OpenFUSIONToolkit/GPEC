@@ -63,7 +63,7 @@ The objects map one-to-one onto the pipeline stages:
 The equilibrium carries the kinetic profiles. Name the file with the `kinetic_file` (and,
 for HDF5, `kinetic_group`) keyword, the same keys as the `[Equilibrium]` deck section, and it
 is read once into `equil.kinetic`; every kinetic stage derives its own view from it.
-[`attach_kinetic_profiles!`](@ref GeneralizedPerturbedEquilibrium.Equilibrium.attach_kinetic_profiles!) attaches a file or in-memory `KineticProfileData` to an
+[`Equilibrium.attach_kinetic_profiles!`](@ref) attaches a file or in-memory `KineticProfileData` to an
 equilibrium built without one, such as an analytic equilibrium.
 
 ```julia

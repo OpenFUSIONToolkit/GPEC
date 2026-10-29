@@ -1,7 +1,7 @@
 @testset "Dispersion brute-force scan + growth-rate extraction" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using StaticArrays
 
     @testset "brute_force_scan: regular grid evaluation" begin
@@ -50,8 +50,8 @@
         @test isempty(result.poles)
         @test length(result.valid_roots) == 1
         @test abs(result.Q_root - Q_root) < 1e-3      # grid-resolution limited
-        @test result.omega_Hz ≈ real(result.Q_root)
-        @test result.gamma_Hz ≈ imag(result.Q_root)
+        @test result.omega ≈ real(result.Q_root)
+        @test result.gamma ≈ imag(result.Q_root)
     end
 
     @testset "find_growth_rates: multiple roots — picks highest γ" begin
@@ -89,11 +89,11 @@
                                  nre=80, nim=80, threaded=false)
         tauk = 5.0e-5
         result = find_growth_rates(scan, tauk)
-        @test result.omega_Hz ≈ real(result.Q_root) / tauk
-        @test result.gamma_Hz ≈ imag(result.Q_root) / tauk
+        @test result.omega ≈ real(result.Q_root) / tauk
+        @test result.gamma ≈ imag(result.Q_root) / tauk
         # Check sensible orders of magnitude (Q_root ≈ 1+2im, tauk ≈ 5e-5)
-        @test result.omega_Hz ≈ 1 / tauk      atol = 1 / tauk * 5e-3
-        @test result.gamma_Hz ≈ 2 / tauk      atol = 2 / tauk * 5e-3
+        @test result.omega ≈ 1 / tauk      atol = 1 / tauk * 5e-3
+        @test result.gamma ≈ 2 / tauk      atol = 2 / tauk * 5e-3
     end
 
     @testset "find_growth_rates: empty result when no contour intersections" begin

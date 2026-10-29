@@ -1,7 +1,7 @@
 @testset "Dispersion root polishing" begin
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using LinearAlgebra
-    D = GeneralizedPerturbedEquilibrium.Dispersion
+    D = GeneralizedPerturbedEquilibrium.Tearing.Dispersion
 
     # ----------------------------------------------------------------
     # _polish_root: core local-solve behaviour on synthetic residuals

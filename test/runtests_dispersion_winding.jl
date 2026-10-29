@@ -1,6 +1,6 @@
 @testset "Dispersion winding-number root classification" begin
-    using GeneralizedPerturbedEquilibrium.Dispersion
-    D = GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
+    D = GeneralizedPerturbedEquilibrium.Tearing.Dispersion
 
     # ----------------------------------------------------------------
     # _winding_number: the argument principle on synthetic functions
@@ -58,7 +58,7 @@
         @test abs(r.poles[1] - p) < 0.05
         # the least stable zero is reported even though it lies above the pole
         @test abs(r.Q_root - z_hi) < 1e-8
-        @test r.gamma_Hz ≈ imag(z_hi) atol = 1e-8
+        @test r.gamma ≈ imag(z_hi) atol = 1e-8
         @test isnan(real(r.Q_root_secondary))
         @test !(:no_root in r.warning_flags)
     end
@@ -100,7 +100,7 @@
         @test r.filtered_roots_winding ≈ [0.0]
         @test :spurious in r.warning_flags
         @test :no_root in r.warning_flags
-        @test r.gamma_Hz == 0.0
+        @test r.gamma == 0.0
     end
 
     @testset "a root about one cell from a pole, with the validity gate on" begin

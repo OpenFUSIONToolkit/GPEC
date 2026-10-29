@@ -317,6 +317,14 @@ function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir
     return eq_config, additional_input
 end
 
+# The stored deck's kinetic profiles, re-read from its file; a file that has since moved leaves the equilibrium without them.
+function _replay_kinetic_profiles(config::Equilibrium.EquilibriumConfig)
+    isempty(config.kinetic_file) && return nothing
+    isfile(config.kinetic_file) && return Equilibrium.configured_kinetic_profiles(config)
+    @warn "The stored deck's kinetic_file is not readable; the restored equilibrium carries no kinetic profiles" file = config.kinetic_file
+    return nothing
+end
+
 """
     equilibrium_from_h5(h5path) -> (; equil, inputs, psilim)
 
@@ -361,7 +369,7 @@ function equilibrium_from_h5(h5path::AbstractString)
         geometry = Equilibrium.compute_geometry_profiles(xs, ys, rzphi[1], rzphi[2], rzphi[4], params.ro)
         analytic = haskey(Equilibrium.ANALYTIC_EQ, config.eq_type) ? build_analytic_config(config.eq_type, inputs) : nothing
         equil = Equilibrium.PlasmaEquilibrium(config, params, profiles, geometry, xs, ys, rzphi..., eqfun..., params.ro, params.zo, params.psio,
-            read_equilibrium_ingest(f), analytic, Equilibrium.configured_kinetic_profiles(config))
+            read_equilibrium_ingest(f), analytic, _replay_kinetic_profiles(config))
         return (; equil, inputs, psilim=Float64(read(f, "Info/psilim")))
     end
 end

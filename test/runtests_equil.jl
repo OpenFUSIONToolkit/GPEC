@@ -194,6 +194,19 @@ using TOML
         # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
         @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
         @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)
+        # The kinetic-profile file moved to [Equilibrium]; the stop names the new home instead of "remove".
+        mktempdir() do deck_dir
+            template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            foreach(name -> cp(joinpath(template_dir, name), joinpath(deck_dir, name)), readdir(template_dir))
+            inputs = TOML.parsefile(joinpath(deck_dir, "gpec.toml"))
+            inputs["SLAYER"] = Dict{String,Any}("profile_file" => "kinetic.h5")
+            open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
+            @test_throws r"\[SLAYER\] sets keys that moved: `profile_file` \(name the kinetic-profile file once, as kinetic_file" GPEC.main([deck_dir])
+            delete!(inputs, "SLAYER")
+            inputs["KineticForces"] = Dict{String,Any}("kinetic_file" => "kinetic.dat")
+            open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
+            @test_throws r"\[KineticForces\] sets keys that moved: `kinetic_file` \(name the kinetic-profile file once" GPEC.main([deck_dir])
+        end
         pe_keywords = union((Base.kwarg_decl(m) for f in (GPEC.plasma_response, GPEC.perturbed_equilibrium) for m in methods(f))...)
         @test !any(k -> Symbol(k) in pe_keywords, GPEC._DEPRECATED_PE_KEYS)
     end

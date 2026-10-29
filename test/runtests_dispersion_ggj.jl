@@ -9,13 +9,13 @@ function (f::GGJDomainTestResidual)(Q)
     return f.residual(Q)
 end
 
-GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainTestResidual, Q::ComplexF64) =
-    GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f.dispersion, Q)
+GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GGJDomainTestResidual, Q::ComplexF64) =
+    GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f.dispersion, Q)
 
 @testset "Dispersion GGJ growth rates (full matching, winding classification)" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: GGJModel, solve_inner
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     GGJ = GeneralizedPerturbedEquilibrium.InnerLayer.GGJ
 
     # Glasser & Wang (2020) Eq. 55 layer, one surface. The 2 × 2 raw Δ' block is
@@ -33,7 +33,7 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
     mc = multi_surface_coupling_full([surface_coupling(model, p, r0.tearing)], dp_raw)
 
     @testset "GGJ classification and polishing stay at positive growth" begin
-        D = GeneralizedPerturbedEquilibrium.Dispersion
+        D = GeneralizedPerturbedEquilibrium.Tearing.Dispersion
         g = GGJDispersion(mc)
         center = 0.01im
         re_paths = [ComplexF64[-1 + center, 1 + center]]
@@ -89,8 +89,8 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
         @test gr.classification === :winding
         @test !(:no_root in gr.warning_flags)
         @test all(w -> w ≈ 1, gr.valid_roots_winding)
-        @test gr.gamma_Hz ≈ s0 rtol = 1e-6
-        @test abs(gr.omega_Hz) < 1e-6 * Q0
+        @test gr.gamma ≈ s0 rtol = 1e-6
+        @test abs(gr.omega) < 1e-6 * Q0
         @test abs(gr.Q_root - 0.1234im) < 1e-6
         # The GGJ layer's branch cut runs along γ ≤ 0, so a box reaching there is refused.
         @test_throws ArgumentError ggj_growth_rates(mc; gamma_range=(-0.01Q0, 0.17Q0), omega_range=(-0.031Q0, 0.047Q0))

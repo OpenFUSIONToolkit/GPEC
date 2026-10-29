@@ -973,7 +973,7 @@ function efc_couplings(
     ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
     ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
     ω_star_n = [
-        (n=kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
+        (n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
     ]
     ω_φ = ω_E .+ ω_star_n .+ ω_star_T
     # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
