@@ -149,6 +149,14 @@ label = "singular q values"
 noise_threshold = 1e-8
 order = 52
 
+[quantities.sing_dqdpsi]
+h5path = "SingularSurfaces/dqdpsi"
+type = "real_vector"
+extract = "all_real"
+label = "singular dq/dpsi (opposite signs on the two q = 2 crossings)"
+noise_threshold = 1e-8
+order = 53
+
 # Mode numbers
 [quantities.mpert]
 h5path = "Info/mpert"

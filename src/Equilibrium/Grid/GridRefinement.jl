@@ -489,14 +489,14 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
         push!(hws, min_half_widths[idx])
     end
     kept = Tuple{Float64,Bool}[(g, false) for g in grid]  # (value, is_bracket_knot)
+    capped = Tuple{Float64,Float64,Float64}[]  # (center, capped half-width, stencil floor)
     for (i, c) in enumerate(cs)
         k = clamp(searchsortedlast(grid, c), 1, length(grid) - 1)
         cap_nb = 0.5 * min(i > 1 ? c - cs[i-1] : Inf, i < length(cs) ? cs[i+1] - c : Inf)
         cap_edge = 0.5 * min(c - lo, hi - c)
         # Stencil floor capped by neighbors and edges; blend to half the local spacing capped by neighbors only.
         w = max(min(hws[i], cap_nb, cap_edge), min(0.5 * (grid[k+1] - grid[k]), cap_nb))
-        w < hws[i] && @warn "Rational surface at ψ=$c: grid bracket half-width capped at $w, below its Δ′ stencil $(hws[i]) " *
-                            "(neighboring surface or domain edge too close, or a near-tangent surface with q′ ≈ 0); Δ′ there is less accurate."
+        w < hws[i] && push!(capped, (c, w, hws[i]))
         left, right = c - w, c + w
         # Drop non-bracket, non-endpoint knots inside the zone or crowding a new bracket knot.
         filter!(kept) do t
@@ -506,6 +506,9 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
         left > lo && push!(kept, (left, true))
         right < hi && push!(kept, (right, true))
     end
+    isempty(capped) || @warn "$(length(capped)) rational surface(s) have grid bracket half-widths capped below their Δ′ stencil " *
+                             "(neighboring surface or domain edge too close, or a near-tangent surface with q′ ≈ 0); Δ′ there is less accurate. " *
+                             "(ψ, half-width, stencil): $(join(capped, ", "))"
     sort!(kept; by=first)
     merged = Float64[]
     for (v, _) in kept
