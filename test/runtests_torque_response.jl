@@ -49,7 +49,9 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             cp(joinpath(template, name), joinpath(dir, name))
         end
         toml = joinpath(dir, "gpec.toml")
-        write(toml, read(toml, String) * _TORQUE_RESPONSE_SECTIONS)
+        # Opt in to the Euler-Lagrange matrices so the kinetic set is written and checked by the metadata walk.
+        deck = replace(read(toml, String), "write_outputs_to_HDF5 = true" => "write_outputs_to_HDF5 = true\nwrite_el_matrices = true"; count=1)
+        write(toml, deck * _TORQUE_RESPONSE_SECTIONS)
 
         res = _GPE_TR.main([dir])
         ffs = res.ffs
@@ -81,6 +83,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
                 @test read(g["T_applied"]) == tr.T_applied
                 @test read(g["total_torque"]) == real(tr.T_applied[end])
                 @test read(g["psi"]) == tr.psi
+                @test haskey(h5, "ForceFreeStates/EulerLagrangeMatrices/Kinetic/f0")
                 bad = _collect_metadata_violations(h5)
                 isempty(bad) || @error "metadata violations" bad
                 @test isempty(bad)

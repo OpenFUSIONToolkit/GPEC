@@ -20,7 +20,7 @@ using HDF5
     # The deck's `[ForceFreeStates]` block as `solve` keywords: everything except the knobs the
     # integrator object and the `nn` keyword own.
     ffs_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"]
-                      if !(k in ("integrator", "nn_low", "nn_high")))
+                                         if !(k in ("integrator", "nn_low", "nn_high")))
 
     # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
     function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
@@ -401,7 +401,7 @@ using HDF5
 
                 kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
                 api = solve(pass1, Forward(); nn=1, wall=wall, dir_path=dir, kwargs...)
-                # The equilibrium stores its analytic config, so `solve` re-forms it on the deck's grid.
+                # The API and deck reform the same analytic source on the same refined grid.
                 @test api.equil.rzphi_xs == reference.equil.rzphi_xs
             end
         end

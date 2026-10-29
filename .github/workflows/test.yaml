@@ -4,6 +4,8 @@ on:
   # Every pull request, whatever its base, so a PR stacked on another feature branch
   # is tested too; it is tested again once retargeted, when it syncs with develop.
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches:
       - main
@@ -14,14 +16,14 @@ permissions:
 
 concurrency:
   # One in-flight run per branch/PR. Superseded pull request runs are cancelled;
-  # runs on main/develop are allowed to finish so every merged commit is verified.
+  # Push and queue runs finish independently on their own refs.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
     name: Detect Julia changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: read
@@ -35,6 +37,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -42,10 +45,10 @@ jobs:
           # `why did/didn't this run?` is answerable from either one.
           say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
 
-          # Pushes to main/develop always run: every merged commit gets verified.
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          # Pushes and queue candidates always run the full battery.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "julia=true" >> "$GITHUB_OUTPUT"
-            say "Not a pull request — running the full test suite."
+            say "Event $EVENT_NAME — running the full test suite."
             exit 0
           fi
 
@@ -58,7 +61,7 @@ jobs:
           # trigger a run, so new untested Julia (benchmarks, docs scripts, a
           # future tools/ directory) is excluded by default rather than by
           # remembering to exclude it.
-          tested='(^src/|^test/|^examples/|^ci/manifests/|^Project\.toml$|^\.github/workflows/test\.yaml$)'
+          tested='(^src/|^test/|^examples/|^ci/manifests/|^ci/local-julia-cache\.sh$|^Project\.toml$|^\.github/workflows/(test|julia-test-version)\.yaml$)'
 
           relevant=$(printf '%s\n' "$files" | grep -E "$tested" || true)
 
@@ -85,108 +88,16 @@ jobs:
           fi
 
   test:
-    name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    name: Julia ${{ matrix.version }}
     needs: changes
     if: needs.changes.outputs.julia == 'true'
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.11'
-          - '1.x'  # latest (currently 1.12)
-        os:
-          - ubuntu-latest
-
-    env:
-      DEPOT_PATHS: |
-        ~/.julia/artifacts
-        ~/.julia/packages
-        ~/.julia/registries
-        ~/.julia/compiled
-        ~/.julia/scratchspaces
-        ~/.julia/logs
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Set up Julia
-        id: julia
-        uses: julia-actions/setup-julia@v2
-        with:
-          version: ${{ matrix.version }}
-
-      # Keyed on the resolved Julia version, not the matrix label: precompiled .ji
-      # files are tied to the exact Julia build, so a patch release invalidates
-      # every one of them. Cache entries are immutable, so were the key not to
-      # rotate the run would recompile the whole tree, hit the unchanged key, skip
-      # the save as having nothing new, and repeat that forever. The version-only
-      # fallback still reuses packages, artifacts and registries across a bump; the
-      # next push to the default branch repopulates under the new key.
-      - name: Restore the Julia depot
-        id: depot
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.DEPOT_PATHS }}
-          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
-          restore-keys: |
-            julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-
-            julia-depot-${{ matrix.os }}-${{ matrix.version }}-
-
-      - name: Pin the CI dependency set
-        run: |
-          set -euo pipefail
-
-          minor=$(julia -e 'print(VERSION.major, ".", VERSION.minor)')
-          pinned="ci/manifests/Manifest-v${minor}.toml"
-
-          if [ ! -f "$pinned" ]; then
-            echo "::warning::No pinned dependency set for Julia ${minor}; resolving fresh. Generate one with 'julia +${minor} ci/manifests/update.jl'."
-            exit 0
-          fi
-
-          cp "$pinned" Manifest.toml
-          echo "Pinned dependency set: ${pinned}"
-
-          recorded=$(cat ci/manifests/project.sha256)
-          actual=$(shasum -a 256 Project.toml | cut -d ' ' -f 1)
-          if [ "$recorded" != "$actual" ]; then
-            echo "::warning::Project.toml has changed since the pinned dependency sets were generated, so ${pinned} may be stale. Regenerate with ci/manifests/update.jl."
-          fi
-
-      - name: Build Julia packages
-        uses: julia-actions/julia-buildpkg@v1
-        with:
-          ignore-no-cache: true
-
-      # Coverage instrumentation is off: nothing consumes the .cov files (they are
-      # gitignored and never uploaded), and instrumenting slows compute-heavy
-      # numerical code noticeably. Set coverage: true and add a Codecov upload
-      # step together if coverage reporting is ever wanted.
-      - name: Run tests
-        uses: julia-actions/julia-runtest@v1
-        with:
-          coverage: false
-
-      # An exact hit has nothing new to store. Otherwise pushes refresh the shared
-      # default-branch entry, and a pull request writes one only when it restored
-      # nothing at all -- which happens when this key prefix is cold, as it is the
-      # first time this runs, after a matrix version is added, or once entries age
-      # out. That entry is scoped to the pull request's own ref and so cannot be
-      # reused by another, but seeding it beats discarding a full compile; once the
-      # default branch has an entry, pull requests always prefix-match and skip.
-      - name: Prune the depot before caching
-        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
-        run: julia --project=. -e 'using Pkg; Pkg.gc()'
-
-      - name: Save the Julia depot
-        if: always() && steps.depot.outputs.cache-hit != 'true' && (github.event_name == 'push' || steps.depot.outputs.cache-matched-key == '')
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.DEPOT_PATHS }}
-          key: julia-depot-${{ matrix.os }}-${{ matrix.version }}-${{ steps.julia.outputs.julia-version }}-${{ hashFiles('Project.toml', 'ci/manifests/Manifest-v*.toml') }}
+        version: ['1.11', '1.x']
+    uses: ./.github/workflows/julia-test-version.yaml
+    with:
+      version: ${{ matrix.version }}
 
   # Stable check that is present on every pull request, whether or not the suite
   # ran. Point branch protection at this job so skipped runs do not block merges.
@@ -194,7 +105,7 @@ jobs:
     name: Tests
     needs: [changes, test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
       - name: Report suite result

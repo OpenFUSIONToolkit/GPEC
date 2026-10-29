@@ -134,6 +134,11 @@ constructor.
   - `filter_above_poles`  -- discard roots above the highest pole γ
   - `filter_outside_re`   -- condition the above-pole filter on the +γ
     step exiting the Re(Δ)=0 contour loop
+  - `root_classification` -- `:threshold` (default) classifies contour
+    intersections with the pole threshold and the filters above; `:winding`
+    classifies each by the winding number of the dispersion residual on a
+    small circle around it (argument principle), and the filters above decide
+    nothing. Applies to both coupling modes; see `find_growth_rates`.
 
 # Kinetic-profile source
 
@@ -219,6 +224,9 @@ there is one consistent interface for resistive and kinetic profiles.
     # |residual| is not below validity_rtol × median(|Δ|) — a contour near-miss
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
+    # How contour intersections are classified as roots or poles: :threshold
+    # (pole_threshold + filters) or :winding (argument principle).
+    root_classification::Symbol = :threshold
 
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
 
@@ -238,6 +246,7 @@ const _VALID_D_C_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 const _VALID_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
+const _VALID_ROOT_CLASSIFICATIONS = (:threshold, :winding)
 
 function validate(ctrl::SLAYERControl)
     iszero(ctrl.theta_sample) || @warn "SLAYERControl: theta_sample = $(ctrl.theta_sample) has no effect: the layer quantities " *
@@ -273,6 +282,9 @@ function validate(ctrl::SLAYERControl)
     ctrl.lnLambda_form in _VALID_LNLAMBDA_FORMS ||
         throw(ArgumentError("SLAYERControl: lnLambda_form=$(ctrl.lnLambda_form) " *
                             "not in $(_VALID_LNLAMBDA_FORMS)"))
+    ctrl.root_classification in _VALID_ROOT_CLASSIFICATIONS ||
+        throw(ArgumentError("SLAYERControl: root_classification=$(ctrl.root_classification) " *
+                            "not in $(_VALID_ROOT_CLASSIFICATIONS)"))
     ctrl.impurity_charge > 1 ||
         throw(ArgumentError("SLAYERControl: impurity_charge=$(ctrl.impurity_charge) must exceed the main-ion charge 1"))
     ctrl.msing_max >= 1 ||
@@ -321,6 +333,7 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "pole_threshold") && (flat["pole_threshold"] = v["pole_threshold"])
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
             haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
+            haskey(v, "root_classification") && (flat["root_classification"] = v["root_classification"])
         elseif k == "CriticalResonantField" && v isa AbstractDict
             flat["critical_resonant_field"] = critical_resonant_field_control_from_toml(v)
         else
@@ -342,7 +355,7 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :D_c_type,
-            :resistivity_model, :lnLambda_form, :P_perp_model)
+            :resistivity_model, :lnLambda_form, :P_perp_model, :root_classification)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
