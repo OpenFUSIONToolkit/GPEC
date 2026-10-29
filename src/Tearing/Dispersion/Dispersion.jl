@@ -11,6 +11,8 @@
 #   - `brute_force_scan`    -- regular 2D Q-plane scan
 #   - `find_growth_rates`   -- contour-intersection root extraction (Re=0 ∩ Im=0)
 #   - `amr_scan`            -- adaptive Q-plane refinement
+#   - `ggj_growth_rates`    -- GGJ roots of the full 4m×4m determinant, classified
+#                              by winding number
 #
 # Roots are ISOLATED by 2D contour intersection on Nyquist-style Q-plane scans
 # (`find_growth_rates`, Re=0 ∩ Im=0), then optionally POLISHED to the true zero
@@ -43,6 +45,7 @@ include("CoupledFullMatch.jl")
 include("BruteForceScan.jl")
 include("ContourSearchAMR.jl")
 include("GrowthRateExtraction.jl")
+include("GGJGrowthRates.jl")
 
 export SurfaceCoupling, surface_coupling
 export MultiSurfaceCoupling, multi_surface_coupling
@@ -51,5 +54,6 @@ export ScanResult, brute_force_scan
 export AMRCell, AMRResult, amr_scan
 export BoxActivity, MultiBoxAMRResult, multi_box_amr_scan, as_amr_result
 export GrowthRateResult, find_growth_rates
+export GGJDispersion, ggj_growth_rates
 
 end # module Dispersion

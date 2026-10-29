@@ -128,10 +128,16 @@ end
 _surface_label(p::SLAYERParameters) = "m=$(p.m), n=$(p.n)"
 _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 
-# Is this an unvalidated GGJ inner-layer model? Used to gate the γ-extraction
-# future-work warning.
+# Is this a GGJ inner-layer model? Its growth rates come from `ggj_growth_rates`, not this runner.
 _is_ggj(::GGJModel) = true
 _is_ggj(::Any) = false
+
+# Winding number of an isolated zero of the dispersion residual, for
+# root_classification = :winding. The SLAYER residual is a function of conj(Q)
+# (solve_inner evaluates conj(Δ̂(ĝ)); see Riccati.jl), so a zero winds −1.
+_zero_winding(::SLAYERModel{:fitzpatrick}) = -1
+_zero_winding(model) =
+    throw(ArgumentError("root_classification=:winding is not available for inner model $(typeof(model))"))
 
 # ---------------------------------------------------------------------
 # Scan dispatch
@@ -186,12 +192,6 @@ function _build_surface_coupling(model::SLAYERModel, params::SLAYERParameters,
     dp_diag, q_shift::Real)
     return surface_coupling(model, params, dp_diag; dc=params.dc_tmp, q_shift=q_shift)
 end
-
-# GGJ: scale = 1.0 (rescale_delta applied inside solve_inner), tauk = 1.0,
-# dc = 0 (the 4m×4m Pletzer-Dewar residual carries interchange stabilization
-# natively), and no E×B shift. See the GGJ `surface_coupling` method.
-_build_surface_coupling(model::GGJModel, params::GGJParameters, dp_diag, ::Real) =
-    surface_coupling(model, params, dp_diag)
 
 # "m/n" label keying `control.omega_E_kHz`; GGJ parameters carry no mode numbers.
 _mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
@@ -310,6 +310,10 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     rational_q::Vector{Float64}=Float64[],
     omega_E::Vector{Float64}=Float64[])
     validate(control)
+    _is_ggj(model) && throw(ArgumentError(
+        "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no GGJ growth rate. " *
+        "Use Dispersion.ggj_growth_rates on multi_surface_coupling_full, which matches both parity channels, and " *
+        "ggj_inner_deltas for the GGJ layer's Δ."))
     control.enabled || return empty_slayer_result(control)
     isempty(params) && return empty_slayer_result(control)
 
@@ -321,51 +325,18 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
 
     # Guard: the inner-layer model and the parameter eltype must match, or
     # `_build_surface_coupling` throws an opaque MethodError downstream.
-    expected_P = _is_ggj(model) ? GGJParameters : SLAYERParameters
+    expected_P = SLAYERParameters
     all(p -> p isa expected_P, params) ||
         throw(
             ArgumentError(
                 "run_slayer: a $(typeof(model)) inner model requires " *
                 "$(expected_P) per-surface parameters, but got eltype " *
-                "$(eltype(params)). Build inputs with the matching builder " *
-                "(build_slayer_inputs for SLAYER, ggj_parameters for GGJ).")
+                "$(eltype(params)). Build them with build_slayer_inputs.")
         )
 
-    # Slab-layer path: convert Δ' from its ψ_N reference length to the
-    # r_s-based convention shared by the layer Δ(Q) and the critical-Δ (see
-    # `delta_prime_to_rs_reference`). GGJ is genuinely toroidal/ψ-based
-    # (its `rescale_delta` handles inner→outer units natively) — no conversion.
-    if !_is_ggj(model)
-        dp = delta_prime_to_rs_reference(dp, params)
-    end
-
-    # The coupled determinant uses the reduced m×m (tearing-only) form, which
-    # drops the interchange channel. For GGJ that channel carries the Glasser
-    # interchange stabilization, so coupled-GGJ results omit real physics.
-    if _is_ggj(model) && control.coupling_mode === :coupled
-        @warn(
-            "SLAYER: coupling_mode=:coupled with a GGJ inner model uses the " *
-            "reduced m×m tearing-only determinant, which DROPS the GGJ " *
-            "interchange (Glasser stabilization) channel — results are " *
-            "physically incomplete. Use the full Pletzer-Dewar matching " *
-            "(multi_surface_coupling_full) for coupled GGJ studies."
-        )
-    end
-
-    # GGJ growth-rate extraction by Re/Im contour matching is not yet
-    # reliable (the contours do not robustly intersect at a dispersion-relation
-    # zero). The scan still runs so the user can inspect/plot the contours and
-    # access both parity Δ channels via `ggj_inner_deltas`, but the reported γ
-    # is unvalidated and should be treated as future work.
-    if _is_ggj(model)
-        @warn(
-            "SLAYER: GGJ γ-extraction by Re/Im contour matching is " *
-            "FUTURE WORK — contours do not reliably intersect at a " *
-            "dispersion-relation root. The scan grid and parity Δ channels " *
-            "are provided for inspection; reported growth rates are " *
-            "unvalidated placeholders."
-        )
-    end
+    # Convert Δ' from its ψ_N reference length to the r_s-based convention shared by the layer Δ(Q) and the
+    # critical-Δ (see `delta_prime_to_rs_reference`).
+    dp = delta_prime_to_rs_reference(dp, params)
 
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
@@ -373,8 +344,6 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     Ω_E = _omega_E_per_surface(control, params, omega_E)
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
-    coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
-        "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
     q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
@@ -425,6 +394,9 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         return 10.0 * median(abs.(finite))
     end
 
+    winding = control.root_classification === :winding
+    zw = winding ? _zero_winding(model) : -1
+
     if control.coupling_mode === :uncoupled
         for (k, sc) in enumerate(scs)
             scan = _run_scan(sc, control)
@@ -434,8 +406,11 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 filter_above_poles=control.filter_above_poles,
                 filter_outside_re=control.filter_outside_re,
                 gap_kHz_threshold=control.gap_kHz_threshold,
-                residual=control.polish_roots ? sc : nothing,
-                validity_rtol=control.validity_rtol)
+                residual=(control.polish_roots || winding) ? sc : nothing,
+                polish=control.polish_roots,
+                validity_rtol=control.validity_rtol,
+                classification=control.root_classification,
+                zero_winding=zw)
             :no_root in gr.warning_flags && @warn(
                 "SLAYER: no usable growth-rate root found for surface " *
                 "$(_surface_label(params[k])); reported γ=0 is a " *
@@ -460,12 +435,18 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
         # above zero), so |det|-based polishing is a no-op and the residual-scale
         # gate is unreliable. The coupled root is therefore the raw contour
-        # intersection and carries the triangulation's interpolation error.
+        # intersection and carries the triangulation's interpolation error. With
+        # root_classification = :winding the determinant is evaluated around
+        # each intersection only to count its zeros and poles.
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
             filter_above_poles=control.filter_above_poles,
             filter_outside_re=control.filter_outside_re,
-            gap_kHz_threshold=control.gap_kHz_threshold)
+            gap_kHz_threshold=control.gap_kHz_threshold,
+            residual=winding ? mc : nothing,
+            polish=false,
+            classification=control.root_classification,
+            zero_winding=zw)
         :no_root in gr.warning_flags && @warn(
             "SLAYER: no usable growth-rate root found for the coupled " *
             "$(m_use)-surface determinant; reported γ=0 is a placeholder, " *
@@ -480,7 +461,51 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, Ω_E, q_shifts, scan_data_list)
+        layer_widths, Ω_E, q_shifts, scan_data_list,
+        run_critical_resonant_field(model, params, Ω_E, real.(diag(dp)), control.critical_resonant_field))
+end
+
+# ---------------------------------------------------------------------
+# Critical resonant field (torque balance)
+# ---------------------------------------------------------------------
+"""
+    run_critical_resonant_field(model, params, omega_E, dp_diag, ctrl) -> CriticalResonantFieldResult
+
+Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
+surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
+Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
+E×B frequency of the m/n mode, Q0 = τ_k·n·Ω_E, with `omega_E` the resolved Ω_E per unit n at
+each surface [rad/s]. The outer stability is α = S^(-1/3)·(Δ_crit − r_s Δ'), with `dp_diag` the
+r_s-referenced Δ' diagonal and Δ_crit the layer's critical-Δ offset, as in the dispersion relation.
+A surface whose Ω_E is unknown (NaN), or that is tearing-unstable (α ≤ 0), is skipped with a
+warning; if no surface has a known Ω_E, the analysis cannot run and this throws.
+"""
+function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::AbstractVector{<:InnerLayerParameters},
+    omega_E::AbstractVector{<:Real}, dp_diag::AbstractVector{<:Real}, ctrl::CriticalResonantFieldControl)
+    ctrl.enabled || return empty_critical_resonant_field_result()
+    model isa SLAYERModel{:fitzpatrick} && eltype(params) <: SLAYERParameters ||
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the SLAYER " *
+                            "fitzpatrick model and SLAYER parameters; got $(typeof(model))."))
+    nsurf = length(params)
+    length(dp_diag) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: dp_diag has $(length(dp_diag)) entries for $nsurf surfaces."))
+    length(omega_E) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: omega_E has $(length(omega_E)) entries for $nsurf surfaces."))
+    nsurf > 0 && all(isnan, omega_E) &&
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the E×B rotation, but the " *
+                            "kinetic file has no omega_E and no [SLAYER] omega_E_kHz entry covers the surfaces."))
+    Q_peak, br_crit = fill(NaN, nsurf), fill(NaN, nsurf)
+    # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
+    Q0 = Float64[p.tauk * p.n * Ω for (p, Ω) in zip(params, omega_E)]
+    scan = CriticalResonantFieldScan[]
+    for (k, p) in enumerate(params)
+        alpha = (p.dc_tmp - dp_diag[k]) / p.lu^(1 / 3)
+        tb = TorqueBalance(model, p, Q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2, alpha)
+        Qs, bal, Q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
+        ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Float64, Qs), bal, Δs))
+    end
+    br_crit_tesla = br_crit .* Float64[abs(p.bt) for p in params]
+    return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, br_crit_tesla, Q0, scan)
 end
 
 # ---------------------------------------------------------------------
@@ -496,10 +521,9 @@ vector of `(ising, tearing, interchange)` named tuples, where `tearing`
 (GWP Δ₋, odd) is the reconnecting channel and `interchange` (GWP Δ₊, even) the
 non-reconnecting Glasser-stabilization channel (see `InnerLayerResponse`).
 
-This is the supported GGJ diagnostic: both parity Δ's are physical and
-directly accessible here. Contour-matching γ extraction from these (the
-Re/Im scan intersection) is not yet validated — see the warning in
-`run_slayer_from_inputs`.
+Both parity Δ's are physical and directly accessible here. For GGJ growth
+rates use `Dispersion.ggj_growth_rates`, which matches both channels through
+the full 4m×4m determinant.
 """
 function ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
     solver::Symbol=:galerkin)
