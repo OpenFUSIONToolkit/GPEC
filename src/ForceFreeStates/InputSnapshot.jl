@@ -28,6 +28,16 @@ function result_inputs(result::ForceFreeStatesResult, inputs)
         delete!(snapshot["Equilibrium"], key)
     end
     snapshot["ForceFreeStates"] = control_to_deck(result.control)
+    # A deck states the overlap cap's layer closures in [SLAYER]; a rerun rebuilds the same SLAYERModel from them.
+    cap = result.control.psilim_from_layer_overlap
+    if cap isa InnerLayer.SLAYERModel
+        snapshot["ForceFreeStates"]["psilim_from_layer_overlap"] = true
+        slayer = get!(snapshot, "SLAYER", Dict{String,Any}())
+        for f in fieldnames(typeof(cap))
+            v = getfield(cap, f)
+            v === nothing || (slayer[String(f)] = v isa Symbol ? String(v) : v)
+        end
+    end
     snapshot["DEBUG"] = _input_fields(result.debug_settings)
     if result.control.algorithm isa Galerkin
         snapshot["DEBUG"]["gal_basis_output"] = result.control.algorithm.basis_output

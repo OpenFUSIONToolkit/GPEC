@@ -31,10 +31,11 @@ using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
     trapped_fraction_eps, nu_star_e, eta_neoclassical
 
 """
-    SLAYERModel{S} <: InnerLayerModel
+    SLAYERModel(; variant=:fitzpatrick, P_perp_model=:D_perp, D_c_type=:none, D_R=nothing, D_geo=nothing, theta_sample=0.0)
 
-SLAYER inner-layer model selector. The type parameter `S` selects the
-Riccati formulation:
+SLAYER inner-layer model: the Riccati formulation and the layer closures that turn the plasma
+(the equilibrium's kinetic data) into layer parameters. The type parameter `S` of
+`SLAYERModel{S}` is the formulation:
 
   - `:fitzpatrick` -- P_perp/P_tor Fitzpatrick formulation (default;
     Fitzpatrick 2023 two-fluid drift-MHD layer)
@@ -43,10 +44,36 @@ Future dispersion variants (e.g. `:standard`) may be added but are not
 currently implemented. The `del_s` formulation is exposed separately as
 the layer-thickness diagnostic [`slayer_layer_thickness`](@ref), not as
 a dispersion `solve_inner` path.
-"""
-struct SLAYERModel{S} <: InnerLayerModel end
 
-SLAYERModel(; variant::Symbol=:fitzpatrick) = SLAYERModel{variant}()
+## Fields
+
+  - `P_perp_model` - How the perpendicular Prandtl number is built: `:D_perp` (default; needs χ⊥,i),
+    `:chi_perp_e`, `:chi_perp_i`, `:P_phi`, `:c_beta` or `:tau_E`; see [`slayer_parameters`](@ref).
+  - `D_c_type` - Critical-Δ offset: `:none` (default), `:lar`, `:fitzpatrick` or `:toroidal`
+    (χ_‖-matching formulas of Connor, Ham, Hastie & Liu 2015).
+  - `D_R`, `D_geo` - Critical-Δ inputs; `nothing` (default) derives `D_R = E + F + H²` per surface
+    from the equilibrium, and `D_geo` is required only by `:toroidal`. An explicit `0.0` disables the offset.
+  - `theta_sample` - Poloidal angle (normalized to [0, 1)) at which the minor radius is sampled; 0 is
+    the outboard midplane.
+"""
+struct SLAYERModel{S} <: InnerLayerModel
+    P_perp_model::Symbol
+    D_c_type::Symbol
+    D_R::Union{Nothing,Float64}
+    D_geo::Union{Nothing,Float64}
+    theta_sample::Float64
+end
+
+const _D_C_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
+
+function SLAYERModel(; variant::Symbol=:fitzpatrick, P_perp_model=:D_perp, D_c_type=:none, D_R=nothing, D_geo=nothing,
+    theta_sample::Real=0.0)
+    P_perp_model, D_c_type = Symbol(P_perp_model), Symbol(D_c_type)
+    P_perp_model in ALLOWED_P_PERP_MODELS || throw(ArgumentError("SLAYERModel: P_perp_model = $P_perp_model not in $ALLOWED_P_PERP_MODELS"))
+    D_c_type in _D_C_TYPES || throw(ArgumentError("SLAYERModel: D_c_type = $D_c_type not in $_D_C_TYPES"))
+    return SLAYERModel{variant}(P_perp_model, D_c_type, D_R === nothing ? nothing : Float64(D_R),
+        D_geo === nothing ? nothing : Float64(D_geo), Float64(theta_sample))
+end
 
 include("LayerParameters.jl")
 include("Riccati.jl")

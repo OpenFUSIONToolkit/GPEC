@@ -236,7 +236,7 @@ function main_from_inputs(
     _stop_on_deprecated_keys(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
     haskey(inputs, "KineticForces") && _stop_on_deprecated_keys(inputs["KineticForces"], _DEPRECATED_KF_KEYS, "KineticForces")
     haskey(inputs, "PerturbedEquilibrium") && _stop_on_deprecated_keys(inputs["PerturbedEquilibrium"], _DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
-    ctrl = ForceFreeStates.control_from_deck(ffs_table, get(inputs, "DEBUG", Dict{String,Any}()))
+    ctrl = _deck_layer_overlap(ForceFreeStates.control_from_deck(ffs_table, get(inputs, "DEBUG", Dict{String,Any}())), inputs)
     local_stability_alg = local_stability_algorithm(inputs)
 
     resolve_mode_space!(intr, ctrl)
@@ -292,15 +292,13 @@ function main_from_inputs(
     @info "\n  Force-Free States\n$_SECTION"
     ffs_start = time()
 
-    # _overlap_slayer_inputs also rejects an enabled [SLAYER] section without usable kinetic profiles, so keep it ahead of the solve.
-    metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl;
-        overlap_inputs=_overlap_slayer_inputs(inputs, equil.kinetic))
+    metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl)
     ffs_result = run_deck_match(run_force_free_states(ctrl, equil, mats, intr, metric), ctrl)
     alg = ctrl.algorithm
     problem_kwargs = ForceFreeStates.problem_keywords(ctrl)
     problem = ForceBalanceProblem(equil; nn=ctrl.nn_low:ctrl.nn_high, wall=intr.wall_settings, dir_path=intr.dir_path,
         debug=intr.debug_settings, problem_kwargs...)
-    ffs_result = ForceFreeStates._with(ffs_result; problem=problem, algorithm=alg)
+    ffs_result = ForceFreeStates._with(ffs_result; problem=problem, algorithm=alg, layer_overlap=layer_overlap)
 
     if ctrl.write_outputs_to_HDF5
         h5open(joinpath(ffs_result.dir_path, ctrl.HDF5_filename), "w") do target
@@ -308,8 +306,7 @@ function main_from_inputs(
                 git_version=git_version,
                 inputs=inputs,
                 forcing_snapshot=forcing_snapshot,
-                local_stability=local_stability,
-                layer_overlap=layer_overlap
+                local_stability=local_stability
             )
         end
         written_h5 = ctrl.HDF5_filename
@@ -476,6 +473,15 @@ The `[KineticForces]` control of the run, defaults when the deck has no such sec
 needs kinetic profiles (a `[KineticForces]` section, or the calculated kinetic source) errors
 here when the equilibrium carries none; every consumer derives its view from `equil.kinetic`.
 """
+# The [SLAYER] layer closures a deck's layer-overlap cap scans with: `psilim_from_layer_overlap = true` becomes that SLAYERModel.
+const _SLAYER_MODEL_KEYS = ("P_perp_model", "D_c_type", "D_R", "D_geo", "theta_sample")
+
+function _deck_layer_overlap(ctrl::ForceFreeStatesControl, inputs::Dict{String,Any})
+    (ctrl.psilim_from_layer_overlap === true && haskey(inputs, "SLAYER")) || return ctrl
+    closures = (Symbol(k) => v for (k, v) in inputs["SLAYER"] if k in _SLAYER_MODEL_KEYS)
+    return ForceFreeStates._with(ctrl; psilim_from_layer_overlap=SLAYERModel(; closures...))
+end
+
 # The deck's species keys, which describe the plasma: they set the equilibrium's kinetic data rather than the NTV control.
 const _KF_SPECIES_KEYS = ("ion_charge", "ion_mass", "impurity_charge", "impurity_mass", "ion_species")
 
@@ -566,77 +572,8 @@ function snapshot_forcing_modes(inputs::Dict{String,Any}, path::String, ctrl::Fo
     return modes, normalization
 end
 
-# Inputs of the overlap scan: the SLAYER view of the equilibrium's kinetic profiles under the run's
-# [SLAYER] control, the same view the SLAYER analysis itself uses, so the scan sees the same
-# profiles and the same chi(psi). Returns `nothing` without a [SLAYER] section or usable kinetic
-# profiles; with tearing enabled that is an error instead, so the run fails before the solve.
-function _overlap_slayer_inputs(inputs, kinetic::Union{Nothing,Equilibrium.KineticProfileData})
-    (inputs isa AbstractDict && haskey(inputs, "SLAYER")) || return nothing
-    ctrl = Tearing.slayer_control_from_toml(inputs["SLAYER"])
-    if kinetic === nothing
-        ctrl.enabled && error("SLAYER needs kinetic profiles: set kinetic_file in [Equilibrium]")
-        return nothing
-    end
-    # chi(psi) and Z_eff(psi) from the file where it carries them, else the control's scalar
-    # fallbacks -- the same precedence run_slayer uses. Every other plasma parameter the layer
-    # widths depend on is the run's own [SLAYER] setting, so the scan and the SLAYER stage see
-    # one plasma.
-    loaded, chi = try
-        l = Tearing._slayer_profiles(kinetic, ctrl)
-        l, Tearing._slayer_chi_inputs(l, ctrl; warn=false)
-    catch err
-        ctrl.enabled && rethrow()
-        @warn "Layer-overlap scan skipped: the kinetic profiles do not serve the SLAYER layer or its P_perp_model's diffusivities." exception = err
-        return nothing
-    end
-    return (; profiles=loaded.profiles,
-        chi.chi_perp_e, chi.chi_perp_i, chi.chi_tor,
-        tau_E=ctrl.tau_E, P_perp_model=ctrl.P_perp_model,
-        zeff=loaded.zeff === nothing ? ctrl.zeff : loaded.zeff,
-        bt=ctrl.bt, mu_i=ctrl.ion_mass, theta=ctrl.theta_sample,
-        resistivity_model=Tearing._build_resistivity_model(ctrl.resistivity_model),
-        lnLambda_form=ctrl.lnLambda_form)
-end
-
-# The binding scan across toroidal mode numbers: the one with the innermost overlap point, since
-# the domain must stop before the first overlap of any n. Scans that find no overlap do not bind;
-# when none overlap, the first scan is returned so its surfaces are still recorded.
-function _binding_overlap(scans)
-    isempty(scans) && return nothing
-    overlapping = filter(sc -> sc.psihigh !== nothing, scans)
-    isempty(overlapping) && return first(scans)
-    return overlapping[argmin([sc.psihigh for sc in overlapping])]
-end
-
-# Run the resistive-layer overlap scan for each toroidal mode number of the run and return the
-# binding one, or `nothing` when there are no [SLAYER] profiles. Physics refusals (a surface that
-# cannot be scored, a limited edge) are handled inside the scan; what qualifies its verdict is
-# logged as a warning and the per-surface detail as info.
-function _layer_overlap_scan(overlap_inputs, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
-    overlap_inputs === nothing && return nothing
-    # Eq. (100) is not covariant -- it is anchored to the toroidal-flux label of the paper's
-    # Eq. (30), so the scan is driven in that label regardless of the SLAYER default.
-    scans = [
-        Tearing.resistive_layer_overlap(equil, overlap_inputs.profiles; n_tor=n, rs_method=:flux,
-            chi_perp_e=overlap_inputs.chi_perp_e, chi_perp_i=overlap_inputs.chi_perp_i, chi_tor=overlap_inputs.chi_tor,
-            tau_E=overlap_inputs.tau_E, P_perp_model=overlap_inputs.P_perp_model,
-            bt=overlap_inputs.bt, mu_i=overlap_inputs.mu_i, zeff=overlap_inputs.zeff, theta=overlap_inputs.theta,
-            resistivity_model=overlap_inputs.resistivity_model, lnLambda_form=overlap_inputs.lnLambda_form)
-        for n in intr.nlow:intr.nhigh
-    ]
-    for (n, scan) in zip(intr.nlow:intr.nhigh, scans)
-        for msg in scan.caveats
-            @warn "Layer-overlap scan (n = $n): $msg"
-        end
-        for msg in scan.notes
-            @info "Layer-overlap scan (n = $n): $msg"
-        end
-    end
-    return _binding_overlap(scans)
-end
-
 """
-    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl; overlap_inputs=nothing) -> (metric, mats, overlap)
+    prepare_force_free_states!(intr, ctrl, equil, kf_ctrl) -> (metric, mats, overlap)
 
 Set up the force-free-states solve on `intr`: integration limits, the surviving singular
 surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
@@ -646,31 +583,14 @@ function prepare_force_free_states!(
     intr::ForceFreeStatesInternal,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    kf_ctrl::KineticForces.KineticForcesControl;
-    overlap_inputs=nothing
+    kf_ctrl::KineticForces.KineticForcesControl
 )
-    # Resistive-layer overlap: locate where adjacent rational surfaces' layers run into each
-    # other, and use it as an upper bound on the integration domain. The scan runs whenever
-    # kinetic profiles are readable so `ForceFreeStates/LayerOverlap/` always records the point,
-    # but it only constrains the domain when the user opts in.
-    overlap = _layer_overlap_scan(overlap_inputs, intr, equil)
-    psilim_cap = (ctrl.psilim_from_layer_overlap && overlap !== nothing) ? overlap.psihigh : nothing
-    if ctrl.psilim_from_layer_overlap && overlap === nothing
-        @warn "psilim_from_layer_overlap = true but no layer-overlap scan was available; the domain is untouched."
-    end
+    # Resistive-layer overlap: where adjacent rational surfaces' layers run into each other bounds the domain, when asked.
+    cap = ctrl.psilim_from_layer_overlap
+    overlap = cap === false ? nothing : Tearing.layer_overlap_scan(equil, cap === true ? SLAYERModel() : cap, intr.nlow:intr.nhigh)
 
     # Determine psilim and qlim (where we will integrate to)
-    sing_lim!(intr, ctrl, equil; psilim_cap=psilim_cap)
-
-    # Fires whether or not the cap was applied: past the overlap point no surface retains a
-    # well-separated inner region, so a domain reaching beyond it is worth flagging even when
-    # the user did not opt in to the cap.
-    if overlap !== nothing && overlap.psihigh !== nothing && intr.psilim > overlap.psihigh
-        @warn "Integration domain extends past the resistive-layer overlap point: psilim = " *
-              "$(@sprintf("%.6f", intr.psilim)) > $(@sprintf("%.6f", overlap.psihigh)). Adjacent resistive " *
-              "layers overlap there, so the matched-asymptotic treatment is not defined. " *
-              "Set psilim_from_layer_overlap = true to cap the domain at that point."
-    end
+    sing_lim!(intr, ctrl, equil; psilim_cap=overlap === nothing ? nothing : overlap.psihigh)
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
@@ -979,9 +899,9 @@ function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrato
 
     equil = maybe_reform_equilibrium(equil, intr, ctrl)
 
-    metric, mats, _ = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl)
+    metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil, kf_ctrl)
     result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa ForceFreeStates.Galerkin && alg.cut_solution)
-    result = ForceFreeStates._with(result; problem=prob, algorithm=alg)
+    result = ForceFreeStates._with(result; problem=prob, algorithm=alg, layer_overlap=layer_overlap)
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - total_start)) s"
 

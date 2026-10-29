@@ -78,8 +78,10 @@ so bpen and closure are always present.
     whichever formalism ran (Riccati BVP or Galerkin); `nothing` when neither produced one.
   - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solver internals and FEM
     diagnostics. Its Δ′ payload lives in `delta_prime`, not here.
+  - `layer_overlap` - The binding resistive-layer overlap scan (`Tearing.LayerOverlapScan`) when
+    `psilim_from_layer_overlap` capped the domain; `nothing` otherwise.
 """
-struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P,A,C<:ForceFreeStatesControl} <: ModeSpace
+struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P,A,C<:ForceFreeStatesControl,L} <: ModeSpace
     problem::P
     algorithm::A
     integrator::Symbol
@@ -120,6 +122,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P
     free_boundary::Union{Nothing,FreeBoundaryResult}
     delta_prime::Union{Nothing,DeltaPrimeData}
     galerkin::Union{Nothing,GalerkinResult}
+    layer_overlap::L
 end
 
 """
@@ -249,6 +252,6 @@ function build_result(
         intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
         metric, mats, intr.sing, kinetic,
         closure, bpen, nothing,
-        solution, odet, wp, free_energies, delta_prime, gal_data
+        solution, odet, wp, free_energies, delta_prime, gal_data, nothing
     )
 end

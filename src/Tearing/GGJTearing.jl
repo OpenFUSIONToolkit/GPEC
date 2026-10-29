@@ -38,7 +38,7 @@ function _ggj_layer_inputs(prob::TearingProblem)
     eta = if prob.eta !== nothing
         _ggj_per_surface(prob.eta, "eta", count)
     else
-        loaded = _slayer_profiles(data, prob)
+        loaded = _slayer_profiles(data, SLAYERModel())
         InnerLayer.SLAYER.layer_resistivity(ffs.equil, surfaces, loaded.profiles; zeff=_layer_zeff(loaded, data),
             resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
     end
@@ -53,7 +53,7 @@ function _ggj_layer_inputs(prob::TearingProblem)
 end
 
 # The SLAYER-only physics fields must stay at their defaults, so a GGJ solve never silently ignores one.
-const _SLAYER_ONLY_FIELDS = (:D_c_type, :P_perp_model, :D_R, :D_geo, :theta_sample, :omega_E_kHz, :critical_resonant_field)
+const _SLAYER_ONLY_FIELDS = (:omega_E_kHz, :critical_resonant_field)
 
 function _check_ggj_inputs(prob::TearingProblem, config::TearingConfig)
     defaults = TearingProblem(prob.ffs)

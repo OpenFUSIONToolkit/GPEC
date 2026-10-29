@@ -5,7 +5,7 @@ import ..Utilities: apply_main_h5_metadata!
 
 """
     save_to_hdf5(target, result::ForceFreeStatesResult; git_version="unknown",
-                 inputs=nothing, forcing_snapshot=nothing, local_stability=nothing, layer_overlap=nothing)
+                 inputs=nothing, forcing_snapshot=nothing, local_stability=nothing)
 
 Save the FFS solutions, operators, singular-surface diagnostics, and vacuum products.
 The associated equilibrium and optional local-stability result use their own save methods.
@@ -17,8 +17,7 @@ function save_to_hdf5(
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
     forcing_snapshot::Union{Nothing,Tuple{Vector{ForcingTerms.ForcingMode},String}}=nothing,
-    local_stability::Union{LocalStability.LocalStabilityResult,Nothing}=nothing,
-    layer_overlap=nothing
+    local_stability::Union{LocalStability.LocalStabilityResult,Nothing}=nothing
 )
 
     ctrl = result.control
@@ -84,10 +83,9 @@ function save_to_hdf5(
     out_h5["SingularSurfaces/D_I"] = (ls !== nothing && !isempty(result.surfaces)) ?
                                      [LocalStability.mercier_D_I(ls, sing.psifac) for sing in result.surfaces] : Float64[]
 
-    # Resistive-layer overlap scan. Written whenever the scan ran, whether or not it
-    # constrained the domain, so a run always shows where layer physics would have cut.
-    if layer_overlap !== nothing
-        lo = layer_overlap
+    # Resistive-layer overlap scan, present when psilim_from_layer_overlap capped the domain.
+    if result.layer_overlap !== nothing
+        lo = result.layer_overlap
         out_h5["ForceFreeStates/LayerOverlap/m"] = lo.m
         out_h5["ForceFreeStates/LayerOverlap/n"] = lo.n
         out_h5["ForceFreeStates/LayerOverlap/psi"] = lo.psi
@@ -104,7 +102,7 @@ function save_to_hdf5(
         # "applied" records that the bound was active going into sing_lim!, not that it set
         # the final psilim -- rational_offset_fraction/qhigh may truncate deeper inside it.
         out_h5["ForceFreeStates/LayerOverlap/applied"] =
-            Int(ctrl.psilim_from_layer_overlap && lo.psihigh !== nothing &&
+            Int(lo.psihigh !== nothing &&
                 lo.psihigh < equil.params.psihigh_resolved)
     end
 

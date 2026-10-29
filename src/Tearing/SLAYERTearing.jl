@@ -11,7 +11,7 @@
 # (or `nothing` when the data carry no usable χ, in which case the caller falls back to the data's
 # `chi_*_default`), a Z_eff(ψ) callable: the data's own `zeff` profile when they carry one, else derived
 # from `n_i/n_e` (or `nothing` when they carry neither, in which case the caller falls back to
-# `zeff_default`), and whether the data carry an `omega_E` profile. `control` selects which χ the layer uses.
+# `zeff_default`), and whether the data carry an `omega_E` profile. The `SLAYERModel` selects which χ the layer uses.
 function _slayer_profiles(data::KineticProfileData, control)
     source = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
     for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))

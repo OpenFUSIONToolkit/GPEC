@@ -440,3 +440,36 @@ function Base.show(io::IO, ::MIME"text/plain", s::LayerOverlapScan)
     end
     return nothing
 end
+
+"""
+    layer_overlap_scan(equil, model::SLAYERModel, ns) -> Union{Nothing,LayerOverlapScan}
+
+The binding resistive-layer overlap scan over the toroidal mode numbers `ns`: the one with the
+innermost overlap point, since the integration domain must stop before the first overlap of any n
+(the first scan when none overlaps, so its surfaces are still recorded). The plasma is the
+equilibrium's kinetic data and the layer closures are `model`'s, the same inputs the SLAYER
+tearing solve uses. Eq. (100) of Fitzpatrick (2025) is anchored to the toroidal-flux label of its
+Eq. (30), so the scan runs in that label whatever `model.theta_sample` samples. What qualifies a
+scan's verdict is logged as a warning and the per-surface detail as info.
+"""
+function layer_overlap_scan(equil, model::SLAYERModel, ns)
+    data = equil.kinetic
+    data === nothing && error("psilim_from_layer_overlap needs kinetic profiles: set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
+    loaded = _slayer_profiles(data, model)
+    chi = _slayer_chi_inputs(loaded, model, data; warn=false)
+    zeff = loaded.zeff === nothing ? data.zeff_default : loaded.zeff
+    scans = [
+        resistive_layer_overlap(equil, loaded.profiles; n_tor=n, rs_method=:flux, chi..., tau_E=data.tau_E,
+            P_perp_model=model.P_perp_model, mu_i=_layer_ion_mass(data), zeff=zeff, theta=model.theta_sample,
+            resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
+        for n in ns
+    ]
+    for (n, scan) in zip(ns, scans)
+        foreach(msg -> @warn("Layer-overlap scan (n = $n): $msg"), scan.caveats)
+        foreach(msg -> @info("Layer-overlap scan (n = $n): $msg"), scan.notes)
+    end
+    isempty(scans) && return nothing
+    overlapping = filter(sc -> sc.psihigh !== nothing, scans)
+    isempty(overlapping) && return first(scans)
+    return overlapping[argmin([sc.psihigh for sc in overlapping])]
+end

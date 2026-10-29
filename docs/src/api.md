@@ -146,29 +146,28 @@ solve instead.
 
 ## Tearing stability
 
-A `TearingProblem` holds the outer solution and physical inputs. `TearingConfig` holds
-scan and root-search settings; the inner-layer model owns its solver options.
+A `TearingProblem` holds the outer solution and the surface coupling. The plasma is the
+equilibrium's kinetic data (profiles, species, transport defaults, resistivity closure), the
+inner-layer model holds its own closures, and `TearingConfig` holds the scan and root-search
+settings.
 
 ```julia
-problem = TearingProblem(ffs; coupling_mode=:coupled, eta=1e-7, rho=1e-7)
-config = TearingConfig(; gamma_range=(1.0, 1e4), omega_range=(-1e4, 1e4))
-tear = solve(problem, GGJModel(; solver=:ray); config=config)
+tear = solve(TearingProblem(ffs), SLAYERModel(; P_perp_model=:chi_perp_e);
+    config=TearingConfig(; Q_re_range=(-2.0, 2.0), Q_im_range=(-0.5, 3.0)))
+ggj = solve(TearingProblem(ffs; coupling_mode=:coupled), GGJModel(; solver=:ray);
+    config=TearingConfig(; gamma_range=(1.0, 1e4), omega_range=(-1e4, 1e4)))
 save_to_hdf5("gpec.h5", tear)
 ```
 
-GGJ derives its per-surface parameters from the equilibrium and validates the raw Delta-prime
-matrix and surface ordering. Omitted `eta` and `rho` are derived from attached kinetic profiles
-using Spitzer resistivity and main-ion mass density. The existing GGJ treatment assumes no
-differential rotation and reports plasma-frame frequencies. SLAYER reports lab-frame frequencies
-with its existing per-surface E×B shifts. Both expose `omega` in rad/s and `gamma` in 1/s,
-positive for instability; the HDF5 roots group records `frequency_frame`.
-
-SLAYER uses `solve(TearingProblem(ffs; physics...), SLAYERModel(); config=TearingConfig(...))`,
-with its normalized Q search box on the configuration. Deck construction is handled by the
-consolidated parser in the subsequent deck-switch work.
+GGJ needs the raw Δ′ matrix and validates the surface ordering. Its η and ρ default from the
+kinetic data: η by the resistivity closure SLAYER uses, ρ = m_i·n_i of the main ion; pass `eta`
+and `rho` to `TearingProblem` to override them. GGJ takes no rotation and reports plasma-frame
+frequencies; SLAYER reports lab-frame frequencies with its per-surface E×B shifts. Both expose
+`omega` in rad/s and `gamma` in 1/s, positive for instability, and the HDF5 roots group records
+`frequency_frame`. SLAYER searches a normalized Q box, GGJ a physical (γ, ω) box.
 
 Kinetic runs (`kinetic_factor > 0`) take `Forward()`. The `"calculated"` source reads the
-equilibrium's kinetic profiles, with the default `KineticForcesControl` species and collision
+equilibrium's kinetic profiles and species, with the default `KineticForcesControl` collision
 settings.
 
 ## Local stability

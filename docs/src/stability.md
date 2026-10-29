@@ -323,15 +323,21 @@ TokaMaker's `save_eqdsk` writes such files when `lcfs_pad` (``p``) is set with t
 ``\psi = 1/(1 - p)``. Writing with `truncate_eq=False` keeps the whole plasma; EFIT-written files
 place their boundary on the X-point flux.
 
-The scan takes its kinetic profiles from the equilibrium (`[Equilibrium] kinetic_file`) through the
-same view and `[SLAYER]` control the SLAYER analysis uses, so both see the same profiles and the
-same χ⊥(ψ) — the layer widths cannot disagree between them. A deck without a `[SLAYER]` section or
-kinetic profiles does not get the scan. Because the layer settings come from the run's `[SLAYER]`
-section, the scan only runs on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path
-has no such section, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
-`ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
-`psilim_from_layer_overlap = true`. It then caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction`
-still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
+The scan runs only when the cap is switched on, and it needs kinetic profiles on the equilibrium.
+It reads the plasma from the equilibrium's kinetic data and the layer closures from a
+`SLAYERModel`, the same inputs the SLAYER tearing solve uses, so the layer widths cannot disagree
+between them. In a script, `psilim_from_layer_overlap = true` scans with the default closures and a
+model sets others:
+
+```julia
+ffs = solve(eq, Riccati(); nn=1, psilim_from_layer_overlap=SLAYERModel(; P_perp_model=:chi_perp_e))
+ffs.layer_overlap.psihigh      # the overlap point
+```
+
+In a deck, `psilim_from_layer_overlap = true` takes its closures from the `[SLAYER]` section. The
+scan is carried on the result as `layer_overlap` and written to `ForceFreeStates/LayerOverlap/`. It
+caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction` still selects
+the final surface from inside the cap. A cap beyond `psihigh` has no effect.
 
 The flag is off by default, so every shipped deck is unchanged by it. With the default
 `P_perp_model = "D_perp"` the layers on the shipped DIII-D-like profiles do not overlap inside
@@ -340,8 +346,7 @@ The flag is off by default, so every shipped deck is unchanged by it. With the d
 0.9995, where the cap would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
 pins `"chi_perp_e"` and raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and
 q = 8, and the resulting domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen
-`psihigh = 0.995` of the ideal deck. Whenever `psilim` lands past the overlap point, with the flag
-on or off, GPEC warns.
+`psihigh = 0.995` of the ideal deck.
 
 **Which perpendicular diffusivity.** The two formulas that take a perpendicular diffusivity want
 different quantities. The layer width goes through `P_perp`, which multiplies the diffusion of the
@@ -349,12 +354,12 @@ total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular 
 `D_⊥` of Fitzpatrick, Phys. Plasmas **29**, 032507 (2022), Eq. 16, which weights the electron and ion energy diffusivities by
 `n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
 flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
-in every case. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
+in every case. `SLAYERModel`'s `P_perp_model` (`[SLAYER] P_perp_model` in a deck) selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
 the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code), from
 `chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
 confinement time (`"tau_E"`); see `slayer_parameters`. `"tau_E"` is for a plasma with no χ
 profiles: its uniform χ_E sets both `P_perp` and the toroidal `P_tor`, so the file's `chi_phi`
-and `[SLAYER] chi_tor` are not used in that mode. On the DIII-D-like
+and the kinetic data's `chi_phi_default` are not used in that mode. On the DIII-D-like
 profiles `D_⊥` is 0.22–0.32 of `chi_e` at the outer rational surfaces, because the weights sum to
 less than one where density gradients carry part of `p′`. Since the widths scale as `χ^{1/4}`, a
 factor-2 change in χ moves them by about 19%, which can be enough to move the overlap cut by a
