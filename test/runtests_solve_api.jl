@@ -12,20 +12,20 @@ using HDF5
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
     equil = GPEC.Equilibrium.PlasmaEquilibrium(
-        GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
+        GPEC.equilibrium_config(deck, template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
     wall = GPEC.Vacuum.parse_wall(get(deck, "Wall", nothing))
 
-    # The deck's `[ForceFreeStates]` block as `solve` keywords: everything except the knobs the
-    # integrator object and the `nn` keyword own.
-    fixture_ctrl = FFS.control_from_deck(deck["ForceFreeStates"])
-    ffs_kwargs = FFS.problem_keywords(fixture_ctrl)
-    ode_kwargs = Dict(Symbol(k) => v for (k, v) in deck["ForceFreeStates"] if Symbol(k) in FFS._ODE_KEYS)
+    # The deck's `[ForceFreeStates]` block as `solve` keywords, less `nn` and the wall; its `[Forward]` numerics
+    # serve both ODE integrators.
+    ffs_kwargs = filter(p -> !(p.first in (:nn, :wall)), GPEC.force_balance_keywords(deck, template))
+    ode_kwargs = GPEC.section_keywords(deck["Forward"], "Forward", GPEC._struct_fields(Forward))
     forward = Forward(; ode_kwargs...)
     riccati = Riccati(; ode_kwargs...)
 
     # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
+    # An `integrator` override moves the `[Forward]` numerics to `[Riccati]`, or drops them for Galerkin.
     function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
         for name in readdir(template)
             cp(joinpath(template, name), joinpath(dir, name))
@@ -34,7 +34,9 @@ using HDF5
         inputs = TOML.parsefile(toml_path)
         merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
-        delete!(inputs, "LocalStability")
+        ode = pop!(inputs, "Forward")
+        inputs["ForceFreeStates"]["integrator"] in ("Forward", "Riccati") && (inputs[inputs["ForceFreeStates"]["integrator"]] = ode)
+        foreach(section -> delete!(inputs, section), ("LocalStability", "Ballooning"))
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir
@@ -64,7 +66,7 @@ using HDF5
 
     @testset "riccati solve produces the unified delta_prime" begin
         mktempdir() do dir
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "riccati"))]).ffs
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"))]).ffs
             prob = ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs...)
             api = solve(prob, Riccati(; ode_kwargs..., nchunks=40))
 
@@ -110,19 +112,18 @@ using HDF5
         kin_template = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_calculated")
         kdeck = TOML.parsefile(joinpath(kin_template, "gpec.toml"))
         kequil = GPEC.Equilibrium.PlasmaEquilibrium(
-            GPEC.Equilibrium.EquilibriumConfig(kdeck["Equilibrium"], kin_template),
+            GPEC.equilibrium_config(kdeck, kin_template),
             GPEC.Equilibrium.SolovevConfig(kdeck["SOL_INPUT"])
         )
         @test kequil.kinetic !== nothing
         kwall = GPEC.Vacuum.parse_wall(get(kdeck, "Wall", nothing))
-        kctrl = FFS.control_from_deck(kdeck["ForceFreeStates"]; kinetic=GPEC.kinetic_forces_control(kdeck))
-        kkwargs = FFS.problem_keywords(kctrl)
+        kkwargs = filter(p -> !(p.first in (:nn, :wall)), GPEC.force_balance_keywords(kdeck, kin_template))
         mktempdir() do dir
             for name in readdir(kin_template)
                 cp(joinpath(kin_template, name), joinpath(dir, name))
             end
             reference = GPEC.main([dir]).ffs
-            api = solve(kequil, kctrl.algorithm; nn=1, wall=kwall, kkwargs...)
+            api = solve(kequil, GPEC.force_balance_algorithm(kdeck); nn=1, wall=kwall, kkwargs...)
             @test api.mats.kinetic !== nothing
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-10
             @test api.diagnostics.nzero == reference.diagnostics.nzero
@@ -136,10 +137,10 @@ using HDF5
         # add knots over the ideal ones.
         sl_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_SLAYER_example")
         sl_deck = TOML.parsefile(joinpath(sl_dir, "gpec.toml"))
-        sl_config = GPEC.Equilibrium.EquilibriumConfig(sl_deck["Equilibrium"], sl_dir)
+        sl_config = GPEC.equilibrium_config(sl_deck, sl_dir)
         pass1 = GPEC.Equilibrium.PlasmaEquilibrium(sl_config)
         @test pass1.kinetic !== nothing
-        sl_ctrl = FFS.control_from_deck(sl_deck["ForceFreeStates"])
+        sl_ctrl = GPEC.force_balance_control(sl_deck, sl_dir)
         sl_intr = FFS.ForceFreeStatesInternal()
         GPEC.resolve_mode_space!(sl_intr, sl_ctrl)
         refined = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
@@ -166,7 +167,8 @@ using HDF5
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
 
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "galerkin", "gal_nx" => 32))]).ffs
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"),
+                extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))]).ffs
             @test reference.galerkin.msing == msing
             @test dp.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
             @test dp.raw ≈ reference.delta_prime.raw rtol = 1e-12
@@ -295,7 +297,6 @@ using HDF5
         @test_throws ArgumentError solve(equil, forward; nn=1, ffs_kwargs..., integrator="riccati")
         @test_throws ArgumentError solve(equil, riccati; nn=1, ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, forward; nn=1, ffs_kwargs..., nn_low=2)
-        @test_throws ErrorException solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, ffs_kwargs..., gal_match_flag=true)
     end
 
     # Path of the first field where `a` and `b` differ (recursing into structs, arrays and
@@ -442,7 +443,7 @@ using HDF5
             mktempdir() do dir
                 reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
                 pass1 = GPEC.Equilibrium.PlasmaEquilibrium(
-                    GPEC.Equilibrium.EquilibriumConfig(merge(deck["Equilibrium"], eq_overrides), template),
+                    GPEC.equilibrium_config(Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], eq_overrides)), template),
                     GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
                 )
                 @test reference.equil.rzphi_xs != pass1.rzphi_xs    # the deck re-formed on a refined grid
@@ -454,24 +455,24 @@ using HDF5
             end
         end
 
-        @testset "deck matching under gal_match_flag" begin
+        @testset "deck matching under [Match]" begin
             layer = (eta=1e-7, rho=1e-7, rotation=1.0)
-            # The deck's match keys for `n` surfaces on top of the integrator's own.
-            match_keys(n, solver) = Dict{String,Any}("gal_match_flag" => true, "gal_inner_solver" => solver,
-                "gal_eta" => fill(layer.eta, n), "gal_rho" => fill(layer.rho, n), "gal_rotation" => fill(layer.rotation, n))
+            # The deck's [Match] section for `n` surfaces and the [GGJ] solver.
+            match_sections(n, solver) = Dict{String,Any}("GGJ" => Dict{String,Any}("solver" => solver),
+                "Match" => Dict{String,Any}("eta" => fill(layer.eta, n), "rho" => fill(layer.rho, n), "rotation" => fill(layer.rotation, n)))
 
             mktempdir() do dir
                 gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, ffs_kwargs...)
                 # The galerkin inner model returns real-ψ profiles, so the inner profiles are compared too.
                 api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:galerkin))
                 n = length(gal.surfaces)
-                overrides = merge(Dict{String,Any}("integrator" => "galerkin", "gal_nx" => 32, "gal_rpec_flag" => true), match_keys(n, "galerkin"))
-                reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
+                sections = merge(Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32, "rpec_flag" => true)), match_sections(n, "galerkin"))
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"), extra_sections=sections)]).ffs
 
                 @test reference.closure === api.closure === :matched
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.xi ≈ reference.match.xi rtol = 1e-12
-                # The composite inner profiles are API-only: a deck never keeps the cut solution.
+                # The composite inner profiles need the cut solution, which Galerkin keeps only on request.
                 @test isempty(reference.match.inner_xi) && isempty(api.match.inner_xi)
                 cut = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, ffs_kwargs...)
                 @test length(solve(MatchProblem(cut; layer...), GGJModel(; solver=:galerkin)).match.inner_xi) == n
@@ -480,18 +481,18 @@ using HDF5
             mktempdir() do dir
                 ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs...)
                 api = solve(MatchProblem(ric; layer...), GGJModel(; solver=:ray))
-                overrides = merge(Dict{String,Any}("integrator" => "riccati"), match_keys(length(ric.surfaces), "ray"))
-                reference = GPEC.main([_stage_deck(dir; ffs_overrides=overrides)]).ffs
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
+                    extra_sections=match_sections(length(ric.surfaces), "ray"))]).ffs
 
                 @test reference.closure === :matched
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
             end
 
-            # A forward solve has no Δ′ to match against, so the deck errors instead of ignoring the flag.
+            # A forward solve has no Δ′ to match against, so the deck errors instead of ignoring the section.
             mktempdir() do dir
                 @test_throws ErrorException GPEC.main([_stage_deck(dir;
-                    ffs_overrides=Dict{String,Any}("gal_match_flag" => true, "gal_ideal_flag" => true))])
+                    extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("ideal" => true)))])
             end
         end
 

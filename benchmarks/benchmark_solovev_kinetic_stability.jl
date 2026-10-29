@@ -103,7 +103,7 @@ function build_matched_fortran_deck(workdir::String)
 
     # dcon.in — kinetic flags already match; align mode band, edge truncation, n.
     dconin = joinpath(workdir, "dcon.in")
-    replace_namelist_value!(dconin, "nn",          string(ffs["nn_low"]))
+    replace_namelist_value!(dconin, "nn",          string(first(ffs["nn"])))
     replace_namelist_value!(dconin, "delta_mlow",  string(get(ffs, "delta_mlow", 0)))
     replace_namelist_value!(dconin, "delta_mhigh", string(get(ffs, "delta_mhigh", 0)))
     replace_namelist_value!(dconin, "qlow",        string(ffs["qlow"]))

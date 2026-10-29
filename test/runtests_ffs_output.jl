@@ -8,18 +8,17 @@ using TOML, HDF5
             cp(joinpath(source, file), joinpath(dir, file))
         end
         deck = TOML.parsefile(joinpath(dir, "gpec.toml"))
-        for section in ("LocalStability", "PerturbedEquilibrium", "ForcingTerms", "KineticForces", "SLAYER")
+        for section in ("LocalStability", "Ballooning", "PerturbedEquilibrium", "ForcingTerms", "KineticForces", "SLAYER")
             pop!(deck, section, nothing)
         end
         open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
         reference = GPEC.main([dir]).ffs
         inputs, config, analytic = GPEC.build_inputs_from_toml(dir)
         eq = PlasmaEquilibrium(config, analytic)
-        ctrl = GPEC.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-        kwargs = GPEC.ForceFreeStates.problem_keywords(ctrl)
+        kwargs = GPEC.force_balance_keywords(inputs, dir)
         mktempdir() do api_dir
-            prob = ForceBalanceProblem(eq; nn=1, wall=GPEC.Vacuum.parse_wall(get(inputs, "Wall", nothing)), kwargs...)
-            alg = ctrl.algorithm
+            prob = ForceBalanceProblem(eq; kwargs...)
+            alg = GPEC.force_balance_algorithm(inputs)
             result = solve(prob, alg)
             @test result.problem === prob
             @test result.algorithm === alg

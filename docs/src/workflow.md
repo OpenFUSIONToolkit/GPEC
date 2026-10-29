@@ -155,8 +155,8 @@ shape = "conformal"
 standoff_fraction = 0.3
 
 [ForceFreeStates]
-nn_low = 1
-nn_high = 1
+nn = 1
+integrator = "Forward"
 vac_flag = true
 
 [PerturbedEquilibrium]

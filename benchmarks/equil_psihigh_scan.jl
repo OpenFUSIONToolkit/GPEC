@@ -39,7 +39,7 @@ function make_config(path::String, eq_type::String, psihigh::Float64)
     raw["Equilibrium"]["eq_type"] = eq_type
     raw["Equilibrium"]["psihigh"] = psihigh
     base = dirname(path)
-    return Equilibrium.EquilibriumConfig(raw["Equilibrium"], base)
+    return GeneralizedPerturbedEquilibrium.equilibrium_config(raw, base)
 end
 
 """

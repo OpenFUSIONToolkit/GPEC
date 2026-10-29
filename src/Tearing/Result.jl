@@ -98,7 +98,7 @@ downstream inspection and HDF5 output.
   - `scan_data`           -- scan results (per-surface in uncoupled, single
     entry in coupled). Empty unless `config.store_scan == true`.
   - `critical_resonant_field` -- `CriticalResonantFieldResult`; `enabled=false`
-    unless `problem.critical_resonant_field.enabled`
+    when `problem.critical_resonant_field` is `nothing`
 """
 struct TearingResult{P,C}
     problem::P

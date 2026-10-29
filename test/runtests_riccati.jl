@@ -97,9 +97,9 @@ end
     ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
 
-    ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
+    ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-        GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
+        GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
         GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)

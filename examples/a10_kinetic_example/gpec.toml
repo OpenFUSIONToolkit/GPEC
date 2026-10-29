@@ -21,12 +21,22 @@ mpsi = 16                      # Number of radial grid points (low value for fas
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 flux_surface_rtol = 1e-7       # Relative tolerance of the ODE solves that trace each flux surface
+impurity_charge = 6            # Impurity charge
+impurity_mass = 12             # Impurity mass
+
+[[Equilibrium.ion_species]]
+z = 1                            # Charge in units of e
+m = 2                            # Mass in proton masses
+fraction = 1.0                   # Fraction of the n_i profile this species carries
 
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
-ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
@@ -41,25 +51,22 @@ qlow = 1.02                    # Integration initiated at q determined by min(q0
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                     # Smallest toroidal mode number to include
-nn_high = 1                    # Largest toroidal mode number to include
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 6                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 6                # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 512            # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
 kinetic = "KineticForces"     # Kinetic source: the drift-kinetic matrices of the [KineticForces] model (omit for an ideal run)
-integrator = "forward"         # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+integrator = "Forward" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 singfac_min = 1e-6             # Fractional distance from rational q at which ideal jump enforced
+
+# Numerical settings of the forward integrator
+[Forward]
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
 
 [KineticForces]
-nn = 1                         # Toroidal mode number
 bounce_harmonic_max = 6        # Bounce-harmonic number
-ion_charge = 1                 # Ion charge (fundamental units)
-ion_mass = 2                   # Ion mass (proton masses)
-impurity_charge = 6            # Impurity charge
-impurity_mass = 12             # Impurity mass
 electron = false               # Include electron contribution (false = ion-only)
 nutype = "harmonic"            # Collision operator (zero, small, krook, harmonic)
 f0type = "maxwellian"          # Distribution function (maxwellian, park, cgl)

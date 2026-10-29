@@ -65,7 +65,7 @@ consume, and the only path that supports a kinetic source.
 Enable with:
 ```toml
 [ForceFreeStates]
-integrator = "forward"
+integrator = "Forward"
 ```
 
 ### Riccati integration
@@ -101,7 +101,9 @@ forced at the end of each chunk.  At singular surface crossings,
 Enable with:
 ```toml
 [ForceFreeStates]
-integrator = "riccati"
+integrator = "Riccati"
+
+[Riccati]
 nchunks    = 0         # 0 = auto: derived from the singular-surface count alone
 ```
 
@@ -140,26 +142,26 @@ zeroing vs GR), not from ODE tolerance; it is present at every thread count.
 
 ### Galerkin
 
-`integrator = "galerkin"` solves the same EL system variationally instead of integrating it:
+`integrator = "Galerkin"` solves the same EL system variationally instead of integrating it:
 the outer region is discretized on packed Hermite-cubic elements and solved as one global banded
 system, giving the RDCON resistive ``\Delta'`` matrix and the PEST-3 matching blocks.  It computes its own vacuum response and
 returns no free-boundary energies, no ODE trace, and no fixed-boundary `crit` scan.  With
-`gal_match_flag` it also matches the inner layer, producing a driven ``\xi`` solution.
+a `[Match]` section it also matches the inner layer, producing a driven ``\xi`` solution.
 Kinetic runs are not supported.  See
-`docs/src/galerkin.md` for the solver and its `gal_*` knobs.
+`docs/src/galerkin.md` for the solver and its `[Galerkin]` settings.
 
 Enable with:
 ```toml
 [ForceFreeStates]
-integrator = "galerkin"
+integrator = "Galerkin"
 ```
 
 ## Local stability: Mercier and ballooning (s–α)
 
 A `[LocalStability]` section in the deck runs a local high-``n`` stability scan over every
 flux surface, as its own stage before the global ideal analysis above. The section's keys are
-the problem settings (`theta_k`, `alpha_boundary_scan`), [`Ballooning`](@ref) numerical settings,
-and solve verbosity. A script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning(); verbose=false)`
+the problem settings (`theta_k`, `alpha_boundary_scan`); an optional `[Ballooning]` section holds the
+[`Ballooning`](@ref) numerical settings, and `[Run] verbose` the solve verbosity. A script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning(); verbose=false)`
 (see the [scripting API](api.md)).
 For the derivation and implementation details behind these diagnostics, see
 [Ballooning and Mercier Local Stability](ballooning.md).
@@ -393,27 +395,25 @@ do not resolve the H-mode pedestal transport barrier, where power-balance χ fal
 
 ## Configuration reference
 
-All `ForceFreeStates` options are set in the `[ForceFreeStates]` section of `gpec.toml`.
+The `[ForceFreeStates]` section holds the [`ForceBalanceProblem`](@ref) keywords and names the
+integrator; the integrator's numerical settings sit in its own section, `[Forward]`, `[Riccati]` or
+`[Galerkin]`, with the fields of that type.
 
 ```toml
 [ForceFreeStates]
-# Integration driver
-integrator   = "riccati"  # "forward" for dense xi profiles and kinetic runs; "galerkin" for the RDCON outer-region solve
-nchunks      = 0          # Riccati chunk-count target (0 = auto, from msing alone)
+integrator   = "Riccati"  # "Forward" for dense xi profiles and kinetic runs; "Galerkin" for the RDCON outer-region solve
 
 # Mode space
-nn_low       = 1       # lowest toroidal mode number
-nn_high      = 1       # highest toroidal mode number
+nn           = 1       # toroidal mode number, or consecutive numbers as a list ([1, 2, 3])
 delta_mlow   = 0       # extra low poloidal modes (m < mlow)
 delta_mhigh  = 0       # extra high poloidal modes (m > mhigh)
 
-# ODE solver
-numsteps_init     = 200    # initial step budget per chunk
-numunorms_init    = 50     # renorm checkpoint budget
-reltol            = 1e-6   # ODE relative tolerance
-
 # Output
 write_el_matrices    = false  # also write ForceFreeStates/EulerLagrangeMatrices (mpert² × npsi per matrix)
+
+[Riccati]
+nchunks                 = 0      # chunk-count target (0 = auto, from msing alone)
+eulerlagrange_tolerance = 1e-8   # ODE relative tolerance
 ```
 
 The number of Julia threads is controlled at startup via `-t N` or the `JULIA_NUM_THREADS`
@@ -434,62 +434,25 @@ Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Typ
 ### Run stability analysis from a TOML configuration
 
 ```julia
-using GeneralizedPerturbedEquilibrium, TOML
+using GeneralizedPerturbedEquilibrium
 
-const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+ffs = main(["examples/DIIID-like_riccati_deltaprime_example"]).ffs
+println("Energy eigenvalue et[1] = ", real(ffs.free_boundary.et[1]))
+```
 
-ex     = "examples/Solovev_ideal_example"
-inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+The same solve from a script, with the deck's keys as keywords:
 
-ctrl  = FFS.control_from_deck(inputs["ForceFreeStates"])
-equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-            GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
-
-intr  = FFS.ForceFreeStatesInternal()
-intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
-intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
-FFS.sing_lim!(intr, ctrl, equil)
-FFS.sing_find!(intr, equil)
-intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-intr.mpert = intr.mhigh - intr.mlow + 1
-intr.numpert_total = intr.mpert * intr.npert
-
-metric = FFS.make_metric(equil, intr.mpert)
-mats   = FFS.build_matrix_splines(equil, intr, metric)
-
-# Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
-# on ctrl.algorithm and always returns a 4-tuple
-# (odet, propagators, chunks, S_at_surface_left).  The trailing three are `nothing`
-# on the forward path.
-odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
-
-vac = FFS.free_run(odet, ctrl, equil, mats, intr)
-println("Energy eigenvalue et[1] = ", real(vac.et[1]))
+```julia
+eq  = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada")
+ffs = solve(eq, Riccati(; eulerlagrange_tolerance=1e-10); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true, qlow=1.02)
 ```
 
 ### Inspect Δ' at singular surfaces
 
 ```julia
-for s in 1:intr.msing
-    sing = intr.sing[s]
-    println("Surface $s: ψ = $(sing.psi_s), m/n = $(sing.m[1])/$(sing.n[1])")
-    println("  Δ' = $(real(sing.delta_prime[1]))")
-end
-```
-
-### Access inter-surface Δ' matrix (Riccati path)
-
-```julia
-# intr.delta_prime_matrix is msing × msing after riccati_eulerlagrange_integration.
-# Internally the solver builds a 2·msing × 2·msing raw matrix; the stored Δ' is
-# the PEST3 four-term combination that folds the raw block into a per-surface
-# tearing parameter.
-dpm = intr.delta_prime_matrix
-println("Δ' matrix size: ", size(dpm))
-println("Diagonal (self-response Δ'):")
-for j in 1:intr.msing
-    println("  Surface $j: ", real(dpm[j, j]))
+for (s, sing) in enumerate(ffs.surfaces)
+    println("Surface $s: ψ = $(sing.psifac), m/n = $(sing.m[1])/$(sing.n[1])")
+    println("  Δ' = $(real(ffs.delta_prime.matrix[s, s]))")
 end
 ```
 

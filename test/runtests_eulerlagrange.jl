@@ -98,7 +98,7 @@ end
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-            GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
+            GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
             GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
         mpert = 2
@@ -451,9 +451,11 @@ end
         function axis_state(psilow; kwargs...)
             eq_inputs = copy(inputs["Equilibrium"])
             eq_inputs["psilow"] = psilow
-            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(eq_inputs, ex)
+            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" => eq_inputs), ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
-            ctrl = FFS.control_from_deck(merge(inputs["ForceFreeStates"], Dict(String(k) => v for (k, v) in kwargs)))
+            deck = deepcopy(inputs)
+            merge!(deck["ForceFreeStates"], Dict{String,Any}(String(k) => v for (k, v) in kwargs))
+            ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(deck, ex)
             intr = FFS.ForceFreeStatesInternal()
             intr.nlow = ctrl.nn_low
             intr.nhigh = ctrl.nn_high
@@ -590,10 +592,9 @@ end
     function setup_solovev_run()
         example_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
-        inputs["ForceFreeStates"]["integrator"] = "forward"
         intr = FFS.ForceFreeStatesInternal()
-        ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
+        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, example_dir)
+        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, example_dir)
         sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, sol_cfg)
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))

@@ -82,7 +82,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
 
     function load_equilibrium_from_gpec(gpec_path::String)
         inputs = TOML.parsefile(gpec_path)
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dirname(gpec_path))
+        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dirname(gpec_path))
         addl = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
         return GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, addl)
     end

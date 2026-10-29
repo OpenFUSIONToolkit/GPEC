@@ -9,7 +9,7 @@ using TOML
     @testset "et[1] is independent of the reduction frequency" begin
         deck = TOML.parsefile(joinpath(ex1, "gpec.toml"))
         function total_energy(renorm_threshold)
-            deck["ForceFreeStates"]["renorm_threshold"] = renorm_threshold
+            deck["Forward"]["renorm_threshold"] = renorm_threshold
             return mktempdir() do workdir
                 open(io -> TOML.print(io, deck), joinpath(workdir, "gpec.toml"), "w")
                 GeneralizedPerturbedEquilibrium.main([workdir])
@@ -33,12 +33,10 @@ using TOML
     function test_kinetic_run(dir, fixture)
         GPEC = GeneralizedPerturbedEquilibrium
         inputs, config, analytic = GPEC.build_inputs_from_toml(joinpath(@__DIR__, "test_data", fixture))
-        ctrl = GPEC.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-        kwargs = merge(GPEC.ForceFreeStates.problem_keywords(ctrl), Dict(:kinetic => TestKineticMatrices(; scale=1e-9)))
-        prob = ForceBalanceProblem(PlasmaEquilibrium(config, analytic); nn=ctrl.nn_low:ctrl.nn_high,
-            wall=GPEC.Vacuum.parse_wall(get(inputs, "Wall", nothing)), kwargs...)
+        kwargs = merge(GPEC.force_balance_keywords(inputs, joinpath(@__DIR__, "test_data", fixture)), Dict(:kinetic => TestKineticMatrices(; scale=1e-9)))
+        prob = ForceBalanceProblem(PlasmaEquilibrium(config, analytic); kwargs...)
         path = joinpath(dir, "gpec.h5")
-        save_to_hdf5(path, solve(prob, ctrl.algorithm))
+        save_to_hdf5(path, solve(prob, GPEC.force_balance_algorithm(inputs)))
         return path
     end
 

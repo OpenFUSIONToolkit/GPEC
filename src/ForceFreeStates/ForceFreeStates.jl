@@ -28,7 +28,6 @@ import StaticArrays: @MMatrix
 include("Surfaces/Types.jl")
 include("Integrators.jl")
 include("CoreTypes.jl")
-include("DeckControl.jl")
 include("Riccati/Types.jl")
 include("Fourfit.jl")
 include("Matching/DeltaPrime.jl")

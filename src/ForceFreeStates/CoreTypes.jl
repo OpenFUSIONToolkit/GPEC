@@ -1,4 +1,4 @@
-# Module-wide types: ModeSpace, DebugSettings, ForceFreeStatesInternal, ForceFreeStatesControl.
+# Module-wide types: ModeSpace, ForceFreeStatesInternal, ForceFreeStatesControl.
 
 """
     ModeSpace
@@ -10,19 +10,6 @@ Supertype for objects that carry the resolved (m, n) mode space — `mlow`, `mhi
 `materialize_derivative_stores!`, `build_kinetic_metric_matrices`) accept either.
 """
 abstract type ModeSpace end
-
-"""
-DebugSettings
-
-A mutable struct containing settings for debugging and benchmarking output.
-
-## Fields
-
-  - `output_benchmark_data::Bool` - Flag to output benchmark data for comparison between codes
-"""
-@kwdef mutable struct DebugSettings
-    output_benchmark_data::Bool = false
-end
 
 """
     ForceFreeStatesInternal
@@ -70,7 +57,6 @@ A mutable struct holding internal state variables for stability calculations.
     psilow::Float64 = 0.0   # lower integration bound; raised above the axis by sing_min! when qlow > qmin (RDCON gal)
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    debug_settings::DebugSettings = DebugSettings()
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
     verbose::Bool = false
     """
@@ -160,21 +146,17 @@ Physical and workflow controls for a force-balance solve, together with its sele
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
     write_el_matrices::Bool = false
 
-    # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
-    gal_match_flag::Bool = false    # match the inner layer on the finished solve (coil-driven ξ from Δ′ + inner Δ(Q)); needs Galerkin(rpec_flag=true), or riccati with vac_flag=true
-    gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
-    gal_inner_solver::String = "ray" # inner-layer Δ backend for the match: "ray" (rotated contour + inward march; recommended for every Q) or "galerkin" (real-axis Hermite FEM; accuracy depends on the surface and arg Q)
-    # --- Inner-layer "galerkin" backend overrides (gal_inner_solver = "galerkin"; unset keeps the backend default) ---
-    gal_inner_xfac::Union{Nothing,Float64} = nothing  # asymptotic-matching radius multiplier
-    gal_inner_nx::Union{Nothing,Int} = nothing        # inner-layer grid cells
-    gal_inner_nq::Union{Nothing,Int} = nothing        # quadrature order per cell
-    gal_inner_cutoff::Union{Nothing,Int} = nothing    # cells carrying the large solution as driving term
-    gal_inner_kmax::Union{Nothing,Int} = nothing      # large-x asymptotic series order
-    gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
-    gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
-    gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
-    gal_gamma::Float64 = 5 / 3       # ratio of specific heats Γ for the resistive-layer coefficients (ggj_parameters G term)
     frobenius_psi_max::Float64 = 0.0
 end
 
 ForceFreeStatesControl(algorithm::A, fields...) where {A<:AbstractIntegrator} = ForceFreeStatesControl{A}(algorithm, fields...)
+
+# Galerkin solves from the fixed start on the full domain, so the start and edge-truncation controls must keep their defaults.
+function validate_algorithm(ctrl::ForceFreeStatesControl)
+    if ctrl.algorithm isa Galerkin
+        for (name, default) in ((:frobenius_psi_max, 0.0), (:truncate_at_dW_peak, false), (:dW_edge_scan_start, 0.99))
+            getfield(ctrl, name) == default || throw(ArgumentError("Galerkin does not support non-default `$name`."))
+        end
+    end
+    return ctrl
+end

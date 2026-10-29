@@ -97,13 +97,13 @@ end
         # both override flags are covered through the real code path with no extra runs.
         @testset "override flags propagate through build_inputs_from_h5" begin
             mktempdir() do out_dir
-                inline = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.eulerlagrange_tolerance=1e-6"])
-                @test inline[1]["ForceFreeStates"]["eulerlagrange_tolerance"] == 1e-6
+                inline = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.qlow=1.05"])
+                @test inline[1]["ForceFreeStates"]["qlow"] == 1.05
 
                 override_toml = joinpath(out_dir, "overrides.toml")
-                write(override_toml, "[ForceFreeStates]\neulerlagrange_tolerance = 2e-6\n")
+                write(override_toml, "[ForceFreeStates]\nqlow = 1.06\n")
                 from_file = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override-file", override_toml])
-                @test from_file[1]["ForceFreeStates"]["eulerlagrange_tolerance"] == 2e-6
+                @test from_file[1]["ForceFreeStates"]["qlow"] == 1.06
             end
         end
 

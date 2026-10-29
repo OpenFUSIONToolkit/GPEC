@@ -37,8 +37,11 @@ standoff_fraction = 20         # Wall standoff in plasma minor radii
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
-ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
@@ -50,36 +53,33 @@ vac_flag             = true    # Compute plasma, vacuum, and total energies for 
 qlow        = 1.02             # Integration initiated at q determined by min(q0, qlow)
 qhigh       = 3.6              # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start  = 0                # Start integration at the sing_start'th rational from the axis (psilow)
-nn_low      = 1                # Smallest toroidal mode number to include
-nn_high     = 1                # Largest toroidal mode number to include
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow  = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8                # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960            # Number of points used in splines over poloidal angle at plasma-vacuum interface
 
-eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min             = 1e-4  # Fractional distance from rational q at which ideal jump enforced
-renorm_threshold        = 1e3   # Column-norm threshold that triggers solution renormalization
 frobenius_order         = 6     # Power-series order for the singular-surface asymptotics
-save_interval           = 1     # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
-integrator            = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
+integrator = "Galerkin" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = false # Keep psilim at psihigh (do not truncate at last_rational_q + rational_offset_fraction)
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n (only used when truncate_at_rational_offset = true)
 
 # Outer-region singular Galerkin Delta-prime solver with rpec coil columns.
-gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
-gal_nq                 = 6     # Gauss-Lobatto quadrature order per element
-gal_pfac               = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)
-gal_dx0                = 5e-4  # Resonant-element integration truncation distance from the rational (times 1/|n q'|)
-gal_dx1                = 1e-3  # Resonant-element size (times 1/|n q'|)
-gal_dx2                = 1e-3  # Extension-element size (times 1/|n q'|)
-gal_cutoff             = 10    # Number of elements carrying the large (driving) solution as a source term
-gal_tol                = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tolerance
-gal_gnstep             = 5000  # Maximum resonant-integration steps
-gal_dx1dx2_flag        = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
-gal_sing_order_ceiling = true  # Auto-raise the series order by ceil(2*Re(alpha)) on high-Mercier-index surfaces
-gal_rpec_flag          = true  # Append mpert coil-response columns (unit edge sources) to the solve, giving the delta_coil block
+[Galerkin]
+nx                     = 256   # Hermite-cubic elements per interval between singular surfaces
+nq                     = 6     # Gauss-Lobatto quadrature order per element
+pfac                   = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)
+dx0                    = 5e-4  # Resonant-element integration truncation distance from the rational (times 1/|n q'|)
+dx1                    = 1e-3  # Resonant-element size (times 1/|n q'|)
+dx2                    = 1e-3  # Extension-element size (times 1/|n q'|)
+cutoff                 = 10    # Number of elements carrying the large (driving) solution as a source term
+tol                    = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tolerance
+gnstep                 = 5000  # Maximum resonant-integration steps
+dx1dx2_flag            = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
+frobenius_order_ceiling = true  # Auto-raise the series order by ceil(2*Re(alpha)) on high-Mercier-index surfaces
+rpec_flag              = true  # Append mpert coil-response columns (unit edge sources) to the solve, giving the delta_coil block
 
-# DRIVEN (RPEC) outer-inner matching in the ideal limit: the inner layer is skipped entirely.
-gal_match_flag         = true  # Solve the coil-driven matched xi(psi) from the gal Delta-prime. Requires gal_rpec_flag = true.
-gal_ideal_flag         = true  # true = build the IDEAL solution (skip the inner layer, bare coil columns)
+# Driven inner-layer matching on the finished solve in the ideal limit: the inner layer is skipped entirely.
+[Match]
+ideal                  = true  # true = build the IDEAL solution (skip the inner layer, bare coil columns)

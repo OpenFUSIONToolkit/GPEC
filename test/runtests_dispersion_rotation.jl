@@ -1,9 +1,8 @@
 @testset "Dispersion per-surface rotation shift" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
-    using GeneralizedPerturbedEquilibrium.Dispersion
-    using GeneralizedPerturbedEquilibrium.Tearing.Runner: SLAYERControl,
-        slayer_control_from_toml, validate, _q_shift, _build_surface_coupling
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing: validate, _q_shift, _build_surface_coupling
     using LinearAlgebra
 
     # Linear inner layer Δ(Q) = a + b·Q makes the applied Q offset readable
@@ -101,13 +100,15 @@
         end
     end
 
-    @testset "omega_E_kHz parses and validates from TOML" begin
-        ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2/1" => 0, "3/1" => 3.0)))
-        @test ctrl.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
-        # Default stays empty so existing decks are untouched.
-        @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_E_kHz)
-        @test_throws "table keyed by m/n" slayer_control_from_toml(Dict("omega_E_kHz" => [0.0, 3.0]))
+    @testset "omega_E_kHz parses from the deck and validates" begin
+        GPEC = GeneralizedPerturbedEquilibrium
+        tearing(t) = GPEC.tearing_from_deck(Dict{String,Any}("Tearing" => merge(Dict{String,Any}("inner_model" => "SLAYER"), t)))
+        prob = TearingProblem(nothing; tearing(Dict{String,Any}("omega_E_kHz" => Dict{String,Any}("2/1" => 0, "3/1" => 3.0))).problem...)
+        @test prob.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
+        # Default stays empty, so surfaces use the kinetic file's rotation.
+        @test isempty(TearingProblem(nothing).omega_E_kHz)
+        @test_throws MethodError TearingProblem(nothing; tearing(Dict{String,Any}("omega_E_kHz" => [0.0, 3.0])).problem...)
         # Reject non-finite overrides before they reach the dispersion scan.
-        @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=Dict("2/1" => NaN)))
+        @test_throws ArgumentError validate(TearingProblem(nothing; omega_E_kHz=Dict("2/1" => NaN)), TearingConfig())
     end
 end

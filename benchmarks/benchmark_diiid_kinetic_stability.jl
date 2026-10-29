@@ -123,8 +123,6 @@ function build_benchmark_tomldir(eq_file::String, kin_file::String)
 [Equilibrium]
 eq_filename = "$eq_name"
 kinetic_file = "$kin_file"
-eq_type = "efit"
-jac_type = "hamada"
 grid_type = "pow1"             # Matches Fortran DIIID_kinetic_example (equil/grid.f90 powspace)
 psilow = 0.01
 psihigh = 0.993
@@ -143,23 +141,21 @@ qlow = 1.02
 qhigh = 1e3
 sing_start = 0
 
-nn_low = 1
-nn_high = 1
+nn = 1
 delta_mlow = 8
 delta_mhigh = 8
 mtheta_vacuum = 512
-thmax0 = 1
 
+integrator = "Forward"
 kinetic = "KineticForces"
-eulerlagrange_tolerance = 1e-7
 singfac_min = 1e-4
+
+[Forward]
+eulerlagrange_tolerance = 1e-7
 renorm_threshold = 1e4
 
 [KineticForces]
-nn = 1
-nl = 4
-zi = 1
-mi = 2
+bounce_harmonic_max = 4
 nutype = "harmonic"
 f0type = "maxwellian"
 """

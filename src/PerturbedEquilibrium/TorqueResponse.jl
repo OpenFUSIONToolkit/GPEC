@@ -35,7 +35,7 @@ function torque_response_matrix(ffs::ForceFreeStatesResult, permeability::Abstra
     ffs.solution === nothing && throw(ArgumentError("torque response matrices need a ξ solution; the forward integrator produced none"))
     ffs.mats.kinetic === nothing &&
         throw(ArgumentError("torque response matrices need a kinetic solve; the ideal Euler-Lagrange energy is Hermitian and carries no torque"))
-    ffs.npert == 1 || throw(ArgumentError("torque response matrices are defined per toroidal harmonic; this solve stacks $(ffs.npert) (nn_low != nn_high)"))
+    ffs.npert == 1 || throw(ArgumentError("torque response matrices are defined per toroidal harmonic; this solve stacks $(ffs.npert)"))
     ffs.control.kinetic isa ForceFreeStates.TestKineticMatrices &&
         @warn "TestKineticMatrices: the torque response is built from synthetic test matrices and has no physical meaning"
 

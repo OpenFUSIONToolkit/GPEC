@@ -24,8 +24,11 @@ flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
-ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
@@ -39,46 +42,43 @@ qlow = 1.02                    # Integration initiated at q determined by min(q0
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                     # Smallest toroidal mode number to include
-nn_high = 1                    # Largest toroidal mode number to include
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 8                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 4                # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 512            # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 
-eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
-save_interval = 1              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
-integrator          = "galerkin" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
+integrator = "Galerkin" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = false # Keep psilim at psihigh (do not truncate at last_rational_q + rational_offset_fraction)
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n (only used when truncate_at_rational_offset = true)
 
+frobenius_order = 6 # Order of singular layer (Frobenius) expansion at rational surfaces
+
 # Outer-region singular Galerkin Δ′ solver with rpec coil columns.
 # This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
-gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
-gal_nq                 = 6     # Gauss-Lobatto quadrature order per element
-gal_pfac               = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)
-gal_dx0                = 5e-4  # Resonant-element integration truncation distance from the rational (× 1/|n q'|)
-gal_dx1                = 1e-3  # Resonant-element size (× 1/|n q'|)
-gal_dx2                = 1e-3  # Extension-element size (× 1/|n q'|)
-gal_cutoff             = 10    # Number of elements carrying the large (driving) solution as a source term
-gal_tol                = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tolerance
-gal_gnstep             = 5000  # Maximum resonant-integration steps
-gal_dx1dx2_flag        = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
-frobenius_order = 6 # Order of singular layer (Frobenius) expansion at rational surfaces
-gal_sing_order_ceiling = true  # Auto-raise the series order by ceil(2·Re(α)) on high-Mercier-index surfaces
-gal_rpec_flag          = true  # Append mpert coil-response columns (unit edge sources) to the solve → delta_coil block
+[Galerkin]
+nx                     = 256   # Hermite-cubic elements per interval between singular surfaces
+nq                     = 6     # Gauss-Lobatto quadrature order per element
+pfac                   = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)
+dx0                    = 5e-4  # Resonant-element integration truncation distance from the rational (× 1/|n q'|)
+dx1                    = 1e-3  # Resonant-element size (× 1/|n q'|)
+dx2                    = 1e-3  # Extension-element size (× 1/|n q'|)
+cutoff                 = 10    # Number of elements carrying the large (driving) solution as a source term
+tol                    = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tolerance
+gnstep                 = 5000  # Maximum resonant-integration steps
+dx1dx2_flag            = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
+frobenius_order_ceiling = true  # Auto-raise the series order by ceil(2·Re(α)) on high-Mercier-index surfaces
+rpec_flag              = true  # Append mpert coil-response columns (unit edge sources) to the solve → delta_coil block
 
-# DRIVEN (RPEC) outer↔inner matching. Per-surface resistive inputs (core→edge) for a DIII-D-like case:
+# Driven inner-layer matching on the finished solve. Per-surface resistive inputs (core→edge) for a DIII-D-like case:
 # η=8e-8, ρ=3.3e-7 kg/m³ (ni≈1e20 m^-3), rotation=1 Hz, Γ=5/3. 4 surfaces.
-gal_match_flag         = true  # Solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag = true.
-gal_ideal_flag         = false # true → build the IDEAL solution (skip the inner layer, bare coil columns). false → the resistive matching below.
-gal_eta                = [8e-8, 8e-8, 8e-8, 8e-8]          # Per-surface resistivity η (core→edge)
-gal_rho                = [3.3e-7, 3.3e-7, 3.3e-7, 3.3e-7]  # Per-surface mass density ρ [kg/m³] (core→edge)
-gal_rotation           = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation frequency f [Hz] (core→edge); forced eigenvalue γ_s = 2πi·n·f
-gal_gamma              = 1.6666666666666667               # Ratio of specific heats Γ for the resistive-layer coefficients (5/3)
+[Match]
+eta                    = [8e-8, 8e-8, 8e-8, 8e-8]          # Per-surface resistivity η (core→edge)
+rho                    = [3.3e-7, 3.3e-7, 3.3e-7, 3.3e-7]  # Per-surface mass density ρ [kg/m³] (core→edge)
+rotation               = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation frequency f [Hz] (core→edge); forced eigenvalue γ_s = 2πi·n·f
+gamma                  = 1.6666666666666667               # Ratio of specific heats Γ for the resistive-layer coefficients (5/3)
 
 [ForcingTerms]
 forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)

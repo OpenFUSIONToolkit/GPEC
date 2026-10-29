@@ -21,8 +21,7 @@ mtheta       = 256             # Number of poloidal grid points
 imas_cocos   = 11              # Expected COCOS convention of the input IMAS dd (11 = IMAS standard)
 
 [ForceFreeStates]
-nn_low               = 1       # Smallest toroidal mode number to include
-nn_high              = 1       # Largest toroidal mode number to include
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 vac_flag             = true    # Compute plasma, vacuum, and total energies for free-boundary modes
 delta_mhigh          = 16      # Expands upper bound of Fourier harmonics
 qlow                 = 1.02    # Integration initiated at q determined by min(q0, qlow)

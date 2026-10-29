@@ -72,7 +72,7 @@ export Analysis
 include("Rerun.jl")
 
 # Import ForceFreeStates types and functions needed for main
-using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings
+using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl
 using .ForceFreeStates: ForceFreeStatesResult, build_result
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines
@@ -85,95 +85,13 @@ using .ForceFreeStates: galerkin_solve, write_galerkin!
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
-using .Tearing: TearingProblem, TearingConfig, TearingResult
+using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
 using .PerturbedEquilibrium: plasma_response, PlasmaResponse
 
-const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
-    "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
-    "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag", "gal_solver", "gal_sing_order", "force_termination",
-    "kinetic_source")
-const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid", "force_termination")
-const _DEPRECATED_KF_KEYS = ("moment", "eq_out", "theta_out", "xlmda_out", "eqpsi_out", "save_records", "gpec_file",
-    "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha")
-const _DEPRECATED_PE_KEYS = ("fixed_boundary", "output_eigenmodes", "filter_modes", "singular_point_method", "compute_response")
-const _DEPRECATED_KEYS = ("Equilibrium" => _DEPRECATED_EQUIL_KEYS, "ForceFreeStates" => _DEPRECATED_FFS_KEYS,
-    "KineticForces" => _DEPRECATED_KF_KEYS, "PerturbedEquilibrium" => _DEPRECATED_PE_KEYS)
-# Per-section output and verbosity keys, replaced by the run-wide [Run] output_file and verbose.
-const _RUN_SECTION_KEYS = ("verbose", "HDF5_filename", "output_filename", "write_outputs_to_HDF5")
-const _RUN_KEY_SECTIONS = ("Equilibrium", "LocalStability", "ForceFreeStates", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
-
-# Stop the run when a parsed gpec.toml section sets keys that no longer exist, so the deck is updated.
-function _stop_on_deprecated_keys(table, deprecated_keys, section::String; remedy::String="remove from gpec.toml")
-    found = [k for k in deprecated_keys if haskey(table, k)]
-    isempty(found) && return nothing
-    listed = join(("`$k`" for k in found), ", ")
-    error(length(found) == 1 ? "[$section] sets $listed, which is no longer a key; $remedy" : "[$section] sets $listed, which are no longer keys; $remedy")
-end
-
-# Stop on every retired key of a parsed deck. `remedy` replaces the per-key advice, e.g. for a stored deck that cannot be edited.
-function _stop_on_deprecated_deck_keys(inputs::AbstractDict; remedy::Union{Nothing,String}=nothing)
-    for (section, keys) in _DEPRECATED_KEYS
-        haskey(inputs, section) && _stop_on_deprecated_keys(inputs[section], keys, section; remedy=something(remedy, "remove from gpec.toml"))
-    end
-    run_remedy = something(remedy, "set [Run] output_file or verbose instead; a deck run always writes its output file")
-    for section in _RUN_KEY_SECTIONS
-        haskey(inputs, section) && _stop_on_deprecated_keys(inputs[section], _RUN_SECTION_KEYS, section; remedy=run_remedy)
-    end
-    ntv = get(get(inputs, "ErrorFields", Dict{String,Any}()), "NTV", nothing)
-    ntv === nothing || _stop_on_deprecated_keys(ntv, ("verbose",), "ErrorFields.NTV"; remedy=run_remedy)
-    return nothing
-end
-
-"""
-    run_settings(inputs, path) -> (; output_file, verbose)
-
-The run-wide `[Run]` settings of a parsed deck: the one output file every stage saves into,
-resolved against the deck directory `path` when relative, and the one verbosity of the run.
-Defaults are `output_file = "gpec.h5"` and `verbose = false`. Unknown keys are an error.
-"""
-function run_settings(inputs::AbstractDict, path::AbstractString)
-    table = get(inputs, "Run", Dict{String,Any}())
-    allowed = ("output_file", "verbose")
-    for k in keys(table)
-        k in allowed || throw(ArgumentError("unknown key \"$k\" in [Run] (allowed: $(join(allowed, ", ")))"))
-    end
-    file = get(table, "output_file", "gpec.h5")
-    return (; output_file=isabspath(file) ? file : normpath(joinpath(path, file)), verbose=Bool(get(table, "verbose", false)))
-end
-
-# A copy of a deck section with its relative path `keys` resolved against the deck directory `path`; absolute paths are kept.
-_deck_paths(::Nothing, path, keys) = nothing
-function _deck_paths(section::AbstractDict, path::AbstractString, keys)
-    resolved = Dict{String,Any}(section)
-    for k in keys
-        v = get(resolved, k, "")
-        isempty(v) || isabspath(v) || (resolved[k] = normpath(joinpath(path, v)))
-    end
-    return resolved
-end
-
-"""
-    local_stability_algorithm(inputs) -> Union{LocalStability.Ballooning,Nothing}
-
-Read the numerical settings from the current `[LocalStability]` section, or return `nothing`
-when absent. Problem settings and verbosity are consumed separately by the driver.
-Unknown keys are an error.
-"""
-function local_stability_algorithm(inputs)
-    haskey(inputs, "LocalStability") || return nothing
-    table = inputs["LocalStability"]
-    algorithm_keys = string.(fieldnames(LocalStability.Ballooning))
-    allowed = [algorithm_keys..., "theta_k", "alpha_boundary_scan"]
-    for k in keys(table)
-        k in allowed || throw(ArgumentError("unknown key \"$k\" in [LocalStability] (allowed: $(join(allowed, ", ")))"))
-    end
-    kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in table if k in algorithm_keys)
-    haskey(kwargs, :psi_window) && (kwargs[:psi_window] = Tuple{Float64,Float64}(kwargs[:psi_window]))
-    return LocalStability.Ballooning(; kwargs...)
-end
+include("Deck.jl")
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Every input source builds a ready `(inputs, eq_config, additional_input)` and hands it to
@@ -211,9 +129,8 @@ reads from disk.
 function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
 
-    haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
     _stop_on_deprecated_deck_keys(inputs)
-    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
+    eq_config = equilibrium_config(inputs, path)
 
     # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
     # IMAS-fed (via the dd kwarg), or read from a file (additional_input = nothing).
@@ -249,10 +166,9 @@ forcing file it writes from that snapshot.
 against the current equilibrium) without the original `.dat`/`.h5` files. The coil
 geometry actually used by the run is always written back into `Input/RawInputs/Coils/`.
 
-Returns `(; ffs, pe, slayer, local_stability, ...)`: the `ForceFreeStates.ForceFreeStatesResult`, the
-`PerturbedEquilibriumState` (`nothing` when that stage did not run), the SLAYER result
-(`nothing` when that stage did not run or failed) and the `LocalStabilityResult` (`nothing`
-without a `[LocalStability]` section). Every stage saves into the one `[Run] output_file`. A deck
+Returns `(; ffs, pe, tearing, local_stability, ...)`: the `ForceFreeStates.ForceFreeStatesResult`
+(matched when the deck has a `[Match]` section), the `PerturbedEquilibriumState`, the
+`TearingResult` and the `LocalStabilityResult`, each `nothing` when its section is absent. Every stage saves into the one `[Run] output_file`. A deck
 without a `[ForceFreeStates]` section stops after the equilibrium and returns `nothing`.
 """
 function main_from_inputs(
@@ -266,8 +182,9 @@ function main_from_inputs(
     total_start = time()
     # Per-stage wall-clock seconds, written to Info/Runtimes at the end of the run.
     runtimes = Vector{Pair{String,Float64}}()
-    _stop_on_deprecated_deck_keys(inputs)
-    (; output_file, verbose) = run_settings(inputs, path)
+    deck = parse_deck(inputs, path)
+    (; output_file, verbose) = deck.run
+    kf_ctrl = deck.kinetic_forces
 
     # ----------------------------------------------------------------
     # Equilibrium
@@ -275,58 +192,44 @@ function main_from_inputs(
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
-    # A deck without [ForceFreeStates] stops after the equilibrium.
-    ffs_table = get(inputs, "ForceFreeStates", nothing)
-    intr = ForceFreeStatesInternal(; verbose)
-    kf_ctrl = kinetic_forces_control(inputs)
-    ctrl = ffs_table === nothing ? nothing :
-           _deck_layer_overlap(ForceFreeStates.control_from_deck(ffs_table, get(inputs, "DEBUG", Dict{String,Any}()); kinetic=_deck_kinetic(ffs_table, kf_ctrl)), inputs)
-    local_stability_alg = local_stability_algorithm(inputs)
-
-    ctrl === nothing || resolve_mode_space!(intr, ctrl)
-
     equil = Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
+    # A deck without [ForceFreeStates] stops after the equilibrium.
+    if deck.force_balance === nothing
+        push!(runtimes, "equilibrium" => time() - equil_start)
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        return
+    end
+    alg = deck.force_balance.algorithm
+    ctrl = ForceFreeStates.validate_algorithm(ForceFreeStatesControl(; algorithm=alg,
+        ForceBalanceProblem(equil; deck.force_balance.keywords...).ctrl_kwargs...))
+    intr = ForceFreeStatesInternal(; verbose)
+    resolve_mode_space!(intr, ctrl)
     # GPEC differentiates the spline of F, so single-precision FPOL rounding becomes noise in Δ′.
-    if ctrl !== nothing && eq_config.eq_type in Equilibrium.EFIT_KINDS && ctrl.algorithm isa Union{Riccati,Galerkin} &&
+    if eq_config.eq_type in Equilibrium.EFIT_KINDS && alg isa Union{Riccati,Galerkin} &&
        Equilibrium.gfile_fpol_single_precision(eq_config.eq_filename)
         @warn "The g-file's FPOL is single precision. Its rounding puts noise of order ±2–3 on Δ′ at 257 radial " *
               "nodes; regenerate the file in double precision for converged Δ′." file = eq_config.eq_filename
     end
 
-    _deck_kinetic_composition!(equil, inputs)
-    if ctrl === nothing
-        push!(runtimes, "equilibrium" => time() - equil_start)
-        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return
-    end
     _needs_kinetic_profiles(inputs, ctrl) && equil.kinetic === nothing &&
         error("this run needs kinetic profiles ([KineticForces], or kinetic = \"KineticForces\"): set kinetic_file in [Equilibrium]")
     equil = maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl=kf_ctrl)
+    problem = ForceBalanceProblem(equil; deck.force_balance.keywords...)
 
     equil_dt = time() - equil_start
     push!(runtimes, "equilibrium" => equil_dt)
     @info "Equilibrium construction completed in $(@sprintf("%.3f", equil_dt)) s"
 
-    intr.wall_settings = Vacuum.parse_wall(_deck_paths(get(inputs, "Wall", nothing), path, ("file",)))
-
-    if "DEBUG" in keys(inputs)
-        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"] if k != "gal_basis_output")...)
-    else
-        intr.debug_settings = DebugSettings()
-    end
-
-    forcing_snapshot = snapshot_forcing_modes(inputs, path; verbose)
+    intr.wall_settings = problem.wall
+    forcing_snapshot = deck.perturbed_equilibrium === nothing ? nothing : snapshot_forcing_modes(deck.forcing; verbose)
 
     # ----------------------------------------------------------------
     # Local Stability
     # ----------------------------------------------------------------
     local_stability = nothing
-    if local_stability_alg !== nothing
+    if deck.local_stability !== nothing
         local_stability = _timed_stage(runtimes, "local_stability", "Local Stability") do
-            section = inputs["LocalStability"]
-            problem = LocalStabilityProblem(equil;
-                (Symbol(k) => section[k] for k in ("theta_k", "alpha_boundary_scan") if haskey(section, k))...)
-            solve(problem, local_stability_alg; verbose)
+            solve(LocalStabilityProblem(equil; deck.local_stability.problem...), deck.local_stability.algorithm; verbose)
         end
     end
 
@@ -337,10 +240,8 @@ function main_from_inputs(
     ffs_start = time()
 
     metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil)
-    ffs_result = run_deck_match(run_force_free_states(ctrl, equil, mats, intr, metric), ctrl; verbose)
-    alg = ctrl.algorithm
-    problem_kwargs = ForceFreeStates.problem_keywords(ctrl)
-    problem = ForceBalanceProblem(equil; nn=ctrl.nn_low:ctrl.nn_high, wall=intr.wall_settings, debug=intr.debug_settings, problem_kwargs...)
+    ffs_result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa Galerkin && alg.cut_solution)
+    deck.match === nothing || (ffs_result = solve(MatchProblem(ffs_result; deck.match.problem...), deck.match.model))
     ffs_result = ForceFreeStates._with(ffs_result; problem=problem, algorithm=alg, layer_overlap=layer_overlap)
 
     h5open(output_file, "w") do target
@@ -367,16 +268,18 @@ function main_from_inputs(
     @info "Force-Free States completed in $(@sprintf("%.3f", ffs_dt)) s"
 
     pe_state = nothing
-    if "PerturbedEquilibrium" in keys(inputs)
+    if deck.perturbed_equilibrium !== nothing
         pe_state = _timed_stage(runtimes, "perturbed_equilibrium", "Perturbed Equilibrium") do
-            run_perturbed_equilibrium(ffs_result, inputs, path, preloaded_coil_sets; verbose)
+            resp = plasma_response(ffs_result; verbose, deck.perturbed_equilibrium.response...)
+            perturbed_equilibrium(resp, ForcingTerms.RMPField(deck.forcing); coil_sets=preloaded_coil_sets, verbose,
+                deck.perturbed_equilibrium.drive...)
         end
         save_to_hdf5(output_file, pe_state)
     end
 
     if "KineticForces" in keys(inputs)
         kinetic = _timed_stage(runtimes, "kinetic_forces", "KineticForces") do
-            run_kinetic_forces(inputs, ffs_result, pe_state, kf_ctrl; verbose)
+            run_kinetic_forces(ffs_result, pe_state, kf_ctrl; verbose)
         end
         if kinetic !== nothing
             h5open(output_file, "cw") do target
@@ -389,9 +292,9 @@ function main_from_inputs(
     end
 
     coil_sensitivities, monte_carlo, locking_risk, efc_couplings = nothing, nothing, nothing, nothing
-    if "ErrorFields" in keys(inputs)
+    if deck.error_fields !== nothing
         error_fields = _timed_stage(runtimes, "error_fields", "ErrorFields") do
-            run_error_fields(inputs, path, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl; verbose)
+            run_error_fields(deck.error_fields, deck.forcing, ffs_result, pe_state, preloaded_coil_sets, kf_ctrl; verbose)
         end
         coil_sensitivities, monte_carlo = error_fields.sens, error_fields.monte_carlo
         locking_risk, efc_couplings = error_fields.risk, error_fields.couplings
@@ -404,14 +307,12 @@ function main_from_inputs(
         end
     end
 
-    tearing_start = time()
-    slayer_result = run_slayer_stage(ffs_result, inputs)
-    tearing_dt = time() - tearing_start
-    # Save a tearing result only when that stage ran.
-    if slayer_result !== nothing
-        save_to_hdf5(output_file, slayer_result)
-        push!(runtimes, "tearing" => tearing_dt)
-        @info "SLAYER completed in $(@sprintf("%.3f", tearing_dt)) s"
+    tearing = nothing
+    if deck.tearing !== nothing
+        tearing = _timed_stage(runtimes, "tearing", "Tearing") do
+            solve(TearingProblem(ffs_result; deck.tearing.problem...), deck.tearing.model; config=deck.tearing.config)
+        end
+        save_to_hdf5(output_file, tearing)
     end
 
     # ----------------------------------------------------------------
@@ -424,8 +325,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, slayer=slayer_result, local_stability, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
-
+    return (; ffs=ffs_result, pe=pe_state, tearing, local_stability, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
 end
 
 """
@@ -461,74 +361,25 @@ function resolve_mode_space!(intr::ForceFreeStatesInternal, ctrl::ForceFreeState
     # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     intr.nlow, intr.nhigh = ctrl.nn_low, ctrl.nn_high
     if intr.nlow == 0 && intr.nhigh == 0
-        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
+        error("the toroidal mode number nn must be set")
     elseif intr.nlow == 0
         intr.nlow = intr.nhigh
     elseif intr.nhigh == 0
         intr.nhigh = intr.nlow
     end
     if intr.nlow > intr.nhigh
-        error("nn_low=$(intr.nlow) cannot be greater than nn_high=$(intr.nhigh)")
+        error("the toroidal mode range $(intr.nlow):$(intr.nhigh) is empty")
     end
     if intr.nhigh < 1
         error("All requested toroidal modes (n=$(intr.nlow):$(intr.nhigh)) are below 1; " *
               "n < 1 modes are not supported")
     end
     if intr.nlow < 1
-        @warn "Clamping nn_low from $(intr.nlow) to 1; n < 1 modes are not supported"
+        @warn "Clamping the lowest toroidal mode from $(intr.nlow) to 1; n < 1 modes are not supported"
         intr.nlow = 1
     end
     intr.npert = intr.nhigh - intr.nlow + 1
     return intr
-end
-
-"""
-    kinetic_forces_control(inputs) -> kf_ctrl
-
-The `[KineticForces]` control of the run, defaults when the deck has no such section. Its species
-keys describe the plasma and are applied to the equilibrium's kinetic data instead.
-"""
-# The [SLAYER] layer closures a deck's layer-overlap cap scans with: `psilim_from_layer_overlap = true` becomes that SLAYERModel.
-const _SLAYER_MODEL_KEYS = ("P_perp_model", "D_c_type", "D_R", "D_geo", "theta_sample")
-
-function _deck_layer_overlap(ctrl::ForceFreeStatesControl, inputs::Dict{String,Any})
-    (ctrl.psilim_from_layer_overlap === true && haskey(inputs, "SLAYER")) || return ctrl
-    closures = (Symbol(k) => v for (k, v) in inputs["SLAYER"] if k in _SLAYER_MODEL_KEYS)
-    return ForceFreeStates._with(ctrl; psilim_from_layer_overlap=SLAYERModel(; closures...))
-end
-
-# The deck's species keys, which describe the plasma: they set the equilibrium's kinetic data rather than the NTV control.
-const _KF_SPECIES_KEYS = ("ion_charge", "ion_mass", "impurity_charge", "impurity_mass", "ion_species")
-
-# Apply the deck's [KineticForces] species keys to the equilibrium's kinetic data, which every kinetic consumer reads.
-function _deck_kinetic_composition!(equil::Equilibrium.PlasmaEquilibrium, inputs::Dict{String,Any})
-    kf = get(inputs, "KineticForces", nothing)
-    (kf === nothing || equil.kinetic === nothing) && return equil
-    settings = Dict{Symbol,Any}()
-    if haskey(kf, "ion_species")
-        settings[:ion_species] = kf["ion_species"]
-    elseif haskey(kf, "ion_charge") || haskey(kf, "ion_mass")
-        settings[:ion_species] = [Equilibrium.IonSpecies(; z=get(kf, "ion_charge", 1), m=get(kf, "ion_mass", 2), fraction=1.0)]
-    end
-    haskey(kf, "impurity_charge") && (settings[:impurity_charge] = kf["impurity_charge"])
-    haskey(kf, "impurity_mass") && (settings[:impurity_mass] = kf["impurity_mass"])
-    isempty(settings) || Equilibrium.attach_kinetic_profiles!(equil, Equilibrium.KineticProfileData(equil.kinetic; settings...))
-    return equil
-end
-
-function kinetic_forces_control(inputs::Dict{String,Any})
-    haskey(inputs, "KineticForces") || return KineticForces.KineticForcesControl()
-    return KineticForces.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"] if !(k in _KF_SPECIES_KEYS))...)
-end
-
-# The kinetic source a [ForceFreeStates] section names: `kinetic = "KineticForces"` is the [KineticForces] model, absent is ideal.
-function _deck_kinetic(ffs_table::AbstractDict, kf_ctrl::KineticForces.KineticForcesControl)
-    name = get(ffs_table, "kinetic", nothing)
-    name === nothing && return nothing
-    name == "KineticForces" && return kf_ctrl
-    name == "TestKineticMatrices" &&
-        error("TestKineticMatrices is script-only: pass ForceBalanceProblem(eq; kinetic=TestKineticMatrices(; scale)) to solve")
-    error("[ForceFreeStates] kinetic = \"$name\" is not a kinetic source (expected \"KineticForces\")")
 end
 
 # Whether a run reads the kinetic profiles through KineticForces (its stage, or the KineticForces kinetic source).
@@ -577,16 +428,14 @@ function maybe_reform_equilibrium(
 end
 
 """
-    snapshot_forcing_modes(inputs, path; verbose=false) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
+    snapshot_forcing_modes(ft_ctrl; verbose=false) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
 
-The raw file-based forcing modes and their normalization tag, read when PerturbedEquilibrium is
-enabled so they land in `Input/RawInputs/ForcingTerms/` alongside the TOML blob. They feed only
-the writer: the PE stage reads and normalizes the forcing file itself.
+The raw file-based forcing modes of `ft_ctrl` and their normalization tag, so they land in
+`Input/RawInputs/ForcingTerms/` alongside the TOML blob; `nothing` for coil forcing, which is
+recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on replay. They feed only the writer:
+the PE stage reads and normalizes the forcing file itself.
 """
-function snapshot_forcing_modes(inputs::Dict{String,Any}, path::String; verbose::Bool=false)
-    # Coil forcing is recomputed from the `[[ForcingTerms.coil_set]]` TOML blob on replay.
-    "PerturbedEquilibrium" in keys(inputs) || return nothing
-    ft_ctrl = forcing_terms_control(inputs, path)
+function snapshot_forcing_modes(ft_ctrl::ForcingTerms.ForcingTermsControl; verbose::Bool=false)
     ft_ctrl.forcing_data_format in ("ascii", "hdf5") || return nothing
     modes = ForcingTerms.ForcingMode[]
     normalization = ForcingTerms.load_forcing_data!(modes, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, verbose)
@@ -733,7 +582,7 @@ function run_force_free_states(
     gal_dp = nothing
     if ctrl.algorithm isa ForceFreeStates.Galerkin
         ctrl.kinetic === nothing ||
-            error("integrator = \"galerkin\" does not support kinetic runs; use integrator = \"forward\".")
+            error("Galerkin() does not support kinetic runs; use Forward().")
         gal_start = time()
         wv = ctrl.vac_flag ? first(ForceFreeStates.compute_scaled_wv(ctrl, equil, intr)) : nothing
         gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
@@ -788,38 +637,7 @@ function run_force_free_states(
 end
 
 """
-    run_deck_match(result, ctrl; verbose=false) -> ForceFreeStatesResult
-
-Solve the deck's inner-layer match (`gal_match_flag`) on a finished solve, posing the same
-`MatchProblem` a script would from the `gal_*` keys. Returns `result` unchanged when the deck
-requests no match.
-"""
-function run_deck_match(result::ForceFreeStatesResult, ctrl::ForceFreeStatesControl; verbose::Bool=false)
-    ctrl.gal_match_flag || return result
-    ctrl.gal_inner_solver in ("ray", "galerkin") ||
-        error("gal_inner_solver = \"$(ctrl.gal_inner_solver)\" (expected \"ray\" or \"galerkin\")")
-    verbose && @info(
-        ctrl.gal_ideal_flag ?
-        "RPEC matching: IDEAL solution (inner layer skipped, bare coil columns)" :
-        "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
-    )
-    # The gal_inner_* knobs override the "galerkin" backend's defaults; unset keys keep them.
-    model = if ctrl.gal_inner_solver == "galerkin"
-        knobs = (xfac=ctrl.gal_inner_xfac, nx=ctrl.gal_inner_nx, nq=ctrl.gal_inner_nq,
-            cutoff=ctrl.gal_inner_cutoff, kmax=ctrl.gal_inner_kmax)
-        InnerLayer.GGJModel(; solver=:galerkin, (k => v for (k, v) in pairs(knobs) if v !== nothing)...)
-    else
-        InnerLayer.GGJModel(; solver=:ray)
-    end
-    prob = ForceFreeStates.MatchProblem(result; eta=ctrl.gal_eta, rho=ctrl.gal_rho, rotation=ctrl.gal_rotation,
-        gamma=ctrl.gal_gamma, ideal=ctrl.gal_ideal_flag)
-    matched = solve(prob, model)
-    ctrl.gal_ideal_flag || (verbose && @info "RPEC matching: linear-solve residual = $(matched.match.residual)")
-    return matched
-end
-
-"""
-    ForceBalanceProblem(equil; nn, wall=nothing, debug=DebugSettings(), kwargs...)
+    ForceBalanceProblem(equil; nn, wall=nothing, kwargs...)
 
 The perturbed force-balance problem posed on an equilibrium, whose solutions are the force-free
 (or, with a `kinetic` source, kinetic) perturbed states. With kinetic terms the force operator
@@ -830,8 +648,7 @@ This is the WHAT of a stability solve; the integrator passed to
 names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
 matching is a separate problem posed on the finished solve: see `MatchProblem`.
 
-`nn` is the toroidal mode number or range. `wall` is the vacuum wall shape, and `debug` the diagnostic dump settings of the
-DEBUG deck section. Remaining keywords describe physics and workflow controls;
+`nn` is the toroidal mode number or range and `wall` the vacuum wall shape. Remaining keywords describe physics and workflow controls;
 numerical settings belong on the integrator passed to `solve`. `nn_low`/`nn_high` are rejected — they
 come from `nn`.
 
@@ -839,13 +656,11 @@ come from `nn`.
 
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium the problem is posed on.
   - `wall::Union{Nothing,Vacuum.WallSettings}` - Vacuum wall shape for the free-boundary energies.
-  - `debug::DebugSettings` - Diagnostic dump settings.
   - `ctrl_kwargs::Dict{Symbol,Any}` - `ForceFreeStatesControl` keywords, `nn` already folded in.
 """
 struct ForceBalanceProblem
     equil::Equilibrium.PlasmaEquilibrium
     wall::Union{Nothing,Vacuum.WallSettings}
-    debug::DebugSettings
     ctrl_kwargs::Dict{Symbol,Any}
 end
 
@@ -853,7 +668,6 @@ function ForceBalanceProblem(
     equil::Equilibrium.PlasmaEquilibrium;
     nn::Union{Int,AbstractUnitRange{Int}},
     wall::Union{Nothing,Vacuum.WallSettings}=nothing,
-    debug::DebugSettings=DebugSettings(),
     kwargs...
 )
     ctrl_kwargs = Dict{Symbol,Any}(kwargs)
@@ -865,7 +679,7 @@ function ForceBalanceProblem(
         error("the toroidal mode range comes from the `nn` keyword; drop nn_low/nn_high")
     ctrl_kwargs[:nn_low] = first(nn)
     ctrl_kwargs[:nn_high] = last(nn)
-    return ForceBalanceProblem(equil, wall, debug, ctrl_kwargs)
+    return ForceBalanceProblem(equil, wall, ctrl_kwargs)
 end
 
 """
@@ -905,11 +719,8 @@ function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrato
 
     intr = ForceFreeStatesInternal(; verbose)
     intr.wall_settings = prob.wall
-    intr.debug_settings = prob.debug
 
     resolve_mode_space!(intr, ctrl)
-    ctrl.gal_match_flag &&
-        error("gal_match_flag is the deck's match request; match the result instead: solve(MatchProblem(ffs; eta, rho, rotation), GGJModel())")
 
     # The kinetic model's control, when there is one, sets the views of the attached kinetic profiles.
     kf_ctrl = ctrl.kinetic isa KineticForces.KineticForcesControl ? ctrl.kinetic : KineticForces.KineticForcesControl()
@@ -933,35 +744,6 @@ equilibrium and the problem keywords, then solves it with `alg`.
 """
 solve(equil::Equilibrium.PlasmaEquilibrium, alg::ForceFreeStates.AbstractIntegrator; verbose::Bool=false, kwargs...) =
     solve(ForceBalanceProblem(equil; kwargs...), alg; verbose)
-
-"""
-    run_perturbed_equilibrium(result, inputs, path, preloaded_coil_sets; verbose=false) -> pe_state
-
-Run the perturbed-equilibrium stage against a published force-free-states `result`. Returns `nothing` when the deck carries no `[PerturbedEquilibrium]` section.
-"""
-function run_perturbed_equilibrium(
-    result::ForceFreeStatesResult,
-    inputs::Dict{String,Any},
-    path::AbstractString,
-    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}};
-    verbose::Bool=false
-)
-    # Check for PerturbedEquilibrium section and run if present
-    pe_state = nothing
-    if "PerturbedEquilibrium" in keys(inputs)
-        ft_ctrl = forcing_terms_control(inputs, path)
-        section = inputs["PerturbedEquilibrium"]
-
-        # The deck's section feeds the two scripting calls, and its forcing block is an unscaled
-        # RMPField, so the TOML path and the scripting API share one stage.
-        response_keys = ("compute_singular_coupling", "compute_torque_response")
-        resp = plasma_response(result; verbose, (Symbol(k) => v for (k, v) in section if k in response_keys)...)
-        pe_state = perturbed_equilibrium(resp, ForcingTerms.RMPField(ft_ctrl);
-            coil_sets=preloaded_coil_sets, verbose, (Symbol(k) => v for (k, v) in section if !(k in response_keys))...)
-    end
-
-    return pe_state
-end
 
 """
     perturbed_equilibrium(resp, rmp; regularization_width=resp.regularization_width, verbose=false, coil_sets=nothing)
@@ -996,15 +778,13 @@ function perturbed_equilibrium(
 end
 
 """
-    run_kinetic_forces(inputs, result, pe_state, kf_ctrl; verbose=false)
+    run_kinetic_forces(result, pe_state, kf_ctrl; verbose=false)
 
-Compute the neoclassical toroidal viscosity torque diagnostics when the deck carries a
-`[KineticForces]` section, from the kinetic profiles attached to `result.equil`. No-op when the perturbed-equilibrium state the operators contract
+Compute the neoclassical toroidal viscosity torque diagnostics of the deck's `[KineticForces]` section from the kinetic profiles attached to `result.equil`. No-op when the perturbed-equilibrium state the operators contract
 against is missing. Returns `(; total, states, labels)` for the summed and per-species results,
 or `nothing` when no torque is computed.
 """
 function run_kinetic_forces(
-    inputs::Dict{String,Any},
     result::ForceFreeStatesResult,
     pe_state,
     kf_ctrl::KineticForces.KineticForcesControl;
@@ -1013,7 +793,6 @@ function run_kinetic_forces(
     # ----------------------------------------------------------------
     # KineticForces (Neoclassical Toroidal Viscosity)
     # ----------------------------------------------------------------
-    ("KineticForces" in keys(inputs)) || return nothing
     kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, result.equil)
     species = KineticForces.ntv_species(kf_ctrl, result.equil)
 
@@ -1053,53 +832,25 @@ function run_kinetic_forces(
 end
 
 """
-    forcing_terms_control(inputs, path) -> ForcingTermsControl
+    run_error_fields(ef, ft_ctrl, result, pe_state, preloaded_coil_sets, kf_ctrl; verbose=false)
 
-The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent, with its
-relative file paths resolved against the deck directory `path`. The `[[ForcingTerms.coil_set]]`
-array of tables is passed through as `coil_sets_raw` rather than splatted with the scalar keys.
-"""
-function forcing_terms_control(inputs::Dict{String,Any}, path::AbstractString)
-    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl(; forcing_data_file=joinpath(path, "forcing.dat"))
-    forcing_raw = _deck_paths(inputs["ForcingTerms"], path, ("forcing_data_file", "dat_dir"))
-    haskey(forcing_raw, "forcing_data_file") || (forcing_raw["forcing_data_file"] = joinpath(path, "forcing.dat"))
-    coil_sets_raw = Dict{String,Any}[_deck_paths(d, path, ("dat_file", "h5_file")) for d in get(forcing_raw, "coil_set", Dict{String,Any}[])]
-    scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
-    return ForcingTerms.ForcingTermsControl(; (Symbol(k) => v for (k, v) in scalar_forcing)..., coil_sets_raw=coil_sets_raw)
-end
-
-"""
-    run_error_fields(inputs, path, result, pe_state, preloaded_coil_sets, kf_ctrl; verbose=false)
-
-Compute the requested coil sensitivities, tolerance Monte Carlo, locking risk, and NTV
+From the deck's `[ErrorFields]` controls `ef` (see [`error_fields_from_deck`](@ref)) and the run's forcing
+`ft_ctrl`, compute the requested coil sensitivities, tolerance Monte Carlo, locking risk, and NTV
 correction-coil couplings. Return `(; sens, monte_carlo, risk, couplings, dom, tolerances, scan)`;
 optional computations are `nothing` when omitted. The driver saves each product after this
 function returns. Requires coil-format forcing and a perturbed-equilibrium response.
 """
 function run_error_fields(
-    inputs::Dict{String,Any},
-    path::AbstractString,
+    ef::NamedTuple,
+    ft_ctrl::ForcingTerms.ForcingTermsControl,
     result::ForceFreeStatesResult,
     pe_state,
     preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}},
     kf_ctrl::KineticForces.KineticForcesControl=KineticForces.KineticForcesControl();
     verbose::Bool=false
 )
-    ("ErrorFields" in keys(inputs)) || return nothing
-
-    # [ErrorFields.MonteCarlo], [ErrorFields.Risk] and [ErrorFields.scenario] are nested tables,
-    # excluded from the control-struct splat.
-    ef_raw = inputs["ErrorFields"]
-    nested = ("MonteCarlo", "Risk", "scenario", "NTV")
-    ef_ctrl = ErrorFields.ErrorFieldsControl(; (Symbol(k) => v for (k, v) in ef_raw if !(k in nested))...)
-    mc_ctrl = ErrorFields.MonteCarloControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "MonteCarlo", Dict{String,Any}()))...)
-    risk_ctrl = ErrorFields.RiskControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "Risk", Dict{String,Any}()))...)
-    scenario_raw = get(ef_raw, "scenario", nothing)
-    ntv_ctrl = ErrorFields.NTVControl(; (Symbol(k) => v for (k, v) in get(ef_raw, "NTV", Dict{String,Any}()))...)
-    # Correction arrays and other excluded sets are swept like any coil but are not error-field sources.
-    excluded = ErrorFields.excluded_coil_names(ef_raw)
+    ef_ctrl, mc_ctrl, risk_ctrl, ntv_ctrl, scenario_raw, excluded = ef.ctrl, ef.monte_carlo, ef.risk, ef.ntv, ef.scenario, ef.excluded
     pe_state === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section with compute_singular_coupling = true")
-    ft_ctrl = forcing_terms_control(inputs, path)
     ft_ctrl.forcing_data_format == "coil" ||
         error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(ft_ctrl.forcing_data_format)\")")
 
@@ -1111,7 +862,7 @@ function run_error_fields(
 
     tolerances = nothing
     if !isempty(ef_ctrl.tolerance_file)
-        tol_path = isabspath(ef_ctrl.tolerance_file) ? ef_ctrl.tolerance_file : joinpath(path, ef_ctrl.tolerance_file)
+        tol_path = ef_ctrl.tolerance_file
         isfile(tol_path) || error("[ErrorFields] tolerance_file not found: $tol_path")
         tolerances = ErrorFields.validate_tolerances(ErrorFields.read_tolerance_toml(tol_path), sens.coil_names)
         ErrorFields.check_excluded_tolerances(tolerances, excluded)
@@ -1136,8 +887,8 @@ function run_error_fields(
     risk = nothing
     scan = nothing
     if monte_carlo !== nothing && scenario_raw !== nothing
-        haskey(scenario_raw, "n_e") || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
-        scen = ErrorFields.ScenarioParameters(result.equil; (Symbol(k) => v for (k, v) in scenario_raw)...)
+        haskey(scenario_raw, :n_e) || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
+        scen = ErrorFields.ScenarioParameters(result.equil; scenario_raw...)
         n_scaling = ErrorFields.single_toroidal_mode(result.nlow, result.nhigh; where="the in-run locking risk of this run")
         sc = ErrorFields.threshold_scaling(; n=n_scaling, year=risk_ctrl.year, dataset=risk_ctrl.dataset, fit=risk_ctrl.fit)
         risk_start = time()
@@ -1316,22 +1067,6 @@ function efc_couplings(
         push!(out, c)
     end
     return out
-end
-
-"""
-    run_slayer_stage(result, inputs) -> slayer_result
-
-Run the SLAYER tearing-mode analysis off the force-free-states `result` and return its result.
-"""
-function run_slayer_stage(result::ForceFreeStatesResult, inputs::Dict{String,Any})
-    ("SLAYER" in keys(inputs)) || return nothing
-    _stop_on_deprecated_keys(inputs["SLAYER"], ("gap_kHz_threshold",), "SLAYER")
-    slayer_ctrl = Tearing.slayer_control_from_toml(inputs["SLAYER"])
-    slayer_ctrl.enabled || return nothing
-    @info "\n  SLAYER\n$_SECTION"
-    model = Tearing._build_inner_model(slayer_ctrl.inner_model)
-    slayer_result = solve(Tearing.TearingProblem(result, slayer_ctrl), model)
-    return slayer_result
 end
 
 """

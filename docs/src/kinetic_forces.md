@@ -59,21 +59,24 @@ kinetic matrices of a `kinetic = "KineticForces"` force-balance solve.
 ```toml
 [Equilibrium]
 kinetic_file = "kinetic.h5"    # n_i column/dataset = TOTAL main-ion density
-
-[KineticForces]
-electron = true                # add electron NTV in addition to the ion species
 impurity_charge = 6            # impurity charge (closes quasineutrality)
 impurity_mass = 12             # impurity mass
 
-[[KineticForces.ion_species]]
+[[Equilibrium.ion_species]]
 z = 1
 m = 2
 fraction = 0.5                 # this species' share of the total n_i
-[[KineticForces.ion_species]]
+[[Equilibrium.ion_species]]
 z = 1
 m = 3
 density = "n_T"                # or: explicit n_* dataset from the HDF5 kinetic file
+
+[KineticForces]
+electron = true                # add electron NTV in addition to the ion species
 ```
+
+The composition describes the plasma, so it sits on the equilibrium's kinetic data beside
+`kinetic_file`, where every kinetic consumer (NTV, the tearing layers) reads it.
 
 Each species sets exactly one of `fraction` (share of the file's total `n_i`)
 or `density` (a named `n_*` dataset). An all-fraction list must sum to 1; in a
@@ -81,8 +84,8 @@ mixed list the impurity content is set by the file's `n_i`/`n_e` deficit, not
 by a fraction shortfall, and fractions may sum below (never above) 1. Every
 main-ion charge must satisfy `z < impurity_charge`. A single main ion carrying all of `n_i`
 runs the single-species NTV (with `electron = true` still adding the electron species — the
-electron flag, a `KineticForcesControl` setting, always means *in addition to* the ions). In a
-deck, `ion_charge`/`ion_mass` without an `ion_species` list give that single main ion.
+electron flag, a `KineticForcesControl` setting, always means *in addition to* the ions). Without
+an `ion_species` list the plasma is one deuterium main ion.
 
 The summed total is written to `KineticForces/<method>/` exactly as in a single-ion
 run, and each species' own contribution to `KineticForces/PerSpecies/<label>/<method>/`

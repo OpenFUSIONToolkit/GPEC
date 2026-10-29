@@ -107,7 +107,7 @@ end
     EQ = GeneralizedPerturbedEquilibrium.Equilibrium
     equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
-    eq_config = EQ.EquilibriumConfig(inputs["Equilibrium"], equil_dir)
+    eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, equil_dir)
     equil = EQ.PlasmaEquilibrium(eq_config, EQ.SolovevConfig(inputs["SOL_INPUT"]))
     psi = equil.rzphi_xs[end]
     mtheta = length(equil.rzphi_ys)

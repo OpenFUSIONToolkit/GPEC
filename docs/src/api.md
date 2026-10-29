@@ -144,6 +144,9 @@ Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the reso
 accepted — `GGJModel()` today; `SLAYERModel()` is slab-only and drives the free-eigenvalue tearing
 solve instead.
 
+A deck poses the match with a `[Match]` section (`eta`, `rho`, `rotation`, `gamma`, `ideal`,
+`inner_model = "GGJ"`), and `[GGJ]` holds the `GGJModel` keywords (`solver` and its options).
+
 ## Tearing stability
 
 A `TearingProblem` holds the outer solution and the surface coupling. The plasma is the
@@ -166,6 +169,11 @@ frequencies; SLAYER reports lab-frame frequencies with its per-surface E×B shif
 `omega` in rad/s and `gamma` in 1/s, positive for instability, and the HDF5 roots group records
 `frequency_frame`. SLAYER searches a normalized Q box, GGJ a physical (γ, ω) box.
 
+A deck runs the solve with a `[Tearing]` section: the `TearingProblem` keywords and
+`inner_model = "SLAYER"` or `"GGJ"`, with `[Tearing.search]` for the `TearingConfig` keys and
+`[Tearing.CriticalResonantField]` for the penetration threshold. The model's keywords sit in
+`[SLAYER]` or `[GGJ]`; `[SLAYER]` also gives the layer-overlap cap its closures.
+
 Kinetic runs take `Forward()`. The problem's `kinetic` keyword selects the source:
 `kinetic=KineticForces.KineticForcesControl(; ...)` evaluates the KineticForces drift-kinetic
 matrices with those settings on the equilibrium's kinetic profiles and species, and
@@ -179,7 +187,7 @@ The Mercier, resistive interchange and ballooning profiles are their own stage, 
 equilibrium. A [`LocalStabilityProblem`](@ref) holds the equilibrium, ballooning angle
 `theta_k`, and `alpha_boundary_scan` choice. [`Ballooning`](@ref) holds numerical tolerances
 and scan settings. `solve` returns a [`LocalStabilityResult`](@ref); its `verbose` keyword
-defaults to `false`. The current deck reader obtains all of these from `[LocalStability]`.
+defaults to `false`. A deck states the problem in `[LocalStability]` and the numerics in `[Ballooning]`.
 
 ```julia
 problem = LocalStabilityProblem(eq; theta_k=0.0, alpha_boundary_scan=true)

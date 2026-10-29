@@ -48,7 +48,7 @@ fails when its pattern matches a violation) lint-check the covered TOMLs on comm
 - `toml-inline-annotations` — every `key = value` line carries a trailing `# description`
   (`examples/*` and `test/test_data/*` only, per the rule-2 exception above).
 - `toml-no-deprecated-keys` — no deprecated config keys; its key list mirrors the
-  `_DEPRECATED_*_KEYS` lists in `src/GeneralizedPerturbedEquilibrium.jl`, which stop any run that
+  `_DEPRECATED_*_KEYS` and `_MOVED_KEYS` lists in `src/Deck.jl`, which stop any run that
   sets one, so extend the hook's pattern whenever a key is added there.
 
 Run them manually with:

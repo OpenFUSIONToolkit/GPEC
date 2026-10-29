@@ -1,39 +1,23 @@
 """
     CriticalResonantFieldControl
 
-Configuration for the critical resonant field (torque-balance) analysis, read from the
-`[SLAYER.CriticalResonantField]` TOML section via `critical_resonant_field_control_from_toml`
-or built with the `@kwdef` keyword constructor. The magnetic Prandtl number is the per-surface
+Configuration for the critical resonant field (torque-balance) analysis, passed as
+`TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl(; ...))`; a deck states it as
+`[Tearing.CriticalResonantField]`. The magnetic Prandtl number is the per-surface
 `P_tor` of the SLAYER layer parameters, and the natural rotation is each surface's resolved Ω_E
 (the kinetic file's `omega_E`, or the `omega_E_kHz` override), which it therefore requires.
 
 ## Fields
 
-  - `enabled`    -- run the analysis after SLAYER
   - `Qmin`, `Qmax` -- override the sampled real-Q range; `nothing` samples from Q0 toward Q_e per surface
   - `n`          -- number of Q samples per surface
   - `store_scan` -- write the per-surface Q, torque balance and Δ samples to `gpec.h5`
 """
 @kwdef struct CriticalResonantFieldControl
-    enabled::Bool = false
     Qmin::Union{Nothing,Float64} = nothing
     Qmax::Union{Nothing,Float64} = nothing
     n::Int = 2000
     store_scan::Bool = false
-end
-
-"""
-    critical_resonant_field_control_from_toml(section::AbstractDict) -> CriticalResonantFieldControl
-
-Parse a `[SLAYER.CriticalResonantField]` TOML section. Unknown keys raise an error.
-"""
-function critical_resonant_field_control_from_toml(section::AbstractDict)
-    field_names = Set(String.(fieldnames(CriticalResonantFieldControl)))
-    unknown = [k for k in keys(section) if !(k in field_names)]
-    isempty(unknown) ||
-        throw(ArgumentError("critical_resonant_field_control_from_toml: unknown keys $(unknown) in " *
-                            "[SLAYER.CriticalResonantField]. Known: $(sort(collect(field_names)))."))
-    return CriticalResonantFieldControl(; (Symbol(k) => v for (k, v) in section)...)
 end
 
 """

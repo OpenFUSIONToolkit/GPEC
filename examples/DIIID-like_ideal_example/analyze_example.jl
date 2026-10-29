@@ -57,7 +57,7 @@ for geqdsk_file in geqdsk_cases
 
     eq_dict = deepcopy(base_toml["Equilibrium"])
     eq_dict["eq_filename"] = geqdsk_file
-    eq_config = Equilibrium.EquilibriumConfig(eq_dict, @__DIR__)
+    eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" => eq_dict), @__DIR__)
     equil = Equilibrium.PlasmaEquilibrium(eq_config)
     psi_norm = Vector(equil.profiles.xs)
 

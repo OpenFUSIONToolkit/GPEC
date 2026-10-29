@@ -143,10 +143,10 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
     if ctrl.truncate_at_rational_offset && intr.nlow <= 0
         error("sing_lim!: truncate_at_rational_offset = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
-              "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
+              "Assign intr.nlow / intr.nhigh (resolve_mode_space!) before calling sing_lim!, " *
               "or set truncate_at_rational_offset = false to truncate via qhigh / psihigh instead.")
     elseif ctrl.truncate_at_rational_offset && intr.nlow != intr.nhigh
-        @warn "truncate_at_rational_offset = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
+        @warn "truncate_at_rational_offset = true is ignored for multi-n runs (n = $(intr.nlow):$(intr.nhigh)); falling back to qhigh / psihigh truncation."
     elseif ctrl.truncate_at_rational_offset
         @info "Setting psilim via rational_offset_fraction: initial qlim = $(@sprintf("%.3f", intr.qlim)), rational_offset_fraction = $(@sprintf("%.3f", ctrl.rational_offset_fraction))"
         # Normalize rational_offset_fraction ∈ [0,1)

@@ -26,8 +26,7 @@ const GEQDSK = joinpath(@__DIR__, "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmo
 # Only the [Equilibrium] section differs between IMAS and g-file paths.
 const SHARED_CONFIG = Dict(
     "ForceFreeStates" => Dict(
-        "nn_low" => 1,
-        "nn_high" => 1,
+        "nn" => 1,
         "vac_flag" => true,
         "delta_mhigh" => 16,
         "qlow" => 1.02

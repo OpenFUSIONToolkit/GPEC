@@ -133,8 +133,8 @@ end
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
+        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
             haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
@@ -201,13 +201,13 @@ end
         @test all(balanced_again[i].psi_end == balanced[i].psi_end for i in eachindex(balanced))
 
         # An explicit nchunks steers the target count directly.
-        ctrl_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(merge(inputs["ForceFreeStates"], Dict("nchunks" => target_n + 7)))
+        ctrl_more = GeneralizedPerturbedEquilibrium.force_balance_control(merge(inputs, Dict("Forward" => merge(inputs["Forward"], Dict{String,Any}("nchunks" => target_n + 7)))), ex)
         balanced_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_more, intr)
         @test length(balanced_more) == target_n + 7
 
         # An nchunks below the singular-surface floor is clamped up, with a warning.
         min_chunks = 2 * intr.msing + 3
-        ctrl_few = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(merge(inputs["ForceFreeStates"], Dict("nchunks" => 1)))
+        ctrl_few = GeneralizedPerturbedEquilibrium.force_balance_control(merge(inputs, Dict("Forward" => merge(inputs["Forward"], Dict{String,Any}("nchunks" => 1)))), ex)
         balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
         @test length(balanced_few) == max(min_chunks, length(base_chunks))
     end
@@ -219,8 +219,8 @@ end
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
+        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
             haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
@@ -280,9 +280,10 @@ end
         function run_solovev(integrator)
             inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
             inputs["ForceFreeStates"]["integrator"] = integrator
+            integrator == "Galerkin" ? delete!(inputs, "Forward") : (inputs[integrator] = pop!(inputs, "Forward"))
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+            ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
+            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
                 eq_config,
                 haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
@@ -304,8 +305,8 @@ end
             return real(vac.et[1]), intr
         end
 
-        et_fwd, intr_fwd = run_solovev("forward")
-        et_ric, intr_ric = run_solovev("riccati")
+        et_fwd, intr_fwd = run_solovev("Forward")
+        et_ric, intr_ric = run_solovev("Riccati")
 
         # Energy eigenvalue matches to 2%
         @test isapprox(et_ric, et_fwd; rtol=0.02)
@@ -322,8 +323,8 @@ end
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
+        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
             haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
@@ -372,9 +373,10 @@ end
         function run_and_capture(example_dir, integrator)
             inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
             inputs["ForceFreeStates"]["integrator"] = integrator
+            integrator == "Galerkin" ? delete!(inputs, "Forward") : (inputs[integrator] = pop!(inputs, "Forward"))
             intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
+            ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, example_dir)
+            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, example_dir)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
                 eq_config,
                 haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
@@ -398,8 +400,8 @@ end
         end
 
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        odet_fwd = run_and_capture(ex, "forward")
-        odet_ric = run_and_capture(ex, "riccati")
+        odet_fwd = run_and_capture(ex, "Forward")
+        odet_ric = run_and_capture(ex, "Riccati")
 
         @test odet_ric.step < odet_fwd.step
         @test length(odet_ric.psi_store) < length(odet_fwd.psi_store)

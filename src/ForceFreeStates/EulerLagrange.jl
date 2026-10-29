@@ -361,15 +361,15 @@ for all three.
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     if ctrl.algorithm isa Riccati
-        ctrl.kinetic !== nothing && error("integrator = \"riccati\" does not support kinetic runs; use integrator = \"forward\".")
+        ctrl.kinetic !== nothing && error("Riccati() does not support kinetic runs; use Forward().")
         return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.algorithm isa Forward
         return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.algorithm isa Galerkin
-        error("integrator = \"galerkin\" solves the Euler-Lagrange system variationally, not by ODE integration; " *
+        error("Galerkin() solves the Euler-Lagrange system variationally, not by ODE integration; " *
               "it is dispatched to galerkin_solve.")
     end
-    error("Unknown integrator: $(typeof(ctrl.algorithm)). Expected \"forward\", \"riccati\", or \"galerkin\".")
+    error("Unknown integrator: $(typeof(ctrl.algorithm)). Expected Forward, Riccati or Galerkin.")
 end
 
 """

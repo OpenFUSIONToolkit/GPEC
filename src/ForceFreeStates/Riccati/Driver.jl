@@ -116,7 +116,7 @@ chunks concurrently using `Threads.@threads`, then re-integrates the outer plasm
     without renormalization); Riccati integration keeps matrices bounded and provides dense
     checkpoints for `findmax_dW_edge!`.
 
-Select via `integrator = "riccati"` in `[ForceFreeStates]` of gpec.toml. Requires
+Select with `Riccati()`, or `integrator = "Riccati"` in a deck's `[ForceFreeStates]`. Requires
 `singfac_min != 0`. Uses whatever threads `julia -t` provides; `ctrl.algorithm.nchunks` is the only
 tunable.
 
@@ -259,7 +259,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
         end
 
         if chunk.needs_crossing
-            ctrl.kinetic !== nothing && error("integrator = \"riccati\" does not support kinetic runs; use integrator = \"forward\".")
+            ctrl.kinetic !== nothing && error("Riccati() does not support kinetic runs; use Forward().")
             # State is (S, I) from the renorm above — well-conditioned at the surface's left boundary.
             push!(S_at_surface_left, copy(odet.u[:, :, 1]))
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)

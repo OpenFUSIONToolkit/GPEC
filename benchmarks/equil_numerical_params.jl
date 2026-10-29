@@ -28,7 +28,7 @@ function make_config(path, eq_type, mpsi, mtheta)
     raw["Equilibrium"]["eq_type"] = eq_type
     raw["Equilibrium"]["mpsi"]    = mpsi
     raw["Equilibrium"]["mtheta"]  = mtheta
-    return Equilibrium.EquilibriumConfig(raw["Equilibrium"], dirname(path))
+    return GeneralizedPerturbedEquilibrium.equilibrium_config(raw, dirname(path))
 end
 
 function roundtrip_error(pe, raw_profile)

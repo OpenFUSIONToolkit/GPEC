@@ -72,11 +72,11 @@ using TOML
         # Synthetic test kinetic matrices are script-only, so this run goes through the API and saves its result.
         mktempdir() do dir
             inputs, config, analytic = GPEC.build_inputs_from_toml(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example"))
-            ctrl = GPEC.ForceFreeStates.control_from_deck(inputs["ForceFreeStates"])
-            kwargs = merge(GPEC.ForceFreeStates.problem_keywords(ctrl), Dict(:kinetic => TestKineticMatrices(; scale=1e-9)))
-            prob = ForceBalanceProblem(PlasmaEquilibrium(config, analytic); nn=1, wall=GPEC.Vacuum.parse_wall(get(inputs, "Wall", nothing)), kwargs...)
+            fixture = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            kwargs = merge(GPEC.force_balance_keywords(inputs, fixture), Dict(:kinetic => TestKineticMatrices(; scale=1e-9)))
+            prob = ForceBalanceProblem(PlasmaEquilibrium(config, analytic); kwargs...)
             h5 = joinpath(dir, "gpec.h5")
-            save_to_hdf5(h5, solve(prob, ctrl.algorithm))
+            save_to_hdf5(h5, solve(prob, GPEC.force_balance_algorithm(inputs)))
             @test _drew(A.ForceFreeStates.plot_cond_fbar(h5))
         end
     end

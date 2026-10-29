@@ -12,8 +12,8 @@ example_dir = "examples/DIIID-like_SLAYER_example"
 
 # Run the shared SLAYER deck through the coupled determinant.
 [overrides]
-"SLAYER.coupling_mode" = "coupled"
-"SLAYER.Q_re_range" = [-4.0, 6.0]
+"Tearing.coupling_mode" = "coupled"
+"Tearing.search.Q_re_range" = [-4.0, 6.0]
 
 # Per-surface inputs to the determinant
 [quantities.slayer_tauk]

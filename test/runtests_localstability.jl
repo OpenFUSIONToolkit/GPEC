@@ -9,7 +9,7 @@ using TOML
     template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
     equil = GPEC.Equilibrium.PlasmaEquilibrium(
-        GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], template),
+        GPEC.equilibrium_config(deck, template),
         GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
     )
     xs = equil.profiles.xs
@@ -86,7 +86,7 @@ using TOML
         end
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        delete!(inputs, "LocalStability")
+        foreach(section -> delete!(inputs, section), ("LocalStability", "Ballooning"))
         merge!(inputs["ForceFreeStates"], ffs_extra)
         merge!(inputs, sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
@@ -133,12 +133,16 @@ using TOML
     end
 
     @testset "deck section parsing" begin
-        @test_throws ArgumentError GPEC.local_stability_algorithm(Dict{String,Any}("LocalStability" => Dict{String,Any}("n_scna" => 32)))
-        alg = GPEC.local_stability_algorithm(Dict{String,Any}("LocalStability" => Dict{String,Any}("psi_window" => [0.2, 0.8], "n_scan" => 32)))
+        parse(sections...) = GPEC.local_stability_from_deck(Dict{String,Any}(sections...))
+        @test_throws ArgumentError parse("LocalStability" => Dict{String,Any}(), "Ballooning" => Dict{String,Any}("n_scna" => 32))
+        @test_throws ArgumentError parse("LocalStability" => Dict{String,Any}("n_scan" => 32))
+        @test_throws ErrorException parse("Ballooning" => Dict{String,Any}("n_scan" => 32))
+        alg = parse("LocalStability" => Dict{String,Any}(), "Ballooning" => Dict{String,Any}("psi_window" => [0.2, 0.8], "n_scan" => 32)).algorithm
         @test alg.psi_window === (0.2, 0.8)
         @test alg.n_scan == 32
-        @test GPEC.local_stability_algorithm(Dict{String,Any}()) === nothing
-        section = Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false, "n_scan" => 32)
-        @test GPEC.local_stability_algorithm(Dict("LocalStability" => section)) == Ballooning(; n_scan=32)
+        @test parse() === nothing
+        ls = parse("LocalStability" => Dict{String,Any}("theta_k" => 0.25, "alpha_boundary_scan" => false))
+        @test ls.algorithm == Ballooning()
+        @test ls.problem == Dict{Symbol,Any}(:theta_k => 0.25, :alpha_boundary_scan => false)
     end
 end

@@ -19,12 +19,12 @@ The solve produces the inter-surface Δ′ matrix and the PEST-3 matching blocks
 whichever formalism produced it.  These are the outer-region inputs to resistive matched-asymptotic stability analysis
 [Glasser 2016, Phys. Plasmas **23**, 072505].
 
-Select it with `integrator = "galerkin"` in `[ForceFreeStates]`. It replaces the radial ODE
+Select it with `integrator = "Galerkin"` in `[ForceFreeStates]`; its settings go in `[Galerkin]`. It replaces the radial ODE
 integration rather than supplementing it: the run computes its own vacuum response at the
 control surface (when `vac_flag`) and produces no free-boundary energies or ODE trace.
-Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution. The
-composite inner-region profiles are a scripting diagnostic: they need `Galerkin(; cut_solution=true)`
-followed by `solve(MatchProblem(...))`, and a deck run does not write them.
+A `[Match]` section additionally matches the inner layer, giving a driven ξ solution. The
+composite inner-region profiles need the cut solution, `[Galerkin] cut_solution = true` (or
+`Galerkin(; cut_solution=true)` followed by `solve(MatchProblem(...))`).
 
 The banded solve automatically tries a Hermitian Cholesky
 factorization of the lower band (LAPACK `zpbtrf`/`zpbtrs`, with the Dirichlet rows' columns moved

@@ -128,9 +128,10 @@ end
 attach_kinetic_profiles!(equil::PlasmaEquilibrium, path::AbstractString; group::AbstractString="/", kwargs...) =
     attach_kinetic_profiles!(equil, KineticProfileData(read_kinetic_file(path; group=group); kwargs...))
 
-# The kinetic profiles a config names, read once at construction; `nothing` when it names none.
+# The kinetic profiles a config names with its composition applied, read once at construction; `nothing` when it names none.
 configured_kinetic_profiles(config::EquilibriumConfig) =
-    isempty(config.kinetic_file) ? nothing : read_kinetic_file(config.kinetic_file; group=config.kinetic_group)
+    isempty(config.kinetic_file) ? nothing :
+    KineticProfileData(read_kinetic_file(config.kinetic_file; group=config.kinetic_group); kinetic_composition(config)...)
 
 """
     write_kinetic_h5(path, data; group="/", schema_version="1.0", provenance=data.provenance)

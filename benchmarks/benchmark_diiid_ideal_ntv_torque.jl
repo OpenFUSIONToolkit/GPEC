@@ -135,15 +135,15 @@ qlow = 1.02
 qhigh = 1e3
 sing_start = 0
 
-nn_low = 1
-nn_high = 1
+nn = 1
 delta_mlow = 8
 delta_mhigh = 8
 mtheta_vacuum = 512
+singfac_min = 1e-4
 
+[Riccati]
 eulerlagrange_tolerance = 1e-7
 save_interval = 3
-singfac_min = 1e-4
 renorm_threshold = 1e4
 """
         )

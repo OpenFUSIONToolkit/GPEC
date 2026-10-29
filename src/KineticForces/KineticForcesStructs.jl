@@ -106,7 +106,6 @@ builds a second control for its differing tolerance).
     electron::Bool = false          # Add electron NTV in addition to the ion species
 
     # Mode numbers
-    nn::Int = 1                     # Toroidal mode number
     bounce_harmonic_max::Int = 1    # Bounce harmonics summed over ℓ = -max:max
 
     # Tolerances, outermost to innermost: ψ quadrature ⊃ λ (pitch) ⊃ x (energy). Each level derives from the one

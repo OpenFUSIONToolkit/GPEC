@@ -19,7 +19,7 @@ and takes no rotation: its roots are in the plasma frame. SLAYER reports lab-fra
   - `ffs` - Outer solution, retained by reference.
   - `coupling_mode`, `msing_max` - Uncoupled or coupled analysis and its maximum number of surfaces.
   - `omega_E_kHz` - SLAYER per-surface rotation overrides keyed by m/n.
-  - `critical_resonant_field` - Optional SLAYER penetration-threshold calculation.
+  - `critical_resonant_field` - The SLAYER penetration-threshold calculation, a `CriticalResonantFieldControl`; `nothing` (default) skips it.
   - `eta`, `rho` - GGJ resistivity in Ω·m and mass density in kg/m³, a scalar or one value per surface
     (core to edge), as in [`MatchProblem`](@ref). `nothing` (default) derives them from the kinetic data:
     η from its resistivity closure, the one SLAYER uses, and ρ = m_i·n_i of its main ion. Unused by `SLAYERModel`.
@@ -33,7 +33,7 @@ and takes no rotation: its roots are in the plasma frame. SLAYER reports lab-fra
     coupling_mode::Symbol = :uncoupled
     msing_max::Int = 3
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
-    critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
+    critical_resonant_field::Union{Nothing,CriticalResonantFieldControl} = nothing
 end
 
 TearingProblem(ffs; eta=nothing, rho=nothing, kwargs...) =
@@ -143,7 +143,7 @@ function validate(problem::TearingProblem, config::TearingConfig)
     problem.coupling_mode in (:uncoupled, :coupled) || throw(ArgumentError("Invalid tearing coupling_mode."))
     problem.msing_max >= 1 || throw(ArgumentError("msing_max must be positive."))
     all(isfinite, values(problem.omega_E_kHz)) || throw(ArgumentError("Rotation overrides must be finite."))
-    problem.critical_resonant_field.n >= 3 || throw(ArgumentError("Critical-resonant-field scans require at least three points."))
+    problem.critical_resonant_field === nothing || problem.critical_resonant_field.n >= 3 || throw(ArgumentError("Critical-resonant-field scans require at least three points."))
     config.scan_mode in (:amr, :brute_force) || throw(ArgumentError("Invalid tearing scan_mode."))
     config.root_classification in (:auto, :threshold, :winding) || throw(ArgumentError("Invalid root_classification."))
     config.nre >= 2 && config.nim >= 2 && config.amr_passes >= 0 || throw(ArgumentError("Invalid tearing scan resolution."))

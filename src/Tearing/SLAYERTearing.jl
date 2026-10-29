@@ -463,8 +463,8 @@ A surface whose Ω_E is unknown (NaN), or that is tearing-unstable (α ≤ 0), i
 warning; if no surface has a known Ω_E, the analysis cannot run and this throws.
 """
 function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::AbstractVector{<:InnerLayerParameters},
-    omega_E::AbstractVector{<:Real}, dp_diag::AbstractVector{<:Real}, ctrl::CriticalResonantFieldControl)
-    ctrl.enabled || return empty_critical_resonant_field_result()
+    omega_E::AbstractVector{<:Real}, dp_diag::AbstractVector{<:Real}, ctrl::Union{Nothing,CriticalResonantFieldControl})
+    ctrl === nothing && return empty_critical_resonant_field_result()
     model isa SLAYERModel{:fitzpatrick} && eltype(params) <: SLAYERParameters ||
         throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the SLAYER " *
                             "fitzpatrick model and SLAYER parameters; got $(typeof(model))."))

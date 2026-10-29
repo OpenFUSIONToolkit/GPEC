@@ -25,7 +25,7 @@ import .SLAYER: surface_minor_radius, surface_da_dpsi, radial_label, build_slaye
 """
     model_name(model) -> String
 
-The deck `inner_model` token of `model`, e.g. `"ggj_ray"` or `"slayer_fitzpatrick"`.
+The `inner_model` token the tearing output records for `model`, e.g. `"ggj_ray"` or `"slayer_fitzpatrick"`.
 """
 model_name(::GGJModel{S}) where {S} = "ggj_$S"
 model_name(::SLAYERModel{S}) where {S} = "slayer_$S"

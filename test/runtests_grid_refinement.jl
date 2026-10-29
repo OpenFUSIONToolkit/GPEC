@@ -212,7 +212,7 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         using TOML
         dir_path = joinpath(dirname(@__DIR__), "examples", "DIIID-like_ideal_example")
         inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-        equil = GridRef.PlasmaEquilibrium(GridRef.EquilibriumConfig(inputs["Equilibrium"], dir_path), nothing)
+        equil = GridRef.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dir_path), nothing)
         fit = GridRef.edge_q_law(equil)
         @test fit !== nothing
         @test fit.A < 0

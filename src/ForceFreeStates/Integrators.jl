@@ -59,7 +59,7 @@ end
 
 RDCON outer-region singular Galerkin solver: solves the same Euler-Lagrange system
 variationally on a finite-element grid packed around the rational surfaces, producing Δ′
-without a radial ODE sweep. Maps onto `integrator = "galerkin"`; every field is the
+without a radial ODE sweep. Maps onto `integrator = "Galerkin"`; every field is the
 corresponding discretization setting. Factorization is selected automatically.
 
 ## Fields

@@ -19,7 +19,29 @@ function save_input_snapshot!(out_h5, result::ForceFreeStatesResult; inputs=noth
     return nothing
 end
 
-_input_fields(x) = Dict{String,Any}(String(f) => getfield(x, f) for f in fieldnames(typeof(x)) if getfield(x, f) !== nothing)
+# A value as TOML can state it: Symbols as strings, tuples and species as arrays and tables.
+_toml_value(v) = v
+_toml_value(v::Symbol) = String(v)
+_toml_value(v::Union{Tuple,AbstractVector}) = Any[_toml_value(x) for x in v]
+_toml_value(v::Equilibrium.IonSpecies) = _input_fields(v)
+
+_input_fields(x) = Dict{String,Any}(String(f) => _toml_value(getfield(x, f)) for f in fieldnames(typeof(x)) if getfield(x, f) !== nothing)
+
+"""
+    control_to_deck(ctrl) -> (section, name, algorithm)
+
+The deck form of a force-balance control: its `[ForceFreeStates]` section, the name of its
+integrator (which is also the name of that integrator's section) and that section.
+"""
+function control_to_deck(ctrl::ForceFreeStatesControl)
+    section = Dict{String,Any}(String(f) => _toml_value(getfield(ctrl, f)) for f in fieldnames(typeof(ctrl))
+                               if !(f in (:algorithm, :kinetic, :nn_low, :nn_high, :psilim_from_layer_overlap)))
+    section["nn"] = ctrl.nn_low == ctrl.nn_high ? ctrl.nn_low : collect(ctrl.nn_low:ctrl.nn_high)
+    section["psilim_from_layer_overlap"] = ctrl.psilim_from_layer_overlap !== false
+    name = String(nameof(typeof(ctrl.algorithm)))
+    section["integrator"] = name
+    return section, name, _input_fields(ctrl.algorithm)
+end
 
 function result_inputs(result::ForceFreeStatesResult, inputs)
     snapshot = inputs === nothing ? Dict{String,Any}() : deepcopy(inputs)
@@ -27,32 +49,27 @@ function result_inputs(result::ForceFreeStatesResult, inputs)
     for key in ("power_bp", "power_b", "power_r", "power_rc")
         delete!(snapshot["Equilibrium"], key)
     end
-    snapshot["ForceFreeStates"] = control_to_deck(result.control)
+    section, name, algorithm = control_to_deck(result.control)
+    snapshot["ForceFreeStates"] = section
+    foreach(other -> delete!(snapshot, other), ("Forward", "Riccati", "Galerkin"))
+    snapshot[name] = algorithm
     # A deck names the KineticForces model and states it in [KineticForces]; test matrices are recorded by name only.
     kinetic = result.control.kinetic
     if kinetic isa TestKineticMatrices
-        snapshot["ForceFreeStates"]["kinetic"] = "TestKineticMatrices"
+        section["kinetic"] = "TestKineticMatrices"
     elseif kinetic !== nothing
-        snapshot["ForceFreeStates"]["kinetic"] = "KineticForces"
+        section["kinetic"] = "KineticForces"
         haskey(snapshot, "KineticForces") || (snapshot["KineticForces"] = _input_fields(kinetic))
     end
     # A deck states the overlap cap's layer closures in [SLAYER]; a rerun rebuilds the same SLAYERModel from them.
     cap = result.control.psilim_from_layer_overlap
     if cap isa InnerLayer.SLAYERModel
-        snapshot["ForceFreeStates"]["psilim_from_layer_overlap"] = true
         slayer = get!(snapshot, "SLAYER", Dict{String,Any}())
-        for f in fieldnames(typeof(cap))
-            v = getfield(cap, f)
-            v === nothing || (slayer[String(f)] = v isa Symbol ? String(v) : v)
-        end
-    end
-    snapshot["DEBUG"] = _input_fields(result.debug_settings)
-    if result.control.algorithm isa Galerkin
-        snapshot["DEBUG"]["gal_basis_output"] = result.control.algorithm.basis_output
+        merge!(slayer, _input_fields(cap))
+        slayer["variant"] = String(typeof(cap).parameters[1])
     end
     if result.equil.analytic !== nothing
-        section = Equilibrium.ANALYTIC_EQ[result.equil.config.eq_type].section
-        snapshot[section] = _input_fields(result.equil.analytic)
+        snapshot[Equilibrium.ANALYTIC_EQ[result.equil.config.eq_type].section] = _input_fields(result.equil.analytic)
     end
     wall = result.wall_settings
     if wall === nothing

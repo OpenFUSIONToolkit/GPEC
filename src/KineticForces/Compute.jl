@@ -437,11 +437,11 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         end
 
         # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k. δW_k is real.
-        total_energy = imag(total_torque) / (2 * ctrl.nn)
+        total_energy = imag(total_torque) / (2 * intr.nlow)
 
         result_entry = MethodResult(;
             method=method,
-            nn=ctrl.nn,
+            nn=intr.nlow,
             total_torque=total_torque,
             total_energy=total_energy,
             psi_grid=psi_grid_out,

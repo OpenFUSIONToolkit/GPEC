@@ -23,7 +23,7 @@ it for Galerkin (`gal_resonant_surfaces`). Side-major orderings run
   - `coil::Matrix{ComplexF64}` - Edge coil-response matrix of shape
     (2msing × numpert_total); column k is the resonant small-solution response at each
     surface side to a unit source on edge poloidal mode k. Riccati fills it from the
-    vacuum-edge BVP, Galerkin from the `gal_rpec_flag` columns (transposed at pack time
+    vacuum-edge BVP, Galerkin from its `rpec_flag` columns (transposed at pack time
     from the (numpert_total × 2msing) block the Galerkin solve produces). Empty when
     neither ran.
   - `A::Union{Nothing,Matrix{ComplexF64}}` - PEST-3 interchange↔interchange block

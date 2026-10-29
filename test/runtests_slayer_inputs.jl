@@ -11,7 +11,7 @@
     # This exercise gets run once for all LayerInputs tests.
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-    eq_cfg = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path)
+    eq_cfg = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dir_path)
     sol_cfg = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
     equil = Equilibrium.PlasmaEquilibrium(eq_cfg, sol_cfg)
 

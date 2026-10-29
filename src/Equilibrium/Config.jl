@@ -3,6 +3,26 @@ function symbolize_keys(dict::Dict{String,Any})
 end
 
 """
+    IonSpecies(; z, m, fraction=NaN, density="")
+
+One main-ion species of the plasma. `z`/`m` are the charge (e) and mass (proton masses). The
+density is given by exactly one of `fraction` or `density`, which select a fraction of the total
+`n_i` profile or an explicit per-species profile (`n_*` dataset) in the kinetic file.
+"""
+struct IonSpecies
+    z::Int
+    m::Int
+    fraction::Float64
+    density::String
+end
+
+IonSpecies(; z::Integer, m::Integer, fraction=NaN, density="") =
+    IonSpecies(Int(z), Int(m), Float64(fraction), String(density))
+IonSpecies(d::AbstractDict) = IonSpecies(; (Symbol(k) => v for (k, v) in d)...)
+Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector) =
+    IonSpecies[x isa IonSpecies ? x : IonSpecies(x) for x in v]
+
+"""
     EquilibriumConfig(...)
 
 An immutable struct containing configuration parameters for equilibrium reconstruction
@@ -45,6 +65,10 @@ specified in the input.
   - `kinetic_file::String` - Kinetic-profile file read once into `PlasmaEquilibrium.kinetic` (see [`read_kinetic_file`](@ref));
     empty for none. Every kinetic consumer (NTV, tearing, the layer-overlap scan, grid refinement) derives its view from it.
   - `kinetic_group::String` - HDF5 group of `kinetic_file` holding the profiles
+  - `ion_species`, `impurity_charge`, `impurity_mass`, `zeff_default`, `chi_e_default`, `chi_i_default`,
+    `chi_phi_default`, `tau_E`, `resistivity_model`, `lnLambda_form` - The plasma composition, profile defaults
+    and resistivity closure applied to the profiles of `kinetic_file` (see [`KineticProfileData`](@ref)); `nothing`
+    keeps the `KineticProfileData` default. Setting any of them needs `kinetic_file`.
 """
 @kwdef struct EquilibriumConfig
     eq_type::String = "efit"
@@ -78,6 +102,16 @@ specified in the input.
 
     kinetic_file::String = ""
     kinetic_group::String = "/"
+    ion_species::Union{Nothing,Vector{IonSpecies}} = nothing
+    impurity_charge::Union{Nothing,Int} = nothing
+    impurity_mass::Union{Nothing,Int} = nothing
+    zeff_default::Union{Nothing,Float64} = nothing
+    chi_e_default::Union{Nothing,Float64} = nothing
+    chi_i_default::Union{Nothing,Float64} = nothing
+    chi_phi_default::Union{Nothing,Float64} = nothing
+    tau_E::Union{Nothing,Float64} = nothing
+    resistivity_model::Union{Nothing,Symbol} = nothing
+    lnLambda_form::Union{Nothing,Symbol} = nothing
 
     """
     Modified internal constructor that enforces self consistency within the inputs
@@ -88,7 +122,7 @@ specified in the input.
     function EquilibriumConfig(eq_type, eq_filename, r0_norm, b0_norm, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-        imas_cocos, kinetic_file, kinetic_group)
+        imas_cocos, kinetic_file, kinetic_group, composition...)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -152,49 +186,20 @@ specified in the input.
             @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
         end
         psihigh = min(psihigh, 1.0)
+        isempty(kinetic_file) && any(!isnothing, composition) &&
+            error("the kinetic composition keys of [Equilibrium] describe the profiles of kinetic_file; set kinetic_file")
         return new(eq_type, eq_filename, r0_norm, b0_norm, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-            imas_cocos, kinetic_file, kinetic_group)
+            imas_cocos, kinetic_file, kinetic_group, composition...)
     end
 end
 
-"""
-Outer constructor for EquilibriumConfig from a parsed TOML dictionary
-"""
-function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
-    # `eq_type` is always required.  `eq_filename` is required for file-based
-    # equilibria (efit, chease, …) but optional for analytic types whose
-    # parameters live in an embedded `[TJ_ANALYTIC_INPUT]` / `[SOL_INPUT]` /
-    # `[LAR_INPUT]` section of the parent gpec.toml.
-    if !haskey(equil_dict, "eq_type")
-        error("Missing required key in [Equilibrium]: eq_type")
-    end
-
-    # Filter to only known parameters
-    config_fields = Set(String.(fieldnames(EquilibriumConfig)))
-    config_data = Dict{String,Any}()
-
-    for (k, v) in equil_dict
-        if k in config_fields
-            config_data[k] = v
-        else
-            @warn "Unknown equilibrium parameter: $k"
-        end
-    end
-
-    # Only resolve `eq_filename` against `base_path` if the user actually supplied one
-    # (otherwise leave the kwdef sentinel for the embedded path). The empty string is the
-    # rerun path's "no input file" marker and must stay empty, not become `base_path`.
-    if haskey(config_data, "eq_filename") && !isempty(config_data["eq_filename"]) && !isabspath(config_data["eq_filename"])
-        config_data["eq_filename"] = normpath(joinpath(base_path, config_data["eq_filename"]))
-    end
-    if !isempty(get(config_data, "kinetic_file", "")) && !isabspath(config_data["kinetic_file"])
-        config_data["kinetic_file"] = normpath(joinpath(base_path, config_data["kinetic_file"]))
-    end
-
-    return EquilibriumConfig(; symbolize_keys(config_data)...)
-end
+# The kinetic composition keys of a config, the ones it sets, as `KineticProfileData` keywords.
+const KINETIC_COMPOSITION_KEYS = (:ion_species, :impurity_charge, :impurity_mass, :zeff_default, :chi_e_default, :chi_i_default,
+    :chi_phi_default, :tau_E, :resistivity_model, :lnLambda_form)
+kinetic_composition(config::EquilibriumConfig) =
+    (; (k => getfield(config, k) for k in KINETIC_COMPOSITION_KEYS if getfield(config, k) !== nothing)...)
 
 """
     EquilibriumParameters

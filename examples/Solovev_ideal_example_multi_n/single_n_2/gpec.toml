@@ -26,8 +26,11 @@ equal_arc_wall = true                   # Equal arc length distribution of nodes
 # Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
-ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
@@ -41,15 +44,18 @@ qlow = 1.02                   # Integration initiated at q determined by min(q0,
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 2                    # Smallest toroidal mode number to include
-nn_high = 2                   # Largest toroidal mode number to include
+nn = 2                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960           # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
+
+# Numerical settings of the Riccati integrator
+[Riccati]
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
+
 # Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
 [SOL_INPUT]
 mr = 128       # Number of radial grid zones

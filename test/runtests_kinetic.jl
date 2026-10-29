@@ -623,7 +623,6 @@ using TOML
         ctrl = KF.KineticForcesControl()
         @test ctrl.fgar_flag == true
         @test ctrl.tgar_flag == false
-        @test ctrl.nn == 1
         @test ctrl.bounce_harmonic_max == 1
         @test ctrl.nutype == "harmonic"
         @test ctrl.f0type == "maxwellian"
@@ -808,7 +807,7 @@ using TOML
             deck = TOML.parsefile(joinpath(template, "gpec.toml"))
             sol = E.SolovevConfig(deck["SOL_INPUT"])
             # A relative kinetic_file resolves against the deck directory, like eq_filename.
-            config = E.EquilibriumConfig(merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))), template)
+            config = GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template)))), template)
             @test config.kinetic_file == normpath(h5)
             raw = E.read_kinetic_file(h5)
             equil = E.PlasmaEquilibrium(config, sol)
@@ -818,7 +817,7 @@ using TOML
             # A re-form passes the data through instead of reading the file again.
             @test E.PlasmaEquilibrium(config, sol; kinetic=equil.kinetic).kinetic === equil.kinetic
 
-            bare = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), sol)
+            bare = E.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(deck, template), sol)
             @test bare.kinetic === nothing
             E.attach_kinetic_profiles!(bare, gpeckf)
             @test bare.kinetic.n_e == E.read_kinetic_file(gpeckf).n_e
@@ -830,7 +829,7 @@ using TOML
             KF = GPEC.KineticForces
             template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
             deck = TOML.parsefile(joinpath(template, "gpec.toml"))
-            equil = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), E.SolovevConfig(deck["SOL_INPUT"]))
+            equil = E.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(deck, template), E.SolovevConfig(deck["SOL_INPUT"]))
             kf = KF.KineticForcesControl()
             @test KF.ntv_profiles(kf, equil) === nothing
 

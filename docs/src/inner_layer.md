@@ -203,7 +203,7 @@ res.Δ, res.breaks, res.bc_cond      # res.Δ = (Δ₊, Δ₋) = (interchange, t
 
 ## Critical resonant field
 
-With `[SLAYER.CriticalResonantField] enabled = true`, each SLAYER surface also gets the
+With a `[Tearing.CriticalResonantField]` section (`TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl())`), each SLAYER surface also gets the
 critical resonant field for error-field penetration, from the steady-state torque balance of
 Cole and Fitzpatrick, Phys. Plasmas **13**, 032503 (2006). The electromagnetic torque on the
 layer balances the viscous restoring torque when (Cole Eq. 61)

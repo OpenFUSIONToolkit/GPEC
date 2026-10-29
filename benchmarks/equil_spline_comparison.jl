@@ -48,7 +48,7 @@ function make_config(path::String, eq_type::String, psihigh::Float64)
     raw = TOML.parsefile(path)
     raw["Equilibrium"]["eq_type"]  = eq_type
     raw["Equilibrium"]["psihigh"] = psihigh
-    return Equilibrium.EquilibriumConfig(raw["Equilibrium"], dirname(path))
+    return GeneralizedPerturbedEquilibrium.equilibrium_config(raw, dirname(path))
 end
 
 # ─── Load all three equilibria ─────────────────────────────────────────────────

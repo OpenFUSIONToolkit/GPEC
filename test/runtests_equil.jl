@@ -198,6 +198,37 @@ using TOML
         @test !any(k -> Symbol(k) in pe_keywords, GPEC._DEPRECATED_PE_KEYS)
     end
 
+    @testset "Deck sections parse into constructor keywords" begin
+        GPEC = GeneralizedPerturbedEquilibrium
+        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+        with(f) = (d = deepcopy(deck); f(d); d)
+        @test GPEC.parse_deck(deck, template).force_balance.algorithm isa Forward
+        # Unknown keys and sections, keys that moved, and sections nothing reads all stop the run.
+        @test_throws r"unknown key \"qlw\" in \[ForceFreeStates\]" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["qlw"] = 1.0), template)
+        @test_throws r"unknown section \[Galerkn\]" GPEC.parse_deck(with(d -> d["Galerkn"] = Dict{String,Any}()), template)
+        @test_throws r"`nn_low` \(set nn = n" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn_low"] = 1), template)
+        @test_throws r"`gal_nx` \(moved to \[Galerkin\] as nx\)" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["gal_nx"] = 32), template)
+        @test_throws r"\[DEBUG\] is retired" GPEC.parse_deck(with(d -> d["DEBUG"] = Dict{String,Any}()), template)
+        @test_throws r"\[Riccati\] is set but \[ForceFreeStates\] integrator = \"Forward\"" GPEC.parse_deck(with(d -> d["Riccati"] = Dict{String,Any}()), template)
+        @test_throws r"\[GGJ\] is set but neither" GPEC.parse_deck(with(d -> d["GGJ"] = Dict{String,Any}()), template)
+        @test_throws r"consecutive" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 3]), template)
+        # Values take their field types: an array becomes a range or a tuple, a string a Symbol.
+        @test GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 2]), template).force_balance.keywords[:nn] == 1:2
+        tearing = GPEC.tearing_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("inner_model" => "SLAYER", "coupling_mode" => "coupled",
+            "search" => Dict{String,Any}("Q_re_range" => [-2, 2]), "CriticalResonantField" => Dict{String,Any}("n" => 500))))
+        @test tearing.problem[:coupling_mode] === :coupled
+        @test tearing.config.Q_re_range === (-2.0, 2.0)
+        @test tearing.problem[:critical_resonant_field].n == 500
+        @test tearing.model isa SLAYERModel
+        # The kinetic composition rides on [Equilibrium] and needs the kinetic file it describes.
+        species = Dict{String,Any}("ion_species" => [Dict{String,Any}("z" => 1, "m" => 2, "fraction" => 1.0)], "impurity_charge" => 6)
+        @test_throws r"set kinetic_file" GPEC.equilibrium_config(with(d -> merge!(d["Equilibrium"], species)), template)
+        config = GPEC.equilibrium_config(with(d -> merge!(d["Equilibrium"], species, Dict{String,Any}("kinetic_file" => "k.h5"))), template)
+        @test config.ion_species == [IonSpecies(; z=1, m=2, fraction=1.0)]
+        @test GPEC.Equilibrium.kinetic_composition(config) == (; ion_species=config.ion_species, impurity_charge=6)
+    end
+
     @testset "Inverse grid types (original, rho)" begin
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
         cfg(grid) = Eq.EquilibriumConfig(; eq_type="chease_binary", eq_filename=joinpath(data_dir, "INP1_binary"), jac_type="boozer",

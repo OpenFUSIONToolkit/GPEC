@@ -299,7 +299,7 @@ function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir
     # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
     # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))
-    eq_config = Equilibrium.EquilibriumConfig(equil_dict, String(output_dir))
+    eq_config = equilibrium_config(Dict{String,Any}("Equilibrium" => equil_dict), String(output_dir))
 
     additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
         build_analytic_config(eq_config.eq_type, inputs)
@@ -333,7 +333,7 @@ function equilibrium_from_h5(h5path::AbstractString)
         haskey(f, "Info/psilim") || error("$h5path has no Info/psilim")
         inputs = TOML.parse(read(f, "Input/gpec_toml_raw"))
         _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
-        config = Equilibrium.EquilibriumConfig(merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => "")), dirname(abspath(h5path)))
+        config = equilibrium_config(Dict{String,Any}("Equilibrium" => merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))), dirname(abspath(h5path)))
         params = Equilibrium.EquilibriumParameters()
         for field in fieldnames(Equilibrium.EquilibriumParameters)
             field in Utilities.EQUIL_H5_SKIP && continue

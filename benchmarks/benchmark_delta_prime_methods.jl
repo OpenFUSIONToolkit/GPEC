@@ -22,10 +22,11 @@ const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 function setup_and_run_solovev()
     ex = joinpath(@__DIR__, "..", "test", "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-    inputs["ForceFreeStates"]["integrator"] = "riccati"
+    inputs["ForceFreeStates"]["integrator"] = "Riccati"
+    inputs["Riccati"] = pop!(inputs, "Forward")
     intr = FFS.ForceFreeStatesInternal()
-    ctrl = FFS.control_from_deck(inputs["ForceFreeStates"])
-    eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+    ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
+    eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
     FFS.sing_lim!(intr, ctrl, equil)
