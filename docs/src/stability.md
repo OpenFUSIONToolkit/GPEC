@@ -323,12 +323,12 @@ TokaMaker's `save_eqdsk` writes such files when `lcfs_pad` (``p``) is set with t
 ``\psi = 1/(1 - p)``. Writing with `truncate_eq=False` keeps the whole plasma; EFIT-written files
 place their boundary on the X-point flux.
 
-The scan takes its kinetic profiles from the `[SLAYER]` `profile_file`, through the same control
-and loader the SLAYER analysis uses, so both see the same profiles, the same HDF5 group and the
-same χ⊥(ψ) — the layer widths cannot disagree between them. A deck without a `[SLAYER]`
-`profile_file` does not get the scan. Because the file is resolved from the run's TOML, the scan
-only runs on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path has no inputs to
-resolve it from, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
+The scan takes its kinetic profiles from the equilibrium (`[Equilibrium] kinetic_file`) through the
+same view and `[SLAYER]` control the SLAYER analysis uses, so both see the same profiles and the
+same χ⊥(ψ) — the layer widths cannot disagree between them. A deck without a `[SLAYER]` section or
+kinetic profiles does not get the scan. Because the layer settings come from the run's `[SLAYER]`
+section, the scan only runs on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path
+has no such section, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
 `ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
 `psilim_from_layer_overlap = true`. It then caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction`
 still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.

@@ -293,6 +293,38 @@ function clear_rational_windows(psi_c::Float64, rationals::Vector{Float64})::Flo
 end
 
 """
+    ntv_profiles(kf_ctrl, equil) → Union{Nothing,KineticProfileSplines}
+
+The NTV view of the kinetic profiles attached to `equil` (`equil.kinetic`), with the main-ion and
+impurity charges and masses and the profile scale factors of `kf_ctrl`; `nothing` when the
+equilibrium carries no kinetic profiles.
+"""
+function ntv_profiles(kf_ctrl::KineticForcesControl, equil)
+    equil.kinetic === nothing && return nothing
+    return Equilibrium.kinetic_profile_splines(equil.kinetic;
+        zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass,
+        density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+        ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+        chi1=2π * equil.psio)
+end
+
+"""
+    ntv_species(kf_ctrl, equil) → Union{Nothing,Vector{ResolvedNTVSpecies}}
+
+The resolved NTV species set of the kinetic profiles attached to `equil` (see
+`Equilibrium.resolve_ntv_species`) when `kf_ctrl` asks for a species sum (`ion_species` or
+`electron`); `nothing` for the single main-ion run or when the equilibrium carries no kinetic profiles.
+"""
+function ntv_species(kf_ctrl::KineticForcesControl, equil)
+    (equil.kinetic !== nothing && (!isempty(kf_ctrl.ion_species) || kf_ctrl.electron)) || return nothing
+    speclist = isempty(kf_ctrl.ion_species) ? [IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)] : kf_ctrl.ion_species
+    return Equilibrium.resolve_ntv_species(equil.kinetic, speclist;
+        electron=kf_ctrl.electron, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass,
+        density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+        ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
+end
+
+"""
     axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil) → Float64
 
 ψ_c for a run: the widest-orbit species' near-axis validity boundary, or `0.0` when suppression is

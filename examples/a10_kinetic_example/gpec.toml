@@ -8,6 +8,7 @@
 
 [Equilibrium]
 eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
+kinetic_file = "a10_prof1.txt" # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed" # Radial grid packing type
@@ -57,7 +58,6 @@ write_outputs_to_HDF5 = true   # Write outputs to the HDF5 file
 force_termination = true       # Stop after force-free states — the kinetic stability eigenvalues are the result of interest
 
 [KineticForces]
-kinetic_file = "a10_prof1.txt"  # Path to the kinetic profile file (bundled)
 nn = 1                         # Toroidal mode number
 bounce_harmonic_max = 6        # Bounce-harmonic number
 ion_charge = 1                 # Ion charge (fundamental units)
