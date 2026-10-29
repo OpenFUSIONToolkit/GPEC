@@ -141,10 +141,10 @@ function write_validity!(h5file::Union{HDF5.File,HDF5.Group}, kf_ctrl::KineticFo
     kinetic_profiles, equil, rationals::Vector{Float64}=Float64[])
     kinetic_profiles === nothing && return nothing
     # One species sets all three of psi_c, envelope and is_valid: the widest-orbit species when a
-    # resolved set is available, else the control's single species.
+    # resolved set is available, else the equilibrium's main ion.
     vp =
         species === nothing ?
-        kinetic_validity_profiles(kinetic_profiles, equil; zi=kf_ctrl.ion_charge, mi=kf_ctrl.ion_mass, electron=kf_ctrl.electron) :
+        kinetic_validity_profiles(kinetic_profiles, equil; zi=main_ion(equil)[1], mi=main_ion(equil)[2], electron=kf_ctrl.electron) :
         kinetic_validity_profiles(species, equil)
     psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
     root = ensure_group(h5file, "KineticForces")

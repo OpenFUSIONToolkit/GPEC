@@ -18,18 +18,42 @@ function _ggj_delta_prime_raw(ffs)
     return dp.raw
 end
 
-# η and ρ per surface, as MatchProblem takes them: a scalar or one value per surface, core to edge.
+# η and ρ given on the problem, as MatchProblem takes them: a scalar or one value per surface, core to edge.
 function _ggj_per_surface(value, name, count)
-    value === nothing && throw(ArgumentError("GGJ tearing: $name is required (a scalar, or one value per surface, core to edge)"))
     values = value isa Real ? fill(Float64(value), count) : collect(Float64, value)
     length(values) == count || throw(ArgumentError("GGJ tearing: $name has length $(length(values)), expected $count"))
     all(v -> isfinite(v) && v > 0, values) || throw(ArgumentError("GGJ tearing: $name must be positive and finite"))
     return values
 end
 
+# η and ρ at each surface: the problem's values where given, else from the equilibrium's kinetic data,
+# η by the resistivity closure the SLAYER layer uses and ρ = m_i·n_i of the main ion.
+function _ggj_layer_inputs(prob::TearingProblem)
+    ffs = prob.ffs
+    surfaces = ffs.surfaces
+    count = length(surfaces)
+    data = ffs.equil.kinetic
+    (prob.eta === nothing || prob.rho === nothing) && data === nothing &&
+        throw(ArgumentError("GGJ tearing: give eta and rho, or attach kinetic profiles to the equilibrium"))
+    eta = if prob.eta !== nothing
+        _ggj_per_surface(prob.eta, "eta", count)
+    else
+        loaded = _slayer_profiles(data, prob)
+        InnerLayer.SLAYER.layer_resistivity(ffs.equil, surfaces, loaded.profiles; zeff=_layer_zeff(loaded, data),
+            resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
+    end
+    rho = if prob.rho !== nothing
+        _ggj_per_surface(prob.rho, "rho", count)
+    else
+        data.n_i === nothing && throw(ArgumentError("GGJ tearing: ρ = m_i·n_i needs an n_i profile in the kinetic data, or give rho"))
+        n_i = cubic_interp(collect(Float64, data.psi), data.n_i)
+        _layer_ion_mass(data) * Utilities.M_P .* Float64[n_i(s.psifac) for s in surfaces]
+    end
+    return _ggj_per_surface(eta, "eta", count), _ggj_per_surface(rho, "rho", count)
+end
+
 # The SLAYER-only physics fields must stay at their defaults, so a GGJ solve never silently ignores one.
-const _SLAYER_ONLY_FIELDS = (:D_c_type, :bt, :impurity_charge, :chi_perp_e, :chi_perp_i, :chi_tor, :tau_E, :P_perp_model,
-    :D_R, :D_geo, :theta_sample, :resistivity_model, :lnLambda_form, :omega_E_kHz, :critical_resonant_field)
+const _SLAYER_ONLY_FIELDS = (:D_c_type, :P_perp_model, :D_R, :D_geo, :theta_sample, :omega_E_kHz, :critical_resonant_field)
 
 function _check_ggj_inputs(prob::TearingProblem, config::TearingConfig)
     defaults = TearingProblem(prob.ffs)
@@ -52,8 +76,7 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
     isempty(surfaces) && return empty_tearing_result(prob, config, model)
     raw = _ggj_delta_prime_raw(ffs)
     count = length(surfaces)
-    eta = _ggj_per_surface(prob.eta, "eta", count)
-    rho = _ggj_per_surface(prob.rho, "rho", count)
+    eta, rho = _ggj_layer_inputs(prob)
     params = [ggj_parameters(s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k) for (k, s) in enumerate(surfaces)]
     couplings = [surface_coupling(model, p, 0.0) for p in params]
 

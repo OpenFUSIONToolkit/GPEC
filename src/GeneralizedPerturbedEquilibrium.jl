@@ -87,7 +87,7 @@ using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing: TearingProblem, TearingConfig, TearingResult
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
-using .Equilibrium: PlasmaEquilibrium
+using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
 using .PerturbedEquilibrium: plasma_response, PlasmaResponse
 
@@ -249,6 +249,7 @@ function main_from_inputs(
               "nodes; regenerate the file in double precision for converged Δ′." file = eq_config.eq_filename
     end
 
+    _deck_kinetic_composition!(equil, inputs)
     kf_ctrl = kinetic_forces_control(inputs, ctrl, equil)
     equil = maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl=kf_ctrl)
 
@@ -475,9 +476,28 @@ The `[KineticForces]` control of the run, defaults when the deck has no such sec
 needs kinetic profiles (a `[KineticForces]` section, or the calculated kinetic source) errors
 here when the equilibrium carries none; every consumer derives its view from `equil.kinetic`.
 """
+# The deck's species keys, which describe the plasma: they set the equilibrium's kinetic data rather than the NTV control.
+const _KF_SPECIES_KEYS = ("ion_charge", "ion_mass", "impurity_charge", "impurity_mass", "ion_species")
+
+# Apply the deck's [KineticForces] species keys to the equilibrium's kinetic data, which every kinetic consumer reads.
+function _deck_kinetic_composition!(equil::Equilibrium.PlasmaEquilibrium, inputs::Dict{String,Any})
+    kf = get(inputs, "KineticForces", nothing)
+    (kf === nothing || equil.kinetic === nothing) && return equil
+    settings = Dict{Symbol,Any}()
+    if haskey(kf, "ion_species")
+        settings[:ion_species] = kf["ion_species"]
+    elseif haskey(kf, "ion_charge") || haskey(kf, "ion_mass")
+        settings[:ion_species] = [Equilibrium.IonSpecies(; z=get(kf, "ion_charge", 1), m=get(kf, "ion_mass", 2), fraction=1.0)]
+    end
+    haskey(kf, "impurity_charge") && (settings[:impurity_charge] = kf["impurity_charge"])
+    haskey(kf, "impurity_mass") && (settings[:impurity_mass] = kf["impurity_mass"])
+    isempty(settings) || Equilibrium.attach_kinetic_profiles!(equil, Equilibrium.KineticProfileData(equil.kinetic; settings...))
+    return equil
+end
+
 function kinetic_forces_control(inputs::Dict{String,Any}, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
     kf_ctrl = haskey(inputs, "KineticForces") ?
-              KineticForces.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
+              KineticForces.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"] if !(k in _KF_SPECIES_KEYS))...) :
               KineticForces.KineticForcesControl()
     _needs_kinetic_profiles(inputs, ctrl) && equil.kinetic === nothing &&
         error("this run needs kinetic profiles ([KineticForces], or kinetic_source = \"calculated\"): set kinetic_file in [Equilibrium]")
@@ -1079,14 +1099,9 @@ function run_kinetic_forces(
             states = KineticForces.KineticForcesState[]
             labels = String[]
             for sp in species
-                # KineticForcesControl is immutable, so each species gets a fresh control
-                # built from the run's control with only its own identity overridden.
-                sctrl = KineticForces.KineticForcesControl(;
-                    (f => getfield(kf_ctrl, f) for f in fieldnames(KineticForces.KineticForcesControl))...,
-                    ion_charge=sp.z, ion_mass=sp.m, electron=sp.electron, ion_species=KineticForces.IonSpecies[])
                 st = KineticForces.KineticForcesState()
-                KineticForces.compute_torque_all_methods!(st, kf_intr, sctrl, result.equil, sp.profiles;
-                    axis_psi_c=axis_psi_c)
+                KineticForces.compute_torque_all_methods!(st, kf_intr, kf_ctrl, result.equil, sp.profiles;
+                    axis_psi_c=axis_psi_c, z=sp.z, m=sp.m, electron=sp.electron)
                 push!(states, st)
                 push!(labels, sp.label)
             end
@@ -1260,7 +1275,7 @@ function efc_couplings(
     # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
     kp = KineticForces.ntv_profiles(kf_ctrl, equil)
     chi1 = 2π * equil.psio
-    chrg = kf_ctrl.ion_charge * Utilities.E_CHG
+    chrg = KineticForces.main_ion(equil)[1] * Utilities.E_CHG
     ψk = kp.xs
     ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
     ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
@@ -1445,6 +1460,7 @@ end
 
 export main, write_imas
 export solve, plasma_response, perturbed_equilibrium
+export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, ForceFreeStatesResult, RMPField, PlasmaResponse
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult

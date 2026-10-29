@@ -6,12 +6,12 @@
 # ---------------------------------------------------------------------
 # Kinetic-profile view
 # ---------------------------------------------------------------------
-# The SLAYER view of raw kinetic profiles (`equil.kinetic`), on their own ψ grid. Returns the
+# The layer view of raw kinetic profiles (`equil.kinetic`), on their own ψ grid. Returns the
 # spline-based `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from `chi_e`/`chi_i`/`chi_phi`
-# (or `nothing` when the data carry no usable χ, in which case the caller falls back to the scalar
-# `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), a Z_eff(ψ) callable: the data's own `zeff` profile when
-# they carry one, else derived from `n_i/n_e` (or `nothing` when they carry neither, in which case the
-# caller falls back to the scalar `control.zeff`), and whether the data carry an `omega_E` profile.
+# (or `nothing` when the data carry no usable χ, in which case the caller falls back to the data's
+# `chi_*_default`), a Z_eff(ψ) callable: the data's own `zeff` profile when they carry one, else derived
+# from `n_i/n_e` (or `nothing` when they carry neither, in which case the caller falls back to
+# `zeff_default`), and whether the data carry an `omega_E` profile. `control` selects which χ the layer uses.
 function _slayer_profiles(data::KineticProfileData, control)
     source = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
     for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))
@@ -27,7 +27,7 @@ function _slayer_profiles(data::KineticProfileData, control)
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
     # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
-    # to the scalar control.chi_perp_e/chi_tor fallback. Build the spline only
+    # to the data's chi_e_default/chi_phi_default. Build the spline only
     # from a usable (present, not all-zero) array.
     psi_xs = collect(Float64, data.psi)
     function _chi_spline(name, v)
@@ -52,7 +52,8 @@ function _slayer_profiles(data::KineticProfileData, control)
     elseif !_usable(data.n_i)
         nothing
     else
-        z = [ne > 0 ? control.impurity_charge - (ni / ne) * (control.impurity_charge - 1.0) : control.impurity_charge for (ni, ne) in zip(data.n_i, data.n_e)]
+        zimp = Float64(data.impurity_charge)
+        z = [ne > 0 ? zimp - (ni / ne) * (zimp - 1.0) : zimp for (ni, ne) in zip(data.n_i, data.n_e)]
         minimum(z) >= 1.0 - 1e-8 ||
             error("run_slayer: $source has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
         cubic_interp(psi_xs, z)
@@ -62,35 +63,37 @@ function _slayer_profiles(data::KineticProfileData, control)
         has_omega_E=(data.omega_E !== nothing))
 end
 
-# χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the control's
-# scalar fallbacks. With `warn`, a fallback is reported only for a χ the selected P_perp model
+# χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the kinetic data's
+# `chi_*_default`. With `warn`, a default is reported only for a χ the selected P_perp model
 # (and, for χ⊥,e, the critical Δ) actually uses.
-function _slayer_chi_inputs(loaded, control; warn::Bool=true)
+function _slayer_chi_inputs(loaded, control, data::KineticProfileData; warn::Bool=true)
     model = control.P_perp_model
     pick(f, s) = f === nothing ? s : f
-    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && control.chi_perp_i === nothing &&
+    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && data.chi_i_default === nothing &&
         throw(
             ArgumentError(
                 "SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
-                "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."
+                "kinetic file, set chi_i_default on the kinetic data, or choose P_perp_model = \"chi_perp_e\"."
             )
         )
+    model === :tau_E && data.tau_E === nothing &&
+        throw(ArgumentError("SLAYER: P_perp_model = tau_E needs the confinement time tau_E on the kinetic data"))
     if warn
         uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
         uses_i = model in (:chi_perp_i, :D_perp)
         uses_tor = model !== :tau_E
         fallbacks = String[]
-        uses_e && loaded.chi_perp_e === nothing && push!(fallbacks, "chi_e → chi_perp_e = $(control.chi_perp_e)")
-        uses_i && loaded.chi_perp_i === nothing && push!(fallbacks, "chi_i → chi_perp_i = $(control.chi_perp_i)")
-        uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_tor = $(control.chi_tor)")
+        uses_e && loaded.chi_perp_e === nothing && push!(fallbacks, "chi_e → chi_e_default = $(data.chi_e_default)")
+        uses_i && loaded.chi_perp_i === nothing && push!(fallbacks, "chi_i → chi_i_default = $(data.chi_i_default)")
+        uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_phi_default = $(data.chi_phi_default)")
         isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
-                                    "$(join(fallbacks, ", ")); using the scalar fallback."
+                                    "$(join(fallbacks, ", ")); using the default."
         model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
-              "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
+              "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(data.tau_E) s; the χ_φ profile is not used."
     end
-    return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
-        chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
-        chi_tor=pick(loaded.chi_tor, control.chi_tor))
+    return (; chi_perp_e=pick(loaded.chi_perp_e, data.chi_e_default),
+        chi_perp_i=pick(loaded.chi_perp_i, data.chi_i_default),
+        chi_tor=pick(loaded.chi_tor, data.chi_phi_default))
 end
 
 # Map the TOML resistivity_model symbol to a NeoResistivityModel instance.

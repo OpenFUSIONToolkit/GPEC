@@ -37,6 +37,7 @@ using FastInterpolations
 using Roots
 import ..ForceFreeStates
 import ..Equilibrium
+using ..Equilibrium: IonSpecies
 import ..Utilities
 import ..PerturbedEquilibrium
 

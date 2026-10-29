@@ -50,32 +50,14 @@ function method_kind(name::AbstractString)
 end
 
 
-"""
-    IonSpecies(; z, m, fraction=NaN, density="")
-
-One main-ion species in a multi-ion NTV run. `z`/`m` are the charge (e) and mass (proton
-masses). The density is given by exactly one of `fraction` or `density`, which select a
-fraction of the total `n_i` profile or an explicit per-species profile in the kinetic file.
-"""
-struct IonSpecies
-    z::Int
-    m::Int
-    fraction::Float64
-    density::String
-end
-
-IonSpecies(; z::Integer, m::Integer, fraction=NaN, density="") =
-    IonSpecies(Int(z), Int(m), Float64(fraction), String(density))
-IonSpecies(d::AbstractDict) = IonSpecies(; (Symbol(k) => v for (k, v) in d)...)
-Base.convert(::Type{Vector{IonSpecies}}, v::AbstractVector) =
-    IonSpecies[x isa IonSpecies ? x : IonSpecies(x) for x in v]
 
 
 """
     KineticForcesControl
 
 User-facing control parameters from the TOML `[KineticForces]` section.
-Configures which NTV methods to run, species parameters, tolerances, and output options.
+Configures which NTV methods to run, whether electrons join the species sum, tolerances, and output
+options. The plasma's species composition is read from the equilibrium's kinetic data (`equil.kinetic`).
 
 Constructed via keyword arguments or from a TOML dict:
 
@@ -121,13 +103,8 @@ builds a second control for its differing tolerance).
     trmm_flag::Bool = false         # Trapped MXM E-L torque matrix norm
     prmm_flag::Bool = false         # Passing MXM E-L torque matrix norm
 
-    # Plasma species parameters
-    ion_charge::Int = 1             # Ion charge (fundamental units)
-    ion_mass::Int = 2               # Ion mass (proton masses)
-    impurity_charge::Int = 6        # Impurity charge
-    impurity_mass::Int = 12         # Impurity mass
+    # Species summed in the NTV; the composition itself is the equilibrium's (`equil.kinetic`)
     electron::Bool = false          # Add electron NTV in addition to the ion species
-    ion_species::Vector{IonSpecies} = IonSpecies[]   # multi-main-ion set; empty ⇒ single ion
 
     # Mode numbers
     nn::Int = 1                     # Toroidal mode number

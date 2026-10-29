@@ -106,10 +106,10 @@ function compute_calculated_kinetic_matrices(
 
     # Species set summed into the kinetic matrices: the resolved multi-species set
     # (main ions + neutrality impurity + electrons) when provided, else a single species
-    # from kf_ctrl. The kinetic W/torque matrices are additive over species, so we
+    # from the equilibrium's main ion. The kinetic W/torque matrices are additive over species, so we
     # accumulate (+=) each species' block-diagonal contribution.
     splist = species === nothing ?
-             [Equilibrium.ResolvedNTVSpecies(kf_ctrl.ion_charge, kf_ctrl.ion_mass, kf_ctrl.electron, "single", kinetic_profiles)] : species
+             [Equilibrium.ResolvedNTVSpecies(main_ion(equil)..., kf_ctrl.electron, "single", kinetic_profiles)] : species
 
 
     # Near-axis validity envelope: suppresses the drift-kinetic increments where the zero-orbit-width

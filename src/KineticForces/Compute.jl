@@ -357,11 +357,13 @@ block-diagonal kinetic matrices.
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
   - `axis_psi_c`: the run's near-axis validity boundary, suppressing the torque density below it
     (`KineticForces.axis_validity_boundary`); 0 disables the suppression
+  - `z`, `m`, `electron`: the species whose torque this is; default the equilibrium's main ion, with
+    `ctrl.electron`. The species sum calls this once per resolved species.
 """
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
     ctrl::KineticForcesControl, equil,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
-    axis_psi_c::Float64=0.0)
+    axis_psi_c::Float64=0.0, z::Int=main_ion(equil)[1], m::Int=main_ion(equil)[2], electron::Bool=ctrl.electron)
 
     for entry in METHOD_REGISTRY
         getfield(ctrl, entry.flag) || continue
@@ -403,8 +405,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
 
             # Adaptive QuadGK integration over ψ (serial BatchIntegrand)
             result = integrate_psi_quadgk(
-                n, ctrl.bounce_harmonic_max, ctrl.ion_charge, ctrl.ion_mass,
-                ctrl.magnetic_drift_factor, ctrl.divxi_factor, ctrl.electron,
+                n, ctrl.bounce_harmonic_max, z, m,
+                ctrl.magnetic_drift_factor, ctrl.divxi_factor, electron,
                 method, equil, intr, ctrl, kinetic_profiles;
                 psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2], axis_psi_c=axis_psi_c)
 

@@ -293,16 +293,33 @@ function clear_rational_windows(psi_c::Float64, rationals::Vector{Float64})::Flo
 end
 
 """
+    main_ion(equil) → (z, m)
+
+Charge and mass (proton masses) of the reference main ion of the equilibrium's kinetic data: the
+first of `equil.kinetic.ion_species`. The single-species NTV runs on it.
+"""
+function main_ion(equil)
+    equil.kinetic === nothing && error("KineticForces needs kinetic profiles: set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
+    ion = first(equil.kinetic.ion_species)
+    return (ion.z, ion.m)
+end
+
+# One main ion carrying all of n_i: the NTV takes its single-species path rather than the species sum.
+_single_main_ion(data) =
+    length(data.ion_species) == 1 && first(data.ion_species).fraction == 1.0 && isempty(first(data.ion_species).density)
+
+"""
     ntv_profiles(kf_ctrl, equil) → Union{Nothing,KineticProfileSplines}
 
-The NTV view of the kinetic profiles attached to `equil` (`equil.kinetic`), with the main-ion and
+The NTV view of the kinetic profiles attached to `equil` (`equil.kinetic`), with its main-ion and
 impurity charges and masses and the profile scale factors of `kf_ctrl`; `nothing` when the
 equilibrium carries no kinetic profiles.
 """
 function ntv_profiles(kf_ctrl::KineticForcesControl, equil)
     equil.kinetic === nothing && return nothing
+    zi, mi = main_ion(equil)
     return Equilibrium.kinetic_profile_splines(equil.kinetic;
-        zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass,
+        zi=zi, zimp=equil.kinetic.impurity_charge, mi=mi, mimp=equil.kinetic.impurity_mass,
         density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
         ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
         chi1=2π * equil.psio)
@@ -312,14 +329,15 @@ end
     ntv_species(kf_ctrl, equil) → Union{Nothing,Vector{ResolvedNTVSpecies}}
 
 The resolved NTV species set of the kinetic profiles attached to `equil` (see
-`Equilibrium.resolve_ntv_species`) when `kf_ctrl` asks for a species sum (`ion_species` or
-`electron`); `nothing` for the single main-ion run or when the equilibrium carries no kinetic profiles.
+`Equilibrium.resolve_ntv_species`) when the run sums species (several main ions, a main ion with a
+partial or explicit density, or `kf_ctrl.electron`); `nothing` for the single main-ion run or when
+the equilibrium carries no kinetic profiles.
 """
 function ntv_species(kf_ctrl::KineticForcesControl, equil)
-    (equil.kinetic !== nothing && (!isempty(kf_ctrl.ion_species) || kf_ctrl.electron)) || return nothing
-    speclist = isempty(kf_ctrl.ion_species) ? [IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)] : kf_ctrl.ion_species
-    return Equilibrium.resolve_ntv_species(equil.kinetic, speclist;
-        electron=kf_ctrl.electron, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass,
+    data = equil.kinetic
+    (data !== nothing && (!_single_main_ion(data) || kf_ctrl.electron)) || return nothing
+    return Equilibrium.resolve_ntv_species(data, data.ion_species;
+        electron=kf_ctrl.electron, zimp=data.impurity_charge, mimp=data.impurity_mass,
         density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
         ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
 end
@@ -328,7 +346,7 @@ end
     axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil) → Float64
 
 ψ_c for a run: the widest-orbit species' near-axis validity boundary, or `0.0` when suppression is
-disabled or no kinetic profiles were loaded. Falls back to `kf_ctrl.ion_charge`/`ion_mass` when the resolved
+disabled or no kinetic profiles were loaded. Falls back to the equilibrium's main ion when the resolved
 species set is unavailable.
 """
 function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_profiles, equil,
@@ -336,7 +354,7 @@ function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_
     (kf_ctrl.axis_validity_suppression && kinetic_profiles !== nothing) || return 0.0
     psi_c =
         species === nothing ?
-        kinetic_axis_validity_psi(kinetic_profiles, equil; zi=kf_ctrl.ion_charge, mi=kf_ctrl.ion_mass, electron=kf_ctrl.electron) :
+        kinetic_axis_validity_psi(kinetic_profiles, equil; zi=main_ion(equil)[1], mi=main_ion(equil)[2], electron=kf_ctrl.electron) :
         kinetic_axis_validity_psi(species, equil)
     return clear_rational_windows(psi_c, rationals)
 end
@@ -358,7 +376,7 @@ function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profi
     for n_res in intr.nlow:intr.nhigh
         n_res == 0 && continue
         append!(nodes, kinetic_resonance_psi_nodes(kinetic_profiles, equil;
-            n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=kf_ctrl.ion_charge, mi=kf_ctrl.ion_mass,
+            n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=main_ion(equil)[1], mi=main_ion(equil)[2],
             electron=kf_ctrl.electron, wdfac=kf_ctrl.magnetic_drift_factor))
     end
     psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)

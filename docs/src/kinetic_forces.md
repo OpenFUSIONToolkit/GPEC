@@ -29,9 +29,23 @@ extension:
 The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_i`/`chi_phi`/`zeff`,
 when present, are carried for the resistive-layer (SLAYER) analysis and ignored
 here. That analysis takes ``Z_\mathrm{eff}(\psi)`` from the `zeff` dataset when the file
-has one, otherwise from `n_i/n_e` with the `[SLAYER]` `impurity_charge`, otherwise
-from the scalar `[SLAYER] zeff`. Supply `zeff` whenever the impurity content is not a
+has one, otherwise from `n_i/n_e` with the kinetic data's `impurity_charge`, otherwise
+from its `zeff_default`. Supply `zeff` whenever the impurity content is not a
 single species fixed by `n_i/n_e`.
+
+The plasma's species composition (main ions, impurity charge and mass), the defaults that stand
+in for absent χ and Z_eff profiles, the confinement time and the resistivity closure belong to the
+equilibrium's kinetic data, not to any one physics stage, so KineticForces and the tearing layers
+see one plasma. In a script, set them where the profiles are attached:
+
+```julia
+attach_kinetic_profiles!(equil, "kinetic.h5"; ion_species=[IonSpecies(; z=1, m=2, fraction=0.5),
+    IonSpecies(; z=1, m=3, fraction=0.5)], impurity_charge=6, impurity_mass=12)
+```
+
+or copy loaded data with new settings, `KineticProfileData(equil.kinetic; impurity_charge=6)`.
+The default is one deuterium main ion carrying all of `n_i`, with a carbon impurity. In a deck
+the species keys are still read from `[KineticForces]`.
 
 ## Multi-ion runs
 
@@ -65,9 +79,10 @@ Each species sets exactly one of `fraction` (share of the file's total `n_i`)
 or `density` (a named `n_*` dataset). An all-fraction list must sum to 1; in a
 mixed list the impurity content is set by the file's `n_i`/`n_e` deficit, not
 by a fraction shortfall, and fractions may sum below (never above) 1. Every
-main-ion charge must satisfy `z < impurity_charge`. An empty `ion_species` list runs the
-single main ion from `ion_charge`/`ion_mass` (with `electron = true` still adding the
-electron species — the electron flag always means *in addition to* the ions).
+main-ion charge must satisfy `z < impurity_charge`. A single main ion carrying all of `n_i`
+runs the single-species NTV (with `electron = true` still adding the electron species — the
+electron flag, a `KineticForcesControl` setting, always means *in addition to* the ions). In a
+deck, `ion_charge`/`ion_mass` without an `ion_species` list give that single main ion.
 
 The summed total is written to `KineticForces/<method>/` exactly as in a single-ion
 run, and each species' own contribution to `KineticForces/PerSpecies/<label>/<method>/`

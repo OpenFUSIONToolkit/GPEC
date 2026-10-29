@@ -110,21 +110,23 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
 end
 
 """
-    attach_kinetic_profiles!(equil, path; group="/") -> equil
+    attach_kinetic_profiles!(equil, path; group="/", kwargs...) -> equil
     attach_kinetic_profiles!(equil, data::KineticProfileData) -> equil
 
-Attach raw kinetic profiles to `equil` as `equil.kinetic`. Every kinetic consumer (the NTV torque, the
+Attach kinetic profiles to `equil` as `equil.kinetic`. Every kinetic consumer (the NTV torque, the
 calculated kinetic matrices, tearing, the layer-overlap scan and the two-pass grid refinement) derives its
 own view from them, so the file is read once. Equilibria built from a config with `kinetic_file` set
 attach it on construction; use this for analytic or IMAS equilibria built without it, or in-memory data.
+Keywords are the composition, default and closure fields of [`KineticProfileData`](@ref), e.g.
+`ion_species`, `impurity_charge`, `chi_e_default`, `resistivity_model`.
 """
 function attach_kinetic_profiles!(equil::PlasmaEquilibrium, data::KineticProfileData)
     equil.kinetic = data
     return equil
 end
 
-attach_kinetic_profiles!(equil::PlasmaEquilibrium, path::AbstractString; group::AbstractString="/") =
-    attach_kinetic_profiles!(equil, read_kinetic_file(path; group=group))
+attach_kinetic_profiles!(equil::PlasmaEquilibrium, path::AbstractString; group::AbstractString="/", kwargs...) =
+    attach_kinetic_profiles!(equil, KineticProfileData(read_kinetic_file(path; group=group); kwargs...))
 
 # The kinetic profiles a config names, read once at construction; `nothing` when it names none.
 configured_kinetic_profiles(config::EquilibriumConfig) =

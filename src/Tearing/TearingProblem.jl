@@ -5,25 +5,25 @@
 """
     TearingProblem(ffs; eta=nothing, rho=nothing, gamma=5/3, kwargs...)
 
-Tearing stability of a finished force-balance solve. Physical keywords describe surface coupling,
-species, transport and rotation; scan settings belong to [`TearingConfig`](@ref).
+Tearing stability of a finished force-balance solve. Keywords describe surface coupling and the
+layer physics; scan settings belong to [`TearingConfig`](@ref). The plasma itself (profiles, species,
+Z_eff and transport defaults, confinement time and resistivity closure) is the equilibrium's kinetic
+data, `ffs.equil.kinetic` (see [`KineticProfileData`](@ref)), so every layer model sees one plasma.
 Solve with `solve(problem, GGJModel(); config)` or `solve(problem, SLAYERModel(); config)`.
 GGJ needs the raw Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`)
-and takes no rotation: its roots are in the plasma frame. SLAYER takes its profiles from the
-equilibrium's kinetic data and reports lab-frame roots.
+and takes no rotation: its roots are in the plasma frame. SLAYER reports lab-frame roots.
 
 ## Fields
 
   - `ffs` - Outer solution, retained by reference.
   - `coupling_mode`, `msing_max` - Uncoupled or coupled analysis and its maximum number of surfaces.
-  - `ion_mass`, `zeff`, `impurity_charge` - Species mass and charge inputs.
-  - `bt`, `chi_perp_e`, `chi_perp_i`, `chi_tor`, `tau_E`, `P_perp_model` - SLAYER field and transport inputs.
+  - `P_perp_model` - SLAYER perpendicular Prandtl-number model.
   - `D_c_type`, `D_R`, `D_geo`, `theta_sample` - SLAYER critical-Delta and geometry inputs.
-  - `resistivity_model`, `lnLambda_form` - SLAYER resistivity closure.
   - `omega_E_kHz` - SLAYER per-surface rotation overrides keyed by m/n.
   - `critical_resonant_field` - Optional SLAYER penetration-threshold calculation.
   - `eta`, `rho` - GGJ resistivity in Ω·m and mass density in kg/m³, a scalar or one value per surface
-    (core to edge), as in [`MatchProblem`](@ref); required by `GGJModel`, unused by `SLAYERModel`.
+    (core to edge), as in [`MatchProblem`](@ref). `nothing` (default) derives them from the kinetic data:
+    η from its resistivity closure, the one SLAYER uses, and ρ = m_i·n_i of its main ion. Unused by `SLAYERModel`.
   - `gamma` - GGJ ratio of specific heats.
 """
 @kwdef struct TearingProblem{R,E,D}
@@ -34,20 +34,10 @@ equilibrium's kinetic data and reports lab-frame roots.
     coupling_mode::Symbol = :uncoupled
     msing_max::Int = 3
     D_c_type::Symbol = :none
-    bt::Union{Float64,Nothing} = nothing
-    ion_mass::Float64 = 2.0
-    zeff::Float64 = 1.0
-    impurity_charge::Float64 = 6.0
-    chi_perp_e::Float64 = 1.0
-    chi_perp_i::Union{Float64,Nothing} = nothing
-    chi_tor::Float64 = 1.0
-    tau_E::Union{Float64,Nothing} = nothing
     P_perp_model::Symbol = :D_perp
     D_R::Union{Float64,Nothing} = nothing
     D_geo::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0
-    resistivity_model::Symbol = :sauter
-    lnLambda_form::Symbol = :nrl
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
     critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
 end
@@ -55,39 +45,44 @@ end
 TearingProblem(ffs; eta=nothing, rho=nothing, kwargs...) =
     TearingProblem{typeof(ffs),typeof(eta),typeof(rho)}(; ffs=ffs, eta=eta, rho=rho, kwargs...)
 
-function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
-    # `equil.config.b0_norm` is a NORMALIZATION (commonly exactly 1.0), not the toroidal
-    # field, so substituting it here silently ran the layer physics at B_T = 1 T. Pass the
-    # control value through instead: `nothing` makes build_slayer_inputs compute the
-    # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
-    # what its docstring already prescribes.
-    bt = control.bt
-    # χ⊥,e/χ⊥,i/χ_φ from the kinetic file when present, else the scalar fallbacks.
-    chi = _slayer_chi_inputs(loaded, control)
-    # Z_eff(ψ) from the kinetic file when it carries n_i, else the scalar fallback.
-    zeff = loaded.zeff === nothing ? control.zeff : loaded.zeff
-    if loaded.zeff_source === :scalar
-        @warn "SLAYER: kinetic file has no usable zeff or n_i profile (dataset absent or all-zero); " *
-              "using the scalar control.zeff = $(control.zeff) at every surface."
-    else
-        zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with impurity_charge = $(control.impurity_charge)"
-        @info "SLAYER: Z_eff(ψ) from the kinetic file's $zeff_origin"
-    end
+function _tearing_params(::SLAYERModel, equil, surfaces, loaded, prob)
+    data = equil.kinetic
+    # χ⊥,e/χ⊥,i/χ_φ from the kinetic file when present, else the kinetic data's defaults.
+    chi = _slayer_chi_inputs(loaded, prob, data)
+    # B_T = F(ψ)/(2π·R₀) per surface comes from the equilibrium's F-spline (bt=nothing).
     return build_slayer_inputs(equil, surfaces, loaded.profiles;
-        bt=bt,
-        mu_i=control.ion_mass,
-        zeff=zeff,
+        mu_i=_layer_ion_mass(data),
+        zeff=_layer_zeff(loaded, data),
         chi_perp_e=chi.chi_perp_e,
         chi_perp_i=chi.chi_perp_i,
         chi_tor=chi.chi_tor,
-        tau_E=control.tau_E,
-        P_perp_model=control.P_perp_model,
-        dr_val=control.D_R,
-        dgeo_val=control.D_geo,
-        dc_type=control.D_c_type,
-        theta=control.theta_sample,
-        resistivity_model=_build_resistivity_model(control.resistivity_model),
-        lnLambda_form=control.lnLambda_form)
+        tau_E=data.tau_E,
+        P_perp_model=prob.P_perp_model,
+        dr_val=prob.D_R,
+        dgeo_val=prob.D_geo,
+        dc_type=prob.D_c_type,
+        theta=prob.theta_sample,
+        resistivity_model=_build_resistivity_model(data.resistivity_model),
+        lnLambda_form=data.lnLambda_form)
+end
+
+# The layer models take one main ion: its mass in proton masses.
+function _layer_ion_mass(data::KineticProfileData)
+    length(data.ion_species) == 1 ||
+        throw(ArgumentError("The tearing layers take one main-ion species; the kinetic data list $(length(data.ion_species))"))
+    return Float64(only(data.ion_species).m)
+end
+
+# Z_eff(ψ) for the layers, reporting where it came from: the file's profile, the n_i/n_e closure, or the default.
+function _layer_zeff(loaded, data::KineticProfileData)
+    if loaded.zeff_source === :scalar
+        @warn "Tearing: kinetic file has no usable zeff or n_i profile (dataset absent or all-zero); " *
+              "using zeff_default = $(data.zeff_default) at every surface."
+        return data.zeff_default
+    end
+    zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with impurity_charge = $(data.impurity_charge)"
+    @info "Tearing: Z_eff(ψ) from the kinetic file's $zeff_origin"
+    return loaded.zeff
 end
 
 """
@@ -155,13 +150,6 @@ function validate(problem::TearingProblem, config::TearingConfig)
     problem.msing_max >= 1 || throw(ArgumentError("msing_max must be positive."))
     problem.D_c_type in (:none, :lar, :fitzpatrick, :toroidal) || throw(ArgumentError("Invalid critical-Delta model."))
     problem.P_perp_model in (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E) || throw(ArgumentError("Invalid perpendicular transport model."))
-    for value in (problem.chi_perp_e, problem.chi_perp_i, problem.chi_tor)
-        value === nothing || (isfinite(value) && value > 0) || throw(ArgumentError("Thermal and momentum diffusivities must be positive and finite."))
-    end
-    if problem.P_perp_model === :tau_E
-        problem.tau_E !== nothing && isfinite(problem.tau_E) && problem.tau_E > 0 || throw(ArgumentError("The tau_E model requires a positive confinement time."))
-    end
-    problem.impurity_charge > 1 || throw(ArgumentError("Impurity charge must exceed one."))
     all(isfinite, values(problem.omega_E_kHz)) || throw(ArgumentError("Rotation overrides must be finite."))
     problem.critical_resonant_field.n >= 3 || throw(ArgumentError("Critical-resonant-field scans require at least three points."))
     config.scan_mode in (:amr, :brute_force) || throw(ArgumentError("Invalid tearing scan_mode."))

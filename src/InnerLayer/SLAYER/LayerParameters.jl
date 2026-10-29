@@ -105,6 +105,35 @@ end
 const ALLOWED_DC_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 
 # Allowed P_perp_model values selecting how P_perp is built. `:chi_perp_e` is the default.
+"""
+    surface_resistivity(; n_e, t_e, zeff, qval, rs, R0, resistivity_model=SauterNeoModel(), lnLambda_form=:nrl,
+                        f_trap=nothing, nu_e_star=nothing, R_major_eff=nothing, lnLamb=nothing) -> Float64
+
+Parallel resistivity η in Ω·m at a rational surface, the closure every resistive inner layer shares
+(n_e in m⁻³, t_e in eV). The model selects it:
+
+  - `SpitzerHarmModel()` -- Fitzpatrick Spitzer-Härm σ_∥; with `lnLambda_form = :wesson` this is
+    bit-identical to the legacy SLAYER η
+  - `SpitzerModel()` -- Sauter 18a fit (the legacy 1.65e-9 form under `:wesson`)
+  - `SauterNeoModel()` / `RedlNeoModel()` -- the F_33 trapped-particle correction using `f_trap` and
+    ν*_e, each from the caller (`ResistGeometry`) or else the ε = r_s/R form with R = `R_major_eff`
+    (default `R0`)
+"""
+function surface_resistivity(; n_e::Real, t_e::Real, zeff::Real, qval::Real, rs::Real, R0::Real,
+    resistivity_model::NeoResistivityModel=SauterNeoModel(), lnLambda_form::Symbol=:nrl,
+    f_trap::Union{Real,Nothing}=nothing, nu_e_star::Union{Real,Nothing}=nothing,
+    R_major_eff::Union{Real,Nothing}=nothing, lnLamb::Union{Real,Nothing}=nothing)
+    lnLamb = lnLamb === nothing ? coulomb_log_e(n_e, t_e; form=lnLambda_form) : lnLamb
+    resistivity_model isa SpitzerModel && lnLambda_form === :wesson && return 1.65e-9 * lnLamb / (t_e / 1e3)^1.5
+    resistivity_model isa Union{SpitzerModel,SpitzerHarmModel} &&
+        return eta_neoclassical(resistivity_model, n_e, t_e, zeff, 0.0, 0.0; lnLamb=lnLamb)
+    R_eff = R_major_eff === nothing ? R0 : Float64(R_major_eff)
+    eps_here = clamp(rs / R_eff, 1e-6, 1.0 - 1e-6)
+    ft_here = f_trap === nothing ? trapped_fraction_eps(eps_here) : Float64(f_trap)
+    nue_here = nu_e_star === nothing ? nu_star_e(n_e, t_e, R_eff, eps_here, qval, zeff; lnLamb=lnLamb) : Float64(nu_e_star)
+    return eta_neoclassical(resistivity_model, n_e, t_e, zeff, ft_here, nue_here; lnLamb=lnLamb)
+end
+
 const ALLOWED_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
 
 """
@@ -310,30 +339,9 @@ function slayer_parameters(;
     # Coulomb logarithm shared by the resistivity closure and τ_ee.
     lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
 
-    # Parallel resistivity entering τ_R. The model selects the closure:
-    #   SpitzerHarmModel — Fitzpatrick Spitzer-Härm σ_∥; with
-    #     lnLambda_form=:wesson this is bit-identical to the legacy SLAYER η.
-    #   SpitzerModel     — Sauter 18a fit (legacy 1.65e-9 form under :wesson).
-    #   SauterNeoModel / RedlNeoModel — F_33 trapped-particle correction
-    #     using f_trap and ν*_e (from ResistGeometry or ε-only fallback).
-    if resistivity_model isa SpitzerModel && lnLambda_form === :wesson
-        # Preserve bit-identical legacy η diagnostic behaviour.
-        eta = 1.65e-9 * lnLamb / (t_e / 1e3)^1.5
-    elseif resistivity_model isa Union{SpitzerModel,SpitzerHarmModel}
-        eta = eta_neoclassical(resistivity_model, n_e, t_e, zeff,
-            0.0, 0.0; lnLamb=lnLamb)
-    else
-        R_eff = R_major_eff === nothing ? R0 : Float64(R_major_eff)
-        eps_here = clamp(rs / R_eff, 1e-6, 1.0 - 1e-6)
-        ft_here = f_trap === nothing ? trapped_fraction_eps(eps_here) :
-                  Float64(f_trap)
-        nue_here = nu_e_star === nothing ?
-                   nu_star_e(n_e, t_e, R_eff, eps_here, qval, zeff;
-            lnLamb=lnLamb) :
-                   Float64(nu_e_star)
-        eta = eta_neoclassical(resistivity_model, n_e, t_e, zeff,
-            ft_here, nue_here; lnLamb=lnLamb)
-    end
+    eta = surface_resistivity(; n_e=n_e, t_e=t_e, zeff=zeff, qval=qval, rs=rs, R0=R0,
+        resistivity_model=resistivity_model, lnLambda_form=lnLambda_form, f_trap=f_trap, nu_e_star=nu_e_star,
+        R_major_eff=R_major_eff, lnLamb=lnLamb)
 
     # Basic plasma quantities
     tau = t_i / t_e
