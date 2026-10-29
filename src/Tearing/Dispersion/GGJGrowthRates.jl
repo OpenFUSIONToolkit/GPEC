@@ -35,6 +35,9 @@ end
 
 (g::GGJDispersion)(Q::Number) = g.mc(-im * ComplexF64(Q) * g.Q0)
 
+# Keep classifying circles, polishing steps and derivative probes strictly in γ > 0.
+_residual_domain_radius(::GGJDispersion, Q::ComplexF64) = 0.9 * max(imag(Q), 0.0)
+
 """
     ggj_growth_rates(mc::MultiSurfaceCouplingFull;
                      gamma_range, omega_range,
@@ -56,9 +59,10 @@ normalization, so no E×B Doppler shift is applied and the roots are in the
 plasma frame.
 
 `gamma_range` must lie at γ > 0: the GGJ layer is evaluated on the principal
-branch of a square root in s, whose cut runs along γ ≤ 0, so a box reaching
-there is not scanning one analytic function. Stable roots therefore need an
-analytic continuation that is not implemented. A solver failure inside the
+branch of a square root in s, with a cut on the negative real s-axis. The search
+supports only γ > 0; classification circles and polishing stay in that half-plane,
+including finite-difference probes. Stable-root searches and analytic continuation
+across the cut are not implemented. A solver failure inside the
 layer (for example a degenerate Frobenius pair near Mercier marginality) is
 not caught and stops the scan.
 

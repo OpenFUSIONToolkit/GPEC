@@ -1,3 +1,17 @@
+struct GGJDomainTestResidual{G,F}
+    dispersion::G
+    residual::F
+    evaluated::Vector{ComplexF64}
+end
+
+function (f::GGJDomainTestResidual)(Q)
+    push!(f.evaluated, ComplexF64(Q))
+    return f.residual(Q)
+end
+
+GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainTestResidual, Q::ComplexF64) =
+    GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f.dispersion, Q)
+
 @testset "Dispersion GGJ growth rates (full matching, winding classification)" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: GGJModel, solve_inner
@@ -17,6 +31,45 @@
     M = ComplexF64[1 -1; 1 1]
     dp_raw = Matrix(transpose(M * P / M))
     mc = multi_surface_coupling_full([surface_coupling(model, p, r0.tearing)], dp_raw)
+
+    @testset "GGJ classification and polishing stay at positive growth" begin
+        D = GeneralizedPerturbedEquilibrium.Dispersion
+        g = GGJDispersion(mc)
+        center = 0.01im
+        re_paths = [ComplexF64[-1 + center, 1 + center]]
+        im_paths = [ComplexF64[0.001im, 0.02im]]
+        # A coarse contour estimate must not pull a stable root into a positive-growth search.
+        f = GGJDomainTestResidual(g, Q -> Q + 0.1im, ComplexF64[])
+        gr = D._run_analysis(re_paths, im_paths, [zeros(2)], 1.0;
+            pole_threshold=10.0, filter_above_poles=false, filter_outside_re=false,
+            residual=f, classification=:winding, zero_winding=1)
+        @test :no_root in gr.warning_flags
+        @test isempty(gr.valid_roots)
+        @test !isempty(f.evaluated) && all(Q -> imag(Q) > 0, f.evaluated)
+
+        # Expansion may find a nearby unstable root, but its returned trust disk must remain in-domain.
+        nearby = GGJDomainTestResidual(g, Q -> Q - 0.014im, ComplexF64[])
+        kind, W, radius = D._winding_classify(nearby, ComplexF64[center], 1, re_paths, im_paths, 2.0;
+            zero_winding=1, rfrac=0.001)
+        @test kind === :root
+        @test W ≈ 1
+        @test 0 < radius < imag(center)
+        root, _, _ = D._polish_root(nearby, center, radius)
+        @test root ≈ 0.014im atol = 1e-10
+        @test all(Q -> imag(Q) > 0, nearby.evaluated)
+
+        # Even an oversized requested trust region cannot move the iterate or its probes below γ = 0.
+        empty!(f.evaluated)
+        root, _, _ = D._polish_root(f, center, 1.0)
+        @test imag(root) > 0
+        @test !isempty(f.evaluated) && all(Q -> imag(Q) > 0, f.evaluated)
+        empty!(f.evaluated)
+        @test D._polish_root(f, 0.0im, 1.0) == (0.0im, 0, false)
+        kind, _, _ = D._winding_classify(f, ComplexF64[0.0im], 1, re_paths, im_paths, 2.0;
+            zero_winding=1, rfrac=0.5)
+        @test kind === :unresolved
+        @test isempty(f.evaluated)
+    end
 
     @testset "GGJDispersion: plane convention s = −i·Q·Q₀" begin
         g = GGJDispersion(mc)

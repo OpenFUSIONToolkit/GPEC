@@ -599,8 +599,12 @@ end
 #
 # The local model is the real 2×2 forward-difference Jacobian of (Re f, Im f), exact for holomorphic
 # and anti-holomorphic f alike; SLAYER's residual is a function of conj(Q) (see Riccati.jl).
+# Radius of a disk contained in the residual's supported domain; unrestricted by default.
+_residual_domain_radius(f, Q::ComplexF64) = Inf
+
 function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
     tol_step::Float64=1e-12, tol_f::Float64=1e-8)
+    R = min(R, _residual_domain_radius(f, Q0))
     (R > 0) || return (Q0, 0, false)
     f0 = ComplexF64(f(Q0))
     nev = 1
@@ -613,6 +617,8 @@ function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
     Qbest, abest = Q0, a0
 
     for _ in 1:maxit
+        h = min(h, 0.5 * _residual_domain_radius(f, Qk))
+        h > 0 || break
         fx = ComplexF64(f(Qk + h))
         fy = ComplexF64(f(Qk + im * h))
         nev += 2
@@ -974,7 +980,9 @@ function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, 
     zero_winding::Int, rfrac::Float64)
     pt = pts[i]
     h_loc = _local_segment_length(re_paths, im_paths, pt, h_grid)
-    r = _polish_trust_radius(pts, i, h_loc; k_cell=rfrac, nn_frac=0.45)
+    domain_radius = _residual_domain_radius(residual, pt)
+    r = min(_polish_trust_radius(pts, i, h_loc; k_cell=rfrac, nn_frac=0.45), domain_radius)
+    r > 0 || return (:unresolved, NaN, r)
     W = NaN
     for _ in 1:3
         W, _ = _winding_number(residual, pt, r)
@@ -984,7 +992,7 @@ function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, 
     isfinite(W) || return (:unresolved, NaN, r)
     n = round(Int, W)
     if n == 0
-        r_wide = _polish_trust_radius(pts, i, h_loc; k_cell=8rfrac, nn_frac=0.9)
+        r_wide = min(_polish_trust_radius(pts, i, h_loc; k_cell=8rfrac, nn_frac=0.9), domain_radius)
         if r_wide > r
             W_wide, _ = _winding_number(residual, pt, r_wide)
             if isfinite(W_wide) && round(Int, W_wide) != 0
