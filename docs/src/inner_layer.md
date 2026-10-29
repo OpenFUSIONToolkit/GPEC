@@ -3,7 +3,8 @@
 The `Tearing` module groups the resistive tearing-mode analysis stack:
 `InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
 SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
-contour-intersection root extraction), and `Runner` (user-facing TOML
+contour-intersection root extraction), `CriticalResonantField` (torque-balance
+error-field penetration threshold), and `Runner` (user-facing TOML
 configuration, profile loading, and HDF5 output).
 
 ## Layer Inputs
@@ -201,6 +202,81 @@ res = solve_ray(p, GGJ.inner_Q(p, γ))
 res.Δ, res.breaks, res.bc_cond      # res.Δ = (Δ₊, Δ₋) = (interchange, tearing)
 ```
 
+## Critical resonant field
+
+With `[SLAYER.CriticalResonantField] enabled = true`, each SLAYER surface also gets the
+critical resonant field for error-field penetration, from the steady-state torque balance of
+Cole and Fitzpatrick, Phys. Plasmas **13**, 032503 (2006). The electromagnetic torque on the
+layer balances the viscous restoring torque when (Cole Eq. 61)
+
+```math
+\frac{\operatorname{Im}\hat\Delta(Q)}{|\alpha + \hat\Delta(Q)|^2}
+  = \frac{2P\,(Q_0 - Q)}{S\hat\kappa\,(b_r/B_\phi)^2},
+\qquad
+\hat\kappa = \left[\frac{2}{s}\right]^2 \int_{r_s}^{a} \frac{\mu(r_s)}{\mu(r)}\,\frac{dr}{r},
+```
+
+and balance is lost above (Cole Eq. 62)
+
+```math
+\left(\frac{b_r}{B_\phi}\right)^2_\mathrm{crit}
+  = \max_Q \frac{2P\,(Q_0 - Q)}{S\hat\kappa\,\operatorname{Im}[-1/(\alpha + \hat\Delta(Q))]} .
+```
+
+- **Inputs.** P is each layer's `P_tor` (so χ_φ from the kinetic file, or the scalar
+  `chi_tor`), S its Lundquist number, and Q0 = τ_k·n·ω_E the natural E×B rotation of the
+  m/n mode (Cole's ω0; the diamagnetic drifts enter through Q_e and Q_i in Δ̂). Ω_E is the
+  kinetic file's `omega_E` or the `omega_E_kHz` override; the analysis needs it, and a surface
+  without one is skipped.
+- **Approximations.** As in Fortran `gslayer.f`, the viscosity integral is taken as 1/2
+  (κ̂ = 2/s²).
+- **Stability α.** Each surface uses its own α = S^(−1/3)(Δ_crit − r_s Δ'), so α + Δ̂ is the
+  dispersion relation's residual and the torque balance shares its poles with SLAYER's free
+  modes (Fortran fixes α = 10⁻²). Cole and Fitzpatrick have no Δ_crit; including it treats the
+  curvature offset as independent of frequency. It is zero unless `D_c_type` is set. Cole's
+  threshold needs a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
+- **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; `solve_inner`
+  mirrors the real axis, so the scan uses conj(Δ(−Q)).
+- **Threshold.** Penetration is associated with a saddle-node bifurcation (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
+  as the field grows, Q moves from Q0 toward the electron fluid at Q_e, where the torque
+  vanishes, and the threshold is the first resolved saddle-node bifurcation on that path, above
+  which the shielded branch followed from Q0 no longer exists. Both the rise to and fall from
+  an interior maximum must exceed 0.1 % of its value within a contiguous retained interval.
+  This excludes monotonic clipped windows and small numerical extrema; excluded samples do
+  not connect separate intervals. A later, higher maximum does not replace the first resolved
+  saddle-node bifurcation. Points where |Δ̂| ≤ α, the
+  unshielded zone next to Q_e, are not candidates, so the balance spike there is never taken.
+  With no resolved saddle-node bifurcation no discrete threshold is reported (NaN). Fortran takes the global maximum on a
+  window instead, which picks that spike. The search assumes Q_i ≤ 0 ≤ Q_e; a surface where
+  that fails is skipped with a warning.
+
+Outputs go to `Tearing/CriticalResonantField/` (`br_crit` = b_r/B_φ, `br_crit_tesla`, `Q_peak`, `Q0`, with P in
+`PerSurface/P_tor`, and with `store_scan` the per-surface `Scan/Surface_<k>/{Q, balance, Delta}`).
+
+`br_crit` is normalized by the toroidal field, as in Cole and Fitzpatrick (2006, Eqs. 61–68) and
+Fitzpatrick, Phys. Plasmas **30**, 092512 (2023), Eq. 120. `br_crit_tesla` = `br_crit`·|B0|, with
+the layer's B0, is for comparison with `SingularCoupling/resonant_area_weighted_field`, the total
+resonant field with the ideal plasma response, which Park et al., Phys. Rev. Lett. **99**, 195003
+(2007) identify as the field that opens islands. The comparison is approximate: the theory's b_r is
+a cylindrical field at the layer, and no reference maps it onto the area-weighted toroidal field.
+`penetrated_area_weighted_field` already includes the layer response and is not the matching quantity.
+
+### Benchmark against Fortran
+
+On the DIII-D-like example (2/1–6/1, n = 1, P = 1, κ̂ = 2/s², Q ∈ [−5, 5] with 20001
+points), both codes were given Fortran's normalized inputs and Fortran's fixed α = 10⁻².
+
+- **Torque balance.** Fed Fortran's own Δ(Q) table, the Julia routine reproduces Fortran's
+  balance to all printed digits on every surface, so the thresholds differ only through the
+  selection rule above.
+- **Layer model.** Fortran solves Park's drift-MHD layer and Julia Fitzpatrick's, so Δ(Q)
+  differs by a median 24–78 % between Q_i and Q_e on 2/1, 3/1, 4/1 and 6/1 (7 % on 5/1).
+
+The dots in the figure mark each code's balance maximum between Q_e and Q0 at that fixed α,
+not the fold threshold above.
+
+![Fortran vs Julia inner-layer Δ(Q) and torque balance](assets/crf_fortran_benchmark.png)
+
 ## API Reference
 
 ### InnerLayer
@@ -225,6 +301,12 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Dispersion]
+```
+
+## CriticalResonantField
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
 ```
 
 ## Runner
