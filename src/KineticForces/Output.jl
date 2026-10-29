@@ -130,6 +130,30 @@ const KF_METHOD_H5_ANNOTATIONS = [
 ]
 
 """
+    save_to_hdf5(target, kf::KineticForcesResult)
+
+Write the kinetic torque under `KineticForces/`: the total by method, each species' contribution under
+`PerSpecies/<label>/`, and the `Validity` diagnostics.
+"""
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, kf::KineticForcesResult)
+    ffs = kf.pe.response.ffs
+    dVdpsi_spline = ffs.equil.profiles.dVdpsi_spline
+    for (label, state) in kf.species
+        save_to_hdf5(h5file, state; dVdpsi_spline, species_label=label)
+    end
+    save_to_hdf5(h5file, kf.total; dVdpsi_spline)
+    ForceFreeStates.write_kinetic_validity!(h5file, kf.control, ffs)
+    return nothing
+end
+
+# A force-balance run whose kinetic source is the KineticForces model records that model's validity diagnostics.
+function ForceFreeStates.write_kinetic_validity!(h5file::Union{HDF5.File,HDF5.Group}, ctrl::KineticForcesControl,
+    ffs::ForceFreeStates.ForceFreeStatesResult)
+    equil = ffs.equil
+    return write_validity!(h5file, ctrl, ntv_species(ctrl, equil), ntv_profiles(ctrl, equil), equil, Float64[sng.psifac for sng in ffs.surfaces])
+end
+
+"""
     write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil)
 
 Write `KineticForces/Validity`: the drift-kinetic validity diagnostics (orbit-width scales, local

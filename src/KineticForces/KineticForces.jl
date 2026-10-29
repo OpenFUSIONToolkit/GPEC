@@ -73,6 +73,8 @@ const deg2rad = π / 180
 # the bounce-averaging Pfirsch-Schlüter denominator.
 const SINGULAR_EPS = 1e-30
 
+export kinetic_torque, KineticForcesResult
+
 # Diagnostic exports for interactive energy-integrand inspection
 export evaluate_energy_integrand, energy_integrand_scalar, EnergyParams
 

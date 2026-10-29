@@ -508,5 +508,40 @@ using HDF5
                 @test_throws "no longer a key" GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_source" => "fixed"))])
             end
         end
+
+        @testset "kinetic torque" begin
+            # The deck's [KineticForces] stage is kinetic_torque on its perturbed equilibrium, saved by its save method.
+            ntv_dir = joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example")
+            mktempdir() do dir
+                for name in readdir(ntv_dir)
+                    cp(joinpath(ntv_dir, name), joinpath(dir, name))
+                end
+                ntv_deck = TOML.parsefile(joinpath(dir, "gpec.toml"))
+                delete!(ntv_deck, "LocalStability")
+                delete!(ntv_deck, "Ballooning")
+                ntv_deck["Run"]["verbose"] = false
+                open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
+                reference = GPEC.main([dir])
+                @test reference.kinetic isa KineticForcesResult && reference.kinetic.pe === reference.pe
+
+                kf = kinetic_torque(reference.pe, GPEC.kinetic_forces_control(ntv_deck))
+                @test sort!(collect(keys(kf.total.method_results))) == sort!(collect(keys(reference.kinetic.total.method_results)))
+                for (method, r) in kf.total.method_results
+                    @test r.total_torque == reference.kinetic.total.method_results[method].total_torque
+                end
+                @test kf.axis_psi_c == reference.kinetic.axis_psi_c
+
+                api_file = joinpath(dir, "api.h5")
+                save_to_hdf5(api_file, kf)
+                h5open(joinpath(dir, "gpec.h5")) do deck_h5
+                    h5open(api_file) do api_h5
+                        for method in keys(kf.total.method_results)
+                            @test read(api_h5["KineticForces/$method/total_torque"]) == read(deck_h5["KineticForces/$method/total_torque"])
+                        end
+                        @test read(api_h5["KineticForces/Validity/psi_c"]) == read(deck_h5["KineticForces/Validity/psi_c"])
+                    end
+                end
+            end
+        end
     end
 end

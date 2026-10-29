@@ -467,3 +467,40 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         end
     end
 end
+
+"""
+    kinetic_torque(pe, ctrl::KineticForcesControl; verbose=false) -> KineticForcesResult
+
+The kinetic (NTV) torque of the perturbed equilibrium `pe`, evaluated with the model settings `ctrl` on the
+kinetic profiles attached to its equilibrium. A multi-species plasma adds each species' contribution.
+Call `save_to_hdf5(target, kf)` to save the result.
+
+```julia
+pe = perturbed_equilibrium(plasma_response(ffs), RMPField("forcing.dat"))
+kf = kinetic_torque(pe, KineticForcesControl())
+```
+"""
+function kinetic_torque(pe::PerturbedEquilibrium.PerturbedEquilibriumState, ctrl::KineticForcesControl; verbose::Bool=false)
+    ffs = pe.response.ffs
+    equil = ffs.equil
+    equil.kinetic === nothing && error("kinetic_torque needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
+    kinetic_profiles = ntv_profiles(ctrl, equil)
+    species = ntv_species(ctrl, equil)
+    # One boundary for the whole run, shared with the EL kinetic matrices and the Validity output.
+    axis_psi_c = axis_validity_boundary(ctrl, species, kinetic_profiles, equil, Float64[sng.psifac for sng in ffs.surfaces])
+
+    kf_intr = KineticForcesInternal(equil; verbose)
+    set_perturbation_data!(kf_intr, pe, ffs, equil, ffs.metric)
+    if species === nothing
+        total = KineticForcesState()
+        compute_torque_all_methods!(total, kf_intr, ctrl, equil, kinetic_profiles; axis_psi_c)
+        return KineticForcesResult(total, Pair{String,KineticForcesState}[], axis_psi_c, pe, ctrl)
+    end
+    per_species = Pair{String,KineticForcesState}[]
+    for sp in species
+        state = KineticForcesState()
+        compute_torque_all_methods!(state, kf_intr, ctrl, equil, sp.profiles; axis_psi_c, z=sp.z, m=sp.m, electron=sp.electron)
+        push!(per_species, String(sp.label) => state)
+    end
+    return KineticForcesResult(combine_species_states(last.(per_species)), per_species, axis_psi_c, pe, ctrl)
+end

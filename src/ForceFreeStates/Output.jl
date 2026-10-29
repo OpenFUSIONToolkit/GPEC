@@ -289,5 +289,14 @@ function save_to_hdf5(
 
     # Self-describing metadata pass (long_name/units/dims + dimension scales).
     apply_main_h5_metadata!(out_h5)
+    write_kinetic_validity!(out_h5, ctrl.kinetic, result)
     return nothing
 end
+
+"""
+    write_kinetic_validity!(target, kinetic, result)
+
+Write the validity diagnostics of the force operator's kinetic source `kinetic`. A no-op unless the module that
+owns the source adds a method (KineticForces does, for `KineticForcesControl`).
+"""
+write_kinetic_validity!(target, kinetic, result) = nothing

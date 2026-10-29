@@ -469,3 +469,24 @@ Written to gpec.h5 under the "KineticForces" group.
     # Block-diagonal kinetic matrices: key=method, value=(numpert_total, numpert_total, 6)
     kinetic_matrices::Dict{String,Array{ComplexF64,3}} = Dict{String,Array{ComplexF64,3}}()
 end
+
+"""
+    KineticForcesResult
+
+The kinetic torque of a perturbed equilibrium, from [`kinetic_torque`](@ref).
+
+## Fields
+
+  - `total::KineticForcesState` - The torque by method, summed over species.
+  - `species::Vector{Pair{String,KineticForcesState}}` - Each species' contribution by label; empty for a single-ion run.
+  - `axis_psi_c::Float64` - The near-axis validity boundary the ψ quadrature used.
+  - `pe::PerturbedEquilibrium.PerturbedEquilibriumState` - The perturbed equilibrium the torque was evaluated on.
+  - `control::KineticForcesControl` - The kinetic model settings.
+"""
+struct KineticForcesResult
+    total::KineticForcesState
+    species::Vector{Pair{String,KineticForcesState}}
+    axis_psi_c::Float64
+    pe::PerturbedEquilibrium.PerturbedEquilibriumState
+    control::KineticForcesControl
+end

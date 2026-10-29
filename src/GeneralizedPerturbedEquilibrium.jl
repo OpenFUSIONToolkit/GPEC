@@ -90,6 +90,7 @@ using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
 using .PerturbedEquilibrium: plasma_response, PlasmaResponse
+using .KineticForces: kinetic_torque, KineticForcesControl, KineticForcesResult
 
 include("Deck.jl")
 
@@ -246,15 +247,6 @@ function main_from_inputs(
     end
     @info "Results written to $output_file"
 
-    # Validity describes the kinetic model, not the torque contraction, so it is written for every
-    # run that reads the kinetic profiles through KineticForces — including FFS-only runs.
-    if _needs_kinetic_profiles(inputs, ctrl)
-        h5open(output_file, "cw") do h5file
-            KineticForces.write_validity!(h5file, kf_ctrl, KineticForces.ntv_species(kf_ctrl, equil), KineticForces.ntv_profiles(kf_ctrl, equil), equil,
-                Float64[sng.psifac for sng in intr.sing])
-        end
-    end
-
     ffs_dt = time() - ffs_start
     push!(runtimes, "force_free_states" => ffs_dt)
     @info "Force-Free States completed in $(@sprintf("%.3f", ffs_dt)) s"
@@ -269,17 +261,15 @@ function main_from_inputs(
         save_to_hdf5(output_file, pe_state)
     end
 
-    if "KineticForces" in keys(inputs)
-        kinetic = _timed_stage(runtimes, "kinetic_forces", "KineticForces") do
-            run_kinetic_forces(ffs_result, pe_state, kf_ctrl; verbose)
-        end
-        if kinetic !== nothing
-            h5open(output_file, "cw") do target
-                for (state, label) in zip(kinetic.states, kinetic.labels)
-                    save_to_hdf5(target, state; dVdpsi_spline=ffs_result.equil.profiles.dVdpsi_spline, species_label=label)
-                end
-                save_to_hdf5(target, kinetic.total; dVdpsi_spline=ffs_result.equil.profiles.dVdpsi_spline)
+    kinetic = nothing
+    if haskey(inputs, "KineticForces")
+        if pe_state === nothing
+            @info "Skipping the kinetic torque: it needs a perturbed equilibrium (no [PerturbedEquilibrium] section)."
+        else
+            kinetic = _timed_stage(runtimes, "kinetic_forces", "KineticForces") do
+                kinetic_torque(pe_state, kf_ctrl; verbose)
             end
+            save_to_hdf5(output_file, kinetic)
         end
     end
 
@@ -317,7 +307,7 @@ function main_from_inputs(
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (; ffs=ffs_result, pe=pe_state, tearing, local_stability, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
+    return (; ffs=ffs_result, pe=pe_state, kinetic, tearing, local_stability, coil_sensitivities, monte_carlo, locking_risk, efc_couplings)
 end
 
 """
@@ -770,60 +760,6 @@ function perturbed_equilibrium(
 end
 
 """
-    run_kinetic_forces(result, pe_state, kf_ctrl; verbose=false)
-
-Compute the neoclassical toroidal viscosity torque diagnostics of the deck's `[KineticForces]` section from the kinetic profiles attached to `result.equil`. No-op when the perturbed-equilibrium state the operators contract
-against is missing. Returns `(; total, states, labels)` for the summed and per-species results,
-or `nothing` when no torque is computed.
-"""
-function run_kinetic_forces(
-    result::ForceFreeStatesResult,
-    pe_state,
-    kf_ctrl::KineticForces.KineticForcesControl;
-    verbose::Bool=false
-)
-    # ----------------------------------------------------------------
-    # KineticForces (Neoclassical Toroidal Viscosity)
-    # ----------------------------------------------------------------
-    kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, result.equil)
-    species = KineticForces.ntv_species(kf_ctrl, result.equil)
-
-    # One boundary for the whole run, shared with the EL kinetic matrices and the Validity output.
-    axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, result.equil,
-        Float64[sng.psifac for sng in result.surfaces])
-
-    # Standalone NTV torque diagnostics need a PE state (they contract kinetic operators
-    # against ξ). A run without [PerturbedEquilibrium] produces none — skip.
-    if pe_state === nothing
-        @info "Skipping NTV torque diagnostics: no perturbed-equilibrium data (no [PerturbedEquilibrium] section)."
-    else
-        kf_intr = KineticForces.KineticForcesInternal(result.equil; verbose)
-        KineticForces.set_perturbation_data!(kf_intr, pe_state, result, result.equil, result.metric)
-
-        if species === nothing
-            kf_state = KineticForces.KineticForcesState()
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, result.equil, kinetic_profiles;
-                axis_psi_c=axis_psi_c)
-            return (; total=kf_state, states=KineticForces.KineticForcesState[], labels=String[])
-        else
-            states = KineticForces.KineticForcesState[]
-            labels = String[]
-            for sp in species
-                st = KineticForces.KineticForcesState()
-                KineticForces.compute_torque_all_methods!(st, kf_intr, kf_ctrl, result.equil, sp.profiles;
-                    axis_psi_c=axis_psi_c, z=sp.z, m=sp.m, electron=sp.electron)
-                push!(states, st)
-                push!(labels, sp.label)
-            end
-            kf_state = KineticForces.combine_species_states(states)
-            return (; total=kf_state, states, labels)
-        end
-    end
-
-    return nothing
-end
-
-"""
     run_error_fields(ef, ft_ctrl, result, pe_state, preloaded_coil_sets, kf_ctrl; verbose=false)
 
 From the deck's `[ErrorFields]` controls `ef` (see [`error_fields_from_deck`](@ref)) and the run's forcing
@@ -1127,11 +1063,12 @@ function write_imas(dd, result)
 end
 
 export main, write_imas
-export solve, plasma_response, perturbed_equilibrium
+export solve, plasma_response, perturbed_equilibrium, kinetic_torque
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, ForceFreeStatesResult, RMPField, PlasmaResponse
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
+export KineticForcesControl, KineticForcesResult
 
 include("Precompile.jl")
 

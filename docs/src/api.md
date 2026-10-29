@@ -57,6 +57,9 @@ The objects map one-to-one onto the pipeline stages:
   - [`plasma_response`](@ref) builds the plasma-response and singular-coupling operators of a
     `ForceFreeStatesResult` once, and `perturbed_equilibrium(resp, rmp)` drives them with one field —
     together the `[PerturbedEquilibrium]` section.
+  - [`kinetic_torque`](@ref) evaluates the kinetic (NTV) torque of a perturbed equilibrium with the
+    model settings of a `KineticForcesControl` — the `[KineticForces]` section — and returns a
+    `KineticForcesResult`: `kf = kinetic_torque(pe, KineticForcesControl())`.
 
 ## Kinetic profiles
 
@@ -175,7 +178,7 @@ A deck runs the solve with a `[Tearing]` section: the `TearingProblem` keywords 
 `[SLAYER]` or `[GGJ]`; `[SLAYER]` also gives the layer-overlap cap its closures.
 
 Kinetic runs take `Forward()`. The problem's `kinetic` keyword selects the source:
-`kinetic=KineticForces.KineticForcesControl(; ...)` evaluates the KineticForces drift-kinetic
+`kinetic=KineticForcesControl(; ...)` evaluates the KineticForces drift-kinetic
 matrices with those settings on the equilibrium's kinetic profiles and species, and
 `kinetic=TestKineticMatrices(; scale)` uses synthetic test matrices. `kinetic_factor` (default 1)
 scales either. A deck selects the KineticForces model with `[ForceFreeStates] kinetic =
