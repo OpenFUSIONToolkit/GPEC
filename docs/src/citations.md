@@ -22,6 +22,34 @@ Extends the 1997 method to high toroidal mode numbers by using 32-point Gaussian
 
 ---
 
+### 3D vacuum singular correction
+
+The 3D vacuum singular correction (`src/Vacuum/Kernel3D.jl`) is translated from BIEST and licensed under Apache-2.0 (see `NOTICE`). If you use the 3D vacuum calculation, please cite the three references below.
+
+> D. Malhotra, "BIEST: Boundary Integral Equation Solver for Taylor states,"
+> [https://github.com/dmalhotra/BIEST](https://github.com/dmalhotra/BIEST).
+> DOI: [10.5281/zenodo.23511944](https://doi.org/10.5281/zenodo.23511944)
+
+The C++ library from which the 3D singular-correction quadrature was translated.
+
+---
+
+> D. Malhotra, A. Cerfon, L.-M. Imbert-Gérard, and M. O'Neil, "Taylor states in stellarators: A fast high-order boundary integral solver,"
+> *Journal of Computational Physics* **397**, 108791 (2019).
+> DOI: [10.1016/j.jcp.2019.06.067](https://doi.org/10.1016/j.jcp.2019.06.067)
+
+Sec. 3.2 defines the polar singular quadrature: partition-of-unity split, polar Gauss–Legendre/trapezoidal rule, and Lagrange interpolation from the collocation grid to the polar nodes.
+
+---
+
+> D. Malhotra, A. J. Cerfon, M. O'Neil, and E. Toler, "Efficient high-order singular quadrature schemes in magnetic fusion,"
+> *Plasma Physics and Controlled Fusion* **62**, 024004 (2020).
+> DOI: [10.1088/1361-6587/ab57f4](https://doi.org/10.1088/1361-6587/ab57f4)
+
+Applies the scheme to the singular surface integrals of magnetic fusion (exterior vacuum fields, virtual casing) on non-axisymmetric toroidal surfaces, and shows its high-order convergence where singularity subtraction is low order.
+
+---
+
 ## ForceFreeStates Module
 
 > A. H. Glasser, "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma,"
@@ -32,7 +60,7 @@ The primary reference for the `ForceFreeStates` module. Derives the Euler-Lagran
 
 ---
 
-> A. H. Glasser, S. A. Sabbagh, J. M. Bialek, and Y.-S. Park, "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control,"
+> A. S. Glasser, E. Kolemen, and A. H. Glasser, "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control,"
 > *Physics of Plasmas* **25**, 032507 (2018).
 > DOI: [10.1063/1.5007042](https://doi.org/10.1063/1.5007042)
 
@@ -50,7 +78,7 @@ Describes the 3D equilibrium perturbation formalism in toroidal geometry that fo
 
 ---
 
-> J.-K. Park, A. H. Boozer, and A. H. Glasser, "Control of Asymmetric Magnetic Perturbations in Tokamaks,"
+> J.-K. Park, M. J. Schaffer, J. E. Menard, and A. H. Boozer, "Control of Asymmetric Magnetic Perturbations in Tokamaks,"
 > *Physical Review Letters* **99**, 195003 (2007).
 > DOI: [10.1103/PhysRevLett.99.195003](https://doi.org/10.1103/PhysRevLett.99.195003)
 
@@ -58,7 +86,7 @@ Demonstrates the GPEC framework for computing plasma response to resonant magnet
 
 ---
 
-> J.-K. Park, M. J. Schaffer, J. E. Menard, and A. H. Boozer, "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
+> J.-K. Park, A. H. Boozer, J. E. Menard, A. M. Garofalo, M. J. Schaffer, R. J. Hawryluk, S. M. Kaye, S. P. Gerhardt, S. A. Sabbagh, and the NSTX Team, "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
 > *Physics of Plasmas* **16**, 056115 (2009).
 > DOI: [10.1063/1.3122862](https://doi.org/10.1063/1.3122862)
 
@@ -92,7 +120,7 @@ Derives the resistive MHD stability analysis and Δ' calculation using matched a
 
 ---
 
-> A. H. Glasser, J.-K. Park, and Z. R. Wang, "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time,"
+> A. S. Glasser and E. Kolemen, "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time,"
 > *Physics of Plasmas* **25**, 082502 (2018).
 > DOI: [10.1063/1.5029477](https://doi.org/10.1063/1.5029477)
 
@@ -108,7 +136,7 @@ Constructs the Wasow large-``x`` asymptotic basis (the `inps` kernel) that suppl
 
 ---
 
-> X. Wang, A. H. Glasser, J.-K. Park, Z. R. Wang, and N. C. Logan, "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach,"
+> Z. Wang, A. H. Glasser, D. Brennan, Y. Liu, and J.-K. Park, "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach,"
 > *Physics of Plasmas* **27**, 122503 (2020).
 > DOI: [10.1063/5.0020010](https://doi.org/10.1063/5.0020010)
 
@@ -124,8 +152,17 @@ The basis for the presently implemented in Fortran SLAYER code which computes th
 
 ---
 
-> A. Burgess et al., "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer,"
-> Preprint (2026).
+> A. Cole and R. Fitzpatrick, "Drift-magnetohydrodynamical model of error-field penetration in tokamak plasmas,"
+> *Physics of Plasmas* **13**, 032503 (2006).
+> DOI: [10.1063/1.2178167](https://doi.org/10.1063/1.2178167)
+
+The torque-balance error-field penetration threshold (Eqs. 61–62) behind the critical resonant field computed in `Tearing.CriticalResonantField`.
+
+---
+
+> D. A. Burgess, N. C. Logan, J.-K. Park, C. J. Hansen, and C. Paz-Soldan, "Tearing stability prediction combining toroidal calculations with a two-fluid slab layer,"
+> *Plasma Physics and Controlled Fusion* **68**, 065017 (2026).
+> DOI: [10.1088/1361-6587/ae7156](https://doi.org/10.1088/1361-6587/ae7156)
 
 Combines the toroidal outer-region calculation with the two-fluid slab layer model to predict tearing stability, extending the matched-asymptotic approach used in the `InnerLayer` module.
 
