@@ -12,7 +12,7 @@ shimming.
 using DelimitedFiles
 using HDF5
 
-# Physical constants and collisionality normalizations shared by `load_kinetic_profiles` and
+# Physical constants and collisionality normalizations shared by `kinetic_profile_splines` and
 # `resolve_ntv_species` (Krook collision frequency, Logan & Park 2013 Eq. 6).
 const _EV_J = 1.602e-19          # eV → J
 const _E_CHARGE = 1.602e-19      # elementary charge [C] (PENTRC-parity value, not CODATA)
@@ -25,11 +25,14 @@ const _ME = 9.109_1e-31          # electron mass [kg]
 # NRL-formulary Coulomb logarithm (natural log); n_e in m⁻³, T_e in J.
 _coulomb_log(ne, Te) = 17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(Te / _KEV_J)
 
+# Names kinetic profiles in error messages by their provenance, when they carry one.
+_describe(data) = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
+
 # Hard stop on an unphysical negative density (bad input or a cubic-resample overshoot).
-function _assert_nonneg_density(kinetic_file, label, arr, psi_reg)
+function _assert_nonneg_density(source, label, arr, psi_reg)
     i = findfirst(<(0), arr)
     i === nothing ||
-        error("kinetic file '$kinetic_file': negative $label = $(arr[i]) at ψ_n = $(psi_reg[i]) — unphysical")
+        error("$source: negative $label = $(arr[i]) at ψ_n = $(psi_reg[i]) — unphysical")
 end
 
 """
@@ -50,57 +53,12 @@ struct ResolvedNTVSpecies{P}
     profiles::P
 end
 
-"""
-    KineticProfileData
-
-Raw kinetic-profile columns read from a kinetic file (HDF5 or ASCII), before
-resampling and spline construction. `psi` (normalized poloidal flux) is always
-present; every profile field is `nothing` when the source omits it, so each
-consumer validates only the fields it needs. Units: densities m⁻³,
-temperatures eV, frequencies rad/s, diffusivities m²/s.
-
-| field               | meaning                                                                                                           |
-|:------------------- |:----------------------------------------------------------------------------------------------------------------- |
-| `n_i`               | main-ion density                                                                                                  |
-| `n_e`               | electron density                                                                                                  |
-| `T_i`/`T_e`         | ion / electron temperature                                                                                        |
-| `omega_E`           | ExB rotation                                                                                                      |
-| `omega_tor`         | toroidal rotation (optional)                                                                                      |
-| `chi_e`             | perpendicular heat diffusivity χ⊥ (shipped data: electron power-balance χ_e; see the stability docs)              |
-| `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
-| `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
-| `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
-| `provenance`        | short string recording the source file/format                                                                     |
-"""
-struct KineticProfileData
-    psi::Vector{Float64}
-    n_i::Union{Nothing,Vector{Float64}}
-    n_e::Union{Nothing,Vector{Float64}}
-    T_i::Union{Nothing,Vector{Float64}}
-    T_e::Union{Nothing,Vector{Float64}}
-    omega_E::Union{Nothing,Vector{Float64}}
-    omega_tor::Union{Nothing,Vector{Float64}}
-    chi_e::Union{Nothing,Vector{Float64}}
-    chi_phi::Union{Nothing,Vector{Float64}}
-    zeff::Union{Nothing,Vector{Float64}}
-    species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
-    provenance::String
-end
-
-function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
-    omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_phi=nothing, zeff=nothing,
-    species_densities=nothing, provenance="")
-    _v(x) = x === nothing ? nothing : Float64.(collect(x))
-    return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
-        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_phi), _v(zeff), species_densities, String(provenance))
-end
-
 const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
 
-# Dataset units written into / expected from the HDF5 kinetic schema.
-const _KINETIC_H5_UNITS = Dict("psi" => "normalized poloidal flux", "n_i" => "m^-3",
-    "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
-    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless")
+# The optional profile datasets of the HDF5 kinetic schema and their units, one row per `KineticProfileData`
+# field of the same name; the reader and writer both iterate it, so a new profile is a row here plus its field.
+const _KINETIC_H5_PROFILES = ("n_i" => "m^-3", "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
+    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_i" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless")
 
 """
     read_kinetic_file(path; group="/") -> KineticProfileData
@@ -139,20 +97,38 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
         haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
         # Non-standard datasets named `n_*` (e.g. "n_D", "n_T") are named per-species density
         # profiles for explicit multi-ion input; other names are reserved for future schema fields.
-        standard = ("psi", "n_i", "n_e", "T_i", "T_e", "omega_E", "omega_tor", "chi_e", "chi_phi", "zeff")
         extras = Dict{String,Vector{Float64}}()
         for k in keys(g)
-            (k in standard || !startswith(k, "n_")) && continue
+            (k == "psi" || any(p -> first(p) == k, _KINETIC_H5_PROFILES) || !startswith(k, "n_")) && continue
             v = read(g[k])
             v isa AbstractArray && (extras[k] = Float64.(vec(v)))
         end
         return KineticProfileData(; psi=Float64.(vec(read(g["psi"]))),
-            n_i=rd("n_i"), n_e=rd("n_e"), T_i=rd("T_i"), T_e=rd("T_e"),
-            omega_E=rd("omega_E"), omega_tor=rd("omega_tor"),
-            chi_e=rd("chi_e"), chi_phi=rd("chi_phi"), zeff=rd("zeff"),
+            (Symbol(name) => rd(name) for (name, _) in _KINETIC_H5_PROFILES)...,
             species_densities=(isempty(extras) ? nothing : extras), provenance=prov)
     end
 end
+
+"""
+    attach_kinetic_profiles!(equil, path; group="/") -> equil
+    attach_kinetic_profiles!(equil, data::KineticProfileData) -> equil
+
+Attach raw kinetic profiles to `equil` as `equil.kinetic`. Every kinetic consumer (the NTV torque, the
+calculated kinetic matrices, tearing, the layer-overlap scan and the two-pass grid refinement) derives its
+own view from them, so the file is read once. Equilibria built from a config with `kinetic_file` set
+attach it on construction; use this for analytic or IMAS equilibria built without it, or in-memory data.
+"""
+function attach_kinetic_profiles!(equil::PlasmaEquilibrium, data::KineticProfileData)
+    equil.kinetic = data
+    return equil
+end
+
+attach_kinetic_profiles!(equil::PlasmaEquilibrium, path::AbstractString; group::AbstractString="/") =
+    attach_kinetic_profiles!(equil, read_kinetic_file(path; group=group))
+
+# The kinetic profiles a config names, read once at construction; `nothing` when it names none.
+configured_kinetic_profiles(config::EquilibriumConfig) =
+    isempty(config.kinetic_file) ? nothing : read_kinetic_file(config.kinetic_file; group=config.kinetic_group)
 
 """
     write_kinetic_h5(path, data; group="/", schema_version="1.0", provenance=data.provenance)
@@ -167,21 +143,15 @@ function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
     provenance::AbstractString=data.provenance)
     h5open(path, "w") do f
         g = group == "/" ? f : create_group(f, group)
-        function put(name, v)
+        function put(name, v, units)
             v === nothing && return
             g[name] = collect(Float64, v)
-            attributes(g[name])["units"] = _KINETIC_H5_UNITS[name]
+            attributes(g[name])["units"] = units
         end
-        put("psi", data.psi)
-        put("n_i", data.n_i)
-        put("n_e", data.n_e)
-        put("T_i", data.T_i)
-        put("T_e", data.T_e)
-        put("omega_E", data.omega_E)
-        put("omega_tor", data.omega_tor)
-        put("chi_e", data.chi_e)
-        put("chi_phi", data.chi_phi)
-        put("zeff", data.zeff)
+        put("psi", data.psi, "normalized poloidal flux")
+        for (name, units) in _KINETIC_H5_PROFILES
+            put(name, getfield(data, Symbol(name)), units)
+        end
         # Named per-species densities (multi-ion input); dataset names must be `n_*` to round-trip.
         if data.species_densities !== nothing
             for (name, v) in data.species_densities
@@ -233,7 +203,7 @@ function multi_ion_composition(zs::AbstractVector, ns::AbstractVector, ne::Real;
 end
 
 """
-    resolve_ntv_species(kinetic_file, ion_species; electron, zimp, mimp, ...) -> Vector{ResolvedNTVSpecies}
+    resolve_ntv_species(data::KineticProfileData, ion_species; electron, zimp, mimp, ...) -> Vector{ResolvedNTVSpecies}
 
 Resolve the **full NTV species set** for a multi-ion run: the main ions, the neutrality-closing
 impurity, and (if `electron`) the electrons. Returns `ResolvedNTVSpecies` descriptors — the
@@ -244,16 +214,16 @@ Each descriptor's `profiles` view carries **that species' resonant density** `n_
 and its **full-composition collision frequency** `ν_s` (as `nui_spline`); `ne/Te/ωE/Zeff/lnΛ` (and
 the electron `nue`) are shared. Main-ion density is resolved from `IonSpecies`: `fraction` ⇒
 `n_s = fraction · n_i` (the kinetic file's `n_i` = total main-ion density); `density` ⇒ an explicit
-`n_*`-named dataset in the HDF5 kinetic file (e.g. `"n_D"`), cubic-resampled to the working grid.
+`n_*`-named dataset of the HDF5 kinetic data (e.g. `"n_D"`), cubic-resampled to the working grid.
 In a mixed fraction/density list the impurity content is set by the file's n_i/n_e deficit, not by
 a fraction shortfall. Composition (Zeff, zpitch, `n_imp`) comes from `multi_ion_composition`;
 per-species `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s·(T_i)^{3/2})`. The `zpitch·n_main` field
 term is exact for z=1 main ions (D-T, D-H) and approximate otherwise (a z>1 main ion's charge
 enters only through Zeff in the impurity closure). The impurity (`zimp`,`mimp`, density = the
 quasineutrality `n_imp`) is included as its own resonant species. Reduces to
-`load_kinetic_profiles` for one z=1 main ion with `fraction=1`.
+[`kinetic_profile_splines`](@ref) for one z=1 main ion with `fraction=1`.
 """
-function resolve_ntv_species(kinetic_file::AbstractString, ion_species::AbstractVector;
+function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVector;
     electron::Bool=false, zimp::Integer=6, mimp::Integer=12,
     density_factor::Float64=1.0, temperature_factor::Float64=1.0,
     ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0)
@@ -262,8 +232,8 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
      toroidal_rotation_factor == 1.0) ||
         error("profile scaling factors are not yet supported together with a multi-ion ion_species list")
 
-    data = read_kinetic_file(kinetic_file)
-    _need(f, n) = f === nothing ? error("kinetic file '$kinetic_file' missing required '$n'") : f
+    source = _describe(data)
+    _need(f, n) = f === nothing ? error("$source missing required '$n'") : f
     psi_in = data.psi
     ne_in = _need(data.n_e, "n_e")
     Ti_in = _need(data.T_i, "T_i")
@@ -278,8 +248,8 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
     Ti = _cubic_resample(psi_in, Ti_in, psi_reg) .* _EV_J
     Te = _cubic_resample(psi_in, Te_in, psi_reg) .* _EV_J
     omegaE = _cubic_resample(psi_in, omE_in, psi_reg)
-    _assert_nonneg_density(kinetic_file, "n_e", ne, psi_reg)
-    _assert_nonneg_density(kinetic_file, "n_i (total)", ni_total, psi_reg)
+    _assert_nonneg_density(source, "n_e", ne, psi_reg)
+    _assert_nonneg_density(source, "n_i (total)", ni_total, psi_reg)
 
     # Fraction bookkeeping: fractions are shares of the total n_i, so they can never sum above 1,
     # and when every species is fraction-specified they must account for all of n_i. (In a mixed
@@ -313,14 +283,14 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
         if has_dens
             (data.species_densities !== nothing && haskey(data.species_densities, s.density)) ||
                 error(
-                    "ion_species[$si]: density profile `$(s.density)` not found in kinetic file " *
+                    "ion_species[$si]: density profile `$(s.density)` not found in the kinetic profiles " *
                     "(available: $(data.species_densities === nothing ? "none — ASCII files carry only n_i" : join(keys(data.species_densities), ", ")))"
                 )
             ns[si] = _cubic_resample(psi_in, data.species_densities[s.density], psi_reg)
         else
             ns[si] = s.fraction .* ni_total
         end
-        _assert_nonneg_density(kinetic_file, "ion_species[$si] density", ns[si], psi_reg)
+        _assert_nonneg_density(source, "ion_species[$si] density", ns[si], psi_reg)
     end
 
     # Shared composition + collisionality (natural-log Coulomb log), per grid point.
@@ -341,7 +311,7 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
         nue[i] = Te[i] > 0 ? (zp / _NU_PREFAC) * ne[i] * loglam[i] / (sqrt(_ME / _MP) * (Te[i] / _KEV_J)^1.5) : 0.0
     end
     # A negative impurity density means the main ions over-neutralize (Σ z_s n_s > n_e) — unphysical.
-    _assert_nonneg_density(kinetic_file, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
+    _assert_nonneg_density(source, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
     # Approaching the zpitch pole at Zeff = zimp signals a dilute main-ion mix taken up by impurity.
     maximum(zeff) > 0.9 * zimp &&
         @warn "max(Zeff) = $(maximum(zeff)) is within 10% of zimp = $zimp — zpitch closure near its pole; check ion_species densities/fractions"
@@ -378,28 +348,23 @@ function resolve_ntv_species(kinetic_file::AbstractString, ion_species::Abstract
 end
 
 """
-    load_kinetic_profiles(kinetic_file::AbstractString;
-                          zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
-                          density_factor::Float64=1.0, temperature_factor::Float64=1.0,
-                          ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
-                          chi1::Union{Nothing,Float64}=nothing)
+    kinetic_profile_splines(data::KineticProfileData;
+                            zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
+                            density_factor::Float64=1.0, temperature_factor::Float64=1.0,
+                            ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
+                            chi1::Union{Nothing,Float64}=nothing)
         → KineticProfileSplines
 
-Parse a kinetic profile file (ASCII or HDF5, dispatched by `read_kinetic_file`),
-interpolate onto a regular 101-point ψ grid, optionally apply profile scaling
-knobs, derive collisional / Z_eff diagnostics, and return a
-`KineticProfileSplines` with independent named cubic splines.
+The NTV view of raw kinetic profiles (e.g. `equil.kinetic`): interpolate onto a regular
+101-point ψ grid, optionally apply profile scaling knobs, derive collisional / Z_eff
+diagnostics, and return a `KineticProfileSplines` with independent named cubic splines.
 
-# Expected file format
-
-An HDF5 file following the GPEC kinetic schema (fields read by name), or a legacy
-six-column whitespace-separated ASCII table (header rows are filtered out):
-
-    psi_n  n_i[m^-3]  n_e[m^-3]  T_i[eV]  T_e[eV]  omega_E[rad/s]
+Needs `n_e`, `T_i`, `T_e` and `omega_E`; `n_i` defaults to `n_e`. See
+[`read_kinetic_file`](@ref) for the file formats.
 
 # Arguments
 
-  - `kinetic_file`: Path to the ASCII or HDF5 kinetic profile file (see `read_kinetic_file`)
+  - `data`: Raw kinetic profiles (`KineticProfileData`)
   - `zi`, `zimp`: Main ion and impurity charge numbers
   - `mi`, `mimp`: Main ion and impurity mass numbers (in proton masses)
   - `density_factor`: Density scaling factor (applied to ni, ne)
@@ -424,17 +389,15 @@ Collisionality is recomputed from the (possibly scaled) profiles. This differs f
 Fortran PENTRC, which computes collisionality from unscaled profiles. Use `nufac`
 (in `KineticForcesControl`) for independent collisionality scaling.
 """
-function load_kinetic_profiles(kinetic_file::AbstractString;
+function kinetic_profile_splines(data::KineticProfileData;
     zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
     density_factor::Float64=1.0, temperature_factor::Float64=1.0,
     ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
     chi1::Union{Nothing,Float64}=nothing)
 
-    data = read_kinetic_file(kinetic_file)
-
     # NTV requires n_e, T_i, T_e, omega_E; n_i defaults to n_e (quasineutrality)
     # when absent. omega_tor / chi_e / chi_phi (if present) are ignored here.
-    _need(field, name) = field === nothing ? error("kinetic file '$kinetic_file' missing required '$name'") : field
+    _need(field, name) = field === nothing ? error("$(_describe(data)) missing required '$name'") : field
     psi_input = data.psi
     ne_input = _need(data.n_e, "n_e")
     Ti_input_eV = _need(data.T_i, "T_i")

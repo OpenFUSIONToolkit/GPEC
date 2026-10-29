@@ -128,8 +128,9 @@ flux_surface_rtol = 1e-7
 [Wall]
 shape = "nowall"
 
+[LocalStability]
+
 [ForceFreeStates]
-local_stability_flag = true
 vac_flag = true
 force_termination = false
 
@@ -264,6 +265,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     # Construct PerturbedEquilibriumState with Fortran Clebsch data.
     # Fortran gpec_xclebsch already writes ξ^α = xms/χ₁, exactly what the KF operator consumes — feed directly.
     pe_state = PE.PerturbedEquilibriumState(;
+        response=PE.PlasmaResponse(; ffs),
         psi_grid=psi_grid_f,
         xi_modes=(
             clebsch_psi=clebsch_psi,
@@ -280,7 +282,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     kf_ctrl = KF.KineticForcesControl(;
         fgar_flag=true, tgar_flag=tgar_enabled, nn=1, bounce_harmonic_max=4,
         ion_mass=2, ion_charge=1, nutype="harmonic", f0type="maxwellian",
-        collisionality_factor=1, psilims=[0.0, 1.0], kinetic_file=inputs.kin_file,
+        collisionality_factor=1, psilims=[0.0, 1.0],
         verbose=false)
 
     # Initialize KF internal state
@@ -307,8 +309,8 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     _p("\n--- Torque integration ---")
     t2 = time()
 
-    kinetic_profiles = Eq.load_kinetic_profiles(
-        kf_ctrl.kinetic_file;
+    kinetic_profiles = Eq.kinetic_profile_splines(
+        Eq.read_kinetic_file(inputs.kin_file);
         zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass)
 
     kf_state = KF.KineticForcesState()

@@ -68,7 +68,7 @@ end
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_response" => true, "compute_singular_coupling" => true,
+            "compute_singular_coupling" => true,
             "verbose" => false, "write_outputs_to_HDF5" => true)
         open(io -> TOML.print(io, inputs), toml_path, "w")
 
@@ -109,20 +109,33 @@ end
             end
         end
 
-        # A gpec.h5 written before the integrator refactor embeds retired keys such as
-        # `use_parallel` in its gpec_toml_raw, so a replay must warn and drop them rather than
-        # failing on an unknown keyword. The override flag stands in for that stale blob.
-        @testset "retired ForceFreeStates keys are warned and ignored on replay" begin
+        # An override that sets a retired key stops the replay before any solve.
+        @testset "retired ForceFreeStates keys stop a replay" begin
             mktempdir() do out_dir
-                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
-                @test inputs["ForceFreeStates"]["use_parallel"] == true
+                @test_throws r"`use_parallel`" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
+            end
+        end
 
-                @test_logs (:warn,) GeneralizedPerturbedEquilibrium._drop_deprecated_keys!(inputs["ForceFreeStates"], GeneralizedPerturbedEquilibrium._DEPRECATED_FFS_KEYS, "ForceFreeStates")
-                @test !haskey(inputs["ForceFreeStates"], "use_parallel")
+        # A gpec.h5 from an older GPEC stores a deck with retired keys, which the replay cannot delete.
+        @testset "a stored deck with retired keys stops the replay" begin
+            mktempdir() do out_dir
+                old_h5 = joinpath(out_dir, "old.h5")
+                cp(source_h5, old_h5)
+                h5open(old_h5, "r+") do h5
+                    inputs = TOML.parse(read(h5, "Input/gpec_toml_raw"))
+                    inputs["PerturbedEquilibrium"]["fixed_boundary"] = false
+                    delete_object(h5, "Input/gpec_toml_raw")
+                    h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                end
+                @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+            end
+        end
 
-                # With the key gone the control struct builds again, on the default integrator.
-                ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-                @test ctrl.integrator in ("forward", "riccati")
+        @testset "the LocalStability section replays" begin
+            mktempdir() do out_dir
+                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
+                @test haskey(inputs, "LocalStability")
+                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
             end
         end
 
@@ -150,7 +163,7 @@ end
 # the source run and the replay: the default (recompute-from-TOML) path then
 # fails, while `--coil-source coils` succeeds from the stored geometry.
 @testset "Rerun from gpec.h5: coil geometry snapshot" begin
-    template_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
+    template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     src_dat = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries", "d3d_il.dat")
 
     read_resfield(path) =
@@ -172,8 +185,11 @@ end
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
         inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
+        inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+            "compute_singular_coupling" => true,
+            "verbose" => false, "write_outputs_to_HDF5" => true)
         inputs["ForcingTerms"] = Dict{String,Any}(
-            "forcing_data_format" => "coil",
+            "forcing_data_format" => "coil", "mtheta_coil" => 64, "nzeta_coil" => 32,
             "coil_set" => [Dict{String,Any}(
                 "dat_file" => coil_dat,
                 "currents" => fill(1.0e3, 6)
@@ -318,7 +334,7 @@ end
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
 
-# Drift guard for the analytic-equilibrium registry: setup_equilibrium and the rerun builder both
+# Drift guard for the analytic-equilibrium registry: `run_input` and the rerun builder both
 # dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
 # empty section) would silently break one path. Asserting each entry is well-formed and that
 # build_analytic_config resolves it keeps adding a new analytic kind a one-row change.

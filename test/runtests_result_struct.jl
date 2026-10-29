@@ -18,9 +18,18 @@ include("h5_metadata_check.jl")
         inputs = TOML.parsefile(toml_path)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
         merge!(inputs, extra_sections)
+        if haskey(inputs, "TJ_ANALYTIC_INPUT")
+            # Interface checks need two rational surfaces, not a converged production grid.
+            merge!(inputs["Equilibrium"], Dict("mpsi" => 32, "mtheta" => 64))
+            merge!(inputs["TJ_ANALYTIC_INPUT"], Dict("ma" => 32, "mtheta" => 32))
+            merge!(inputs["ForceFreeStates"], Dict("gal_nx" => 32, "delta_mlow" => 2, "delta_mhigh" => 2, "mtheta_vacuum" => 64))
+        end
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir
     end
+
+    forward_result = Ref{FFS.ForceFreeStatesResult}()
+    riccati_result = Ref{FFS.ForceFreeStatesResult}()
 
     @testset "forward run publishes a dense axis-basis solution" begin
         mktempdir() do dir
@@ -29,6 +38,7 @@ include("h5_metadata_check.jl")
 
             @test keys(ret)[1:3] == (:ffs, :pe, :slayer)   # later stages append their own outputs
             ffs = ret.ffs
+            forward_result[] = ffs
             @test ffs isa FFS.ForceFreeStatesResult
             @test ffs.integrator === :forward
 
@@ -75,6 +85,7 @@ include("h5_metadata_check.jl")
             ret = GeneralizedPerturbedEquilibrium.main([dir])
 
             ffs = ret.ffs
+            riccati_result[] = ffs
             @test ffs.integrator === :riccati
             # Chunk-endpoint Riccati states are not a ξ solution; only the raw state is carried.
             @test ffs.solution === nothing
@@ -96,10 +107,7 @@ include("h5_metadata_check.jl")
     end
 
     @testset "require / require_solution gates" begin
-        mktempdir() do dir
-            _stage_deck(dir, template; ffs_overrides=Dict{String,Any}("integrator" => "riccati"))
-            ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
-
+        let ffs = riccati_result[]
             # `require` passes silently on a populated field and warns once on an absent one.
             @test @test_logs FFS.require(ffs, :free_boundary, "a calculation")
             @test !(@test_logs (:warn,) FFS.require(ffs, :galerkin, "a calculation"))
@@ -118,7 +126,6 @@ include("h5_metadata_check.jl")
                         "forcing_data_file" => "forcing.dat",
                         "forcing_data_format" => "ascii"),
                     "PerturbedEquilibrium" => Dict{String,Any}(
-                        "compute_response" => true,
                         "compute_singular_coupling" => true,
                         "verbose" => false,
                         "write_outputs_to_HDF5" => false)))
@@ -129,8 +136,8 @@ include("h5_metadata_check.jl")
             @test_logs (:warn,) match_mode = :any (ret = GeneralizedPerturbedEquilibrium.main([dir]))
             # The stage runs to completion; both sub-calculations are simply not populated.
             @test ret.pe !== nothing
-            @test isempty(ret.pe.permeability)
-            @test isempty(ret.pe.C_delta_prime)
+            @test isempty(ret.pe.response.permeability)
+            @test isempty(ret.pe.response.C_delta_prime)
         end
     end
 
@@ -195,6 +202,9 @@ include("h5_metadata_check.jl")
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
                     HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                        @test ffs.galerkin.solver in ("cholesky", "LU")
+                        @test read(f["$gal/solver"]) == ffs.galerkin.solver
+                        @test haskey(attrs(f["$gal/solver"]), "long_name")
                         @test read(f["$gal/psi"]) == sol.psi_store
                         @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
                         @test read(f["$gal/dxi_psidpsi"]) == sol.du_store
@@ -247,9 +257,7 @@ include("h5_metadata_check.jl")
     end
 
     @testset "free-boundary run aliases free_run's W_p" begin
-        mktempdir() do dir
-            _stage_deck(dir, template)
-            ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
+        let ffs = forward_result[]
             @test ffs.free_boundary !== nothing
             @test ffs.wp === ffs.free_boundary.wp
         end

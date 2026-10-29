@@ -441,7 +441,7 @@ table.abs_delta_rim_per_mm         # the same for tilt, as rim displacement at t
 table.tilt_sensitivity_per_deg[1, :]               # ∂δ/∂θx per degree, per coil set
 
 # In memory, from the run's returned state (no I/O)
-rc  = PerturbedEquilibrium.ResonantCoupling(run.pe, run.ffs)
+rc  = PerturbedEquilibrium.ResonantCoupling(run.pe.response)
 dom = PerturbedEquilibrium.dominant_coupling(rc; psi_low=0.5)
 table = EF.sensitivity_table(run.coil_sensitivities, dom; mode=1)
 ```

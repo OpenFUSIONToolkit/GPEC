@@ -33,7 +33,7 @@ With no `overrides`, the example deck runs in place (returns it untouched). With
 the deck is copied to a uniquely named throwaway sibling of the example dir and the named gpec.toml keys are
 patched there, so one shared example can serve several cases (e.g. a collisionless variant via
 `"KineticForces.nutype" => "zero"`). The copy sits beside the original so relative file
-references in the deck (e.g. `SLAYER.profile_file = "../<other_example>/..."`) still resolve.
+references in the deck (e.g. `Equilibrium.kinetic_file = "../<other_example>/..."`) still resolve.
 Override keys are dotted paths into the TOML; missing intermediate tables are created.
 Returns `(rundir, is_temp)`; the caller removes `rundir` when `is_temp`.
 """
@@ -151,7 +151,7 @@ end
 # computational box hugs the LCFS (eps=0.05 TokaMaker aspect-scan g-file): outside the prescribed
 # LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
 # bracketed-Brent separatrix finder could not bracket psi=sibry and equilibrium setup threw. Calls
-# setup_equilibrium directly and writes the leading equilibrium scalars: errors on the buggy code,
+# PlasmaEquilibrium directly and writes the leading equilibrium scalars: errors on the buggy code,
 # passes with the Newton finder. Runtime and environment are written to ARGS[2] by the run-info epilogue.
 const COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE = """
 using Pkg
@@ -161,9 +161,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using HDF5
 root = dirname(Base.active_project())
 gfile = joinpath(root, "examples", "efit_fixedbdy_separatrix_example", "eq_eps0.0500000_k1.000_d0.000.geqdsk")
-cfg = Equilibrium.EquilibriumConfig(; eq_type="efit", eq_filename=gfile)
 t_start = time()
-pe = Equilibrium.setup_equilibrium(cfg)
+pe = Equilibrium.PlasmaEquilibrium(gfile; eq_type="efit")
 elapsed = time() - t_start
 h5open(ARGS[1], "w") do fid
     fid["Equilibrium/psi_total"]  = pe.psio

@@ -7,6 +7,11 @@ a single global banded system.  Cells adjacent to each rational surface ("resona
 "extension" cells) carry the large/small power-law asymptotic solutions analytically, so the
 singular behavior is built into the basis rather than resolved numerically.
 
+The ideal coefficient is reconstructed as ``F = (QL)(QL)^\dagger`` from the interpolated
+Cholesky factor ``L``, with ``Q = \operatorname{diag}(m-nq)``. This uses the same coefficient
+representation as the Euler–Lagrange integration and singular-surface expansions, including
+between spline knots, and preserves Hermitian positive semidefiniteness of ``F``.
+
 The solve produces the inter-surface Δ′ matrix and the PEST-3 matching blocks
 (``A'``, ``B'``, ``\Gamma'``, ``\Delta'``), written to the HDF5 output under the same
 `SingularSurfaces/` paths the Riccati Δ′ uses (`Delta_prime_matrix`, `Delta_prime_raw`,
@@ -17,7 +22,18 @@ whichever formalism produced it.  These are the outer-region inputs to resistive
 Select it with `integrator = "galerkin"` in `[ForceFreeStates]`. It replaces the radial ODE
 integration rather than supplementing it: the run computes its own vacuum response at the
 control surface (when `vac_flag`) and produces no free-boundary energies or ODE trace.
-Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution.
+Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution. The
+composite inner-region profiles are a scripting diagnostic: they need `Galerkin(; cut_solution=true)`
+followed by `solve(MatchProblem(...))`, and a deck run does not write them.
+
+`gal_solver` picks the banded solver. `"auto"` (the default) tries a Hermitian Cholesky
+factorization of the lower band (LAPACK `zpbtrf`/`zpbtrs`, with the Dirichlet rows' columns moved
+to the right-hand side). The free block's off-diagonal entries must be Hermitian within
+`1e-10 * sqrt(abs(A_ii)) * sqrt(abs(A_jj))`; the diagonal's imaginary part is deliberately
+discarded. Unequal bandwidths, off-diagonal asymmetry, or failure of positive definiteness
+trigger a reported fallback to Jacobi-scaled LU. `"LU"` skips the Cholesky attempt;
+`"cholesky"` stops with an error instead of falling back. The factorization actually used is
+recorded as `ForceFreeStates/Solutions/GalerkinIntegration/solver` in `gpec.h5`.
 
 The implementation lives in `src/ForceFreeStates/Galerkin/`:
 

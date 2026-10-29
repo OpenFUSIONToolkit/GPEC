@@ -59,9 +59,9 @@ using HDF5
             end
         end
 
-        # Single species [z=1,m=2,fraction=1] reproduces load_kinetic_profiles.
-        single = EQ.load_kinetic_profiles(f; zi=1, zimp=6, mi=2, mimp=12)
-        sp1 = EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=false, zimp=6, mimp=12)
+        # Single species [z=1,m=2,fraction=1] reproduces kinetic_profile_splines.
+        single = EQ.kinetic_profile_splines(EQ.read_kinetic_file(f); zi=1, zimp=6, mi=2, mimp=12)
+        sp1 = EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=false, zimp=6, mimp=12)
         main = sp1[1]
         for ψ in (0.3, 0.6)
             @test main.profiles.ni_spline(ψ) ≈ single.ni_spline(ψ) rtol = 1e-8
@@ -70,7 +70,7 @@ using HDF5
         end
 
         # D-T-e set = {D, T, impurity, electron}; ν scales as 1/√m at fixed z, T.
-        sp = EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, fraction=0.5)];
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, fraction=0.5)];
             electron=true, zimp=6, mimp=12)
         @test length(sp) == 4
         @test count(s -> !s.electron && s.z == 1, sp) == 2   # D, T
@@ -81,11 +81,11 @@ using HDF5
         @test sp[iD].profiles.nui_spline(0.5) / sp[iT].profiles.nui_spline(0.5) ≈ sqrt(3 / 2) rtol = 1e-6
 
         # Exactly one of {fraction, density} required.
-        @test_throws ErrorException EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2)]; zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2)]; zimp=6, mimp=12)
 
         # Unified electron semantics: a single-ion + electron run resolves as
         # {main ion, impurity, electron} — electrons in ADDITION to the ions.
-        spe = EQ.resolve_ntv_species(f, [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=true, zimp=6, mimp=12)
+        spe = EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=true, zimp=6, mimp=12)
         @test length(spe) == 3
         @test !spe[1].electron && spe[1].z == 1                  # main ion unchanged
         @test spe[1].profiles.ni_spline(0.5) ≈ main.profiles.ni_spline(0.5)
@@ -111,14 +111,14 @@ using HDF5
             file["n_D"] = 0.6 .* Ni
             file["n_T"] = 0.4 .* Ni     # unequal explicit shapes
         end
-        sp = EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
             electron=false, zimp=6, mimp=12)
         iD = findfirst(s -> s.m == 2, sp)
         iT = findfirst(s -> s.m == 3, sp)
         @test sp[iD].profiles.ni_spline(0.5) ≈ 0.6 * 1.0e20 * (1 - 0.25) rtol = 1e-6
         @test sp[iT].profiles.ni_spline(0.5) ≈ 0.4 * 1.0e20 * (1 - 0.25) rtol = 1e-6
         # A missing named profile errors clearly.
-        @test_throws ErrorException EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=1, m=2, density="n_He")]; zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_He")]; zimp=6, mimp=12)
         rm(h5)
     end
 
@@ -137,7 +137,7 @@ using HDF5
         @test back.species_densities["n_D"] ≈ data.species_densities["n_D"]
         @test back.species_densities["n_T"] ≈ data.species_densities["n_T"]
         # The written file feeds the explicit-density multi-ion input directly.
-        sp = EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
             zimp=6, mimp=12)
         @test count(s -> !s.electron && s.z == 1, sp) == 2
         # Non-`n_*` species names are rejected at write time (they would not round-trip).
@@ -167,20 +167,20 @@ using HDF5
         end
         DT(f1, f2) = [KF.IonSpecies(; z=1, m=2, fraction=f1), KF.IonSpecies(; z=1, m=3, fraction=f2)]
         # An all-fraction list must account for the full n_i (the impurity is set by n_i/n_e, not a shortfall).
-        @test_throws ErrorException EQ.resolve_ntv_species(h5, DT(0.5, 0.4); zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), DT(0.5, 0.4); zimp=6, mimp=12)
         # Fractions are shares of n_i, so summing above 1 is fatal in any list, mixed included.
-        @test_throws ErrorException EQ.resolve_ntv_species(h5, DT(0.7, 0.5); zimp=6, mimp=12)
-        @test_throws ErrorException EQ.resolve_ntv_species(h5,
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), DT(0.7, 0.5); zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5),
             [KF.IonSpecies(; z=1, m=2, fraction=1.2), KF.IonSpecies(; z=1, m=3, density="n_T")]; zimp=6, mimp=12)
         # A partial fraction alongside an explicit density is legal — the n_i/n_e deficit is the impurity.
-        sp = EQ.resolve_ntv_species(h5,
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(h5),
             [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, density="n_T")]; zimp=6, mimp=12)
         @test count(s -> !s.electron && s.z == 1, sp) == 2
         # Main-ion z must stay below the impurity charge (zpitch closure pole at Zeff = zimp).
-        @test_throws ErrorException EQ.resolve_ntv_species(h5, [KF.IonSpecies(; z=6, m=12, fraction=1.0)]; zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=6, m=12, fraction=1.0)]; zimp=6, mimp=12)
         # A dilute main-ion mix drives Zeff toward zimp and warns about the zpitch pole.
         @test_logs (:warn, r"zpitch closure near its pole") match_mode = :any EQ.resolve_ntv_species(
-            h5, [KF.IonSpecies(; z=1, m=2, density="n_dilute")]; zimp=6, mimp=12)
+            EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_dilute")]; zimp=6, mimp=12)
         # Vacuum point: neutral composition, no impurity, finite zpitch.
         @test EQ.multi_ion_composition([1], [1.0e19], 0.0; zimp=6, mimp=12) == (1.0, 1.0, 1.0e19, 0.0)
         rm(h5)

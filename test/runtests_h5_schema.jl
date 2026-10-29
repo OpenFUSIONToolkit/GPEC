@@ -15,7 +15,7 @@ function _group_name_ok(parent_path, name)
     parent_path == "KineticForces" && return true
     # Multi-ion runs nest KineticForces/PerSpecies/<species>/<method>/: the species label
     # (ion_z1_m2, impurity_z6_m12, electron) and the method token are both data-driven.
-    # Exactly those two levels — anything deeper (EnergyIntegrals/, KineticMatrices/) is
+    # Exactly those two levels — anything deeper (KineticMatrices/) is
     # a normal group and still has to be CamelCase.
     occursin(r"^KineticForces/PerSpecies(/[^/]+)?$", parent_path) && return true
     occursin(r"^Surface_\d+$", name) && return true
@@ -58,7 +58,8 @@ end
             cp(joinpath(template_dir, name), joinpath(run_dir, name))
         end
         toml_path = joinpath(run_dir, "gpec.toml")
-        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_outputs_to_HDF5 = true"))
+        # Opt into the Euler-Lagrange matrices so the metadata pass below covers that group too.
+        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_el_matrices = true\nwrite_outputs_to_HDF5 = true"))
 
         GeneralizedPerturbedEquilibrium.main([run_dir])
         h5_path = joinpath(run_dir, "gpec.h5")
@@ -73,6 +74,9 @@ end
             # two moved under ForceFreeStates/ and are CamelCase, so pin them explicitly.
             @test !haskey(h5, "FreeBoundaryStability")
             @test !haskey(h5, "EdgeScan")
+
+            # The opt-in above writes the Euler-Lagrange matrix group.
+            @test haskey(h5, "ForceFreeStates/EulerLagrangeMatrices/Ideal/A")
 
             # Inputs live only under Input/; spot-check the rerun-critical paths.
             @test haskey(h5, "Input/gpec_toml_raw")

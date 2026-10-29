@@ -122,6 +122,60 @@ end
     @test abs(By[1]) < 1e-14
 end
 
+@testset "BiotSavart: straight segment field is exact" begin
+    # Segment from (0,0,-0.5) to (0,0,0.5) m, unit current. Textbook finite-wire field at
+    # distance d, height z: B_φ = μ₀I/(4πd) × ((L/2 - z)/√(d² + (L/2 - z)²) + (L/2 + z)/√(d² + (L/2 + z)²)).
+    xs = [0.0, 0.0]
+    ys = [0.0, 0.0]
+    zs = [-0.5, 0.5]
+    for d in (0.05, 0.25, 0.5, 2.0), z in (0.0, 0.2, 0.9)
+        Bx = zeros(1)
+        By = zeros(1)
+        Bz = zeros(1)
+        ForcingTerms.accumulate_strand_field!(Bx, By, Bz, 1, d, 0.0, z, xs, ys, zs, 1.0)
+        a = 0.5 - z
+        b = 0.5 + z
+        B_exact = 1e-7 / d * (a / sqrt(d^2 + a^2) + b / sqrt(d^2 + b^2))
+        @test By[1] ≈ B_exact rtol = 1e-12
+        @test abs(Bx[1]) < 1e-14 * B_exact && abs(Bz[1]) < 1e-14 * B_exact
+    end
+    @inferred ForcingTerms._segment_field(1.0, 0.2, 0.3, 0.0, 0.0, 1.0, 1.0)
+
+    # Observer on the conductor: the segment contribution is skipped, never Inf/NaN
+    Bx = zeros(1)
+    By = zeros(1)
+    Bz = zeros(1)
+    ForcingTerms.accumulate_strand_field!(Bx, By, Bz, 1, 0.0, 0.0, 0.1, xs, ys, zs, 1.0)
+    @test Bx[1] == 0 && By[1] == 0 && Bz[1] == 0
+end
+
+@testset "BiotSavart: field independent of polyline subdivision" begin
+    # 0.6 m × 0.4 m rectangle in the plane x = 1.25 m with each side split into m collinear
+    # pieces; the conductor is the same for every m, so the field must be too.
+    function rectangle(m)
+        cy = [-0.3, 0.3, 0.3, -0.3, -0.3]
+        cz = [-0.2, -0.2, 0.2, 0.2, -0.2]
+        ys = [cy[s] + p / m * (cy[s+1] - cy[s]) for s in 1:4 for p in 0:(m-1)]
+        zs = [cz[s] + p / m * (cz[s+1] - cz[s]) for s in 1:4 for p in 0:(m-1)]
+        push!(ys, cy[5])
+        push!(zs, cz[5])
+        n = length(ys)
+        return ForcingTerms.CoilSet("rectangle", 1, 1, 1.0, n, reshape(fill(1.25, n), 1, 1, :),
+            reshape(ys, 1, 1, :), reshape(zs, 1, 1, :), [1.0e3])
+    end
+    obs_R = [r for r in 0.95:0.05:1.15 for z in -0.3:0.15:0.3]
+    obs_Z = [z for r in 0.95:0.05:1.15 for z in -0.3:0.15:0.3]
+    obs_phi = fill(0.1, length(obs_R))
+    B = map((1, 16)) do m
+        B_R = zeros(length(obs_R))
+        B_phi = zeros(length(obs_R))
+        B_Z = zeros(length(obs_R))
+        ForcingTerms.compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, [rectangle(m)])
+        hcat(B_R, B_phi, B_Z)
+    end
+    @test maximum(abs, B[1] .- B[2]) < 1e-12 * maximum(abs, B[2])
+end
+
 @testset "BiotSavart: compute_biot_savart_boundary! threading" begin
     # Same circular loop; verify threaded result matches single-obs result
     a = 0.8
@@ -166,7 +220,7 @@ end
 
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
     eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir)
-    equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     mtheta = 48
     nzeta = 16
@@ -293,7 +347,7 @@ end
 # ---------------------------------------------------------------------------
 @testset "CoilFourier: B·n̂ file conversion onto the run's harmonics" begin
     eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", psilow=0.01, psihigh=0.995)
-    equil = Equilibrium.setup_equilibrium(eq_config, Equilibrium.SolovevConfig())
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, Equilibrium.SolovevConfig())
     n, m_out, mtheta = 1, -10:14, 256
     convert(modes) = ForcingTerms.convert_forcing_normalization(modes, "normal_field_T", equil, n, m_out)
     spectrum(ms, amp) = [ForcingMode(; n, m, amplitude=amp(m)) for m in ms]
@@ -349,7 +403,7 @@ end
 
     inputs2 = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
     eq_config2 = Equilibrium.EquilibriumConfig(inputs2["Equilibrium"], equil_dir)
-    equil = Equilibrium.setup_equilibrium(eq_config2)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config2)
 
     # Build coil sets manually (standard I-coil currents for RMP studies)
     il_cfg = ForcingTerms.CoilSetConfig(;
@@ -502,7 +556,7 @@ end
 @testset "Analytic coils: window_pane standoff" begin
     equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
-    equil = Equilibrium.setup_equilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir),
+    equil = Equilibrium.PlasmaEquilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir),
         Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
 
     # surface_point_and_normal: outboard midplane (poloidal_angle = 0)
@@ -685,7 +739,7 @@ end
     open(flipped, "w") do io
         for (i, l) in enumerate(lines)
             if i == 4   # header line 4 starts with the plasma current
-                vals = [l[j:min(j + 15, end)] for j in 1:16:length(l)]
+                vals = [l[j:min(j+15, end)] for j in 1:16:length(l)]
                 cur = -parse(Float64, strip(vals[1]))
                 l = @sprintf("%16.9E", cur) * l[17:end]
             end
@@ -693,8 +747,8 @@ end
         end
     end
     cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="core_edge_packed", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
-    eq_pos = Equilibrium.setup_equilibrium(cfg(gfile))
-    eq_neg = Equilibrium.setup_equilibrium(cfg(flipped))
+    eq_pos = Equilibrium.PlasmaEquilibrium(cfg(gfile))
+    eq_neg = Equilibrium.PlasmaEquilibrium(cfg(flipped))
     @test eq_pos.params.ip_sign == 1 && eq_neg.params.ip_sign == -1
     @test eq_pos.params.bt_sign == eq_neg.params.bt_sign == -1
     @test eq_pos.params.crnt > 0 && eq_neg.params.crnt > 0          # the computed current carries no sign

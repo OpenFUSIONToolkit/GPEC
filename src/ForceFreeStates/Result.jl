@@ -39,7 +39,8 @@ once this has been built.
 Optional fields are `Union{Nothing,T}` and follow a presence-equals-capability rule: a
 consumer that needs one gates on [`require`](@ref) (or [`require_solution`](@ref) for the
 ξ profiles) and warns-and-skips rather than erroring, so a result from an integrator that
-cannot supply a given product still flows through the pipeline.
+cannot supply a given product still flows through the pipeline. PerturbedEquilibrium refuses
+Galerkin and `:matched` results instead, since they publish no `wp` or `free_boundary` yet.
 
 A jump condition at the rational surfaces is always applied before a final result is built,
 so bpen and closure are always present.
@@ -126,10 +127,7 @@ that produced `result`. Warns naming the calculation being skipped otherwise.
 """
 function require(result::ForceFreeStatesResult, field::Symbol, calc::AbstractString)
     getfield(result, field) === nothing || return true
-    why = result.closure === :matched && field in (:wp, :free_boundary) ?
-          "a :matched result carries no δW (the resistive δW is not implemented)" :
-          "`$field` was not produced by the $(result.integrator) integrator"
-    @warn "Skipping $calc: $why"
+    @warn "Skipping $calc: `$field` was not produced by the $(result.integrator) integrator"
     return false
 end
 

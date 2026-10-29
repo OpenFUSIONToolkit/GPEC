@@ -218,59 +218,40 @@ function _el_solution_at(
 end
 
 """
-    compute_singular_coupling_metrics!(
-        state::PerturbedEquilibriumState,
-        equil::Equilibrium.PlasmaEquilibrium,
-        solution::SolutionProfiles,
-        mtheta_vacuum::Int,
-        ffs::ForceFreeStatesResult,
-        intr::PerturbedEquilibriumInternal,
-        ctrl::PerturbedEquilibriumControl,
-        mats::MatrixSplines
-    )
+    build_coupling_operators!(resp; verbose=false)
 
-Compute singular layer coupling matrices and applied resonant vectors.
+Build the singular-layer coupling matrices of `resp.ffs` onto `resp`, matching Fortran GPEC's
+`C_f_x_out` [Park Phys. Plasmas 2009 056115]: one row per resonant (surface, n) pair, giving the
+resonant area-weighted field, current, (w/2)², penetrated field and Δ' per unit forcing mode, plus
+the rational-surface metadata and the edge-to-solution coefficients `C_coeffs`. The matrices are
+stored acting on b̃_x, with flux-space copies in `resp.coupling_flux` for applying a forcing.
 
-Matching Fortran GPEC output: `C_f_x_out` (coupling matrix) and `Phi_res`, `w_isl`, etc. (applied vectors).
-[Park Phys. Plasmas 2009 056115]
+## Normalization
 
-## Modifies
-
-Populates `state` with:
-
-Coupling matrices `[n_rational × numpert_total]` — C[row, j] = coupling when forcing mode j has unit amplitude:
-
-  - `C_resonant_area_weighted_field`, `C_resonant_current`, `C_island_width_sq`, `C_penetrated_area_weighted_field`, `C_delta_prime`
-
-Applied resonant vectors `[n_rational]` = C · amp_vec:
-
-  - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_prime`
-
-Diagnostics `[n_rational]`: `island_half_width`, `chirikov_parameter`
-
-Metadata `[n_rational]`: `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
+  - Rows: the resonant and penetrated rows are a resonant flux divided by that surface's own area
+    `rational_area[row]`, so both are fields in T. `C_resonant_current`, `C_island_width_sq` and
+    `C_delta_prime` carry their own normalizations.
+  - Columns: each field-space coupling matrix is right-multiplied by the control-surface `flux_conform`, so it
+    acts on the root-area-weighted field b̃ in T and its singular values do not depend on `jac_type`.
+    Applied vectors use the flux-space copies in `resp.coupling_flux` on the run's own forcing flux.
 """
-function compute_singular_coupling_metrics!(
-    state::PerturbedEquilibriumState,
-    equil::Equilibrium.PlasmaEquilibrium,
-    solution::SolutionProfiles,
-    mtheta_vacuum::Int,
-    ffs::ForceFreeStatesResult,
-    intr::PerturbedEquilibriumInternal,
-    ctrl::PerturbedEquilibriumControl,
-    mats::MatrixSplines
-)
-    ctrl.verbose && @info "Computing singular coupling metrics (GPEC method)"
+function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
+    ffs = resp.ffs
+    equil = ffs.equil
+    solution = ffs.solution
+    mats = ffs.mats
+    mtheta_vacuum = ffs.control.mtheta_vacuum
+    verbose && @info "Computing singular coupling metrics (GPEC method)"
 
     (; numpert_total, mlow, mhigh, nlow, nhigh) = ffs
     msing = length(ffs.surfaces)
 
     if msing == 0
-        ctrl.verbose && @info "No singular surfaces found. Skipping singular coupling calculation."
+        verbose && @info "No singular surfaces found. Skipping singular coupling calculation."
         return
     end
 
-    if size(intr.plasma_response, 1) == 0
+    if isempty(resp.permeability_flux)
         @warn "Permeability matrix not computed. Skipping singular coupling."
         return
     end
@@ -295,30 +276,30 @@ function compute_singular_coupling_metrics!(
 
     n_rational = length(resonant_pairs)
     if n_rational == 0
-        ctrl.verbose && @info "No resonant surfaces found. Skipping singular coupling."
+        verbose && @info "No resonant surfaces found. Skipping singular coupling."
         return
     end
 
-    ctrl.verbose && @info "Found $n_rational resonant (surface, n) pairs"
+    verbose && @info "Found $n_rational resonant (surface, n) pairs"
 
     # Phase 2: Allocate output arrays
-    state.C_resonant_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
-    state.C_resonant_current = zeros(ComplexF64, n_rational, numpert_total)
-    state.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
-    have_inner_bpen = !isempty(intr.inner_bpen)
+    resp.C_resonant_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
+    resp.C_resonant_current = zeros(ComplexF64, n_rational, numpert_total)
+    resp.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
+    have_inner_bpen = !isempty(ffs.bpen)
     if have_inner_bpen
-        state.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
+        resp.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     else
-        state.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
+        resp.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
         @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog=1
     end
-    state.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
-    state.rational_psi = zeros(Float64, n_rational)
-    state.rational_q = zeros(Float64, n_rational)
-    state.rational_m_res = zeros(Int, n_rational)
-    state.rational_n = zeros(Int, n_rational)
-    state.rational_surface_idx = zeros(Int, n_rational)
-    state.rational_area = zeros(Float64, n_rational)
+    resp.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
+    resp.rational_psi = zeros(Float64, n_rational)
+    resp.rational_q = zeros(Float64, n_rational)
+    resp.rational_m_res = zeros(Int, n_rational)
+    resp.rational_n = zeros(Int, n_rational)
+    resp.rational_surface_idx = zeros(Int, n_rational)
+    resp.rational_area = zeros(Float64, n_rational)
 
     # Precompute ODE coefficient matrix C_coeffs for all PE forcing modes.
     # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
@@ -326,15 +307,16 @@ function compute_singular_coupling_metrics!(
     # Matches Fortran gpout_resp: edge_mn = foutmn/(chi1·singfac·twopi·ifac)
     psi_lim = solution.psi_store[solution.step]
     q_lim = equil.profiles.q_spline(psi_lim)
-    singfac_lim = [intr.m_modes[j] - intr.n_modes[j] * q_lim for j in 1:numpert_total]
+    singfac_lim = [resp.m_modes[j] - resp.n_modes[j] * q_lim for j in 1:numpert_total]
     u_bnd = solution.u_store[:, :, 1, solution.step]
     # Divide each row j by singfac_lim[j] — reshape to column vector so Julia broadcasts row-wise, not column-wise.
-    edge_mn = intr.plasma_response ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
+    edge_mn = resp.permeability_flux ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
     C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
+    resp.C_coeffs = C_coeffs
 
     # Phase 3: Compute full coupling matrix rows. Each rational surface is independent -- it
     # builds its own Green's functions (a fresh, allocation-local vacuum solve) and writes its
-    # own disjoint coupling-matrix row (state.C_*[row,:] / state.rational_*[row]) -- so thread
+    # own disjoint coupling-matrix row (resp.C_*[row,:] / resp.rational_*[row]) -- so thread
     # the loop over surfaces. Note a single surface `s` can appear on multiple rows in a
     # multi-n run (integer q resonates at several n), so per-row work must not write shared
     # sing[s] state. BLAS is pinned to one thread across the loop (each surface's solve is
@@ -353,7 +335,7 @@ function compute_singular_coupling_metrics!(
             sing_surf = ffs.surfaces[s]
             m_res = round(Int, sing_surf.q * nn)
 
-            resnum = findfirst(j -> intr.m_modes[j] == m_res && intr.n_modes[j] == nn, 1:numpert_total)
+            resnum = findfirst(j -> resp.m_modes[j] == m_res && resp.n_modes[j] == nn, 1:numpert_total)
             if resnum === nothing
                 @warn "Could not find index for resonant mode (m=$m_res, n=$nn)" maxlog = 1
                 continue
@@ -383,7 +365,7 @@ function compute_singular_coupling_metrics!(
             # Evaluate u and dξ/dψ at lpsi and rpsi from the stored ODE solution.
             # Branch order mirrors Fortran gpeq_sol: gal-matched solutions take the analytic
             # galerkin Ξ′, ideal runs the EL relation, kinetic runs the stored Ξ′.
-            if intr.odet_from_gal
+            if resp.odet_from_gal
                 # interpolate u and the analytic galerkin dξ/dψ carried in du_store
                 u_l, ud_l = _gal_solution_at(lpsi, resnum, solution, nstep)
                 u_r, ud_r = _gal_solution_at(rpsi, resnum, solution, nstep)
@@ -420,36 +402,36 @@ function compute_singular_coupling_metrics!(
             # coil-drive columns as the outer solution, so it contracts with C_coeffs exactly like
             # the outer solution values above (xsp = transpose(u) * ck); /area matches the area-weighted
             # convention of the pointwise row.
-            if have_inner_bpen && s <= size(intr.inner_bpen, 1)
-                pen_row = (transpose(C_coeffs) * @view(intr.inner_bpen[s, :])) ./ area
-                state.C_penetrated_area_weighted_field[row, :] = pen_row
+            if have_inner_bpen && s <= size(ffs.bpen, 1)
+                pen_row = (transpose(C_coeffs) * @view(ffs.bpen[s, :])) ./ area
+                resp.C_penetrated_area_weighted_field[row, :] = pen_row
             end
 
-            # LHS normalization audit (#233) — output scalar coordinate-invariance per row:
+            # LHS normalization audit — output scalar coordinate-invariance per row:
             #  - Δ' (1/length): the resonant-surface jump in ∂b^ψ/∂ψ over 2π·χ₁; the tearing index is
             #    coordinate-invariant (its sign/zero-crossing set the stability boundary) [Glasser 2016].
             #  - resonant (shielding) current: j_c already integrates jac·|∇ψ| over the surface, so the
             #    Jacobian weighting is carried inside j_c — no separate area factor needed.
             #  - resonant flux → field: Φ^r/A^r [T], invariant [Park 2008; Pharr 2026].
-            state.C_delta_prime[row, :] = jump_vec ./ (twopi * chi1)
-            state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
+            resp.C_delta_prime[row, :] = jump_vec ./ (twopi * chi1)
+            resp.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
             # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant area-weighted field = singflx/area,
             # islandhwids = 4·singflx/(2π·shear·q·chi1)
-            singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
-            state.C_resonant_area_weighted_field[row, :] = singflx_pre ./ area
+            singflx_pre = (L_mm / (twopi * nn)) .* resp.C_resonant_current[row, :]
+            resp.C_resonant_area_weighted_field[row, :] = singflx_pre ./ area
             if abs(shear) > 1e-10
-                state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
+                resp.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
             end
 
-            state.rational_psi[row] = sing_surf.psifac
-            state.rational_area[row] = area
-            state.rational_q[row] = sing_surf.q
-            state.rational_m_res[row] = m_res
-            state.rational_n[row] = nn
-            state.rational_surface_idx[row] = s
+            resp.rational_psi[row] = sing_surf.psifac
+            resp.rational_area[row] = area
+            resp.rational_q[row] = sing_surf.q
+            resp.rational_m_res[row] = m_res
+            resp.rational_n[row] = nn
+            resp.rational_surface_idx[row] = s
 
-            if ctrl.verbose
-                dp_diag = real(state.C_delta_prime[row, resnum])
+            if verbose
+                dp_diag = real(resp.C_delta_prime[row, resnum])
                 @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ'(diag)=$(@sprintf("%.3e", dp_diag))"
             end
         end
@@ -457,40 +439,54 @@ function compute_singular_coupling_metrics!(
         BLAS.set_num_threads(_blas_nthreads)
     end
 
-    # Phase 4: Apply forcing amplitudes → R = C · Φ_x. The applied resonant scalars are
-    # physical, coordinate-invariant quantities, so evaluate them from the flux-space C and
-    # the physical forcing Φ_x (bit-identical to pre-conform values).
+    # Conform the stored coupling-matrix input basis to the coordinate-invariant root-area-weighted
+    # field (b̃) space (Pharr 2026): C̃ = C·R, so each stored row acts on the applied field
+    # b̃_x (Φ_x = R·b̃_x) and its singular values become coordinate-invariant. The conform operator
+    # R = S·A (Σ·√A) is the only place flux briefly appears; it is built from the b̃→b̄ operator S and
+    # the scalar surface area A. The flux-space copies kept in `coupling_flux` apply a forcing without round-trip noise.
+    resp.coupling_flux = (; resonant_area_weighted_field=resp.C_resonant_area_weighted_field, resonant_current=resp.C_resonant_current,
+        island_width_sq=resp.C_island_width_sq, penetrated_area_weighted_field=resp.C_penetrated_area_weighted_field, delta_prime=resp.C_delta_prime)
+    flux_conform = resp.rootarea_to_area_weight .* resp.surface_area
+    resp.C_resonant_area_weighted_field = resp.C_resonant_area_weighted_field * flux_conform
+    resp.C_resonant_current = resp.C_resonant_current * flux_conform
+    resp.C_island_width_sq = resp.C_island_width_sq * flux_conform
+    resp.C_delta_prime = resp.C_delta_prime * flux_conform
+    have_inner_bpen && (resp.C_penetrated_area_weighted_field = resp.C_penetrated_area_weighted_field * flux_conform)
+
+    return resp
+end
+
+"""
+    apply_coupling!(state; verbose=false)
+
+Apply the coupling matrices of `state.response` to the forcing on `state`: the applied resonant vectors
+(Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`), the forcing's solution weights, and the island
+half-widths and Chirikov overlap.
+"""
+function apply_coupling!(state::PerturbedEquilibriumState; verbose::Bool=false)
+    resp = state.response
+    C = resp.coupling_flux
+    numpert_total = resp.ffs.numpert_total
+
+    # Apply forcing amplitudes → R = C · Φ_x. The applied resonant scalars are physical,
+    # coordinate-invariant quantities, so evaluate them from the flux-space C and the physical forcing Φ_x.
     forcing_flux = zeros(ComplexF64, numpert_total)
-    for mode in intr.forcing_modes
-        j = findfirst(k -> intr.m_modes[k] == mode.m && intr.n_modes[k] == mode.n, 1:numpert_total)
+    for mode in state.forcing_modes
+        j = findfirst(k -> resp.m_modes[k] == mode.m && resp.n_modes[k] == mode.n, 1:numpert_total)
         isnothing(j) || (forcing_flux[j] = mode.amplitude)
     end
 
-    state.resonant_area_weighted_field = state.C_resonant_area_weighted_field * forcing_flux
-    state.resonant_current = state.C_resonant_current * forcing_flux
-    state.island_width_sq = state.C_island_width_sq * forcing_flux
-    state.delta_prime = state.C_delta_prime * forcing_flux
-    have_inner_bpen && (state.penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * forcing_flux)
-    state.forcing_solution_weights = C_coeffs * forcing_flux
+    state.resonant_area_weighted_field = C.resonant_area_weighted_field * forcing_flux
+    state.resonant_current = C.resonant_current * forcing_flux
+    state.island_width_sq = C.island_width_sq * forcing_flux
+    state.delta_prime = C.delta_prime * forcing_flux
+    isempty(C.penetrated_area_weighted_field) || (state.penetrated_area_weighted_field = C.penetrated_area_weighted_field * forcing_flux)
+    state.forcing_solution_weights = resp.C_coeffs * forcing_flux
 
-    # Conform the stored coupling-matrix input basis to the coordinate-invariant root-area-weighted
-    # field (b̃) space (#233 / Pharr 2026): C̃ = C·R, so each stored row acts on the applied field
-    # b̃_x (Φ_x = R·b̃_x) and its singular values become coordinate-invariant. The conform operator
-    # R = S·A (Σ·√A) is the only place flux briefly appears; it is built from the b̃→b̄ operator S and
-    # the scalar surface area A. Done after the applied-vector evaluation above so those physical
-    # scalars carry no round-trip noise.
-    rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs)
-    flux_conform = rootarea_to_area_weight .* surface_area
-    state.C_resonant_area_weighted_field = state.C_resonant_area_weighted_field * flux_conform
-    state.C_resonant_current = state.C_resonant_current * flux_conform
-    state.C_island_width_sq = state.C_island_width_sq * flux_conform
-    state.C_delta_prime = state.C_delta_prime * flux_conform
-    have_inner_bpen && (state.C_penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * flux_conform)
+    # Island diagnostics from the applied resonant vectors
+    state.island_half_width, state.chirikov_parameter = island_diagnostics(state.island_width_sq, resp.rational_psi, resp.rational_surface_idx)
 
-    # Phase 5: Island diagnostics from applied resonant vectors
-    compute_island_diagnostics!(state, n_rational)
-
-    if ctrl.verbose
+    if verbose
         max_island = isempty(state.island_half_width) ? 0.0 : maximum(state.island_half_width)
         max_dp = isempty(state.delta_prime) ? 0.0 : maximum(abs.(real.(state.delta_prime)))
         @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island)), max |Δ'| = $(@sprintf("%.3e", max_dp))"
@@ -645,32 +641,29 @@ function compute_surface_area(
 end
 
 """
-    compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rational::Int)
+    island_diagnostics(island_width_sq, rational_psi, rational_surface_idx) -> (island_half_width, chirikov_parameter)
 
-Compute island half-width and Chirikov parameter from applied resonant vectors.
+Island half-width and Chirikov parameter from the applied (w/2)² on each rational row.
 
   - `island_half_width[row]` = √|island_width_sq[row]|
   - `chirikov_parameter[row]` = half-width / (half-distance to the nearest other rational surface);
     rows on the same surface at another n (integer q) are not neighbors
 """
-function compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rational::Int)
-    state.island_half_width = sqrt.(abs.(state.island_width_sq))
-    state.chirikov_parameter = zeros(Float64, n_rational)
-
-    n_rational <= 1 && return
+function island_diagnostics(island_width_sq::AbstractVector, rational_psi::AbstractVector{Float64}, rational_surface_idx::AbstractVector{Int})
+    island_half_width = sqrt.(abs.(island_width_sq))
+    n_rational = length(rational_psi)
+    chirikov_parameter = zeros(Float64, n_rational)
+    n_rational <= 1 && return island_half_width, chirikov_parameter
 
     for row in 1:n_rational
-        psi_row = state.rational_psi[row]
+        psi_row = rational_psi[row]
         min_dist = Inf
         for row2 in 1:n_rational
-            state.rational_surface_idx[row2] == state.rational_surface_idx[row] && continue
-            dist = abs(state.rational_psi[row2] - psi_row)
+            rational_surface_idx[row2] == rational_surface_idx[row] && continue
+            dist = abs(rational_psi[row2] - psi_row)
             min_dist = min(min_dist, dist)
         end
-        if min_dist > 1e-10
-            state.chirikov_parameter[row] = state.island_half_width[row] / (min_dist / 2.0)
-        else
-            state.chirikov_parameter[row] = Inf
-        end
+        chirikov_parameter[row] = min_dist > 1e-10 ? island_half_width[row] / (min_dist / 2.0) : Inf
     end
+    return island_half_width, chirikov_parameter
 end

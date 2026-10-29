@@ -8,11 +8,13 @@
 Tearing-mode growth rates from a finished force-free-states solve: hold the outer Δ′ fixed
 and find the growth rate at which the inner layer matches it. Solve with
 `solve(prob, SLAYERModel())`; GGJ growth-rate extraction is not implemented yet. Keywords are
-[`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs; kinetic profiles come from
-`profile_file`. Without a full Δ′ matrix the per-surface Δ′ stubs are used, with a warning.
+[`SLAYERControl`](@ref) fields, the `[SLAYER]` deck knobs; kinetic profiles come from the
+equilibrium (`ffs.equil.kinetic`, see `attach_kinetic_profiles!`). Without a full Δ′ matrix the
+per-surface Δ′ stubs are used, with a warning.
 
 ## Fields
-  - `ffs` - The finished solve; duck-typed on `equil`, `surfaces`, `delta_prime`, `dir_path`, so tests can use stand-ins.
+
+  - `ffs` - The finished solve; duck-typed on `equil` (with its `kinetic` profiles), `surfaces` and `delta_prime`, so tests can use stand-ins.
   - `control::SLAYERControl` - The tearing knobs.
 """
 struct TearingProblem{R}
@@ -32,12 +34,8 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
     # physical B_T = F(psi)/(2*pi*R_0) per surface from the equilibrium's F-spline, which is
     # what its docstring already prescribes.
     bt = control.bt
-    # χ⊥/χ_φ from the kinetic file when present, else the scalar fallbacks.
-    chi_perp = loaded.chi_perp === nothing ? control.chi_perp : loaded.chi_perp
-    chi_tor = loaded.chi_tor === nothing ? control.chi_tor : loaded.chi_tor
-    (loaded.chi_perp === nothing || loaded.chi_tor === nothing) && @warn(
-        "SLAYER: no usable chi_e/chi_phi profile(s) (dataset absent or all-zero); " *
-        "using the scalar chi_perp/chi_tor fallback for the missing one(s).")
+    # χ⊥,e/χ⊥,i/χ_φ from the kinetic file when present, else the scalar fallbacks.
+    chi = _slayer_chi_inputs(loaded, control)
     # Z_eff(ψ) from the kinetic file when it carries n_i, else the scalar fallback.
     zeff = loaded.zeff === nothing ? control.zeff : loaded.zeff
     if loaded.zeff_source === :scalar
@@ -51,8 +49,11 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
         bt=bt,
         mu_i=control.ion_mass,
         zeff=zeff,
-        chi_perp=chi_perp,
-        chi_tor=chi_tor,
+        chi_perp_e=chi.chi_perp_e,
+        chi_perp_i=chi.chi_perp_i,
+        chi_tor=chi.chi_tor,
+        tau_E=control.tau_E,
+        P_perp_model=control.P_perp_model,
         dr_val=control.D_R,
         dgeo_val=control.D_geo,
         dc_type=control.D_c_type,
@@ -77,7 +78,9 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
     control.enabled || return empty_slayer_result(control)
     isempty(surfaces) && return empty_slayer_result(control)
 
-    loaded = _load_profiles(control, ffs.dir_path)
+    equil.kinetic === nothing &&
+        error("TearingProblem: the equilibrium carries no kinetic profiles; set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
+    loaded = _slayer_profiles(equil.kinetic, control)
 
     params = _tearing_params(model, equil, surfaces, loaded, control)
 
@@ -110,6 +113,10 @@ function CommonSolve.solve(prob::TearingProblem, model::InnerLayer.InnerLayerMod
 
     rational_psi = Float64[surfaces[p.ising].psifac for p in params]
     rational_q = Float64[surfaces[p.ising].q for p in params]
+    # E×B rotation per unit n at each surface, for the Doppler shifts and the lab-frame roots;
+    # empty when the kinetic file carries none.
+    omega_E = loaded.has_omega_E ? Float64[loaded.profiles.omega_E(ψ) for ψ in rational_psi] : Float64[]
+    loaded.has_omega_E || @warn "SLAYER: the kinetic file has no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
     return run_slayer_from_inputs(model, params, dp, control;
-        rational_psi=rational_psi, rational_q=rational_q)
+        rational_psi=rational_psi, rational_q=rational_q, omega_E=omega_E)
 end

@@ -113,14 +113,16 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Module**: `PerturbedEquilibrium`
 
-**Purpose**: Compute the self-consistent plasma response to the external perturbation specified in Stage 4. Uses the force-free eigenfunctions and vacuum matrices to project the response into mode space, then evaluates singular coupling diagnostics at each rational surface.
+**Purpose**: Compute the self-consistent plasma response to the external perturbation specified in Stage 4, in two steps:
+- `plasma_response(ffs)` builds the source-independent operators once from the force-free eigenfunctions and vacuum matrices: the permeability, inductance and reluctance matrices on the control surface, and the singular coupling matrices at each rational surface (`PlasmaResponse`).
+- `perturbed_equilibrium(resp, rmp)` applies them to one forcing field: it projects the response into mode space and evaluates the singular coupling diagnostics for that field. One response serves any number of fields.
 
 **Configuration**: `[PerturbedEquilibrium]` section of `gpec.toml`
 
 **Inputs**:
-- ForceFreeStates results from Stage 3 (eigenfunctions, singular surface data)
-- Vacuum response matrices from Stage 2
-- `ForcingMode` array from Stage 4
+- ForceFreeStates results from Stage 3 (eigenfunctions, singular surface data), for `plasma_response`
+- Vacuum response matrices from Stage 2, for `plasma_response`
+- The forcing field from Stage 4, for `perturbed_equilibrium`
 
 **Outputs** (`PerturbedEquilibriumState`):
 - Mode-space normal displacement ξ(m, ψ) across the plasma
@@ -179,7 +181,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 | `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
 | `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
 | `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
-| `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/` (opt-in: `write_el_matrices = true`), `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |
 | `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ'/PEST-3 matching matrices, kinetic surfaces (`Kinetic/`) |
 | `PerturbedEquilibrium/` | Plasma response: `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/` |

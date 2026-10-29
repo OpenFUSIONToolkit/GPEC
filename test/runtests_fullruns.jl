@@ -1,12 +1,26 @@
 using HDF5
+using TOML
 
 # Run GeneralizedPerturbedEquilibrium.main on the provided example directories and assert it completes without throwing.
 @testset "Full ForceFreeStates runs" begin
     ex1 = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-    @info "Running Solovev ideal example"
-    @test begin
-        GeneralizedPerturbedEquilibrium.main([ex1])
-        true
+    # A renorm_threshold reduction landing just before an ideal crossing must not change which solution the crossing removes.
+    @info "Running Solovev ideal example with frequent Gaussian reductions"
+    @testset "et[1] is independent of the reduction frequency" begin
+        deck = TOML.parsefile(joinpath(ex1, "gpec.toml"))
+        deck["ForceFreeStates"]["write_outputs_to_HDF5"] = true
+        function total_energy(renorm_threshold)
+            deck["ForceFreeStates"]["renorm_threshold"] = renorm_threshold
+            return mktempdir() do workdir
+                open(io -> TOML.print(io, deck), joinpath(workdir, "gpec.toml"), "w")
+                GeneralizedPerturbedEquilibrium.main([workdir])
+                return h5open(h5 -> read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])[1], joinpath(workdir, "gpec.h5"), "r")
+            end
+        end
+        et_ref = total_energy(1e3)
+        for renorm_threshold in (2.0, 3.0, 5.0, 10.0)
+            @test total_energy(renorm_threshold) ≈ et_ref rtol = 1e-6
+        end
     end
 
     ex2 = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example_multi_n")
@@ -35,6 +49,8 @@ using HDF5
             # emit deterministic zero-extent sentinels, not uninitialized memory.
             @test isempty(read(h5["SingularSurfaces/ca_left"]))
             @test isempty(read(h5["SingularSurfaces/ca_right"]))
+            # The Euler-Lagrange matrices are opt-in; a default deck writes no group.
+            @test !haskey(h5, "ForceFreeStates/EulerLagrangeMatrices")
         end
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true
