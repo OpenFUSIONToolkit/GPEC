@@ -170,8 +170,10 @@ instead of the pole-threshold heuristics. The counter-clockwise winding number
 of `residual` on a small circle around the intersection counts the zeros minus
 the poles inside it (for a holomorphic function; the sign is reversed for an
 anti-holomorphic one, hence `zero_winding`). The circle is resampled until no
-phase step between neighboring samples exceeds π/2, so the count is exact
-rather than estimated. An intersection is a root when the count has the sign of
+sampled phase step exceeds π/2. This numerical criterion can miss rapid phase
+turns between samples and does not certify the count. Additional midpoint and
+count-convergence checks are possible defensive extensions. An intersection is
+classified as a root when the estimated count has the sign of
 `zero_winding`, a pole when it has the opposite sign, and is moved to
 `filtered_roots` (flag `:spurious`) when the count is zero, e.g. a contour
 near-miss or an unresolved pole-zero pair. A zero count is checked once more on
@@ -180,15 +182,15 @@ other intersection, because the contour estimate of a pole can lie outside the
 small circle. A non-finite
 circle (the residual failed on it) is retried at half and a quarter of the
 radius; a circle that stays unresolved is filtered too and flags
-`:winding_unresolved`. The count is
-exact only for a residual that is single-valued and meromorphic on the circle:
+`:winding_unresolved`. The argument principle requires a residual that is
+single-valued and meromorphic on and inside the circle:
 a branch cut crossing it, or a jump in the residual, can change the count.
 The classification replaces the pole threshold, the validity gate and the
 above-pole/outside-Re filter, so `pole_threshold`, `validity_rtol`,
 `filter_above_poles` and `filter_outside_re` decide nothing in this mode; the
 selection of `Q_root`, the `:geom`/`:gap` warnings and the secondary root are
 the same as in `:threshold` mode. With `polish = true` a root is polished inside
-its classifying circle, which is proven to contain it. `residual` is required.
+its classifying circle. `residual` is required.
 Each intersection costs between 64 and a few thousand residual evaluations
 (one or two circles of 64–4096 samples). Only zeros that the scan resolves
 as contour crossings are found, as in `:threshold` mode.
@@ -698,7 +700,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     # near-miss (e.g. a surface whose Δ' BVP failed → |Δ'| huge and
     # uncancellable by the inner layer) leaves |residual| stuck near the typical
     # scan magnitude. Only active when polishing AND a scale is supplied.
-    # A winding count already proves a zero, so the gate applies to the threshold classification only.
+    # Winding classification uses the sampled count instead of this residual-magnitude gate.
     do_gate = do_polish && validity_scale > 0 && !winding
     polish_evals = 0
 
@@ -821,7 +823,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         for k in 1:length(sorted_pts)
             cand = sorted_pts[k]
             top_re = sorted_top[k]
-            # Legacy filter: above-pole + closed-loop outside-Re (a winding-classified root is a proven zero)
+            # Apply the above-pole and outside-Re heuristics only to threshold classification.
             legacy_reject = !winding && filter_above_poles && imag(cand) > max_pole_gamma &&
                             (!filter_outside_re || top_re)
             if legacy_reject
@@ -892,8 +894,7 @@ end
 # can misjudge a root that sits close to a pole, and none of them is a proof.
 # The argument principle is: the winding number of f on a closed curve counts
 # zeros minus poles inside it (holomorphic f; the sign flips for a function of
-# conj(Q)). Evaluated on a small circle around each intersection with the
-# phase resolved, it classifies the intersection exactly.
+# conj(Q)). Finite sampling can miss phase turns between points and is not a proof of the count.
 # ---------------------------------------------------------------------
 
 const _VALID_CLASSIFICATIONS = (:threshold, :winding)
@@ -911,11 +912,7 @@ function _check_classification(classification::Symbol, residual, zero_winding::I
     return nothing
 end
 
-# Counter-clockwise winding number of `f` on the circle |Q − Q0| = r. The
-# circle is sampled at `nmin` points and the sampling doubled (reusing the
-# previous samples) until no phase step between neighbors exceeds π/2, up to
-# `nmax` points. Returns (W, max_step); W is NaN when `f` is non-finite or zero
-# on the circle or the phase stays unresolved (a zero or pole on the circle).
+# Estimate the counter-clockwise winding count by refining sampled phase steps; NaN means unresolved.
 function _winding_number(f, Q0::ComplexF64, r::Float64; nmin::Int=64, nmax::Int=4096)
     N = nmin
     vals = ComplexF64[f(Q0 + r * cis(2π * j / N)) for j in 0:N-1]
