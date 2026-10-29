@@ -235,7 +235,7 @@ function build_result(
     wp = if free_energies !== nothing
         free_energies.wp
     elseif odet !== nothing
-        (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+        (odet.u[:, :, 2] / lu(odet.u[:, :, 1])) ./ equil.psio^2
     else
         nothing
     end

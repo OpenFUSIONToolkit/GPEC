@@ -42,6 +42,21 @@ function trim_storage!(odet::OdeState)
 end
 
 """
+    grow_reduction_storage!(odet::OdeState)
+
+Doubles the capacity of the per-reduction arrays (`fixfac`, `index`, `sing_flag`, `fixstep`, `zeroed_idx`).
+"""
+function grow_reduction_storage!(odet::OdeState)
+    nfix = size(odet.fixfac, 3)
+    odet.fixfac = cat(odet.fixfac, zeros(ComplexF64, size(odet.fixfac, 1), size(odet.fixfac, 2), nfix); dims=3)
+    odet.index = hcat(odet.index, zeros(Int, size(odet.index, 1), nfix))
+    append!(odet.sing_flag, falses(nfix))
+    append!(odet.fixstep, zeros(Int64, nfix))
+    append!(odet.zeroed_idx, [Int[] for _ in 1:nfix])
+    return odet
+end
+
+"""
     truncate_integration!(odet, intr, equil, step)
 
 Make stored step `step` the plasma edge, resetting every piece of state derived from the old one:

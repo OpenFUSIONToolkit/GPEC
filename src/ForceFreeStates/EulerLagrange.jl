@@ -44,7 +44,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
 
-  - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
+  - `numunorms_init::Int` - Initial capacity for recorded Gaussian reductions.
 
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
 
@@ -376,7 +376,7 @@ end
     forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=ctrl.verbose) -> (odet, nothing, nothing, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
-applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.renorm_threshold` and undoing it
+applying Gaussian reduction whenever the column-normalized U₁ is worse conditioned than `ctrl.renorm_threshold` and undoing it
 via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
 directly to force this branch regardless of `ctrl.integrator`; `verbose` overrides
 `ctrl.verbose` for progress logging.
@@ -902,8 +902,10 @@ Errors when the solver stops short of the interval's end (e.g. the step size und
 function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
     sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
     SciMLBase.successful_retcode(sol) ||
-        error("Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
-              "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor.")
+        error(
+            "Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
+            "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor."
+        )
     return sol
 end
 
@@ -994,13 +996,11 @@ end
 """
     compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
-Computes norms of the solution vectors of the array `u` and normalizes them
-if this is not the first call after a fixup. Formerly `ode_unorm!`.
-Throws an error if any vector norm is zero. It then compares the variation in norms
-relative to initial values after a fixup, and applies the Gaussian reduction via
-`apply_gaussian_reduction!` if the variation exceeds `ctrl.renorm_threshold` or if `sing_flag` is true.
-Performs the same function as `ode_unorm` in the Fortran code, with minor differences in indexing
-and array handling.
+Computes the U₁ column norms of `u`, relative to the last reduction unless this is the first call after one
+(they set the reduction's pivot order). Formerly `ode_unorm!`. Throws an error if any norm is zero. Applies
+`apply_gaussian_reduction!` at a singular surface or when the condition number of the column-normalized U₁
+exceeds `ctrl.renorm_threshold`. Fortran `ode_unorm` triggers on the column-norm spread instead, which misses columns that
+grow alike and turn near-parallel.
 
 Note that we pass `u` as an argument to reduce the number of copies that are
 necessary in the integration callback, since otherwise we'd need to copy from
@@ -1012,10 +1012,6 @@ operate on `u` directly without extra copies.
   - u: Current solution vector array, updated in-place if fixfac is called
   - sing_flag: Indicates if normalization is occuring at a singular surface or not
   - resonant_rows: Resonant rows at an ideal crossing; when given, the reduction always runs and pivots on them
-
-### TODOs
-
-Add resizing logic for unorm arrays when ifix exceeds allocated size
 """
 function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool;
     resonant_rows=Int[])
@@ -1039,17 +1035,11 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     if !odet.new
         odet.unorm ./= odet.unorm0
     end
-    uratio = maximum(odet.unorm) / minimum(odet.unorm)
 
-    # Perform Gaussian reduction if the renorm_threshold ratio is reached or at a singular surface
-    if uratio > ctrl.renorm_threshold || sing_flag
-        # TODO: add resizing logic here as well
-        if odet.ifix < ctrl.numunorms_init
-            odet.ifix += 1
-        else
-            @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
-            Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
-        end
+    # Reduce at a singular surface or once the U₁ columns lose independence (1-norm condition estimate of the column-normalized U₁)
+    @views if sing_flag || cond(UpperTriangular(qr!(u[:, :, 1] ./ norm.(eachcol(u[:, :, 1]))').R), 1) > ctrl.renorm_threshold
+        odet.ifix == size(odet.fixfac, 3) && grow_reduction_storage!(odet)
+        odet.ifix += 1
         apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
         odet.new = true
     end
@@ -1061,14 +1051,14 @@ end
 Applies Gaussian reduction to orthogonalize solution vectors in `u`.
 Formerly `ode_fixup!`. Performs the same function as `ode_fixup` in the Fortran code,
 except now relevant `fixfac` data are stored in memory instead of dumped to `euler.bin`.
-Used when the spread in norms exceeds a threshold or when a rational surface is reached.
+Used when U₁ becomes ill-conditioned or when a rational surface is reached.
 This will update both `u` and relevant fields in `odet` in-place. See the
 description of `compute_solution_norms!` for more details on the benefits of in-place `u`
 updates.
 
 At an ideal crossing, the first pivots are the `resonant_rows`, each on the remaining column largest
-there. Growth order cannot pick the resonant solution if a `renorm_threshold` reduction fired just before the
-crossing, since every column has then grown alike.
+there. Growth order cannot pick the resonant solution if a reduction fired just before the crossing,
+since every column has then grown alike.
 """
 function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 

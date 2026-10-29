@@ -54,7 +54,7 @@ kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or
 kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
+renorm_threshold = 1e3        # Forward: U₁ condition number that triggers Gaussian reduction; Riccati: entry size that triggers renormalization
 write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
 HDF5_filename = "euler_n1.h5" # Output HDF5 filename
 # Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.

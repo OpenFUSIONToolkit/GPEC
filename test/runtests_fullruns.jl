@@ -10,7 +10,7 @@ using TOML
         true
     end
 
-    # A renorm_threshold reduction landing just before an ideal crossing must not change which solution the crossing removes.
+    # A reduction landing just before an ideal crossing must not change which solution the crossing removes.
     @info "Running Solovev ideal example with frequent Gaussian reductions"
     @testset "et[1] is independent of the reduction frequency" begin
         deck = TOML.parsefile(joinpath(ex1, "gpec.toml"))
@@ -24,7 +24,7 @@ using TOML
             end
         end
         et_ref = total_energy(1e3)
-        for renorm_threshold in (2.0, 3.0, 5.0, 10.0)
+        for renorm_threshold in (3.0, 10.0, 1e2, 1e6)
             @test total_energy(renorm_threshold) ≈ et_ref rtol = 1e-6
         end
     end
