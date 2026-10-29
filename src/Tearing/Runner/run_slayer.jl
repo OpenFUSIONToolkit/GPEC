@@ -136,7 +136,7 @@ _is_ggj(::Any) = false
 # Winding number of an isolated zero of the dispersion residual, for
 # root_classification = :winding. The SLAYER residual is a function of conj(Q)
 # (solve_inner evaluates conj(Δ̂(ĝ)); see Riccati.jl), so a zero winds −1.
-_zero_winding(::SLAYERModel) = -1
+_zero_winding(::SLAYERModel{:fitzpatrick}) = -1
 _zero_winding(model) =
     throw(ArgumentError("root_classification=:winding is not available for inner model $(typeof(model))"))
 

@@ -448,6 +448,16 @@
                 @test abs(r.Q_root[1] - Q2 * p2.tauk / p1.tauk) < 2e-2    # grid-resolution limited
                 @test r.Q_root == ref.Q_root
             end
+            if mode === :coupled
+                # A Hermitian off-diagonal coupling moves the zeros off the diagonal entries' own; both classifications must
+                # still agree on the reported root, and every winding root counts −1.
+                dpc = ComplexF64[Δ1 0.3*sqrt(abs(Δ1 * Δ2)); 0.3*sqrt(abs(Δ1 * Δ2)) Δ2]
+                rc = run_slayer_from_inputs(model, [p1, p2], dpc, ctrl(:winding); rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
+                refc = run_slayer_from_inputs(model, [p1, p2], dpc, ctrl(:threshold))
+                @test !isempty(rc.coupled_extraction.valid_roots)
+                @test all(w -> w ≈ -1, rc.coupled_extraction.valid_roots_winding)
+                @test rc.Q_root == refc.Q_root
+            end
             mktemp() do path, io
                 close(io)
                 h5open(path, "w") do f

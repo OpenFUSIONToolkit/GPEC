@@ -103,6 +103,52 @@
         @test r.gamma_Hz == 0.0
     end
 
+    @testset "a root about one cell from a pole, with the validity gate on" begin
+        # Zero 0.04 from a pole on a 0.025 grid: the pole's field leaks into the root's neighborhood.
+        zr, pp = 0.2131 + 0.1517im, 0.2131 + 0.1917im
+        h(Q) = conj((ComplexF64(Q) - zr) / (ComplexF64(Q) - pp))
+        scan = brute_force_scan(h, (-0.5, 0.5), (-0.5, 0.5); nre=41, nim=41, threaded=false)
+        r = find_growth_rates(scan, 1.0; residual=h, classification=:winding, zero_winding=-1)
+        @test length(r.valid_roots) == 1 && length(r.poles) == 1
+        @test abs(r.Q_root - zr) < 1e-8
+        @test abs(r.poles[1] - pp) < 0.03
+    end
+
+    @testset "a residual that fails near a pole: the circle is retried smaller" begin
+        # The residual is NaN within 0.06 of the pole, as a failed inner-layer solve would be; the zero sits just outside.
+        zr, pp = -0.1173 + 0.0811im, -0.1173 + 0.1611im
+        h(Q) = abs(ComplexF64(Q) - pp) < 0.06 ? ComplexF64(NaN, NaN) : conj((ComplexF64(Q) - zr) / (ComplexF64(Q) - pp))
+        scan = brute_force_scan(h, (-0.5, 0.5), (-0.5, 0.5); nre=21, nim=21, threaded=false)
+        r = find_growth_rates(scan, 1.0; residual=h, classification=:winding, zero_winding=-1)
+        @test any(z -> abs(z - zr) < 1e-8, r.valid_roots)
+        @test abs(r.Q_root - zr) < 1e-8
+    end
+
+    @testset "a coupled two-surface determinant with an off-diagonal term" begin
+        # det of [d1 − a(Q)  c; c  d2 − b(Q)] with a, b functions of conj(Q) and real d1, d2, c is itself a function of
+        # conj(Q); its zeros solve (d1 − Q̄)(d2 − 2Q̄) = c² and are not those of either diagonal entry alone.
+        d1, d2, c = 0.31 + 0.12im, 0.18 - 0.05im, 0.07
+        det2(Q) = conj((d1 - ComplexF64(Q)) * (d2 - 2ComplexF64(Q)) - c^2)
+        # (d1 − x)(d2 − 2x) − c² = 0 for x = Q̄
+        A, B, C = 2.0, -(d2 + 2d1), d1 * d2 - c^2
+        xs = [(-B + sqrt(B^2 - 4A * C)) / 2A, (-B - sqrt(B^2 - 4A * C)) / 2A]
+        zs = conj.(xs)
+        scan = brute_force_scan(det2, (-0.5, 0.8), (-0.6, 0.6); nre=53, nim=49, threaded=false)
+        r = find_growth_rates(scan, 1.0; residual=det2, classification=:winding, zero_winding=-1)
+        @test length(r.valid_roots) == 2
+        for z in zs
+            @test any(v -> abs(v - z) < 1e-8, r.valid_roots)
+        end
+        @test all(w -> w ≈ -1, r.valid_roots_winding)
+    end
+
+    @testset "coarse AMR first pass: circles follow the local resolution" begin
+        amr = amr_scan(fanti, (-1.0, 1.0), (-1.0, 1.0); nre0=6, nim0=6, passes=2)
+        r = find_growth_rates(amr, 1.0; residual=fanti, classification=:winding)
+        @test length(r.valid_roots) == 2 && length(r.poles) == 1
+        @test abs(r.Q_root - z_hi) < 1e-8
+    end
+
     @testset "threshold mode is unchanged and carries no winding numbers" begin
         scan = brute_force_scan(fanti, (-1.0, 1.0), (-1.0, 1.0); nre=41, nim=41, threaded=false)
         r = find_growth_rates(scan, 1.0)

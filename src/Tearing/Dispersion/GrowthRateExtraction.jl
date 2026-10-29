@@ -20,10 +20,10 @@
 #      pole are filtered out (spurious upper branches).
 #   5. Return the highest-γ surviving root in physical units.
 #
-# With `classification = :winding`, steps 3-4 are replaced by the argument
+# With `classification = :winding`, step 3 is replaced by the argument
 # principle: each intersection is a root, a pole or neither according to the
 # winding number of the residual on a small circle around it (see
-# `_run_analysis_winding`).
+# `_winding_classify`); the rest of the analysis is shared.
 
 using Contour
 using DelaunayTriangulation
@@ -55,10 +55,14 @@ Output of `find_growth_rates`.
 |                          | `NaN`; `omega_Hz`/`gamma_Hz` fall back to 0 — check   |
 |                          | this flag to tell that apart from a true γ≈0 result). |
 |                          | Empty if root is clean.                               |
-| `valid_roots`            | All non-pole intersections that survived pole filter  |
+| `valid_roots`            | Intersections classified as roots (threshold: not a   |
+|                          | pole and passed the validity gate; winding: a zero    |
+|                          | count of the sign of `zero_winding`)                  |
 | `poles`                  | Intersections classified as poles                     |
-| `filtered_roots`         | Intersections rejected by the above-pole/outside-Re   |
-|                          | filter or the new geom+gap recursion                  |
+| `filtered_roots`         | Gate-rejected near-misses and roots rejected by the   |
+|                          | above-pole/outside-Re filter (threshold), or          |
+|                          | intersections with a zero or unresolved count         |
+|                          | (winding)                                             |
 | `re_contours`            | Extracted Re(Δ)=`re_target` polylines                 |
 | `im_contours`            | Extracted Im(Δ)=`im_target` polylines                 |
 | `pole_threshold`         | Threshold used for pole classification                |
@@ -156,8 +160,8 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
     that is anti-holomorphic (a function of conj(Q)), such as the SLAYER
     residual. Default `-1`.
   - `winding_rfrac` -- `:winding` mode only: radius of the classifying circle
-    in units of the median contour-segment length (default 0.5), capped at
-    0.45 × the distance to the nearest other intersection.
+    in units of the local contour-segment length at the intersection (default
+    0.5), capped at 0.45 × the distance to the nearest other intersection.
 
 # Winding classification (`classification = :winding`)
 
@@ -172,14 +176,20 @@ rather than estimated. An intersection is a root when the count has the sign of
 `filtered_roots` (flag `:spurious`) when the count is zero, e.g. a contour
 near-miss or an unresolved pole-zero pair. A zero count is checked once more on
 a circle eight times wider (still clear of every other intersection), because
-the contour estimate of a pole can lie outside the small circle. A circle that
-stays unresolved (winding `NaN`, a zero or pole on it) is filtered too and flags
-`:winding_unresolved`. `pole_threshold`, `filter_above_poles`,
-`filter_outside_re`, `gap_kHz_threshold` and `validity_rtol` decide nothing in
-this mode, and `Q_root` is the least stable root, with no secondary root.
-With `polish = true` a root is polished inside its classifying circle, which is
-proven to contain it. `residual` is required. Each intersection costs between
-64 and a few hundred residual evaluations. Only zeros that the scan resolves
+the contour estimate of a pole can lie outside the small circle. A non-finite
+circle (the residual failed on it) is retried at half and a quarter of the
+radius, and a zero count must agree on the half-radius circle; a circle that
+stays unresolved is filtered too and flags `:winding_unresolved`. The count is
+exact only for a residual that is single-valued and meromorphic on the circle:
+a branch cut crossing it, or a jump in the residual, can change the count.
+The classification replaces the pole threshold, the validity gate and the
+above-pole/outside-Re filter, so `pole_threshold`, `validity_rtol`,
+`filter_above_poles` and `filter_outside_re` decide nothing in this mode; the
+selection of `Q_root`, the `:geom`/`:gap` warnings and the secondary root are
+the same as in `:threshold` mode. With `polish = true` a root is polished inside
+its classifying circle, which is proven to contain it. `residual` is required.
+Each intersection costs between about 130 and a few thousand residual
+evaluations (two circles of 64–4096 samples). Only zeros that the scan resolves
 as contour crossings are found, as in `:threshold` mode.
 
 # Spurious-root recursion
@@ -666,35 +676,55 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     classification::Symbol=:threshold,
     zero_winding::Int=-1,
     winding_rfrac::Float64=0.5)
-    classification === :winding &&
-        return _run_analysis_winding(re_paths, im_paths, tauk, residual;
-            zero_winding=zero_winding, rfrac=winding_rfrac,
-            polish=polish, polish_maxit=polish_maxit, pole_threshold=pole_threshold)
+    winding = classification === :winding
     raw_intersections = _all_intersections(re_paths, im_paths)
 
     poles = ComplexF64[]
     candidates = Tuple{ComplexF64,Bool}[]    # (pt, on_top_half_re_flag)
-    spurious_roots = ComplexF64[]               # polished, but |residual| ≫ 0
+    spurious_roots = ComplexF64[]               # polished, but |residual| ≫ 0, or a zero winding count
+    w_valid, w_poles, w_filtered = Float64[], Float64[], Float64[]
+    warning_flags = Symbol[]
 
     # Isolate-then-polish: when a residual callable is supplied, refine each
     # (non-pole) contour intersection to the true zero of `f`. Trust radii are
     # capped by the spacing to neighbouring intersections so closely-spaced
     # coupled roots stay coherently bound to their own contour crossing.
     do_polish = polish && residual !== nothing
-    h_grid = do_polish ? _median_segment_length(re_paths, im_paths) : 0.0
+    h_grid = (do_polish || winding) ? _median_segment_length(re_paths, im_paths) : 0.0
+    # Contours crossing at a shared vertex are reported once per adjacent segment pair; a winding count needs each once.
+    winding && (raw_intersections = _dedupe_points(raw_intersections, 1e-9 * max(h_grid, eps())))
     # Validity gate: a genuine root drives |residual| ≈ 0; a spurious contour
     # near-miss (e.g. a surface whose Δ' BVP failed → |Δ'| huge and
     # uncancellable by the inner layer) leaves |residual| stuck near the typical
     # scan magnitude. Only active when polishing AND a scale is supplied.
-    do_gate = do_polish && validity_scale > 0
+    # A winding count already proves a zero, so the gate applies to the threshold classification only.
+    do_gate = do_polish && validity_scale > 0 && !winding
     polish_evals = 0
 
     for (i_pt, pt) in enumerate(raw_intersections)
-        # --- 1. classify as pole or root via local Re-magnitude on Im contour
         best_im_path_idx, best_im_vert_idx, _ =
             _closest_polyline_vertex(im_paths, pt)
+        # --- 1. classify as root or pole: by winding number, or by the local Re-magnitude on the Im contour
+        R_root = 0.0   # trust radius for the polish; the classifying circle in :winding mode
+        if winding
+            kind, W, r = _winding_classify(residual, raw_intersections, i_pt, re_paths, im_paths, h_grid;
+                zero_winding=zero_winding, rfrac=winding_rfrac)
+            if kind === :pole
+                push!(poles, pt)
+                push!(w_poles, W)
+                continue
+            elseif kind !== :root
+                push!(spurious_roots, pt)
+                push!(w_filtered, W)
+                flag = kind === :unresolved ? :winding_unresolved : :spurious
+                flag in warning_flags || push!(warning_flags, flag)
+                continue
+            end
+            push!(w_valid, W)
+            R_root = r
+        end
         is_pole = false
-        if best_im_path_idx > 0
+        if !winding && best_im_path_idx > 0
             re_vals = im_re_vals[best_im_path_idx]
             n = length(re_vals)
             i_prev = max(1, best_im_vert_idx - 1)
@@ -713,7 +743,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         # --- 1b. polish this (non-pole) intersection to the true zero of `f`,
         # bounded to a neighbour-aware trust region (no-op on failure).
         if do_polish
-            R = _polish_trust_radius(raw_intersections, i_pt, h_grid)
+            R = winding ? R_root : _polish_trust_radius(raw_intersections, i_pt, h_grid)
             pt, nev, _ = _polish_root(residual, pt, R; maxit=polish_maxit)
             polish_evals += nev
             # --- 1c. validity gate: drop intersections that don't polish to a
@@ -777,8 +807,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     filtered_roots = copy(spurious_roots)     # gate-rejected near-misses kept here
     Q_root = ComplexF64(NaN, NaN)
     Q_root_2nd = ComplexF64(NaN, NaN)
-    warning_flags = Symbol[]
-    isempty(spurious_roots) || push!(warning_flags, :spurious)
+    !winding && !isempty(spurious_roots) && push!(warning_flags, :spurious)
 
     if !isempty(valid_roots)
         order = sortperm(valid_roots; by=q -> -imag(q))
@@ -791,8 +820,8 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         for k in 1:length(sorted_pts)
             cand = sorted_pts[k]
             top_re = sorted_top[k]
-            # Legacy filter: above-pole + closed-loop outside-Re
-            legacy_reject = filter_above_poles && imag(cand) > max_pole_gamma &&
+            # Legacy filter: above-pole + closed-loop outside-Re (a winding-classified root is a proven zero)
+            legacy_reject = !winding && filter_above_poles && imag(cand) > max_pole_gamma &&
                             (!filter_outside_re || top_re)
             if legacy_reject
                 push!(filtered_roots, cand)
@@ -850,7 +879,8 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         Q_root_2nd, omega_Hz_2nd, gamma_Hz_2nd,
         warning_flags,
         valid_roots, poles, filtered_roots,
-        re_paths, im_paths, pole_threshold)
+        re_paths, im_paths, pole_threshold,
+        classification, w_valid, w_poles, w_filtered)
 end
 
 # ---------------------------------------------------------------------
@@ -921,68 +951,55 @@ function _dedupe_points(pts::Vector{ComplexF64}, tol::Float64)
     return out
 end
 
-function _run_analysis_winding(re_paths::Vector{Vector{ComplexF64}},
-    im_paths::Vector{Vector{ComplexF64}},
-    tauk::Float64, residual;
-    zero_winding::Int, rfrac::Float64, polish::Bool, polish_maxit::Int,
-    pole_threshold::Float64)
-    h_grid = _median_segment_length(re_paths, im_paths)
-    pts = _dedupe_points(_all_intersections(re_paths, im_paths), 1e-9 * max(h_grid, eps()))
+# Length of the contour segments that meet at the vertices nearest `pt`, the local resolution there; on an AMR mesh it
+# follows the cell size, unlike the median over the whole scan.
+function _local_segment_length(re_paths::Vector{Vector{ComplexF64}}, im_paths::Vector{Vector{ComplexF64}}, pt::ComplexF64,
+    fallback::Float64)
+    h = 0.0
+    for paths in (re_paths, im_paths)
+        ip, iv, _ = _closest_polyline_vertex(paths, pt)
+        ip > 0 || continue
+        path = paths[ip]
+        iv > 1 && (h = max(h, abs(path[iv] - path[iv-1])))
+        iv < length(path) && (h = max(h, abs(path[iv+1] - path[iv])))
+    end
+    return h > 0 ? h : fallback
+end
 
-    valid_roots, poles, filtered = ComplexF64[], ComplexF64[], ComplexF64[]
-    w_valid, w_poles, w_filtered = Float64[], Float64[], Float64[]
-    warning_flags = Symbol[]
-
-    for (i, pt) in enumerate(pts)
-        # circle radius: a fraction of the local resolution, and less than half
-        # the distance to any other intersection so circles never overlap
-        r = _polish_trust_radius(pts, i, h_grid; k_cell=rfrac, nn_frac=0.45)
+# Classify intersection `i` of `pts` by the winding number of `residual` on a circle around it: `(kind, W, r)` with kind
+# `:root`, `:pole`, `:none` (zero count) or `:unresolved`, the count W and the circle radius r. The circle is a fraction
+# `rfrac` of the local contour resolution and under half the distance to every other intersection; a non-finite circle is
+# retried at r/2 and r/4. A zero count must agree on the half-radius circle (the contour estimate of a zero is accurate, so a
+# disagreement means a second zero or a pole near the circle), and a zero count is checked once on a circle eight times
+# wider, because the contour estimate of a pole can lie outside the small one.
+function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, im_paths, h_grid::Float64;
+    zero_winding::Int, rfrac::Float64)
+    pt = pts[i]
+    h_loc = _local_segment_length(re_paths, im_paths, pt, h_grid)
+    r = _polish_trust_radius(pts, i, h_loc; k_cell=rfrac, nn_frac=0.45)
+    W = NaN
+    for _ in 1:3
         W, _ = _winding_number(residual, pt, r)
-        # The contour estimate of a zero is accurate (the field is nearly linear
-        # there); that of a pole is not, and can fall outside the small circle.
-        # If it counts nothing, count once more on a wider circle, still clear
-        # of every other intersection.
-        if !(isfinite(W) && round(Int, W) != 0)
-            r_wide = _polish_trust_radius(pts, i, h_grid; k_cell=8rfrac, nn_frac=0.45)
-            if r_wide > r
-                W_wide, _ = _winding_number(residual, pt, r_wide)
-                if isfinite(W_wide) && round(Int, W_wide) != 0
-                    W, r = W_wide, r_wide
-                end
+        isfinite(W) && break
+        r /= 2
+    end
+    isfinite(W) || return (:unresolved, NaN, r)
+    n = round(Int, W)
+    if n * zero_winding >= 1
+        W_half, _ = _winding_number(residual, pt, r / 2)
+        (isfinite(W_half) && round(Int, W_half) == n) || return (:unresolved, NaN, r)
+    elseif n == 0
+        r_wide = _polish_trust_radius(pts, i, h_loc; k_cell=8rfrac, nn_frac=0.45)
+        if r_wide > r
+            W_wide, _ = _winding_number(residual, pt, r_wide)
+            if isfinite(W_wide) && round(Int, W_wide) != 0
+                W, r, n = W_wide, r_wide, round(Int, W_wide)
             end
-        end
-        n = isfinite(W) ? round(Int, W) : 0
-        if !isfinite(W) || abs(W - n) > 0.1
-            push!(filtered, pt)
-            push!(w_filtered, NaN)
-            :winding_unresolved in warning_flags || push!(warning_flags, :winding_unresolved)
-        elseif n * zero_winding >= 1                      # net zeros inside the circle
-            if polish
-                pt, _, _ = _polish_root(residual, pt, r; maxit=polish_maxit)
-            end
-            push!(valid_roots, pt)
-            push!(w_valid, W)
-        elseif n * zero_winding <= -1                     # net poles inside
-            push!(poles, pt)
-            push!(w_poles, W)
-        else                                              # zero count: near-miss or pole-zero pair
-            push!(filtered, pt)
-            push!(w_filtered, W)
-            :spurious in warning_flags || push!(warning_flags, :spurious)
         end
     end
-
-    Q_root = isempty(valid_roots) ? ComplexF64(NaN, NaN) : valid_roots[argmax(imag.(valid_roots))]
-    isnan(real(Q_root)) && push!(warning_flags, :no_root)
-    omega_Hz = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
-    gamma_Hz = isnan(imag(Q_root)) ? 0.0 : imag(Q_root) / tauk
-
-    return GrowthRateResult(Q_root, omega_Hz, gamma_Hz,
-        ComplexF64(NaN, NaN), 0.0, 0.0,
-        warning_flags,
-        valid_roots, poles, filtered,
-        re_paths, im_paths, pole_threshold,
-        :winding, w_valid, w_poles, w_filtered)
+    n * zero_winding >= 1 && return (:root, W, r)
+    n * zero_winding <= -1 && return (:pole, W, r)
+    return (:none, W, r)
 end
 
 # Regular-grid path: extract contours via Contour.jl, compute im_re_vals by
