@@ -20,7 +20,7 @@ import .GGJ: solve_ray, pick_smax, delta_convergence, solution_profile, asymptot
 
 import .SLAYER: SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 import .SLAYER: riccati_del_s, slayer_layer_thickness, LayerWidths
-import .SLAYER: surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs
+import .SLAYER: surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs, toroidal_dgeo, toroidal_kpar
 
 """
     model_name(model) -> String
@@ -37,6 +37,6 @@ export solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_pro
 
 export SLAYER, SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 export riccati_del_s, slayer_layer_thickness, LayerWidths
-export surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs
+export surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs, toroidal_dgeo, toroidal_kpar
 
 end # module InnerLayer

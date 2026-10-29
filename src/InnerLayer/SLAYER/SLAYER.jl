@@ -51,8 +51,10 @@ a dispersion `solve_inner` path.
     `:chi_perp_e`, `:chi_perp_i`, `:P_phi`, `:c_beta` or `:tau_E`; see [`slayer_parameters`](@ref).
   - `D_c_type` - Critical-Δ offset: `:none` (default), `:lar`, `:fitzpatrick` or `:toroidal`
     (χ_‖-matching formulas of Connor, Ham, Hastie & Liu 2015).
-  - `D_R`, `D_geo` - Critical-Δ inputs; `nothing` (default) derives `D_R = E + F + H²` per surface
-    from the equilibrium, and `D_geo` is required only by `:toroidal`. An explicit `0.0` disables the offset.
+  - `D_R`, `D_geo` - Critical-Δ inputs; `nothing` (default) derives them per surface from the equilibrium:
+    `D_R = E + F + H²`, and `D_geo` the Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s`
+    reference (consumed only by `:toroidal`, which also takes its parallel wavenumber from the equilibrium,
+    `toroidal_kpar`). An explicit `D_R = 0.0` disables the offset for every `D_c_type`; `D_geo = 0.0` only for `:toroidal`.
   - `theta_sample` - Poloidal angle (normalized to [0, 1)) at which the minor radius is sampled; 0 is
     the outboard midplane.
 """
@@ -83,7 +85,8 @@ include("LayerInputs.jl")
 export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear
 export riccati_del_s, slayer_layer_thickness, slayer_algebraic_widths, LayerWidths
-export surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs, surface_resistivity, layer_resistivity
+export surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs, surface_resistivity, layer_resistivity,
+    toroidal_dgeo, toroidal_kpar
 export NeoResistivityModel, SpitzerModel, SpitzerHarmModel, SauterNeoModel, RedlNeoModel
 
 end # module SLAYER
