@@ -45,6 +45,12 @@
             SLAYERControl(; msing_max=0))
         @test_throws ArgumentError Runner.validate(
             SLAYERControl(; nre=1))
+        @test c.root_classification === :threshold
+        @test_throws ArgumentError Runner.validate(
+            SLAYERControl(; root_classification=:bogus))
+        @test slayer_control_from_toml(Dict{String,Any}("root_classification" => "winding")).root_classification === :winding
+        @test slayer_control_from_toml(Dict{String,Any}("growth_rate_filter" =>
+            Dict{String,Any}("root_classification" => "winding"))).root_classification === :winding
     end
 
     @testset "slayer_control_from_toml: nested sections flatten" begin
@@ -398,10 +404,76 @@
                 # Ragged diagnostics use flat+offsets encoding
                 @test haskey(g["Diagnostics/ValidRoots"], "flat")
                 @test haskey(g["Diagnostics/ValidRoots"], "offsets")
+                @test !haskey(g["Diagnostics"], "ValidRootsWinding")    # threshold mode
 
                 # Scan group present (store_scan=true)
                 @test haskey(g, "Scan/Surface_1")
                 @test read(g["Scan/Surface_1/kind"]) == "brute_force"
+            end
+        end
+    end
+
+    @testset "root_classification = :winding: uncoupled + coupled, HDF5" begin
+        p1 = _mk_params(; rs=0.5, lu=1.0e7, tauk=1.0e-4, m=2, ising=1)
+        p2 = _mk_params(; rs=0.6, lu=2.0e7, tauk=1.2e-4, m=3, ising=2)
+        model = SLAYERModel(; variant=:fitzpatrick)
+        # Diagonal Δ' placing surface 1's zero at Q1 and surface 2's at Q2 (each
+        # in its own normalization), so the coupled determinant has two
+        # distinct zeros. Both points are off the scan nodes and away from Q = 0.
+        Q1, Q2 = -0.1213 + 0.0537im, 0.1517 + 0.1029im
+        Δ1 = InnerLayer.solve_inner(model, p1, Q1).tearing * p1.lu^(1 / 3)
+        Δ2 = InnerLayer.solve_inner(model, p2, Q2).tearing * p2.lu^(1 / 3)
+        dp = ComplexF64[Δ1 0.0; 0.0 Δ2]
+        for mode in (:uncoupled, :coupled)
+            ctrl(cls) = SLAYERControl(; enabled=true, scan_mode=:brute_force, coupling_mode=mode,
+                Q_re_range=(-0.5, 0.5), Q_im_range=(-0.3, 0.3), nre=40, nim=40,
+                root_classification=cls, pole_threshold_adaptive=true)   # adaptive: threshold-mode reference
+            r = run_slayer_from_inputs(model, [p1, p2], dp, ctrl(:winding);
+                rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
+            ref = run_slayer_from_inputs(model, [p1, p2], dp, ctrl(:threshold))
+            exts = mode === :coupled ? [r.coupled_extraction] : r.per_surface_extraction
+            @test all(gr -> gr.classification === :winding, exts)
+            @test all(gr -> all(w -> w ≈ -1, gr.valid_roots_winding), exts)
+            if mode === :uncoupled
+                # Polished. The SLAYER residual is only smooth to |r| ~ 1e-2 within
+                # 1e-4 of these zeros, which bounds any polish; the grid step is 0.026.
+                @test abs(r.Q_root[1] - Q1) < 1e-3
+                @test abs(r.Q_root[2] - Q2) < 1e-3
+                @test maximum(abs.(r.Q_root .- ref.Q_root)) < 1e-3
+            else
+                # zeros at Q1 and Q2·τ_k1/τ_k2 in the reference normalization
+                # (surface k sees Q·τ_kk/τ_k1); the least stable is reported,
+                # unpolished since the coupled path does not polish
+                @test length(r.coupled_extraction.valid_roots) == 2
+                @test abs(r.Q_root[1] - Q2 * p1.tauk / p2.tauk) < 2e-2    # grid-resolution limited
+                @test r.Q_root == ref.Q_root
+            end
+            if mode === :coupled
+                # A Hermitian off-diagonal coupling moves the zeros off the diagonal entries' own; both classifications must
+                # still agree on the reported root, and every winding root counts −1.
+                dpc = ComplexF64[Δ1 0.3*sqrt(abs(Δ1 * Δ2)); 0.3*sqrt(abs(Δ1 * Δ2)) Δ2]
+                rc = run_slayer_from_inputs(model, [p1, p2], dpc, ctrl(:winding); rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0])
+                refc = run_slayer_from_inputs(model, [p1, p2], dpc, ctrl(:threshold))
+                @test !isempty(rc.coupled_extraction.valid_roots)
+                @test all(w -> w ≈ -1, rc.coupled_extraction.valid_roots_winding)
+                @test rc.Q_root == refc.Q_root
+            end
+            mktemp() do path, io
+                close(io)
+                h5open(path, "w") do f
+                    write_slayer_hdf5!(f, r)
+                end
+                h5open(path, "r") do f
+                    viol = _collect_metadata_violations(f)
+                    isempty(viol) || @error "metadata contract violations in Tearing/" viol
+                    @test isempty(viol)
+                    g = f["Tearing/Diagnostics"]
+                    for k in ("ValidRootsWinding", "PolesWinding", "FilteredRootsWinding")
+                        @test haskey(g, k)
+                    end
+                    @test read(g["ValidRootsWinding/offsets"]) == read(g["ValidRoots/offsets"])
+                    @test all(w -> w ≈ -1, read(g["ValidRootsWinding/flat"]))
+                end
             end
         end
     end
