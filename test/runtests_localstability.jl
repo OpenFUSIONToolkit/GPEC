@@ -81,9 +81,10 @@ using TOML
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir
     end
-    _h5_local_stability(dir) = h5open(joinpath(dir, "gpec.h5"), "r") do f
-        Dict(k => read(f, "LocalStability/$k") for k in keys(f["LocalStability"]))
-    end
+    _h5_local_stability(dir) =
+        h5open(joinpath(dir, "gpec.h5"), "r") do f
+            Dict(k => read(f, "LocalStability/$k") for k in keys(f["LocalStability"]))
+        end
     quiet_section = Dict{String,Any}("LocalStability" => Dict{String,Any}("verbose" => false))
 
     @testset "deck section and solve give identical results" begin
