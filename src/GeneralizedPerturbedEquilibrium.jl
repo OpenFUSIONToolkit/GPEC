@@ -121,10 +121,9 @@ end
 
 Build the pipeline inputs from a working directory containing `gpec.toml`. Returns the
 parsed `inputs` dict, the `EquilibriumConfig`, and the `additional_input` consumed by
-`PlasmaEquilibrium` — an analytic `*Config` for
-sol/lar/tj equilibria (parameters from the embedded TOML section), the `dd` data dictionary
-for IMAS, or `nothing` for file-based equilibria (efit, chease) that `PlasmaEquilibrium`
-reads from disk.
+`PlasmaEquilibrium` — the analytic `*Config` a `[Solovev]`, `[LargeAspectRatio]` or
+`[TJAnalytic]` section states, the `dd` data dictionary for IMAS, or `nothing` for file-based
+equilibria (efit, chease) that `PlasmaEquilibrium` reads from disk.
 """
 function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
@@ -132,15 +131,8 @@ function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothi
     _stop_on_deprecated_deck_keys(inputs)
     eq_config = equilibrium_config(inputs, path)
 
-    # An equilibrium is analytic (sol/lar/tj, parameters from its embedded section),
-    # IMAS-fed (via the dd kwarg), or read from a file (additional_input = nothing).
-    additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
-        build_analytic_config(eq_config.eq_type, inputs)
-    elseif eq_config.eq_type == "imas"
-        dd
-    else
-        nothing
-    end
+    # An equilibrium is IMAS-fed (via the dd kwarg), analytic (stated by its section), or read from a file (nothing).
+    additional_input = eq_config.eq_type == "imas" ? dd : analytic_config(inputs)
 
     return inputs, eq_config, additional_input
 end

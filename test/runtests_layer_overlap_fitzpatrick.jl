@@ -153,7 +153,7 @@ end
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
     equil = Equilibrium.PlasmaEquilibrium(
         GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dir_path),
-        Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+        GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
     _fresh() = (i = ForceFreeStatesInternal(); i.nlow = 1; i.nhigh = 1; i)
     ctrl = ForceFreeStatesControl(; truncate_at_rational_offset=false, qhigh=1e3)
@@ -325,6 +325,6 @@ end
     sol_dir = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     sol_inputs = TOML.parsefile(joinpath(sol_dir, "gpec.toml"))
     solovev = Equilibrium.PlasmaEquilibrium(
-        GeneralizedPerturbedEquilibrium.equilibrium_config(sol_inputs, sol_dir), Equilibrium.SolovevConfig(sol_inputs["SOL_INPUT"]))
+        GeneralizedPerturbedEquilibrium.equilibrium_config(sol_inputs, sol_dir), GeneralizedPerturbedEquilibrium.analytic_config(sol_inputs))
     @test separatrix_q_law(solovev) === nothing
 end

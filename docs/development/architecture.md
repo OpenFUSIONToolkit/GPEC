@@ -30,8 +30,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
      - `chease`, `chease2` - CHEASE equilibrium code formats
-     - `lar` - Large Aspect Ratio analytical model
-     - `sol` - Solovev analytical equilibrium
+     - analytic models, selected by their deck section rather than `eq_type`: `[Solovev]`,
+       `[LargeAspectRatio]`, `[TJAnalytic]`
    - Key files, by pipeline stage:
      - `Config.jl` - `EquilibriumConfig`, `EquilibriumParameters`
      - `PlasmaEquilibrium.jl` - The result type and its profile and geometry splines

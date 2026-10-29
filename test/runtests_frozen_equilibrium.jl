@@ -105,8 +105,8 @@ using GeneralizedPerturbedEquilibrium
         @test spectra[2] ≈ spectra[1] rtol = 1e-12
         @test rc.C * spectra[2] ≈ rc.C * spectra[1] rtol = 1e-12
         analytic_inputs = deepcopy(inputs)
-        analytic_inputs["Equilibrium"]["eq_type"] = "sol"
-        analytic_inputs["SOL_INPUT"] = Dict("elongation" => 1.8)
+        delete!(analytic_inputs["Equilibrium"], "eq_type")
+        analytic_inputs["Solovev"] = Dict("elongation" => 1.8)
         h5open(path, "r+") do f
             delete_object(f, "Input/gpec_toml_raw")
             f["Input/gpec_toml_raw"] = sprint(io -> TOML.print(io, analytic_inputs))

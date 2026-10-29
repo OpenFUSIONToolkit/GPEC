@@ -12,7 +12,7 @@
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
     eq_cfg = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dir_path)
-    sol_cfg = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
+    sol_cfg = GeneralizedPerturbedEquilibrium.analytic_config(inputs)
     equil = Equilibrium.PlasmaEquilibrium(eq_cfg, sol_cfg)
 
     # Synthetic profiles (simple linear-in-ψ temperature decrease)

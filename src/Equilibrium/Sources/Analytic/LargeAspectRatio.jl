@@ -1,7 +1,7 @@
 """
     LargeAspectRatioConfig(...)
 
-A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equilibrium model.
+A struct holding parameters for the Large Aspect Ratio (LAR) plasma equilibrium model.
 
 ## Fields:
 
@@ -16,7 +16,7 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
   - `ma`: The number of grid points in the radial direction.
   - `zeroth`: If set to true, it neglects the Shafranov shift
 """
-@kwdef mutable struct LargeAspectRatioConfig <: AnalyticEquilibriumConfig
+@kwdef struct LargeAspectRatioConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0
     a::Float64 = 1.0
     beta0::Float64 = 1e-3
@@ -29,13 +29,6 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     mtheta::Int = 128
     ma::Int = 128
     zeroth::Bool = false
-end
-
-"""
-Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table.
-"""
-function LargeAspectRatioConfig(input_dict::Dict{String,Any})
-    return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
 end
 
 """
@@ -147,13 +140,16 @@ Solves the LAR (Large Aspect Ratio) plasma equilibrium ODE system using analytic
 defined by `lar_input`, and returns the full solution table including derived quantities.
 
 ## Arguments:
-- `lar_input`: A `LargeAspectRatioConfig` object containing profile and geometric parameters.
+- `lar_config`: A `LargeAspectRatioConfig` object containing profile and geometric parameters.
 
 ## Returns:
  - working on it not yet implemented
 """
 
-function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConfig)
+function lar_run(equil_input::EquilibriumConfig, lar_config::LargeAspectRatioConfig)
+    # The profile ODEs need a pressure exponent above 1.
+    fields = (f => getfield(lar_config, f) for f in fieldnames(LargeAspectRatioConfig))
+    lar_input = LargeAspectRatioConfig(; fields..., p_pres=max(lar_config.p_pres, 1.001))
     rmin = 1e-4
     lar_a = lar_input.a
     lar_r0 = lar_input.r0
@@ -162,7 +158,6 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     sigma_type = lar_input.sigma_type
 
     p00 = beta0 / 2.0
-    lar_input.p_pres = max(lar_input.p_pres, 1.001)
 
     sigma0 = 2.0 / (q0 * lar_r0)
 
@@ -266,6 +261,6 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)
 
     # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0.
-    # Analytic: ingest=nothing — replay regenerates from the [LAR_INPUT] TOML section.
+    # Analytic: ingest=nothing — replay regenerates from the [LargeAspectRatio] deck section.
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, lar_r0, 0.0, psio, nothing)
 end

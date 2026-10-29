@@ -1,12 +1,11 @@
 # Solovev analytical equilibrium — 3D (toroidally resolved) n=1 ideal stability.
 # Same near-marginal Solovev plasma as Solovev_ideal_example, with the vacuum response
-# evaluated on a toroidal grid (nzvac > 1). Equilibrium is generated from the embedded [SOL_INPUT] section.
+# evaluated on a toroidal grid (nzvac > 1). Equilibrium is generated from the embedded [Solovev] section.
 
 [Run]
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -67,8 +66,8 @@ equal_arc_wall = false                  # Equal arc length distribution of nodes
 # forcing_data_file = "forcing.dat"      # Manual mode table (n, m, amplitude_real, amplitude_imag)
 # forcing_data_format = "ascii"          # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 # compute_singular_coupling = true       # Compute singular layer coupling metrics
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

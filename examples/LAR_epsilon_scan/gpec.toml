@@ -2,16 +2,15 @@
 #
 # The TJ-analytic equilibrium follows the analytic profile family of R. Fitzpatrick's
 # TJ code (https://github.com/rfitzp/TJ): same f₁ / pressure / shape-ODE parameterization,
-# fed through GPEC's own pipeline. run_scan.jl overrides eq_type to "tj_analytic_direct"
+# fed through GPEC's own pipeline. run_scan.jl sets [TJAnalytic] solver = "direct"
 # (direct-GS path, required to capture the ideal external-kink pole δW_t → 0 as ε → ε_crit)
-# and varies only TJ_ANALYTIC_INPUT.lar_r0 = lar_a / ε per point, writing a fresh gpec.toml
-# into each tempdir. Every equilibrium parameter is embedded in [TJ_ANALYTIC_INPUT] below.
+# and varies only [TJAnalytic] r0 = a / ε per point, writing a fresh gpec.toml
+# into each tempdir. Every equilibrium parameter is embedded in [TJAnalytic] below.
 
 [Run]
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type   = "tj_analytic"      # TJ-analytic model (inverse pipeline; overridden to "tj_analytic_direct" by run_scan.jl)
 jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed" # Radial grid packing type
 psilow    = 0.01               # Lower limit of normalized poloidal flux
@@ -20,9 +19,9 @@ mpsi      = 128                # Number of radial grid intervals (0 = two-pass a
 mtheta    = 512                # Number of poloidal grid points
 
 # TJ-analytic equilibrium parameters (cf. R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ).
-# All parameters held FIXED except lar_r0, which run_scan.jl overrides as lar_r0 = lar_a / ε;
-# lar_a stays fixed at 1 m so each scan point is a self-similar rescaling of the geometry.
-[TJ_ANALYTIC_INPUT]
+# All parameters held FIXED except r0, which run_scan.jl overrides as r0 = a / ε;
+# a stays fixed at 1 m so each scan point is a self-similar rescaling of the geometry.
+[TJAnalytic]
 r0               = 5.0         # Major radius R₀ [m] (baseline ε = 0.2; OVERRIDDEN per scan point by run_scan.jl)
 a                = 1.0         # Minor radius a [m] (plasma half-width at the midplane; fixed across the scan)
 q0               = 1.5         # On-axis safety factor q(r=0)

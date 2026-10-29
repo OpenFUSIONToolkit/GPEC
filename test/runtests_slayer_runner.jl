@@ -133,7 +133,7 @@
             deck_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(deck_path)
             merge!(inputs["Equilibrium"], Dict("mpsi" => 32, "mtheta" => 64))
-            merge!(inputs["TJ_ANALYTIC_INPUT"], Dict("ma" => 32, "mtheta" => 32))
+            merge!(inputs["TJAnalytic"], Dict("ma" => 32, "mtheta" => 32))
             merge!(inputs["ForceFreeStates"], Dict("delta_mlow" => 2, "delta_mhigh" => 2, "mtheta_vacuum" => 64))
             inputs["Galerkin"]["nx"] = 32
             open(io -> TOML.print(io, inputs), deck_path, "w")

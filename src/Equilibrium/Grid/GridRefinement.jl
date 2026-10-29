@@ -186,11 +186,11 @@ const PASS1_INTERVALS = 1024
 """
     wants_two_pass(config::EquilibriumConfig) -> Bool
 
-True when the config requests the automatic two-pass grid: `grid_type = "auto"` (or its
-legacy alias `"log_asymptotic"`) with `mpsi = 0` and a positive `psi_accuracy`.
+True when the config requests the automatic two-pass grid: `grid_type = "auto"` with `mpsi = 0`
+and a positive `psi_accuracy`.
 """
 wants_two_pass(config::EquilibriumConfig) =
-    config.grid_type in ("auto", "log_asymptotic") && config.mpsi == 0 && config.psi_accuracy > 0
+    config.grid_type == "auto" && config.mpsi == 0 && config.psi_accuracy > 0
 
 """
     _validate_psi_nodes(psi_nodes, psilow, psihigh) -> Vector{Float64}

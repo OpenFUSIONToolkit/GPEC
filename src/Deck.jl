@@ -66,7 +66,10 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "lnLambda_form" => "moved to [Equilibrium]",
         "bt" => "removed; B_T comes from the equilibrium's F",
         "profile_file" => _KINETIC_FILE_HOME, "profile_group" => _KINETIC_FILE_HOME))
-const _RETIRED_SECTIONS = Dict("DEBUG" => "[DEBUG] is retired: output_benchmark_data was never read, and gal_basis_output is [Galerkin] basis_output")
+const _ANALYTIC_HOME = "; an analytic deck sets no [Equilibrium] eq_type"
+const _RETIRED_SECTIONS = Dict("DEBUG" => "[DEBUG] is retired: output_benchmark_data was never read, and gal_basis_output is [Galerkin] basis_output",
+    "SOL_INPUT" => "[SOL_INPUT] is now [Solovev]" * _ANALYTIC_HOME, "LAR_INPUT" => "[LAR_INPUT] is now [LargeAspectRatio]" * _ANALYTIC_HOME,
+    "TJ_ANALYTIC_INPUT" => "[TJ_ANALYTIC_INPUT] is now [TJAnalytic], whose solver = \"direct\" replaces eq_type = \"tj_analytic_direct\"" * _ANALYTIC_HOME)
 
 # Every section a deck may hold, besides the analytic-equilibrium sections.
 const _DECK_SECTIONS = ("Run", "Equilibrium", "Wall", "LocalStability", "Ballooning", "ForceFreeStates", "Forward", "Riccati",
@@ -173,18 +176,49 @@ function run_settings(inputs::AbstractDict, path::AbstractString)
     return (; output_file=isabspath(file) ? file : normpath(joinpath(path, file)), verbose=get(kwargs, :verbose, false))
 end
 
+# The eq_type => ANALYTIC_EQ row of the one analytic-equilibrium section a deck holds, `nothing` when it holds none.
+function _analytic_row(inputs::AbstractDict)
+    rows = [row for row in Equilibrium.ANALYTIC_EQ if haskey(inputs, row.second.section)]
+    length(rows) > 1 && error("gpec.toml holds more than one analytic equilibrium: " * join(sort!(["[$(row.second.section)]" for row in rows]), ", "))
+    return isempty(rows) ? nothing : only(rows)
+end
+
+"""
+    analytic_config(inputs) -> Union{Nothing,Equilibrium.AnalyticEquilibriumConfig}
+
+The analytic equilibrium a deck's `[Solovev]`, `[LargeAspectRatio]` or `[TJAnalytic]` section
+states, `nothing` when the deck holds none.
+"""
+function analytic_config(inputs::AbstractDict)
+    row = _analytic_row(inputs)
+    row === nothing && return nothing
+    spec = row.second
+    return spec.config_type(; section_keywords(inputs[spec.section], spec.section, _struct_fields(spec.config_type))...)
+end
+
 """
     equilibrium_config(inputs, path) -> Equilibrium.EquilibriumConfig
 
 The `[Equilibrium]` section as an `EquilibriumConfig`, its file paths resolved against the deck
-directory `path`. `eq_type` is required.
+directory `path`. An analytic-equilibrium section implies `eq_type`; otherwise it is required.
 """
 function equilibrium_config(inputs::AbstractDict, path::AbstractString)
     table = get(inputs, "Equilibrium", nothing)
     table === nothing && error("No [Equilibrium] section in gpec.toml")
-    haskey(table, "eq_type") || error("Missing required key in [Equilibrium]: eq_type")
+    row = _analytic_row(inputs)
+    eq_type = get(table, "eq_type", nothing)
+    if row !== nothing
+        eq_type === nothing || error("[Equilibrium] sets eq_type, but the [$(row.second.section)] section already selects the equilibrium; remove eq_type")
+    elseif eq_type === nothing
+        error("Missing required key in [Equilibrium]: eq_type")
+    elseif haskey(Equilibrium.ANALYTIC_EQ, eq_type)
+        error("[Equilibrium] eq_type = \"$eq_type\" is not a deck value: state the analytic equilibrium as a " *
+              "[$(Equilibrium.ANALYTIC_EQ[eq_type].section)] section and remove eq_type")
+    end
     fields = _struct_fields(Equilibrium.EquilibriumConfig, (:power_bp, :power_b, :power_r, :power_rc))
-    return Equilibrium.EquilibriumConfig(; section_keywords(_deck_paths(table, path, ("eq_filename", "kinetic_file")), "Equilibrium", fields)...)
+    kwargs = section_keywords(_deck_paths(table, path, ("eq_filename", "kinetic_file")), "Equilibrium", fields)
+    row === nothing || (kwargs[:eq_type] = row.first)
+    return Equilibrium.EquilibriumConfig(; kwargs...)
 end
 
 """

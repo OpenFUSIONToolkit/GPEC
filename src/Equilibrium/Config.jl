@@ -1,7 +1,3 @@
-function symbolize_keys(dict::Dict{String,Any})
-    return Dict(Symbol(k) => v for (k, v) in dict)
-end
-
 """
     IonSpecies(; z, m, fraction=NaN, density="")
 
@@ -30,7 +26,7 @@ specified in the input.
 
 ## Fields
 
-  - `eq_type::String` - Type of equilibrium file ("efit", "solovev", "lar", etc.)
+  - `eq_type::String` - Type of equilibrium file ("efit", "chease", "ifile", "imas", ...); an analytic config implies its own
   - `eq_filename::String` - Path to equilibrium input file
   - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "custom")
   - `power_bp::Int` - Poloidal field power exponent for Jacobian (internal, derived from `jac_type`; not a deck key)
@@ -46,7 +42,7 @@ specified in the input.
   - `grid_type::String` - Grid type for flux surface discretization ("auto" — two-pass measured-curvature
     refinement when mpsi=0, three-region log layout when mpsi>0; "core_edge_packed" (sin² spacing, dense at axis and edge), "pow1", "uniform";
     inverse equilibria also "rho" (uniform in √ψ from psilow to psihigh) and "original" (the input
-    file's own ψ nodes between psilow and psihigh; ignores mpsi); "log_asymptotic" is a legacy alias for "auto")
+    file's own ψ nodes between psilow and psihigh; ignores mpsi))
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Requested upper limit of normalized flux coordinate; the value the
     equilibrium is actually formed on is `EquilibriumParameters.psihigh_resolved`.

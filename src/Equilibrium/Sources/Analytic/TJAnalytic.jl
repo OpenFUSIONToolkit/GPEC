@@ -16,11 +16,12 @@ and edge safety factors. The q profile is determined by:
 
 where ν = qa/q0 is the current peaking parameter, q0 is the axis q, and qa
 is the edge q. All lengths are normalized to R₀, fields to B₀. The pressure
-profile is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`.
+profile is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`. `solver` picks the pipeline: `:inverse`
+feeds the flux-surface geometry to the inverse solver, `:direct` builds ψ(R, Z) for the direct solver.
 
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-@kwdef mutable struct TJAnalyticConfig <: AnalyticEquilibriumConfig
+@kwdef struct TJAnalyticConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0         # Major radius R₀ [m]
     a::Float64 = 1.0           # Minor radius a [m] (ε = a/R₀)
     q0::Float64 = 1.5          # On-axis safety factor
@@ -31,13 +32,7 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     ma::Int = 128              # Radial grid points
     mtheta::Int = 128          # Poloidal grid points
     zeroth::Bool = false       # If true, suppress Shafranov shift
-end
-
-"""
-Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table.
-"""
-function TJAnalyticConfig(input_dict::Dict{String,Any})
-    return TJAnalyticConfig(; symbolize_keys(input_dict)...)
+    solver::Symbol = :inverse  # Equilibrium pipeline: :inverse or :direct
 end
 
 """
@@ -80,7 +75,7 @@ end
 """
 Internal parameter bundle for the TJ-analytic shape ODE (ψ, g₂, H₁, H₁', f₃) —
 GPEC adaptation of the analytic shape ODE used in R. Fitzpatrick's TJ code
-(https://github.com/rfitzp/TJ).  Built once per `tj_analytic_run` /
+(https://github.com/rfitzp/TJ).  Built once per `tj_analytic_run_inverse` /
 `tj_analytic_run_direct` call so both pipelines share identical numerics.
 
 Fields:
@@ -180,7 +175,7 @@ end
 Integrate the TJ-analytic shape ODE for the given ν.  Pass `saveat` to collect
 output on a prescribed dense grid (used by `tj_analytic_run_direct` so the
 downstream Hₙ / ψ splines sit on uniform nodes); leave it `nothing` for
-the default adaptive save pattern used by `tj_analytic_run`. `reltol` and `abstol` go to the
+the default adaptive save pattern used by `tj_analytic_run_inverse`. `reltol` and `abstol` go to the
 Vern9 solve; `abstol` defaults to `equil_abstol(reltol)`.
 """
 function tj_analytic_shape_solve(p::TJAnalyticShapeParams, nu::Float64;
@@ -231,6 +226,18 @@ end
 """
     tj_analytic_run(equil_input, tj_input)
 
+Solve the TJ-analytic equilibrium with the pipeline `tj_input.solver` names, `:inverse`
+([`tj_analytic_run_inverse`](@ref)) or `:direct` ([`tj_analytic_run_direct`](@ref)).
+"""
+function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
+    tj.solver === :inverse && return tj_analytic_run_inverse(equil_input, tj)
+    tj.solver === :direct && return tj_analytic_run_direct(equil_input, tj)
+    return error("TJAnalytic solver = \"$(tj.solver)\" is not one of \"inverse\", \"direct\"")
+end
+
+"""
+    tj_analytic_run_inverse(equil_input, tj_input)
+
 Construct a cylindrical tokamak equilibrium using the TJ-analytic
 model — GPEC's adaptation of the analytic-profile family used in
 R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).
@@ -263,7 +270,7 @@ included; they are zero in the TJ-analytic benchmark scans.
 
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
+function tj_analytic_run_inverse(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     a, R0 = tj.a, tj.r0
     qc, mu = tj.q0, max(tj.pressure_peaking, 1.001)
     pc, B0 = tj.p0, tj.B0
@@ -362,7 +369,7 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; itp_2d_opts...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)
 
-    # Analytic: ingest=nothing — replay regenerates from the [TJ_ANALYTIC_INPUT] TOML section.
+    # Analytic: ingest=nothing — replay regenerates from the [TJAnalytic] deck section.
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, R0, 0.0, psio, nothing)
 end
 
@@ -577,7 +584,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     rmin_grid, rmax_grid = extrema(psi_in_xs)
     zmin_grid, zmax_grid = extrema(psi_in_ys)
 
-    # Analytic: ingest=nothing — replay regenerates from the [TJ_ANALYTIC_INPUT] TOML section.
+    # Analytic: ingest=nothing — replay regenerates from the [TJAnalytic] deck section.
     return DirectRunInput(equil_input, sq_in, psi_in, psi_in_xs, psi_in_ys,
         rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1, 1, nothing)
 end

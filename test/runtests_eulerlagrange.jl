@@ -99,7 +99,7 @@ end
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
-            GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
         mpert = 2
         intr = F.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
@@ -451,8 +451,8 @@ end
         function axis_state(psilow; kwargs...)
             eq_inputs = copy(inputs["Equilibrium"])
             eq_inputs["psilow"] = psilow
-            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" => eq_inputs), ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => eq_inputs)), ex)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.analytic_config(inputs))
             deck = deepcopy(inputs)
             merge!(deck["ForceFreeStates"], Dict{String,Any}(String(k) => v for (k, v) in kwargs))
             ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(deck, ex)
@@ -595,7 +595,7 @@ end
         intr = FFS.ForceFreeStatesInternal()
         ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, example_dir)
         eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, example_dir)
-        sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        sol_cfg = GeneralizedPerturbedEquilibrium.analytic_config(inputs)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, sol_cfg)
         intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
         FFS.sing_lim!(intr, ctrl, equil)

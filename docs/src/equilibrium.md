@@ -57,7 +57,7 @@ tuning is needed.
 
 ## Radial grid packing
 
-With `grid_type = "auto"` and `mpsi = 0` (the defaults; `"log_asymptotic"` is a legacy alias), the radial grid is
+With `grid_type = "auto"` and `mpsi = 0` (the defaults), the radial grid is
 built by a **two-pass measured-curvature refinement** driven by the single accuracy knob
 `psi_accuracy` (τ):
 
@@ -131,9 +131,10 @@ Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 - `PlasmaEquilibrium` — the runtime structure containing spline fields,
 	geometry, profiles, and computed diagnostics (q-profile, separatrix,
 	etc.).
-- `LargeAspectRatioConfig`, `SolovevConfig` — convenience structs to
-	construct analytic/model equilibria when using `eq_type = "lar"` or
-	`eq_type = "sol"`.
+- `SolovevConfig`, `LargeAspectRatioConfig`, `TJAnalyticConfig` — the parameters of the
+	analytic equilibria. A deck states one as a `[Solovev]`, `[LargeAspectRatio]` or
+	`[TJAnalytic]` section, which selects the equilibrium, so it sets no `eq_type`.
+	`[TJAnalytic] solver = "inverse" | "direct"` picks the TJ pipeline.
 
 ## Key functions
 
@@ -174,7 +175,7 @@ Analytic / testing example: construct a large-aspect-ratio model
 using GeneralizedPerturbedEquilibrium
 
 larcfg = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(r0=10.0, a=1.0, beta0=1e-3)
-pe = PlasmaEquilibrium(larcfg)  # eq_type = "lar" is implied by the config type
+pe = PlasmaEquilibrium(larcfg)  # the config type implies the equilibrium kind
 
 println("Built LAR equilibrium with a = ", larcfg.a)
 ```

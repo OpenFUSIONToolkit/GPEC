@@ -145,7 +145,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     if override_psi_nodes !== nothing
         sq_xs = _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
         mpsi = length(sq_xs) - 1
-    elseif grid_type in ("auto", "log_asymptotic")
+    elseif grid_type == "auto"
         if mpsi == 0 && config.psi_accuracy > 0
             # Two-pass auto grid: pass-1 layout sized to resolve the gradient structure so pass 2
             # is well-provisioned; the driver refines and re-forms (GridRefinement.jl, PASS1_INTERVALS).
@@ -193,7 +193,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     # Floor node spacing on the fixed grids (core_edge_packed/pow1 pack the edge below the integration-noise
     # scale at high mpsi); the auto grid floors its refined grid in refined_psi_grid, an override
     # grid arrives already floored, and the original grid keeps the input's nodes.
-    if override_psi_nodes === nothing && !(grid_type in ("auto", "log_asymptotic", "original", "orig"))
+    if override_psi_nodes === nothing && !(grid_type in ("auto", "original", "orig"))
         sq_xs = enforce_min_spacing(sq_xs, MIN_KNOT_SPACING)
         mpsi = length(sq_xs) - 1
     end

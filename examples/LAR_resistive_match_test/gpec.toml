@@ -12,7 +12,6 @@ output_file = "gpec_lar_resistive.h5"# HDF5 file every stage saves into, relativ
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type   = "tj_analytic"      # Type of the input 2D equilibrium (analytic large-aspect-ratio model)
 jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed" # Radial grid packing type (core_edge_packed = sin² spacing, dense at axis and edge)
 psilow    = 0.01               # Lower limit of normalized flux coordinate
@@ -20,7 +19,7 @@ psihigh   = 0.995              # Upper limit of normalized flux coordinate
 mpsi      = 128                # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta    = 512                # Number of poloidal grid points
 
-[TJ_ANALYTIC_INPUT]
+[TJAnalytic]
 r0               = 2.0         # Major radius R0 [m]
 a                = 0.4         # Minor radius a [m] (epsilon = a/R0 = 0.2)
 q0               = 1.5         # On-axis safety factor

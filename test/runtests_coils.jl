@@ -220,7 +220,7 @@ end
 
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
     eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, equil_dir)
-    equil = Equilibrium.PlasmaEquilibrium(eq_config, Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
     mtheta = 48
     nzeta = 16
@@ -557,7 +557,7 @@ end
     equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
     equil = Equilibrium.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, equil_dir),
-        Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+        GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
     # surface_point_and_normal: outboard midplane (poloidal_angle = 0)
     R0, Z0, nR0, nZ0 = ForcingTerms.surface_point_and_normal(equil, 0.0)

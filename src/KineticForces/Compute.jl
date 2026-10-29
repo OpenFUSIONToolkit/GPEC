@@ -399,9 +399,6 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
 
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
-            if n == 0
-                n = ctrl.nn  # fallback to control parameter for single-n
-            end
 
             # Adaptive QuadGK integration over ψ (serial BatchIntegrand)
             result = integrate_psi_quadgk(
@@ -461,7 +458,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
 
         if intr.verbose
             @printf("%-24s%11.3e\n", "Total torque = ", real(total_torque))
-            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(total_torque) / (2 * ctrl.nn))
+            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(total_torque) / (2 * intr.nlow))
             if imag(total_torque) != 0.0
                 @printf("%-24s%11.3e\n", "alpha/s  = ", real(total_torque) / (-1 * imag(total_torque)))
             end

@@ -4,7 +4,6 @@
 # test asserts only finiteness/sign of et[1]. The mode-converged eigenvalue is
 # tracked separately by the solovev_kinetic_nuzero regression case.
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
@@ -58,8 +57,8 @@ renorm_threshold = 1e3        # Column-norm threshold that triggers solution ren
 [KineticForces]
 nutype = "zero"               # Collisionless operator — isolates the real-x-space collisionless energy integral
 
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

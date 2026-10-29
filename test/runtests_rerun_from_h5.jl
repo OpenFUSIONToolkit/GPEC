@@ -338,23 +338,27 @@ end
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
 
-# Drift guard for the analytic-equilibrium registry: `run_input` and the rerun builder both
-# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
-# empty section) would silently break one path. Asserting each entry is well-formed and that
-# build_analytic_config resolves it keeps adding a new analytic kind a one-row change.
-@testset "ANALYTIC_EQ registry is well-formed and drives build_analytic_config" begin
-    Equil = GeneralizedPerturbedEquilibrium.Equilibrium
-    bac = GeneralizedPerturbedEquilibrium.build_analytic_config
+# Drift guard for the analytic-equilibrium registry: `run_input` and the deck parser both
+# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed row would silently break one path.
+@testset "ANALYTIC_EQ registry is well-formed and drives the deck's analytic sections" begin
+    GPEC = GeneralizedPerturbedEquilibrium
+    Equil = GPEC.Equilibrium
     for (eq_type, spec) in Equil.ANALYTIC_EQ
-        @test spec.section isa String && !isempty(spec.section)
-        # config_type must build from a parsed TOML table (the embedded-section path).
-        @test hasmethod(spec.config_type, Tuple{Dict{String,Any}})
-        # run_fn must accept (EquilibriumConfig, <its config type>).
+        # The section is the config type's name without "Config".
+        @test spec.section * "Config" == String(nameof(spec.config_type))
         @test hasmethod(spec.run_fn, Tuple{Equil.EquilibriumConfig,spec.config_type})
-        # build_analytic_config resolves the section to the right config type using defaults.
-        cfg = bac(eq_type, Dict{String,Any}(spec.section => Dict{String,Any}()))
-        @test cfg isa spec.config_type
+        # The section alone selects the equilibrium: its config with defaults, and the implied eq_type.
+        deck = Dict{String,Any}("Equilibrium" => Dict{String,Any}(), spec.section => Dict{String,Any}())
+        @test GPEC.analytic_config(deck) isa spec.config_type
+        @test GPEC.equilibrium_config(deck, ".").eq_type == eq_type
+        @test Equil.analytic_eq_type(spec.config_type()) == eq_type
     end
-    # Unregistered kinds are rejected, not silently mis-built.
-    @test_throws ErrorException bac("not_a_real_kind", Dict{String,Any}())
+    # An analytic deck sets no eq_type, holds one analytic section, and does not name the internal token.
+    stated = Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol"), "Solovev" => Dict{String,Any}())
+    @test_throws ErrorException GPEC.equilibrium_config(stated, ".")
+    @test_throws ErrorException GPEC.equilibrium_config(Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol")), ".")
+    @test_throws ErrorException GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}(), "TJAnalytic" => Dict{String,Any}()))
+    @test_throws ArgumentError GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}("lar_r0" => 1.0)))
+    @test GPEC.analytic_config(Dict{String,Any}("TJAnalytic" => Dict{String,Any}("solver" => "direct"))).solver === :direct
+    @test_throws ErrorException GPEC._stop_on_deprecated_deck_keys(Dict{String,Any}("SOL_INPUT" => Dict{String,Any}()))
 end

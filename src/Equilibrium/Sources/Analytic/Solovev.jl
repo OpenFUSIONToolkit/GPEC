@@ -1,7 +1,7 @@
 """
     SolovevConfig(...)
 
-A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium model.
+A struct holding parameters for the Solev'ev (SOL) plasma equilibrium model.
 
 ## Fields:
 
@@ -16,7 +16,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
   - `b0fac`: scale toroidal field at constant beta (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
   - `f0fac`: scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 """
-@kwdef mutable struct SolovevConfig <: AnalyticEquilibriumConfig
+@kwdef struct SolovevConfig <: AnalyticEquilibriumConfig
     mr::Int = 128      # number of radial grid zones
     mz::Int = 128      # number of axial grid zones
     ma::Int = 128      # number of flux grid zones
@@ -27,13 +27,6 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
     p0fac::Float64 = 1       # scale on-axis pressure (P-> P+P0*p0fac. beta changes. Phi,q constant)
     b0fac::Float64 = 1       # scale toroidal field at constant beta (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
     f0fac::Float64 = 1       # scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
-end
-
-"""
-Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table.
-"""
-function SolovevConfig(input_dict::Dict{String,Any})
-    return SolovevConfig(; symbolize_keys(input_dict)...)
 end
 
 """
@@ -113,6 +106,6 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     @info "Generating Solovev equilibrium: mr=$mr, mz=$mz, ma=$ma, e=$(@sprintf("%.3f", e)), a=$(@sprintf("%.3f", a)), r0=$(@sprintf("%.3f", r0)), q0=$(@sprintf("%.3f", q0))"
 
     # 1 is bt_sign=+1: Solovev has positive Bt by construction (f0 = r0 * b0fac > 0).
-    # Analytic equilibria carry positive field and current; ingest=nothing — replay regenerates from the [SOL_INPUT] TOML section.
+    # Analytic equilibria carry positive field and current; ingest=nothing — replay regenerates from the [Solovev] deck section.
     return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, 1, 1, nothing)
 end

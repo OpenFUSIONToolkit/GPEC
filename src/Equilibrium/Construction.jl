@@ -18,7 +18,7 @@ function run_input(eq_config::EquilibriumConfig, ::Nothing)
     eq_type == "ifile" && return resolve_psihigh!(read_ifile(eq_config))
     if haskey(ANALYTIC_EQ, eq_type)
         spec = ANALYTIC_EQ[eq_type]
-        error("analytic eq_type=\"$eq_type\" needs its $(spec.config_type) as the source (built from the embedded [$(spec.section)] section)")
+        error("analytic eq_type=\"$eq_type\" needs its $(spec.config_type) as the source (a deck states it as a [$(spec.section)] section)")
     end
     eq_type == "imas" && error("eq_type=\"imas\" needs an IMASdd.dd as the source")
     return error("Equilibrium type $(eq_type) is not implemented")
@@ -78,7 +78,7 @@ function PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; overrid
     # Forward the captured ingest so the gpec.h5 writer can snapshot it (nothing for analytic).
     plasma_equilibrium.ingest = eq_input.ingest
     # Analytic configs are still mutable; copy so later edits by the caller cannot change a re-form.
-    source isa AnalyticEquilibriumConfig && (plasma_equilibrium.analytic = deepcopy(source))
+    source isa AnalyticEquilibriumConfig && (plasma_equilibrium.analytic = source)
     plasma_equilibrium.kinetic = kinetic === nothing ? configured_kinetic_profiles(eq_config) : kinetic
 
     equilibrium_global_parameters!(plasma_equilibrium)
@@ -129,22 +129,25 @@ function PlasmaEquilibrium(path::AbstractString; eq_type::String="efit", kwargs.
     return PlasmaEquilibrium(EquilibriumConfig(; eq_type, eq_filename=abspath(path), kwargs...))
 end
 
-# Default analytic eq_type for a config: the first registry kind, in sorted order, that takes it.
-_analytic_eq_type(cfg::AnalyticEquilibriumConfig) = first(k for k in sort!(collect(keys(ANALYTIC_EQ))) if ANALYTIC_EQ[k].config_type === typeof(cfg))
+"""
+    analytic_eq_type(cfg::AnalyticEquilibriumConfig) -> String
+
+The internal `eq_type` token of the `ANALYTIC_EQ` row whose config type `cfg` is.
+"""
+analytic_eq_type(cfg::AnalyticEquilibriumConfig) = only(k for (k, spec) in ANALYTIC_EQ if spec.config_type === typeof(cfg))
 
 """
-    PlasmaEquilibrium(cfg::AnalyticEquilibriumConfig; eq_type=<from ANALYTIC_EQ>, kwargs...) -> PlasmaEquilibrium
+    PlasmaEquilibrium(cfg::AnalyticEquilibriumConfig; kwargs...) -> PlasmaEquilibrium
 
 Solve the analytic equilibrium described by `cfg` and return the processed equilibrium. The
-`eq_type` is implied by the config type; `TJAnalyticConfig` defaults to `tj_analytic` and takes
-`eq_type="tj_analytic_direct"` for the direct solve. `kwargs` are [`EquilibriumConfig`](@ref) fields.
+`eq_type` is implied by the config type. `kwargs` are [`EquilibriumConfig`](@ref) fields.
 
 ```julia
 eq = PlasmaEquilibrium(Equilibrium.SolovevConfig(; elongation=1.5); mpsi=0, psi_accuracy=1e-3)
 ```
 """
-function PlasmaEquilibrium(cfg::AnalyticEquilibriumConfig; eq_type::String=_analytic_eq_type(cfg), kwargs...)
-    return PlasmaEquilibrium(EquilibriumConfig(; eq_type, kwargs...), cfg)
+function PlasmaEquilibrium(cfg::AnalyticEquilibriumConfig; kwargs...)
+    return PlasmaEquilibrium(EquilibriumConfig(; eq_type=analytic_eq_type(cfg), kwargs...), cfg)
 end
 
 """

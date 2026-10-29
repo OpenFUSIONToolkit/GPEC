@@ -415,8 +415,7 @@ function adaptive_grid_params(
 end
 
 """
-    equilibrium_solver_by_inversion(raw_profile; resolution_factor=1.0,
-                                    refine=nothing, β_r=nothing, β_z=nothing)
+    equilibrium_solver_by_inversion(raw_profile; resolution_factor=4.0, override_psi_nodes=nothing)
 
 Driver for contour-tracing equilibrium reconstruction.
 
@@ -424,17 +423,11 @@ Grid parameters (n and β in each direction) are computed adaptively from the bi
 interpolation error bound along the LCFS and an axis constraint. `resolution_factor`
 scales both n values uniformly (higher → more points, same β).
 
-Legacy keyword arguments `refine`, `β_r`, `β_z` override the adaptive values when
-provided (for benchmark sweeps and backward compatibility).
-
 Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 function equilibrium_solver_by_inversion(
     raw_profile::DirectRunInput;
     resolution_factor::Float64=4.0,
-    refine::Union{Nothing,Int}=nothing,
-    β_r::Union{Nothing,Float64}=nothing,
-    β_z::Union{Nothing,Float64}=nothing,
     override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing
 )
     equil_params = raw_profile.config
@@ -459,8 +452,6 @@ function equilibrium_solver_by_inversion(
     # The EFIT nodal ψ values are free (already stored in the spline); a single coarse
     # Contour.jl call at ψ ≈ psihigh gives the plasma bounding box with no extra spline work.
     # A 5% margin on each side ensures small arc curvature outside the box is covered.
-    nw = length(raw_profile.psi_in_xs)
-    nh = length(raw_profile.psi_in_ys)
     ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
     ψ_bbox_target = psio * max(1.0 - psihigh, 1e-3)   # outermost needed surface, ≥ 0.001·psio
     cl_bbox = Ctr.contour(raw_profile.psi_in_xs, raw_profile.psi_in_ys, ψ_coarse, ψ_bbox_target)
@@ -489,19 +480,12 @@ function equilibrium_solver_by_inversion(
     # Compute physics-based (n, β) from LCFS curvature sampling and axis constraint.
     # resolution_factor scales n; β is determined by h_max/h_min curvature ratio alone.
     Δψ = psio * (psihigh - psilow) / mpsi
-    nr_adp, nz_adp, β_r_adp, β_z_adp = adaptive_grid_params(
+    nr_adp, nz_adp, β_r, β_z = adaptive_grid_params(
         raw_profile, ro, zo, r_lo, r_hi, z_lo, z_hi, psilow, Δψ, bbox_curve)
-    β_r_use = β_r !== nothing ? β_r : β_r_adp
-    β_z_use = β_z !== nothing ? β_z : β_z_adp
-    if refine !== nothing
-        nr_fine = max(4, round(Int, refine * nw * (r_hi - r_lo) / (raw_profile.rmax - raw_profile.rmin)))
-        nz_fine = max(4, round(Int, refine * nh * (z_hi - z_lo) / (raw_profile.zmax - raw_profile.zmin)))
-    else
-        nr_fine = max(4, round(Int, nr_adp * resolution_factor))
-        nz_fine = max(4, round(Int, nz_adp * resolution_factor))
-    end
-    r_fine = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r_use)
-    z_grid = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z_use)
+    nr_fine = max(4, round(Int, nr_adp * resolution_factor))
+    nz_fine = max(4, round(Int, nz_adp * resolution_factor))
+    r_fine = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r)
+    z_grid = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z)
 
     iro = clamp(searchsortedfirst(r_fine, ro), 2, length(r_fine))
     izo = clamp(searchsortedfirst(z_grid, zo), 2, length(z_grid))
@@ -514,7 +498,7 @@ function equilibrium_solver_by_inversion(
     n_min_cells = 10
     near_axis_threshold = (n_min_cells * d_max)^2 * max(ψ_RR_abs, ψ_ZZ_abs) / (2 * psio)
 
-    @info "efit_by_inversion: a_low=$(@sprintf("%.1f", a_low*1000)) mm; grid=$(nr_fine)×$(nz_fine) β_r=$(@sprintf("%.2f", β_r_use)) β_z=$(@sprintf("%.2f", β_z_use)) (dR=$(@sprintf("%.2f", dR_axis*1000)) mm dZ=$(@sprintf("%.2f", dZ_axis*1000)) mm); zoom threshold ψ<$(@sprintf("%.4f", near_axis_threshold))"
+    @info "efit_by_inversion: a_low=$(@sprintf("%.1f", a_low*1000)) mm; grid=$(nr_fine)×$(nz_fine) β_r=$(@sprintf("%.2f", β_r)) β_z=$(@sprintf("%.2f", β_z)) (dR=$(@sprintf("%.2f", dR_axis*1000)) mm dZ=$(@sprintf("%.2f", dZ_axis*1000)) mm); zoom threshold ψ<$(@sprintf("%.4f", near_axis_threshold))"
 
     # Parallel grid evaluation: each column (fixed z) is independent.
     # One hint pair per thread (allocated once), reset at the start of each column.

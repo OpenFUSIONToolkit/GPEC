@@ -1,13 +1,12 @@
 # Solovev analytical equilibrium — n=1 only, companion to the multi-n parent run.
 # Runs n=1 in isolation (output euler_n1.h5) to cross-check the combined multi-n result.
-# Equilibrium is generated from the embedded [SOL_INPUT] section.
+# Equilibrium is generated from the embedded [Solovev] section.
 
 [Run]
 output_file = "euler_n1.h5"    # HDF5 file every stage saves into, relative to this deck's directory
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -56,8 +55,8 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

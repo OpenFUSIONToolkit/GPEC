@@ -7,7 +7,7 @@ Sweeps:
   - mpsi ∈ {64, 128, 256}              (all methods)
   - mtheta ∈ {128, 256, 512}            (all methods)
   - ODE reltol ∈ {1e-5, 1e-7, 1e-9}    (efit, efit_arclength)
-  - Contour grid refinement ∈ {2, 4, 8} (efit_by_inversion, via REFINE env var override)
+  - Contour grid resolution_factor ∈ {2, 4, 8} (efit_by_inversion)
 
 Accuracy metric: max roundtrip error over a sparse (ψ, θ) sample grid.
 Performance metric: wall-clock runtime.
@@ -121,13 +121,13 @@ println("ODE reltol scan — NOTE: not yet exposed via config; using default rel
 println("(Add reltol to EquilibriumConfig and threading to enable this scan)")
 println("=" ^ 65)
 
-# ── Contour grid refinement scan (efit_by_inversion only) ─────────────────────
-# The refine factor in equilibrium_solver_by_inversion is a keyword arg.
+# ── Contour grid resolution scan (efit_by_inversion only) ─────────────────────
+# resolution_factor scales the adaptive contour grid of equilibrium_solver_by_inversion.
 # We call it directly here, bypassing the PlasmaEquilibrium constructor.
 println("\n" * "=" ^ 65)
-println("Contour grid refinement scan (efit_by_inversion only, mpsi=128, mtheta=256)")
+println("Contour grid resolution scan (efit_by_inversion only, mpsi=128, mtheta=256)")
 println("=" ^ 65)
-for refine in [2, 4, 8]
+for resolution_factor in [2.0, 4.0, 8.0]
     cfg = make_config(config_path, "efit_by_inversion", 128, 256)
     raw_input = Equilibrium.read_efit(cfg)
     local pe = nothing
@@ -136,7 +136,7 @@ for refine in [2, 4, 8]
     local rt_err = NaN
     try
         t = @elapsed begin
-            pe_raw = Equilibrium.equilibrium_solver_by_inversion(raw_input; refine=refine)
+            pe_raw = Equilibrium.equilibrium_solver_by_inversion(raw_input; resolution_factor)
             pe = pe_raw
             Equilibrium.equilibrium_global_parameters!(pe)
             Equilibrium.equilibrium_qfind!(pe)
@@ -146,10 +146,10 @@ for refine in [2, 4, 8]
         rt_err = roundtrip_error(pe, raw_for_check)
         success = true
     catch e
-        @warn "  refine=$refine FAILED: $e"
+        @warn "  resolution_factor=$resolution_factor FAILED: $e"
     end
-    @printf("  efit_by_inversion refine=%2d  t=%.2fs  rt=%.2e\n", refine, runtime, rt_err)
-    push!(rows, (sweep="refine", method="efit_by_inversion", param=Float64(refine), param2=128.0,
+    @printf("  efit_by_inversion resolution_factor=%3.1f  t=%.2fs  rt=%.2e\n", resolution_factor, runtime, rt_err)
+    push!(rows, (sweep="resolution_factor", method="efit_by_inversion", param=resolution_factor, param2=128.0,
         success=success, runtime=runtime, roundtrip_max=rt_err))
 end
 

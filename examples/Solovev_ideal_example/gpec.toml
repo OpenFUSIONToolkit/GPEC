@@ -1,13 +1,12 @@
 # Solovev analytical equilibrium — n=1 ideal stability + perturbed equilibrium.
 # Near-marginal n=1 external kink stabilized by a close conformal wall (see [Wall] note).
 # Integration-pipeline smoke-test and et[1] regression fixture; the equilibrium is
-# generated analytically from the embedded [SOL_INPUT] section.
+# generated analytically from the embedded [Solovev] section.
 
 [Run]
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -80,8 +79,8 @@ eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 save_interval = 1             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

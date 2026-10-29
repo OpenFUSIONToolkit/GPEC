@@ -13,7 +13,7 @@ using HDF5
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
     equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.equilibrium_config(deck, template),
-        GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
+        GPEC.analytic_config(deck)
     )
     wall = GPEC.Vacuum.parse_wall(get(deck, "Wall", nothing))
 
@@ -113,7 +113,7 @@ using HDF5
         kdeck = TOML.parsefile(joinpath(kin_template, "gpec.toml"))
         kequil = GPEC.Equilibrium.PlasmaEquilibrium(
             GPEC.equilibrium_config(kdeck, kin_template),
-            GPEC.Equilibrium.SolovevConfig(kdeck["SOL_INPUT"])
+            GPEC.analytic_config(kdeck)
         )
         @test kequil.kinetic !== nothing
         kwall = GPEC.Vacuum.parse_wall(get(kdeck, "Wall", nothing))
@@ -443,8 +443,8 @@ using HDF5
             mktempdir() do dir
                 reference = GPEC.main([_stage_deck(dir; eq_overrides=eq_overrides, ffs_overrides=ffs_overrides)]).ffs
                 pass1 = GPEC.Equilibrium.PlasmaEquilibrium(
-                    GPEC.equilibrium_config(Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], eq_overrides)), template),
-                    GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
+                    GPEC.equilibrium_config(merge(deck, Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], eq_overrides))), template),
+                    GPEC.analytic_config(deck)
                 )
                 @test reference.equil.rzphi_xs != pass1.rzphi_xs    # the deck re-formed on a refined grid
 

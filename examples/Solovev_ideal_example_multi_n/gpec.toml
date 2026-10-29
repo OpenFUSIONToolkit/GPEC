@@ -1,13 +1,12 @@
 # Solovev analytical equilibrium — multi-n ideal stability (n = 1 and 2 in one run).
 # Same near-marginal Solovev plasma as Solovev_ideal_example, swept over a toroidal
 # mode-number range. The single_n_1/ and single_n_2/ subdirectories run each n alone
-# for cross-checking. Equilibrium is generated from the embedded [SOL_INPUT] section.
+# for cross-checking. Equilibrium is generated from the embedded [Solovev] section.
 
 [Run]
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -62,8 +61,8 @@ rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rati
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

@@ -2,8 +2,7 @@
 """
     run_scan.jl — TJ-analytic ε (inverse aspect ratio) scan
 
-Uses the TJ-analytic equilibrium model (eq_type="tj_analytic" /
-"tj_analytic_direct").  The TJ-analytic model follows the profile family of
+Uses the TJ-analytic equilibrium model ([TJAnalytic], direct solver).  The TJ-analytic model follows the profile family of
 R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); no geqdsk files
 are needed.
 
@@ -41,10 +40,10 @@ const EPSILONS_TEST = [0.2495, 0.4072, 0.5510]
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "epsilon_scan.h5")
 
-# All baseline parameters (Equilibrium, TJ_ANALYTIC_INPUT, Wall, ForceFreeStates)
+# All baseline parameters (Equilibrium, TJAnalytic, Wall, ForceFreeStates)
 # live in gpec.toml next to this script — there is no side-car TOML file.
 # The scan below reads gpec.toml once and overrides ONLY
-# `TJ_ANALYTIC_INPUT.r0` per scan point as `r0 = a / ε` before
+# `TJAnalytic.r0` per scan point as `r0 = a / ε` before
 # writing the per-point gpec.toml into a tempdir.
 const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 
@@ -55,15 +54,15 @@ const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 function run_single(epsilon::Float64)
     run_dir = mktempdir(; prefix="gpec_tj_analytic_")
     try
-        # Per-point gpec.toml = baseline gpec.toml with TJ_ANALYTIC_INPUT.r0
-        # overridden.  Switch eq_type to "tj_analytic_direct" so ψ(R, Z) is built
+        # Per-point gpec.toml = baseline gpec.toml with TJAnalytic.r0
+        # overridden.  Switch to the direct solver so ψ(R, Z) is built
         # from the TJ-analytic model and processed by the direct-GS
         # pipeline.  Required to capture the ideal external-kink pole (δW_t →
         # 0 as ε → ε_crit); the inverse path bypasses the line-integrated q
         # and shows no such pole.
         config = deepcopy(GPEC_BASE)
-        config["TJ_ANALYTIC_INPUT"]["r0"] = GPEC_BASE["TJ_ANALYTIC_INPUT"]["a"] / epsilon
-        config["Equilibrium"]["eq_type"] = "tj_analytic_direct"
+        config["TJAnalytic"]["r0"] = GPEC_BASE["TJAnalytic"]["a"] / epsilon
+        config["TJAnalytic"]["solver"] = "direct"
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
         GeneralizedPerturbedEquilibrium.main([run_dir])
@@ -108,13 +107,13 @@ function main()
     test_mode = "--test" in ARGS
     epsilons = test_mode ? EPSILONS_TEST : EPSILONS_FULL
 
-    tj = GPEC_BASE["TJ_ANALYTIC_INPUT"]
+    tj = GPEC_BASE["TJAnalytic"]
     @info "TJ-analytic ε scan: $(length(epsilons)) points, B0=$(tj["B0"])T, q0=$(tj["q0"]), qa=$(tj["qa"]), p0=$(tj["p0"])" *
           (test_mode ? " (test mode)" : "")
 
     isfile(OUTPUT_H5) && rm(OUTPUT_H5)
 
-    lar_a = GPEC_BASE["TJ_ANALYTIC_INPUT"]["a"]
+    lar_a = GPEC_BASE["TJAnalytic"]["a"]
     for (i, eps) in enumerate(epsilons)
         @info "[$(i)/$(length(epsilons))] ε=$eps (R0=$(@sprintf("%.3f", lar_a/eps)))"
         result = run_single(eps)

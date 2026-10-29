@@ -345,11 +345,10 @@ This object provides a complete representation of the processed plasma equilibri
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
-    equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
+    equilibria, or `nothing` for analytic ones (regenerated from their deck section on replay)
   - `analytic::Union{Nothing,AnalyticEquilibriumConfig}`: the parameters an analytic kind
-    (`sol`, `lar`, `tj_analytic`, `tj_analytic_direct`) was solved from, so [`reform`](@ref) can
-    re-solve it on a new grid; `nothing` for file-based and IMAS equilibria. A defensive copy, so
-    later edits to the caller's config do not reach it.
+    (`sol`, `lar`, `tj_analytic`) was solved from, so [`reform`](@ref) can re-solve it on a new
+    grid; `nothing` for file-based and IMAS equilibria.
   - `kinetic::Union{Nothing,KineticProfileData}`: the raw kinetic profiles of `config.kinetic_file` (or of
     [`attach_kinetic_profiles!`](@ref)), on the file's own ψ grid; `nothing` when none are attached
 """

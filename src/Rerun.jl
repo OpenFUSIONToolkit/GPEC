@@ -5,25 +5,6 @@
 # Included directly into the GeneralizedPerturbedEquilibrium module, so these functions share
 # its imports (TOML, HDF5, Equilibrium, ForcingTerms, etc.).
 
-# Analytic equilibria carry their parameters in an embedded TOML section rather than an ingest
-# array; replay regenerates them from that section. The eq_type -> section mapping (and which
-# kinds are analytic at all) lives in the `Equilibrium.ANALYTIC_EQ` registry, the single source
-# of truth shared with `Equilibrium.run_input`.
-
-"""
-    build_analytic_config(eq_type, inputs)
-
-Construct the analytic-equilibrium `*Config` (`SolovevConfig` / `LargeAspectRatioConfig` /
-`TJAnalyticConfig`) from the TOML section named in the `Equilibrium.ANALYTIC_EQ` registry.
-Shared by the TOML and rerun input builders so both resolve analytic parameters the same way.
-"""
-function build_analytic_config(eq_type::AbstractString, inputs::Dict)
-    spec = get(Equilibrium.ANALYTIC_EQ, eq_type, nothing)
-    spec === nothing && error("build_analytic_config: $eq_type is not an analytic equilibrium type")
-    haskey(inputs, spec.section) || error("Analytic equilibrium $eq_type requires a [$(spec.section)] section in gpec.toml")
-    return spec.config_type(inputs[spec.section])
-end
-
 """
     read_equilibrium_ingest(in_h5) -> EquilibriumIngest
 
@@ -290,7 +271,7 @@ end
 
 The equilibrium configuration and the input `PlasmaEquilibrium` consumes, rebuilt from a stored
 TOML `inputs` dict and the equilibrium `ingest` read from a `gpec.h5`. Analytic kinds regenerate
-from their TOML section; file-based kinds rebuild splines from the stored ingest. A file-based
+from their deck section; file-based kinds rebuild splines from the stored ingest. A file-based
 run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Stops on
 deprecated equilibrium keys.
 """
@@ -299,10 +280,11 @@ function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir
     # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
     # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))
-    eq_config = equilibrium_config(Dict{String,Any}("Equilibrium" => equil_dict), String(output_dir))
+    eq_config = equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => equil_dict)), String(output_dir))
 
-    additional_input = if haskey(Equilibrium.ANALYTIC_EQ, eq_config.eq_type)
-        build_analytic_config(eq_config.eq_type, inputs)
+    analytic = analytic_config(inputs)
+    additional_input = if analytic !== nothing
+        analytic
     elseif ingest isa Equilibrium.DirectIngest
         Equilibrium.build_direct_from_ingest(eq_config, ingest)
     elseif ingest isa Equilibrium.InverseIngest
@@ -310,8 +292,7 @@ function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir
     else
         error(
             "gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay. " *
-            "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one); a new analytic kind must be " *
-            "registered in Equilibrium.ANALYTIC_EQ."
+            "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one)."
         )
     end
     return eq_config, additional_input
@@ -341,7 +322,7 @@ function equilibrium_from_h5(h5path::AbstractString)
         haskey(f, "Info/psilim") || error("$h5path has no Info/psilim")
         inputs = TOML.parse(read(f, "Input/gpec_toml_raw"))
         _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
-        config = equilibrium_config(Dict{String,Any}("Equilibrium" => merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))), dirname(abspath(h5path)))
+        config = equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => "")))), dirname(abspath(h5path)))
         params = Equilibrium.EquilibriumParameters()
         for field in fieldnames(Equilibrium.EquilibriumParameters)
             field in Utilities.EQUIL_H5_SKIP && continue
@@ -367,9 +348,8 @@ function equilibrium_from_h5(h5path::AbstractString)
         end
         eqfun = Equilibrium._eqfun_from_geometry(profiles, rzphi..., params.ro, params.psio, grid2d, opts2d)
         geometry = Equilibrium.compute_geometry_profiles(xs, ys, rzphi[1], rzphi[2], rzphi[4], params.ro)
-        analytic = haskey(Equilibrium.ANALYTIC_EQ, config.eq_type) ? build_analytic_config(config.eq_type, inputs) : nothing
         equil = Equilibrium.PlasmaEquilibrium(config, params, profiles, geometry, xs, ys, rzphi..., eqfun..., params.ro, params.zo, params.psio,
-            read_equilibrium_ingest(f), analytic, _replay_kinetic_profiles(config))
+            read_equilibrium_ingest(f), analytic_config(inputs), _replay_kinetic_profiles(config))
         return (; equil, inputs, psilim=Float64(read(f, "Info/psilim")))
     end
 end

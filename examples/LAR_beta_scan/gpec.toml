@@ -3,15 +3,14 @@
 # The TJ-analytic equilibrium follows the analytic profile family of R. Fitzpatrick's
 # TJ code (https://github.com/rfitzp/TJ): same f₁ / pressure / shape-ODE parameterization,
 # fed through GPEC's own pipeline. The accompanying run_scan.jl reads this file, overrides
-# only the scan parameter (TJ_ANALYTIC_INPUT.pc) per point, and writes a fresh gpec.toml
-# into each tempdir. Every equilibrium parameter is embedded in [TJ_ANALYTIC_INPUT] below —
+# only the scan parameter ([TJAnalytic] p0) per point, and writes a fresh gpec.toml
+# into each tempdir. Every equilibrium parameter is embedded in [TJAnalytic] below —
 # there is no side-car TOML file.
 
 [Run]
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type   = "tj_analytic"      # TJ-analytic model (inverse pipeline; Fitzpatrick https://github.com/rfitzp/TJ)
 jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed" # Radial grid packing type
 psilow    = 0.01               # Lower limit of normalized poloidal flux
@@ -21,7 +20,7 @@ mtheta    = 512                # Number of poloidal grid points
 
 # TJ-analytic equilibrium parameters (cf. R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ).
 # Geometry is FIXED at ε = a / R₀ = 0.4 / 2.0 = 0.2; run_scan.jl varies only `pc` per point.
-[TJ_ANALYTIC_INPUT]
+[TJAnalytic]
 r0               = 2.0         # Major radius R₀ [m] (centerline radius of the magnetic axis)
 a                = 0.4         # Minor radius a [m] (plasma half-width at the midplane; here ε = 0.2)
 q0               = 1.5         # On-axis safety factor q(r=0)

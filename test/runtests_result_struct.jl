@@ -24,10 +24,10 @@ include("h5_metadata_check.jl")
         for (name, section) in extra_sections
             haskey(inputs, name) ? merge!(inputs[name], section) : (inputs[name] = section)
         end
-        if haskey(inputs, "TJ_ANALYTIC_INPUT")
+        if haskey(inputs, "TJAnalytic")
             # Interface checks need two rational surfaces, not a converged production grid.
             merge!(inputs["Equilibrium"], Dict("mpsi" => 32, "mtheta" => 64))
-            merge!(inputs["TJ_ANALYTIC_INPUT"], Dict("ma" => 32, "mtheta" => 32))
+            merge!(inputs["TJAnalytic"], Dict("ma" => 32, "mtheta" => 32))
             merge!(inputs["ForceFreeStates"], Dict("delta_mlow" => 2, "delta_mhigh" => 2, "mtheta_vacuum" => 64))
             inputs["Galerkin"]["nx"] = 32
         end

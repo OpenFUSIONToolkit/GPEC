@@ -68,8 +68,11 @@ function result_inputs(result::ForceFreeStatesResult, inputs)
         merge!(slayer, _input_fields(cap))
         slayer["variant"] = String(typeof(cap).parameters[1])
     end
-    if result.equil.analytic !== nothing
-        snapshot[Equilibrium.ANALYTIC_EQ[result.equil.config.eq_type].section] = _input_fields(result.equil.analytic)
+    # An analytic equilibrium is stated by its own section, which implies eq_type.
+    analytic = result.equil.analytic
+    if analytic !== nothing
+        delete!(snapshot["Equilibrium"], "eq_type")
+        snapshot[Equilibrium.ANALYTIC_EQ[result.equil.config.eq_type].section] = _input_fields(analytic)
     end
     wall = result.wall_settings
     if wall === nothing

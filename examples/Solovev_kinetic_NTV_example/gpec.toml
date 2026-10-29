@@ -3,13 +3,12 @@
 # response is computed the neoclassical toroidal viscosity torque is integrated over ψ as a
 # post-processing diagnostic (adaptive quadrature paneled at the rational surfaces).
 # The kinetic profiles (kinetic.dat) are constructed to be consistent with this equilibrium's
-# pressure; the equilibrium is generated analytically from the embedded [SOL_INPUT] section.
+# pressure; the equilibrium is generated analytically from the embedded [Solovev] section.
 
 [Run]
 verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "core_edge_packed"          # Radial grid packing type
@@ -78,8 +77,8 @@ eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 save_interval = 1             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

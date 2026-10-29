@@ -10,7 +10,7 @@ using TOML
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
     equil = GPEC.Equilibrium.PlasmaEquilibrium(
         GPEC.equilibrium_config(deck, template),
-        GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])
+        GPEC.analytic_config(deck)
     )
     xs = equil.profiles.xs
     res = solve(LocalStabilityProblem(equil), Ballooning())

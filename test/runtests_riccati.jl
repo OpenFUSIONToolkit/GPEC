@@ -100,7 +100,7 @@ end
     ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
     equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
         GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
-        GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+        GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
     metric = FFS.make_metric(equil, intr_tmp.mpert)

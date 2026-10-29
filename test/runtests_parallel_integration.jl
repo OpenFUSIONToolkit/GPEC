@@ -137,7 +137,7 @@ end
         eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
-            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs)
         )
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
@@ -223,7 +223,7 @@ end
         eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
-            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs)
         )
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
@@ -286,7 +286,7 @@ end
             eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
                 eq_config,
-                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+                GeneralizedPerturbedEquilibrium.analytic_config(inputs)
             )
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
             intr.nlow = ctrl.nn_low;
@@ -327,7 +327,7 @@ end
         eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
             eq_config,
-            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs)
         )
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
@@ -379,7 +379,7 @@ end
             eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, example_dir)
             equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
                 eq_config,
-                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+                GeneralizedPerturbedEquilibrium.analytic_config(inputs)
             )
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
             intr.nlow = ctrl.nn_low;
