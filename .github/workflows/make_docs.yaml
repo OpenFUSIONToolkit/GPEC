@@ -8,6 +8,8 @@ on:
     tags:
       - '*'
   pull_request:
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   # Skip intermediate builds: always.
@@ -28,6 +30,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Disable the solver precompile workload
+        run: |
+          printf '[GeneralizedPerturbedEquilibrium]\nprecompile_workload = false\n' > docs/LocalPreferences.toml
+
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
@@ -39,7 +45,7 @@ jobs:
       - name: Prepare docs environment (develop local package, then instantiate)
         run: julia --project=docs -e 'using Pkg; Pkg.activate("docs"); Pkg.develop(PackageSpec(path=".")); Pkg.instantiate(update_registry=false)'
 
-      - name: Build and deploy documentation
+      - name: Build documentation
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: julia --project=docs docs/make.jl

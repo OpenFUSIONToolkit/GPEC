@@ -25,7 +25,7 @@ permissions:
 jobs:
   validate:
     name: Title and release note
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,7 +102,7 @@ jobs:
 
   metadata:
     name: Label and metadata
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     # Forked PRs get a read-only token, so these steps cannot run there.
     if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
