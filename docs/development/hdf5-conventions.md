@@ -40,13 +40,13 @@ Top level (11 groups):
 | `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim`, `Runtimes/` (per-stage wall-clock seconds) |
 | `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
 | `Equilibrium/` | Scalars (`beta_N`, `q_axis`, `q_95`, `I_p`, …) plus `Profiles/` (1-D on `psi`: 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D on `psi`×`theta`: rcoords, offset, nu, jac) |
-| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, the gal surface list, debug-gated `Basis/`), `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
+| `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, the gal surface list, `gal_basis_output`-gated `Basis/`), `write_el_matrices`-gated `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |
 | `SingularSurfaces/` | Per-rational-surface data: `rational_psi`/`rational_q`/`rational_m`/`rational_n`, GGJ coefficients, `Delta_prime_matrix`/`Delta_prime_raw`/`Delta_coil`/`pest3_A`/`pest3_B`/`pest3_Gamma` (Riccati or Galerkin alike), the inner-layer `Match/` results, `Kinetic/` |
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`, `TorqueResponse/` (kinetic forward solves: ψ-resolved `T_xe`, `T_source`), control-surface spectra |
 | `KineticForces/` | `<method>/` (torque/energy profiles, `dTdpsi_ell` resolved by bounce harmonic on the `ell` scale, `KineticMatrices/`); multi-ion runs add `PerSpecies/<species>/<method>/` with the same per-method layout, summing to the top-level total |
 | `ErrorFields/` | `CoilSensitivities/` (per-coil-set control-surface spectra and their rigid shift/tilt derivatives, `DominantMode/` full-window projection); `MonteCarlo/` (intrinsic and corrected `\|δ\|` histograms over the sampled tolerances, per batch and averaged); `Risk/` (threshold density, `P(lock\|δ)`, locking probabilities, `ToleranceScan/`); `NTV/` (correction-coil overlap and NTV torque couplings per kAt) |
-| `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}`, `Scan/Surface_<k>/`, `CriticalResonantField/` (+ `Scan/Surface_<k>/`) |
+| `Tearing/` | `PerSurface/` (+ `DpMatrix/`), `Roots/`, `LayerWidths/`, `Diagnostics/{ValidRoots,Poles,FilteredRoots}` (+ `*Winding` with `root_classification = winding`), `Scan/Surface_<k>/`, `CriticalResonantField/` (+ `Scan/Surface_<k>/`) |
 | `SurfaceGeometries/` | `{Plasma,Wall}/{x,y,z}` point clouds |
 
 Reserved (documented, not yet written): `ForceFreeStates/Solutions/RiccatiIntegration/` — the third integrator backend slot alongside `ForwardIntegration` and `GalerkinIntegration`.

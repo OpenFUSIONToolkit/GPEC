@@ -60,7 +60,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     # bundle across the bounce harmonics of a surface.
     surf = surface === nothing ?
            _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles;
-        need_matrices=!isnothing(op_wmats), n, wdfac, divxfac) :
+        need_matrices=(!isnothing(op_wmats)), n, wdfac, divxfac) :
            surface
     (; chrg, mass, tspl, bmax, bmin, q, n_s, T_s, welec, wdian, wdiat, wtran, wgyro, nuk, epsr, dVdpsi, dbob_m_f, divx_m_f) = surf
     wbhat = (π / 4) * sqrt(epsr / 2) * wtran
@@ -480,6 +480,11 @@ function _setup_surface_state(
         dBdtheta_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(0, 1), hint=hB)
         jac_vals[i+1] = equil.rzphi_jac(pt; hint=hJ) / intr.chi1
         djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0), hint=hJ) / intr.chi1^2
+    end
+
+    # The repeated periodic endpoint must match exactly, including sampled derivatives.
+    for values in (B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)
+        values[end] = values[1]
     end
 
     tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())

@@ -37,6 +37,23 @@ A change that builds on another unmerged pull request can be opened against that
 
 CI runs the test suite on every pull request whatever its base. While the base is another feature branch, the harness stamp stays current until this pull request's own `src/` changes differ from those at the stamped commit, so merging an updated parent in does not invalidate it. Once retargeted to `develop`, the usual check applies: nothing under `src/` may differ from the stamped commit. Because the check compares file contents, a report taken on top of the final parent survives the retarget unless `develop` has since gained other `src/` changes.
 
+## Merge queue
+
+The `Tests` and `Documentation` workflows handle `merge_group: checks_requested` as well as
+pull requests. Queue candidates run the full test battery and build documentation; they do not
+deploy documentation. Each queue ref has its own concurrency group. PR conventions remain on
+pull-request events because they validate the PR title, body, and regression stamp.
+
+After these workflows have landed on `develop`, an administrator can enable **Require merge
+queue** on its exact branch protection rule. Keep `Tests` and `Documentation` required, retain
+at least one human approval, select **merge commits**, and start with build concurrency **1**.
+Keep **Only merge non-failing pull requests** enabled. Adding a PR to the queue still requires
+human review; queue checks validate it together with the target branch and earlier queued PRs.
+The queue does not resolve textual merge conflicts.
+
+Workflow support does not enable the repository setting. Validate the first actual queue build
+when enabling it; a normal PR run cannot exercise GitHub's synthetic merge-group event.
+
 ## Hotfix Workflow
 
 Hotfixes address critical bugs in production (`main`) that cannot wait for the next release cycle:
