@@ -100,10 +100,14 @@ const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_
     "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag")
 const _DEPRECATED_EQUIL_KEYS = ("power_bp", "power_b", "power_r", "power_rc", "use_galgrid")
 const _DEPRECATED_KF_KEYS = ("moment", "eq_out", "theta_out", "xlmda_out", "eqpsi_out", "save_records", "gpec_file",
-    "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha")
+    "fnml_flag", "ellip_flag", "diag_flag", "force_xialpha", "kinetic_file")
 const _DEPRECATED_PE_KEYS = ("fixed_boundary", "output_eigenmodes", "filter_modes", "singular_point_method", "compute_response")
+const _DEPRECATED_SLAYER_KEYS = ("profile_file", "profile_group")
 const _DEPRECATED_KEYS = ("Equilibrium" => _DEPRECATED_EQUIL_KEYS, "ForceFreeStates" => _DEPRECATED_FFS_KEYS,
-    "KineticForces" => _DEPRECATED_KF_KEYS, "PerturbedEquilibrium" => _DEPRECATED_PE_KEYS)
+    "KineticForces" => _DEPRECATED_KF_KEYS, "PerturbedEquilibrium" => _DEPRECATED_PE_KEYS, "SLAYER" => _DEPRECATED_SLAYER_KEYS)
+# The kinetic-profile file is named once, in [Equilibrium]; these keys stop with that remedy rather than the generic one.
+const _MOVED_KINETIC_KEYS = ("KineticForces" => ("kinetic_file",), "SLAYER" => _DEPRECATED_SLAYER_KEYS)
+const _MOVED_KINETIC_REMEDY = "name the kinetic-profile file once, as kinetic_file (and kinetic_group) in [Equilibrium]"
 
 # Stop the run when a parsed gpec.toml section sets keys that no longer exist, so the deck is updated.
 function _stop_on_deprecated_keys(table, deprecated_keys, section::String; remedy::String="remove from gpec.toml")
@@ -236,6 +240,9 @@ function main_from_inputs(
     intr = ForceFreeStatesInternal(; dir_path=path)
     ffs_table = inputs["ForceFreeStates"]
     _stop_on_deprecated_keys(ffs_table, _DEPRECATED_FFS_KEYS, "ForceFreeStates")
+    for (section, keys) in _MOVED_KINETIC_KEYS
+        haskey(inputs, section) && _stop_on_deprecated_keys(inputs[section], keys, section; remedy=_MOVED_KINETIC_REMEDY)
+    end
     haskey(inputs, "KineticForces") && _stop_on_deprecated_keys(inputs["KineticForces"], _DEPRECATED_KF_KEYS, "KineticForces")
     haskey(inputs, "PerturbedEquilibrium") && _stop_on_deprecated_keys(inputs["PerturbedEquilibrium"], _DEPRECATED_PE_KEYS, "PerturbedEquilibrium")
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
@@ -460,9 +467,10 @@ needs kinetic profiles (a `[KineticForces]` section, or the calculated kinetic s
 here when the equilibrium carries none; every consumer derives its view from `equil.kinetic`.
 """
 function kinetic_forces_control(inputs::Dict{String,Any}, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
-    kf_ctrl = haskey(inputs, "KineticForces") ?
-              KineticForces.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
-              KineticForces.KineticForcesControl()
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
+        KineticForces.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
+        KineticForces.KineticForcesControl()
     _needs_kinetic_profiles(inputs, ctrl) && equil.kinetic === nothing &&
         error("this run needs kinetic profiles ([KineticForces], or kinetic_source = \"calculated\"): set kinetic_file in [Equilibrium]")
     return kf_ctrl
@@ -1300,7 +1308,7 @@ function efc_couplings(
     ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
     ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
     ω_star_n = [
-        (n=kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
+        (n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
     ]
     ω_φ = ω_E .+ ω_star_n .+ ω_star_T
     # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
