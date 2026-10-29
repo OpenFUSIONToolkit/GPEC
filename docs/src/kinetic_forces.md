@@ -54,7 +54,7 @@ per species under one shared full-composition ``Z_\mathrm{eff}`` and summed
 (``\tau = \sum_s \tau_s``) over the main ions, the quasineutrality-closing
 impurity, and (with `electron = true`) the electrons. This applies to both NTV
 paths: the post-PE ψ-quadrature diagnostic and the self-consistent
-`kinetic_source = "calculated"` matrices.
+kinetic matrices of a `kinetic = "KineticForces"` force-balance solve.
 
 ```toml
 [Equilibrium]
@@ -169,7 +169,7 @@ The torque is three nested adaptive Gauss–Kronrod integrals: over ψ (paneled 
 | λ | `rtol_pitch` | `psi_tolerance_margin × rtol_psi` = 1e-3 |
 | x | `rtol_x` | `nested_tolerance_margin × rtol_pitch` = 1e-5 |
 
-QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The calculated kinetic matrix build (`kinetic_source = "calculated"`) has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
+QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The kinetic matrix build of a `kinetic = "KineticForces"` solve has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
 
 ## Regularization: off by default, and never needed by kinetic runs
 

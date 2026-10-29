@@ -6,7 +6,7 @@
 # is treated as zero.
 [case]
 name = "solovev_kinetic_calculated"
-description = "Solovev, n=1, kinetic_source=calculated, kinetic_factor=1.0, 50/50 D-T multi-ion kinetic matrices, mode-converged band (delta_m=8, mpert=32); pressure-consistent kinetic.dat (n·T tied to the Solovev P₀≈4.27e4 Pa)."
+description = "Solovev, n=1, kinetic = 'KineticForces', 50/50 D-T multi-ion kinetic matrices, mode-converged band (delta_m=8, mpert=32); pressure-consistent kinetic.dat (n·T tied to the Solovev P₀≈4.27e4 Pa)."
 example_dir = "examples/Solovev_kinetic_calculated_example"
 
 # Energies — leading eigenvalues

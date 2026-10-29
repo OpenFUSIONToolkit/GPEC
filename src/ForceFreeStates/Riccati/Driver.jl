@@ -259,7 +259,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
         end
 
         if chunk.needs_crossing
-            ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
+            ctrl.kinetic !== nothing && error("integrator = \"riccati\" does not support kinetic runs; use integrator = \"forward\".")
             # State is (S, I) from the renorm above — well-conditioned at the surface's left boundary.
             push!(S_at_surface_left, copy(odet.u[:, :, 1]))
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)

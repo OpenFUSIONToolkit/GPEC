@@ -47,8 +47,6 @@ delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 10              # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960           # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
-kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
-kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization

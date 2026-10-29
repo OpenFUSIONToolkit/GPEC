@@ -3,8 +3,8 @@
 
 Bridge from KineticForces' bounce-averaged matrix kernels into the kinetic-MHD
 stability path in ForceFreeStates. Used by `build_kinetic_matrix_splines` when
-`ctrl.kinetic_source == "calculated"` (via the `calculated_source` callback
-injected from `GeneralizedPerturbedEquilibrium.main`).
+the force-balance problem's `kinetic` source is a `KineticForcesControl` (via the
+`calculated_source` callback injected by the force-balance solve).
 """
 
 """
@@ -30,7 +30,7 @@ interpolants (`kf_intr.dbob_m`, `kf_intr.divx_m`) are not wired into this routin
 
 # Arguments
 
-  - `ffs_ctrl`: ForceFreeStatesControl (carries `kinetic_factor`, `kinetic_source`)
+  - `ffs_ctrl`: ForceFreeStatesControl (carries `kinetic` and `kinetic_factor`)
   - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
   - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
   - `metric`: MetricData (provides ψ grid via `metric.xs`)

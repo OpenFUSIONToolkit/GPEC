@@ -88,25 +88,21 @@ using HDF5
         end
     end
 
-    @testset "fixed kinetic solve matches the TOML-driven run" begin
-        # Large enough that the fixed kinetic matrices visibly shift the free-boundary energies.
+    @testset "test kinetic matrices: kinetic_factor scales the source" begin
+        # Large enough that the test matrices visibly shift the free-boundary energies.
         kf = 1e-3
-        mktempdir() do dir
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_factor" => kf))]).ffs
-            api = solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic_factor=kf, kinetic_source="fixed")
+        scaled = solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic=TestKineticMatrices(; scale=kf))
+        factored = solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic=TestKineticMatrices(; scale=1.0), kinetic_factor=kf)
+        ideal = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
 
-            @test api.mats.kinetic !== nothing
-            @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
-            @test api.diagnostics.nzero == reference.diagnostics.nzero
-            @test api.mlow == reference.mlow
-            @test api.mhigh == reference.mhigh
-            @test api.psilim ≈ reference.psilim rtol = 1e-12
-            @test api.kinetic.kmsing == reference.kinetic.kmsing
-            @test [s.psifac for s in api.kinetic.kinsing] ≈ [s.psifac for s in reference.kinetic.kinsing]
+        @test scaled.mats.kinetic !== nothing && ideal.mats.kinetic === nothing
+        @test !isapprox(scaled.free_boundary.et[1], ideal.free_boundary.et[1]; rtol=1e-6)
+        @test factored.free_boundary.et[1] ≈ scaled.free_boundary.et[1] rtol = 1e-10
+        @test factored.kinetic.kmsing == scaled.kinetic.kmsing
+        @test [s.psifac for s in factored.kinetic.kinsing] ≈ [s.psifac for s in scaled.kinetic.kinsing]
 
-            # Too large a factor for this coarse deck: the integration aborts near ψ = 0.4 and says so.
-            @test_throws "Euler-Lagrange integration aborted" solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic_factor=0.1)
-        end
+        # Too large a scale for this coarse deck: the integration aborts near ψ = 0.4 and says so.
+        @test_throws "Euler-Lagrange integration aborted" solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic=TestKineticMatrices(; scale=0.1))
     end
 
     @testset "calculated kinetic solve matches the TOML-driven run" begin
@@ -119,7 +115,7 @@ using HDF5
         )
         @test kequil.kinetic !== nothing
         kwall = GPEC.Vacuum.parse_wall(get(kdeck, "Wall", nothing))
-        kctrl = FFS.control_from_deck(kdeck["ForceFreeStates"])
+        kctrl = FFS.control_from_deck(kdeck["ForceFreeStates"]; kinetic=GPEC.kinetic_forces_control(kdeck))
         kkwargs = FFS.problem_keywords(kctrl)
         mktempdir() do dir
             for name in readdir(kin_template)
@@ -292,10 +288,10 @@ using HDF5
     end
 
     @testset "rejected keyword combinations" begin
-        @test_throws "needs kinetic profiles on the equilibrium" solve(equil, forward; nn=1, ffs_kwargs..., kinetic_factor=0.5,
-            kinetic_source="calculated")
-        @test_throws "does not support kinetic runs" solve(equil, riccati; nn=1, ffs_kwargs..., kinetic_factor=1e-9)
-        @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, ffs_kwargs..., kinetic_factor=1e-9)
+        @test_throws "needs kinetic profiles on the equilibrium" solve(equil, forward; nn=1, ffs_kwargs...,
+            kinetic=GPEC.KineticForces.KineticForcesControl())
+        @test_throws "does not support kinetic runs" solve(equil, riccati; nn=1, ffs_kwargs..., kinetic=TestKineticMatrices(; scale=1e-9))
+        @test_throws "does not support kinetic runs" solve(equil, Galerkin(); nn=1, ffs_kwargs..., kinetic=TestKineticMatrices(; scale=1e-9))
         @test_throws ArgumentError solve(equil, forward; nn=1, ffs_kwargs..., integrator="riccati")
         @test_throws ArgumentError solve(equil, riccati; nn=1, ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, forward; nn=1, ffs_kwargs..., nn_low=2)
@@ -499,14 +495,16 @@ using HDF5
             end
         end
 
-        @testset "fixed kinetic source" begin
+        @testset "deck kinetic source names" begin
+            # A deck selects only the KineticForces model; test matrices and the retired key stop the run.
             mktempdir() do dir
-                reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_factor" => 1e-9))]).ffs
-                @test reference.free_boundary !== nothing
-
-                kwargs = merge(ffs_kwargs, Dict(:kinetic_factor => 1e-9))
-                # The fixed source needs no profiles, so `solve` runs it as the deck does.
-                @test solve(equil, forward; nn=1, wall=wall, kwargs...).free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-12
+                @test_throws "script-only" GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic" => "TestKineticMatrices"))])
+            end
+            mktempdir() do dir
+                @test_throws "not a kinetic source" GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic" => "fixed"))])
+            end
+            mktempdir() do dir
+                @test_throws "no longer a key" GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_source" => "fixed"))])
             end
         end
     end

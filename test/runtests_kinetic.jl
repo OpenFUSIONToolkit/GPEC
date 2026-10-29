@@ -625,8 +625,6 @@ using TOML
         @test ctrl.tgar_flag == false
         @test ctrl.nn == 1
         @test ctrl.bounce_harmonic_max == 1
-        @test ctrl.ion_charge == 1
-        @test ctrl.ion_mass == 2
         @test ctrl.nutype == "harmonic"
         @test ctrl.f0type == "maxwellian"
         @test ctrl.psilims == [0.0, 1.0]
@@ -793,9 +791,10 @@ using TOML
         end
 
         @testset "schema table matches the data fields" begin
-            # Every profile dataset the reader and writer iterate is a KineticProfileData field, and vice versa.
+            # Every profile dataset the reader and writer iterate is an optional profile field of KineticProfileData, and vice versa.
             table = Set(Symbol(first(p)) for p in E._KINETIC_H5_PROFILES)
-            @test table == setdiff(Set(fieldnames(E.KineticProfileData)), Set([:psi, :species_densities, :provenance]))
+            profiles = Set(f for (f, T) in zip(fieldnames(E.KineticProfileData), fieldtypes(E.KineticProfileData)) if T == Union{Nothing,Vector{Float64}})
+            @test table == profiles
         end
 
         @testset "missing required field errors" begin
@@ -834,14 +833,12 @@ using TOML
             equil = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), E.SolovevConfig(deck["SOL_INPUT"]))
             kf = KF.KineticForcesControl()
             @test KF.ntv_profiles(kf, equil) === nothing
-            @test_throws "set kinetic_file in [Equilibrium]" GPEC.kinetic_forces_control(
-                Dict{String,Any}("KineticForces" => Dict{String,Any}()), GPEC.ForceFreeStates.ForceFreeStatesControl(), equil)
 
             raw = E.read_kinetic_file(h5)
             E.attach_kinetic_profiles!(equil, raw)
             view = KF.ntv_profiles(kf, equil)
-            ref = E.kinetic_profile_splines(raw; zi=kf.ion_charge, zimp=kf.impurity_charge, mi=kf.ion_mass, mimp=kf.impurity_mass,
-                chi1=2π * equil.psio)
+            zi, mi = KF.main_ion(equil)
+            ref = E.kinetic_profile_splines(raw; zi, zimp=raw.impurity_charge, mi, mimp=raw.impurity_mass, chi1=2π * equil.psio)
             for ψ in 0.0:0.1:1.0
                 @test view.Ti_spline(ψ) == ref.Ti_spline(ψ)
                 @test view.nui_spline(ψ) == ref.nui_spline(ψ)

@@ -103,7 +103,7 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
         T_expected = dot(ξ, (U2l / U1l) * ξ) * (2 * nn * im / (2μ₀)) / 2
 
         # The run's coil sets, rebuilt the way the response stage builds them.
-        ft_ctrl = _GPE_TR.forcing_terms_control(_GPE_TR.TOML.parsefile(toml))
+        ft_ctrl = _GPE_TR.forcing_terms_control(_GPE_TR.TOML.parsefile(toml), dirname(toml))
         cfg = _GPE_TR.ForcingTerms.CoilConfig(ft_ctrl)
         coil_sets = _GPE_TR.ForcingTerms.load_coil_sets(cfg, nn; equil=ffs.equil)
 

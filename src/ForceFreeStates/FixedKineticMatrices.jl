@@ -1,12 +1,18 @@
 """
-    FixedKineticMatrices
+    TestKineticMatrices(; scale)
 
-Test fixtures: synthetic X-shaped kinetic energy matrices keyed off the ideal
-matrices' Frobenius norms. Used by `build_kinetic_matrix_splines` when
-`ctrl.kinetic_source == "fixed"` to exercise the kinetic-MHD code path before
-the calculated NTV pipeline (see `KineticForces.compute_calculated_kinetic_matrices`)
-is wired in.
+Synthetic X-shaped kinetic matrices for exercising the kinetic code path in tests, with no
+physical meaning: `scale` times the ideal matrices' Frobenius norms (Ak, Dk, Hk Hermitian; Bk, Ck,
+Ek not). Pass it as `ForceBalanceProblem(eq; kinetic=TestKineticMatrices(; scale))`; a deck cannot
+select it.
+
+## Fields
+
+  - `scale::Float64` - Size of the test matrices relative to the ideal matrix norms.
 """
+@kwdef struct TestKineticMatrices
+    scale::Float64
+end
 
 """
     _build_x_matrix(mpert, mlow, sigma; hermitian=true)

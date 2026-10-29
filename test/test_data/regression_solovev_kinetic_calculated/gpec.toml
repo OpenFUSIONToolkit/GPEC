@@ -44,8 +44,7 @@ delta_mlow = 0                # Expands lower bound of Fourier harmonics
 delta_mhigh = 0               # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 64                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
-kinetic_source = "calculated" # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
-kinetic_factor = 1.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode; 1.0 = full strength)
+kinetic = "KineticForces"     # Kinetic source: the drift-kinetic matrices of the [KineticForces] model (omit for an ideal run)
 integrator = "forward"        # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced

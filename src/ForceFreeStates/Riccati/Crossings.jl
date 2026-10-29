@@ -95,7 +95,7 @@ function _predict_across_singular_surface!(odet::OdeState, ctrl::ForceFreeStates
     equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
     intr::ForceFreeStatesInternal, ising::Int,
     ipert_res, dpsi::Float64, sing_asymp_right)
-    if ctrl.kinetic_factor == 0
+    if ctrl.kinetic === nothing
         for i in eachindex(sing_asymp_right.r1)
             odet.u[:, ipert_res[i], :] .= 0
         end
@@ -119,7 +119,7 @@ function _capture_right_crossing_data!(odet::OdeState, singp::SingType, sing_asy
     ua = sing_get_ua(sing_asymp_right, dpsi)
     singp.ua_right = copy(ua)
     singp.psi_ua_right = odet.psifac
-    if ctrl.kinetic_factor == 0
+    if ctrl.kinetic === nothing
         for i in eachindex(sing_asymp_right.r1)
             odet.u[ipert_res[i], :, :] .= 0
             odet.u[:, ipert_res[i], :] .= ua[:, ipert_res[i]+intr.numpert_total, :]
@@ -135,7 +135,7 @@ function _stash_per_surface_delta_prime_stub!(odet::OdeState, intr::ForceFreeSta
     ising::Int, ipert_res, sing_asymp_right,
     equil::Equilibrium.PlasmaEquilibrium,
     ctrl::ForceFreeStatesControl)
-    ctrl.kinetic_factor == 0 || return
+    ctrl.kinetic === nothing || return
     denom = (2π)^2 * equil.psio
     n_res = length(sing_asymp_right.r1)
     N = intr.numpert_total

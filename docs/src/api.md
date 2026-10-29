@@ -166,9 +166,12 @@ frequencies; SLAYER reports lab-frame frequencies with its per-surface E×B shif
 `omega` in rad/s and `gamma` in 1/s, positive for instability, and the HDF5 roots group records
 `frequency_frame`. SLAYER searches a normalized Q box, GGJ a physical (γ, ω) box.
 
-Kinetic runs (`kinetic_factor > 0`) take `Forward()`. The `"calculated"` source reads the
-equilibrium's kinetic profiles and species, with the default `KineticForcesControl` collision
-settings.
+Kinetic runs take `Forward()`. The problem's `kinetic` keyword selects the source:
+`kinetic=KineticForces.KineticForcesControl(; ...)` evaluates the KineticForces drift-kinetic
+matrices with those settings on the equilibrium's kinetic profiles and species, and
+`kinetic=TestKineticMatrices(; scale)` uses synthetic test matrices. `kinetic_factor` (default 1)
+scales either. A deck selects the KineticForces model with `[ForceFreeStates] kinetic =
+"KineticForces"`, using its `[KineticForces]` section.
 
 ## Local stability
 

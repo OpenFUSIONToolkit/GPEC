@@ -60,7 +60,7 @@ columns of ``U_2`` that correspond to resonant modes are zeroed via Gaussian red
 keeping the solution bounded; `transform_u!` undoes the reduction at the end, so `u_store`
 comes back dense in the axis (Euler-Lagrange) basis.  This is the reference path for
 correctness comparisons, the only path whose solution the perturbed-equilibrium stage can
-consume, and the only path that supports `kinetic_factor > 0`.
+consume, and the only path that supports a kinetic source.
 
 Enable with:
 ```toml

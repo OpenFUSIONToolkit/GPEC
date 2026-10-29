@@ -99,7 +99,7 @@ and for the Galerkin/vacuum paths that are defined only in the ideal basis.
 ## Fields
 
   - `ideal::IdealMatrices` - always present.
-  - `kinetic::Union{Nothing,KineticMatrices}` - present iff `ctrl.kinetic_factor > 0`.
+  - `kinetic::Union{Nothing,KineticMatrices}` - present iff the solve is kinetic (`ctrl.kinetic !== nothing`).
   - `_hint::Base.RefValue{Int}` - shared bracket-search hint for sequential (single-threaded)
     evaluation. Not thread-safe: parallel paths must pass their own hint.
 """

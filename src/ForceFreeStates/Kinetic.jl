@@ -76,11 +76,11 @@ Construct kinetic energy (W) and torque (T) matrices and pre-compute the FKG der
 matrices used by `sing_der!`, returning a new `MatrixSplines` carrying both alongside the
 ideal matrices of the input `mats`.
 
-Dispatches on `ctrl.kinetic_source`:
+Dispatches on `ctrl.kinetic`:
 
-  - `"fixed"`: X-shaped test matrices scaled by `ctrl.kinetic_factor` relative to
+  - [`TestKineticMatrices`](@ref): X-shaped test matrices of its `scale` relative to
     ideal matrix Frobenius norms (Ak, Dk, Hk Hermitian; Bk, Ck, Ek non-Hermitian)
-  - `"calculated"`: Compute via the `calculated_source` callback. This is
+  - a `KineticForcesControl`: compute via the `calculated_source` callback. This is
     expected to be `KineticForces.compute_calculated_kinetic_matrices` injected
     by `GeneralizedPerturbedEquilibrium.main`. The callback receives
     `(ctrl, equil, intr, metric, mats)` and returns `(kw_flat, kt_flat)` of
@@ -109,11 +109,14 @@ function build_kinetic_matrix_splines(
                          [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=BAND_KNOTS) if lo < x < hi] : Float64[]
 
     # Get raw kinetic matrices (scaling is baked into each source)
-    if ctrl.kinetic_source == "fixed"
-        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, intr.numpert_total, mpsi, ctrl.kinetic_factor, intr.mlow, mats, xs)
-    elseif ctrl.kinetic_source == "calculated"
+    calculated = !(ctrl.kinetic isa TestKineticMatrices)
+    if !calculated
+        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, intr.numpert_total, mpsi, ctrl.kinetic.scale, intr.mlow, mats, xs)
+        kw_flat .*= ctrl.kinetic_factor
+        kt_flat .*= ctrl.kinetic_factor
+    else
         isnothing(calculated_source) && error(
-            "kinetic_source=\"calculated\" requires the KineticForces callback. " *
+            "The KineticForces kinetic source requires the KineticForces callback. " *
             "Drive the run via `GeneralizedPerturbedEquilibrium.main` instead of " *
             "calling build_kinetic_matrix_splines directly, or pass " *
             "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
@@ -128,8 +131,6 @@ function build_kinetic_matrix_splines(
         end
         kw_flat .*= ctrl.kinetic_factor
         kt_flat .*= ctrl.kinetic_factor
-    else
-        error("Unknown kinetic_source: $(ctrl.kinetic_source). Must be \"fixed\" or \"calculated\"")
     end
 
     # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
@@ -137,7 +138,7 @@ function build_kinetic_matrix_splines(
 
     # The FKG splines now exist, so F̄ can be scanned: add knots only where near-singular structure
     # (shifted/split kinetic resonances) falls in an interval that does not resolve it.
-    if ctrl.kinetic_source == "calculated" && calculated_source !== nothing && mats.kinetic !== nothing
+    if calculated && calculated_source !== nothing && mats.kinetic !== nothing
         xs2, kw_flat, kt_flat = refine_grid_at_fbar_peaks(
             collect(xs), kw_flat, kt_flat,
             psis -> begin

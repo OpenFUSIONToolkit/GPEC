@@ -372,7 +372,7 @@ supplies it because `intr.sing` is not populated until after the grid is built.
 function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profiles, species,
     equil, intr; rationals::Vector{Float64}=Float64[])::Vector{Float64}
     nodes = Float64[]
-    (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && kinetic_profiles !== nothing) || return nodes
+    (ctrl.kinetic isa KineticForcesControl && kinetic_profiles !== nothing) || return nodes
     for n_res in intr.nlow:intr.nhigh
         n_res == 0 && continue
         append!(nodes, kinetic_resonance_psi_nodes(kinetic_profiles, equil;

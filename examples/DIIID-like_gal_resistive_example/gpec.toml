@@ -44,8 +44,6 @@ delta_mlow = 8                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 4                # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 512            # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 
-kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" kinetic response)
-kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 1              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced

@@ -3,7 +3,7 @@ const _GALERKIN_DECK_KEYS = Dict(String(f) => "gal_" * String(f) for f in fieldn
 _GALERKIN_DECK_KEYS["frobenius_order_ceiling"] = "gal_sing_order_ceiling"
 
 # Translate the current deck layout until the consolidated section parser replaces it.
-function control_from_deck(section::AbstractDict, debug::AbstractDict=Dict{String,Any}())
+function control_from_deck(section::AbstractDict, debug::AbstractDict=Dict{String,Any}(); kinetic=nothing)
     token = get(section, "integrator", "riccati")
     T = token == "forward" ? Forward : token == "riccati" ? Riccati : token == "galerkin" ? Galerkin :
         error("Unknown integrator: $token")
@@ -18,9 +18,9 @@ function control_from_deck(section::AbstractDict, debug::AbstractDict=Dict{Strin
             haskey(section, String(key)) && (numerical[key] = section[String(key)])
         end
     end
-    numerical_keys = Set(vcat(["integrator", "extended_precision_bvp"], collect(String.(_ODE_KEYS)), collect(values(_GALERKIN_DECK_KEYS))))
+    numerical_keys = Set(vcat(["integrator", "extended_precision_bvp", "kinetic"], collect(String.(_ODE_KEYS)), collect(values(_GALERKIN_DECK_KEYS))))
     physical = Dict(Symbol(k) => v for (k, v) in section if !(k in numerical_keys))
-    ctrl = ForceFreeStatesControl(; algorithm=T(; numerical...), physical...)
+    ctrl = ForceFreeStatesControl(; algorithm=T(; numerical...), kinetic, physical...)
     validate_algorithm(ctrl)
     return ctrl
 end
@@ -35,7 +35,7 @@ function validate_algorithm(ctrl::ForceFreeStatesControl)
 end
 
 function control_to_deck(ctrl::ForceFreeStatesControl)
-    section = Dict{String,Any}(String(f) => getfield(ctrl, f) for f in fieldnames(typeof(ctrl)) if f !== :algorithm && getfield(ctrl, f) !== nothing)
+    section = Dict{String,Any}(String(f) => getfield(ctrl, f) for f in fieldnames(typeof(ctrl)) if !(f in (:algorithm, :kinetic)) && getfield(ctrl, f) !== nothing)
     alg = ctrl.algorithm
     section["integrator"] = String(_integrator_symbol(alg))
     for f in fieldnames(typeof(alg))

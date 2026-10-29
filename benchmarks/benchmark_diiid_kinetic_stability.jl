@@ -5,7 +5,7 @@
 Benchmark the self-consistent kinetic-DCON path (KF → FFS → PE) against
 Fortran GPEC's kinetic DCON reference.
 
-Runs `GPE.main()` with `kinetic_source="calculated"` and `kinetic_factor=1.0`
+Runs `GPE.main()` with `kinetic = "KineticForces"`
 against the EFIT g-file and `.kin` profile taken from a Fortran GPEC
 kinetic example directory, then compares the least-stable total-energy
 eigenvalue `ForceFreeStates/FreeBoundaryStability/eigenmode_energies[1]` against `W_t_eigenvalue[:, 0]` in the Fortran
@@ -150,8 +150,7 @@ delta_mhigh = 8
 mtheta_vacuum = 512
 thmax0 = 1
 
-kinetic_source = "calculated"
-kinetic_factor = 1.0
+kinetic = "KineticForces"
 eulerlagrange_tolerance = 1e-7
 singfac_min = 1e-4
 renorm_threshold = 1e4
@@ -187,7 +186,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
 
     tomldir = build_benchmark_tomldir(inputs.eq_file, inputs.kin_file)
 
-    _p("\n--- Running GPE.main with kinetic_source=\"calculated\" ---")
+    _p("\n--- Running GPE.main with kinetic = \"KineticForces\" ---")
     t0 = time()
     GPE.main([tomldir])
     wall = time() - t0

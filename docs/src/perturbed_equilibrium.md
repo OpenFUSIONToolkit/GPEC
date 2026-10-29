@@ -87,7 +87,7 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_dominant_coupling!
 
 ## Torque response matrices
 
-A kinetic forward solve (`integrator = "forward"`, `kinetic_factor > 0`) carries the
+A kinetic forward solve (`integrator = "forward"`, `kinetic = "KineticForces"`) carries the
 drift-kinetic response inside its Euler-Lagrange energy: the complex plasma energy inside a
 flux surface, `δW(ψ) = ξ†·U₂(ψ)·U₁(ψ)⁻¹·ξ/(2μ₀)`, has an anti-Hermitian part that is the
 neoclassical toroidal viscosity torque (Logan & Park 2013, eq. 19). On request,

@@ -28,6 +28,14 @@ function result_inputs(result::ForceFreeStatesResult, inputs)
         delete!(snapshot["Equilibrium"], key)
     end
     snapshot["ForceFreeStates"] = control_to_deck(result.control)
+    # A deck names the KineticForces model and states it in [KineticForces]; test matrices are recorded by name only.
+    kinetic = result.control.kinetic
+    if kinetic isa TestKineticMatrices
+        snapshot["ForceFreeStates"]["kinetic"] = "TestKineticMatrices"
+    elseif kinetic !== nothing
+        snapshot["ForceFreeStates"]["kinetic"] = "KineticForces"
+        haskey(snapshot, "KineticForces") || (snapshot["KineticForces"] = _input_fields(kinetic))
+    end
     # A deck states the overlap cap's layer closures in [SLAYER]; a rerun rebuilds the same SLAYERModel from them.
     cap = result.control.psilim_from_layer_overlap
     if cap isa InnerLayer.SLAYERModel

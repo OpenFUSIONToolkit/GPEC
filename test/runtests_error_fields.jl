@@ -486,7 +486,7 @@ include("h5_metadata_check.jl")
             @test table_file.shift_sensitivity_per_m == table.shift_sensitivity_per_m && table_file.tilt_sensitivity_per_deg == table.tilt_sensitivity_per_deg
 
             # Post-hoc entry point: equilibrium and coupling rebuilt from the file, same coils.
-            cfg = FT.CoilConfig(GPEC.forcing_terms_control(inputs))
+            cfg = FT.CoilConfig(GPEC.forcing_terms_control(inputs, dir))
             sets = FT.load_coil_sets(cfg, 1; equil=ffs.equil)
             rebuilt = GPEC.equilibrium_from_h5(h5path)
             @test rebuilt.psilim == ffs.psilim

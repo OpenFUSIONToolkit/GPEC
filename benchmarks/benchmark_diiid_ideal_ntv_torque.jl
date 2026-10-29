@@ -141,8 +141,6 @@ delta_mlow = 8
 delta_mhigh = 8
 mtheta_vacuum = 512
 
-kinetic_source = "fixed"
-kinetic_factor = 0.0
 eulerlagrange_tolerance = 1e-7
 save_interval = 3
 singfac_min = 1e-4

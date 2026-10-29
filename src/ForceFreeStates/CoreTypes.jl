@@ -130,8 +130,8 @@ Physical and workflow controls for a force-balance solve, together with its sele
   - `rational_offset_fraction::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `truncate_at_rational_offset` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
   - `frobenius_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (the drift-kinetic matrices of the KineticForces model, evaluated on the `[KineticForces]` profiles; needs `integrator = "forward"` and is deck-driven through `main`)
-  - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
+  - `kinetic` - Kinetic source of the force operator: `nothing` (ideal), a `KineticForces.KineticForcesControl` (the drift-kinetic matrices of the KineticForces model evaluated on the equilibrium's kinetic profiles; needs `Forward()`), or `TestKineticMatrices` (synthetic test matrices). A deck selects the KineticForces model with `kinetic = "KineticForces"`, using its `[KineticForces]` section.
+  - `kinetic_factor::Float64` - Uniform scale on the kinetic matrices of a kinetic run. Default 1.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
   - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `rational_offset_fraction`.
@@ -153,8 +153,8 @@ Physical and workflow controls for a force-balance solve, together with its sele
     rational_offset_fraction::Float64 = 0.2
     frobenius_order::Int = 6
     qhigh::Float64 = 1e3
-    kinetic_source::String = "fixed"
-    kinetic_factor::Float64 = 0.0
+    kinetic::Any = nothing
+    kinetic_factor::Float64 = 1.0
     qlow::Float64 = 0.0
     dW_edge_scan_start::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.

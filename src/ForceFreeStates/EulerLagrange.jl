@@ -361,7 +361,7 @@ for all three.
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
     if ctrl.algorithm isa Riccati
-        ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
+        ctrl.kinetic !== nothing && error("integrator = \"riccati\" does not support kinetic runs; use integrator = \"forward\".")
         return riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
     elseif ctrl.algorithm isa Forward
         return forward_eulerlagrange_integration(ctrl, equil, mats, intr)
@@ -413,7 +413,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
         # Cross a singular surface after integration if this chunk requires it
         if chunk.needs_crossing
-            if ctrl.kinetic_factor > 0
+            if ctrl.kinetic !== nothing
                 cross_kinetic_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             else
                 cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
@@ -557,7 +557,7 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ma
     # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
     # because it depends on the starting psifac which is set here. The logic for sing_start != 0
     # and kinetic mode would also live here when implemented.
-    if ctrl.kinetic_factor > 0
+    if ctrl.kinetic !== nothing
         # Use kinetic singular surfaces (kinsing) for crossing points
         odet.ising_start = searchsortedfirst(getfield.(intr.kinsing, :psifac), odet.psifac) - 1
     else
@@ -648,7 +648,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
     end
 
     # -------------------- Create chunks ------------------------
-    if ctrl.kinetic_factor > 0 && intr.kmsing > 0 && ctrl.singfac_min > 0
+    if ctrl.kinetic !== nothing && intr.kmsing > 0 && ctrl.singfac_min > 0
         # Kinetic mode with kinsing surfaces: chunk around each kinetically-displaced
         # singular surface, mirroring Fortran ode.f:184-201 (kin_flag path).
         # The ODE's F̄⁻¹ blows up at these locations; the trapezoidal crossing in
@@ -687,7 +687,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
             needs_crossing=false,
             ising=0
         ))
-    elseif ctrl.kinetic_factor > 0
+    elseif ctrl.kinetic !== nothing
         # Kinetic mode with no kinsing surfaces (or singfac_min==0): single chunk.
         # Kinetic contributions are weak enough that F̄ stays well-conditioned.
         push!(chunks, IntegrationChunk(;
@@ -1327,7 +1327,7 @@ multi-threaded callers should use [`el_derivatives!`](@ref) with their own hints
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
     intr::ForceFreeStatesInternal, odet::OdeState, psieval::Float64)
-    odet.q = el_derivatives!(du, u, ctrl.kinetic_factor > 0, equil, mats, intr, psieval, odet.spline_hint, odet.mats_hint)
+    odet.q = el_derivatives!(du, u, ctrl.kinetic !== nothing, equil, mats, intr, psieval, odet.spline_hint, odet.mats_hint)
     return nothing
 end
 
