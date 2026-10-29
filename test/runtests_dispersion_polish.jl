@@ -14,7 +14,7 @@
         @test improved
         @test abs(Qp - r) < 1e-10
         @test abs(f(Qp)) < 1e-10
-        @test nev <= 3 * 8 + 2             # bounded eval budget
+        @test nev <= 1 + 6                 # one iteration: 2 differences, the trial step, ≤ 3 backtracks
     end
 
     @testset "_polish_root: nonlinear residual converges" begin
@@ -23,6 +23,43 @@
         Qp, _, improved = D._polish_root(f, r + 0.02 - 0.015im, 0.15)
         @test improved
         @test abs(Qp - r) < 1e-7
+    end
+
+    @testset "_polish_root: residual that is neither holomorphic nor anti-holomorphic converges" begin
+        r = 0.15 - 0.35im
+        f(Q) = (ComplexF64(Q) - r) + 0.5 * conj(ComplexF64(Q) - r)   # zero only at r
+        Qp, _, improved = D._polish_root(f, r + 0.01 + 0.012im, 0.1)
+        @test improved
+        @test abs(Qp - r) < 1e-10
+    end
+
+    # The SLAYER residual is a function of conj(Q) (solve_inner evaluates
+    # conj(Δ̂(ĝ))), so the polish must not assume a holomorphic f.
+    @testset "_polish_root: anti-holomorphic residual converges" begin
+        r = 0.42 + 0.27im
+        f(Q) = (2 - 1im) * conj(ComplexF64(Q) - r)
+        Qp, _, improved = D._polish_root(f, r + (0.013 - 0.009im), 0.1)
+        @test improved
+        @test abs(Qp - r) < 1e-10
+        @test abs(f(Qp)) < 1e-9
+    end
+
+    @testset "_polish_root: anti-holomorphic root offset along Im Q (mirrored complex step)" begin
+        # A complex-slope step on f = a·conj(Q - r) maps an offset i·y to 2i·y and
+        # every halving backtrack stays worse, so a complex-secant polish stalls here.
+        r = -0.75 - 0.009im
+        f(Q) = 1e3 * conj(ComplexF64(Q) - r)
+        Qp, _, improved = D._polish_root(f, r + 0.0017im, 0.01)
+        @test improved
+        @test abs(Qp - r) < 1e-10
+    end
+
+    @testset "_polish_root: steep nonlinear anti-holomorphic residual converges" begin
+        r = -0.75 - 0.009im
+        f(Q) = 1e3 * conj((ComplexF64(Q) - r) * (1 + 0.4 * (ComplexF64(Q) - r)))
+        Qp, _, improved = D._polish_root(f, r + (0.004 + 0.003im), 0.02)
+        @test improved
+        @test abs(Qp - r) < 1e-9
     end
 
     @testset "_polish_root: no-op-or-better invariant (never worse)" begin
@@ -180,5 +217,18 @@
         gr3 = find_growth_rates(scan, 1.0; residual=nothing, validity_rtol=1e-300)
         @test !(:spurious in gr3.warning_flags)
         @test !isnan(real(gr3.Q_root))
+    end
+
+    @testset "find_growth_rates: steep anti-holomorphic root passes the validity gate" begin
+        # A steep residual leaves the raw contour intersection far above the gate
+        # threshold, so the root is kept only if the polish reaches the true zero.
+        r = 0.42 + 0.27im
+        f(Q) = 1e3 * conj((ComplexF64(Q) - r) * (1 + 0.4 * (ComplexF64(Q) - r)))
+        scan = brute_force_scan(f, (0.0, 1.0), (0.0, 0.6); nre=9, nim=7, threaded=false)   # raw |f| above the gate
+        # the pole classifier's threshold is absolute: scale it with f, as SLAYER's adaptive one does
+        gr = find_growth_rates(scan, 1.0; residual=f, validity_rtol=1e-3, pole_threshold=1e3 * 10.0)
+        @test !(:spurious in gr.warning_flags)
+        @test !isnan(real(gr.Q_root))
+        @test abs(gr.Q_root - r) < 1e-8
     end
 end
