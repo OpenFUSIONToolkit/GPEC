@@ -6,6 +6,44 @@
 # section(s) of a `gpec.toml`.
 
 """
+    CriticalResonantFieldControl
+
+Configuration for the critical resonant field (torque-balance) analysis, read from the
+`[SLAYER.CriticalResonantField]` TOML section via `critical_resonant_field_control_from_toml`
+or built with the `@kwdef` keyword constructor. The magnetic Prandtl number is the per-surface
+`P_tor` of the SLAYER layer parameters, and the natural rotation is each surface's resolved Ω_E
+(the kinetic file's `omega_E`, or the `omega_E_kHz` override), which it therefore requires.
+
+## Fields
+
+  - `enabled`    -- run the analysis after SLAYER
+  - `Qmin`, `Qmax` -- override the sampled real-Q range; `nothing` samples from Q0 toward Q_e per surface
+  - `n`          -- number of Q samples per surface
+  - `store_scan` -- write the per-surface Q, torque balance and Δ samples to `gpec.h5`
+"""
+@kwdef struct CriticalResonantFieldControl
+    enabled::Bool = false
+    Qmin::Union{Nothing,Float64} = nothing
+    Qmax::Union{Nothing,Float64} = nothing
+    n::Int = 2000
+    store_scan::Bool = false
+end
+
+"""
+    critical_resonant_field_control_from_toml(section::AbstractDict) -> CriticalResonantFieldControl
+
+Parse a `[SLAYER.CriticalResonantField]` TOML section. Unknown keys raise an error.
+"""
+function critical_resonant_field_control_from_toml(section::AbstractDict)
+    field_names = Set(String.(fieldnames(CriticalResonantFieldControl)))
+    unknown = [k for k in keys(section) if !(k in field_names)]
+    isempty(unknown) ||
+        throw(ArgumentError("critical_resonant_field_control_from_toml: unknown keys $(unknown) in " *
+                            "[SLAYER.CriticalResonantField]. Known: $(sort(collect(field_names)))."))
+    return CriticalResonantFieldControl(; (Symbol(k) => v for (k, v) in section)...)
+end
+
+"""
     SLAYERControl
 
 Configuration for the SLAYER tearing-mode analysis. All fields are
@@ -94,6 +132,11 @@ constructor.
   - `filter_above_poles`  -- discard roots above the highest pole γ
   - `filter_outside_re`   -- condition the above-pole filter on the +γ
     step exiting the Re(Δ)=0 contour loop
+  - `root_classification` -- `:threshold` (default) classifies contour
+    intersections with the pole threshold and the filters above; `:winding`
+    classifies each by the winding number of the dispersion residual on a
+    small circle around it (argument principle), and the filters above decide
+    nothing. Applies to both coupling modes; see `find_growth_rates`.
 
 # Kinetic-profile source
 
@@ -113,6 +156,12 @@ there is one consistent interface for resistive and kinetic profiles.
 
   - `store_scan`  -- write the full Q/Δ scan grid to HDF5. `false` by
     default to keep the output file small.
+
+# Critical resonant field
+
+  - `critical_resonant_field` -- `CriticalResonantFieldControl` from the
+    `[SLAYER.CriticalResonantField]` subsection (keyword form:
+    `critical_resonant_field=CriticalResonantFieldControl(; enabled=true)`)
 """
 @kwdef struct SLAYERControl
     enabled::Bool = false
@@ -173,6 +222,9 @@ there is one consistent interface for resistive and kinetic profiles.
     # |residual| is not below validity_rtol × median(|Δ|) — a contour near-miss
     # / failed-Δ'-BVP surface, not a real root. Flagged `:spurious`.
     validity_rtol::Float64 = 1e-3
+    # How contour intersections are classified as roots or poles: :threshold
+    # (pole_threshold + filters) or :winding (argument principle).
+    root_classification::Symbol = :threshold
 
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
 
@@ -180,6 +232,8 @@ there is one consistent interface for resistive and kinetic profiles.
     profile_group::String = "/"
 
     store_scan::Bool = false
+
+    critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
 end
 
 const _VALID_INNER_MODELS = (:slayer_fitzpatrick,)
@@ -190,6 +244,7 @@ const _VALID_D_C_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
 const _VALID_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
+const _VALID_ROOT_CLASSIFICATIONS = (:threshold, :winding)
 
 function validate(ctrl::SLAYERControl)
     ctrl.inner_model in _VALID_INNER_MODELS || ctrl.inner_model in _UNSUPPORTED_INNER_MODELS ||
@@ -223,6 +278,9 @@ function validate(ctrl::SLAYERControl)
     ctrl.lnLambda_form in _VALID_LNLAMBDA_FORMS ||
         throw(ArgumentError("SLAYERControl: lnLambda_form=$(ctrl.lnLambda_form) " *
                             "not in $(_VALID_LNLAMBDA_FORMS)"))
+    ctrl.root_classification in _VALID_ROOT_CLASSIFICATIONS ||
+        throw(ArgumentError("SLAYERControl: root_classification=$(ctrl.root_classification) " *
+                            "not in $(_VALID_ROOT_CLASSIFICATIONS)"))
     ctrl.impurity_charge > 1 ||
         throw(ArgumentError("SLAYERControl: impurity_charge=$(ctrl.impurity_charge) must exceed the main-ion charge 1"))
     ctrl.msing_max >= 1 ||
@@ -230,6 +288,8 @@ function validate(ctrl::SLAYERControl)
     all(isfinite, values(ctrl.omega_E_kHz)) ||
         throw(ArgumentError("SLAYERControl: omega_E_kHz contains a " *
                             "non-finite entry: $(ctrl.omega_E_kHz)"))
+    crf = ctrl.critical_resonant_field
+    crf.n >= 3 || throw(ArgumentError("SLAYERControl: CriticalResonantField n must be ≥ 3"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
@@ -269,6 +329,9 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "pole_threshold") && (flat["pole_threshold"] = v["pole_threshold"])
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
             haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
+            haskey(v, "root_classification") && (flat["root_classification"] = v["root_classification"])
+        elseif k == "CriticalResonantField" && v isa AbstractDict
+            flat["critical_resonant_field"] = critical_resonant_field_control_from_toml(v)
         else
             flat[k] = v
         end
@@ -288,7 +351,7 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :D_c_type,
-            :resistivity_model, :lnLambda_form, :P_perp_model)
+            :resistivity_model, :lnLambda_form, :P_perp_model, :root_classification)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
