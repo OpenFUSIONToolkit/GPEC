@@ -33,7 +33,6 @@ struct EnergyParams
     nutype::String    # collision operator type
     f0type::String    # distribution function type
     nufac::Float64    # collisionality scaling factor
-    ximag::Float64    # deprecated: imaginary contour offset, no longer used
     qt::Bool          # heat flux calculation flag
     nutype_id::Int    # `nutype` as an integer code (see `_NUTYPE_IDS`), for the hot loop
     f0type_id::Int    # `f0type` as an integer code (see `_F0TYPE_IDS`)
@@ -42,10 +41,10 @@ end
 const _NUTYPE_IDS = Dict("zero" => 1, "small" => 2, "krook" => 3, "harmonic" => 4)
 const _F0TYPE_IDS = Dict("maxwellian" => 1, "park" => 2, "cgl" => 3)
 
-function EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype::String, f0type::String, nufac, ximag, qt)
+function EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype::String, f0type::String, nufac, qt)
     haskey(_NUTYPE_IDS, nutype) || error("nutype must be zero, small, krook, or harmonic")
     haskey(_F0TYPE_IDS, f0type) || error("f0type must be maxwellian, park, or cgl")
-    return EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, ximag, qt, _NUTYPE_IDS[nutype], _F0TYPE_IDS[f0type])
+    return EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, qt, _NUTYPE_IDS[nutype], _F0TYPE_IDS[f0type])
 end
 
 """
@@ -54,7 +53,7 @@ end
 Collision frequency ν(x) at normalized energy x = E/T.
 
   - `"zero"`: collisionless (ν = 0)
-  - `"small"`: 1e-5 * we
+  - `"small"`: 1e-5 * |we|, a positive Krook width for either rotation direction
   - `"krook"`: unmodified Krook operator
   - `"harmonic"`: (1 + (l/2)²) * krook * x^(-3/2)
 """
@@ -63,7 +62,7 @@ Collision frequency ν(x) at normalized energy x = E/T.
     nux = if id == 1
         0.0
     elseif id == 2
-        1e-5 * p.we
+        1e-5 * abs(p.we)
     elseif id == 3
         p.nuk
     else
@@ -357,7 +356,7 @@ end
 """
     integrate_energy(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
                      nutype="harmonic", f0type="maxwellian", nufac=1.0,
-                     ximag=0.0, qt=false, atol=1e-7, rtol=1e-5) → ComplexF64
+                     qt=false, atol=1e-7, rtol=1e-5) → ComplexF64
 
 Integrate the kinetic resonance operator over normalized energy x = E/T.
 
@@ -374,9 +373,6 @@ its real-axis pole resolved analytically (see `_integrate_energy_resonant`).
 Collision operator types (`nutype`): `"zero"`, `"small"`, `"krook"`, `"harmonic"`.
 Distribution function types (`f0type`): `"maxwellian"`, `"park"`, `"cgl"`.
 
-`ximag` is accepted for backward compatibility but no longer used — resonance
-poles are now handled analytically rather than by contour deformation.
-
 # Returns
 
   - `ComplexF64`: energy integral value
@@ -385,11 +381,11 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
     wb::Float64, nuk::Float64, ell::Int, leff::Float64,
     n::Int, psi::Float64, lambda::Float64, method::String;
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+    nufac::Float64=1.0, qt::Bool=false,
     atol::Float64=1e-7, rtol::Float64=1e-5, segbuf=nothing)::ComplexF64
 
     p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
-        nutype, f0type, nufac, ximag, qt)
+        nutype, f0type, nufac, qt)
 
     # CGL has no resonance denominator and no pole — integrate the physical
     # x-space integrand directly over the half line (QuadGK maps [0,∞) itself).
@@ -406,7 +402,7 @@ end
 """
     evaluate_energy_integrand(x_grid; wn, wt, we, wd, wb, nuk, leff, n,
                                nutype="harmonic", f0type="maxwellian",
-                               nufac=1.0, ximag=0.0, qt=false) → Vector{ComplexF64}
+                               nufac=1.0, qt=false) → Vector{ComplexF64}
 
 Diagnostic convenience: evaluate the physical x-space energy integrand
 N(x)·exp(-x)/denom(x) at specified x = E/T values. Returns the integrand value
@@ -427,7 +423,7 @@ function evaluate_energy_integrand(x_grid::AbstractVector{Float64};
     wd::Float64, wb::Float64, nuk::Float64,
     leff::Float64, n::Int,
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false)
-    p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, ximag, qt)
+    nufac::Float64=1.0, qt::Bool=false)
+    p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, qt)
     return [energy_integrand_scalar(x, p) for x in x_grid]
 end

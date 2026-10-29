@@ -6,6 +6,44 @@
 # section(s) of a `gpec.toml`.
 
 """
+    CriticalResonantFieldControl
+
+Configuration for the critical resonant field (torque-balance) analysis, read from the
+`[SLAYER.CriticalResonantField]` TOML section via `critical_resonant_field_control_from_toml`
+or built with the `@kwdef` keyword constructor. The magnetic Prandtl number is the per-surface
+`P_tor` of the SLAYER layer parameters, and the natural rotation is each surface's resolved Ω_E
+(the kinetic file's `omega_E`, or the `omega_E_kHz` override), which it therefore requires.
+
+## Fields
+
+  - `enabled`    -- run the analysis after SLAYER
+  - `Qmin`, `Qmax` -- override the sampled real-Q range; `nothing` samples from Q0 toward Q_e per surface
+  - `n`          -- number of Q samples per surface
+  - `store_scan` -- write the per-surface Q, torque balance and Δ samples to `gpec.h5`
+"""
+@kwdef struct CriticalResonantFieldControl
+    enabled::Bool = false
+    Qmin::Union{Nothing,Float64} = nothing
+    Qmax::Union{Nothing,Float64} = nothing
+    n::Int = 2000
+    store_scan::Bool = false
+end
+
+"""
+    critical_resonant_field_control_from_toml(section::AbstractDict) -> CriticalResonantFieldControl
+
+Parse a `[SLAYER.CriticalResonantField]` TOML section. Unknown keys raise an error.
+"""
+function critical_resonant_field_control_from_toml(section::AbstractDict)
+    field_names = Set(String.(fieldnames(CriticalResonantFieldControl)))
+    unknown = [k for k in keys(section) if !(k in field_names)]
+    isempty(unknown) ||
+        throw(ArgumentError("critical_resonant_field_control_from_toml: unknown keys $(unknown) in " *
+                            "[SLAYER.CriticalResonantField]. Known: $(sort(collect(field_names)))."))
+    return CriticalResonantFieldControl(; (Symbol(k) => v for (k, v) in section)...)
+end
+
+"""
     SLAYERControl
 
 Configuration for the SLAYER tearing-mode analysis. All fields are
@@ -46,10 +84,17 @@ constructor.
   - `impurity_charge` -- charge of the single impurity species that closes quasi-neutrality when
     `Z_eff(ψ)` is derived from `n_i/n_e` (default 6.0, carbon); the main ion has charge 1.
     Unused when the file supplies a `zeff` profile
-  - `chi_perp`, `chi_tor` -- fallback perpendicular / toroidal heat
-    diffusivity [m²/s], used only when the kinetic file carries no usable
-    `chi_e`/`chi_phi` profile (dataset absent or all-zero); otherwise the
-    file's χ⊥(ψ)/χ_φ(ψ) take precedence
+  - `chi_perp_e`, `chi_perp_i`, `chi_tor` -- fallback electron / ion perpendicular heat and
+    toroidal momentum diffusivity [m²/s], used only when the kinetic file carries no usable
+    `chi_e`/`chi_i`/`chi_phi` profile (dataset absent or all-zero); otherwise the file's
+    χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) take precedence. `chi_perp_i` defaults to `nothing`, so a model that
+    needs χ⊥,i fails loudly when neither the file nor the deck supplies it. Each must be positive
+  - `tau_E`    -- whole-plasma energy confinement time τ̄_E [s], required by
+    `P_perp_model = :tau_E` (default `nothing`)
+  - `P_perp_model` -- how the perpendicular Prandtl number is built: `:D_perp` (default; needs
+    χ⊥,i), `:chi_perp_e`, `:chi_perp_i`, `:P_phi`, `:c_beta` or `:tau_E`; see
+    `InnerLayer.SLAYER.slayer_parameters`. `:tau_E` sets both P_perp and P_tor from τ̄_E, so it
+    ignores `chi_phi`/`chi_tor`. `chi_perp_e` still sets the critical-Δ width in every mode
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
@@ -96,9 +141,9 @@ there is one consistent interface for resistive and kinetic profiles.
 
   - `profile_file`   -- path to a kinetic-profile file (relative to the run
     dir), required when SLAYER is enabled. HDF5 (`.h5`) files use the GPEC
-    kinetic schema and may carry `chi_e` (χ⊥) and `chi_phi` (χ_φ); ASCII
+    kinetic schema and may carry `chi_e` (χ⊥,e), `chi_i` (χ⊥,i) and `chi_phi` (χ_φ); ASCII
     tables are also accepted but carry no χ. When a χ dataset is absent or
-    all-zero, the scalar `chi_perp`/`chi_tor` fallbacks below are used (so a
+    all-zero, the scalar `chi_perp_e`/`chi_perp_i`/`chi_tor` fallbacks below are used (so a
     file can keep the χ keys set to 0 to defer to the scalars).
   - `profile_group`  -- group within the HDF5 file (default `"/"`)
 
@@ -106,6 +151,12 @@ there is one consistent interface for resistive and kinetic profiles.
 
   - `store_scan`  -- write the full Q/Δ scan grid to HDF5. `false` by
     default to keep the output file small.
+
+# Critical resonant field
+
+  - `critical_resonant_field` -- `CriticalResonantFieldControl` from the
+    `[SLAYER.CriticalResonantField]` subsection (keyword form:
+    `critical_resonant_field=CriticalResonantFieldControl(; enabled=true)`)
 """
 @kwdef struct SLAYERControl
     enabled::Bool = false
@@ -120,8 +171,11 @@ there is one consistent interface for resistive and kinetic profiles.
     ion_mass::Float64 = 2.0
     zeff::Float64 = 1.0
     impurity_charge::Float64 = 6.0
-    chi_perp::Float64 = 1.0
+    chi_perp_e::Float64 = 1.0
+    chi_perp_i::Union{Float64,Nothing} = nothing
     chi_tor::Float64 = 1.0
+    tau_E::Union{Float64,Nothing} = nothing
+    P_perp_model::Symbol = :D_perp
     D_R::Union{Float64,Nothing} = nothing
     D_geo::Union{Float64,Nothing} = nothing
     theta_sample::Float64 = 0.0
@@ -170,6 +224,8 @@ there is one consistent interface for resistive and kinetic profiles.
     profile_group::String = "/"
 
     store_scan::Bool = false
+
+    critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
 end
 
 const _VALID_INNER_MODELS = (:slayer_fitzpatrick,)
@@ -177,6 +233,7 @@ const _UNSUPPORTED_INNER_MODELS = (:ggj_ray, :ggj_shooting, :ggj_galerkin)
 const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
 const _VALID_D_C_TYPES = (:none, :lar, :fitzpatrick, :toroidal)
+const _VALID_P_PERP_MODELS = (:chi_perp_e, :chi_perp_i, :P_phi, :D_perp, :c_beta, :tau_E)
 const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
 const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
@@ -197,6 +254,15 @@ function validate(ctrl::SLAYERControl)
     ctrl.D_c_type in _VALID_D_C_TYPES ||
         throw(ArgumentError("SLAYERControl: D_c_type=$(ctrl.D_c_type) " *
                             "not in $(_VALID_D_C_TYPES)"))
+    ctrl.P_perp_model in _VALID_P_PERP_MODELS ||
+        throw(ArgumentError("SLAYERControl: P_perp_model=$(ctrl.P_perp_model) " *
+                            "not in $(_VALID_P_PERP_MODELS)"))
+    for (name, v) in (("chi_perp_e", ctrl.chi_perp_e), ("chi_perp_i", ctrl.chi_perp_i), ("chi_tor", ctrl.chi_tor))
+        v === nothing || (isfinite(v) && v > 0) ||
+            throw(ArgumentError("SLAYERControl: $name must be positive and finite [m²/s]; got $v"))
+    end
+    ctrl.P_perp_model !== :tau_E || (ctrl.tau_E !== nothing && isfinite(ctrl.tau_E) && ctrl.tau_E > 0) ||
+        throw(ArgumentError("SLAYERControl: P_perp_model=tau_E requires a positive, finite tau_E [s]"))
     ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
         throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
                             "not in $(_VALID_RESISTIVITY_MODELS)"))
@@ -210,6 +276,8 @@ function validate(ctrl::SLAYERControl)
     all(isfinite, values(ctrl.omega_E_kHz)) ||
         throw(ArgumentError("SLAYERControl: omega_E_kHz contains a " *
                             "non-finite entry: $(ctrl.omega_E_kHz)"))
+    crf = ctrl.critical_resonant_field
+    crf.n >= 3 || throw(ArgumentError("SLAYERControl: CriticalResonantField n must be ≥ 3"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
         throw(ArgumentError("SLAYERControl: nre and nim must both be ≥ 2"))
     ctrl.amr_passes >= 0 ||
@@ -249,6 +317,8 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "pole_threshold") && (flat["pole_threshold"] = v["pole_threshold"])
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
             haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
+        elseif k == "CriticalResonantField" && v isa AbstractDict
+            flat["critical_resonant_field"] = critical_resonant_field_control_from_toml(v)
         else
             flat[k] = v
         end
@@ -257,9 +327,10 @@ function slayer_control_from_toml(section::AbstractDict)
     # Validate keys against the struct fields
     field_names = Set(String.(fieldnames(SLAYERControl)))
     unknown = [k for k in keys(flat) if !(k in field_names)]
+    hint = "chi_perp" in unknown ? " (`chi_perp` is now `chi_perp_e`.)" : ""
     isempty(unknown) ||
         throw(ArgumentError("slayer_control_from_toml: unknown keys " *
-                            "$(unknown) in [SLAYER] section. Known: " *
+                            "$(unknown) in [SLAYER] section.$hint Known: " *
                             "$(sort(collect(field_names)))."))
 
     # Coerce types where needed
@@ -267,11 +338,11 @@ function slayer_control_from_toml(section::AbstractDict)
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :D_c_type,
-            :resistivity_model, :lnLambda_form)
+            :resistivity_model, :lnLambda_form, :P_perp_model)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym in (:bt, :D_R, :D_geo)
+        elseif sym in (:bt, :D_R, :D_geo, :tau_E, :chi_perp_i)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :omega_E_kHz

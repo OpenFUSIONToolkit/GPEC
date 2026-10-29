@@ -82,10 +82,11 @@ scan_mode               = "amr"      # Q-plane scan strategy: "amr" (adaptive re
 coupling_mode           = "uncoupled" # "uncoupled" (per-surface) or "coupled" (multi-surface determinant)
 D_c_type                = "none"     # Critical-Δ offset selector: "none", "lar", "fitzpatrick", or "toroidal"
 ion_mass                = 2.0        # Ion mass in proton-mass units (2.0 = deuterium)
-zeff                    = 1.0        # fallback only; Z_eff(ψ) comes from the kinetic file (its zeff profile, else n_i/n_e with zimp)
+zeff                    = 1.0        # fallback only; Z_eff(ψ) comes from the kinetic file (its zeff profile, else n_i/n_e with impurity_charge)
 impurity_charge         = 6.0        # Impurity charge closing quasi-neutrality when Z_eff(ψ) is derived from n_i/n_e (6.0 = carbon)
-chi_perp                = 1.0       # fallback only; the kinetic file supplies χ⊥(ψ)
+chi_perp_e              = 1.0       # fallback only; the kinetic file supplies χ⊥,e(ψ)
 chi_tor                 = 1.0       # fallback only; the kinetic file supplies χ_φ(ψ)
+P_perp_model            = "D_perp"   # Perpendicular Prandtl number model: "D_perp" (default), "chi_perp_e", "chi_perp_i", "P_phi", "c_beta", or "tau_E" (needs tau_E [s]; also replaces the χ_φ-based P_tor)
 # omega_E_kHz           = {"2/1" = 0.0, "3/1" = 3.0} # override of the E×B rotation Ω_E/2π per unit n [kHz], keyed by m/n; unlisted surfaces use the kinetic file
 pole_threshold_adaptive = true       # SLAYER |Δ| spans many orders; adapt to 10·median(|Δ|)
 filter_above_poles      = true       # Discard roots above the highest pole γ
@@ -93,7 +94,7 @@ filter_outside_re       = true       # Condition the above-pole filter on the +�
 polish_roots            = true       # refine each root to the true zero; enables the validity gate
 store_scan              = false      # per-surface scans omitted from HDF5 (uncoupled has one per surface)
 # Standardized kinetic-profile file (GPEC HDF5 kinetic schema), shared with the
-# sibling ideal example; carries n_e, T_e, T_i, omega_E, chi_e (χ⊥), chi_phi (χ_φ).
+# sibling ideal example; carries n_e, T_e, T_i, omega_E, chi_e (χ⊥,e), chi_i (χ⊥,i), chi_phi (χ_φ).
 profile_file = "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode_kinetic.h5" # Kinetic-profile file (relative to the run dir), required when SLAYER is enabled
 
 [SLAYER.scan_grid]
@@ -101,3 +102,12 @@ Q_re_range = [-2.0, 2.0]       # Scan box in the normalized Q plane, Re(Q) axis
 Q_im_range = [-0.5, 3.0]       # Scan box in the normalized Q plane, Im(Q) axis
 nre        = 41                # Grid resolution along the Re(Q) axis
 nim        = 31                # Grid resolution along the Im(Q) axis
+
+[SLAYER.CriticalResonantField]
+# Critical resonant field b_r/B_φ for error-field penetration at each SLAYER surface, from the
+# Cole-Fitzpatrick 2006 torque balance with P = P_tor of each layer and Q0 = τ_k·n·Ω_E, so it
+# needs the kinetic file's omega_E (or omega_E_kHz). b_crit is taken at the penetration fold met
+# walking from Q0 toward Q_e; Qmin/Qmax may be set to override the sampled range.
+enabled    = true      # run the analysis after SLAYER
+n          = 2000      # number of Q samples per surface
+store_scan = false     # write the per-surface Q, torque balance and Δ samples to gpec.h5

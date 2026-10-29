@@ -94,7 +94,7 @@
             # In CGL mode, fx = cx^2.5 * exp(-cx) / (i*n) — no resonance denominator
             p = KF.EnergyParams(
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1,
-                "zero", "cgl", 1.0, 0.0, false
+                "zero", "cgl", 1.0, false
             )
             x = 1.0
             val = KF.energy_integrand_scalar(x, p)
@@ -107,7 +107,7 @@
             # At large x, the integrand should decay exponentially
             p = KF.EnergyParams(
                 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1,
-                "zero", "maxwellian", 1.0, 0.0, false
+                "zero", "maxwellian", 1.0, false
             )
             val_large = KF.energy_integrand_scalar(50.0, p)
             # At x=50, exp(-50) ≈ 1.9e-22, so integrand should be negligible
@@ -118,17 +118,35 @@
             # With qt=true, integrand is multiplied by (x - 2.5)
             p_no_qt = KF.EnergyParams(
                 1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 1,
-                "zero", "maxwellian", 1.0, 0.0, false
+                "zero", "maxwellian", 1.0, false
             )
             p_qt = KF.EnergyParams(
                 1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 1,
-                "zero", "maxwellian", 1.0, 0.0, true
+                "zero", "maxwellian", 1.0, true
             )
             x = 3.0
             val_no = KF.energy_integrand_scalar(x, p_no_qt)
             val_qt = KF.energy_integrand_scalar(x, p_qt)
             # qt multiplies by (x - 2.5) = 0.5
             @test val_qt ≈ (x - 2.5) * val_no atol = 1e-14
+        end
+
+        @testset "small collisions damp for either rotation sign" begin
+            # Match a positive Krook width for either rotation direction.
+            for we in (2.0, -2.0)
+                p_small = KF.EnergyParams(
+                    1.0, 0.5, we, 0.5, 1.0, 0.0, 1.0, 1,
+                    "small", "maxwellian", 1.0, false
+                )
+                p_krook = KF.EnergyParams(
+                    1.0, 0.5, we, 0.5, 1.0, 1e-5 * abs(we), 1.0, 1,
+                    "krook", "maxwellian", 1.0, false
+                )
+                for x in (0.3, 1.0, 3.0)
+                    @test KF.energy_integrand_scalar(x, p_small) ≈
+                          KF.energy_integrand_scalar(x, p_krook) rtol = 1e-14
+                end
+            end
         end
     end
 
@@ -428,7 +446,7 @@
             # CGL mode: ∫₀^∞ x^2.5·exp(-x)/(i·n) dx = Γ(3.5)/(i·1) = -i·(15/8)√π.
             result = KF.integrate_energy(
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 1, 0.5, 0.5, "fcgl";
-                nutype="zero", f0type="cgl", nufac=1.0, ximag=0.0, qt=false,
+                nutype="zero", f0type="cgl", nufac=1.0, qt=false,
                 atol=1e-12, rtol=1e-10
             )
             gamma_3_5 = 15 / 8 * sqrt(π)
@@ -451,7 +469,7 @@
             # independent reference for the u-substitution + pole-extraction result.
             wn, wt, we, wd, wb, nuk, leff, n = 0.5, 0.8, -2.0, 0.5, 1.0, 0.3, 1.0, 1
             p = KF.EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
-                "harmonic", "maxwellian", 1.0, 0.0, false)
+                "harmonic", "maxwellian", 1.0, false)
             x_res = KF.find_resonance_energies(leff, wb, n, we, wd)
             @test length(x_res) == 1   # this case has exactly one resonance
             reference, _ = KF.quadgk(x -> KF.energy_integrand_scalar(x, p),
@@ -574,7 +592,7 @@
         @test all(isfinite, vals)
         # Element-wise match against the scalar form documented in the docstring.
         p = KF.EnergyParams(0.5, 0.8, -2.0, 0.5, 1.0, 0.3, 1.0, 1,
-            "harmonic", "maxwellian", 1.0, 0.0, false)
+            "harmonic", "maxwellian", 1.0, false)
         @test vals ≈ [KF.energy_integrand_scalar(x, p) for x in x_grid]
     end
 
@@ -713,7 +731,6 @@
 
     @testset "KineticForcesState" begin
         state = KF.KineticForcesState()
-        @test !state.completed
         @test isempty(state.method_results)
         @test isempty(state.kinetic_matrices)
     end
@@ -722,7 +739,6 @@
         mr = KF.MethodResult(; method="fgar", nn=1)
         @test mr.total_torque == 0.0 + 0.0im
         @test mr.total_energy == 0.0
-        @test isempty(mr.records)
         @test isempty(mr.dtdpsi_ell) && isempty(mr.ell)
     end
 
@@ -739,8 +755,9 @@
             da = E.read_kinetic_file(gpeckf)
             db = E.read_kinetic_file(h5)
             # legacy ASCII carries no optional fields; the example .h5 carries chi
-            @test da.chi_e === nothing && da.chi_phi === nothing
-            @test db.chi_e !== nothing && db.chi_phi !== nothing
+            @test da.chi_e === nothing && da.chi_i === nothing && da.chi_phi === nothing
+            @test db.chi_e !== nothing && db.chi_i !== nothing && db.chi_phi !== nothing
+            @test all(>(0), db.chi_i)
             # core columns identical (the .h5 was generated from the .gpeckf)
             @test da.psi == db.psi
             @test da.n_e == db.n_e
@@ -768,6 +785,9 @@
             @test dc.chi_phi ≈ db.chi_phi
             @test dc.n_e ≈ db.n_e
             @test dc.provenance == "roundtrip"
+            @test dc.chi_i ≈ db.chi_i
+            E.write_kinetic_h5(tmp, E.KineticProfileData(; psi=db.psi, chi_e=db.chi_e))
+            @test E.read_kinetic_file(tmp).chi_i === nothing
             rm(tmp; force=true)
         end
 

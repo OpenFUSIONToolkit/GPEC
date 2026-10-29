@@ -8,9 +8,9 @@
 # ---------------------------------------------------------------------
 # Read kinetic profiles through the shared `Equilibrium.read_kinetic_file`
 # reader and adapt them to the SLAYER inner layer. Returns the spline-based
-# `KineticProfiles` plus χ⊥(ψ)/χ_φ(ψ) callables built from the file's
-# `chi_e`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
-# case the caller falls back to the scalar `control.chi_perp`/`chi_tor`), and
+# `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from the file's
+# `chi_e`/`chi_i`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
+# case the caller falls back to the scalar `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), and
 # a Z_eff(ψ) callable: the file's own `zeff` profile when it carries one, else
 # derived from its `n_i/n_e` (or `nothing` when the file carries neither, in which
 # case the caller falls back to the scalar `control.zeff`), and whether the file
@@ -38,13 +38,19 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
     # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
     # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
-    # to the scalar control.chi_perp/chi_tor fallback. Build the spline only
+    # to the scalar control.chi_perp_e/chi_tor fallback. Build the spline only
     # from a usable (present, not all-zero) array.
     psi_xs = collect(Float64, data.psi)
-    _chi_spline(v) = (v === nothing || all(iszero, v)) ? nothing :
-                     cubic_interp(psi_xs, collect(Float64, v))
-    chi_perp = _chi_spline(data.chi_e)
-    chi_tor = _chi_spline(data.chi_phi)
+    function _chi_spline(name, v)
+        (v === nothing || all(iszero, v)) && return nothing
+        minimum(v) > 0 || error("run_slayer: kinetic file '$path' has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
+        return cubic_interp(psi_xs, collect(Float64, v))
+    end
+    model = control.P_perp_model
+    uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+    chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
+    chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
+    chi_tor = model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
     # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
     # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
     # charge-1 main ion, the single-ion closure the kinetic spline set uses:
@@ -63,8 +69,39 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    return (profiles=profiles, chi_perp=chi_perp, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
-        has_omega_E=data.omega_E !== nothing)
+    return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
+        has_omega_E=(data.omega_E !== nothing))
+end
+
+# χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the control's
+# scalar fallbacks. With `warn`, a fallback is reported only for a χ the selected P_perp model
+# (and, for χ⊥,e, the critical Δ) actually uses.
+function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
+    model = control.P_perp_model
+    pick(f, s) = f === nothing ? s : f
+    model in (:chi_perp_i, :D_perp) && loaded.chi_perp_i === nothing && control.chi_perp_i === nothing &&
+        throw(
+            ArgumentError(
+                "SLAYER: P_perp_model = $model needs the ion diffusivity χ⊥,i: add a chi_i profile to the " *
+                "kinetic file, set [SLAYER] chi_perp_i, or choose P_perp_model = \"chi_perp_e\"."
+            )
+        )
+    if warn
+        uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+        uses_i = model in (:chi_perp_i, :D_perp)
+        uses_tor = model !== :tau_E
+        fallbacks = String[]
+        uses_e && loaded.chi_perp_e === nothing && push!(fallbacks, "chi_e → chi_perp_e = $(control.chi_perp_e)")
+        uses_i && loaded.chi_perp_i === nothing && push!(fallbacks, "chi_i → chi_perp_i = $(control.chi_perp_i)")
+        uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_tor = $(control.chi_tor)")
+        isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
+                                    "$(join(fallbacks, ", ")); using the scalar fallback."
+        model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
+              "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
+    end
+    return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
+        chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
+        chi_tor=pick(loaded.chi_tor, control.chi_tor))
 end
 
 # ---------------------------------------------------------------------
@@ -337,7 +374,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
     coupled && _is_ggj(model) && any(!iszero, Ω_shift) && @warn(
-            "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
+        "SLAYER: E×B rotation is not applied to GGJ surfaces, which carry no time normalization.")
     q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)
     scs = [_build_surface_coupling(model, params[k], dp[k, k], q_shifts[k]) for k in 1:n]
     # Coupled Q is scanned in the reference surface's normalization.
@@ -443,7 +480,51 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     return SLAYERResult(true, control, model, params, rational_psi, rational_q, dp,
         Q_root, omega_Hz, gamma_Hz,
         per_surface_extraction, coupled_extraction,
-        layer_widths, Ω_E, q_shifts, scan_data_list)
+        layer_widths, Ω_E, q_shifts, scan_data_list,
+        run_critical_resonant_field(model, params, Ω_E, real.(diag(dp)), control.critical_resonant_field))
+end
+
+# ---------------------------------------------------------------------
+# Critical resonant field (torque balance)
+# ---------------------------------------------------------------------
+"""
+    run_critical_resonant_field(model, params, omega_E, dp_diag, ctrl) -> CriticalResonantFieldResult
+
+Critical normalized resonant field b_r/B_φ for error-field penetration at each SLAYER
+surface, from the torque balance of Cole and Fitzpatrick, Phys. Plasmas 13, 032503 (2006),
+Eq. 62. The magnetic Prandtl number is the layer's `P_tor`, and the natural rotation is the
+E×B frequency of the m/n mode, Q0 = τ_k·n·Ω_E, with `omega_E` the resolved Ω_E per unit n at
+each surface [rad/s]. The outer stability is α = S^(-1/3)·(Δ_crit − r_s Δ'), with `dp_diag` the
+r_s-referenced Δ' diagonal and Δ_crit the layer's critical-Δ offset, as in the dispersion relation.
+A surface whose Ω_E is unknown (NaN), or that is tearing-unstable (α ≤ 0), is skipped with a
+warning; if no surface has a known Ω_E, the analysis cannot run and this throws.
+"""
+function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::AbstractVector{<:InnerLayerParameters},
+    omega_E::AbstractVector{<:Real}, dp_diag::AbstractVector{<:Real}, ctrl::CriticalResonantFieldControl)
+    ctrl.enabled || return empty_critical_resonant_field_result()
+    model isa SLAYERModel{:fitzpatrick} && eltype(params) <: SLAYERParameters ||
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the SLAYER " *
+                            "fitzpatrick model and SLAYER parameters; got $(typeof(model))."))
+    nsurf = length(params)
+    length(dp_diag) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: dp_diag has $(length(dp_diag)) entries for $nsurf surfaces."))
+    length(omega_E) == nsurf ||
+        throw(ArgumentError("run_critical_resonant_field: omega_E has $(length(omega_E)) entries for $nsurf surfaces."))
+    nsurf > 0 && all(isnan, omega_E) &&
+        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the E×B rotation, but the " *
+                            "kinetic file has no omega_E and no [SLAYER] omega_E_kHz entry covers the surfaces."))
+    Q_peak, br_crit = fill(NaN, nsurf), fill(NaN, nsurf)
+    # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
+    Q0 = Float64[p.tauk * p.n * Ω for (p, Ω) in zip(params, omega_E)]
+    scan = CriticalResonantFieldScan[]
+    for (k, p) in enumerate(params)
+        alpha = (p.dc_tmp - dp_diag[k]) / p.lu^(1 / 3)
+        tb = TorqueBalance(model, p, Q0[k], p.P_tor, p.lu, 2.0 / p.sval_r^2, alpha)
+        Qs, bal, Q_peak[k], br_crit[k], _, Δs = torque_balance_scan(tb; Qmin=ctrl.Qmin, Qmax=ctrl.Qmax, n=ctrl.n)
+        ctrl.store_scan && push!(scan, CriticalResonantFieldScan(collect(Float64, Qs), bal, Δs))
+    end
+    br_crit_tesla = br_crit .* Float64[abs(p.bt) for p in params]
+    return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, br_crit_tesla, Q0, scan)
 end
 
 # ---------------------------------------------------------------------
