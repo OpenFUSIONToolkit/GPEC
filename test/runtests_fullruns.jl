@@ -55,6 +55,8 @@ using TOML
             # emit deterministic zero-extent sentinels, not uninitialized memory.
             @test isempty(read(h5["SingularSurfaces/ca_left"]))
             @test isempty(read(h5["SingularSurfaces/ca_right"]))
+            # The Euler-Lagrange matrices are opt-in; a default deck writes no group.
+            @test !haskey(h5, "ForceFreeStates/EulerLagrangeMatrices")
         end
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true

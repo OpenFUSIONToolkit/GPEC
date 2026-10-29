@@ -143,6 +143,7 @@ gpec.toml.
   - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
   - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `rational_offset_fraction`.
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
+  - `write_el_matrices::Bool` - Write the Euler-Lagrange matrices (`ForceFreeStates/EulerLagrangeMatrices`: the ideal A, B, C, D, E, H, F, K and G and, on a kinetic run, the kinetic set) sampled on the ψ grid. Each is `numpert_total × numpert_total` complex at every ψ, so the group scales as numpert_total²·npsi and dominates the file size. Needs `write_outputs_to_HDF5`. Default `false`.
   - `HDF5_filename::String` - Name of HDF5 output file
   - `save_interval::Int` - Save every Nth ODE step (1=all). Always saves near rational surfaces. Default `1`: PerturbedEquilibrium and KineticForces interpolate ξ(ψ) between saved steps, so their accuracy follows the saved-step density.
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
@@ -176,6 +177,7 @@ gpec.toml.
     dW_edge_scan_start::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
     write_outputs_to_HDF5::Bool = true
+    write_el_matrices::Bool = false
     HDF5_filename::String = "gpec.h5"
     save_interval::Int = 1
     force_termination::Bool = false
