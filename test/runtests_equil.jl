@@ -22,6 +22,13 @@ using TOML
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
     end
 
+    @testset "Single-precision g-file FPOL is detected" begin
+        single_precision = GeneralizedPerturbedEquilibrium.Equilibrium.gfile_fpol_single_precision
+        @test single_precision(joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk"))
+        @test !single_precision(joinpath(@__DIR__, "test_data", "TokaMaker_ifile", "g65.geqdsk"))
+        @test !single_precision(joinpath(data_dir, "EQDSK_COCOS_02"))
+    end
+
     @testset "Load EFIT Data (arclength)" begin
         arclength_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
@@ -187,6 +194,20 @@ using TOML
         # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
         @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
         @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)
+        @test !any(k -> hasfield(GPEC.Runner.SLAYERControl, Symbol(k)), GPEC._DEPRECATED_SLAYER_KEYS)
+        # The kinetic-profile file moved to [Equilibrium]; the stop names the new home instead of "remove".
+        mktempdir() do deck_dir
+            template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            foreach(name -> cp(joinpath(template_dir, name), joinpath(deck_dir, name)), readdir(template_dir))
+            inputs = TOML.parsefile(joinpath(deck_dir, "gpec.toml"))
+            inputs["SLAYER"] = Dict{String,Any}("enabled" => false, "profile_file" => "kinetic.h5")
+            open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
+            @test_throws r"\[SLAYER\] sets `profile_file`, which is no longer a key; name the kinetic-profile file once, as kinetic_file" GPEC.main([deck_dir])
+            delete!(inputs, "SLAYER")
+            inputs["KineticForces"] = Dict{String,Any}("kinetic_file" => "kinetic.dat")
+            open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
+            @test_throws r"\[KineticForces\] sets `kinetic_file`, which is no longer a key; name the kinetic-profile file once" GPEC.main([deck_dir])
+        end
         pe_keywords = union((Base.kwarg_decl(m) for f in (GPEC.plasma_response, GPEC.perturbed_equilibrium) for m in methods(f))...)
         @test !any(k -> Symbol(k) in pe_keywords, GPEC._DEPRECATED_PE_KEYS)
     end
@@ -471,6 +492,17 @@ using TOML
         q_lar = plasma_eq_lar.profiles.q_spline.y
         @test all(>(0), q_lar)
         @test issorted(q_lar)
+
+        # The "hollow" current profile keeps q(0) = q0 but drives an off-axis current peak, giving reversed shear:
+        # q falls to an interior minimum and rises again, crossing q = 2 on both legs.
+        hollow_input = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(;
+            r0=10.0, a=1.0, q0=2.4, beta0=1e-3, p_sig=2.0, sigma_type="hollow", hollow=6.0, mtheta=64, ma=64
+        )
+        q_rs = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(lar_config, hollow_input).profiles.q_spline.y
+        jmin = argmin(q_rs)
+        @test 1 < jmin < length(q_rs)
+        @test q_rs[jmin] < 2 < min(q_rs[1], q_rs[end])
+        @test isapprox(q_rs[1], 2.4; rtol=0.05)
     end
 
     @testset "Solovev Equilibrium" begin

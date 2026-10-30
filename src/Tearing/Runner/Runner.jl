@@ -31,7 +31,7 @@ import CommonSolve
 using FastInterpolations: cubic_interp
 using ..Utilities
 using ..Utilities: KineticProfiles
-using ...Equilibrium: read_kinetic_file, KineticProfileData
+using ...Equilibrium: KineticProfileData
 using ...ForceFreeStates: ForceFreeStatesResult
 using ..InnerLayer
 using ..InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
@@ -45,6 +45,7 @@ using ..Dispersion: SurfaceCoupling, surface_coupling,
     AMRResult, amr_scan,
     MultiBoxAMRResult, multi_box_amr_scan, as_amr_result,
     GrowthRateResult, find_growth_rates
+using ..CriticalResonantField: TorqueBalance, torque_balance_scan
 
 include("Control.jl")
 include("Result.jl")
@@ -56,5 +57,8 @@ export SLAYERControl, slayer_control_from_toml, validate
 export SLAYERResult, empty_slayer_result
 export TearingProblem, run_slayer_from_inputs, ggj_inner_deltas
 export write_slayer_hdf5!
+export CriticalResonantFieldControl, critical_resonant_field_control_from_toml
+export CriticalResonantFieldScan, CriticalResonantFieldResult, empty_critical_resonant_field_result
+export run_critical_resonant_field
 
 end # module Runner

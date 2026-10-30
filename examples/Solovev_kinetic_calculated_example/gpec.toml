@@ -9,6 +9,7 @@
 
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
+kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
@@ -68,13 +69,12 @@ kinetic_source = "calculated" # Kinetic matrix source — exercises KineticForce
 kinetic_factor = 1.0          # Full-strength kinetic matrices (the "calculated" path is the real physics; no perturbation scaling)
 integrator = "forward"        # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
-singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
+singfac_min = 1e-6            # Fractional distance from rational q at which ideal jump enforced
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
 verbose = false               # Enable verbose logging
 
 [KineticForces]
-kinetic_file = "kinetic.dat"  # Kinetic profile file: psi_n, n_i, n_e, T_i, T_e, omega_E columns
 
 [[KineticForces.ion_species]]
 z = 1                         # Species charge (fundamental units)

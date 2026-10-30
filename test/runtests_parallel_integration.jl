@@ -1,6 +1,29 @@
 using LinearAlgebra
 using TOML
 
+@testset "BVP without controls preserves extended precision" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    M = ComplexF64[1 / (i + j - 1) + 0.02im / (i + j) for i in 1:6, j in 1:6]
+    reference = setprecision(BigFloat, 256) do
+        factor = lu(Complex{BigFloat}.(M))
+        raw = zeros(Complex{BigFloat}, 2, 2)
+        for row in 1:2
+            rhs = zeros(Complex{BigFloat}, 6)
+            rhs[4+row] = 1
+            x = factor \ rhs
+            raw[row, :] = x[[3, 5]]
+        end
+        delta = reshape([raw[2, 2] - raw[2, 1] - raw[1, 2] + raw[1, 1]], 1, 1)
+        return ComplexF64.(delta), ComplexF64.(raw)
+    end
+    default = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, nothing, false)
+    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(), false)
+    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; extended_precision_bvp=false), false)
+    @test default == reference
+    @test extended == reference
+    @test ordinary != reference
+end
+
 @testset "Riccati FM Integration Tests" begin
 
     @testset "ChunkPropagator identity on trivial interval" begin
@@ -114,7 +137,10 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            eq_config,
+            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        )
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
@@ -201,7 +227,10 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            eq_config,
+            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        )
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
@@ -251,7 +280,7 @@ using TOML
         #
         # Bidirectional FM integration (crossing chunks integrated backward) is what the
         # Riccati path uses. It keeps FM propagators well-conditioned for both small-N
-        # (Solovev N=8, tested here) and large-N (DIIID N=26, tested below).
+        # on this small multi-surface fixture.
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
         function run_solovev(integrator)
@@ -262,7 +291,10 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+                eq_config,
+                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            )
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
             intr.nlow = ctrl.nn_low;
@@ -286,75 +318,6 @@ using TOML
 
         # Energy eigenvalue matches to 2%
         @test isapprox(et_ric, et_fwd; rtol=0.02)
-        # Per-surface Δ' assertions were removed: per-surface Δ' is a stub calculation
-        # left in the code for future work but no longer reported, output, or tested.
-        # The STRIDE BVP Δ' matrix (`SingularSurfaces/Delta_prime_matrix`) is the canonical
-        # Δ', regression-tested via the DIIID-like fixture which has well-conditioned
-        # values; Solovev is near marginal stability and BVP Δ' is pathological there.
-    end
-
-    @testset "Riccati FM integration matches forward ODE — DIIID-like example (large N)" begin
-        # Run forward and Riccati FM integrations on the DIIID-like example (N≈26 modes).
-        # Before bidirectional integration, the all-forward FM propagators were ill-conditioned
-        # for large N, producing ~10% energy error. Bidirectional integration (backward crossing
-        # chunks + forward intermediate chunks) restores accuracy to within 2%.
-        #
-        # This is the key regression test for the bidirectional parallel FM fix.
-        ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
-
-        function run_diiid(integrator)
-            inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-            inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["integrator"] = integrator
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-            intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-            # Apply the two-pass auto grid exactly as the main driver does (the example ships
-            # grid_type="auto", mpsi=0): measured-curvature refinement with rational surfaces
-            # pinned as mandatory knots, re-formed from the captured ingest. The pinned values
-            # below are for this grid, which is the production default.
-            if GeneralizedPerturbedEquilibrium.Equilibrium.wants_two_pass(eq_config)
-                mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
-                psi_nodes = GeneralizedPerturbedEquilibrium.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
-                rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
-                equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
-            end
-            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-                (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            intr.nlow = ctrl.nn_low;
-            intr.nhigh = ctrl.nn_high;
-            intr.npert = 1
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-            intr.mpert = intr.mhigh - intr.mlow + 1
-            intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-            mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
-            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
-            return real(vac.et[1]), intr
-        end
-
-        et_ric, intr_ric = run_diiid("riccati")
-
-        # Riccati FM et[1] regression — pinned tightly, NOT bracketed. et[1] is grid- and
-        # equilibrium-sensitive (auto-mpsi gives a spurious value; a wrong grid/Ip shifts it), so
-        # a loose bracket would mask exactly that accuracy regression. The Riccati-path value is
-        # deterministic and reproducible.
-        @test isapprox(et_ric, 0.800637; rtol=2e-2)
-        # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
-        # comment above). BVP Δ' matrix regression for DIIID-like is in the
-        # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
-
-        # No explicit Riccati-vs-forward cross-path check here: the two paths share the
-        # equilibrium grid (so a cross-path comparison is blind to grid/accuracy regressions),
-        # and their agreement is already verified on the lighter Solovev case above. The tight
-        # absolute pin above is the guard for grid/equilibrium regressions on this case.
     end
 
     @testset "ode_itime_cost is additive over sub-intervals" begin
@@ -372,7 +335,10 @@ using TOML
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            eq_config,
+            haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        )
         intr.nlow = ctrl.nn_low;
         intr.nhigh = ctrl.nn_high;
         intr.npert = 1
@@ -423,7 +389,10 @@ using TOML
             ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
             eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+                eq_config,
+                haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+            )
             intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
                 (Symbol(k) => v for (k, v) in inputs["Wall"])...)
             intr.nlow = ctrl.nn_low;
@@ -462,99 +431,6 @@ using TOML
         @test isempty(odet_ric.xi_s_store)
     end
 
-    @testset "delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)" begin
-        # Verify that the parallel FM path computes a well-formed inter-surface Δ' matrix
-        # for the DIIID-like case (N≈26 modes, multiple rational surfaces). This complements
-        # the Solovev test above by exercising the BVP assembly with more surfaces and larger
-        # mode space, where ill-conditioned (non-bidirectional) FM propagators would fail.
-        ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
-        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
-        inputs["ForceFreeStates"]["integrator"] = "riccati"
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing)
-        # Apply the two-pass auto grid (measured-curvature refinement, rational surfaces pinned
-        # as mandatory knots) exactly as the main driver does (see the FM testset above); the
-        # pinned values below are for this grid, the production default.
-        if GeneralizedPerturbedEquilibrium.Equilibrium.wants_two_pass(eq_config)
-            mand = GeneralizedPerturbedEquilibrium.ForceFreeStates.rational_psi_nodes(equil; nlow=ctrl.nn_low, nhigh=ctrl.nn_high)
-            psi_nodes = GeneralizedPerturbedEquilibrium.Equilibrium.refined_psi_grid(equil; tau=eq_config.psi_accuracy, mandatory=mand)
-            rerun_input = GeneralizedPerturbedEquilibrium.Equilibrium.build_direct_from_ingest(eq_config, equil.ingest)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, rerun_input; override_psi_nodes=psi_nodes)
-        end
-        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-            (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
-        intr.npert = 1
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-        intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.numpert_total = intr.mpert * intr.npert
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
-        odet, fm_propagators, fm_chunks, fm_S_left =
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
-        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
-            intr, fm_propagators, fm_chunks;
-            wv=vac.wv, psio=equil.psio,
-            S_at_surface_left=fm_S_left, ctrl=ctrl, equil=equil, mats=mats)
-
-        msing = intr.msing
-        dpm = intr.delta_prime_matrix
-
-        # Matrix is populated with correct shape (msing × msing); see Solovev test above
-        # for why this is msing × msing rather than 2·msing × 2·msing.
-        @test !isempty(dpm)
-        @test size(dpm) == (msing, msing)
-
-        # All elements are finite
-        @test all(isfinite, dpm)
-
-        # Diagonal (self-response) elements are non-zero
-        for j in 1:msing
-            @test abs(dpm[j, j]) > 1e-10
-        end
-
-        # Pinned diagonal `delta_prime_matrix` REAL parts, PEST3-convention self-response Δ' from
-        # the STRIDE BVP with vacuum coupling, on the two-pass measured-curvature grid (rational
-        # surfaces now *bracketed* rather than pinned on — see `bracket_mandatory_nodes`).
-        #
-        # The q=2 pin is now a CONVERGED value, which closes the "replace this with a converged-Δ′
-        # pin on a fixed ldp grid" item the previous pin carried. Three independent grid families
-        # on this fixture agree to ~1%:
-        #     ldp     mpsi 512 / 1024 / 2048   :  8.478 / 9.142 / 9.244
-        #     uniform mpsi 1024 / 2048         :  9.146 / 9.143
-        #     auto    τ 2e-3/1e-3/5e-4/2.5e-4  :  9.198 / 9.239 / 9.206 / 9.157
-        # i.e. dpm[1,1] → ≈9.2. Before this grid fix the τ-scan swung ~50% (6.2–9.9) and the pin
-        # had to be a mid-spread snapshot; it is now flat in τ to 0.9%, so the default
-        # psi_accuracy lands on the converged value rather than near it by luck.
-        # See the "pinning grid-sensitive Δ′ robustly" open problem in
-        # docs/src/developer_notes.md for the plateau criterion meant to replace single-point pins.
-        # (et[1], NTV torque, and ‖resonant flux‖ stay grid-robust to <1% — the sensitivity is
-        # local to the singular-layer matching, not the global response.) Only real parts are
-        # pinned; the imaginary parts are dominated by the PEST3 four-term cancellation and are
-        # FP/platform-sensitive. Near-separatrix surfaces q=5,6 keep only the finiteness/non-zero
-        # checks above. Values use this testset's mode range (mpert=27, vs full-pipeline mpert=35).
-        #
-        # The q=2 platform spread also collapsed with this fix: because the matching stencil no
-        # longer straddles a knot, q‴ is single-valued across it and the surface no longer sits on
-        # the steepest part of the refinement curve. Same grid and inputs now give 9.239
-        # (macOS/aarch64), 9.333 (linux/julia 1.11) and 9.356 (linux/julia 1.x) — 1.3% end to end,
-        # against ~25% before (6.14 / 6.69 / 7.70). rtol=3e-2 spans that with margin and is a 5×
-        # TIGHTENING of the old 1.5e-1. q=3 and q=4 are unchanged: the same ladder puts them at
-        # −5.716 and −16.033 (ldp 2048), inside their existing tolerances, and they reproduce
-        # across platforms.
-        @test isapprox(real(dpm[1, 1]), +9.300000e+00; rtol=3e-2)   # q=2, converged (ldp2048 9.244)
-        @test isapprox(real(dpm[2, 2]), -5.344199e+00; rtol=1e-1)   # q=3
-        @test isapprox(real(dpm[3, 3]), -1.590034e+01; rtol=1e-1)   # q=4
-    end
+    # Production DIII-D energies and Δ′ are tracked by the diiid_n1_riccati harness cases.
 
 end

@@ -13,9 +13,11 @@
 #   │   ├── psi, q, q1, ...
 #   │   └── ...
 #   ├── Roots/              -- complex Q_root, omega_Hz, gamma_Hz
-#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame)
+#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame;
+#   │                          + *Winding when root_classification = :winding)
 #   │                           (flat-plus-offsets ragged encoding)
-#   └── Scan/               -- optional: full Q/Δ scan data
+#   ├── Scan/               -- optional: full Q/Δ scan data
+#   └── CriticalResonantField/ -- optional: torque-balance b_r/B_φ crit per surface
 
 using HDF5
 
@@ -57,8 +59,28 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     if result.control.store_scan && !isempty(result.scan_data)
         _write_scan_data!(g, result)
     end
+    result.critical_resonant_field.enabled && _write_critical_resonant_field!(g, result.critical_resonant_field)
     _annotate_tearing!(g)
     return g
+end
+
+# ---------- critical resonant field ----------
+function _write_critical_resonant_field!(g, crf::CriticalResonantFieldResult)
+    cg = create_group(g, "CriticalResonantField")
+    cg["rational_index"] = crf.rational_index
+    cg["Q_peak"] = crf.Q_peak
+    cg["br_crit"] = crf.br_crit
+    cg["br_crit_tesla"] = crf.br_crit_tesla
+    cg["Q0"] = crf.Q0
+    isempty(crf.scan) && return nothing
+    scan = create_group(cg, "Scan")
+    for (k, sc) in enumerate(crf.scan)
+        sg = create_group(scan, "Surface_$k")
+        sg["Q"] = sc.Q
+        sg["balance"] = sc.balance
+        sg["Delta"] = sc.Delta
+    end
+    return nothing
 end
 
 # Token recorded in the Tearing group's layer_model attribute; keyed by the
@@ -92,16 +114,17 @@ const TEARING_H5_ANNOTATIONS = [
         (; long_name="real E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E applied to each surface's inner-layer Q in the coupled determinant (0 in uncoupled mode)", dims=("surface",)),
     "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface", units="s", dims=("surface",)),
     "PerSurface/Delta_prime_norm" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
-    "PerSurface/rs" => (; long_name="minor radius of each rational surface", units="m", dims=("surface",)),
+    "PerSurface/rs" => (; long_name="minor radius √(2ψ_t/B₀) of each rational surface (toroidal-flux label)", units="m", dims=("surface",)),
     "PerSurface/R0" => (; long_name="major radius", units="m", dims=("surface",)),
     "PerSurface/bt" => (; long_name="toroidal field", units="T", dims=("surface",)),
     "PerSurface/sval_r" => (; long_name="r-based magnetic shear r_s·(dq/dr)/q (Fitzpatrick convention)", dims=("surface",)),
     "PerSurface/D_R" =>
         (; long_name="resistive interchange D_R = E + F + H² for the critical-Δ formula (auto-derived from GGJ coefficients unless overridden)", dims=("surface",)),
-    "PerSurface/D_geo" => (; long_name="Connor et al. 2015 Eq. 59 geometric factor (0 unless supplied)", dims=("surface",)),
+    "PerSurface/D_geo" =>
+        (; long_name="Connor et al. 2015 Eq. 59 toroidal critical-Δ geometric factor in the r_s reference or the dgeo_val override (0 without ResistGeometry)", dims=("surface",)),
     "PerSurface/eta" => (; long_name="parallel resistivity at each surface", units="Ohm*m", dims=("surface",)),
     "PerSurface/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
-    "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor et al. 2015 Eq. 59)", dims=("surface",)),
+    "PerSurface/D_c_offset" => (; long_name="critical-Δ offset from χ_∥/χ_⊥ matching (Connor, Ham, Hastie & Liu 2015 Eq. 59)", dims=("surface",)),
     "PerSurface/D_c_type" => (; long_name="per-surface D_c prescription label", dims=("surface",)),
     "PerSurface/k_ref" => (; long_name="reference-length ratio K = r_s·(dψ_N/dr) at each surface", dims=("surface",)),
     "PerSurface/alpha_mercier" => (; long_name="Mercier Frobenius exponent α = √(−D_I) at each surface (Glasser-Greene-Johnson 1975 Eq. 48)", dims=("surface",)),
@@ -138,11 +161,33 @@ const TEARING_H5_ANNOTATIONS = [
     "LayerWidths/delta_s_over_d_beta" => (; long_name="complex dimensionless layer thickness δ_s/d_β", dims=("surface",)),
     "LayerWidths/delta_s" => (; long_name="complex resistive layer thickness δ_s (Riccati)", dims=("surface",)),
     "LayerWidths/delta_s_abs" => (; long_name="physical resistive layer thickness |δ_s|", units="m", dims=("surface",)),
-    "LayerWidths/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",))
+    "LayerWidths/d_beta" => (; long_name="β-weighted ion drift scale d_β", units="m", dims=("surface",)),
+    "CriticalResonantField/rational_index" => (; long_name="rational-surface index of each row", dims=("surface",)),
+    "CriticalResonantField/Q_peak" =>
+        (; long_name="normalized frequency Q (Cole axis) at the torque-balance maximum (NaN = no maximum or surface skipped)", units="1", dims=("surface",)),
+    "CriticalResonantField/br_crit" =>
+        (; long_name="critical normalized resonant field b_r/B_φ for error-field penetration (Cole-Fitzpatrick 2006 Eq. 62; NaN = no maximum or surface skipped)",
+            units="1", dims=("surface",)),
+    "CriticalResonantField/br_crit_tesla" =>
+        (; long_name="critical resonant field br_crit·|B0| with the layer's B0, approximately comparable to SingularCoupling/resonant_area_weighted_field (NaN = no maximum or surface skipped)",
+            units="T", dims=("surface",)),
+    "CriticalResonantField/Q0" =>
+        (; long_name="normalized natural E×B rotation Q0 = τ_k·n·Ω_E of the m/n mode (NaN where Ω_E is unknown)", units="1", dims=("surface",))
+]
+
+const TEARING_CRF_SCAN_H5_ANNOTATIONS = [
+    "Q" => (; long_name="sampled real normalized frequency Q (Cole axis)", units="1"),
+    "balance" => (; long_name="torque balance 2·P·(Q0 − Q)/Im[−1/(α + Δ)]", units="1"),
+    "Delta" => (; long_name="complex inner-layer Δ(Q) on the Cole axis", units="1")
 ]
 
 const TEARING_RAGGED_H5_ANNOTATIONS = [
     "flat" => (; long_name="concatenated complex entries (rows delimited by offsets)"),
+    "offsets" => (; long_name="ragged-array offsets: row k spans offsets[k]+1:offsets[k+1]")
+]
+
+const TEARING_RAGGED_WINDING_H5_ANNOTATIONS = [
+    "flat" => (; long_name="winding number of the dispersion residual around each entry of the matching root list (NaN: circle unresolved)"),
     "offsets" => (; long_name="ragged-array offsets: row k spans offsets[k]+1:offsets[k+1]")
 ]
 
@@ -162,7 +207,13 @@ function _annotate_tearing!(g)
     ann.annotate!(g, TEARING_H5_ANNOTATIONS)
     if haskey(g, "Diagnostics")
         for sub in keys(g["Diagnostics"])
-            ann.annotate!(g["Diagnostics"][sub], TEARING_RAGGED_H5_ANNOTATIONS)
+            ann.annotate!(g["Diagnostics"][sub],
+                endswith(sub, "Winding") ? TEARING_RAGGED_WINDING_H5_ANNOTATIONS : TEARING_RAGGED_H5_ANNOTATIONS)
+        end
+    end
+    if haskey(g, "CriticalResonantField/Scan")
+        for sub in keys(g["CriticalResonantField/Scan"])
+            ann.annotate!(g["CriticalResonantField/Scan"][sub], TEARING_CRF_SCAN_H5_ANNOTATIONS)
         end
     end
     if haskey(g, "Scan")
@@ -276,22 +327,30 @@ function _write_diagnostics!(g, r::SLAYERResult)
         r.per_surface_extraction
     end
 
-    _write_ragged_complex!(diag, "ValidRoots",
+    _write_ragged!(diag, "ValidRoots",
         [gr.valid_roots for gr in extractions])
-    _write_ragged_complex!(diag, "Poles",
+    _write_ragged!(diag, "Poles",
         [gr.poles for gr in extractions])
-    _write_ragged_complex!(diag, "FilteredRoots",
+    _write_ragged!(diag, "FilteredRoots",
         [gr.filtered_roots for gr in extractions])
+    if any(gr -> gr.classification === :winding, extractions)
+        _write_ragged!(diag, "ValidRootsWinding",
+            [gr.valid_roots_winding for gr in extractions])
+        _write_ragged!(diag, "PolesWinding",
+            [gr.poles_winding for gr in extractions])
+        _write_ragged!(diag, "FilteredRootsWinding",
+            [gr.filtered_roots_winding for gr in extractions])
+    end
     return nothing
 end
 
-# Write a ragged vector-of-vectors of ComplexF64 as (flat, offsets) —
+# Write a ragged vector-of-vectors (ComplexF64 or Float64) as (flat, offsets) —
 # `offsets[k+1] - offsets[k]` is the length of row `k`. This avoids HDF5 VLEN
 # types, which have patchy cross-language support.
-function _write_ragged_complex!(parent, name::String,
-    data::Vector{Vector{ComplexF64}})
+function _write_ragged!(parent, name::String,
+    data::Vector{Vector{T}}) where {T<:Union{ComplexF64,Float64}}
     g = create_group(parent, name)
-    flat = ComplexF64[]
+    flat = T[]
     offsets = Int[0]
     for v in data
         append!(flat, v)

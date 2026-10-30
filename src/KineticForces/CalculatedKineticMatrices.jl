@@ -43,7 +43,7 @@ interpolants (`kf_intr.dbob_m`, `kf_intr.divx_m`) are not wired into this routin
     carry NTV-specific knobs (nl, zi, mi, wdfac, electron) that the
     KineticForces kernel needs but ForceFreeStatesControl does not expose.
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-
-    profile splines loaded via `Equilibrium.load_kinetic_profiles`.
+    profile splines built by `Equilibrium.kinetic_profile_splines`.
 
 # Returns
 

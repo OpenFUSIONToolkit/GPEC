@@ -68,7 +68,7 @@ force_termination     = true   # Terminate after the stability stage (no perturb
 write_outputs_to_HDF5 = true   # Write stability outputs to HDF5
 
 # Outer-region singular Galerkin Delta-prime solver with rpec coil columns.
-gal_solver             = "LU"  # Banded solver: "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs). rpec requires "LU".
+gal_solver             = "LU"  # Banded solver: "auto" (Cholesky if Hermitian positive definite, else LU), "LU" or "cholesky"
 gal_nx                 = 256   # Hermite-cubic elements per interval between singular surfaces
 gal_nq                 = 6     # Gauss-Lobatto quadrature order per element
 gal_pfac               = 0.03  # Grid packing ratio toward singular surfaces (smaller = tighter packing)

@@ -171,9 +171,6 @@ builds a second control for its differing tolerance).
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
 
-    # Input files (relative to dir_path)
-    kinetic_file::String = "kinetic.dat"
-
     # Debugging
     verbose::Bool = false
 end

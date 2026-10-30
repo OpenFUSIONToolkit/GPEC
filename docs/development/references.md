@@ -26,7 +26,7 @@ The ForceFreeStates module (ideal MHD stability analysis) implements methods fro
 
 - **Glasser (2016)**: "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma"
   - Location: `docs/resources/2016-Glasser-The_direct_criterion_of_Newcomb_for_the_ideal_MHD_stability_of_an_axisymmetric_toroidal_plasma.pdf`
-  - Published: Physics of Plasmas **23**, 112506 (2016)
+  - Published: Physics of Plasmas **23**, 072505 (2016)
   - **Describes: FUNDAMENTAL PAPER - Newcomb's criterion for ideal MHD stability (current implementation)**
 
 - **Glasser (2018)**: "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control"
@@ -74,6 +74,7 @@ The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are
 
 - **Burgess et al. (2026)**: "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer"
   - Location: `docs/resources/2026-Burgess-Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer.pdf`
+  - Published: Plasma Physics and Controlled Fusion **68**, 065017 (2026), doi 10.1088/1361-6587/ae7156
   - Describes: The two-fluid slab layer, its four regimes, and the `S^(1/3)` outer-inner matching
 
 - **Fitzpatrick (2022)**: "Influence of anomalous perpendicular transport on linear tearing mode dynamics in tokamak plasmas"
@@ -91,13 +92,22 @@ The SLAYER slab inner-layer solver and the resistive-layer width diagnostics are
   - Published: Nuclear Fusion (2025), doi 10.1088/1741-4326/ae4fdd (open access: arXiv:2511.07666)
   - Describes: Diffusive-resistive layer width (Eq. 100) and the resistive-layer-overlap truncation `0 < Ψ < 1 − ε_c` (Sect. 5.9)
 
+- **Cole & Fitzpatrick (2006)**: "Drift-magnetohydrodynamical model of error-field penetration in tokamak plasmas"
+  - Location: not in `docs/resources/`
+  - Published: Physics of Plasmas 13, 032503 (2006), doi 10.1063/1.2178167
+  - Describes: Steady-state torque balance at a rational surface (Eq. 61) and the critical resonant field for error-field penetration (Eq. 62), used by `Tearing.CriticalResonantField`
+- **Fitzpatrick (1993)**: "Interaction of tearing modes with external structures in cylindrical geometry"
+  - Location: not in `docs/resources/`
+  - Published: Nuclear Fusion 33, 1049 (1993)
+  - Describes: Bifurcated rotating states and the fold at which an error field penetrates (Sec. 7.4), the threshold definition used by `Tearing.CriticalResonantField`
+
 ## Resistive MHD Stability Analysis (Future Work)
 
 GPEC will eventually implement resistive MHD stability analysis based on:
 
 - **Glasser (2016)**: "Computation of resistive instabilities by matched asymptotic expansions"
   - Location: `docs/resources/2016-Glasser-Computation_of_resistive_instabilities_by_matched_asymptotic_expansions-compressed.pdf`
-  - Published: Physics of Plasmas **23**, 072505 (2016)
+  - Published: Physics of Plasmas **23**, 112506 (2016)
   - Describes: Resistive stability analysis and Δ' calculation via matched asymptotic expansions
 
 - **Glasser (2018)**: "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time"
@@ -131,3 +141,9 @@ The KineticForces module (formerly PENTRC) implements neoclassical toroidal visc
   - Published: Physical Review Letters **102**, 065002 (2009)
   - Link: https://doi.org/10.1103/PhysRevLett.102.065002
   - Describes: Trapped-particle nonambipolar transport theory underpinning the NTV calculation
+
+- **Connor et al. (2015)**: "The role of thermal conduction in tearing mode theory"
+  - Location: not in `docs/resources/`; preprint at https://arxiv.org/abs/1410.7240
+  - Published: Plasma Physics and Controlled Fusion **57**, 065001 (2015)
+  - Link: https://doi.org/10.1088/0741-3335/57/6/065001
+  - Describes: Toroidal critical Δ′ from finite parallel thermal conduction at a rational surface. Eq. 59 gives the geometric factor (`toroidal_dgeo`) and Eq. 20 the parallel-wavenumber gradient (`toroidal_kpar`) used by `dc_type = :toroidal` in `InnerLayer.SLAYER`; Eq. 61 is the large-aspect-ratio form of Eq. 59, and Eq. 65 gives the corresponding critical island width of Fitzpatrick (1995)

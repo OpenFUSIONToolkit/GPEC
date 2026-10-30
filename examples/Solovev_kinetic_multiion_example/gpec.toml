@@ -7,6 +7,7 @@
 
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
+kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -72,7 +73,7 @@ mtheta_vacuum = 960           # Number of points used in splines over poloidal a
 kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
-singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
+singfac_min = 1e-6            # Fractional distance from rational q at which ideal jump enforced
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 save_interval = 1             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
@@ -95,7 +96,6 @@ f0fac = 1      # Scale toroidal field at constant pressure (β, q change; Φ, p,
 [KineticForces]
 # Multi-ion NTV: the analytic Solovev main ion is modelled as a 50/50 D-T mix (n_i = total),
 # so the summed NTV runs over D + T + the neutrality-closing impurity + electrons.
-kinetic_file = "kinetic.dat"  # Kinetic profile file: psi_n, n_i, n_e, T_i, T_e, omega_E columns
 electron = true               # Add electron NTV in addition to the ion species
 impurity_charge = 6           # Impurity charge (fundamental units); closes quasineutrality
 impurity_mass = 12            # Impurity mass (proton masses)
