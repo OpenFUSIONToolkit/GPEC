@@ -236,6 +236,18 @@ end
         @test all(isapprox.(widths(; over...), w_ref; rtol=1e-10))
     end
 
+    # Z_eff(ψ): the file's profile wins, else Z_imp − (n_i/n_e)(Z_imp − 1), else nothing (the zeff_default fallback).
+    layer_view(data) = GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER._slayer_profiles(data, model)
+    j = length(kin.psi) ÷ 2
+    closure = layer_view(KineticProfileData(kin))
+    @test closure.zeff_source === :closure
+    @test closure.zeff(kin.psi[j]) ≈ 6.0 - kin.n_i[j] / kin.n_e[j] * 5.0
+    @test layer_view(KineticProfileData(kin; impurity_charge=10)).zeff(kin.psi[j]) ≈ 10.0 - kin.n_i[j] / kin.n_e[j] * 9.0
+    own = layer_view(KineticProfileData(kin; impurity_charge=10, zeff=fill(3.2, length(kin.psi))))
+    @test own.zeff_source === :file && own.zeff(kin.psi[j]) ≈ 3.2
+    no_ni = layer_view(KineticProfileData(kin; n_i=nothing))
+    @test no_ni.zeff === nothing && no_ni.zeff_source === :scalar
+
     # Multi-n: the innermost overlap point binds; scans with no overlap never do.
     per_n = [scan(KineticProfileData(kin), n:n) for n in 1:2]
     overlapping = [sc.psihigh for sc in per_n if sc.psihigh !== nothing]

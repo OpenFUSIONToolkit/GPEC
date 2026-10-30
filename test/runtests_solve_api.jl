@@ -513,6 +513,7 @@ using HDF5
                 reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"), extra_sections=sections)]).ffs
 
                 @test reference.closure === api.closure === :matched
+                @test h5open(f -> haskey(f, "Info/Runtimes/match"), joinpath(dir, "gpec.h5"))
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.xi ≈ reference.match.xi rtol = 1e-12
                 # The composite inner profiles need the cut solution, which Galerkin keeps only on request.

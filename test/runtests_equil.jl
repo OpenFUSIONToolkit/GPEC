@@ -231,6 +231,11 @@ using TOML
         @test_throws r"\[Riccati\] is set but \[ForceFreeStates\] integrator = \"Forward\"" GPEC.parse_deck(with(d -> d["Riccati"] = Dict{String,Any}()), template)
         @test_throws r"\[GGJ\] is set but neither" GPEC.parse_deck(with(d -> d["GGJ"] = Dict{String,Any}()), template)
         @test_throws r"consecutive" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 3]), template)
+        no_ffs = with(d -> foreach(k -> delete!(d, k), ("ForceFreeStates", "Wall", "Forward")))
+        @test_throws r"\[LocalStability\] is set but there is no \[ForceFreeStates\]" GPEC.parse_deck(no_ffs, template)
+        @test_throws r"\[ForcingTerms\] is set but there is no \[PerturbedEquilibrium\]" GPEC.parse_deck(with(d -> d["ForcingTerms"] = Dict{String,Any}()), template)
+        @test_throws r"\[KineticForces\] is set but neither" GPEC.parse_deck(with(d -> d["KineticForces"] = Dict{String,Any}()), template)
+        @test_throws r"set kinetic_file in \[Equilibrium\]" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["kinetic"] = "KineticForces"), template)
         # Values take their field types: an array becomes a range or a tuple, a string a Symbol.
         @test GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 2]), template).force_balance.keywords[:nn] == 1:2
         tearing = GPEC.tearing_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("inner_model" => "SLAYER", "coupling_mode" => "coupled",
