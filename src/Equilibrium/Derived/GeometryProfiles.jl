@@ -17,9 +17,8 @@ equilibrium's 2D rzphi interpolants. Uses trapezoidal sums in θ across the
 non-periodic θ nodes (the trailing duplicate at θ = 1 is skipped, mthsurf =
 length(rzphi_ys) - 1).
 
-The integrand `delpsi = |∇ψ|` (in geometry units) is built from the same
-nodal derivatives the GS-residual diagnostic uses; see `Equilibrium.jl:407-419`
-and the Fortran reference at `pentrc/dcon_interface.f:1199-1254`.
+The integrand `delpsi = |∇ψ|` (in geometry units) applies `metric_from_primitives`
+to the bicubic's nodal values.
 """
 function compute_geometry_profiles(
     rzphi_xs::Vector{Float64},
@@ -41,24 +40,15 @@ function compute_geometry_profiles(
         r_int = 0.0
         R_int = 0.0
         for itheta in 1:mthsurf
-            f1 = rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
-            offset = rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
-            jac = rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
-            fy1 = rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
-            fy2 = rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
-
-            rfac = sqrt(f1)
-            eta = 2π * (rzphi_ys[itheta] + offset)
-            R = ro + rfac * cos(eta)
-
-            w1 = (1 + fy2) * (2π)^2 * rfac * R / jac
-            w2 = (rfac > 0) ? (-fy1 * π * R / (rfac * jac)) : 0.0
-            delpsi = sqrt(w1^2 + w2^2)
+            p = (r2=rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta], deta=rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
+                jac=rzphi_jac.nodal_derivs.partials[1, ipsi, itheta], r2_y=rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta],
+                deta_y=rzphi_offset.nodal_derivs.partials[3, ipsi, itheta])
+            (; rfac, r, jac, delpsi) = metric_from_primitives(ro, rzphi_ys[itheta], p)
             weight = jac * delpsi / mthsurf
 
             area_psi += weight                  # wegt=0, ave=0
             r_int += weight * rfac              # wegt=3, ave=1
-            R_int += weight * R                 # wegt=1, ave=1
+            R_int += weight * r                 # wegt=1, ave=1
         end
         area_vals[ipsi] = area_psi
         avg_r_vals[ipsi] = (area_psi > 0) ? r_int / area_psi : 0.0

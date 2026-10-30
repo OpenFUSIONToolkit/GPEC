@@ -140,32 +140,11 @@ function reconstruct_physical_fields(
 
         # Compute b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path
         # area = <J·|∇ψ|>_θ (Hamada: J is const over θ)
-        ro = equil.ro
         mthsurf = length(equil.rzphi_ys) - 1
-        thetas_for_avg = [(k - 1) / mthsurf for k in 1:mthsurf]
         Jb_psi_modes = similar(b_psi_modes)
         # Surfaces are independent; :static keeps threadid() stable for any per-thread state.
         Threads.@threads :static for ipsi in 1:npsi
-            psi = psi_grid[ipsi]
-            hint2d = (Ref(1), Ref(1))
-            area = 0.0
-            for k in 1:mthsurf
-                theta = thetas_for_avg[k]
-                r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
-                deta = equil.rzphi_offset((psi, theta); hint=hint2d)
-                jac = equil.rzphi_jac((psi, theta); hint=hint2d)
-                r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-                deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-                rfac = sqrt(abs(r2))
-                eta = 2π * (theta + deta)
-                r = ro + rfac * cos(eta)
-                w11 = (1.0 + deta_y) * 4π^2 * rfac * r / jac
-                w12 = -r2_y * π * r / (rfac * jac)
-                delpsi = sqrt(w11^2 + w12^2)
-                area += jac * delpsi
-            end
-            area /= mthsurf
-            Jb_psi_modes[ipsi, :] = b_psi_modes[ipsi, :] ./ area
+            Jb_psi_modes[ipsi, :] = b_psi_modes[ipsi, :] ./ Equilibrium.flux_surface_area(equil, psi_grid[ipsi], mthsurf)
         end
 
         # R,Z,φ cylindrical components (Fortran gpeq_rzphi)
@@ -794,7 +773,6 @@ function compute_b_n_xi_n_modes(
     npsi, numpert_total = size(b_psi_modes)
     (; mpert, mlow, npert) = ffs
     mthsurf = length(equil.rzphi_ys) - 1
-    ro = equil.ro
     twopi = 2π
 
     b_n_modes = zeros(ComplexF64, npsi, numpert_total)
@@ -814,20 +792,9 @@ function compute_b_n_xi_n_modes(
         delpsis = zeros(Float64, mthsurf)
         jacs = zeros(Float64, mthsurf)
         for k in 1:mthsurf
-            theta = thetas[k]
-            r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d_psi)
-            deta = equil.rzphi_offset((psi, theta); hint=hint2d_psi)
-            jac = equil.rzphi_jac((psi, theta); hint=hint2d_psi)
-            r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d_psi)
-            deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d_psi)
-            rfac = sqrt(abs(r2))
-            eta = twopi * (theta + deta)
-            r = ro + rfac * cos(eta)
-            w11 = (1.0 + deta_y) * twopi^2 * rfac * r / jac
-            w12 = -r2_y * π * r / (rfac * jac)
-            delpsi = sqrt(w11^2 + w12^2)
-            delpsis[k] = delpsi
-            jacs[k] = jac
+            m = Equilibrium.flux_surface_metric(equil, psi, thetas[k]; hint=hint2d_psi)
+            delpsis[k] = m.delpsi
+            jacs[k] = m.jac
         end
 
         jd = jacs .* delpsis

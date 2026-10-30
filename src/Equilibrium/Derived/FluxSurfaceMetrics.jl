@@ -4,8 +4,8 @@
 Evaluate the smooth `rzphi` primitives at `(psi, theta)`: `r²`, the `η`-offset, the Jacobian and the
 θ-derivatives of `r²` and the offset. Every consumer that derives flux-surface geometry from `rzphi`
 (the metric and area helpers here, the perturbed-field reconstruction transform) samples this one
-function, so the gpout.f conventions live in one place. ψ-derivatives are deliberately not provided:
-the bicubic is only C¹ in ψ, so callers differentiate a ψ-resample of these values instead.
+function, and `metric_from_primitives` turns them into the gpout.f metric. ψ-derivatives are
+deliberately not provided: the bicubic is only C¹ in ψ, so callers differentiate a ψ-resample instead.
 """
 function rzphi_primitives(equil::PlasmaEquilibrium, psi::Float64, theta::Float64; hint=(Ref(1), Ref(1)))
     pt = (psi, theta)
@@ -18,50 +18,44 @@ function rzphi_primitives(equil::PlasmaEquilibrium, psi::Float64, theta::Float64
 end
 
 """
+    metric_from_primitives(ro, theta, p) -> (; rfac, r, jac, delpsi)
+
+The gpout.f flux-surface metric at one point from the `rzphi` primitives `p` (the fields of
+`rzphi_primitives`): minor radius `rfac = √r²`, major radius `r`, Jacobian `jac` and
+`delpsi = |∇ψ|`. Every `|∇ψ|` derived from `rzphi` goes through this one formula, whether the
+primitives come from evaluating the bicubic or from its nodal values.
+"""
+function metric_from_primitives(ro::Float64, theta::Float64, p)
+    rfac = sqrt(abs(p.r2))
+    r = ro + rfac * cos(2π * (theta + p.deta))
+    w11 = (1.0 + p.deta_y) * (2π)^2 * rfac * r / p.jac
+    w12 = rfac > 0 ? -p.r2_y * π * r / (rfac * p.jac) : 0.0
+    return (; rfac, r, jac=p.jac, delpsi=sqrt(w11^2 + w12^2))
+end
+
+"""
     flux_surface_metric(equil, psi, theta; hint=(Ref(1), Ref(1))) -> (; r, jac, delpsi)
 
 Evaluate the flux-surface geometry at `(psi, theta)`: major radius `r`, Jacobian `jac`, and the
-flux-gradient magnitude `delpsi = |∇ψ|`. The metric components `w11`/`w12` follow GPEC's gpout.f
-convention for the rzphi straight-field-line coordinates. This is the single source of truth for the
-`|∇ψ|` computation reused across the FFS and PE modules.
+flux-gradient magnitude `delpsi = |∇ψ|`, by `metric_from_primitives` on the bicubic at that point.
 """
 function flux_surface_metric(equil::PlasmaEquilibrium, psi::Float64, theta::Float64; hint=(Ref(1), Ref(1)))
-    (; r2, deta, jac, r2_y, deta_y) = rzphi_primitives(equil, psi, theta; hint=hint)
-
-    rfac = sqrt(abs(r2))
-    eta = 2π * (theta + deta)
-    r = equil.ro + rfac * cos(eta)
-
-    # Metric components for |∇ψ| in flux coordinates (GPEC gpout.f)
-    w11 = (1.0 + deta_y) * (2π)^2 * rfac * r / jac
-    w12 = -r2_y * π * r / (rfac * jac)
-    delpsi = sqrt(w11^2 + w12^2)
-
+    (; r, jac, delpsi) = metric_from_primitives(equil.ro, theta, rzphi_primitives(equil, psi, theta; hint=hint))
     return (; r, jac, delpsi)
 end
 
 """
     flux_surface_area(equil, psi, mtheta) -> Float64
 
-Compute ∫ J·|∇ψ| dθ over the flux surface at `psi` using `mtheta` equally-spaced θ points and the
-trapezoidal rule with periodic end correction.
+Compute ⟨J·|∇ψ|⟩_θ on the flux surface at `psi`: the periodic trapezoidal rule on `mtheta` equally
+spaced θ points (θ = 1 duplicates θ = 0).
 """
 function flux_surface_area(equil::PlasmaEquilibrium, psi::Float64, mtheta::Int)
+    hint = (Ref(1), Ref(1))
     area = 0.0
-    last_contrib = 0.0
-
-    hint = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
-    for itheta in 0:mtheta
-        theta = itheta / mtheta
-        m = flux_surface_metric(equil, psi, theta; hint=hint)
-        contrib = m.jac * m.delpsi / mtheta
-        area += contrib
-
-        if itheta == mtheta
-            last_contrib = contrib
-        end
+    for itheta in 0:(mtheta-1)
+        m = flux_surface_metric(equil, psi, itheta / mtheta; hint=hint)
+        area += m.jac * m.delpsi
     end
-
-    # Trapezoidal rule end correction
-    return area - last_contrib
+    return area / mtheta
 end
