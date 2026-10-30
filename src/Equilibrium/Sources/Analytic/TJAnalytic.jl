@@ -461,11 +461,6 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     # Per Fitzpatrick's TJ, freeze f_R, f_Z at r = rc and scale the inner
     # value by r²/rc² for r ≥ rc to prevent the Newton iteration from
     # diverging in the far vacuum.
-    function L_of(r::Float64)
-        rr = (r >= rc) ? (rc - 1e-8) : r
-        H1 = (rr < 1.0) ? H1_of_x(rr) : H1_vac(rr)
-        return rr^3 / 8 - rr * H1 / 2
-    end
     function f_R_shift(r::Float64, w::Float64)
         if r >= rc
             # TJ-analytic capping (Fitzpatrick's TJ): f_R(r, w) = f_R(rc − ε, w) · r² / rc²

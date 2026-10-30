@@ -38,7 +38,6 @@ vac_flag = true               # Compute plasma, vacuum, and total energies for f
 dW_edge_scan_start = 0.99     # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
-sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
 nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 0                # Expands lower bound of Fourier harmonics

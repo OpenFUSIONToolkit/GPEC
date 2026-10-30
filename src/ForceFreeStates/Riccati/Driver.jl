@@ -178,13 +178,7 @@ function _initialize_parallel_odet(ctrl::ForceFreeStatesControl,
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal)
     odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
-    if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
-    elseif ctrl.sing_start <= intr.msing
-        error("sing_start > 0 not implemented yet!")
-    else
-        error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
-    end
+    initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
     # Prime odet.new = false (consistent with riccati path — no Gaussian reduction used).
     odet.new = false
     fill!(odet.unorm0, 1.0)

@@ -184,16 +184,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
 
-    # Kinetic workspace arrays: evaluated from Kw_spline/Kt_spline splines at current psi
-    kwmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
-    ktmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
-
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups
     spline_hint::Base.RefValue{Int} = Ref(1)
-    # Shared 2D hint for CubicInterpolantND (rzphi splines) during ODE integration
-    # Tuple of (psi_hint, theta_hint) for O(1) interval lookups in 2D bicubic splines
-    rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
     # Per-thread hint for MatrixSplines matrix splines (A_spline/B_spline/C_spline/F_spline_lower/K_spline/G_spline
     # and kinetic equivalents). Lives on OdeState — which is already cloned per thread in the
     # parallel BVP path — so concurrent sing_der! invocations don't race on a shared Ref.
@@ -386,14 +379,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
-    if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
-    elseif ctrl.sing_start <= intr.msing
-        error("sing_start > 0 not implemented yet!")
-        # initialize_el_at_singular_surf!(ctrl, equil, intr, odet)
-    else
-        error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
-    end
+    initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
     # Pre-compute all integration chunks
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
@@ -527,8 +513,7 @@ end
 """
     initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, mats::MatrixSplines, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
-Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
-Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
+Initialize the OdeState at the axis start: `psifac`, `ising_start` and `u`.
 The default `ctrl.frobenius_psi_max = 0` uses the fixed start, U₁ = 0, U₂ = I, with no warning. The
 Frobenius start is used only when `frobenius_psi_max` is positive and the starting surface lies at or
 below it.
@@ -540,9 +525,7 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ma
     odet.psifac = max(intr.psilow, profiles.xs[1])
 
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))
-    # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
-    # because it depends on the starting psifac which is set here. The logic for sing_start != 0
-    # and kinetic mode would also live here when implemented.
+    # Kept here rather than in chunk_el_integration_bounds because it depends on the starting psifac set above.
     if ctrl.kinetic !== nothing
         # Use kinetic singular surfaces (kinsing) for crossing points
         odet.ising_start = searchsortedfirst(getfield.(intr.kinsing, :psifac), odet.psifac) - 1
@@ -567,11 +550,6 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ma
         odet.u[:, :, 1] .= U1_init
         odet.u[:, :, 2] .= U2_init
     end
-end
-
-# TODO: NOT IMPLEMENTED YET! (low priority, just make sure sing_start = 0 in toml)
-function initialize_el_at_singular_surf()
-    return
 end
 
 """

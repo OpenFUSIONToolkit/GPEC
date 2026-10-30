@@ -134,34 +134,6 @@ end
     return minimum(vals) * maximum(vals) <= 0
 end
 
-# Subdivide a parent cell into 4 quadrants, evaluating Δ at the 5
-# midpoints (BM, TM, LM, RM, MM) via the hash cache.
-function _subdivide_cell(parent::AMRCell,
-    cache::Dict{ComplexF64,ComplexF64}, f)
-    q_bm = 0.5 * (parent.q_bl + parent.q_br)
-    q_tm = 0.5 * (parent.q_tl + parent.q_tr)
-    q_lm = 0.5 * (parent.q_bl + parent.q_tl)
-    q_rm = 0.5 * (parent.q_br + parent.q_tr)
-    q_mm = 0.25 * (parent.q_bl + parent.q_br + parent.q_tl + parent.q_tr)
-
-    d_bm = _cached_eval!(cache, f, q_bm)
-    d_tm = _cached_eval!(cache, f, q_tm)
-    d_lm = _cached_eval!(cache, f, q_lm)
-    d_rm = _cached_eval!(cache, f, q_rm)
-    d_mm = _cached_eval!(cache, f, q_mm)
-
-    return (
-        AMRCell(parent.q_bl, q_bm, q_lm, q_mm,    # bottom-left quadrant
-            parent.d_bl, d_bm, d_lm, d_mm),
-        AMRCell(q_bm, parent.q_br, q_mm, q_rm,    # bottom-right quadrant
-            d_bm, parent.d_br, d_mm, d_rm),
-        AMRCell(q_lm, q_mm, parent.q_tl, q_tm,    # top-left quadrant
-            d_lm, d_mm, parent.d_tl, d_tm),
-        AMRCell(q_mm, q_rm, q_tm, parent.q_tr,    # top-right quadrant
-            d_mm, d_rm, d_tm, parent.d_tr)
-    )
-end
-
 """
     amr_scan(f, Q_re_range, Q_im_range;
               nre0, nim0, passes,
@@ -265,8 +237,7 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
     for pass_idx in 1:passes
         truncated && break
         # Phase A: identify flagged parent cells and collect the midpoints we
-        # need to evaluate. The 5 midpoints per parent (BM, TM, LM, RM, MM)
-        # mirror _subdivide_cell's coordinates exactly.
+        # need to evaluate: the 5 midpoints per parent (BM, TM, LM, RM, MM).
         flagged_idx = Int[]
         new_qs = Vector{ComplexF64}()
         sizehint!(new_qs, length(cells))

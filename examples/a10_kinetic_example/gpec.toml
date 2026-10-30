@@ -49,7 +49,6 @@ truncate_at_rational_offset = false # FALSE for limited/analytical equilibria �
 dW_edge_scan_start = 1.0       # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
-sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
 
 nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 6                 # Expands lower bound of Fourier harmonics

@@ -44,8 +44,6 @@ averages (⟨1⟩ = 1), and `‖∇ψ_N‖` is the gradient of the normalized po
 | `avg_bsq_over_dpsisq` | ⟨B²/‖∇ψ_N‖²⟩ — needed for τ_R                            |
 | `avg_bsq`             | ⟨B²⟩ — needed for τ_R                                    |
 | `avg_dpsisq`          | ⟨‖∇ψ_N‖²⟩ — needed for the toroidal critical-Δ           |
-| `avg_B`               | ⟨B⟩ — needed for Lin-Liu-Miller f_t                      |
-| `B_max`, `B_min`      | θ-extrema of B on the surface [T]                        |
 | `f_trap`              | Lin-Liu & Miller 1995 trapped-particle fraction          |
 | `R_major`             | flux-surface-averaged major radius ⟨R⟩ [m]               |
 | `eps_local`           | (R_max − R_min)/2 / R_major — local inverse aspect ratio |
@@ -56,7 +54,7 @@ averages (⟨1⟩ = 1), and `‖∇ψ_N‖` is the gradient of the normalized po
 `H` here is identical to the `H` reported by `mercier_scan!` and stored
 in `LocalStability/h` — the GGJ routine recomputes it for convenience.
 
-`avg_B`, `B_max`, `B_min`, `f_trap`, `R_major`, and `eps_local` are used
+`f_trap` (from ⟨B⟩ and the θ-extrema of B), `R_major` and `eps_local` are used
 by `NeoclassicalResistivity.eta_neoclassical` to form the Sauter/Redl
 F_33 correction to Spitzer resistivity. See Sauter, Angioni & Lin-Liu
 1999, Phys. Plasmas 6, 2834 and Lin-Liu & Miller 1995, Phys. Plasmas 2,
@@ -72,9 +70,6 @@ struct ResistGeometry
     avg_bsq_over_dpsisq::Float64
     avg_bsq::Float64
     avg_dpsisq::Float64
-    avg_B::Float64
-    B_max::Float64
-    B_min::Float64
     f_trap::Float64
     R_major::Float64
     eps_local::Float64
@@ -198,7 +193,7 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     return ResistGeometry(
         E_coef, F_coef, G_coef, H_coef, K_coef, M_coef,
         avg[1], avg[5], avg[8],
-        avg_B, B_max, B_min, f_trap, R_major, eps_local,
+        f_trap, R_major, eps_local,
         p, p1, v1
     )
 end

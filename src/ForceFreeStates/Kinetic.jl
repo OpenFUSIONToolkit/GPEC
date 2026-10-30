@@ -374,8 +374,6 @@ function _compute_fkg_matrices(
         A_spline=cubic_interp(xs, Series(ak_flat); itp_opts...),
         B_spline=cubic_interp(xs, Series(bk_flat); itp_opts...),
         C_spline=cubic_interp(xs, Series(ck_flat); itp_opts...),
-        Kw_spline=[cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); itp_opts...) for ic in 1:6],
-        Kt_spline=[cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); itp_opts...) for ic in 1:6],
         F0_spline=cubic_interp(xs, Series(f0_flat); itp_opts...),
         P_spline=cubic_interp(xs, Series(p_flat); itp_opts...),
         P_spline_adj=cubic_interp(xs, Series(pa_flat); itp_opts...),

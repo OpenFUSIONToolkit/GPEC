@@ -104,7 +104,6 @@ Physical and workflow controls for a force-balance solve, together with its sele
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mtheta_vacuum::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzeta_vacuum::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
-  - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
   - `frobenius_psi_max::Float64` - Largest starting ψ_N at which the opt-in Frobenius start is used. Default `0` selects the fixed start everywhere and silently: U₁ = 0, U₂ = I, the initialization Fortran DCON uses. A positive value uses the diagonal Frobenius 2×2 when the integration starts at or below it, and warns that this start is currently unreliable. A start above the threshold uses the fixed start with no warning. That 2×2 does not recover a displacement that vanishes as a positive power of the starting ψ, and its m = 0 branch is an imaginary pair whose sign follows roundoff. Leave this at 0 unless the Frobenius start itself is under test.
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
@@ -128,7 +127,6 @@ Physical and workflow controls for a force-balance solve, together with its sele
     vac_flag::Bool = false
     mtheta_vacuum::Int = 480
     nzeta_vacuum::Int = 1
-    sing_start::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0
     delta_mlow::Int = 0

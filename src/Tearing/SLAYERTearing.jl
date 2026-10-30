@@ -214,7 +214,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     _is_ggj(model) && throw(ArgumentError(
         "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no GGJ growth rate. " *
         "Use Dispersion.ggj_growth_rates on multi_surface_coupling_full, which matches both parity channels, and " *
-        "ggj_inner_deltas for the GGJ layer's Δ."))
+        "solve_inner for the GGJ layer's Δ."))
     isempty(params) && return empty_tearing_result(problem, config, model)
 
     n = length(params)
@@ -406,31 +406,3 @@ function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::
     return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, br_crit_tesla, Q0, scan)
 end
 
-# ---------------------------------------------------------------------
-# GGJ parity-Δ diagnostic
-# ---------------------------------------------------------------------
-"""
-    ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
-                     solver=:galerkin) -> Vector{NamedTuple}
-
-Evaluate both parity channels of the GGJ inner-layer matching data at the
-complex normalized growth rate `Q` for each rational surface. Returns a
-vector of `(ising, tearing, interchange)` named tuples, where `tearing`
-(GWP Δ₋, odd) is the reconnecting channel and `interchange` (GWP Δ₊, even) the
-non-reconnecting Glasser-stabilization channel (see `InnerLayerResponse`).
-
-Both parity Δ's are physical and directly accessible here. For GGJ growth
-rates use `Dispersion.ggj_growth_rates`, which matches both channels through
-the full 4m×4m determinant.
-"""
-function ggj_inner_deltas(params::AbstractVector{GGJParameters}, Q::Number;
-    solver::Symbol=:galerkin)
-    model = GGJModel(; solver=solver)
-    out = Vector{NamedTuple{(:ising, :tearing, :interchange),
-        Tuple{Int,ComplexF64,ComplexF64}}}(undef, length(params))
-    for (k, p) in enumerate(params)
-        r = solve_inner(model, p, ComplexF64(Q))
-        out[k] = (ising=p.ising, tearing=r.tearing, interchange=r.interchange)
-    end
-    return out
-end

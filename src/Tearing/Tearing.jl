@@ -58,7 +58,7 @@ include("HDF5Output.jl")
 export InnerLayer, Dispersion, CriticalResonantField
 export resistive_layer_overlap, layer_overlap_scan, LayerOverlapScan
 export TearingProblem, TearingConfig, TearingResult
-export run_slayer_from_inputs, ggj_inner_deltas
+export run_slayer_from_inputs
 export save_to_hdf5
 export CriticalResonantFieldControl, CriticalResonantFieldScan, CriticalResonantFieldResult
 export run_critical_resonant_field

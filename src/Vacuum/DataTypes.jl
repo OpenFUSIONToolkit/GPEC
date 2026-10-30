@@ -676,7 +676,6 @@ ordered with the poloidal index fastest.
 # Fields
 
   - `nowall::Bool`: Boolean flag indicating if there is no wall
-  - `is_closed_toroidal::Bool`: Boolean flag indicating if the wall is a closed toroidal surface
   - `mtheta::Int`: Number of poloidal grid points
   - `nzeta::Int`: Number of toroidal grid points
   - `r::Matrix{Float64}`: (x, y, z) wall coordinates at each grid point
@@ -686,7 +685,6 @@ ordered with the poloidal index fastest.
 """
 struct WallGeometry3D
     nowall::Bool
-    is_closed_toroidal::Bool
     mtheta::Int
     nzeta::Int
     r::Matrix{Float64}
@@ -735,7 +733,6 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
 
     # Basic wall flags
     nowall = isnothing(wall_settings)
-    is_closed_toroidal = true
 
     (; mtheta, nzeta) = inputs
 
@@ -770,7 +767,6 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         @info "Using no wall"
         return WallGeometry3D(
             nowall,
-            is_closed_toroidal,
             mtheta,
             nzeta,
             r,
@@ -882,7 +878,6 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
 
     return WallGeometry3D(
         nowall,
-        is_closed_toroidal,
         mtheta,
         nzeta,
         r,

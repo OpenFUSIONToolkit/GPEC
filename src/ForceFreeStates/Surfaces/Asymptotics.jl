@@ -154,7 +154,7 @@ function compute_sing_asymptotics(
         msg
     end
 
-    return SingAsymptotics(sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
+    return SingAsymptotics(sing_order, alpha, r1, r2, power, vmat)
 end
 
 """
@@ -532,25 +532,11 @@ See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
 end
 
 """
-    sing_matmul(a, b) -> c
+    sing_matmul!(out, a, b) -> out
 
-Matrix multiplication specific to singular matrices.
-Identical to the Fortran `sing_matmul` subroutine.
-
-### Arguments
-
-  - `a::AbstractArray{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
-  - `b::AbstractArray{ComplexF64,3}`: shape (mmpert, 2 * mpert, 2)
-
-## Returns
-
-  - `c::Array{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
+Matrix product of two asymptotic-series coefficient arrays into `out`, as the Fortran `sing_matmul`:
+`a` and `out` are `(mpert, 2·mpert, 2)`, `b` is `(mpert, 2·mpert, 2)`.
 """
-function sing_matmul(a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
-    c = zeros(ComplexF64, size(a, 1), size(b, 2), 2)
-    return sing_matmul!(c, a, b)
-end
-
 @with_pool pool function sing_matmul!(out::AbstractArray{ComplexF64,3}, a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
     m = size(b, 1)
     n = size(b, 2)
@@ -614,67 +600,11 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
     return ua
 end
 
-"""
-    sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64) -> dua
-
-Compute the derivative of the asymptotic series solution with respect to the positive distance
-`dpsi = |ψ − ψ_res|`, consistent with `sing_get_ua`. Port of Fortran `sing_get_dua`
-(sing.f / sing1.f). Shape `(numpert_total, 2*numpert_total, 2)`. Used by the
-outer-region Galerkin solver (`gal_extension`, `sing_matvec`).
-
-Direction is carried by the `SingAsymptotics` (left vs right vmat built with sig=∓1), exactly as in
-`sing_get_ua`, so `dpsi` is always positive and the arithmetic is real (no analytic continuation).
-The term-by-term derivative is built via a `power` array tracking each term's total exponent (in
-half-powers of `dpsi`: the 2*sing_order offset, the ∓1 shearing on resonant rows, and twice the
-column's Frobenius power), then the same shearing restoration and the chain-rule factor `1/(2·dpsi)`
-are applied. The physical d/dψ sign for the left side (ψ = ψ_res − dpsi) is applied by the caller.
-
-### Arguments
-
-  - `sing_asymp::SingAsymptotics`: Pre-computed asymptotic data (must be left- or right-specific)
-  - `dpsi::Float64`: Positive distance from singular surface = |ψ − ψ_res|
-"""
-function sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64)
-
-    r1 = sing_asymp.r1
-    r2 = sing_asymp.r2
-    order = sing_asymp.sing_order
-    sqrtfac = sqrt(dpsi)
-    N = size(sing_asymp.vmat, 1)
-
-    # Per-term total exponent (×2, in half-powers of dpsi). See Fortran sing_get_dua.
-    power = fill(ComplexF64(2 * order), N, 2 * N, 2)
-    power[r1, :, 1] .-= 1
-    power[r1, :, 2] .+= 1
-    for i in eachindex(r1)
-        power[:, r2[2*i-1], :] .+= 2 * sing_asymp.power[r2[2*i-1]]
-        power[:, r2[2*i], :] .+= 2 * sing_asymp.power[r2[2*i]]
-    end
-
-    # Power series derivative by Horner's method (Fortran sing_get_dua)
-    dua = sing_asymp.vmat[:, :, :, 2*order+1] .* power
-    for iorder in (2*order-1):-1:0
-        power .-= 1
-        dua .= dua .* sqrtfac .+ sing_asymp.vmat[:, :, :, iorder+1] .* power
-    end
-
-    # Restore shearing and resonant powers, then the chain-rule factor 1/(2·dpsi) (Fortran sing_get_dua)
-    for i in eachindex(r1)
-        _apply_column_powers!(@view(dua[:, r2[2*i-1], :]), @view(dua[:, r2[2*i], :]),
-            sing_asymp.power[r2[2*i-1]], sing_asymp.power[r2[2*i]], dpsi)
-        dua[r1[i], :, 1] ./= sqrtfac
-        dua[r1[i], :, 2] .*= sqrtfac
-    end
-    dua ./= (2 * dpsi)
-
-    return dua
-end
-
 # --- Column-restricted asymptotic evaluation for the outer-region Galerkin solver ---------------
 #
 # Every gal caller (gal_resonant!, gal_extension!, gal_get_solution) needs only the two resonant
 # columns of a single-surface asymptotic: the big solution (column r2[1] = ipert_res) and the small
-# solution (column r2[2] = ipert_res + numpert_total). The general sing_get_ua/sing_get_dua compute
+# solution (column r2[2] = ipert_res + numpert_total). The general sing_get_ua computes
 # all 2·numpert_total columns and allocate full (N, 2N, 2) arrays at every evaluation point — ~34×
 # more work than used. These kernels evaluate ONLY those two columns into a caller-provided
 # (N, 2, 2) buffer (col 1 = big, col 2 = small), allocation-free, with scalar exponent bookkeeping
@@ -722,9 +652,11 @@ end
 """
     sing_get_dua_res!(out, sing_asymp, dpsi) -> out
 
-Evaluate only the big (col 1) and small (col 2) resonant columns of `sing_get_dua` into the
-caller-provided `out` of shape `(numpert_total, 2, 2)`. Allocation-free; scalar per-term exponents
-replace the full `power` array. See the section comment.
+Derivative of the asymptotic series with respect to the positive distance `dpsi = |ψ − ψ_res|`, for
+the big (col 1) and small (col 2) resonant columns only, into the caller-provided `out` of shape
+`(numpert_total, 2, 2)`; Fortran `sing_get_dua` restricted to those columns. Direction is carried by the
+left or right `SingAsymptotics`, so `dpsi` is positive and the caller applies the d/dψ sign on the
+left. Allocation-free; scalar per-term exponents replace a full `power` array. See the section comment.
 """
 function sing_get_dua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
     vmat = sing_asymp.vmat
@@ -761,7 +693,7 @@ function sing_get_dua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsy
     @inbounds out[ρ, 2, 1] /= sqrtfac
     @inbounds out[ρ, 1, 2] *= sqrtfac
     @inbounds out[ρ, 2, 2] *= sqrtfac
-    # Divide (not multiply by reciprocal) to match sing_get_dua bit-for-bit; the resonant QuadGK and the
+    # Divide (not multiply by the reciprocal), as Fortran sing_get_dua does; the resonant QuadGK and the
     # ill-conditioned near-singular solve amplify a 1e-16 input change into ~1e-3 in Δ′.
     @inbounds for idx in eachindex(out)
         out[idx] /= twodpsi
@@ -821,56 +753,16 @@ sing_get_dua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
     sing_get_dua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
 
 """
-    sing_matvec(mats::MatrixSplines, intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua, dua) -> matvec
-
-Apply the Euler-Lagrange residual operator `L u = -(F u' + K u)' + (K† u' + G u)` to the asymptotic
-solutions. Port of Fortran `sing_matvec` (sing.f). Returns `matvec`, shape
-`(numpert_total, size(ua,2))`.
-
-Uses the reduced (Schur-complemented) `mats.ideal.K_spline` (= K̄) and `mats.ideal.G_spline` (= Ḡ) directly, with the
-**direct** singular factor `singfac = m - n q` applied to `u' = dua[:,:,1]`. The second component
-`ua[:,:,2]` is the canonical momentum `F u' + K u`, so `-dua[:,:,2] = -(F u' + K u)'`.
-
-### Arguments
-
-  - `psi`: flux coordinate; `q`: safety factor at `psi` (passed in to avoid re-evaluating the spline)
-  - `ua`, `dua`: asymptotic solution and its ψ-derivative from `sing_get_ua`/`sing_get_dua`
-"""
-function sing_matvec(mats::MatrixSplines, intr::ForceFreeStatesInternal, psi::Float64, q::Float64,
-    ua::Array{ComplexF64,3}, dua::Array{ComplexF64,3})
-
-    N = intr.numpert_total
-    msol = size(ua, 2)
-
-    # Direct singular factor (m - n q), NOT 1/(m - n q)
-    sfvec = vec((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
-
-    kmat = Matrix{ComplexF64}(undef, N, N)
-    gmat = Matrix{ComplexF64}(undef, N, N)
-    mats.ideal.K_spline(vec(kmat), psi; hint=mats._hint)
-    mats.ideal.G_spline(vec(gmat), psi; hint=mats._hint)
-    kdag = adjoint(kmat)
-
-    matvec = zeros(ComplexF64, N, msol)
-    d1 = Vector{ComplexF64}(undef, N)
-    for isol in 1:msol
-        @views d1 .= dua[:, isol, 1] .* sfvec          # u' · singfac
-        @views matvec[:, isol] .= kdag * d1            # K̄† (u' · singfac)
-        @views matvec[:, isol] .+= gmat * ua[:, isol, 1]  # + Ḡ u
-        @views matvec[:, isol] .-= dua[:, isol, 2]     # - (F u' + K u)'
-    end
-    return matvec
-end
-
-"""
     sing_matvec!(matvec, kmat, gmat, d1, tmp, sfvec, mats, intr, psi, q, ua, dua) -> matvec
 
-Allocation-free, in-place form of [`sing_matvec`](@ref) for the hot resonant-quadrature integrand.
+Apply the Euler-Lagrange residual operator `L u = -(F u' + K u)' + (K† u' + G u)` to the asymptotic
+solutions `ua` and their ψ-derivatives `dua`, as Fortran `sing_matvec` (sing.f), for the resonant-quadrature
+integrand. It uses the reduced K̄ and Ḡ splines with the direct singular factor `sfvec = m − n q` on
+`u' = dua[:,:,1]`; `ua[:,:,2]` is the canonical momentum `F u' + K u`, so `-dua[:,:,2] = -(F u' + K u)'`.
 All scratch is caller-owned: `kmat`/`gmat` are `N×N`, `d1`/`tmp`/`sfvec` are length-`N`, `matvec` is
-`N×size(ua,2)`. The reduced K̄/Ḡ splines write directly into `kmat`/`gmat`. The accumulation order
-(separate `gmat*ua` into `tmp`, then add) reproduces `sing_matvec` **bit-for-bit** — a fused 5-arg
-`mul!` would round differently, and the ill-conditioned near-singular resonant solve amplifies a
-1e-16 change into ~1e-3 in Δ′.
+`N×size(ua,2)`. The accumulation order (separate `gmat*ua` into `tmp`, then add) is kept on purpose: a
+fused 5-arg `mul!` would round differently, and the ill-conditioned near-singular resonant solve amplifies
+a 1e-16 change into ~1e-3 in Δ′.
 """
 function sing_matvec!(matvec::AbstractMatrix{ComplexF64}, kmat::Matrix{ComplexF64}, gmat::Matrix{ComplexF64},
     d1::Vector{ComplexF64}, tmp::Vector{ComplexF64}, sfvec::Vector{Float64}, mats::MatrixSplines,

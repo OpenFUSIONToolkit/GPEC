@@ -43,22 +43,14 @@ This data is computed on-demand during singular surface crossings in `cross_idea
   - `alpha::Vector{ComplexF64}` - Mercier exponent α = √(tr²/4 − det) of each resonant block.
   - `r1::Vector{Int}` - Resonant indices along first index
   - `r2::Vector{Int}` - Resonant indices along second index
-  - `n1::Vector{Int}` - Nonresonant indices along first index
-  - `n2::Vector{Int}` - Nonresonant indices along second index
   - `power::Vector{ComplexF64}` - Frobenius power of each column in |ψ − ψ_s| (0 off resonance). Resonant powers are sig·λ of that side's M₀ block, big solution (more negative real part) first.
   - `vmat::Array{ComplexF64,4}` - Power series of V matrix for asymptotic analysis
-  - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
-  - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
 """
 struct SingAsymptotics
     sing_order::Int
     alpha::Vector{ComplexF64}
     r1::Vector{Int}
     r2::Vector{Int}
-    n1::Vector{Int}
-    n2::Vector{Int}
     power::Vector{ComplexF64}
     vmat::Array{ComplexF64,4}
-    mmat::Array{ComplexF64,4}
-    m0mat::Matrix{ComplexF64}
 end

@@ -58,13 +58,11 @@ rather than a transpose of the forward one. The `_adj` suffix marks those adjoin
 
   - `A_spline`, `B_spline`, `C_spline` - the kinetic-modified A, B, C consumed by `sing_der!`. Unlike their
     ideal counterparts, A here is non-Hermitian and requires an LU rather than a Cholesky.
-  - `Kw_spline`, `Kt_spline` - kinetic energy (W) and torque (T) matrices, 6 components each
-    (A, B, C, D, E, H perturbations), indexed in that order.
   - `F0_spline` - reduced F̄ of the kinetic system, F₀ = F_prim − D†A_kin⁻¹D.
   - `P_spline`, `P_spline_adj` - P = (iD)†A_kin⁻¹B_k and its adjoint-side counterpart.
   - `Kk_spline`, `Kk_spline_adj` - kinetic K̄ = E − (iD)†A_kin⁻¹C_kin and its adjoint-side counterpart.
   - `R1_spline`, `R2_spline`, `R3_spline` - blocks built from the D- and E-perturbation kinetic
-    components (`Kw_spline[4:5]`, `Kt_spline[4:5]`), which have no ideal counterpart. R3 is the
+    components of the kinetic energy and torque matrices, which have no ideal counterpart. R3 is the
     adjoint-side partner of R2.
   - `G_spline_adj` - adjoint-side Ḡ, Ḡ_adj = H_kin − C_adj†A_kin⁻¹C_kin.
 
@@ -76,8 +74,6 @@ explicit (m−nq) factors instead of 1/(m−nq).
     A_spline::S
     B_spline::S
     C_spline::S
-    Kw_spline::Vector{S}
-    Kt_spline::Vector{S}
     F0_spline::S
     P_spline::S
     P_spline_adj::S

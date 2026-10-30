@@ -233,17 +233,8 @@ function prepare_force_free_states!(
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
-    if ctrl.sing_start == 0
-        intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + delta_mhigh
-    else
-        intr.mmin = Inf # HUGE in Fortran
-        for ising in Int(ctrl.sing_start):intr.msing
-            intr.mmin = min(intr.mmin, sing[ising].m)
-        end
-        intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + delta_mhigh
-    end
+    intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
+    intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + delta_mhigh
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
 
