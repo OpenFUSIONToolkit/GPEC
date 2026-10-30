@@ -7,7 +7,6 @@ using StaticArrays: SVector
 using SparseArrays
 using AdaptiveArrayPools
 
-# Import parent modules
 import ..Equilibrium
 using ..Utilities.FourierTransforms: FourierTransform, compute_fourier_coefficients
 
@@ -52,12 +51,8 @@ end
 """
     _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv=false)
 
-2D (axisymmetric) vacuum response calculation.
-
-Each toroidal mode `n` decouples in 2D geometry, so the routine loops over `inputs.n_modes`,
-building the double-/single-layer operators, solving the exterior system for `wv`, and
-optionally the interior system to build `I_v` when `compute_Iv=true`.
-Green's functions are internal scratch only.
+2D (axisymmetric) vacuum response. Each toroidal mode `n` decouples, so each is one exterior solve for its
+`wv` block, plus an interior solve for `I_v` when `compute_Iv=true`.
 """
 @with_pool pool function _compute_vacuum_response_2d!(vac_data::VacuumResponse, inputs::VacuumInput, wall_settings::Union{Nothing,WallSettings}; compute_Iv::Bool=false)
 
@@ -84,7 +79,6 @@ Green's functions are internal scratch only.
         # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
         num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
 
-        # Local work matrices
         grad_green = zeros!(pool, num_points_total, num_points_total)
         green_temp = zeros!(pool, num_points_surf, num_points_surf)
         grre = zeros!(pool, ComplexF64, num_points_total, mpert)
@@ -130,7 +124,6 @@ Green's functions are internal scratch only.
             mul!(I_v_block, ft.basis, g_diff)
             I_v_block ./= num_points_surf
         else
-            # Only need exterior system for wv
             ldiv!(lu!(grad_green), grre)
         end
 

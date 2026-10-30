@@ -132,8 +132,7 @@ grad_greenfunction is not zeroed since it fills a different block of the
     stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
     sing_idx = zeros!(pool, Int, 5)
 
-    # Precompute source derivatives on the theta grid once used in Simpson integration
-    # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
+    # Source derivatives on the grid for the Simpson sum; the off-grid Gaussian points use the splines directly
     dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
     dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
 
@@ -141,9 +140,7 @@ grad_greenfunction is not zeroed since it fills a different block of the
     d1_spline_x(dx_dtheta_grid, theta_grid)
     d1_spline_z(dz_dtheta_grid, theta_grid)
 
-    # Loop through observer points
     for j in 1:mtheta
-        # Get observer coordinates
         x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
         # Perform Simpson integration for nonsingular source points
@@ -174,7 +171,6 @@ grad_greenfunction is not zeroed since it fills a different block of the
         for leftpanel in (true, false)
             gauss_mid = theta_obs + (leftpanel ? -dtheta : dtheta)
             @inbounds for ig in 1:8 # 8-point Gaussian quadrature
-                # Compute green function for this Gaussian point
                 theta_gauss = gauss_mid + GL8.x[ig] * dtheta
                 theta_gauss0 = mod(theta_gauss, 2π)
                 x_gauss = spline_x(theta_gauss0)
@@ -233,14 +229,13 @@ grad_greenfunction is not zeroed since it fills a different block of the
     end
 end
 
-#############################################################
-# Legendre function of the first kind eq.(47)~(50) , replacing aleg. (verified)
-#############################################################
+# Legendre functions of the first kind P^n_{-1/2} [Chance 1997 eqs. 47-50]
 
 """
-    This function is different from elliptic integral K(k). Be careful.
+    elliptic_integral_k(m1) -> Float64
 
-Returns : K(1-m1)
+Polynomial approximation of the complete elliptic integral of the first kind at parameter `1 - m1`.
+Takes the complementary parameter `m1`, not the modulus k.
 """
 function elliptic_integral_k(m1)
 
@@ -267,9 +262,10 @@ end
 
 
 """
-    This function is different from elliptic integral E(k). Be careful.
+    elliptic_integral_e(m1) -> Float64
 
-Returns : E(1-m1)
+Polynomial approximation of the complete elliptic integral of the second kind at parameter `1 - m1`.
+Takes the complementary parameter `m1`, not the modulus k.
 """
 function elliptic_integral_e(m1)
 
@@ -301,7 +297,7 @@ function P0_minus_half(s)
 end
 
 # Chance 1997 eq.(50) (original)
-# This is the case where the paper has a typo, the -1/4 exponent is written in the paper as +1/2
+# The paper's eq. 50 has a typo: the exponent is -1/4, not +1/2
 function P0_plus_half(s)
     m1 = (s + sqrt(s^2 - 1))^(-2)
     return 2 / π * m1^(-1/4) * elliptic_integral_e(m1) # This is correct
@@ -314,13 +310,10 @@ function P1_minus_half(s)
 end
 
 """
-    Pn_minus_half_1997(s, n)
+    Pn_minus_half_1997(s, n) -> Vector{Float64}
 
-Compute the Legendre function of the first kind of order -1/2, P^n_{-1/2}(s),
-recursively using Chance 1997 equations (47)-(50).
-
-The implementation follows the original Fortran code. Note: equation (50) in the paper
-has a typo where the exponent should be -1/4 instead of +1/2.
+Legendre functions of the first kind P^n_{-1/2}(s) by upward recurrence (Chance 1997 eq. 47) from the
+elliptic-integral base cases (eqs. 48-50, with the eq. 50 exponent typo corrected).
 
 # Arguments
 
@@ -330,11 +323,6 @@ has a typo where the exponent should be -1/4 instead of +1/2.
 # Returns
 
   - `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
-
-# Notes
-
-  - Uses recursive relation from Chance 1997 eq. (47)
-  - Base cases computed from eqs. (48)-(50) using elliptic integrals
 """
 function Pn_minus_half_1997(s::Real, n::Int)
     P = Vector{Float64}(undef, n + 2)
@@ -343,7 +331,6 @@ end
 
 function Pn_minus_half_1997!(P::AbstractVector{Float64}, s::Real, n::Int)
 
-    #initialize
     P .= 0.0
 
     # n = 0
@@ -365,8 +352,8 @@ end
 """
     elliptic_integrals_bulirsch(m1; error=1e-8, maxit=10)
 
-Compute complete elliptic integrals K(m1) and E(m1) using Bulirsch's algorithm.
-This is the Julia equivalent of the Fortran `ek3` subroutine.
+Complete elliptic integrals K and E at complementary parameter `m1` by Bulirsch's algorithm.
+Port of Fortran `ek3`.
 
 # Arguments
 
@@ -381,11 +368,7 @@ This is the Julia equivalent of the Fortran `ek3` subroutine.
   - `convergence::Float64`: Convergence metric
   - `iterations::Int`: Number of iterations performed
 
-# Notes
-
-  - Based on Bulirsch's method as described in Numerical Recipes
-  - Precision is approximately error²
-  - Reference: JCP 221 (2007) 330-348
+Precision is approximately `error²`. See Chance, J. Comput. Phys. 221 (2007) 330-348.
 """
 function elliptic_integrals_bulirsch(m1::Float64; error::Float64=1e-8, maxit::Int=10)
 
@@ -474,16 +457,11 @@ function elliptic_integrals_bulirsch(m1::Float64; error::Float64=1e-8, maxit::In
 end
 
 """
-    Pn_minus_half_2007(s, n)
+    Pn_minus_half_2007(s, n) -> Vector{Float64}
 
-Compute the Legendre function of the first kind of order -1/2, P^n_{-1/2}(s),
-using methods from Chance J. Comp. Phys 221 (2007) 330-348.
-
-This implementation uses:
-
- 1. Bulirsch's algorithm for elliptic integrals (more accurate than polynomial approximations)
- 2. Gaussian integration for large mode numbers (n*rhohat >= 0.1) where rhohat = 1/√(2*y*w)
- 3. Upward recurrence for small mode numbers
+Legendre functions of the first kind P^n_{-1/2}(s) by the method of Chance, J. Comput. Phys. 221 (2007) 330-348:
+Bulirsch elliptic integrals for the base cases, then Gaussian integration when `n * rhohat >= 0.1`
+(`rhohat = 1/√(2yw)`) and upward recurrence otherwise. More accurate than `Pn_minus_half_1997` at large n.
 
 # Arguments
 
@@ -492,13 +470,7 @@ This implementation uses:
 
 # Returns
 
-  - `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
-
-# Notes
-
-  - This version is more accurate than Pn_minus_half_1997 for large n
-  - Expected to diverge from 1997 version at large nloc
-  - Reference: JCP 221 (2007) 330-348    # Constants
+  - `P::Vector{Float64}`: P^0_{-1/2}(s), P^1_{-1/2}(s), then P^n_{-1/2}(s) and P^{n+1}_{-1/2}(s) in the last two slots (rest zero)
 """
 function Pn_minus_half_2007(s::Real, n::Int)
     P = Vector{Float64}(undef, n + 2)
@@ -565,9 +537,7 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int; pn_cac
         gint *= _PN_BGAUS
         gintp *= _PN_BGAUS
 
-        # pcoef = √((s-1)/(s+1)) is the only s-dependent factor in the final assembly.
-        # The Γ-function prefactors and normalization constants are pre-cached in
-        # pn_cache.gauss_norm_n / pn_cache.gauss_norm_np1 (see PnQuadCache.jl for derivation).
+        # pcoef = √((s-1)/(s+1)) is the only s-dependent factor; the n-only factors are cached in pn_cache (PnQuadCache.jl)
         pcoef = sqrt((s - 1.0) / (s + 1.0))
         pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
 
@@ -597,8 +567,8 @@ end
 """
     green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; gamma_prefactor, pn_cache, uselegacygreenfunction=false)
 
-Compute the Green's function and related quantities for axisymmetric geometry
-according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
+Axisymmetric Green's function and its normal-derivative coupling terms, Chance 1997 eqs. 36-42.
+Port of Fortran `green`.
 
 # Arguments
 
@@ -609,9 +579,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
   - `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
   - `n`: Toroidal mode number (Int)
-  - `gamma_prefactor`: Precomputed value of `2√π · Γ(1/2 - n)` [Chance Phys. Plasmas 1997 eq. 40].
-    Constant for a given `n`; callers in tight loops should compute this once and pass it in.
-    Defaults to `2 * sqrt(π) * gamma(0.5 - n)` if omitted.
+  - `gamma_prefactor`: `2√π · Γ(1/2 - n)` (Chance 1997 eq. 40); tight-loop callers compute it once and pass it in.
   - `pn_cache`: `get_pn_quad_cache(n)`; takes a lock, so tight-loop callers look it up once and pass it in.
   - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default false, uses 2007 version)
 
@@ -620,13 +588,6 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - `G_n`: 2π𝒢ⁿ(θ,θ′) — Green's function value
   - `coupling_n`: 𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
   - `coupling_0`: 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
-
-# Notes
-
-  - Uses Legendre functions P^n_{-1/2}(s) computed via elliptic integrals
-  - Implements analytical derivatives from Chance 1997 equations
-  - The coupling terms include the Jacobian factor from the coordinate transformation
-  - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
 @with_pool pool function green(
     x_obs::Float64,

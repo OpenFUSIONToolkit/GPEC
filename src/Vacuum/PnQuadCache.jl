@@ -1,23 +1,8 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# PnQuadCache.jl — Pre-computed constants and per-n cache for Gaussian
-# quadrature in Pn_minus_half_2007!
-#
-# The 32-point Gauss quadrature uses two levels of pre-computation:
-#
-#  1. Node-level constants (_PN_TG02, _PN_WANUMR): depend only on the
-#     quadrature rule, computed once at module load time as NTuples.
-#
-#  2. Per-n sinh/cosh cache (PnQuadEntry): depend on toroidal mode number n
-#     but not on the Legendre argument s. Since n is fixed per vacuum run, we
-#     cache them on first use and serve millions of subsequent calls from reads.
-#
-# Thread safety: Dict + SpinLock. Callers look the entry up once per kernel
-# call (n is fixed there) and pass it down, so the lock stays off the hot path.
-# ═══════════════════════════════════════════════════════════════════════════════
+# Precomputed constants for the 32-point Gauss quadrature in Pn_minus_half_2007!: node constants fixed at load
+# time, and a per-n sinh/cosh cache (independent of s) behind a SpinLock that callers query once per kernel call.
 
 # ── Quadrature node constants (integration limits: xl=0, xu=5) ───────────────
-# Uses gausslegendre(32) directly; this file is included before Kernel2D.jl
-# and needs to be self-contained.
+# Uses gausslegendre(32) directly because this file is included before Kernel2D.jl.
 # _PN_TG02[ig]   = tg0² = (agaus + x[ig] * bgaus)²
 # _PN_WANUMR[ig] = w[ig] * tg0 * exp(-tg0²)
 const _PN_AGAUS = 2.5
@@ -35,9 +20,9 @@ end
 """
     PnQuadEntry
 
-Cached sinh/cosh values for the 32-point Gaussian quadrature at a given
-toroidal mode number `n`. Each field is a 32-element vector indexed by
-Gauss node `ig`.
+Cached sinh/cosh values for the 32-point Gaussian quadrature at toroidal mode number `n`, as 32-element
+vectors indexed by Gauss node `ig`, plus the n-only scale factors of the final Legendre values:
+`gauss_norm_n = √2 / (n √π Γ(1/2 - n))` for P^n_{-1/2} and `gauss_norm_np1 = √2 / ((n+1) √π Γ(-1/2 - n))` for P^{n+1}_{-1/2}.
 """
 struct PnQuadEntry
     sinh::Vector{Float64}   # sinh(tg0²/(2n))
@@ -45,19 +30,10 @@ struct PnQuadEntry
     sinhp::Vector{Float64}  # sinh(tg0²/(2n+2))
     coshp::Vector{Float64}  # cosh(tg0²/(2n+2))
 
-    # Pre-computed scale factors for the final Legendre function values.
-    # These combine all factors that depend only on n (not on s):
-    #   √2, n, √π, and the Gamma function Γ(1/2 - n) or Γ(-1/2 - n).
-    # Caching them here avoids an O(n) product-formula computation on
-    # every call to Pn_minus_half_2007! (which is called millions of times per run).
-    #
-    #   gauss_norm_n   = √2 / (n · √π · Γ(1/2 - n))      — scale for P^n_{-1/2}
-    #   gauss_norm_np1 = √2 / ((n+1) · √π · Γ(-1/2 - n)) — scale for P^{n+1}_{-1/2}
     gauss_norm_n::Float64
     gauss_norm_np1::Float64
 end
 
-# Dict-based storage: works for any positive n, no upper limit.
 const _PN_CACHE = Dict{Int,PnQuadEntry}()
 const _PN_CACHE_LOCK = Threads.SpinLock()
 
@@ -99,15 +75,11 @@ function _make_pn_quad_entry(n::Int)
         chp[ig] = cosh(xp)
     end
 
-    # Compute the Gamma function Γ(1/2 - n) via the product formula.
-    # Γ(1/2 - n) = √π / ∏_{i=1}^{n} (1/2 - i)  for n ≥ 1.
-    # (n ≥ 1 is guaranteed: this cache is only populated when n·rhohat ≥ 0.1.)
+    # Γ(1/2 - n) = √π / ∏_{i=1}^{n} (1/2 - i) for n ≥ 1
     sqpi = sqrt(π)
     gamn = sqpi / prod(0.5 - i for i in 1:n)  # Γ(1/2 - n)
     gamp = -gamn / (n + 0.5)                   # Γ(-1/2 - n) = Γ(1/2 - (n+1)), via Γ(z-1) = Γ(z)/(z-1)
 
-    # Combine into scale factors used in the final Legendre function assembly.
-    # Pre-computing these once per n avoids repeating the Gamma product on every s-call.
     sqtwo = sqrt(2.0)
     gauss_norm_n = sqtwo / (n * sqpi * gamn)
     gauss_norm_np1 = sqtwo / ((n + 1.0) * sqpi * gamp)
