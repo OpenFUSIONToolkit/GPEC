@@ -133,7 +133,6 @@ vac_flag = true
 dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
 qhigh = 1e3
-sing_start = 0
 
 nn = 1
 delta_mlow = 8
@@ -274,10 +273,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     # for the final full-validation run.
     tgar_enabled = get(ENV, "BENCHMARK_TGAR", "0") == "1"
     kf_ctrl = KF.KineticForcesControl(;
-        fgar_flag=true, tgar_flag=tgar_enabled, nn=1, bounce_harmonic_max=4,
-        ion_mass=2, ion_charge=1, nutype="harmonic", f0type="maxwellian",
-        collisionality_factor=1, psilims=[0.0, 1.0],
-        verbose=false)
+        fgar_flag=true, tgar_flag=tgar_enabled, bounce_harmonic_max=4,
+        nutype="harmonic", f0type="maxwellian",
+        collisionality_factor=1, psilims=[0.0, 1.0])
 
     # Initialize KF internal state
     kf_intr = KF.KineticForcesInternal(equil; verbose=false)
@@ -303,9 +301,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     _p("\n--- Torque integration ---")
     t2 = time()
 
-    kinetic_profiles = Eq.kinetic_profile_splines(
-        Eq.read_kinetic_file(inputs.kin_file);
-        zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass)
+    # The default species (one deuterium main ion, carbon impurity) match pentrc.in.
+    Eq.attach_kinetic_profiles!(equil, inputs.kin_file)
+    kinetic_profiles = KF.ntv_profiles(kf_ctrl, equil)
 
     kf_state = KF.KineticForcesState()
     KF.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)

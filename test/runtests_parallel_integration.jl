@@ -146,7 +146,7 @@ end
     @testset "balance_integration_chunks produces target count" begin
         # Verify that balance_integration_chunks creates at least
         # max(2*msing+3, 8*(msing+1)+msing) chunks from a small set of base chunks.
-        ctrl, intr, equil, metric, mats = _prepared_solovev()
+        ctrl, intr, equil, metric, mats = _prepared_solovev("Riccati")
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
@@ -197,13 +197,13 @@ end
         @test all(balanced_again[i].psi_end == balanced[i].psi_end for i in eachindex(balanced))
 
         # An explicit nchunks steers the target count directly.
-        ctrl_more = first(_prepared_solovev(; nchunks=target_n + 7))
+        ctrl_more = first(_prepared_solovev("Riccati"; nchunks=target_n + 7))
         balanced_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_more, intr)
         @test length(balanced_more) == target_n + 7
 
         # An nchunks below the singular-surface floor is clamped up, with a warning.
         min_chunks = 2 * intr.msing + 3
-        ctrl_few = first(_prepared_solovev(; nchunks=1))
+        ctrl_few = first(_prepared_solovev("Riccati"; nchunks=1))
         balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
         @test length(balanced_few) == max(min_chunks, length(base_chunks))
     end
@@ -212,7 +212,7 @@ end
         # Verify that bidirectional=true sets direction=-1 on crossing chunks and direction=+1
         # on non-crossing chunks, and that balance_integration_chunks propagates these correctly:
         # the right sub-chunk inherits direction from the parent, the left sub-chunk is always +1.
-        ctrl, intr, equil, metric, mats = _prepared_solovev()
+        ctrl, intr, equil, metric, mats = _prepared_solovev("Riccati")
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)

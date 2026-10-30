@@ -18,7 +18,6 @@ Serial forward integration with Gaussian reduction and dense solution profiles.
   - `numsteps_init::Int` - Initial capacity for stored ODE solution steps.
   - `numunorms_init::Int` - Initial capacity for solution-normalization records.
   - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.
-  - `nchunks::Int` - Target chunk count; zero derives the count from the singular surfaces.
 """
 @kwdef struct Forward <: AbstractIntegrator
     eulerlagrange_tolerance::Float64 = 1e-8
@@ -26,7 +25,6 @@ Serial forward integration with Gaussian reduction and dense solution profiles.
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
     save_interval::Int = 1
-    nchunks::Int = 0
 end
 
 """

@@ -8,8 +8,8 @@
 name = "diiid_kinetic_multi_n"
 description = "DIII-D-like equilibrium, n = 1, 2, KineticForces kinetic matrices, kinetic_factor=1.0, stability only, truncation at psihigh."
 example_dir = "examples/DIIID-like_ideal_example"
-# Without a perturbed equilibrium the run ends after ForceFreeStates; the torque stage needs one and skips.
-remove_sections = ["PerturbedEquilibrium", "ErrorFields"]
+# Without a perturbed equilibrium the run ends after ForceFreeStates; [KineticForces] stays as the kinetic source.
+remove_sections = ["ForcingTerms", "PerturbedEquilibrium", "ErrorFields"]
 
 [overrides]
 "ForceFreeStates.nn" = [1, 2]                         # Toroidal mode number, or consecutive numbers as a list

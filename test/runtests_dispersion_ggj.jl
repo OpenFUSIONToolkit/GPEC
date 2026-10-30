@@ -84,7 +84,7 @@ GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GG
     end
 
     @testset "ggj_growth_rates finds the constructed root, winding +1" begin
-        gr, amr = ggj_growth_rates(mc; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.031Q0, 0.047Q0),
+        gr, amr = ggj_growth_rates(mc; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.047Q0, 0.031Q0),
             nre0=6, nim0=6, passes=3, parallel=false)
         @test gr.classification === :winding
         @test !(:no_root in gr.warning_flags)
@@ -121,7 +121,7 @@ GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GG
         end
         b = secant_root(g2, 0.1234im)
         @test abs(b - 0.1234im) > 1e-5                 # the coupling moved the root
-        gr2, _ = ggj_growth_rates(mc2; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.031Q0, 0.047Q0),
+        gr2, _ = ggj_growth_rates(mc2; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.047Q0, 0.031Q0),
             nre0=6, nim0=6, passes=3, parallel=false)
         @test length(gr2.valid_roots) == 1 && all(w -> w ≈ 1, gr2.valid_roots_winding)
         @test abs(gr2.Q_root - b) < 1e-8 * abs(b)

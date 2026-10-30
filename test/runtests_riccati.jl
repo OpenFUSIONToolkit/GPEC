@@ -8,6 +8,9 @@ function prepared_solovev()
     GPEC = GeneralizedPerturbedEquilibrium
     ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+    # The fixture's [Forward] settings drive both paths; the Riccati control also carries the chunking.
+    inputs["ForceFreeStates"]["integrator"] = "Riccati"
+    inputs["Riccati"] = pop!(inputs, "Forward")
     equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
     prob = GPEC.ForceBalanceProblem(equil; GPEC.force_balance_keywords(inputs, ex)...)
     ctrl, intr, equil, metric, mats = GPEC._prepare_solve(prob, GPEC.force_balance_algorithm(inputs))

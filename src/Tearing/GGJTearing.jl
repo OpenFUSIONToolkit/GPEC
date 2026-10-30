@@ -88,12 +88,10 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
     else
         [Dispersion.multi_surface_coupling_full([surface_coupling(model, params[k], 0.0)], raw[(2k-1):2k, (2k-1):2k]) for k in 1:count]
     end
-    # The result reports ω = Re(Q)/τ, the negative of the determinant's Im(s), so the box flips.
-    omega_range = (-config.omega_range[2], -config.omega_range[1])
     extractions = GrowthRateResult[]
     scans = Union{ScanResult,AMRResult}[]
     for det in determinants
-        extraction, scan = Dispersion.ggj_growth_rates(det; gamma_range=config.gamma_range, omega_range=omega_range,
+        extraction, scan = Dispersion.ggj_growth_rates(det; gamma_range=config.gamma_range, omega_range=config.omega_range,
             nre0=config.nre, nim0=config.nim, passes=config.amr_passes, max_cells=config.amr_max_cells, polish=config.polish_roots)
         push!(extractions, extraction)
         config.store_scan && push!(scans, scan)

@@ -35,13 +35,12 @@ _residual_domain_radius(::GGJDispersion, Q::ComplexF64) = 0.9 * max(imag(Q), 0.0
                      parallel=Threads.nthreads() > 1) -> (GrowthRateResult, AMRResult)
 
 Tearing growth rates of the GGJ inner layer matched through the full 4m × 4m determinant `mc`
-(one surface gives the uncoupled 2 × 2 block of its raw Δ'). The box `gamma_range` × `omega_range`
-bounds Re(s) in 1/s and Im(s) in rad/s, and is scanned adaptively in the plane of [`GGJDispersion`](@ref);
-each contour intersection is classified by winding number (see `find_growth_rates`). In the result, with
-s = γ − iω, `gamma` is γ in 1/s, `omega` is ω = −Im(s) in rad/s, `Q_root` is `(ω + iγ)/Q₀`, and the reported
-root is the least stable zero in the box. Each surface's layer is evaluated in its own E×B frame,
-`s_k = s + i·n·Ω_E,k`, so with rotation `omega_range` must cover the lab-frame Im(s). Without drifts or
-rotation the roots come in ±ω pairs and either member may be reported.
+(one surface gives the uncoupled 2 × 2 block of its raw Δ'). With s = γ − iω, the box `gamma_range` ×
+`omega_range` bounds γ in 1/s and ω in rad/s, and is scanned adaptively in the plane of [`GGJDispersion`](@ref);
+each contour intersection is classified by winding number (see `find_growth_rates`). In the result `gamma` is γ,
+`omega` is ω, `Q_root` is `(ω + iγ)/Q₀`, and the reported root is the least stable zero in the box. Each
+surface's layer is evaluated in its own E×B frame, `s_k = s + i·n·Ω_E,k`, so with rotation `omega_range` must
+cover the lab-frame ω. Without drifts or rotation the roots come in ±ω pairs and either member may be reported.
 
 `gamma_range` must lie at γ > 0: the GGJ layer has a branch cut on the negative real s-axis, and
 classification circles and polishing stay in γ > 0. A solver failure inside the layer (e.g. near
@@ -66,7 +65,7 @@ function ggj_growth_rates(mc::MultiSurfaceCouplingFull;
         throw(ArgumentError("ggj_growth_rates: omega_range must be increasing; got $(omega_range)"))
     g = GGJDispersion(mc)
     τ = 1 / g.Q0
-    re_range = (-Float64(omega_range[2]) * τ, -Float64(omega_range[1]) * τ)
+    re_range = (Float64(omega_range[1]) * τ, Float64(omega_range[2]) * τ)
     im_range = (Float64(gamma_range[1]) * τ, Float64(gamma_range[2]) * τ)
     amr = amr_scan(g, re_range, im_range; nre0=nre0, nim0=nim0, passes=passes,
         max_cells=max_cells, parallel=parallel)

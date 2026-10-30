@@ -11,7 +11,7 @@ name = "gal_resistive_pe"
 description = "DIII-D-like, n=1, DRIVEN/RPEC: gal-matched resistive ξ → PerturbedEquilibrium (coil-driven singular coupling)"
 example_dir = "examples/DIIID-like_gal_resistive_pe_example"
 # Stop after force-free states so the run completes; the follow-up Galerkin-PE PR removes this.
-remove_sections = ["PerturbedEquilibrium"]
+remove_sections = ["ForcingTerms", "PerturbedEquilibrium"]
 
 # Full-pipeline coverage for gal_match_flag → gal_matched_odestate → PerturbedEquilibrium. Tracks the
 # FINITE, per-rational-surface singular-coupling scalars (the physics-meaningful driven quantities) — not

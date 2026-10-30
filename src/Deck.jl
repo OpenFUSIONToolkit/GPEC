@@ -356,6 +356,8 @@ end
 function tearing_from_deck(inputs::AbstractDict)
     haskey(inputs, "Tearing") || return nothing
     table = inputs["Tearing"]
+    get(table, "omega_E_kHz", Dict{String,Any}()) isa AbstractDict ||
+        throw(ArgumentError("[Tearing] omega_E_kHz must be a table keyed by m/n, e.g. omega_E_kHz = { \"2/1\" = 3.0 }"))
     fields = _struct_fields(TearingProblem, (:ffs, :critical_resonant_field))
     fields[:inner_model] = String
     problem = section_keywords(_without(table, "search", "CriticalResonantField"), "Tearing", fields)
@@ -436,12 +438,17 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     end
     has_ffs = haskey(inputs, "ForceFreeStates")
     if !has_ffs
-        for section in ("Wall", "Forward", "Riccati", "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "PerturbedEquilibrium", "ErrorFields")
+        for section in ("Wall", "Forward", "Riccati", "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "LocalStability", "Ballooning",
+            "ForcingTerms", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
             haskey(inputs, section) && error("[$section] is set but there is no [ForceFreeStates] section, so the run stops after the equilibrium")
         end
     end
     force_balance = has_ffs ? (; keywords=force_balance_keywords(inputs, path), algorithm=force_balance_algorithm(inputs)) : nothing
     kinetic_source = has_ffs && get(inputs["ForceFreeStates"], "kinetic", nothing) == "KineticForces"
+    haskey(inputs, "ForcingTerms") && !haskey(inputs, "PerturbedEquilibrium") &&
+        error("[ForcingTerms] is set but there is no [PerturbedEquilibrium] section to apply it")
+    haskey(inputs, "KineticForces") && !haskey(inputs, "PerturbedEquilibrium") && !kinetic_source &&
+        error("[KineticForces] is set but neither [PerturbedEquilibrium] (the torque) nor [ForceFreeStates] kinetic = \"KineticForces\" uses it")
     (haskey(inputs, "KineticForces") || kinetic_source) && isempty(get(get(inputs, "Equilibrium", Dict{String,Any}()), "kinetic_file", "")) &&
         error("this run needs kinetic profiles ([KineticForces], or kinetic = \"KineticForces\"): set kinetic_file in [Equilibrium]")
     match = match_from_deck(inputs)

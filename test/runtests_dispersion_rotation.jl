@@ -110,7 +110,7 @@
         @test prob.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
         # Default stays empty, so surfaces use the kinetic file's rotation.
         @test isempty(TearingProblem(nothing).omega_E_kHz)
-        @test_throws MethodError TearingProblem(nothing; tearing(Dict{String,Any}("omega_E_kHz" => [0.0, 3.0])).problem...)
+        @test_throws "table keyed by m/n" tearing(Dict{String,Any}("omega_E_kHz" => [0.0, 3.0]))
         # Reject non-finite overrides before they reach the dispersion scan.
         @test_throws ArgumentError validate(TearingProblem(nothing; omega_E_kHz=Dict("2/1" => NaN)), TearingConfig())
     end

@@ -179,7 +179,9 @@ function main_from_inputs(
             end
         end
         if deck.match !== nothing
-            ffs = solve(MatchProblem(ffs; deck.match.problem...), deck.match.model)
+            ffs = _timed_stage(runtimes, "match", "Match") do
+                solve(MatchProblem(ffs; deck.match.problem...), deck.match.model)
+            end
             match = ffs.match
         end
         h5open(output_file, "w") do target
@@ -197,15 +199,12 @@ function main_from_inputs(
         save_to_hdf5(output_file, pe)
     end
 
-    if deck.kinetic_forces !== nothing
-        if pe === nothing
-            @info "Skipping the kinetic torque: it needs a perturbed equilibrium (no [PerturbedEquilibrium] section)."
-        else
-            kinetic = _timed_stage(runtimes, "kinetic_forces", "KineticForces") do
-                kinetic_torque(pe, deck.kinetic_forces; verbose)
-            end
-            save_to_hdf5(output_file, kinetic)
+    # Without [PerturbedEquilibrium], [KineticForces] only sets the kinetic source of the force-free-states solve.
+    if deck.kinetic_forces !== nothing && pe !== nothing
+        kinetic = _timed_stage(runtimes, "kinetic_forces", "KineticForces") do
+            kinetic_torque(pe, deck.kinetic_forces; verbose)
         end
+        save_to_hdf5(output_file, kinetic)
     end
 
     if deck.error_fields !== nothing
