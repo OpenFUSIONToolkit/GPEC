@@ -68,7 +68,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     dsol = want_d ? zeros(ComplexF64, mpert) : nothing
 
     # --- non-resonant (Hermite) part: same coefficients, value basis pb → ξ, derivative basis qb → ξ′ ---
-    pbt, qbt = gal_hermite(x, cell.x[1], cell.x[2])
+    pbt, qbt = hermite_basis(x, cell.x[1], cell.x[2])
     swap = iintvl == msing && icell == ws.nx       # last edge cell: swap node-2/3 DOFs (gal.f)
     pb = swap ? (pbt[1], pbt[2], pbt[4], pbt[3]) : pbt
     qb = swap ? (qbt[1], qbt[2], qbt[4], qbt[3]) : qbt
@@ -87,7 +87,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     # sing_get_*_gal returns only the two resonant columns: 1 = big solution, 2 = small solution.
 
     # Edge Hermite weights (fresh, unswapped) for ext/ext2 cells (gal.f)
-    pbe, qbe = gal_hermite(x, cell.x[1], cell.x[2])
+    pbe, qbe = hermite_basis(x, cell.x[1], cell.x[2])
     if cell.extra == GAL_SIDE_LEFT
         epb1, epb2 = pbe[3], pbe[4]
         eqb1, eqb2 = qbe[3], qbe[4]

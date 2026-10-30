@@ -18,6 +18,7 @@ import CommonSolve
 import ..Equilibrium
 import ..Utilities
 import ..Utilities: save_to_hdf5
+using ..Utilities.HermiteFEM: hermite_basis, pack_grid
 import ..Vacuum
 import ..InnerLayer
 using Printf

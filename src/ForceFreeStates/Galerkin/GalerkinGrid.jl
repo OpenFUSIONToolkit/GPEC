@@ -1,50 +1,11 @@
 # GalerkinGrid.jl
 #
 # Grid construction and local→global DOF mapping for the outer-region Galerkin solver.
-# Ports gal_pack (gal.f), gal_make_grid (gal.f), and gal_make_map (gal.f).
+# Ports gal_make_grid (gal.f) and gal_make_map (gal.f); gal_pack is Utilities.HermiteFEM.pack_grid.
 #
 # Node arrays use Fortran 0-based `x(0:nx)` mapped to Julia `xn[i+1]` (so Fortran `x(i)` is `xn[i+1]`).
 # Cells are 1-based in both. Intervals `0:msing` (Fortran) are `ws.intvl[ising+1]` in Julia.
 # The optional `gal_xmin_flag`/`sing1_xmin` adaptive-width branch is intentionally not ported.
-
-"""
-    gal_pack(nx::Int, pfac::Float64, side::String) -> Vector{Float64}
-
-Packed logical grid on `[-1, 1]`. Port of Fortran `gal_pack` (gal.f). For `side="both"`
-returns `2*nx+1` nodes (Fortran `-nx:nx`) clustered toward both ends when `pfac < 1` (strong packing
-near the bracketing singular surfaces). `pfac > 1` packs toward the centre; `pfac == 1` is uniform.
-"""
-function gal_pack(nx::Int, pfac::Float64, side::String)
-    if side == "left"
-        xi = collect(-2nx:0) ./ (2nx)
-    elseif side == "right"
-        xi = collect(0:2nx) ./ (2nx)
-    elseif side == "both"
-        xi = collect(-nx:nx) ./ nx
-    else
-        error("gal_pack: unrecognized side = $side")
-    end
-
-    if pfac > 1
-        λ = sqrt(1 - 1 / pfac)
-        x = @. log((1 + λ * xi) / (1 - λ * xi)) / log((1 + λ) / (1 - λ))
-    elseif pfac == 1
-        x = copy(xi)
-    elseif pfac > 0
-        λ = sqrt(1 - pfac)
-        a = log((1 + λ) / (1 - λ))
-        x = @. (exp(a * xi) - 1) / (exp(a * xi) + 1) / λ
-    else
-        x = @. xi^(-pfac)
-    end
-
-    if side == "left"
-        @. x = 2x + 1
-    elseif side == "right"
-        @. x = 2x - 1
-    end
-    return x
-end
 
 """
     gal_resonant_surfaces(intr, equil) -> (sings, psilow, psihigh)
@@ -172,7 +133,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
             side = "left"    # rational sits at the lower (ixmin) end
         end
     end
-    packed = gal_pack(mx, pfac, side)          # length 2*mx+1 = (ixmax-ixmin)+1
+    packed = pack_grid(mx, pfac, side)          # length 2*mx+1 = (ixmax-ixmin)+1
     for k in 0:(ixmax-ixmin)
         xn[ixmin+1+k] = xm + dxh * packed[k+1]
     end

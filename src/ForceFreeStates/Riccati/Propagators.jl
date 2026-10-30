@@ -270,31 +270,6 @@ function riccati_integrate_chunk!(
 end
 
 """
-    renormalize_riccati!(odet, intr)
-
-After a singular surface crossing, restore the canonical Riccati storage convention:
-  u[:,:,1] = S_new = U₁_new · U₂_new⁻¹
-  u[:,:,2] = I
-
-`riccati_cross_ideal_singular_surf!` leaves u[:,:,1] = U₁_new and u[:,:,2] = U₂_new (not I),
-so this step is required before continuing the Riccati integration.
-
-The u_store entry from the crossing correctly has U₁_new and U₂_new (stored before this call),
-so `compute_smallest_eigenvalue` still computes U₁_new/U₂_new = S_new correctly.
-"""
-function renormalize_riccati!(odet::OdeState, intr::ForceFreeStatesInternal)
-    N = intr.numpert_total
-    # S_new = U₁_new · U₂_new⁻¹  (in-place to avoid allocation)
-    U2_copy = copy(@view odet.u[:, :, 2])
-    rdiv!(@view(odet.u[:, :, 1]), lu!(U2_copy))
-    # Reset U₂ = I
-    fill!(@view(odet.u[:, :, 2]), 0)
-    for i in 1:N
-        odet.u[i, i, 2] = 1
-    end
-end
-
-"""
     renormalize_riccati_inplace!(u, N)
 
 In-place Riccati renormalization on an arbitrary N×N×2 array:
@@ -314,6 +289,16 @@ function renormalize_riccati_inplace!(u::Array{ComplexF64,3}, N::Int)
         u[i, i, 2] = 1
     end
 end
+
+"""
+    renormalize_riccati!(odet, intr)
+
+[`renormalize_riccati_inplace!`](@ref) on `odet.u`. After a singular surface crossing, which leaves
+u[:,:,2] = U₂_new ≠ I, it restores the canonical storage u[:,:,1] = S_new = U₁_new·U₂_new⁻¹, u[:,:,2] = I
+before the integration continues. The crossing's u_store entry keeps U₁_new and U₂_new, so
+`compute_smallest_eigenvalue` is unaffected.
+"""
+renormalize_riccati!(odet::OdeState, intr::ForceFreeStatesInternal) = renormalize_riccati_inplace!(odet.u, intr.numpert_total)
 
 """
     integrate_propagator_chunk!(prop, chunk, ctrl, equil, mats, intr, odet_proxy)

@@ -18,18 +18,14 @@ function read_chease_binary(config::EquilibriumConfig)
         nsym = read(io, Int32)
         read(io, UInt32)
 
-        read(io, UInt32)
-        axx = [read(io, Float64) for _ in 1:5]
-        read(io, UInt32)
+        axx = _read_fortran_reals(io, 5)
 
         # 1D array allocation
         zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim =
             [zeros(i == 1 || i == 10 ? npsi1 - 1 : npsi1) for i in 1:10]
 
         for arr in (zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim)
-            read(io, UInt32)
-            read!(io, arr)
-            read(io, UInt32)
+            arr .= _read_fortran_reals(io, length(arr))
         end
 
         # --- Normalization (1D) ---
@@ -64,9 +60,7 @@ function read_chease_binary(config::EquilibriumConfig)
         buffer = zeros(Float64, ntnova + 3, npsi1) # CHEASE binary record size
 
         # Reading R data
-        read(io, UInt32)
-        read!(io, buffer)
-        read(io, UInt32)
+        buffer .= reshape(_read_fortran_reals(io, length(buffer)), size(buffer))
         buffer .*= R0EXP
 
         # sart reading with ASCII
@@ -74,9 +68,7 @@ function read_chease_binary(config::EquilibriumConfig)
         fs_2d[:, :, 1] .= transpose(buffer[poloidal_start:poloidal_stop, :])
 
         # Reading Z data
-        read(io, UInt32)
-        read!(io, buffer)
-        read(io, UInt32)
+        buffer .= reshape(_read_fortran_reals(io, length(buffer)), size(buffer))
         buffer .*= R0EXP
 
         zo = buffer[poloidal_start, 1]
