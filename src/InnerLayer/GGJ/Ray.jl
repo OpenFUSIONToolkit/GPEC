@@ -251,10 +251,9 @@ end
         -> (Us, Ub, E, cond_est)
 
 Boundary data at s = S taken directly from the inps series, used when the BVP edge is S itself
-(s_m ≳ S): `Us`, `Ub` are the small/large
-power-like solutions as 6-component states in the inps normalization, `E`
-the numerically-generated decaying pair, `cond_est` the condition number of
-the column-normalized basis.
+(s_m ≳ S): `Us`, `Ub` are the small/large power-like solutions as 6-component states in the inps
+normalization, `E` the numerically generated decaying pair, `cond_est` the condition number of the
+column-normalized basis.
 """
 function boundary_basis(params::GGJParameters, Q::ComplexF64,
     cache::InnerAsymptoticsCache, θ::Float64, S::Float64;
@@ -308,18 +307,14 @@ Solve the GGJ inner-layer problem on the rotated ray x = e^{iθ}s. `Δ` is the r
 (Δ₊, Δ₋) = (interchange, tearing), directly comparable to the `:galerkin` backend; θ = 0 is a
 real-axis solve.
 
-Both boundary points are computed per solve. `S` defaults to the smallest radius where the series
-residual is below `smax_tol` with order `kmax` ([`pick_smax`](@ref); it warns and uses the best
-point if the tolerance is not reached). The BVP edge s_m is where every exponential family has
-decayed 45 e-folds from the origin, from the local spectrum, scaled by `sm_fac`. `cfl`,
-`min_cells` set the Hermite grid ([`ray_breaks`](@ref)) and `nq` its quadrature. The grid is fixed by
-these rates, not refined against a residual, and no run-time error estimate is returned: at small |Q|
-the cubic BVP gives Δ to about 1e-8–2e-7 relative, so pass a smaller `cfl` or larger `min_cells`
-when more is needed, or [`delta_convergence`](@ref) for an error bar. A grid of more than
-`warn_cells` cells warns once, as a cost guard: it is set by `cfl`, `min_cells` and the local rates,
-which grow with |Q|. `march_rtol`
-is [`march_boundary`](@ref)'s `rtol`; `growth`, `seed`, `ztrk`, `purge_budget`, `dp_res` go to
-`march_boundary`/[`decaying_pair`](@ref); `handoff` (diagnostic) supplies (Us, Ub) at S.
+`S` defaults to the smallest radius where the series residual is below `smax_tol` at order `kmax`
+([`pick_smax`](@ref); warns and uses the best point otherwise). The BVP edge s_m is where every
+exponential family has decayed 45 e-folds from the origin, scaled by `sm_fac`. `cfl`, `min_cells` set
+the Hermite grid ([`ray_breaks`](@ref)) and `nq` its quadrature. The grid is not residual-refined and
+no error estimate is returned (at small |Q| Δ is good to about 1e-8–2e-7 relative); use
+[`delta_convergence`](@ref) for an error bar. More than `warn_cells` cells warns once (cost guard).
+`march_rtol` is [`march_boundary`](@ref)'s `rtol`; `growth`, `seed`, `ztrk`, `purge_budget`, `dp_res`
+go to `march_boundary`/[`decaying_pair`](@ref); `handoff` (diagnostic) supplies (Us, Ub) at S.
 """
 function solve_ray(params::GGJParameters, Q::ComplexF64;
     θ::Float64=angle(Q) / 4, kmax::Int=12,
@@ -360,8 +355,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
 
     local Us, Ub, E, bc_cond, Sbvp
     if s_m < 0.98 * Sv
-        # `handoff` is a diagnostic: externally supplied series data (Us, Ub) at x = e^{iθ}S.
-        UsS, UbS = handoff === nothing ? _power_states(cache, cis(θ) * Sv) : handoff
+            UsS, UbS = handoff === nothing ? _power_states(cache, cis(θ) * Sv) : handoff
         Us, Ub, E = march_boundary(params, Q, θ, Sv, s_m, UsS, UbS;
             rtol=march_rtol, growth=growth, seed=seed,
             ztrk=ztrk, purge_budget=purge_budget, dp_res=dp_res)

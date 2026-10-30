@@ -3,12 +3,9 @@
 
 using ...Equilibrium: KineticProfileData
 
-# The layer view of raw kinetic profiles (`equil.kinetic`), on their own ψ grid. Returns the
-# spline-based `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from `chi_e`/`chi_i`/`chi_phi`
-# (or `nothing` when the data carry no usable χ, in which case the caller falls back to the data's
-# `chi_*_default`), a Z_eff(ψ) callable: the data's own `zeff` profile when they carry one, else derived
-# from `n_i/n_e` (or `nothing` when they carry neither, in which case the caller falls back to
-# `zeff_default`), and whether the data carry an `omega_E` profile. The `SLAYERModel` selects which χ the layer uses.
+# Layer view of raw kinetic profiles (`equil.kinetic`) on their own ψ grid: the `KineticProfiles`, the χ⊥,e/χ⊥,i/χ_φ(ψ)
+# callables the `SLAYERModel` uses (`nothing` when absent, so the caller uses `chi_*_default`), Z_eff(ψ) (the data's
+# `zeff`, else from n_i/n_e, else `nothing` for `zeff_default`) with its source, and whether the data carry `omega_E`.
 function _slayer_profiles(data::KineticProfileData, control)
     source = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
     for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))
@@ -21,11 +18,7 @@ function _slayer_profiles(data::KineticProfileData, control)
     profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
         T_i=data.T_i, omega_E=omega_E)
 
-    # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
-    # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
-    # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
-    # to the data's chi_e_default/chi_phi_default. Build the spline only
-    # from a usable (present, not all-zero) array.
+    # χ⊥(ψ)/χ_φ(ψ) splines; an absent or all-zero array means "not provided" and defers to the data's `chi_*_default`.
     psi_xs = collect(Float64, data.psi)
     function _chi_spline(name, v)
         (v === nothing || all(iszero, v)) && return nothing
@@ -37,10 +30,8 @@ function _slayer_profiles(data::KineticProfileData, control)
     chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
     chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
     chi_tor = model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
-    # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
-    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
-    # charge-1 main ion, the single-ion closure the kinetic spline set uses:
-    # Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
+    # Z_eff(ψ): the file's profile wins; else quasi-neutrality with one impurity of charge `impurity_charge` and a
+    # charge-1 main ion, Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
     _usable(v) = v !== nothing && !all(iszero, v)
     zeff = if _usable(data.zeff)
         minimum(data.zeff) >= 1.0 - 1e-8 ||

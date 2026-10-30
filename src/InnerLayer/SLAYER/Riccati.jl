@@ -1,40 +1,20 @@
 # Riccati.jl
 #
-# Inner-layer Δ via the Fitzpatrick two-fluid drift-MHD layer Riccati ODE
-# (Fitzpatrick, Tearing Mode Dynamics in Tokamak Plasmas, IOP 2023; Park
-# 2022, Phys. Plasmas 29, 072506; Burgess et al. 2026), for the
-# pressureless tearing channel (no parallel flow, pe = 0). The A, B, C
-# coefficients, the dW/dp Riccati equation, the large-p asymptotic boundary
-# conditions, the regime test D² > ι_e P_⊥/P_tor^(2/3), the small-p
-# Δ = π/W' extraction, and the analytic Jacobian all follow that layer
-# formulation; the full C(p) form is retained in every regime (no low-D
-# reduction).
+# Inner-layer Δ from the Fitzpatrick two-fluid drift-MHD layer Riccati ODE (Fitzpatrick, Tearing Mode Dynamics in
+# Tokamak Plasmas, IOP 2023; Park 2022, Phys. Plasmas 29, 072506; Burgess et al. 2026) for the pressureless tearing
+# channel (no parallel flow, pe = 0), keeping the full C(p) form in every regime.
 #
 # The layer is evaluated at Fitzpatrick's normalized eigenvalue ĝ = (γ − iω)·τ_k: `solve_inner` takes the
 # growth rate s = γ − iω (ĝ = s·τ_k) and `layer_response` the dispersion scans' Q = (ω + iγ)·τ_k (ĝ = −i·Q).
-# All other inputs come from `SLAYERParameters` (see `LayerParameters.jl`).
-#
-# Returns the parity-projected matching data as an `InnerLayerResponse`
-# with only the `tearing` channel populated so callers can treat SLAYER and
-# GGJ interchangeably through the shared `InnerLayerModel` interface.
-# SLAYER's inner-layer dispersion relation produces a single complex Δ
-# (the tearing channel); the interchange channel is zero.
+# Only the `tearing` channel of the returned `InnerLayerResponse` is populated; the interchange channel is zero.
 
 using OrdinaryDiffEq
 
 # ---------------------------------------------------------------------
-# Coefficient evaluation for the two-fluid layer A, B, C terms (Fitzpatrick 2023).
-#
-# All x-independent quantities are bundled in `_RiccatiConsts` and computed
-# once per `solve_inner` call (see line ~200). The hot RHS / Jacobian
-# evaluations then access only the bundled constants and `x`, avoiding the
-# tens of thousands of redundant complex muls/adds the prior code did.
+# Coefficients of the two-fluid layer A, B, C terms (Fitzpatrick 2023).
 # ---------------------------------------------------------------------
 
-# Pre-computed x-independent constants for the Fitzpatrick Riccati ODE.
-# Derived from `(p::SLAYERParameters, g::ComplexF64)` once per solve. Used as
-# the integrator `params` so `_riccati_f_rhs` and `_riccati_f_jac` only need
-# the x-dependent algebra.
+# x-independent constants of the Riccati ODE, built once per solve from (p, ĝ) and passed as the integrator `params`.
 struct _RiccatiConsts
     g_minus_iQe::ComplexF64   # constant part of denom = g − iQe + x²
     A::ComplexF64             # g·(g − iQi)               — fB constant term
@@ -58,21 +38,14 @@ end
     )
 end
 
-# Riccati RHS coefficients fA, fA', fB, fC at point x. Receives the
-# pre-built `_RiccatiConsts` so each call costs only a handful of muls/adds
-# plus one complex division (the fA = p²/denom).
+# Riccati RHS coefficients fA, fA', fB, fC at x.
 @inline function _riccati_f_coeffs(c::_RiccatiConsts, x::Real)
     p2 = x * x
     p4 = p2 * p2
     denom = c.g_minus_iQe + p2
 
     fA = p2 / denom
-    # Use the numerator-subtracts-twice-p² form rather than the algebraic
-    # identity 1 − 2·fA. The two are mathematically equal, but the
-    # integrator's adaptive stepping near marginal stability compounds
-    # ULP-level differences in fA' over thousands of steps; this form keeps
-    # the result tighter than the identity, which drifts to ~3e-3 relative
-    # (within abs-tolerance, but tighter is better).
+    # (denom − 2p²)/denom, not the equal 1 − 2·fA: the identity drifts ~3e-3 relative near marginal stability.
     fA_prime = (denom - 2 * p2) / denom
 
     fB = c.A + c.B * p2 + c.C * p4
@@ -81,21 +54,13 @@ end
     return fA, fA_prime, fB, fC
 end
 
-# Scalar ODE right-hand side dW/dp for OrdinaryDiffEq.
-#
-# This is a 1-equation ODE — modeling W(x) as a `ComplexF64` scalar (rather
-# than a 1-element `Vector{ComplexF64}`) lets the integrator's stage updates
-# stay on the stack with no per-step allocations. SDIRK + Rosenbrock + BDF
-# methods in OrdinaryDiffEq all support scalar `u`.
+# Scalar ODE right-hand side dW/dp; a scalar `ComplexF64` state keeps the integrator allocation-free.
 @inline function _riccati_f_rhs(W::Number, consts::_RiccatiConsts, x::Real)
     fA, fA_prime, fB, fC = _riccati_f_coeffs(consts, x)
     return -(fA_prime / x) * W - W * W / x + (fB / (fA * fC)) * (x * x * x)
 end
 
-# Analytic Jacobian of the Riccati RHS. The full RHS has
-# both the explicit (fA'/p, fB·p³) terms and the W² term; for the
-# Jacobian only the W-dependent pieces survive. Returns a scalar — the
-# 1×1 Jacobian of the scalar ODE.
+# Analytic 1×1 Jacobian of the Riccati RHS (only the W-dependent terms survive).
 @inline function _riccati_f_jac(W::Number, consts::_RiccatiConsts, x::Real)
     p2 = x * x
     denom = consts.g_minus_iQe + p2
@@ -104,9 +69,7 @@ end
 end
 
 # ---------------------------------------------------------------------
-# Boundary-condition selection (large-p asymptotics, Fitzpatrick 2023).
-# Two regimes selected by D_norm² vs.
-# iota_e·P_perp/P_tor^(2/3).
+# Boundary-condition selection (large-p asymptotics, Fitzpatrick 2023): regime set by D_norm² vs iota_e·P_perp/P_tor^(2/3).
 # ---------------------------------------------------------------------
 
 # Returns (p_start, W_at_p_start, branch) where `branch ∈ (:large_D, :small_D)`.
@@ -163,33 +126,11 @@ surface's E×B frame. The layer is evaluated at Fitzpatrick's normalized eigenva
 with the electron fluid at ω = ω_*e. Returns an `InnerLayerResponse` with `tearing = Δ` and `interchange = 0`: SLAYER's
 pressureless layer produces only the tearing channel.
 
-# Algorithm
+Integrates `dW/dp = -(fA'/p)·W − W²/p + (fB/(fA·fC))·p³` (Fitzpatrick 2023; Park 2022) from a large `p_start`
+inward to `pmin` and returns `Δ = π / W'(pmin)`.
 
-Implements the Fitzpatrick two-fluid drift-MHD layer formulation
-(Fitzpatrick 2023; Park 2022) for the pressureless tearing channel
-(no parallel flow, pe = 0). Integrates
-`dW/dp = -(fA'/p)·W − W²/p + (fB/(fA·fC))·p³` from a large `p_start`
-(selected by `_riccati_f_initial` according to whether
-`D_norm² ≷ iota_e·P_perp/P_tor^(2/3)`) inward to `pmin`, then computes
-`Δ = π / W'(pmin)` from a single RHS evaluation at the inner endpoint.
-
-# Solver
-
-Default `Rodas5P(autodiff=false)` (Rosenbrock, stiff-friendly). The
-analytic Jacobian wired via the `ODEFunction(jac=...)` field accelerates
-the Newton solves. AD is disabled because complex `Dual` propagation
-through the chained denominators incurs allocations in this regime;
-finite-difference fallback is fast enough for the 1-equation system.
-
-**Note on solver swaps:** sub-percent floating-point differences between
-ODE solvers cascade through the outer AMR's cell-flagging decisions
-(`ContourSearchAMR.jl::_crosses_zero`) and produce **structurally
-different** AMR cell trees. Swapping the ODE solver has been observed to
-change the classified root/pole inventory substantially even when the
-most-unstable γ agrees to within ~1e-5 relative. So solver choice is not
-just a per-call optimization — it affects the downstream root/pole
-inventory. Future solver swaps need to be validated against the topology
-fields (`n_valid_roots`, `n_poles`), not just γ.
+**Solver swaps:** tiny differences between ODE solvers change the outer AMR's cell flagging and hence the
+classified root/pole inventory, so validate a new `solver` against `n_valid_roots` and `n_poles`, not just γ.
 
 # Keyword arguments
 
@@ -214,18 +155,11 @@ function _slayer_delta(p::SLAYERParameters, g::ComplexF64;
     maxiters::Integer=50_000,
     solver=Rodas5P(; autodiff=false))
 
-    # Boundary condition at p_start
     p_start, W_bound, _ = _riccati_f_initial(p, g; p_floor=p_floor)
 
-    # Pre-compute x-independent constants ONCE; the integrator threads this
-    # through to every RHS / Jacobian call instead of recomputing per-step.
     rhs_params = _build_riccati_consts(p, g)
 
-    # Scalar `u0`: the ODE state is a single `ComplexF64`, not a 1-element
-    # vector. OrdinaryDiffEq supports scalar problems via the out-of-place
-    # form (`ODEFunction{false}`). This eliminates the per-step heap-
-    # allocation of intermediate `dW` vectors that the in-place form
-    # incurred for every stage of every accepted/rejected step.
+    # Scalar state with the out-of-place form (`ODEFunction{false}`) avoids per-step allocations.
     u0 = ComplexF64(W_bound)
     f = ODEFunction{false}(_riccati_f_rhs; jac=_riccati_f_jac)
     prob = ODEProblem(f, u0, (p_start, pmin), rhs_params)
@@ -234,21 +168,16 @@ function _slayer_delta(p::SLAYERParameters, g::ComplexF64;
         save_everystep=false, dense=false)
 
     if sol.retcode != ReturnCode.Success
-        # Unconverged solve: return a NaN sentinel so the dispersion scan / AMR
-        # flags this Q-cell (via its isfinite checks) rather than ingesting a
-        # bogus finite Δ built from an unconverged W_end. @debug not @warn: in a
-        # dense Q-plane scan failures cluster near poles and would flood the log.
+        # NaN sentinel so the scan/AMR isfinite checks flag this cell; @debug since failures cluster near poles.
         @debug "SLAYER Riccati integration did not return Success" sol.retcode
         return InnerLayerResponse(ComplexF64(NaN, NaN), zero(ComplexF64))
     end
 
-    # Δ = π / W'(pmin) — single RHS evaluation at the inner endpoint
+    # Δ = π / W'(pmin) from one RHS evaluation at the inner endpoint.
     W_end = sol.u[end]
     dW_end = _riccati_f_rhs(W_end, rhs_params, pmin)
     Δ::ComplexF64 = π / dW_end
 
-    # Fitzpatrick / pressureless SLAYER has no interchange channel
-    # (the Δ₊ / even-parity matching quantity is identically zero in
-    # the pressureless limit), so populate only the tearing field.
+    # The pressureless layer has no interchange (Δ₊) channel.
     return InnerLayerResponse(Δ, zero(ComplexF64))
 end

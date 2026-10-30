@@ -13,8 +13,6 @@
 #
 # Type-parameter `S` of `SLAYERModel{S}` selects the Riccati formulation
 # used for the dispersion relation; only `:fitzpatrick` is implemented.
-#
-# The growth rate is passed to `solve_inner` rather than stored on the parameter struct.
 
 module SLAYER
 
@@ -40,9 +38,7 @@ SLAYER inner-layer model: the Riccati formulation and the layer closures that tu
   - `:fitzpatrick` -- P_perp/P_tor Fitzpatrick formulation (default;
     Fitzpatrick 2023 two-fluid drift-MHD layer)
 
-Future dispersion variants (e.g. `:standard`) may be added but are not
-currently implemented. The `del_s` formulation is exposed separately as
-the layer-thickness diagnostic [`slayer_layer_thickness`](@ref), not as
+The `del_s` formulation is exposed separately as the layer-thickness diagnostic [`slayer_layer_thickness`](@ref), not as
 a dispersion `solve_inner` path.
 
 ## Fields

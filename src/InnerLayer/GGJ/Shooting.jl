@@ -225,7 +225,7 @@ end
 
 Construct a [`GGJShootingSystem`](@ref) for the given parameters `p` and
 complex frequency `Q`, precomputing the origin and infinity asymptotic arrays
-used by the forward/backward shoots.
+used by the backward shoot.
 """
 function _build_shooting_system(p::GGJParameters, Q::ComplexF64;
     nps::Int=8, rtol::Float64=1e-6, fmax::Float64=1.0)
