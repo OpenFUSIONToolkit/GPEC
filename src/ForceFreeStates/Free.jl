@@ -40,12 +40,10 @@ Fourier band `jmat` (length 2·mpert−1, evaluated from the `mats.ideal.J_splin
 
     ξ†·N·ξ = ∮ J |ξ(θ)|² dθ / (dV/dψ) = ⟨|ξ|²⟩
 
-is the flux-surface average of the squared boundary displacement — the DCON power normalization
-as a quadratic form. N is Hermitian Toeplitz within each n-block (block-diagonal over n since the
-Jacobian is axisymmetric) and positive definite (J > 0). It is the metric of the generalized
-eigenproblem W·v = λ·N·v solved in `free_run` and `free_compute_total`: because W and N
-transform by the same congruence under a change of working (Jacobian) coordinate, the pencil
-eigenvalues are power-normalized mode energies that are invariant to that coordinate choice.
+is the flux-surface average of the squared boundary displacement. N is Hermitian Toeplitz within each
+n-block, block-diagonal over n, and positive definite. It is the metric of the pencil W·v = λ·N·v in
+`free_run` and `free_compute_total`, whose eigenvalues are therefore invariant to the working (Jacobian)
+coordinate.
 """
 function power_norm_matrix!(Nmat::AbstractMatrix{ComplexF64}, jmat::AbstractVector{ComplexF64}, mpert::Int, npert::Int, dV_dpsi::Float64)
     fill!(Nmat, 0.0 + 0.0im)
@@ -113,11 +111,9 @@ end
 """
     free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal) -> FreeBoundaryResult
 
-Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
-in the Fortran code.
-
-Returns a `FreeBoundaryResult` struct containing the data needed for perturbed equilibrium
-calculations and data dumping.
+Free-boundary energies at `intr.psilim`: the plasma response from the ODE edge state plus the
+singfac-scaled vacuum matrix, diagonalized as the pencil (W, N). Returns the eigenmodes and their
+plasma/vacuum/total energies as a [`FreeBoundaryResult`](@ref).
 """
 @with_pool pool function free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
@@ -147,10 +143,7 @@ calculations and data dumping.
     # (wv, N) so it shares the units of the mode energies (should be PSD; clamp noise to zero)
     vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(wv), Hermitian(Nmat)))))
 
-    # Complex energy eigenvalues and vectors of the generalized eigenproblem W·v = λ·N·v.
-    # The eigenvalues are stationary values of the power quotient ξ†Wξ/ξ†Nξ — power-normalized
-    # mode energies invariant to the working (Jacobian) coordinate, since W and N transform by
-    # the same congruence under a poloidal coordinate change.
+    # Generalized eigenproblem W·v = λ·N·v: eigenvalues are power-normalized, Jacobian-invariant mode energies
     wt = wp .+ wv
     wt0 = copy(wt)
     Ev = eigen(wt, Nmat)
@@ -164,8 +157,7 @@ calculations and data dumping.
         orig = eindex[numpert_total+1-ipert]
         wt[:, ipert] .= Ev.vectors[:, orig]
         et[ipert] = etemp[orig]
-        # Store which n this eigenvector corresponds to (needed to write IMAS data)
-        # This relies on the block diagonal matrix structure due to n decoupling in tokamaks
+        # n index of each eigenvector from its dominant entry (relies on n-block-diagonal W)
         imax = argmax(abs.(Ev.vectors[:, orig]))
         n_tor_idx[ipert] = (imax - 1) ÷ mpert
     end
@@ -208,17 +200,15 @@ end
 """
     free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute a spline of vacuum response matrices over the range of psi from 'ctrl.psi_edge' to
-`intr.qlim`. This is used for fast evaluation of wt during `ode_record_edge`. Performs the
-same function as `free_wvmats` in the Fortran code. Currently defaults to 4 spline points per
-q-window minimum.
+Cubic ψ-spline of the raw (not singfac-scaled) vacuum response matrices from
+`ctrl.dW_edge_scan_start` to `intr.psilim`, sampled evenly in q with at least 4 points per q-window,
+for fast evaluation in `free_compute_total` during the edge dW scan.
 """
 @with_pool pool function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
     profiles = equil.profiles
 
     # Number of psi grid points for the spline: 4 per q-window minimum
-    # TODO: 4 spline points is arbitrary - is there a better way?
     qedge = profiles.q_spline(ctrl.dW_edge_scan_start)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
     psi_array = zeros!(pool, Float64, npsi + 1)
@@ -244,21 +234,22 @@ q-window minimum.
     # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
     wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
 
-    # FastInterpolations now natively supports complex values - create complex series interpolant directly
-    # Use CubicFit() (default) for native endpoint handling
+    # Complex series interpolant; the default CubicFit handles the endpoints
     wvmat = cubic_interp(psi_array, Series(wv_flat); extrap=ExtendExtrap())
 
     return wvmat
 end
 
 """
-    free_compute_total(equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, odet::OdeState) -> ComplexF64
+    free_compute_total(equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, odet::OdeState) -> NamedTuple
 
-Compute total complex energy eigenvalue (total1). This is a trimmed down version of `free_run`
-that only computes the total energy eigenvalue for the mode unstable mode, used in `findmax_dW_edge!`
-which calls this function at each step in the dW_edge_scan_start -> psilim region of integration. This performs
-the same function as `free_test` in the Fortran code, except we have moved the creation of the
-wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvmat` (a complex-valued spline).
+Energies of the least stable mode at `odet.psifac`: a trimmed `free_run` called by `findmax_dW_edge!` at
+each step of the edge dW scan. The raw vacuum matrix comes from `odet.edge_scan.wvmat`
+(see `free_compute_wv_spline`) and is singfac-scaled here.
+
+## Returns
+
+NamedTuple `(total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue)`.
 """
 @with_pool pool function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal, odet::OdeState)
 

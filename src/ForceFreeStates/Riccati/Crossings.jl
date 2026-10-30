@@ -3,30 +3,12 @@
 """
     riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, ising)
 
-Cross a singular surface for the Riccati formulation. Replaces `cross_ideal_singular_surf!`
-for the Riccati integration path with two key differences:
+Cross a singular surface on the Riccati path: the Riccati counterpart of `cross_ideal_singular_surf!`,
+without Gaussian reduction (S is bounded) and zeroing the resonant columns `ipert_res` directly.
 
- 1. **No Gaussian reduction**: `cross_ideal_singular_surf!` calls `compute_solution_norms!`
-    which applies Gaussian reduction to (S, I). This divides by pivot elements of S, which
-    can be near-zero (S = 0 at axis and grows slowly), producing NaN/Inf in U₂. For Riccati,
-    S is bounded so Gaussian reduction is unnecessary.
-
- 2. **Direct column zeroing**: Instead of using the GR-sorted `odet.index` to identify the
-    column to zero, we use `ipert_res` directly (the resonant mode index). This is valid since
-    without GR there is no permutation applied to the columns of S.
-
-**Δ' normalization**: This function expects `odet.u` in the bounded (U₁, U₂) form produced by
-`riccati_integrate_chunk!` with `needs_crossing=true` (final renorm skipped). ca_l is computed
-from (U₁, U₂) before the crossing, and ca_r from (U₁_new, U₂_new) before `renormalize_riccati!`.
-Since column `ipert_res` of [U₁_new; U₂_new] equals the introduced asymptotic solution exactly,
-ca_r[ipert_res,ipert_res,2] = 1 regardless of other column normalizations. This gives a
-physically meaningful Δ' = ca_r - ca_l with consistent left/right normalization.
-
-After the predictor step and asymptotic introduction, `renormalize_riccati!` is called
-to restore the canonical (S_new, I) form before continuing integration.
-
-The u_store entry at the crossing step correctly stores (U₁_new, U₂_new) so that
-`evaluate_stability_criterion!` can compute U₁_new / U₂_new = S_new correctly.
+Expects `odet.u` in the bounded (U₁, U₂) form from `riccati_integrate_chunk!` with `needs_crossing=true`.
+`ca_l`/`ca_r` are captured before `renormalize_riccati!` restores the (S, I) form, so the introduced
+small solution has `ca_r[ipert_res, ipert_res, 2] = 1`.
 """
 function riccati_cross_ideal_singular_surf!(
     odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -87,10 +69,7 @@ function _capture_left_crossing_data!(odet::OdeState, singp::SingType, sing_asym
     odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 end
 
-# Trapezoidal predictor across the singular surface: zero the resonant columns,
-# evaluate sing_der! on both sides, advance odet by (du1 + du2)·dpsi, and jump
-# odet.psifac to the right side. The zeroed columns stay zero through the predictor
-# since du[:, ipert_res, :] = 0 when u[:, ipert_res, :] = 0.
+# Trapezoidal predictor across the singular surface with the resonant columns zeroed (they stay zero).
 function _predict_across_singular_surface!(odet::OdeState, ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
     intr::ForceFreeStatesInternal, ising::Int,
@@ -109,10 +88,7 @@ function _predict_across_singular_surface!(odet::OdeState, ctrl::ForceFreeStates
     odet.u .+= (du1 .+ du2) .* dpsi
 end
 
-# Inject the right-side small asymptotic into the resonant columns of (U₁_new, U₂_new),
-# capture odet.ca_r, and save singp.ua_right / psi_ua_right.
-# Column ipert_res of [U₁_new; U₂_new] = ua[:, ipert_res+N, :] (the introduced small asymptotic),
-# so ca_r[ipert_res, ipert_res, 2] = 1 regardless of other columns' normalization.
+# Inject the right-side small asymptotic into the resonant columns, then capture odet.ca_r and singp.ua_right.
 function _capture_right_crossing_data!(odet::OdeState, singp::SingType, sing_asymp_right,
     dpsi::Float64, intr::ForceFreeStatesInternal, ising::Int,
     ipert_res, ctrl::ForceFreeStatesControl)

@@ -31,29 +31,20 @@ function _apply_column_powers!(big_cols, small_cols, p_big, p_small, dpsi)
 end
 
 """
-    compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
+    compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0, sing_order=ctrl.frobenius_order) -> SingAsymptotics
 
-Calculate asymptotic vmat and mmat matrices for a singular surface.
-Formerly `sing_vmat!`. Returns a `SingAsymptotics` struct with the computed data instead of
-mutating the `SingType` struct. This makes it clear that asymptotics are computed on-demand
-for ideal ForceFreeStates and are not inherent properties of the singular surface.
-
-See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematical details.
+Frobenius power series (`vmat`) of the asymptotic solutions on one side of a singular surface, Glasser
+Phys. Plasmas 2016 112506 Eqs. 41-48.
 
 ### Arguments
 
   - `singp::SingType`: Singular surface parameters
+  - `sig`: Side of the surface, `-1.0` left or `+1.0` right
   - `sing_order`: Expansion order, defaulting to `ctrl.frobenius_order`. The Galerkin path overrides it
     per surface (`frobenius_order`, raised for high-Mercier-index surfaces).
 
-A trace diagnostic warns once per surface per solve when `abs(tr(M₀))/2` exceeds both
-`1e-3 * abs(α)` and a round-off floor of `64 * Base.eps(Float64) * opnorm(M₀, Inf)`. It is not
-a Fourier or radial convergence test; near Mercier marginality the absolute floor avoids
-warning on round-off alone.
-
-### Returns
-
-  - `SingAsymptotics`: Struct containing all asymptotic expansion data
+Warns once per surface when a resonant block has `abs(tr(M₀))/2` above both `1e-3 * abs(α)` and the
+round-off floor `64 * Base.eps(Float64) * opnorm(M₀, Inf)`.
 """
 function compute_sing_asymptotics(
     singp::SingType,
@@ -65,15 +56,12 @@ function compute_sing_asymptotics(
     sing_order::Int=ctrl.frobenius_order
 )
 
-    # Allocations
     vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * sing_order + 1)
     mmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * sing_order + 3)
     power = zeros(ComplexF64, 2 * intr.numpert_total)
 
-    # Compute the resonant (r) and nonresonant (n) indices of the shearing transformation matrix R
-    # 1 indexes along the N*M dimension, and 2 along the 2*N*M dimension
-    # In 2D, see eq. 41 of Glasser Phys. Plasmas 2016 112506
-    # TODO: if we remove the 3rd dimension, no need for both r1 and r2
+    # Resonant (r) and nonresonant (n) indices of the shearing transformation (Glasser 2016 Eq. 41);
+    # 1 indexes the numpert_total dimension, 2 the 2·numpert_total dimension
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     r1 = ipert_res
     r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
@@ -158,35 +146,11 @@ function compute_sing_asymptotics(
 end
 
 """
-    compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, mats::MatrixSplines, intr::ForceFreeStatesInternal)
+    compute_sing_mmat!(mmat, singp, ctrl, profiles, mats, intr; sig=1.0, sing_order=ctrl.frobenius_order)
 
-Calculate asymptotic mmat matrix for a singular surface. Formerly `sing_mmat!`.
-Performs the same function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
-the expansion orders and using dense matrices instead of banded. We keep the Fortran
-convention of only filling in the lower half of the Hermitian matrices, and wrap the
-subsequent multiplications in `Hermitian()` calls to take advantage of the symmetry.
-We have tried to be explicit in which matrices have only their lower triangle stored
-to avoid confusion.
-
-More specifically, in this function we construct the Taylor series M_k of the matrix M
-(eq. 43-44 in Glasser 2016). This involves: evaluating the cubic splines and their
-derivatives at the singular surface, constructing the Taylor series coefficients for each
-composite matrix (simple for G, more complicated for F and K since they are stored as
-their nonsingular forms and need to be multiplied by Q, which is itself a Taylor series
-so the coefficients get complicated), solving x = L v for each order in the Taylor series,
-and then reconstructing mmat from x.
-
-### Arguments
-
-  - `mmat::Array{ComplexF64,4}`: Output array to store the computed mmat values
-  - `singp::SingType`: Singular surface parameters
-
-### TODOs
-
-Check third derivative accuracy in cubic splines or determine if it matters
-Better way to unpack the cubic splines
-Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
-Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
+Fill `mmat` with the Taylor coefficients M_k of the matrix M at a singular surface (Glasser 2016 Eqs. 43-44),
+with `sig` flipping odd ψ-derivatives for the left side. Port of Fortran `sing_mmat`, with dense matrices;
+Hermitian matrices store only their lower triangle (suffix `_lower`) and are used through `Hermitian(·, :L)`.
 """
 @with_pool pool function compute_sing_mmat!(
     mmat::Array{ComplexF64,4},
@@ -204,7 +168,6 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     q_d2 = deriv2(q_spline)
     q_d3 = deriv3(q_spline)
 
-    # Initial allocations
     Npert = intr.numpert_total
 
     singfac = zeros!(pool, Float64, Npert, 4)
@@ -264,12 +227,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
         singfac[ipert_res, 1:4] .= (-nres * q[2], -nres * q[3] / 2, -nres * q[4] / 3, 0)
     end
 
-    # This section becomes tricky because we need to reform F = QL̄L̄ᴴQᴴ
-    # TODO: this section can absolutely be simplified using some intuition on the coefficients.
-    # Possibly could just store an unfactorized F spline? Then logic would just look like K but
-    # with an extra singfac/altered coefficients since it would just be F = QF̄Q
-    # For now, leaving overly detailed comments to remind so I don't have to work through this again
-    # First, compute Taylor series coefficients of QL̄ (but without scaling by 1/n!), so we get binomial coefficients leftover
+    # F = QL̄L̄ᴴQᴴ: first the Taylor coefficients of QL̄ without the 1/n! scaling, leaving binomial coefficients
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
@@ -312,12 +270,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     end
     @views f0_lower .= f_lower[:, :, 1]
 
-    # Compute Taylor series coefficients of F = QL̄L̄ᴴQᴴ (lower half only due to indexing) from QL̄ computed above
-    # Here, we build in the Taylor series coefficients iteratively (fac1 = (n choose j), fac0 = 1/n!)
-    # so the final coefficient is 1/(n-j)!j! as desired (and hardcoded in the K computation below)
-    # When we wrap the matrix multiplications later with Hermitian(ff),
-    # Julia will handle filling the upper half via the Hermitian property
-    # internally, just like LAPACK does in Fortran
+    # Taylor coefficients of F = QL̄L̄ᴴQᴴ (lower half) from QL̄; fac1 = (n choose j) and fac0 = n! give 1/((n-j)! j!)
     fac0 = 1
     for n in 0:sing_order
         fac1 = 1
@@ -403,8 +356,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
         end
     end
 
-    # We will now compute the Taylor series expansion of x = Lv, with L specified in eq. 23 of Glasser 2016
-    # Start with the identity matrix (which can be indexed to project onto resonant/nonresonant modes)
+    # Taylor expansion of x = Lv (Glasser 2016 Eq. 23), with v the identity
     for ipert in 1:intr.numpert_total
         v[ipert, ipert, 1] = 1
         v[ipert, ipert+intr.numpert_total, 2] = 1
@@ -443,9 +395,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
         end
     end
 
-    # Assemble power series coefficients of M = zS⁻¹(LS - S') at each order in √z
-    # eq. 28 in Glasser 2023 PoP paper
-    # Compute resonant and nonresonant indices
+    # Power series of M = zS⁻¹(LS - S') in √z (Glasser 2023 PoP Eq. 28)
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     r1 = ipert_res
     r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
@@ -453,19 +403,16 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
 
     j = 0
-    # Start with the S⁻¹LS components
-    # Glasser PoP 2023 eq. 39: at each other of L, we get contributions to z^k from RLR,
-    # z^k+0.5 from RLA and ALR, and z^k+1 from ALA (where A is the nonresonant part)
+    # S⁻¹LS part (Glasser 2023 Eq. 39): order k of L feeds z^k (RLR), z^(k+1/2) (RLA, ALR), z^(k+1) (ALA)
     for i in 0:sing_order
         mmat[r1, r2, :, j+1] .= x[r1, r2, :, i+1]
         mmat[r1, n2, :, j+2] .= x[r1, n2, :, i+1]
         mmat[n1, r2, :, j+2] .= x[n1, r2, :, i+1]
         mmat[n1, n2, :, j+3] .= x[n1, n2, :, i+1]
-        # Expansion of M is in half powers of z due to shearing transformation, so we jump by 2
+        # Half-power index steps by 2 per order
         j += 2
     end
-    # Apply the effect of the shearing transformation to the resonant indices R
-    # Glasser PoP 2023 eq. 25 + 28: M = zS⁻¹LS - zS⁻¹S' = zS⁻¹LS + 0.5 [R, 0; 0, -R], 0ᵗʰ order only
+    # Shearing term -zS⁻¹S' = 0.5 [R, 0; 0, -R] at zeroth order (Glasser 2023 Eqs. 25, 28)
     for i in eachindex(r1)
         mmat[r1[i], r2[2*i-1], 1, 1] += 0.5 * sig
         mmat[r1[i], r2[2*i], 2, 1] -= 0.5 * sig
@@ -473,11 +420,9 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 end
 
 """
-    solve_higher_order_vmat!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, power::Vector{ComplexF64}, intr::ForceFreeStatesInternal, k::Int)
+    solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=1.0)
 
-Solves iteratively for the next order in the power series `vmat`.
-See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
-`sing_solve` subroutine. Now takes individual arrays instead of singp struct.
+Solve for order `k` of the power series `vmat` (Glasser 2016 Eq. 47). Port of Fortran `sing_solve`.
 
 ### Arguments
 
@@ -535,19 +480,17 @@ end
     sing_matmul!(out, a, b) -> out
 
 Matrix product of two asymptotic-series coefficient arrays into `out`, as the Fortran `sing_matmul`:
-`a` and `out` are `(mpert, 2·mpert, 2)`, `b` is `(mpert, 2·mpert, 2)`.
+`b` is `(m, n, 2)`, `a` is `(·, 2m, 2)`, and `out` is `(size(a, 1), n, 2)`.
 """
 @with_pool pool function sing_matmul!(out::AbstractArray{ComplexF64,3}, a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
     m = size(b, 1)
     n = size(b, 2)
 
-    # consistency check
     if size(a, 2) != 2 * m
         error("Sing_matmul: size(a,2) = $(size(a,2)) != 2*size(b,1) = $(2*m)")
     end
 
     fill!(out, zero(ComplexF64))
-    # main computation
     tmp = acquire!(pool, ComplexF64, size(a, 1))
     for i in 1:n
         for j in 1:2
@@ -564,9 +507,8 @@ end
 """
     sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64) -> ua
 
-Compute the asymptotic series solution for a given singular surface.
-Uses direction-specific asymptotics (left: sig=-1, right: sig=+1) with positive dpsi.
-Matches Fortran STRIDE's `sing_get_ua`.
+Evaluate the asymptotic solutions at distance `dpsi` from the surface, on the side `sing_asymp` was built
+for. Port of Fortran STRIDE `sing_get_ua`.
 
 ### Arguments
 
@@ -578,9 +520,7 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
     r1 = sing_asymp.r1
     r2 = sing_asymp.r2
 
-    # dpsi = |ψ - ψ_res| is always positive. Direction is handled by the
-    # SingAsymptotics (left vs right vmat built with sig=-1 or sig=+1).
-    # Matches Fortran STRIDE sing_get_ua: sqrtfac=SQRT(dpsi), always positive.
+    # dpsi ≥ 0 always; the side is carried by the sig of the SingAsymptotics.
     sqrtfac = sqrt(dpsi)
 
     # Compute power series via Horner's method (eq. 45 in Glasser 2016)
@@ -600,17 +540,9 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
     return ua
 end
 
-# --- Column-restricted asymptotic evaluation for the outer-region Galerkin solver ---------------
-#
-# Every gal caller (gal_resonant!, gal_extension!, gal_get_solution) needs only the two resonant
-# columns of a single-surface asymptotic: the big solution (column r2[1] = ipert_res) and the small
-# solution (column r2[2] = ipert_res + numpert_total). The general sing_get_ua computes
-# all 2·numpert_total columns and allocate full (N, 2N, 2) arrays at every evaluation point — ~34×
-# more work than used. These kernels evaluate ONLY those two columns into a caller-provided
-# (N, 2, 2) buffer (col 1 = big, col 2 = small), allocation-free, with scalar exponent bookkeeping
-# instead of the full `power` array. They require a single-resonance asymptotic (length(r1) == 1),
-# which always holds for the per-surface gal series. Numerically identical to slicing the full
-# result to [r2[1], r2[2]].
+# Column-restricted evaluation for the outer-region Galerkin solver: only the big (r2[1]) and small (r2[2])
+# resonant columns, into a caller-provided (N, 2, 2) buffer. Requires a single resonance (length(r1) == 1);
+# numerically identical to slicing `sing_get_ua` to [r2[1], r2[2]].
 
 """
     sing_get_ua_res!(out, sing_asymp, dpsi) -> out
@@ -713,10 +645,8 @@ sing_get_ua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
 Leading-order ("cut") form of [`sing_get_ua_res!`](@ref): keeps only the `t = 0` term of the
 Frobenius series instead of summing all `2·sing_order` terms, then applies the same unshear.
 
-This is the resonant basis used to build the *cut* outer solution, whose role is to supply the
-regular background that the resistive inner-layer solution is added to when forming the composite
-solution near a rational surface. Because the full and cut series share the same leading term, the
-difference between them is exactly the higher-order content that the layer solution replaces.
+Used for the *cut* outer solution, the background the resistive inner-layer solution is added to in the
+composite solution; full minus cut is the higher-order content the layer solution replaces.
 """
 function sing_get_ua_res_cut!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
     vmat = sing_asymp.vmat
@@ -795,32 +725,25 @@ end
 """
     sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::ForceFreeStatesInternal)
 
-Compute the asymptotic expansion coefficients according to equation
-50 in Glasser 2016 DCON paper. Performs the same function as
-`sing_get_ca` in the Fortran code.
+Asymptotic expansion coefficients `ca` of `u` in the basis `ua` (Glasser 2016 Eq. 50). Port of Fortran `sing_get_ca`.
 
 ### Arguments
 
   - `u::Array{ComplexF64,3}`: Current solution matrix, shape (numpert_total, numpert_total, 2)
-  - `ua::Array{ComplexF64,3}`: Asymptotic solution matrix, shape (numpert_total, numpert_total, 2)
-  - `intr::ForceFreeStatesInternal`: Internal ForceFreeStates data containing perturbation dimensions
+  - `ua::Array{ComplexF64,3}`: Asymptotic solution matrix, shape (numpert_total, 2·numpert_total, 2)
 """
 function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::ForceFreeStatesInternal)
 
-    # Build temp1
     temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
     temp1[1:intr.numpert_total, :] .= ua[:, :, 1]
     temp1[(intr.numpert_total+1):(2*intr.numpert_total), :] .= ua[:, :, 2]
 
-    # Built temp2
     temp2 = zeros(ComplexF64, 2 * intr.numpert_total, intr.numpert_total)
     temp2[1:intr.numpert_total, :] .= u[:, :, 1]
     temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= u[:, :, 2]
 
-    # LU factorization and solve
     temp2 .= lu!(temp1) \ temp2
 
-    # Build ca
     ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     @views ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
     @views ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]

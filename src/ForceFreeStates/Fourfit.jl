@@ -15,8 +15,7 @@ the Galerkin solver's variant of the same matrix.
     ODE integrates; see [`FKGMatrices`](@ref).
   - `D_spline_prim`, `E_spline_prim` - pre-Schur-reduction geometric forms
     (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)). Downstream
-    kinetic FKG Schur complements consume these primitive forms; the alternate singular-layer path
-    that would need kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
+    kinetic FKG Schur complements consume these primitive forms.
   - `H_spline` - primitive Ḡ before the Schur complement (Ḡ = H − C†A⁻¹C), also consumed by the
     kinetic reduction.
   - `F_spline_lower` - reduced F̄ as its lower-triangular Cholesky factor L, F̄ = L·Lᴴ. The ideal
@@ -115,11 +114,9 @@ end
 """
     MetricData
 
-A structure to hold the computed metric tensor components and their
-Fourier representation. This is the Julia equivalent of the `fspline_type`
-named `metric` in the Fortran `fourfit_make_metric` subroutine.
+Metric tensor components on the (ψ, θ) grid and their Fourier representation.
 
-### Fields
+## Fields
 
   - `mpsi::Int`: Number of radial grid points minus one.
   - `mtheta::Int`: Number of poloidal grid points minus one.
@@ -143,8 +140,8 @@ MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
 """
     make_metric(equil::Equilibrium.PlasmaEquilibrium, mpert::Int) -> MetricData
 
-Constructs the metric tensor data on a (ψ, θ) grid from an input plasma equilibrium.
-The metric coefficients stored in `metric.fs` include:
+Construct the metric tensor data on the (ψ, θ) grid of `equil`, Fourier-decomposed up to
+harmonic `mpert - 1`. The coefficients stored in `metric.fs` are:
 
  1. g_ψψ / J
  2. g_θθ / J
@@ -154,15 +151,6 @@ The metric coefficients stored in `metric.fs` include:
  6. g_ψθ / J
  7. J (Jacobian)
  8. ∂J/∂ψ
-
-### Arguments
-
-  - `mpert::Int`: Number of poloidal modes
-
-### Returns
-
-  - `metric::MetricData`:
-    A structure containing the metric coefficients, coordinate grids, and Jacobians for the specified equilibrium.
 """
 function make_metric(equil::Equilibrium.PlasmaEquilibrium, mpert::Int)
 
@@ -225,9 +213,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium, mpert::Int)
         end
     end
 
-    # --- Compute Fourier coefficients (no spline overhead since we only access at grid points) ---
-    # Faithful Fortran fspline_fit_2 (equil/fspline.f:293): FFT after dropping the duplicated
-    # θ=2π endpoint. The fspline_fit_1 integration variant (idcon.f fft_flag=false) is not implemented.
+    # FFT after dropping the duplicated θ=2π endpoint (matches Fortran fspline_fit_2)
     metric.fourier_coeffs = Utilities.FourierCoefficients(metric.xs, metric.ys, metric.fs, mpert - 1)
     return metric
 end
@@ -236,17 +222,9 @@ end
     build_kinetic_metric_matrices(equil, intr, metric) → NamedTuple
 
 Compute the 5 kinetic geometric matrices (s, t, x, y, z) needed by
-`KineticForces.BounceAveraging` for kinetic W vector outer products.
-These encode the coupling between magnetic perturbation modes and
-the equilibrium geometry.
-
-Ports Fortran `dcon_interface.f` lines 895-1013 (`idcon_action_matrices`), which is single-n,
-extended to every toroidal mode n in `intr.nlow:intr.nhigh`. Only Y (through m - nq) and Z
-(through n) depend on n; S, T and X are repeated in each block so all five share one layout.
-
-Computes 8 `fmodb` quantities on the (ψ,θ) grid from the equilibrium geometry, Fourier
-decomposes them, assembles the mpert×mpert matrices of each n from the Fourier bands at each ψ,
-and splines them over ψ.
+`KineticForces.BounceAveraging` for kinetic W vector outer products, for every toroidal mode n in
+`intr.nlow:intr.nhigh`. Only Y (through m - nq) and Z (through n) depend on n; S, T and X are
+repeated in each block so all five share one layout.
 
 # Returns
 
@@ -296,7 +274,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, jtheta]
             fy3 = equil.rzphi_nu.nodal_derivs.partials[3, ipsi, jtheta]
 
-            # Covariant basis vectors WITHOUT /jac (matches Fortran dcon_interface.f:925-931)
+            # Covariant basis vectors WITHOUT /jac (unlike make_metric)
             v[1, 1] = fx1 / (2.0 * rfac)
             v[1, 2] = fx2 * 2π * rfac
             v[1, 3] = fx3 * rs
@@ -305,7 +283,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             v[2, 3] = fy3 * rs
             v[3, 3] = 2π * rs
 
-            # Raw g_ij (Fortran dcon_interface.f:933-937)
+            # Raw covariant metric g_ij
             g12 = v[1, 1] * v[2, 1] + v[1, 2] * v[2, 2] + v[1, 3] * v[2, 3]
             g13 = v[3, 3] * v[1, 3]
             g22 = v[2, 1]^2 + v[2, 2]^2 + v[2, 3]^2
@@ -324,7 +302,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             eqfun_fy2 = equil.eqfun_metric1.nodal_derivs.partials[3, ipsi, jtheta]
             eqfun_fy3 = equil.eqfun_metric2.nodal_derivs.partials[3, ipsi, jtheta]
 
-            # 8 fmodb quantities (Fortran dcon_interface.f:939-948)
+            # 8 fmodb quantities
             fmodb_fs[ipsi, jtheta, 1] = jac * (p1 + b2hp) -
                                         chi1^2 * b2ht * (g12 + q * g13) / (jac * b2h * 2)  # sband
             fmodb_fs[ipsi, jtheta, 2] =
@@ -367,7 +345,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
     for ipsi in 1:mpsi
         q = equil.profiles.q_spline.y[ipsi]
 
-        # Extract Fourier modes (Fortran dcon_interface.f:963-979)
+        # Fourier bands, conjugate-symmetric for ± modes
         for m in 0:(mpert-1)
             sband[mpert-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 1)
             tband[mpert-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 2)
@@ -389,7 +367,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             zband3[k+mpert] = conj(zband3[mpert-k])
         end
 
-        # Assemble the mpert×mpert block of each n (Fortran dcon_interface.f:981-997)
+        # Assemble the mpert×mpert block of each n
         for n in nlow:nhigh
             block_offset = (n - nlow) * mpert^2
             for m1 in mlow:mhigh
@@ -438,16 +416,11 @@ end
 """
     core_capped_knots(xs, rationals) -> Vector{Int}
 
-Indices of `xs` the EL coefficient splines keep, decoupling their knots from the equilibrium grid
-in the packed core. A cubic spline's third-derivative jumps scale as (node error)/Δψ³, so
-equilibrium-grade core packing amplifies tolerance-level node error into jumps that slave the
-Euler-Lagrange step size. Near the axis every component is a Frobenius power law in ψ, and power
-laws are scale-free, so log-uniform sampling (Δψ ≥ 0.05·ψ) resolves them at constant relative
-accuracy — cubic interpolation of ψ^p on that grid errs by ~(0.05p)⁴/384, resolving even the
-steepest component (p = m_max/2) to ~2e-4 at m_max = 22 (~1e-2 at m_max = 60). The capped region
-ends at the innermost rational (or ψ = 0.1, whichever is smaller) and never drops a knot inside a
-rational's resolution window, preserving the Δ′-stencil structure the equilibrium grid encodes
-(`Equilibrium.RATIONAL_RES_RADIUS`).
+Indices of `xs` the EL coefficient splines keep. Below the innermost rational (or ψ = 0.1, whichever
+is smaller) knots are thinned to log-uniform spacing Δψ ≥ 0.05·ψ, which resolves the near-axis
+Frobenius power laws at constant relative accuracy and stops dense core packing from amplifying node
+error into spline third-derivative jumps that throttle the Euler-Lagrange step size. Knots inside a
+rational's resolution window (`Equilibrium.RATIONAL_RES_RADIUS`) are always kept.
 """
 function core_capped_knots(xs::Vector{Float64}, rationals::Vector{Float64})::Vector{Int}
     length(xs) < 3 && return collect(eachindex(xs))
@@ -466,22 +439,9 @@ end
 """
     build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData) -> MatrixSplines
 
-Constructs main ForceFreeStates matrices for a given toroidal mode number and returns
-them as a new `MatrixSplines` object. See the appendix of the Glasser Phys. Plasmas 2016 112506
-DCON paper for details on the matrix definitions. Performs the same function
-as `fourfit_make_matrix` in the Fortran code, except F, G, and K are stored as dense
-matrices. The matrix F is stored in factorized form with the lower triangle only,
-because F is Hermitian and can be written as F = L · Lᴴ, which speeds up calculations
-later (i.e. `sing_der!`).
-
-### Arguments
-
-  - `metric::MetricData`:
-    Metric coefficients on the (ψ, θ) grid, including Fourier representations of g_ij/J and J.
-
-### Returns
-
-  - `mats::MatrixSplines`: A struct holding cubic spline fits of the assembled matrices
+Assemble the ideal-MHD stability matrices on every ψ surface of `metric` and fit them as ψ-splines
+(Glasser Phys. Plasmas 2016 112506 Appendix A). F̄ is stored as its lower Cholesky factor
+(F̄ = L·Lᴴ), since `sing_der!` only solves against it; see [`IdealMatrices`](@ref) for the fields.
 """
 function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
 
@@ -489,8 +449,7 @@ function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceF
     profiles = equil.profiles
     mpsi = metric.mpsi
 
-    # Allocations (use flat storage for all matrices to fill splines)
-    # NOTE: Using zeros() instead of undef to ensure off-diagonal blocks (n≠n') are zero for block-diagonal multi-n
+    # Flat storage for the spline fits; zeros (not undef) keeps the n≠n' blocks zero for multi-n
     amats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     bmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     cmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
@@ -562,7 +521,6 @@ function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceF
         # Save the Jacobian Fourier band at every surface for the power-normalization spline
         @views jmats_flat[ipsi, :] .= jmat
 
-        # TODO: for 3D, would need an additional nlow:nhigh loop here for n/n' coupling
         for n in intr.nlow:intr.nhigh
             ipert_n = n - intr.nlow + 1
             nq = n * q
@@ -575,15 +533,12 @@ function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceF
                     singfac2 = m2 - nq
                     jpert_m = ipert_m + dm
                     dmidx = dm + intr.mpert
-                    # Some complex indexing here... we flatten the 2D (mpert x npert) x (mpert x npert) matrix,
-                    # so we need a "ipert" for m, m', n, and n' (in full 3D). In 2D, just m, m', and n
+                    # Flattened (m, n) × (m', n') index; n' = n in 2D
                     ipert = ipert_m + (ipert_n - 1) * intr.mpert
-                    jpert = jpert_m + (ipert_n - 1) * intr.mpert # TODO: this will be jpert_n in 3D-ForceFreeStates
+                    jpert = jpert_m + (ipert_n - 1) * intr.mpert
                     ipert_flat = ipert + (jpert - 1) * intr.numpert_total
 
-                    # Compute matrix values at the current m, m', n (and eventually n')
-                    # Note: dmat and emat here do not correspond to their representations in eq. A6 of the DCON paper,
-                    # but rather to subterms that appear in the composite matrix construction in A7 and A8, respectively
+                    # dmat/emat are the subterms of the composite matrices in Eqs. A7-A8, not the D, E of Eq. A6
                     amats_flatview[ipert_flat] = (2π)^2 * (n^2 * g22[dmidx] + n * (m1 + m2) * g23[dmidx] + m1 * m2 * g33[dmidx])
                     bmats_flatview[ipert_flat] = -2π * im * chi1 * (n * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
                     cmats_flatview[ipert_flat] =
@@ -627,20 +582,14 @@ function build_matrix_splines(equil::Equilibrium.PlasmaEquilibrium, intr::ForceF
         kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)  # K̃ = E - K†A⁻¹C
         gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)  # G̃ = H - C†A⁻¹C
 
-        # Capture the reduced Hermitian F̄ (full matrix) before it is overwritten by its Cholesky
-        # factor below. The Galerkin solver (gal_get_fkg) needs F̄ directly: F = Q F̄ Qᴴ with
-        # Q = diag(singfac). Mirror of Fortran fmats_gal (fourfit.f).
+        # Keep the full reduced F̄ before it is overwritten by its Cholesky factor below
         @views fmats_gal_flat[ipsi, :] .= vec(fmat)
 
-        # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
-        # and this make computation more efficient via combined forward and back substitution
+        # Store F̄ as its lower Cholesky factor; consumers only ever solve against F̄
         fmat .= cholesky(Hermitian(fmat)).L
     end
 
-    # --- Create Fourier coefficient splines (multi-quantity cubic interpolants) ---
-    # FastInterpolations now natively supports complex values - no need to split real/imag
-    # Create complex series interpolants with per-column extrap BC
-    # TODO: set powers. Do we need this yet? Only called if power_flag = true
+    # Complex series interpolants over the core-capped knot grid
     itp_opts = (; extrap=ExtendExtrap())
     keep = core_capped_knots(metric.xs, [s.psifac for s in intr.sing])
     mxs = metric.xs[keep]

@@ -1,6 +1,5 @@
 module ForceFreeStates
 
-# All imports and includes for the ForceFreeStates module
 using LinearAlgebra
 using LinearAlgebra.LAPACK
 using TOML
@@ -73,7 +72,7 @@ include("InputSnapshot.jl")
 include("Output.jl")
 include("Run.jl")
 
-# These are used for various small tolerances and root finders throughout ForceFreeStates
+# Small tolerance and root-finder iteration cap used throughout ForceFreeStates
 global eps = 1e-10
 global itmax = 50
 

@@ -71,7 +71,6 @@ function run_force_free_states(
         gal_dt = time() - gal_start
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
     else
-        # Integrate Euler-Lagrange Equation
         if intr.verbose
             @info "Integrating Euler-Lagrange equation"
         end
@@ -80,7 +79,6 @@ function run_force_free_states(
             @warn "Fixed-boundary mode unstable for n = $nstring"
         end
 
-        # Compute free boundary energies.
         if ctrl.vac_flag
             if intr.verbose
                 wall_desc = intr.wall_settings === nothing ? "no wall" : nameof(typeof(intr.wall_settings))
@@ -98,8 +96,7 @@ function run_force_free_states(
                 end
             end
 
-            # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
-            # Requires propagators from parallel FM path and wv from free_run.
+            # Inter-surface Δ' (STRIDE BVP): needs Riccati() propagators and wv from free_run.
             if ctrl.kinetic === nothing && intr.msing > 0 && fm_propagators !== nothing
                 if intr.verbose
                     @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"

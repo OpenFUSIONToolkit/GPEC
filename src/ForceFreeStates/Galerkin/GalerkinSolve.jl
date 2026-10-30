@@ -231,15 +231,10 @@ end
 """
     write_galerkin!(out_h5, result::GalerkinResult; basis_output=false)
 
-Write the Galerkin solver outputs into the open HDF5 file, under
-`ForceFreeStates/Solutions/GalerkinIntegration/`: the surface list
-the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
-rationals). The Δ′/PEST-3 matrices and the closed ξ profiles are NOT written here — both go to
-formalism-independent homes from the driver writer (`SingularSurfaces/` off `result.delta_prime`;
-the shared `Solutions/` profile layout off `result.solution`). With `basis_output` the raw
-outer-region basis functions (per-interval, unconstrained at the rationals — solver internals)
-are dumped under `Basis/` in the shared axis order. Replaces the Fortran
-`delta_gw`/`pest3_data` ASCII/binary outputs.
+Write the Galerkin surface list (a subset of `SingularSurfaces/` when the domain or the m-band excludes
+rationals) under `ForceFreeStates/Solutions/GalerkinIntegration/`. The Δ′/PEST-3 matrices and closed ξ
+profiles are written by the driver writer, not here. With `basis_output`, the raw per-interval
+outer-region basis functions (solver internals) are written under `Basis/`.
 """
 function write_galerkin!(out_h5, result::GalerkinResult; basis_output::Bool=false)
     gal = "ForceFreeStates/Solutions/GalerkinIntegration"

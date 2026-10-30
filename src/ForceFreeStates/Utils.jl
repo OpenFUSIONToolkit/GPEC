@@ -1,26 +1,21 @@
 """
     resize_storage!(odet::OdeState)
 
-Resize storage arrays in `odet` when the current step exceeds allocated size.
-Doubles the size of the storage arrays for `u_store`, `psi_store`, and `q_store`, and
-copies over existing data to the new arrays. The derivative stores are not grown here:
-they are filled at exact size by `materialize_derivative_stores!` after integration.
+Double the length of `u_store`, `psi_store` and `q_store`, keeping the stored steps. The derivative
+stores are not grown here; `materialize_derivative_stores!` fills them at exact size after integration.
 """
 function resize_storage!(odet::OdeState)
     oldlen = size(odet.u_store, 4)
     newlen = 2 * oldlen
 
-    # Allocate new arrays
     u_new = Array{ComplexF64,4}(undef, odet.numpert_total, odet.numpert_total, 2, newlen)
     psi_new = Vector{Float64}(undef, newlen)
     q_new = Vector{Float64}(undef, newlen)
 
-    # Copy old data
     u_new[:, :, :, 1:odet.step] = odet.u_store[:, :, :, 1:odet.step]
     psi_new[1:odet.step] = odet.psi_store[1:odet.step]
     q_new[1:odet.step] = odet.q_store[1:odet.step]
 
-    # Replace old arrays
     odet.u_store = u_new
     odet.psi_store = psi_new
     odet.q_store = q_new
@@ -29,11 +24,8 @@ end
 """
     trim_storage!(odet::OdeState)
 
-Trim storage arrays in `odet` to the actual number of steps taken.
-Resizes `u_store`, `psi_store`, and `q_store` to the current step count, removing any
-unused allocated space. The derivative stores are left alone — they are either empty
-(serial/Riccati, filled later by `materialize_derivative_stores!`) or already exact-size
-(galerkin-matched states).
+Trim `u_store`, `psi_store` and `q_store` to the current step count. The derivative stores are left
+alone: they are either empty (filled later by `materialize_derivative_stores!`) or already exact-size.
 """
 function trim_storage!(odet::OdeState)
     resize!(odet.psi_store, odet.step)

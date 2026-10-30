@@ -67,10 +67,8 @@ so bpen and closure are always present.
     formalism produced none (Riccati, and Galerkin without a match).
   - `diagnostics::Union{Nothing,OdeState}` - The integrator's raw ODE state (ψ trace, `crit`,
     edge scan, asymptotic coefficients). Written to HDF5; not a consumable solution.
-  - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix
-    `W_p = (U₂·U₁⁻¹)/ψ₀²` at `psilim`. Present for any Euler-Lagrange sweep (forward or
-    Riccati) regardless of `vac_flag` — the fixed-boundary run's energy product — and
-    identical to `free_boundary.wp` when the free-boundary calculation ran.
+  - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix `W_p = (U₂·U₁⁻¹)/ψ₀²` at
+    `psilim`. Present for any Euler-Lagrange sweep regardless of `vac_flag`; equals `free_boundary.wp` when that ran.
   - `free_boundary::Union{Nothing,FreeBoundaryResult}` - Free-boundary energies and eigenmodes; `nothing` when the vacuum step was skipped or the formalism computes none.
   - `delta_prime::Union{Nothing,DeltaPrimeData}` - Δ′/outer-region matching payload from
     whichever formalism ran (Riccati BVP or Galerkin); `nothing` when neither produced one.
@@ -146,12 +144,8 @@ function require_solution(result::ForceFreeStatesResult, calc::AbstractString)
     return false
 end
 
-# Pack the RPEC-matched Galerkin solution into `SolutionProfiles`. Mirrors Fortran
-# `idcon_build`'s gal branch (idcon.f) and `globalsol.bin` (match.f): the on-surface `issing`
-# grid points are dropped as zero placeholders where the resonant series diverges, Ξ′ is the
-# analytic Galerkin derivative rather than a differenced value spline, and
-# Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) is the same outer ideal-MHD relation `sing_der!` uses. The grid runs
-# inner→edge, so the last node is the control surface and carries the edge boundary condition.
+# Pack the matched Galerkin solution into `SolutionProfiles`: on-surface `issing` points are dropped, Ξ′ is the
+# analytic Galerkin derivative, and Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) as in `sing_der!`. Grid runs inner→edge.
 function _matched_gal_profiles(gal_result::GalerkinResult, m::MatchResult, mats::MatrixSplines, intr::ModeSpace)
     sol = gal_result.solution
     npert = intr.numpert_total
@@ -185,15 +179,12 @@ end
     build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
         -> ForceFreeStatesResult
 
-Assemble the published result once the solve is finished — the one place that decides what a
-formalism's raw output means downstream. Beyond materializing the forward path's derivative
-stores and forming the fixed-boundary `W_p` when the free-boundary stage did not run, every
-field is copied or aliased from what the stages already produced. The integrator always
-publishes the ideal closure; a `MatchProblem` solve transforms the result afterwards.
+Assemble the published result once the solve is finished, with the ideal closure (a `MatchProblem`
+solve transforms it afterwards). Materializes the forward path's derivative stores and forms `W_p`
+when the free-boundary stage did not run; everything else is copied or aliased.
 
-`odet` is the integrator's ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` the Galerkin
-solver internals and its Δ′ payload (`nothing` otherwise). The two formalisms are never both
-present: additive Galerkin does not exist.
+`odet` is the ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` are the Galerkin internals and
+its Δ′ payload (`nothing` otherwise).
 """
 function build_result(
     integrator::Symbol,

@@ -113,7 +113,7 @@ function save_to_hdf5(
     out_h5["$fwd/psi"] = diag !== nothing ? diag.psi_store : Float64[]
     out_h5["$fwd/q"] = diag !== nothing ? diag.q_store : Float64[]
     out_h5["$fwd/xi_psi"] = xi_solution !== nothing ? xi_solution.u_store[:, :, 1, :] : ComplexF64[]
-    out_h5["$fwd/u2"] = xi_solution !== nothing ? xi_solution.u_store[:, :, 2, :] : ComplexF64[] # TODO: what to name this? These are the "conjugate momenta" of u1
+    out_h5["$fwd/u2"] = xi_solution !== nothing ? xi_solution.u_store[:, :, 2, :] : ComplexF64[] # conjugate momenta of ξ_ψ
     out_h5["$fwd/dxi_psidpsi"] = xi_solution !== nothing ? xi_solution.du_store : ComplexF64[]
     out_h5["$fwd/xi_s"] = xi_solution !== nothing ? xi_solution.xi_s_store : ComplexF64[]
     out_h5["$fwd/crit"] = diag !== nothing ? diag.crit_store : Float64[]
@@ -155,12 +155,7 @@ function save_to_hdf5(
         out_h5["SingularSurfaces/rational_m"] = m_matrix
         out_h5["SingularSurfaces/rational_n"] = n_matrix
 
-        # Glasser-Greene-Johnson geometric coefficients + surface averages
-        # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
-        # Both kinetic-free (E, F, G, H, K, M) and geometry-only
-        # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
-        # downstream consumers (ForceFreeStates.ggj_parameters)
-        # can reconstruct τ_A / τ_R from any kinetic-profile source.
+        # GGJ coefficients and geometric surface averages, enough for ggj_parameters to rebuild τ_A / τ_R from any kinetic profiles.
         if all(s -> s.restype !== nothing, result.surfaces)
             out_h5["SingularSurfaces/E"] = [s.restype.E for s in result.surfaces]
             out_h5["SingularSurfaces/F"] = [s.restype.F for s in result.surfaces]
@@ -192,11 +187,7 @@ function save_to_hdf5(
         # (2msing × numpert_total); transpose only at write.
         isempty(dp.coil) || (out_h5["SingularSurfaces/Delta_coil"] = permutedims(dp.coil))
 
-        # Raw 2msing×2msing outer-region D' matrix in side-major ordering
-        # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
-        # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
-        # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
-        # pest3_decompose to recover (A', B', Γ', Δ').
+        # Raw 2msing×2msing outer-region D' matrix, side-major [L_s1, R_s1, L_s2, R_s2, …]; pest3_decompose recovers (A', B', Γ', Δ').
         isempty(dp.raw) || (out_h5["SingularSurfaces/Delta_prime_raw"] = dp.raw)
 
         # Remaining PEST-3 parity blocks, when the formalism persisted them (Galerkin);
@@ -217,12 +208,8 @@ function save_to_hdf5(
     out_h5["SingularSurfaces/Kinetic/scan_cond"] = result.kinetic.scan_cond
     out_h5["SingularSurfaces/Kinetic/scan_threshold"] = result.kinetic.scan_threshold
 
-    # Write free-boundary stability data. The eigenmode energies are the generalized
-    # eigenvalues of the pencil (W, N) with N the power-normalization (surface-norm) matrix:
-    # power-normalized mode energies (⟨|ξ|²⟩ = 1 metric) that are invariant to the choice of
-    # working (Jacobian) coordinate. W_freeboundary_eigenmodes holds the generalized
-    # eigenvectors, columns sorted most-unstable first, normalized to unit power norm with
-    # the largest-magnitude entry made real-positive.
+    # Free-boundary stability: eigenmode energies are generalized eigenvalues of the (W, N) pencil (power-normalized,
+    # Jacobian-invariant); eigenmode columns are sorted most-unstable first, unit power norm, largest entry real-positive.
     fbs = "ForceFreeStates/FreeBoundaryStability"
     out_h5["$fbs/W_freeboundary"] = free_energies !== nothing ? free_energies.wt0 : ComplexF64[]
     out_h5["$fbs/W_plasma"] = free_energies !== nothing ? free_energies.wp : ComplexF64[]
@@ -233,8 +220,7 @@ function save_to_hdf5(
     out_h5["$fbs/eigenmode_vacuum_energies"] = free_energies !== nothing ? free_energies.ev : ComplexF64[]
     out_h5["$fbs/vacuum_eigenvalue"] = free_energies !== nothing ? free_energies.vacuum_eigenvalue : NaN
 
-    # Cartesian surface point clouds used downstream for visualisation and
-    # perturbed-equilibrium plotting.
+    # Cartesian surface point clouds for visualization.
     out_h5["SurfaceGeometries/Plasma/x"] = free_energies !== nothing ? free_energies.plasma_pts[:, 1] : Float64[]
     out_h5["SurfaceGeometries/Plasma/y"] = free_energies !== nothing ? free_energies.plasma_pts[:, 2] : Float64[]
     out_h5["SurfaceGeometries/Plasma/z"] = free_energies !== nothing ? free_energies.plasma_pts[:, 3] : Float64[]
