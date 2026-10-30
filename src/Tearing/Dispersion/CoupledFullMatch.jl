@@ -89,9 +89,9 @@ end
 Construct the 4m × 4m dispersion matrix driver. `dp_raw` must be the
 2m × 2m matrix in side-major ordering (the `intr.delta_prime_raw`
 field populated by `ForceFreeStates.compute_delta_prime_matrix!` on the
-Riccati path). Surface k's inner layer is evaluated at `Q·ratio_k + q_shift_k`, with
-`ratio_k` and the real E×B Doppler offset `q_shift_k` exactly as in the reduced
-`multi_surface_coupling`.
+Riccati path). Surface k's inner layer is evaluated at `Q·ratio_k` Doppler-shifted by its
+E×B offset `q_shift_k`, exactly as in the reduced `multi_surface_coupling`: added to Q for a
+SLAYER surface, and as `i·q_shift_k` to the growth rate s for a GGJ surface (see `SurfaceCoupling`).
 
 # Keyword arguments
 
@@ -151,7 +151,7 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
 
         # Map the shared scanned Q onto this surface's normalization, then Doppler it into
         # the surface's E×B frame (GGJ carries tauk = 1, so the ratio is a no-op there).
-        Q_k = Qc * (sc.tauk / ref_tauk) + sc.q_shift
+        Q_k = layer_argument(sc, Qc * (sc.tauk / ref_tauk))
         resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
         # delta1 = interchange (parity +), delta2 = tearing (parity −); named

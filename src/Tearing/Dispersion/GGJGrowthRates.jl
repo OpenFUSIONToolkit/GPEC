@@ -53,10 +53,12 @@ its own 2 × 2 block of the raw Δ'). The box `gamma_range` × `omega_range`
 winding number; see `find_growth_rates`. The result is in the units of the
 SLAYER extraction: `gamma_Hz` is γ [s⁻¹], `omega_Hz` is −ω [rad/s], and
 `Q_root` is the normalized `(−ω + iγ)/Q₀`. The reported root is the least
-stable zero in the box. Without drifts the GGJ roots come in ±ω pairs, so
-either member of a pair can be reported. GGJ surfaces carry no time
-normalization, so no E×B Doppler shift is applied and the roots are in the
-plasma frame.
+stable zero in the box. Each surface's layer is evaluated in its own E×B frame,
+`s_k = s + i·n·Ω_E,k` from the `omega_E` and `n` given to `surface_coupling`;
+the scanned s, and so ω, is then in the lab frame, and in the plasma frame when
+no surface rotates, so with rotation set `omega_range` must cover the lab-frame ω,
+shifted by about n·Ω_E from the plasma frame. Without drifts or rotation the GGJ roots come in ±ω pairs,
+so either member of a pair can be reported.
 
 `gamma_range` must lie at γ > 0: the GGJ layer is evaluated on the principal
 branch of a square root in s, with a cut on the negative real s-axis. The search
