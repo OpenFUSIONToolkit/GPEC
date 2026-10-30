@@ -70,6 +70,7 @@ include("Result.jl")
 include("Matching/MatchProblem.jl")
 include("InputSnapshot.jl")
 include("Output.jl")
+include("Run.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10

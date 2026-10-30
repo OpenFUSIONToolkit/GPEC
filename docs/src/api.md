@@ -28,14 +28,20 @@ save_to_hdf5("gpec.h5", ffs)
 ```
 
 `solve` returns its result without writing a file. Call `save_to_hdf5(path, ffs)`
-or pass an open HDF5 file or group to save it explicitly. The deck driver saves its
-FFS result after the solve.
+or pass an open HDF5 file or group to save it explicitly.
 
 The same `save_to_hdf5(target, result)` function saves an equilibrium, local-stability
 result, perturbed-equilibrium state, kinetic-force state, tearing result, or error-field
 result. Each module owns the datasets for its result. Paths open or create an HDF5
 file; an open file or group remains owned by the caller. Stage computations return
-results, and the deck driver applies the configured output switches and filenames.
+results without writing anything.
+
+A deck runs through these same calls. `main` translates each section of `gpec.toml` into the
+problem, algorithm or control it names, calls the function above for every section present,
+and saves each result into the one `[Run] output_file`, so a deck can never take a path a script
+cannot. It returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing)`,
+each `nothing` when its section is absent; `ffs` is the result the later stages read (matched
+when the deck has `[Match]`) and `match` its `MatchResult`.
 
 The objects map one-to-one onto the pipeline stages:
 

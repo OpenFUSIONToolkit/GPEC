@@ -437,6 +437,9 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
         end
     end
     force_balance = has_ffs ? (; keywords=force_balance_keywords(inputs, path), algorithm=force_balance_algorithm(inputs)) : nothing
+    kinetic_source = has_ffs && get(inputs["ForceFreeStates"], "kinetic", nothing) == "KineticForces"
+    (haskey(inputs, "KineticForces") || kinetic_source) && isempty(get(get(inputs, "Equilibrium", Dict{String,Any}()), "kinetic_file", "")) &&
+        error("this run needs kinetic profiles ([KineticForces], or kinetic = \"KineticForces\"): set kinetic_file in [Equilibrium]")
     match = match_from_deck(inputs)
     tearing = tearing_from_deck(inputs)
     perturbed_equilibrium = perturbed_equilibrium_from_deck(inputs)

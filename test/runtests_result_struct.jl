@@ -43,7 +43,9 @@ include("h5_metadata_check.jl")
             _stage_deck(dir, template)
             ret = GeneralizedPerturbedEquilibrium.main([dir])
 
-            @test keys(ret)[1:3] == (:ffs, :pe, :tearing)   # later stages append their own outputs
+            # One field per stage, nothing for the sections the deck does not hold.
+            @test keys(ret) == (:equil, :local_stability, :ffs, :match, :resp, :pe, :kinetic, :error_fields, :tearing)
+            @test ret.equil === ret.ffs.equil && all(isnothing, (ret.match, ret.resp, ret.pe, ret.kinetic, ret.error_fields, ret.tearing))
             ffs = ret.ffs
             forward_result[] = ffs
             @test ffs isa FFS.ForceFreeStatesResult

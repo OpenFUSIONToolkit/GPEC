@@ -387,6 +387,22 @@ Base.:*(c::Number, f::RMPSpectrum) = RMPSpectrum(f.modes, ComplexF64(c) * f.scal
 Base.:*(c::Number, f::RMPFieldSum) = RMPFieldSum([c * t for t in f.terms])
 Base.:*(f::RMPField, c::Number) = c * f
 
+"""
+    snapshot_forcing_modes(ft_ctrl; verbose=false) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
+
+The raw file-based forcing modes of `ft_ctrl` and their normalization tag, so they land in
+`Input/RawInputs/ForcingTerms/` alongside the TOML blob; `nothing` for coil forcing, which is
+recomputed from the `[[coil_set]]` TOML blob on replay. They feed only the writer:
+the PE stage reads and normalizes the forcing file itself.
+"""
+function snapshot_forcing_modes(ft_ctrl::ForcingTermsControl; verbose::Bool=false)
+    ft_ctrl.forcing_data_format in ("ascii", "hdf5") || return nothing
+    modes = ForcingMode[]
+    normalization = load_forcing_data!(modes, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, verbose)
+    return modes, normalization
+end
+
+
 export ForcingTermsControl, ForcingMode, RMPField, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
 
 end # module ForcingTerms

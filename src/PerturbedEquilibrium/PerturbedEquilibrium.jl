@@ -34,7 +34,7 @@ export PerturbedEquilibriumState
 export ForcingMode
 
 # Export main functions
-export plasma_response
+export plasma_response, perturbed_equilibrium
 export compute_perturbed_equilibrium
 export save_to_hdf5
 export ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap, check_mode_basis, CORE_PSI_LOW, CORE_PSI_HIGH
@@ -79,6 +79,38 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
     end
     compute_torque_response && build_torque_response!(resp; verbose)
     return resp
+end
+
+"""
+    perturbed_equilibrium(resp, rmp; regularization_width=0.0, verbose=false, coil_sets=nothing)
+        -> PerturbedEquilibriumState
+
+Drive the plasma response `resp` (from [`plasma_response`](@ref)) with the external field `rmp`, an
+[`RMPField`](@ref), and return the perturbed-equilibrium result. One response serves any number of
+fields, so a scan rebuilds no operator.
+
+`regularization_width` smooths the ideal 1/(m−nq) divergence in the profile reconstruction (Fortran
+`reg_spot`); its default is 0, and 0.05 is typical for driving KineticForces with an ideal solve.
+Call `save_to_hdf5(target, pe)` to save the result. `coil_sets` injects already-built coil geometry (the gpec.h5 replay path), bypassing the geometry read.
+
+```julia
+resp = plasma_response(ffs)
+pe = perturbed_equilibrium(resp, RMPField("forcing.dat"))
+```
+"""
+function perturbed_equilibrium(
+    resp::PlasmaResponse,
+    rmp::ForcingTerms.RMPField;
+    regularization_width::Real=0.0,
+    verbose::Bool=false,
+    coil_sets::Union{Nothing,Vector{CoilSet}}=nothing
+)
+    # Injected coil geometry (gpec.h5 replay with `--coil-source coils`) lets the coil field
+    # be recomputed from stored geometry without the .dat/.h5 files.
+    pe_state = compute_perturbed_equilibrium(resp, rmp; regularization_width, verbose,
+        preloaded_coil_sets=coil_sets === nothing ? CoilSet[] : copy(coil_sets))
+
+    return pe_state
 end
 
 """

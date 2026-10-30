@@ -142,7 +142,7 @@ using HDF5
         @test pass1.kinetic !== nothing
         sl_ctrl = GPEC.force_balance_control(sl_deck, sl_dir)
         sl_intr = FFS.ForceFreeStatesInternal()
-        GPEC.resolve_mode_space!(sl_intr, sl_ctrl)
+        FFS.resolve_mode_space!(sl_intr, sl_ctrl)
         refined = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
         @test refined.kinetic === pass1.kinetic        # carried through the re-form, not re-read
         kinetic = pass1.kinetic
