@@ -8,9 +8,7 @@
 # energies are power-normalized (per unit surface-averaged |ξ|², not joules); `dims`
 # lists axis names in Julia (column-major) order, axis 1 first.
 
-# Equilibrium scalars are written by iterating EquilibriumParameters' fields. The struct keeps
-# its legacy field spellings; these tables give the HDF5 datasets their literature names and
-# drop fields that duplicate another dataset or echo a control flag (inputs live only under Input/).
+# HDF5 names for the EquilibriumParameters fields, and fields not written (duplicates or control flags).
 const EQUIL_H5_NAMES = Dict(
     :ro => "R_axis",
     :zo => "Z_axis",

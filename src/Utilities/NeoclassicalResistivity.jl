@@ -1,17 +1,5 @@
-# NeoclassicalResistivity.jl
-#
-# Shared neoclassical-resistivity utilities used by both the GGJ and
-# SLAYER inner-layer models. All formulas follow Sauter, Angioni & Lin-Liu
-# Phys. Plasmas 6, 2834 (1999) and its errata, with an optional Redl et al.
-# Phys. Plasmas 28, 022502 (2021) variant that improves the fit at high
-# collisionality.
-#
-# Two external references were cross-checked during implementation:
-#   - OpenFUSIONToolkit `TokaMaker/bootstrap.py`  (Redl 2021 path)
-#   - OMFIT `omfit_classes/utils_fusion.py::nclass_conductivity-style
-#     block` around lines 1255-1319 (Sauter 1999 and `neo_2021` paths)
-#
-# Formula provenance:
+# Formulas follow Sauter, Angioni & Lin-Liu, Phys. Plasmas 6, 2834 (1999) and errata, with the
+# Redl et al., Phys. Plasmas 28, 022502 (2021) variant for high collisionality:
 #   - eq 18a (Spitzer):       Sauter et al. 1999, Eq. (18a)
 #   - eq 18b (nu*_e):         Sauter et al. 1999, Eq. (18b)
 #   - eq 13 (F_33 Sauter):    Sauter et al. 1999, Eqs. (13a)-(13b)
@@ -82,31 +70,28 @@ high-collisionality fit vs SauterNeoModel.
 """
 struct RedlNeoModel <: NeoResistivityModel end
 
-# --------------------------------------------------------------------------
 # Coulomb logarithm
-# --------------------------------------------------------------------------
 
 """
     coulomb_log_e(n_e, T_e; form=:nrl) -> Float64
 
 Electron Coulomb logarithm. `n_e` in m⁻³, `T_e` in eV.
 
-`form=:nrl` (default) uses the NRL Plasma Formulary 2009 expression, which
-OpenFUSIONToolkit's `bootstrap.py` also selects as the "more accurate"
-option. `form=:sauter` uses the simpler Sauter 1999 Eq. 18d form.
+`form=:nrl` (default) uses the NRL Plasma Formulary 2009 expression, `form=:sauter` the simpler
+Sauter 1999 Eq. 18d form, and `form=:wesson` the Wesson form of the legacy SLAYER.
 """
 function coulomb_log_e(n_e::Real, T_e::Real; form::Symbol=:nrl)
     n_e > 0 || throw(ArgumentError("coulomb_log_e: n_e must be > 0 (got $n_e)"))
     T_e > 0 || throw(ArgumentError("coulomb_log_e: T_e must be > 0 (got $T_e)"))
     if form === :nrl
-        # NRL 2009, n_e in cm⁻³; matches utils_fusion.py:1262-1264
+        # NRL 2009, n_e in cm⁻³
         return 23.5 - log(sqrt(n_e / 1e6) * T_e^(-1.25)) -
                sqrt(1e-5 + (log(T_e) - 2)^2 / 16.0)
     elseif form === :sauter
-        # Sauter 1999 Eq. 18d; matches utils_fusion.py:1255
+        # Sauter 1999 Eq. 18d
         return 31.3 - log(sqrt(n_e) / T_e)
     elseif form === :wesson
-        # Legacy Wesson form used by previous Julia code & SLAYER
+        # Wesson form of the legacy SLAYER
         return 24.0 + 3.0 * log(10.0) - 0.5 * log(n_e) + log(T_e)
     else
         throw(ArgumentError("coulomb_log_e: unknown form=$form " *
@@ -114,11 +99,9 @@ function coulomb_log_e(n_e::Real, T_e::Real; form::Symbol=:nrl)
     end
 end
 
-# --------------------------------------------------------------------------
 # Spitzer resistivity (Sauter 1999 Eq. 18a)
-# --------------------------------------------------------------------------
 
-# Sauter 1999 Eq. 18a line 2 — Spitzer conductivity Zeff correction
+# Sauter 1999 Eq. 18a: Z_eff correction N(Z) to the Spitzer conductivity
 _N_Z(Z::Real) = 0.58 + 0.74 / (0.76 + Z)
 
 """
@@ -132,7 +115,7 @@ N(Z) = 0.58 + 0.74 / (0.76 + Z)
 η_Sp = 1 / σ_Sp
 ```
 
-`n_e` [m⁻³], `T_e` [eV]. `lnLamb` defaults to `coulomb_log_e(n_e, T_e)` (NRL).
+`n_e` in m⁻³, `T_e` in eV. `lnLamb` defaults to `coulomb_log_e(n_e, T_e)` (NRL).
 """
 function eta_spitzer(n_e::Real, T_e::Real, Z_eff::Real;
     lnLamb::Union{Real,Nothing}=nothing)
@@ -143,9 +126,7 @@ function eta_spitzer(n_e::Real, T_e::Real, Z_eff::Real;
     return 1.0 / sigma_sp
 end
 
-# --------------------------------------------------------------------------
 # Spitzer-Härm parallel resistivity (Fitzpatrick TJ LayerParameters.tex Eqs. 7-8)
-# --------------------------------------------------------------------------
 
 """
     tau_ee_spitzer_harm(n_e, T_e; lnLamb=nothing) -> Float64
@@ -192,9 +173,7 @@ function eta_spitzer_harm(n_e::Real, T_e::Real, Z_eff::Real;
     return 1.0 / sigma_par
 end
 
-# --------------------------------------------------------------------------
 # Trapped fraction
-# --------------------------------------------------------------------------
 
 """
     trapped_fraction(avg_B, avg_Bsq, B_min, B_max) -> Float64
@@ -205,9 +184,7 @@ Lin-Liu & Miller 1995, Phys. Plasmas **2**, 1666, Eq. (6):
 f_t = 1 − ⟨B⟩² / ⟨B²⟩ · (1 − √(1 − h) · (1 + h/2)),   h = B_min / B_max
 ```
 
-Equivalent to the OMFIT `f_t` / `f_c` pair at full geometric accuracy (uses
-both the average-B ratio and the min/max extremes). Arguments are
-flux-surface averages computed from the θ-loop in the equilibrium.
+Arguments are flux-surface averages and extrema of |B| on the surface.
 """
 function trapped_fraction(avg_B::Real, avg_Bsq::Real,
     B_min::Real, B_max::Real)
@@ -229,9 +206,7 @@ f_c ≈ (1 − ε)² / (√(1 − ε²) · (1 + 1.46·√ε + 0.2·ε))
 f_t = 1 − f_c
 ```
 
-Used as a fallback when the full (⟨B⟩, ⟨B²⟩, B_min, B_max) moments are
-unavailable — e.g. when feeding SLAYER directly from minor-radius geometry
-without having evaluated `ResistGeometry` first.
+Fallback for when the (⟨B⟩, ⟨B²⟩, B_min, B_max) moments of [`trapped_fraction`](@ref) are unavailable.
 """
 function trapped_fraction_eps(eps::Real)
     e = clamp(eps, 0.0, 1.0 - 1e-12)
@@ -239,9 +214,7 @@ function trapped_fraction_eps(eps::Real)
     return clamp(1.0 - fc, 0.0, 1.0)
 end
 
-# --------------------------------------------------------------------------
 # Electron collisionality (Sauter 1999 Eq. 18b)
-# --------------------------------------------------------------------------
 
 """
     nu_star_e(n_e, T_e, R_major, eps, q, Z_eff; lnLamb=nothing) -> Float64
@@ -252,8 +225,7 @@ Electron collisionality ν*_e per Sauter 1999 Eq. 18b:
 ν*_e = 6.921e-18 · |q| · R · n_e · Z_eff · lnΛ_e / (T_e² · ε^1.5)
 ```
 
-`n_e` [m⁻³], `T_e` [eV], `R_major` [m]. Matches OFT `bootstrap.py:640` and
-OMFIT `utils_fusion.py:1278`.
+`n_e` in m⁻³, `T_e` in eV, `R_major` in m.
 """
 function nu_star_e(n_e::Real, T_e::Real, R_major::Real,
     eps::Real, q::Real, Z_eff::Real;
@@ -265,9 +237,7 @@ function nu_star_e(n_e::Real, T_e::Real, R_major::Real,
            (T_e^2 * eps^1.5)
 end
 
-# --------------------------------------------------------------------------
-# Neoclassical resistivity (F_33 · η_Sp)
-# --------------------------------------------------------------------------
+# Neoclassical resistivity (η_Sp / F_33)
 
 # Sauter 1999 Eqs. 13a-13b
 function _F33_sauter(f_t::Real, nu_star::Real, Z_eff::Real)
@@ -291,7 +261,7 @@ end
     eta_neoclassical(model, n_e, T_e, Z_eff, f_t, nu_e_star;
                      lnLamb=nothing) -> Float64
 
-Neoclassical resistivity η [Ω·m] under the chosen closure.
+Neoclassical resistivity η in Ω·m under the chosen closure.
 
   - `SpitzerModel()`   -- returns `eta_spitzer(n_e, T_e, Z_eff; lnLamb)`
     unchanged; `f_t` and `nu_e_star` are ignored.
@@ -300,9 +270,7 @@ Neoclassical resistivity η [Ω·m] under the chosen closure.
   - `SauterNeoModel()` -- Sauter 1999 Eq. 13: η = η_Sp / F_33(Sauter).
   - `RedlNeoModel()`   -- Redl 2021 Eq. 17: η = η_Sp / F_33(Redl).
 
-Note that σ_neo = σ_Sp · F_33, so η_neo = η_Sp / F_33. For a banana-regime
-plasma with f_t ≈ 0.5 and ν*_e ≪ 1, F_33 ≈ 0.4–0.5, so η_neo is a factor
-of ~2 larger than η_Sp — this is the standard H-mode tearing correction.
+σ_neo = σ_Sp · F_33, so η_neo = η_Sp / F_33 (about 2 η_Sp in the banana regime at f_t ≈ 0.5).
 """
 function eta_neoclassical(::SpitzerModel, n_e::Real, T_e::Real, Z_eff::Real,
     f_t::Real, nu_e_star::Real;
