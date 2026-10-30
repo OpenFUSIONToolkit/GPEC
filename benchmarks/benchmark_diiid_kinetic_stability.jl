@@ -139,7 +139,6 @@ vac_flag = true
 dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
 qhigh = 1e3
-sing_start = 0
 
 nn = 1
 delta_mlow = 8

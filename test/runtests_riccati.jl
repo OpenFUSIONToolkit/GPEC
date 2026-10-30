@@ -2,22 +2,16 @@ using LinearAlgebra, Random, TOML
 
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
-# Configure a fresh ForceFreeStatesInternal from an already-built equilibrium.
-# Cheap (sing_lim! + sing_find! + field assignment). Separate from equil/mats
-# setup because intr is mutated by each integration (sing[s].delta_prime etc.).
-function make_solovev_intr(inputs, ctrl, equil, ex)
-    intr = FFS.ForceFreeStatesInternal()
-    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
-    intr.nlow = ctrl.nn_low;
-    intr.nhigh = ctrl.nn_high;
-    intr.npert = 1
-    FFS.sing_lim!(intr, ctrl, equil)
-    FFS.sing_find!(intr, equil)
-    intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-    intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-    intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.numpert_total = intr.mpert * intr.npert
-    return intr
+# The Solovev fixture prepared as solve prepares it, up to the integration. Each integration mutates its
+# intr (sing[s].delta_prime etc.), so every run takes a freshly prepared one.
+function prepared_solovev()
+    GPEC = GeneralizedPerturbedEquilibrium
+    ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
+    prob = GPEC.ForceBalanceProblem(equil; GPEC.force_balance_keywords(inputs, ex)...)
+    ctrl, intr, equil, metric, mats = GPEC._prepare_solve(prob, GPEC.force_balance_algorithm(inputs))
+    return ctrl, intr, equil, metric, mats
 end
 
 @testset "Riccati Integration Tests" begin
@@ -94,22 +88,11 @@ end
     #   intr_ric / odet_ric — Riccati path (shared by most tests)
     #   intr_fwd / odet_fwd — Forward path (energy comparison only)
 
-    ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-
-    ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
-    equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-        GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
-        GeneralizedPerturbedEquilibrium.analytic_config(inputs))
-
-    intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
-    metric = FFS.make_metric(equil, intr_tmp.mpert)
-    mats = FFS.build_matrix_splines(equil, intr_tmp, metric)
-    N = intr_tmp.numpert_total
+    ctrl, intr_ric, equil, metric, mats = prepared_solovev()
+    N = intr_ric.numpert_total
 
     # Riccati integration. The driver returns (odet, propagators, chunks, S_at_surface_left);
     # only odet is used here.
-    intr_ric = make_solovev_intr(inputs, ctrl, equil, ex)
     odet_ric, _, _, _ = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr_ric)
 
     # Save inline Δ' values before any test that calls compute_delta_prime_from_ca!
@@ -120,7 +103,7 @@ end
     et_ric = real(vac_ric.et[1])
 
     # Forward integration (needed only for energy comparison).
-    intr_fwd = make_solovev_intr(inputs, ctrl, equil, ex)
+    _, intr_fwd, _, _, _ = prepared_solovev()
     odet_fwd, _, _, _ = FFS.forward_eulerlagrange_integration(ctrl, equil, mats, intr_fwd)
     vac_fwd = FFS.free_run(odet_fwd, ctrl, equil, mats, intr_fwd)
     et_fwd = real(vac_fwd.et[1])
@@ -215,7 +198,6 @@ end
         # Note: this call overwrites intr_ric.sing[s].delta_prime; delta_prime_inline was
         # saved before free_run above so it holds the original inline values.
         #
-        # See benchmarks/benchmark_delta_prime_methods.jl for the extended version.
         FFS.compute_delta_prime_from_ca!(odet_ric, intr_ric, equil)
         for s in 1:intr_ric.msing
             @test intr_ric.sing[s].delta_prime == delta_prime_inline[s]

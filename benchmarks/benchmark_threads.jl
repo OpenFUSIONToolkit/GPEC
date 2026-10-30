@@ -3,7 +3,7 @@
 # across 1, 2, 4, 8 threads and compares against the forward path. The chunk list is
 # thread-independent, so et[1] must not move with the thread count — only wall-clock.
 #
-# Usage (from JPEC_main root):
+# Usage (from the repository root):
 #   for t in 1 2 4 8; do julia -t $t --project=. benchmarks/benchmark_threads.jl; done
 
 using GeneralizedPerturbedEquilibrium, TOML, Printf, Statistics

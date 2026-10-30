@@ -1,6 +1,22 @@
 using LinearAlgebra
 using TOML
 
+# The Solovev fixture prepared exactly as solve prepares it, up to the Euler-Lagrange integration.
+function _prepared_solovev(integrator::String="Forward"; nchunks=nothing)
+    GPEC = GeneralizedPerturbedEquilibrium
+    ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+    if integrator != "Forward"
+        inputs["ForceFreeStates"]["integrator"] = integrator
+        integrator == "Galerkin" ? delete!(inputs, "Forward") : (inputs[integrator] = pop!(inputs, "Forward"))
+    end
+    nchunks === nothing || (inputs[integrator]["nchunks"] = nchunks)
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
+    prob = GPEC.ForceBalanceProblem(equil; GPEC.force_balance_keywords(inputs, ex)...)
+    ctrl, intr, equil, metric, mats = GPEC._prepare_solve(prob, GPEC.force_balance_algorithm(inputs))
+    return ctrl, intr, equil, metric, mats
+end
+
 @testset "BVP without controls preserves extended precision" begin
     FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
     M = ComplexF64[1 / (i + j - 1) + 0.02im / (i + j) for i in 1:6, j in 1:6]
@@ -130,27 +146,7 @@ end
     @testset "balance_integration_chunks produces target count" begin
         # Verify that balance_integration_chunks creates at least
         # max(2*msing+3, 8*(msing+1)+msing) chunks from a small set of base chunks.
-        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
-        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-            eq_config,
-            GeneralizedPerturbedEquilibrium.analytic_config(inputs)
-        )
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
-        intr.npert = 1
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-        intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.numpert_total = intr.mpert * intr.npert
-
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+        ctrl, intr, equil, metric, mats = _prepared_solovev()
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
@@ -201,13 +197,13 @@ end
         @test all(balanced_again[i].psi_end == balanced[i].psi_end for i in eachindex(balanced))
 
         # An explicit nchunks steers the target count directly.
-        ctrl_more = GeneralizedPerturbedEquilibrium.force_balance_control(merge(inputs, Dict("Forward" => merge(inputs["Forward"], Dict{String,Any}("nchunks" => target_n + 7)))), ex)
+        ctrl_more = first(_prepared_solovev(; nchunks=target_n + 7))
         balanced_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_more, intr)
         @test length(balanced_more) == target_n + 7
 
         # An nchunks below the singular-surface floor is clamped up, with a warning.
         min_chunks = 2 * intr.msing + 3
-        ctrl_few = GeneralizedPerturbedEquilibrium.force_balance_control(merge(inputs, Dict("Forward" => merge(inputs["Forward"], Dict{String,Any}("nchunks" => 1)))), ex)
+        ctrl_few = first(_prepared_solovev(; nchunks=1))
         balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
         @test length(balanced_few) == max(min_chunks, length(base_chunks))
     end
@@ -216,27 +212,7 @@ end
         # Verify that bidirectional=true sets direction=-1 on crossing chunks and direction=+1
         # on non-crossing chunks, and that balance_integration_chunks propagates these correctly:
         # the right sub-chunk inherits direction from the parent, the left sub-chunk is always +1.
-        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
-        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-            eq_config,
-            GeneralizedPerturbedEquilibrium.analytic_config(inputs)
-        )
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
-        intr.npert = 1
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-        intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.numpert_total = intr.mpert * intr.npert
-
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+        ctrl, intr, equil, metric, mats = _prepared_solovev()
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
@@ -275,31 +251,8 @@ end
         # Bidirectional FM integration (crossing chunks integrated backward) is what the
         # Riccati path uses. It keeps FM propagators well-conditioned for both small-N
         # on this small multi-surface fixture.
-        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-
         function run_solovev(integrator)
-            inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-            inputs["ForceFreeStates"]["integrator"] = integrator
-            integrator == "Galerkin" ? delete!(inputs, "Forward") : (inputs[integrator] = pop!(inputs, "Forward"))
-            intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-            ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
-            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-                eq_config,
-                GeneralizedPerturbedEquilibrium.analytic_config(inputs)
-            )
-            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
-            intr.nlow = ctrl.nn_low;
-            intr.nhigh = ctrl.nn_high;
-            intr.npert = 1
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-            intr.mpert = intr.mhigh - intr.mlow + 1
-            intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-            mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+            ctrl, intr, equil, metric, mats = _prepared_solovev(integrator)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
             return real(vac.et[1]), intr
@@ -320,27 +273,7 @@ end
         # strictly inside the interval. We use the first integration chunk from
         # chunk_el_integration_bounds, which is guaranteed to contain no rational
         # surfaces in its interior.
-        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, ex)
-        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-            eq_config,
-            GeneralizedPerturbedEquilibrium.analytic_config(inputs)
-        )
-        intr.nlow = ctrl.nn_low;
-        intr.nhigh = ctrl.nn_high;
-        intr.npert = 1
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-        intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.numpert_total = intr.mpert * intr.npert
-
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-        mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+        ctrl, intr, equil, metric, mats = _prepared_solovev()
 
         # Use the first chunk from chunk_el_integration_bounds: guaranteed rational-free interior
         odet_tmp = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, 10, 5, intr.msing)
@@ -370,38 +303,16 @@ end
         # strictly fewer entries than the forward path's dense saved steps, and the stored
         # state is not in the Euler-Lagrange axis basis. Downstream ξ consumers must therefore
         # be fed by the forward integrator; this test pins that contract.
-        function run_and_capture(example_dir, integrator)
-            inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
-            inputs["ForceFreeStates"]["integrator"] = integrator
-            integrator == "Galerkin" ? delete!(inputs, "Forward") : (inputs[integrator] = pop!(inputs, "Forward"))
-            intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
-            ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, example_dir)
-            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, example_dir)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-                eq_config,
-                GeneralizedPerturbedEquilibrium.analytic_config(inputs)
-            )
-            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
-            intr.nlow = ctrl.nn_low;
-            intr.nhigh = ctrl.nn_high;
-            intr.npert = 1
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-            intr.mpert = intr.mhigh - intr.mlow + 1
-            intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
-            mats = GeneralizedPerturbedEquilibrium.ForceFreeStates.build_matrix_splines(equil, intr, metric)
+        function run_and_capture(integrator)
+            ctrl, intr, equil, metric, mats = _prepared_solovev(integrator)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
             # Derivatives are recomputed on demand; materialize so the stores can be compared.
             GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, mats, intr)
             return odet
         end
 
-        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        odet_fwd = run_and_capture(ex, "Forward")
-        odet_ric = run_and_capture(ex, "Riccati")
+        odet_fwd = run_and_capture("Forward")
+        odet_ric = run_and_capture("Riccati")
 
         @test odet_ric.step < odet_fwd.step
         @test length(odet_ric.psi_store) < length(odet_fwd.psi_store)
