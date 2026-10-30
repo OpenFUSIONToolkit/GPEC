@@ -167,7 +167,7 @@ Response fields (mode space):
 
   - `psi_grid` - FFS ODE integration ψ_n values [npsi]
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, numpert_total]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=J·b^ψ, b_psi_area_weighted=J·b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, numpert_total]
   - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, numpert_total]
 

@@ -150,12 +150,12 @@ MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
 Constructs the metric tensor data on a (ψ, θ) grid from an input plasma equilibrium.
 The metric coefficients stored in `metric.fs` include:
 
- 1. g^ψψ · J
- 2. g^θθ · J
- 3. g^ζζ · J
- 4. g^θζ · J
- 5. g^ζψ · J
- 6. g^ψθ · J
+ 1. g_ψψ / J
+ 2. g_θθ / J
+ 3. g_ζζ / J
+ 4. g_θζ / J
+ 5. g_ζψ / J
+ 6. g_ψθ / J
  7. J (Jacobian)
  8. ∂J/∂ψ
 
@@ -180,7 +180,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium, mpert::Int)
     metric.xs .= equil.rzphi_xs
     metric.ys .= equil.rzphi_ys .* 2π
 
-    # Temporary array for contravariant basis vectors
+    # Temporary array for the covariant basis vectors over J
     v = @MMatrix zeros(Float64, 3, 3)
 
     # --- Main computation loop over the (ψ, θ) grid ---
@@ -199,7 +199,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium, mpert::Int)
             eta = 2π * (theta_norm + eta_offset)
             r_major = equil.ro + rfac * cos(eta) # This is the R coordinate
 
-            # --- Compute contravariant basis vectors ∇ψ, ∇θ, ∇ζ ---
+            # --- Covariant basis vectors e_ψ, e_θ, e_ζ divided by J ---
             fx1 = equil.rzphi_rsquared.nodal_derivs.partials[2, ipsi, jtheta]
             fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, jtheta]
             fx3 = equil.rzphi_nu.nodal_derivs.partials[2, ipsi, jtheta]
@@ -271,7 +271,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
     # Allocate fmodb grid: 8 quantities on (ψ,θ)
     fmodb_fs = zeros(Float64, mpsi, mtheta, 8)
 
-    # Temporary for contravariant basis vectors (Fortran style, WITHOUT /jac)
+    # Temporary for the covariant basis vectors (Fortran style, WITHOUT /jac)
     v = @MMatrix zeros(Float64, 3, 3)
     hint = Ref(1)
 
@@ -300,7 +300,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, jtheta]
             fy3 = equil.rzphi_nu.nodal_derivs.partials[3, ipsi, jtheta]
 
-            # Contravariant basis vectors WITHOUT /jac (matches Fortran dcon_interface.f:925-931)
+            # Covariant basis vectors WITHOUT /jac (matches Fortran dcon_interface.f:925-931)
             v[1, 1] = fx1 / (2.0 * rfac)
             v[1, 2] = fx2 * 2π * rfac
             v[1, 3] = fx3 * rs
@@ -309,7 +309,7 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             v[2, 3] = fy3 * rs
             v[3, 3] = 2π * rs
 
-            # Raw g^ij (Fortran dcon_interface.f:933-937)
+            # Raw g_ij (Fortran dcon_interface.f:933-937)
             g12 = v[1, 1] * v[2, 1] + v[1, 2] * v[2, 2] + v[1, 3] * v[2, 3]
             g13 = v[3, 3] * v[1, 3]
             g22 = v[2, 1]^2 + v[2, 2]^2 + v[2, 3]^2
@@ -481,7 +481,7 @@ later (i.e. `sing_der!`).
 ### Arguments
 
   - `metric::MetricData`:
-    Metric coefficients on the (ψ, θ) grid, including Fourier representations of g^ij and J.
+    Metric coefficients on the (ψ, θ) grid, including Fourier representations of g_ij/J and J.
 
 ### Returns
 

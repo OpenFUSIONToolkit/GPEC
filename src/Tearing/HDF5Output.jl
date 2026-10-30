@@ -103,7 +103,7 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/m" => (; long_name="resonant poloidal mode number m per surface", dims=("surface",)),
     "PerSurface/n" => (; long_name="resonant toroidal mode number n per surface", dims=("surface",)),
     "PerSurface/tau" => (; long_name="temperature ratio τ = T_i/T_e per surface", dims=("surface",)),
-    "PerSurface/lu" => (; long_name="Lundquist number S per surface", dims=("surface",)),
+    "PerSurface/S" => (; long_name="Lundquist number S per surface", dims=("surface",)),
     "PerSurface/c_beta" => (; long_name="compressibility factor c_β = √(β_local/(1+β_local)) per surface", dims=("surface",)),
     "PerSurface/D_norm" => (; long_name="Fitzpatrick normalized ion-sound/drift scale D = (d_β/r_s)·S^(1/3)·√ι_e per surface", dims=("surface",)),
     "PerSurface/P_perp" => (; long_name="perpendicular magnetic Prandtl number per surface", dims=("surface",)),
@@ -247,13 +247,14 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     for fname in (:m, :n)
         ps[String(fname)] = Int[getfield(p, fname) for p in params]
     end
-    for fname in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor,
+    for fname in (:tau, :c_beta, :D_norm, :P_perp, :P_tor,
         :Q_e, :Q_i, :iota_e,
         :rs, :R0, :bt, :sval_r,
         :eta, :d_beta)
         ps[String(fname)] = Float64[getfield(p, fname) for p in params]
     end
     # Literature/physics dataset names where the struct fields kept legacy spellings.
+    ps["S"] = Float64[p.lu for p in params]
     ps["tau_k"] = Float64[p.tauk for p in params]
     ps["tau_R"] = Float64[p.tau_r for p in params]
     ps["Delta_prime_norm"] = Float64[p.delta_n for p in params]

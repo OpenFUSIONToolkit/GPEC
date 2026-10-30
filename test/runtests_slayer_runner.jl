@@ -361,8 +361,8 @@
                 # Per-surface arrays have the right length
                 @test length(read(g["PerSurface/rational_index"])) == 2
                 @test read(g["PerSurface/rational_index"]) == [1, 2]
-                @test read(g["PerSurface/lu"])[1] ≈ 1.0e7
-                @test read(g["PerSurface/lu"])[2] ≈ 2.0e7
+                @test read(g["PerSurface/S"])[1] ≈ 1.0e7
+                @test read(g["PerSurface/S"])[2] ≈ 2.0e7
 
                 # Roots arrays
                 @test length(read(g["Roots/Q_root"])) == 1    # coupled

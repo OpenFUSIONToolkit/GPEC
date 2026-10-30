@@ -12,7 +12,7 @@ Displacement components from ODE integration (u_store/du_store/xi_s_store):
   (xi_s_store; Glasser 2016 Phys. Plasmas 23, 072505, eqs. 9 and 18)
 
 Contravariant perturbed field from ideal MHD (matches Fortran gpeq_sol):
-    b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
+    J·b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
     b^θ = -(χ₁·dξ_ψ/dψ + 2πi·n·ξ_s)
     b^ζ = -(χ₁·(q'·ξ_ψ + q·dξ_ψ/dψ) + 2πi·m·ξ_s)
 
@@ -69,8 +69,8 @@ Tuple of (xi_modes, b_modes) NamedTuples:
   - `xi_modes.theta_reg`: ξ^θ regularized (= xmt, from gpeq_contra with reg_spot smoothing)
   - `xi_modes.zeta_reg`: ξ^ζ regularized (= xmz, from gpeq_contra with reg_spot smoothing)
   - `xi_modes.cova_psi/theta/zeta`: covariant displacement (from gpeq_cova)
-  - `b_modes.psi`: b^ψ [npsi, numpert_total]
-  - `b_modes.b_psi_area_weighted`: b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
+  - `b_modes.psi`: J·b^ψ [npsi, numpert_total]; b^ψ itself would need the jmat convolution
+  - `b_modes.b_psi_area_weighted`: J·b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
   - `b_modes.theta`: b^θ [npsi, numpert_total]
   - `b_modes.zeta`: b^ζ [npsi, numpert_total]
   - `b_modes.theta_reg/zeta_reg`: regularized b^θ, b^ζ (from gpeq_sol with reg_spot smoothing)
@@ -138,8 +138,7 @@ function reconstruct_physical_fields(
             psi_grid, ffs, metric
         )
 
-        # Compute b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path
-        # area = <J·|∇ψ|>_θ (Hamada: J is const over θ)
+        # J·b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path; area = <J·|∇ψ|>_θ
         mthsurf = length(equil.rzphi_ys) - 1
         Jb_psi_modes = similar(b_psi_modes)
         # Surfaces are independent; :static keeps threadid() stable for any per-thread state.
@@ -176,8 +175,8 @@ function reconstruct_physical_fields(
             R=xi_R, Z=xi_Z, phi=xi_phi
         )
         b_modes = (
-            psi=b_psi_modes,      # b^ψ (no Jacobian) — used for b_n normal projection
-            b_psi_area_weighted=Jb_psi_modes,     # b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
+            psi=b_psi_modes,      # J·b^ψ — used for b_n normal projection
+            b_psi_area_weighted=Jb_psi_modes,     # J·b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
             theta=b_theta_modes,    # b^θ unregularized
             zeta=b_zeta_modes,     # b^ζ unregularized
             theta_reg=b_theta_reg,      # b^θ regularized (from gpeq_sol with reg_spot)
@@ -261,7 +260,7 @@ Compute contravariant perturbed B-field from displacement using ideal MHD relati
 
 Matches Fortran `gpeq_sol` bwp/bwt/bwz (unregularized) [Park 2007 eq. 8-10]:
 
-    b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
+    J·b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
     b^θ = -(χ₁·∂ξ_ψ/∂ψ + 2πi·n·ξ_s)
     b^ζ = -(χ₁·(q'·ξ_ψ + q·∂ξ_ψ/∂ψ) + 2πi·m·ξ_s)
 """
@@ -604,7 +603,7 @@ end
 Compute covariant displacement and B-field via metric tensor contraction.
 
 Matches Fortran `gpeq_cova`: contracts contravariant components with metric tensor
-Fourier coefficients (g^ij·J, quantities 1-6 in metric.fourier_coeffs) via poloidal
+Fourier coefficients (g_ij/J, quantities 1-6 in metric.fourier_coeffs) via poloidal
 mode coupling convolution.
 
 Uses regularized (modified) xmt/xmz and bmt/bmz for the theta/zeta contravariant inputs.
@@ -802,7 +801,7 @@ function compute_b_n_xi_n_modes(
         for in in 1:npert
             blk = ((in-1)*mpert+1):(in*mpert)
             # IDFT: mode space → theta space
-            bwp_fun = phase_fwd * b_psi_modes[ipsi, blk]   # [mthsurf] — b^ψ (not J-weighted)
+            bwp_fun = phase_fwd * b_psi_modes[ipsi, blk]   # [mthsurf] — J·b^ψ
             xwp_fun = phase_fwd * xwp_modes[ipsi, blk]     # [mthsurf] — J·ξ^ψ (J-weighted from gpeq_contra)
 
             # Divide by J·|∇ψ| → physical normal components in theta space (matches Fortran gpeq_normal)

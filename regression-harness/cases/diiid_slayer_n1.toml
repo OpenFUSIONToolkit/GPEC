@@ -52,7 +52,7 @@ noise_threshold = 1e-10
 order = 14
 
 [quantities.slayer_lu]
-h5path = "Tearing/PerSurface/lu"
+h5path = "Tearing/PerSurface/S"
 type = "real_vector"
 extract = "all_real"
 label = "SLAYER Lundquist S"

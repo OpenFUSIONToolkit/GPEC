@@ -35,7 +35,7 @@ PerturbedEquilibrium/
 │   ├── psi             # Radial abscissa ψ_N [npsi] shared by every response profile below
 │   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, numpert_total])
 │   ├── Jxi_psi        # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
-│   ├── b_psi_area_weighted       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, numpert_total])
+│   ├── b_psi_area_weighted       # J·b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, numpert_total])
 │   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, numpert_total])
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, numpert_total])
 │   ├── Jb_theta
@@ -125,12 +125,15 @@ function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilib
     !isempty(state.psi_grid) && (response_group["psi"] = state.psi_grid)
     have_xi = !isnothing(state.xi_modes)
     have_b = have_xi && !isnothing(state.b_modes)
-    response_group["xi_psi"] = have_xi ? state.xi_modes.psi : ComplexF64[]
-    response_group["b_psi_area_weighted"] = have_b ? state.b_modes.b_psi_area_weighted : ComplexF64[]
-    response_group["Jb_theta"] = have_b ? state.b_modes.theta : ComplexF64[]
-    response_group["Jb_zeta"] = have_b ? state.b_modes.zeta : ComplexF64[]
-    response_group["b_n"] = !isnothing(state.b_n_modes) ? state.b_n_modes : ComplexF64[]
-    response_group["xi_n"] = !isnothing(state.xi_n_modes) ? state.xi_n_modes : ComplexF64[]
+    # Fields the run did not reconstruct are left out rather than written empty.
+    have_xi && (response_group["xi_psi"] = state.xi_modes.psi)
+    if have_b
+        response_group["b_psi_area_weighted"] = state.b_modes.b_psi_area_weighted
+        response_group["Jb_theta"] = state.b_modes.theta
+        response_group["Jb_zeta"] = state.b_modes.zeta
+    end
+    isnothing(state.b_n_modes) || (response_group["b_n"] = state.b_n_modes)
+    isnothing(state.xi_n_modes) || (response_group["xi_n"] = state.xi_n_modes)
 
     # Clebsch displacements for PENTRC (matches Fortran gpout_xclebsch)
     if have_xi
