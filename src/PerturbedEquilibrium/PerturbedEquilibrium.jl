@@ -86,7 +86,7 @@ end
         -> PerturbedEquilibriumState
 
 Drive the plasma response `resp` (from [`plasma_response`](@ref)) with the external field `rmp`, an
-[`RMPField`](@ref), and return the perturbed-equilibrium result. One response serves any number of
+[`RMPField`](@ref GeneralizedPerturbedEquilibrium.ForcingTerms.RMPField), and return the perturbed-equilibrium result. One response serves any number of
 fields, so a scan rebuilds no operator.
 
 `regularization_width` smooths the ideal 1/(m−nq) divergence in the profile reconstruction (Fortran
@@ -193,10 +193,7 @@ function materialize_forcing_modes(
         for n in ffs.nlow:ffs.nhigh
             modes_n = filter(m -> m.n == n, file_modes)
             isempty(modes_n) && continue
-            # Same control surface as the coil branch above: psilim, the integration
-            # limit (Fortran: gpec/gpec.f:431 `field_bs_psi(psilim, ...)`). Without it
-            # the normalization was taken on the equilibrium-spline limit, which differs
-            # whenever rational_offset_fraction/qhigh/dW_edge_scan_start truncation moves psilim inward.
+            # Normalize on the same control surface as the coil branch: psilim, the integration limit.
             append!(modes, convert_forcing_normalization(modes_n, norm_tag, equil, n, ffs.mlow:ffs.mhigh; psi=ffs.psilim))
         end
     end
@@ -232,12 +229,8 @@ end
     materialize_forcing_modes(ffs, rmp::ForcingTerms.RMPFieldSum; kwargs...) -> (modes, coil_sets)
 
 Materialize a lazy linear combination of forcing sources: each weighted leaf is evaluated
-against the equilibrium independently, then the mode amplitudes are summed per (n, m) — the
-perturbed-equilibrium response is linear in the forcing, so this equals forcing with the
-combined field. The merged modes are sorted by (n, m) for a deterministic order. Coil
-geometry from every coil-format leaf is concatenated in the second return value; the
-preloaded-geometry shortcut does not apply to sums (the replay path injects materialized
-modes upstream and never materializes a sum).
+independently and the mode amplitudes are summed per (n, m), sorted by (n, m). Coil geometry from
+every coil-format leaf is concatenated in the second return value; `preloaded_coil_sets` is ignored for sums.
 """
 function materialize_forcing_modes(ffs::ForceFreeStatesResult, rmp::ForcingTerms.RMPFieldSum;
     preloaded_coil_sets::Vector{ForcingTerms.CoilSet}=ForcingTerms.CoilSet[],

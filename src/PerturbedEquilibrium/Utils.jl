@@ -18,72 +18,10 @@ end
 """
     save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilibriumState)
 
-Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeStates output).
-
-## Output Structure
-
-```
-PerturbedEquilibrium/
-├── mode_m / mode_n  # (m, n) of each entry along every `mode` axis below [numpert_total]
-├── ForcingModes/
-│   ├── n              # Toroidal mode numbers
-│   ├── m              # Poloidal mode numbers
-│   └── amplitude      # ComplexF64 forcing amplitudes
-├── forcing_b / forcing_b_root_area / forcing_b_area      # control-surface forcing spectrum (b, b̃, b̄) [numpert_total], tesla
-├── response_b / response_b_root_area / response_b_area   # control-surface response spectrum (b, b̃, b̄) [numpert_total], tesla
-├── Response/
-│   ├── psi             # Radial abscissa ψ_N [npsi] shared by every response profile below
-│   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, numpert_total])
-│   ├── Jxi_psi        # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
-│   ├── b_psi_area_weighted       # J·b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, numpert_total])
-│   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, numpert_total])
-│   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, numpert_total])
-│   ├── Jb_theta
-│   └── Jb_zeta
-├── ResponseMatrices/         # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
-│   ├── plasma_inductance     # Λ̃ = R⁻¹·Λ·R⁻†
-│   ├── surface_inductance    # L̃ = R⁻¹·L·R⁻†
-│   ├── permeability          # P̃ = R⁻¹·P·R  (P = Λ·L⁻¹)
-│   ├── reluctance            # ϱ̃ = R†·ϱ·R
-│   ├── rootarea_to_area_weight_operator  # S = Σ/√A at psilim; recover area-weighted field b̄ = S·b̃
-│   └── surface_area          # scalar A = ∫J|∇ψ|dθ; recover flux via Φ = A·b̄
-├── SingularCoupling/
-│   ├── C_resonant_area_weighted_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant area-weighted field b^r=Φ^r/A^r [T])
-│   ├── C_resonant_current
-│   ├── C_island_width_sq
-│   ├── C_penetrated_area_weighted_field
-│   ├── C_Delta_prime
-│   ├── resonant_area_weighted_field       # [n_rational] applied vector = C̃ · b̃_x (resonant area-weighted field b^r [T])
-│   ├── resonant_current
-│   ├── island_width_sq
-│   ├── penetrated_area_weighted_field
-│   ├── Delta_prime
-│   ├── island_half_width    # [n_rational] Float64
-│   ├── chirikov_parameter
-│   ├── rational_psi         # [n_rational] surface metadata
-│   ├── rational_q
-│   ├── rational_m
-│   ├── rational_n
-│   └── DominantMode/        # SVD U·diag(σ)·Vᴴ of C_resonant_area_weighted_field over the core-window rational surfaces (ψ_N ≤ 0.9)
-│       ├── singular_values          # σ, descending [rank]
-│       ├── right_singular_vectors   # V: applied-b̃ spectra ranked by resonant drive [numpert_total × rank]
-│       ├── left_singular_vectors    # U: resonant-field patterns over the retained surfaces [n_retained × rank]
-│       ├── rational_index           # rows of rational_* retained in the ψ_N window [n_retained]
-│       └── forcing_overlap          # Vᴴ·b̃_x, applied forcing's coefficient on each mode [rank]
-├── Energies/
-│   ├── vacuum_energy
-│   ├── surface_energy
-│   ├── plasma_energy
-│   └── toroidal_torque
-└── TorqueResponse/           # kinetic forward solves with compute_torque_response; b̃ basis, cumulative in ψ
-    ├── psi                   # ψ_N of each stored node [npsi]
-    ├── m, n                  # (m, n) of each row/column of T_xe [numpert_total]
-    ├── T_xe                  # torque response on b̃, N·m/T² (ComplexF64 [numpert_total, numpert_total, npsi])
-    ├── source_name           # forcing-source names: the coil sets, or the forcing file [nsource]
-    ├── T_source              # torque response in forcing-source space (ComplexF64 [nsource, nsource, npsi])
-    ├── T_applied             # b̃ₓ†·T_xe(ψ)·b̃ₓ/2: Re = torque inside ψ, Im = 2n·δW inside ψ (ComplexF64 [npsi])
-    └── total_torque          # Re T_applied at the control surface [N·m]
-```
+Write the `PerturbedEquilibrium` group (forcing modes, control-surface spectra, response profiles, response
+matrices, singular coupling, energies, and the torque response when present) and record the coil and forcing
+inputs under `Input/RawInputs`. Dataset meanings and units are in `PE_H5_ANNOTATIONS`; layout rules are in
+`docs/development/hdf5-conventions.md`.
 """
 function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilibriumState)
     resp = state.response

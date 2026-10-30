@@ -64,7 +64,7 @@ with `Φ = A·b̄`.
   - `plasma_inductance` - Λ̃ = R⁻¹·Λ·R⁻† (wt0-based plasma inductance, congruence)
   - `surface_inductance` - L̃ = R⁻¹·L·R⁻† (vacuum surface inductance, congruence)
   - `permeability` - P̃ = R⁻¹·P·R (plasma response operator P=Λ·L⁻¹, similarity)
-  - `reluctance` - ϱ̃ = R†·ϱ·R (ϱ = L⁻¹·(Λ−L)·L⁻¹, congruence)
+  - `reluctance` - ϱ̃ = R†·ϱ·R (ϱ = L⁻¹·(Λ†−L)·L⁻¹, congruence)
   - `rootarea_to_area_weight` - S = Σ/√A at psilim (b̃→b̄ recovery operator)
   - `surface_area` - scalar A = ∫J|∇ψ|dθ at psilim (flux recovery Φ = A·b̄)
 
@@ -167,7 +167,8 @@ Response fields (mode space):
 
   - `psi_grid` - FFS ODE integration ψ_n values [npsi]
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, numpert_total]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=J·b^ψ, b_psi_area_weighted=J·b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=J·b^ψ, b_psi_area_weighted=J·b^ψ/⟨J·|∇ψ|⟩_θ,
+    theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, numpert_total]
   - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, numpert_total]
 
@@ -199,9 +200,8 @@ well-conditioned flux-space inductances L, Λ:
   - `plasma_energy`  - Σₙ Re( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ ) / 4 over the diagonal n blocks of Λ (energy to
     perturb the plasma; Fortran's "total energy")
   - `toroidal_torque` - Σₙ −2n·Im( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ / 4 ) [Park 2011 PoP 18 110702, eq. 1] —
-    the boundary-response torque, zero for ideal
-    (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
-    self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
+    the boundary-response torque, zero for ideal (Hermitian) runs. Equals the volume-integrated
+    Euler-Lagrange kinetic torque only for converged self-consistent solutions; distinct from the KineticForces NTV torque.
 
 Torque response (kinetic forward solves with `compute_torque_response`):
 

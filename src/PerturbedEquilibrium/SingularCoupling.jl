@@ -56,10 +56,8 @@ end
 
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` from the stored solution:
 cubic Hermite for the value, chord slope across the bracketing nodes for the derivative.
-The least accurate of the Ξ′ evaluators, kept as the fallback for a solution whose stored
-Ξ′ cannot be trusted. Currently unused: every basis that reaches the singular-coupling
-loop carries a populated `du_store`, so the gal-native, ideal-EL and kinetic evaluators
-cover all of them.
+The least accurate Ξ′ evaluator; currently unused, kept as a fallback for a solution whose
+stored Ξ′ cannot be trusted.
 """
 function _chord_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, nstep::Int)
     isempty(odet.du_store) && error(
@@ -82,12 +80,9 @@ end
     _gal_solution_at(psi, resnum, odet, nstep) -> (u, du)
 
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` for a gal-matched solution:
-cubic Hermite for the value, and the analytic Ξ′ carried in `du_store` for the
-derivative. Mirrors the `galsol%gal_flag` branch of Fortran `gpeq_sol`, which takes
-Ξ′ from the analytic galerkin derivative rather than differentiating the value
-spline. Differencing `u_store` here would discard that analytic content, and
-near-cancellation in `bwp1` (singfac·Ξ′ against n q′·Ξ, with singfac → 0 at the
-surface) amplifies the resulting error into Δ′ at the outer surfaces.
+cubic Hermite for the value and the analytic Ξ′ carried in `du_store` for the derivative
+(the `gal_flag` branch of Fortran `gpeq_sol`). Do not difference `u_store` instead:
+near-cancellation in `bwp1` (singfac·Ξ′ against n·q′·Ξ) amplifies that error into Δ′.
 """
 function _gal_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, nstep::Int)
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
@@ -163,9 +158,8 @@ ideal Euler-Lagrange relation Ξ′ = Q⁻¹·F̄⁻¹·(Q⁻¹·u₂ − K̄·u
 with u₁, u₂ Hermite-interpolated to `psi`. Only valid for ideal runs where
 `mats.ideal.F_spline_lower` and `K_spline` generated the solution.
 
-The Hermite slopes need du₂ as well as du₁, and du₂ is not stored: both are evaluated here
-from the derivative kernel at the two bracketing nodes, which is where the handful of
-resonant evaluation points actually need them.
+du₂ is not stored, so the Hermite slopes du₁ and du₂ are both evaluated from the derivative
+kernel at the two bracketing nodes.
 """
 function _el_solution_at(
     psi::Float64,
@@ -260,7 +254,7 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
     twopi = 2π
     mtheta = mtheta_vacuum
 
-    # Phase 1: Collect all resonant (surface, n) pairs in psi order
+    # Collect all resonant (surface, n) pairs
     resonant_pairs = Tuple{Int,Int}[]
     for nn in nlow:nhigh
         for s in 1:msing
@@ -282,7 +276,6 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
 
     verbose && @info "Found $n_rational resonant (surface, n) pairs"
 
-    # Phase 2: Allocate output arrays
     resp.C_resonant_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     resp.C_resonant_current = zeros(ComplexF64, n_rational, numpert_total)
     resp.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
@@ -301,10 +294,7 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
     resp.rational_surface_idx = zeros(Int, n_rational)
     resp.rational_area = zeros(Float64, n_rational)
 
-    # Precompute ODE coefficient matrix C_coeffs for all PE forcing modes.
-    # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
-    # where edge_mn_k[j] = plasma_response[j,k] / (chi1·singfac_lim[j]·2πi)
-    # Matches Fortran gpout_resp: edge_mn = foutmn/(chi1·singfac·twopi·ifac)
+    # Edge-to-solution coefficients C_coeffs = u_bnd⁻¹·edge_mn, edge_mn = P/(chi1·singfac_lim·2πi) (Fortran gpout_resp)
     psi_lim = solution.psi_store[solution.step]
     q_lim = equil.profiles.q_spline(psi_lim)
     singfac_lim = [resp.m_modes[j] - resp.n_modes[j] * q_lim for j in 1:numpert_total]
@@ -314,16 +304,8 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
     C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
     resp.C_coeffs = C_coeffs
 
-    # Phase 3: Compute full coupling matrix rows. Each rational surface is independent -- it
-    # builds its own Green's functions (a fresh, allocation-local vacuum solve) and writes its
-    # own disjoint coupling-matrix row (resp.C_*[row,:] / resp.rational_*[row]) -- so thread
-    # the loop over surfaces. Note a single surface `s` can appear on multiple rows in a
-    # multi-n run (integer q resonates at several n), so per-row work must not write shared
-    # sing[s] state. BLAS is pinned to one thread across the loop (each surface's solve is
-    # small; multi-threaded BLAS would oversubscribe against the Julia threads) and restored in
-    # a `finally` so an exception in the loop cannot leak the pinned count into the session. The
-    # loop is top-level: its threadid()-indexed state must never be nested inside another
-    # @threads region.
+    # Rows are independent (own vacuum solve, disjoint output row), so thread them; a surface can own several rows
+    # at integer q, so never write per-surface state. BLAS is pinned to one thread and restored in `finally`.
     nstep = solution.step
     # ξ′ evaluation preference: the ideal EL relation, or the interpolated stored RHS for kinetic runs.
     use_el = mats.kinetic === nothing
@@ -350,31 +332,22 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
 
             j_c = compute_current_density(equil, sing_surf.psifac)
             area = compute_surface_area(equil, sing_surf.psifac)
-            # Matches Fortran gpout_resp: shear = m*dq/dψ / q² = n*dq/dψ / q (since m=n*q).
-            # Uses abs(nn) because island_half_width = sqrt(abs(island_width_sq)), so the sign
-            # of shear only affects the sign of C_island_width_sq, not the physical island width.
+            # shear = n·q′/q (Fortran gpout_resp); abs(nn) only sets the sign of C_island_width_sq, not the width.
             shear = abs(nn) * sing_surf.q1 / sing_surf.q
 
-            # Evaluate bwp1_mn = ∂b^ψ/∂ψ at lpsi and rpsi using permeability-weighted eigenstates.
-            # Matches Fortran gpout_resp: evaluate bwp1_mn at lpsi/rpsi via gpeq_sol
-            # spot = 5e-4 matches Fortran default singfac_min
+            # Evaluate ∂b^ψ/∂ψ either side of the surface; spot 5e-4 matches the Fortran singfac_min default.
             spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
             lpsi = sing_surf.psifac - spot_psi
             rpsi = sing_surf.psifac + spot_psi
 
-            # Evaluate u and dξ/dψ at lpsi and rpsi from the stored ODE solution.
-            # Branch order mirrors Fortran gpeq_sol: gal-matched solutions take the analytic
-            # galerkin Ξ′, ideal runs the EL relation, kinetic runs the stored Ξ′.
+            # Ξ, Ξ′ at lpsi/rpsi as in Fortran gpeq_sol: gal-matched → analytic Ξ′, ideal → EL relation, kinetic → stored Ξ′.
             if resp.odet_from_gal
-                # interpolate u and the analytic galerkin dξ/dψ carried in du_store
                 u_l, ud_l = _gal_solution_at(lpsi, resnum, solution, nstep)
                 u_r, ud_r = _gal_solution_at(rpsi, resnum, solution, nstep)
             elseif use_el
-                # interpolate u and evaluate dξ/dψ from the ideal EL relation
                 u_l, ud_l = _el_solution_at(lpsi, resnum, solution, mats, equil, ffs, nstep)
                 u_r, ud_r = _el_solution_at(rpsi, resnum, solution, mats, equil, ffs, nstep)
             else
-                # interpolate u and the stored dξ/dψ, weighted to remove the resonant pole
                 u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
                 u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
             end
@@ -398,21 +371,14 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
                 jump_vec[k] = bwp1_r - bwp1_l
             end
 
-            # Inner-layer (cusp-free) penetrated field: bpen[s, j] is linear in the same identity-at-edge
-            # coil-drive columns as the outer solution, so it contracts with C_coeffs exactly like
-            # the outer solution values above (xsp = transpose(u) * ck); /area matches the area-weighted
-            # convention of the pointwise row.
+            # Inner-layer penetrated field bpen[s, :] contracts with C_coeffs like the outer solution; /area makes it area-weighted.
             if have_inner_bpen && s <= size(ffs.bpen, 1)
                 pen_row = (transpose(C_coeffs) * @view(ffs.bpen[s, :])) ./ area
                 resp.C_penetrated_area_weighted_field[row, :] = pen_row
             end
 
-            # LHS normalization audit — output scalar coordinate-invariance per row:
-            #  - Δ' (1/length): the resonant-surface jump in ∂b^ψ/∂ψ over 2π·χ₁; the tearing index is
-            #    coordinate-invariant (its sign/zero-crossing set the stability boundary) [Glasser 2016].
-            #  - resonant (shielding) current: j_c already integrates jac·|∇ψ| over the surface, so the
-            #    Jacobian weighting is carried inside j_c — no separate area factor needed.
-            #  - resonant flux → field: Φ^r/A^r [T], invariant [Park 2008; Pharr 2026].
+            # Δ' is the ∂b^ψ/∂ψ jump over 2π·χ₁ [Glasser 2016]; j_c carries the surface Jacobian weighting of the current;
+            # resonant flux/area is a coordinate-invariant field in T [Park 2008; Pharr 2026].
             resp.C_delta_prime[row, :] = jump_vec ./ (twopi * chi1)
             resp.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
             # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant area-weighted field = singflx/area,
@@ -439,11 +405,8 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
         BLAS.set_num_threads(_blas_nthreads)
     end
 
-    # Conform the stored coupling-matrix input basis to the coordinate-invariant root-area-weighted
-    # field (b̃) space (Pharr 2026): C̃ = C·R, so each stored row acts on the applied field
-    # b̃_x (Φ_x = R·b̃_x) and its singular values become coordinate-invariant. The conform operator
-    # R = S·A (Σ·√A) is the only place flux briefly appears; it is built from the b̃→b̄ operator S and
-    # the scalar surface area A. The flux-space copies kept in `coupling_flux` apply a forcing without round-trip noise.
+    # Conform the stored matrices to b̃ space, C̃ = C·R with R = S·A (Pharr 2026); `coupling_flux` keeps the flux-space
+    # copies so a forcing is applied without round-trip noise.
     resp.coupling_flux = (; resonant_area_weighted_field=resp.C_resonant_area_weighted_field, resonant_current=resp.C_resonant_current,
         island_width_sq=resp.C_island_width_sq, penetrated_area_weighted_field=resp.C_penetrated_area_weighted_field, delta_prime=resp.C_delta_prime)
     flux_conform = resp.rootarea_to_area_weight .* resp.surface_area
@@ -468,8 +431,7 @@ function apply_coupling!(state::PerturbedEquilibriumState; verbose::Bool=false)
     C = resp.coupling_flux
     numpert_total = resp.ffs.numpert_total
 
-    # Apply forcing amplitudes → R = C · Φ_x. The applied resonant scalars are physical,
-    # coordinate-invariant quantities, so evaluate them from the flux-space C and the physical forcing Φ_x.
+    # The applied resonant scalars are coordinate-invariant, so evaluate them from the flux-space C and Φ_x.
     forcing_flux = zeros(ComplexF64, numpert_total)
     for mode in state.forcing_modes
         j = findfirst(k -> resp.m_modes[k] == mode.m && resp.n_modes[k] == mode.n, 1:numpert_total)
@@ -499,61 +461,27 @@ end
         psi::Float64
     )::Float64
 
-Compute effective current density coefficient at given flux surface.
-
-Implements GPEC's j_c calculation (Fortran `gpout_respinfo`):
-j_c = χ₁² * q / (μ₀ * integral)
-
-where the integral is computed via flux surface integration:
-integral = ∫ (jac * |∇ψ| * sqreqb / |∇ψ|³) dθ
-
-## GPEC Formula
-
-```fortran
-DO itheta=0,mthsurf
-   CALL bicube_eval(rzphi,respsi,theta(itheta),1)
-   rfac=SQRT(rzphi%f(1))
-   jac=rzphi%f(4)
-   w(1,1)=(1+rzphi%fy(2))*twopi**2*rfac*r(itheta)/jac
-   w(1,2)=-rzphi%fy(1)*pi*r(itheta)/(rfac*jac)
-   delpsi(itheta)=SQRT(w(1,1)**2+w(1,2)**2)
-   sqreqb(itheta)=(sq%f(1)**2+chi1**2*delpsi(itheta)**2)/(twopi*r(itheta))**2
-   jcfun(itheta)=sqreqb(itheta)/(delpsi(itheta)**3)
-   j_c(ising)=j_c(ising)+jac*delpsi(itheta)*jcfun(itheta)/mthsurf
-ENDDO
-j_c(ising)=j_c(ising)-jac*delpsi(mthsurf)*jcfun(mthsurf)/mthsurf  ! trapezoidal rule
-j_c(ising)=1.0/j_c(ising)*chi1**2*sq%f(4)/mu0
-```
-
-## Implementation
-
-Uses trapezoidal rule integration around the flux surface with metric quantities
-from the equilibrium bicubic spline (rzphi). The integrand includes:
-
-  - jac: Jacobian of flux coordinates
-  - |∇ψ|: Flux gradient magnitude (delpsi)
-  - sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)² where F = R·B_tor
+Effective current density coefficient `j_c = χ₁²·q / (μ₀·∮ J·|∇ψ|·sqreqb/|∇ψ|³ dθ)` at `psi`, with
+`sqreqb = (F² + χ₁²|∇ψ|²)/(2πR)²` and `F` the equilibrium `F_spline`, by the trapezoidal rule on the
+equilibrium θ grid. Port of the `j_c` calculation in Fortran `gpout_respinfo`.
 """
 function compute_current_density(
     equil::Equilibrium.PlasmaEquilibrium,
     psi::Float64
 )::Float64
-    # Physical constants
     μ₀ = 4π * 1e-7
     chi1 = 2π * equil.psio
     twopi = 2π
 
-    # Get equilibrium quantities at this surface
     F_tor = equil.profiles.F_spline(psi)  # Toroidal field function (2π·R·B_tor in GPEC convention)
     q = equil.profiles.q_spline(psi)      # Safety factor
 
     ro = equil.ro
 
-    # Number of theta points for integration
-    # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
+    # mthsurf intervals over θ ∈ [0, 1], matching Fortran
     mthsurf = length(equil.rzphi_ys) - 1
 
-    # Integrate around flux surface using trapezoidal rule
+    # Trapezoidal rule around the flux surface
     integral = 0.0
 
     # Storage for last point (needed for trapezoidal rule correction)
@@ -563,23 +491,19 @@ function compute_current_density(
 
     hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for itheta in 0:mthsurf
-        # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
         m = Equilibrium.flux_surface_metric(equil, psi, theta; hint=hint2d)
         jac = m.jac
         delpsi = m.delpsi  # flux gradient magnitude |∇ψ|
 
-        # sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²  where F = R·B_tor (Fortran sq%f(1))
+        # F_tor is Fortran sq%f(1)
         sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (twopi * m.r)^2
 
-        # Integrand function
         jcfun = sqreqb / (delpsi^3)
 
-        # Accumulate integral (trapezoidal rule)
         integral += jac * delpsi * jcfun / mthsurf
 
-        # Store last point for correction
         if itheta == mthsurf
             last_jac = jac
             last_delpsi = delpsi
@@ -587,10 +511,9 @@ function compute_current_density(
         end
     end
 
-    # Trapezoidal rule end correction (subtract half of last point contribution)
+    # Drop the duplicated periodic endpoint θ = 1
     integral -= last_jac * last_delpsi * last_jcfun / mthsurf
 
-    # Final normalization: j_c = (1/integral) * χ₁² * q / μ₀
     j_c = (1.0 / integral) * chi1^2 * q / μ₀
 
     return j_c
@@ -602,34 +525,7 @@ end
         psi::Float64
     )::Float64
 
-Compute flux surface area at given ψ.
-
-Implements GPEC's area calculation (Fortran `gpout_respinfo`):
-area = ∫ jac * |∇ψ| dθ
-
-where the integral is computed around the flux surface.
-
-## GPEC Formula
-
-```fortran
-DO itheta=0,mthsurf
-   CALL bicube_eval(rzphi,respsi,theta(itheta),1)
-   rfac=SQRT(rzphi%f(1))
-   jac=rzphi%f(4)
-   w(1,1)=(1+rzphi%fy(2))*twopi**2*rfac*r(itheta)/jac
-   w(1,2)=-rzphi%fy(1)*pi*r(itheta)/(rfac*jac)
-   delpsi(itheta)=SQRT(w(1,1)**2+w(1,2)**2)
-   area(ising)=area(ising)+jac*delpsi(itheta)/mthsurf
-ENDDO
-area(ising)=area(ising)-jac*delpsi(mthsurf)/mthsurf  ! trapezoidal rule
-```
-
-## Implementation
-
-Uses trapezoidal rule integration around the flux surface with:
-
-  - jac: Jacobian of flux coordinates from rzphi
-  - |∇ψ|: Flux gradient magnitude (delpsi) from metric tensor
+Flux-surface area `∮ J·|∇ψ| dθ` at `psi` on the equilibrium θ grid (the area of Fortran `gpout_respinfo`).
 """
 function compute_surface_area(
     equil::Equilibrium.PlasmaEquilibrium,
