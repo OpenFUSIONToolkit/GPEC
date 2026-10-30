@@ -16,7 +16,12 @@ using TOML
             psilow=0.01,
             psihigh=0.994
         )
-        global plasma_eq_efit = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(efit_config)
+        # A healthy g-file takes the plain Newton path to the magnetic axis, without the bisection restart.
+        logger = Test.TestLogger(; min_level=Base.CoreLogging.Warn)
+        global plasma_eq_efit = Base.CoreLogging.with_logger(logger) do
+            GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(efit_config)
+        end
+        @test !any(occursin("bisection", log.message) for log in logger.logs)
 
         @test plasma_eq_efit isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
