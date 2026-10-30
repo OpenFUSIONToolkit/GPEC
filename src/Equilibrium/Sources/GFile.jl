@@ -1,17 +1,8 @@
 """
-_read_1d_gfile_format(lines_block, num_values)
+    _read_1d_gfile_format(lines_block, num_values) -> Vector{Float64}
 
-Internal helper function to parse Fortran-style fixed-width numerical blocks
-from a vector of strings.
-
-## Arguments:
-
-  - `lines_block`: A `Vector{String}` containing the lines to parse.
-  - `num_values`: The total number of `Float64` values to read from the block.
-
-## Returns:
-
-  - A `Vector{Float64}` containing the parsed values.
+Parse `num_values` reals from Fortran fixed-width (16-character) fields in `lines_block`, warning on
+unparsable fields or a short read.
 """
 function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     data_str = join(lines_block)
@@ -19,7 +10,7 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     parsed_values = Float64[]
     num_read = 0
 
-    # Ensure the string length is a multiple of the field width for safe processing
+    # Only whole fields
     safe_len = (length(data_str) ÷ field_width) * field_width
     for i in 1:field_width:safe_len
         num_read >= num_values && break
@@ -55,18 +46,10 @@ function gfile_fpol_single_precision(filename::AbstractString)
 end
 
 """
-    _read_efit(equil_in)
+    read_efit(config::EquilibriumConfig) -> DirectRunInput
 
-Parses an EFIT g-file, creates initial 1D and 2D splines, and bundles
-them into a `DirectRunInput` object.
-
-## Arguments:
-
-  - `equil_in`: The `EquilInput` object containing the filename and parameters.
-
-## Returns:
-
-  - A `DirectRunInput` object ready for the direct solver.
+Parse the EFIT g-file `config.eq_filename` into the 1D profile spline and 2D ψ(R, Z) interpolant
+for the direct solver.
 """
 function read_efit(config::EquilibriumConfig)
     @info "Processing EFIT g-file: $(config.eq_filename)"
@@ -134,8 +117,7 @@ function read_efit(config::EquilibriumConfig)
     psi_in_ys = collect(z_grid)
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; extrap=ExtendExtrap())
 
-    # Capture the raw arrays that reconstruct sq_in and psi_in, so the rerun path
-    # (gpec.h5 → PlasmaEquilibrium) can skip the g-file parse entirely.
+    # Raw arrays that rebuild sq_in and psi_in, so a rerun from gpec.h5 skips the g-file parse
     ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, psi_proc, rmin, rmax, zmin, zmax, psio, fpol_sign, ip_sign)
 
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign, ip_sign, ingest)

@@ -4,7 +4,7 @@
 # (direct field-line, large-aspect-ratio and TJ-analytic integrations).
 
 """
-Ceiling on the absolute tolerance of the equilibrium ODE solves; the historical fixed value, kept so a loose `flux_surface_rtol` never loosens abstol.
+Ceiling on the absolute tolerance of the equilibrium ODE solves, so a loose `flux_surface_rtol` never loosens abstol.
 """
 const EQUIL_ABSTOL_MAX = 1e-8
 

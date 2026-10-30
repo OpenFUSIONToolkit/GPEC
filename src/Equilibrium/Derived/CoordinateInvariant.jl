@@ -19,10 +19,7 @@ With `Σ ≡ sqrtamat` (the mpert×mpert √weight convolution) and the scalar s
 The √-weight (`b̃`) basis is the one in which an operator's singular values / spectra are
 independent of the straight-field-line (working) coordinate; `b` and `b̄` are not
 coordinate-invariant and are provided only as field/flux recovery views. Poloidal flux is
-recovered, when ever needed, as the scalar product `Φ = A·b̄` — it is never stored.
-
-See `scripts/test_power_norm_invariance.jl` for the numerical invariance proof of
-the underlying √weight identity and angle map.
+recovered, whenever needed, as the scalar product `Φ = A·b̄` — it is never stored.
 """
 
 """
@@ -61,16 +58,9 @@ Build the √A convolution matrix `sqrtamat`. Produces a Hermitian Toeplitz matr
 with entries sqrtamat[m',k] = ŵ_{m_k − m'} where ŵ_n = (1/N)Σ w_j exp(+inθ_j) and
 w(θ) = √(J·|∇ψ|).
 
-Operationally, sqrtamat is the mode-space √weight operator: for a field b with
-Fourier coefficients b_fft, it satisfies the identity
-`‖sqrtamat·b_fft‖² = ∫ |b|² · J|∇ψ| dθ`  (θ normalized to [0, 1))
-which is Jacobian-invariant on a given flux surface. Its diagonal is the θ-average of
-√(J|∇ψ|), so `sqrtamat/√jarea` has a diagonal close to (and never above) one; this is the
-matrix Fortran GPEC writes as `J_surf_2` after that division.
-
-Each column is the unit mode e^{+i m_k θ} taken to θ-space with `FourierTransforms.inverse`,
-weighted pointwise, and brought back with the forward transform `ft(...)`, the same pair whose
-round trip is the identity, so the convolution structure is correct.
+For Fourier coefficients `b_fft` of a field b it satisfies `‖sqrtamat·b_fft‖² = ∫ |b|² · J|∇ψ| dθ`
+(θ normalized to one period), which is Jacobian-invariant on a given flux surface.
+`sqrtamat/√jarea` is the matrix Fortran GPEC writes as `J_surf_2`.
 """
 function compute_sqrtamat(
     equil::PlasmaEquilibrium,
@@ -88,13 +78,12 @@ function compute_sqrtamat(
         e_k .= 0.0
         e_k[k] = 1.0 + 0.0im
 
-        # Inverse FT of the unit mode, f(θ_j) = exp(+i m_k θ_j), through the library's own inverse
+        # Unit mode to θ-space, f(θ_j) = exp(+i m_k θ_j)
         theta_vec = Utilities.FourierTransforms.inverse(ft, e_k)
 
-        # Multiply pointwise by √(J·|∇ψ|) in theta-space
         theta_vec .*= sqrt_jdp
 
-        # Forward FT: theta-space → mode-space (exp(+imθ), Julia convention)
+        # Back to mode space (exp(+imθ) convention)
         sqrtamat[:, k] .= ft(theta_vec)
     end
 
@@ -107,12 +96,8 @@ end
 Build the root-area-weighted → area-weighted field operator `Σ/√A = sqrtamat ./ √jarea` at the
 flux surface `psi`, where `jarea = ∫ J|∇ψ| dθ` is the scalar flux-surface area. It maps the
 coordinate-invariant root-area-weighted field `b̃` to the area-weighted field `b̄`: `b̄ = (Σ/√A)·b̃`
-(both in tesla). Poloidal flux is the scalar product `Φ = A·b̄` (so `Φ = Σ·√A·b̃`), recovered only
-when a user supplies/requests flux — it is never stored.
-
-The √-weight (`b̃`) basis is the one in which operator singular values / spectra are independent of
-the straight-field-line (working) coordinate — see `field_space_response_matrices`. `b̄` is *not*
-coordinate-invariant; it is only a field/flux recovery view. [Pharr 2026]
+(both in tesla); `b̄` is not coordinate-invariant and serves only to recover field or flux
+(`Φ = A·b̄`). Pharr 2026.
 """
 function rootarea_to_area_weight(
     equil::PlasmaEquilibrium,
@@ -128,7 +113,7 @@ end
     area_to_rootarea_weight(equil, psi, ft) -> Matrix{ComplexF64}
 
 Inverse of [`rootarea_to_area_weight`](@ref): the area-weighted → root-area-weighted field operator
-`√A·Σ⁻¹ = √jarea · inv(sqrtamat)`, mapping `b̄ → b̃` (`b̃ = √A·Σ⁻¹·b̄`). [Pharr 2026]
+`√A·Σ⁻¹ = √jarea · inv(sqrtamat)`, mapping `b̄ → b̃` (`b̃ = √A·Σ⁻¹·b̄`). Pharr 2026.
 """
 function area_to_rootarea_weight(
     equil::PlasmaEquilibrium,

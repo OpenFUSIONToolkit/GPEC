@@ -20,19 +20,13 @@ end
 """
     _build_psi_grid(equil_params, psilow, psihigh)
 
-Resolve `mpsi` and build `psi_nodes` for any supported `grid_type`.
-
-For `"auto"` with `mpsi=0`, this is the coarse pass-1 layout of
-the two-pass refinement — the main driver measures the formed equilibrium and re-forms on
-the `refined_psi_grid` result. Shared by `direct_fieldline_int` and `efit_by_inversion`
-solvers.
+Resolve `mpsi` and build `psi_nodes` for any supported `grid_type`. For `"auto"` with `mpsi=0`
+this is the coarse pass-1 layout of the two-pass refinement (see `refined_psi_grid`).
 """
 function _build_psi_grid(equil_params, psilow, psihigh)
     mpsi = equil_params.mpsi
     if equil_params.grid_type == "auto" && mpsi == 0 && equil_params.psi_accuracy > 0
-        # Two-pass auto grid: this is the pass-1 layout; the driver measures the formed
-        # equilibrium's curvature and re-forms on a refined grid (GridRefinement.jl). Sized to
-        # resolve the gradient structure accurately so pass 2 is well-provisioned (PASS1_INTERVALS).
+        # Pass-1 layout of the two-pass auto grid.
         mpsi = PASS1_INTERVALS
         @info "Auto psi grid: forming pass-1 equilibrium on $(mpsi)-interval log_asymptotic grid pending curvature-based refinement"
     elseif mpsi == 0
@@ -55,7 +49,7 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     elseif equil_params.grid_type == "core_edge_packed"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
     elseif equil_params.grid_type == "pow1"
-        # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
+        # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper"): edge-packed grid.
         [psilow + (psihigh - psilow) * (3(ipsi / mpsi) - (ipsi / mpsi)^3) / 2 for ipsi in 0:mpsi]
     elseif equil_params.grid_type == "uniform"
         # Evenly spaced surfaces, e.g. for profile diagnostics at constant resolution
@@ -63,8 +57,7 @@ function _build_psi_grid(equil_params, psilow, psihigh)
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
-    # Floor node spacing on the fixed grids: core_edge_packed/pow1 pack the edge as ~(π/2·mpsi)⁻² and at high
-    # mpsi drive it below the integration-noise scale (garbage curvature). The auto grid floors its
-    # refined pass-2 grid in refined_psi_grid, so it is left untouched here.
+    # Floor node spacing on the fixed grids, whose edge packing at high mpsi drops below integration noise;
+    # the auto grid is floored in refined_psi_grid.
     return equil_params.grid_type == "auto" ? psi_nodes : enforce_min_spacing(psi_nodes, MIN_KNOT_SPACING)
 end

@@ -46,10 +46,9 @@ specified in the input.
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Requested upper limit of normalized flux coordinate; the value the
     equilibrium is actually formed on is `EquilibriumParameters.psihigh_resolved`.
-  - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the
-    two-pass auto grid: the main driver forms a coarse pass-1 equilibrium, measures its curvature,
-    pins knots on rational surfaces, and re-forms on the refined grid. Standalone `PlasmaEquilibrium`
-    callers get the coarse pass-1 grid unless they refine via `refined_psi_grid` + `override_psi_nodes`.
+  - `mpsi::Int` - Number of radial grid intervals; 0 with grid_type="auto" selects the two-pass auto
+    grid. Standalone `PlasmaEquilibrium` callers get the coarse pass-1 grid unless they refine via
+    `refined_psi_grid` + `override_psi_nodes`.
   - `psi_accuracy::Float64` - Target relative accuracy τ of splined profile derivatives for the
     two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
@@ -93,7 +92,6 @@ specified in the input.
     newq0::Float64 = 0.0
     flux_surface_rtol::Float64 = 1e-10
 
-    # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
     imas_cocos::Int = 11
 
     kinetic_file::String = ""
@@ -110,11 +108,9 @@ specified in the input.
     lnLambda_form::Union{Nothing,Symbol} = nothing
 
     """
-    Modified internal constructor that enforces self consistency within the inputs
+    Inner constructor that derives the Jacobian exponents from `jac_type` and validates the inputs.
     """
-    # The four `_` slots are the `power_bp/power_b/power_r/power_rc` struct fields, which @kwdef
-    # forwards positionally. They are always derived below from `jac_type` (or `jac_custom_power_*`),
-    # so their incoming values are ignored (hence `_`).
+    # The `_` slots are the `power_*` fields, always derived from `jac_type` here.
     function EquilibriumConfig(eq_type, eq_filename, r0_norm, b0_norm, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
@@ -239,7 +235,9 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `delta1::Union{Nothing,Float64}` - Upper triangularity
   - `delta2::Union{Nothing,Float64}` - Lower triangularity
   - `bt0::Union{Nothing,Float64}` - Toroidal field at axis [T]
-  - `crnt::Union{Nothing,Float64}` - Plasma current [A]
+  - `crnt::Union{Nothing,Float64}` - Plasma current [A], always positive
+  - `bt_sign::Int` - Sign of the toroidal field (+1 or -1; `bt0` is always positive)
+  - `ip_sign::Int` - Sign of the plasma current as the source file states it (+1 or -1)
   - `bwall::Union{Nothing,Float64}` - Toroidal field at wall [T]
   - `verbose::Bool` - Enable verbose output
   - `diagnose_src::Bool` - Enable source data diagnostics
@@ -256,55 +254,55 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `li3::Union{Nothing,Float64}` - Internal inductance (definition 3)
 """
 @kwdef mutable struct EquilibriumParameters
-    ro::Union{Nothing,Float64} = nothing # R-coordinate of the magnetic axis [m]
-    zo::Union{Nothing,Float64} = nothing # Z-coordinate of the magnetic axis [m]
-    psio::Union{Nothing,Float64} = nothing # Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
-    psihigh_resolved::Union{Nothing,Float64} = nothing # Outer flux limit actually formed on (clamped config.psihigh)
-    rsep::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma boundary [m]
-    zsep::Union{Nothing,Vector{Float64}} = nothing # Z-coordinates of the plasma boundary [m]
-    rext::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma edge [m]
-    zext::Union{Nothing,Vector{Float64}} = nothing # Z-coordinates of the plasma edge [m]
-    psi0::Union{Nothing,Float64} = nothing # Normalized poloidal flux
-    b0::Union{Nothing,Float64} = nothing # Total magnetic field strength at the axis [T]
-    q0::Union{Nothing,Float64} = nothing # Safety factor at the axis
-    qmin::Union{Nothing,Float64} = nothing # Minimum safety factor in the plasma
-    qmax::Union{Nothing,Float64} = nothing # Maximum safety factor in the plasma
-    qa::Union{Nothing,Float64} = nothing # Safety factor at the plasma edge
-    q95::Union{Nothing,Float64} = nothing # Safety factor at 95% flux surface
-    qextrema_psi::Union{Nothing,Vector{Float64}} = nothing # Normalized poloidal flux values where q has extrema
-    qextrema_q::Union{Nothing,Vector{Float64}} = nothing # Safety factor values at the extrema points
-    mextrema::Union{Nothing,Int} = nothing # Number of extrema points in the q-profile
-    psi_norm::Union{Nothing,Float64} = nothing # Normalized poloidal flux at the axis
-    psi_axis::Union{Nothing,Float64} = nothing # Normalized poloidal flux at the axis
-    psi_boundary::Union{Nothing,Float64} = nothing # Poloidal flux at the boundary
-    psi_boundary_norm::Union{Nothing,Float64} = nothing # Normalized poloidal flux at the boundary
-    psi_boundary_offset::Union{Nothing,Float64} = nothing # Offset for the boundary poloidal flux
-    psi_axis_offset::Union{Nothing,Float64} = nothing  # Offset for the axis poloidal flux
-    psi_boundary_sign::Union{Nothing,Int} = nothing # Sign of the boundary poloidal flux
-    psi_axis_sign::Union{Nothing,Int} = nothing # Sign of the axis poloidal flux
-    psi_boundary_zero::Union{Nothing,Bool} = nothing # Whether the boundary poloidal flux is zero
-    rmean::Union{Nothing,Float64} = nothing # Mean R-coordinate of the plasma [m]
-    amean::Union{Nothing,Float64} = nothing # Mean minor radius of the plasma [m]
-    aratio::Union{Nothing,Float64} = nothing # Aspect ratio of the plasma (R0/a)
-    kappa::Union{Nothing,Float64} = nothing # Elongation of the plasma cross-section
-    delta1::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (upper triangularity)
-    delta2::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (lower triangularity)
-    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
-    crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
-    bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
-    ip_sign::Int = 1 # Sign of the plasma current as the source file states it: +1 or -1 (crnt is always positive)
-    bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
-    verbose::Bool = false # Whether to print verbose output
-    diagnose_src::Bool = false # Whether to diagnose source data
-    diagnose_maxima::Bool = false # Whether to diagnose maxima in the equilibrium
-    volume::Union{Nothing,Float64} = nothing # Plasma volume [m³]
-    betat::Union{Nothing,Float64} = nothing # Toroidal beta (normalized pressure) at the axis
-    betan::Union{Nothing,Float64} = nothing # Normalized beta at the axis
-    betaj::Union{Nothing,Float64} = nothing # Total beta at the axis
-    betap1::Union{Nothing,Float64} = nothing # Pressure beta at the axis
-    betap2::Union{Nothing,Float64} = nothing # Toroidal beta at the axis
-    betap3::Union{Nothing,Float64} = nothing # Poloidal beta at the axis
-    li1::Union{Nothing,Float64} = nothing  # Internal inductance at the axis
-    li2::Union{Nothing,Float64} = nothing  # External inductance at the axis
-    li3::Union{Nothing,Float64} = nothing  # Total inductance at the axis
+    ro::Union{Nothing,Float64} = nothing
+    zo::Union{Nothing,Float64} = nothing
+    psio::Union{Nothing,Float64} = nothing
+    psihigh_resolved::Union{Nothing,Float64} = nothing
+    rsep::Union{Nothing,Vector{Float64}} = nothing
+    zsep::Union{Nothing,Vector{Float64}} = nothing
+    rext::Union{Nothing,Vector{Float64}} = nothing
+    zext::Union{Nothing,Vector{Float64}} = nothing
+    psi0::Union{Nothing,Float64} = nothing
+    b0::Union{Nothing,Float64} = nothing
+    q0::Union{Nothing,Float64} = nothing
+    qmin::Union{Nothing,Float64} = nothing
+    qmax::Union{Nothing,Float64} = nothing
+    qa::Union{Nothing,Float64} = nothing
+    q95::Union{Nothing,Float64} = nothing
+    qextrema_psi::Union{Nothing,Vector{Float64}} = nothing
+    qextrema_q::Union{Nothing,Vector{Float64}} = nothing
+    mextrema::Union{Nothing,Int} = nothing
+    psi_norm::Union{Nothing,Float64} = nothing
+    psi_axis::Union{Nothing,Float64} = nothing
+    psi_boundary::Union{Nothing,Float64} = nothing
+    psi_boundary_norm::Union{Nothing,Float64} = nothing
+    psi_boundary_offset::Union{Nothing,Float64} = nothing
+    psi_axis_offset::Union{Nothing,Float64} = nothing
+    psi_boundary_sign::Union{Nothing,Int} = nothing
+    psi_axis_sign::Union{Nothing,Int} = nothing
+    psi_boundary_zero::Union{Nothing,Bool} = nothing
+    rmean::Union{Nothing,Float64} = nothing
+    amean::Union{Nothing,Float64} = nothing
+    aratio::Union{Nothing,Float64} = nothing
+    kappa::Union{Nothing,Float64} = nothing
+    delta1::Union{Nothing,Float64} = nothing
+    delta2::Union{Nothing,Float64} = nothing
+    bt0::Union{Nothing,Float64} = nothing
+    crnt::Union{Nothing,Float64} = nothing
+    bt_sign::Int = 1
+    ip_sign::Int = 1
+    bwall::Union{Nothing,Float64} = nothing
+    verbose::Bool = false
+    diagnose_src::Bool = false
+    diagnose_maxima::Bool = false
+    volume::Union{Nothing,Float64} = nothing
+    betat::Union{Nothing,Float64} = nothing
+    betan::Union{Nothing,Float64} = nothing
+    betaj::Union{Nothing,Float64} = nothing
+    betap1::Union{Nothing,Float64} = nothing
+    betap2::Union{Nothing,Float64} = nothing
+    betap3::Union{Nothing,Float64} = nothing
+    li1::Union{Nothing,Float64} = nothing
+    li2::Union{Nothing,Float64} = nothing
+    li3::Union{Nothing,Float64} = nothing
 end

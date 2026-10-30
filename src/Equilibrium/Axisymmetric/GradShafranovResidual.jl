@@ -1,9 +1,8 @@
 """
     equilibrium_gse!(equil::PlasmaEquilibrium)
 
-Diagnoses the Grad-Shafranov solution by computing the residual of the
-Grad-Shafranov equation across the grid and writing diagnostic data to HDF5 files.
-Performs the same function as equil_out_gse in the Fortran code.
+Computes the Grad-Shafranov residual on the grid and, with `diagnose_src`, writes it to HDF5 files.
+Port of Fortran `equil_out_gse`.
 
 Returns `(; xs, ys, flux_x, flux_y, source, total, error, errori)` on the `rzphi` (ψ, θ) nodes: the two
 flux-divergence terms, the source, the residual `total = flux_x - flux_y + source`, `error = |total|` over

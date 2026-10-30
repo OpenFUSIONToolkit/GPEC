@@ -5,8 +5,7 @@ Reading and processing kinetic profile data (density, temperature, rotation,
 and optionally transport diffusivities) from the GPEC HDF5 kinetic format or
 from legacy 6-column ASCII tables (`.gpeckf`/`.kin`). The processed output is a
 `KineticProfileSplines` of independent named splines that downstream physics
-modules (KineticForces NTV, etc.) read directly without re-implementing data
-shimming.
+modules (KineticForces NTV, etc.) read directly.
 """
 
 using DelimitedFiles
@@ -173,9 +172,8 @@ end
 """
     multi_ion_composition(zs, ns, ne; zimp, mimp) -> (zeff, zpitch, n_main, n_imp)
 
-Full-composition effective charge and pitch-angle enhancement for a plasma with an
-arbitrary number of main-ion species. Inputs are per-point scalars (`zs`, `ns` are per-species
-values at one ψ; the caller loops grid points):
+Full-composition effective charge and pitch-angle enhancement at one ψ point for a plasma with an
+arbitrary number of main-ion species:
 
   - `zs`, `ns`: main-ion charges and number densities (one entry per species)
   - `ne`: electron density
@@ -188,10 +186,7 @@ Composition (per point):
     Zeff   = (Σ_s z_s² n_s + z_imp² n_imp) / n_e
     zpitch = 1 + (1+m_imp)/(2 m_imp)·z_imp·(Zeff−1)/(z_imp−Zeff)   momentum-restoring closure
 
-Reduces **exactly** to the single-ion form `Zeff = z_imp − (n_i/n_e)·z_i·(z_imp−z_i)` for one
-z-species (verified algebraically). The per-species pitch-angle collision frequency built from
-this is `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s · (T_s)^{3/2})` — shared `zpitch`, `n_main`,
-`Zeff`, `lnΛ`; the test species contributes only its own `z_s²`, `m_s`, `T_s`.
+Reduces exactly to the single-ion form `Zeff = z_imp − (n_i/n_e)·z_i·(z_imp−z_i)` for one main-ion species.
 """
 function multi_ion_composition(zs::AbstractVector, ns::AbstractVector, ne::Real;
     zimp::Real, mimp::Real)
@@ -208,23 +203,17 @@ end
 """
     resolve_ntv_species(data::KineticProfileData, ion_species; electron, zimp, mimp, ...) -> Vector{ResolvedNTVSpecies}
 
-Resolve the **full NTV species set** for a multi-ion run: the main ions, the neutrality-closing
-impurity, and (if `electron`) the electrons. Returns `ResolvedNTVSpecies` descriptors — the
-single set that BOTH NTV paths (the KineticForces quadrature and the self-consistent kinetic-matrix
-build) loop over and sum. Errors on any negative density (unphysical input / resample overshoot).
+Resolve the full NTV species set for a multi-ion run: the main ions, the neutrality-closing
+impurity (`zimp`, `mimp`, density from quasineutrality), and the electrons if `electron`. Both NTV
+paths (the KineticForces quadrature and the self-consistent kinetic-matrix build) loop over and sum
+this set. Errors on any negative density.
 
-Each descriptor's `profiles` view carries **that species' resonant density** `n_s` (as `ni_spline`)
-and its **full-composition collision frequency** `ν_s` (as `nui_spline`); `ne/Te/ωE/Zeff/lnΛ` (and
-the electron `nue`) are shared. Main-ion density is resolved from `IonSpecies`: `fraction` ⇒
-`n_s = fraction · n_i` (the kinetic file's `n_i` = total main-ion density); `density` ⇒ an explicit
-`n_*`-named dataset of the HDF5 kinetic data (e.g. `"n_D"`), cubic-resampled to the working grid.
-In a mixed fraction/density list the impurity content is set by the file's n_i/n_e deficit, not by
-a fraction shortfall. Composition (Zeff, zpitch, `n_imp`) comes from `multi_ion_composition`;
-per-species `ν_s = (zpitch/3.5e17)·z_s²·n_main·lnΛ / (√m_s·(T_i)^{3/2})`. The `zpitch·n_main` field
-term is exact for z=1 main ions (D-T, D-H) and approximate otherwise (a z>1 main ion's charge
-enters only through Zeff in the impurity closure). The impurity (`zimp`,`mimp`, density = the
-quasineutrality `n_imp`) is included as its own resonant species. Reduces to
-[`kinetic_profile_splines`](@ref) for one z=1 main ion with `fraction=1`.
+Each descriptor's `profiles` carries that species' density as `ni_spline` and its full-composition
+Krook collision frequency (Logan & Park 2013 Eq. 6) as `nui_spline`; the other profiles are shared.
+A main ion's density is `fraction · n_i` (`n_i` is the total main-ion density) or the named `n_*`
+dataset given by `density` (e.g. `"n_D"`). In a mixed fraction/density list the impurity content is
+set by the file's n_i/n_e deficit. The `zpitch` closure is exact for z=1 main ions and approximate
+otherwise. Reduces to [`kinetic_profile_splines`](@ref) for one z=1 main ion with `fraction=1`.
 """
 function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVector;
     electron::Bool=false, zimp::Integer=6, mimp::Integer=12,
@@ -254,10 +243,7 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     _assert_nonneg_density(source, "n_e", ne, psi_reg)
     _assert_nonneg_density(source, "n_i (total)", ni_total, psi_reg)
 
-    # Fraction bookkeeping: fractions are shares of the total n_i, so they can never sum above 1,
-    # and when every species is fraction-specified they must account for all of n_i. (In a mixed
-    # fraction/density list no full-sum check is possible; the n_imp ≥ 0 quasineutrality check below
-    # still catches over-allocation in physical units.)
+    # Fractions are shares of the total n_i: never above 1, and exactly 1 when every species is fraction-specified.
     fracs = [s.fraction for s in ion_species if !isnan(s.fraction)]
     if !isempty(fracs)
         fsum = sum(fracs)
@@ -319,16 +305,13 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     maximum(zeff) > 0.9 * zimp &&
         @warn "max(Zeff) = $(maximum(zeff)) is within 10% of zimp = $zimp — zpitch closure near its pole; check ion_species densities/fractions"
 
-    # Per-species Krook ν of Logan & Park (2013) Eq. (6); numerical form ported from Fortran
-    # PENTRC inputs.f90:238-244 with an added test-particle z_s². Shared zpitch/n_main/Zeff/lnΛ,
-    # species-specific z²/m/T_i; `zpitch` is a main-ion closure, applied approximately to the
-    # impurity/electron test species.
+    # Per-species Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z_s²; `zpitch` is a main-ion closure,
+    # applied approximately to the impurity/electron test species.
     _nu(zsp, msp) = [Ti[i] > 0 ? (zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * (Ti[i] / _KEV_J)^1.5) : 0.0 for i in 1:npts]
     _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
 
     # Full NTV species set: main ions, the neutrality-closing impurity, and (optionally) electrons.
-    # Labels become HDF5 group names under KineticForces/PerSpecies/, so z and m identify the
-    # species; a repeated (z, m) pair gets a numeric discriminator to keep the names unique.
+    # Labels become HDF5 group names under KineticForces/PerSpecies/; a repeated (z, m) gets a numeric suffix.
     species = ResolvedNTVSpecies[]
     seen_labels = Dict{String,Int}()
     function _unique_label(base)
@@ -376,21 +359,15 @@ Needs `n_e`, `T_i`, `T_e` and `omega_E`; `n_i` defaults to `n_e`. See
   - `toroidal_rotation_factor`: Toroidal rotation scaling factor (scales total wphi = omegaE + wdian + wdiat)
   - `chi1`: Poloidal flux normalization `2π·ψ₀` — required when `density_factor`, `temperature_factor`, or `toroidal_rotation_factor` differ from 1.0
 
-# Scaling sequence
+# Scaling
 
-When any of `density_factor`, `temperature_factor`, `toroidal_rotation_factor` differ from 1.0:
+When `density_factor`, `temperature_factor` or `toroidal_rotation_factor` differ from 1, the total
+rotation `wphi = omegaE + wdian + wdiat` is held from the unscaled profiles, the diamagnetic frequencies
+scale with `temperature_factor` (`density_factor` cancels), and `omegaE` is reformed as
+`toroidal_rotation_factor * wphi - wdian - wdiat`. `ExB_rotation_factor` then multiplies `omegaE`.
 
- 1. Build first-pass cubic splines from unscaled profiles (for derivatives)
- 2. Compute diamagnetic frequencies `wdian`, `wdiat` and total toroidal rotation `wphi`
- 3. Scale: `wdian_new = temperature_factor * wdian`, `wdiat_new = temperature_factor * wdiat` (`density_factor` cancels in `T*(dn/dψ)/n`)
- 4. Reform: `omegaE = toroidal_rotation_factor * wphi - wdian_new - wdiat_new`
- 5. Scale density/temperature arrays: `ni *= density_factor`, `Ti *= temperature_factor`, etc.
-
-Then `ExB_rotation_factor` is applied independently: `omegaE *= ExB_rotation_factor`.
-
-Collisionality is recomputed from the (possibly scaled) profiles. This differs from
-Fortran PENTRC, which computes collisionality from unscaled profiles. Use `nufac`
-(in `KineticForcesControl`) for independent collisionality scaling.
+Collisionality is recomputed from the scaled profiles (unlike Fortran PENTRC); use `nufac`
+(in `KineticForcesControl`) to scale collisionality independently.
 """
 function kinetic_profile_splines(data::KineticProfileData;
     zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
@@ -398,8 +375,7 @@ function kinetic_profile_splines(data::KineticProfileData;
     ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
     chi1::Union{Nothing,Float64}=nothing)
 
-    # NTV requires n_e, T_i, T_e, omega_E; n_i defaults to n_e (quasineutrality)
-    # when absent. omega_tor / chi_e / chi_phi (if present) are ignored here.
+    # n_i defaults to n_e (quasineutrality); omega_tor and the diffusivities are unused here.
     _need(field, name) = field === nothing ? error("$(_describe(data)) missing required '$name'") : field
     psi_input = data.psi
     ne_input = _need(data.n_e, "n_e")
@@ -411,12 +387,7 @@ function kinetic_profile_splines(data::KineticProfileData;
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
 
-    # Match Fortran pentrc/inputs.f90:215-232 — cubic-spline-then-resample, NOT
-    # linear interp. Linear interp of the irregular .kin grid produces large
-    # errors wherever the profile has curvature, and is catastrophic where
-    # omegaE crosses zero (DIIID: ψ≈0.9 omegaE flips sign in one Δψ≈0.01 cell;
-    # linear interp misses sign and magnitude of welec → wrong resonance
-    # denominator). See feedback_kf_kin_profile_linear_interp.md.
+    # Cubic-spline resample as in Fortran PENTRC; linear interpolation misplaces ω_E zero crossings and so the resonance.
     ni = _cubic_resample(psi_input, ni_input, psi_reg)
     ne = _cubic_resample(psi_input, ne_input, psi_reg)
     Ti = _cubic_resample(psi_input, Ti_input_eV, psi_reg) .* _EV_J
@@ -481,9 +452,7 @@ function kinetic_profile_splines(data::KineticProfileData;
         ll = _coulomb_log(n_e, T_e)
         loglam[i] = ll
 
-        # Krook ν of Logan & Park (2013) Eq. (6); numerical form ported from Fortran PENTRC
-        # inputs.f90:238-244 with an added test-particle z² (generalizes the implicit zi=1 form);
-        # identical to the single-species limit of resolve_ntv_species.
+        # Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z²; the single-species limit of resolve_ntv_species.
         nui[i] = T_i > 0 ?
                  (zpitch / _NU_PREFAC) * zi^2 * n_i * ll / (sqrt(1.0 * mi) * (T_i / _KEV_J)^1.5) : 0.0
         nue[i] = T_e > 0 ?
@@ -495,17 +464,13 @@ function kinetic_profile_splines(data::KineticProfileData;
 end
 
 """
-Internal helper: parse the raw 6-column kinetic profile table from disk,
-filtering out non-numeric header rows. Returns six independent column views.
-`#` comment lines (e.g. a provenance header) are stripped so they cannot widen
-the parsed matrix and pad the data rows.
+Parse a 6-column kinetic profile table, dropping `#` comments and non-numeric header rows.
+Returns the six columns.
 """
 function _read_kinetic_table(kinetic_file::AbstractString)
     table = DelimitedFiles.readdlm(kinetic_file; comments=true)
 
-    # Keep numeric rows only (drops text headers). Build row-major by rebuilding
-    # the matrix as a stack of rows — reshape(:, 6) is column-major and scrambles
-    # columns.
+    # Keep numeric rows and stack them row-wise (reshape(:, 6) is column-major and would scramble columns).
     numeric_rows = [collect(row) for row in eachrow(table) if all(x -> isa(x, Number), row)]
     if isempty(numeric_rows)
         error("No numeric data rows found in kinetic file: $kinetic_file")
@@ -523,10 +488,8 @@ function _read_kinetic_table(kinetic_file::AbstractString)
 end
 
 """
-Cubic-spline resample matching Fortran pentrc/inputs.f90:215-232:
-build a cubic spline on the (irregular) input grid, then evaluate at the
-regular psi_new grid. Out-of-range points use ExtendExtrap (smooth cubic
-extrapolation), matching Fortran's `spline_fit(...,"extrap")`.
+Cubic spline of `y(x)` on the irregular input grid, evaluated at `x_new` with smooth cubic
+extrapolation, as Fortran PENTRC `spline_fit(..., "extrap")`.
 """
 function _cubic_resample(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
     spl = cubic_interp(collect(Float64, x), collect(Float64, y); extrap=ExtendExtrap())

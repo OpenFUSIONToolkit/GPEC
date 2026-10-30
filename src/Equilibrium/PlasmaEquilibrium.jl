@@ -2,7 +2,6 @@
     ProfileSplines
 
 Named 1D cubic spline interpolants for equilibrium profiles.
-Each profile is stored as a separate spline for code clarity.
 
 # Fields
 
@@ -223,11 +222,9 @@ KineticProfileData(data::KineticProfileData; kwargs...) =
 """
     KineticProfileSplines
 
-Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures,
-ExB rotation, collisional diagnostics) loaded from an external `kinetic.dat`
-file. Mirrors the `ProfileSplines` pattern: each quantity is its own named
-spline plus a paired derivative view for the species the NTV kernel needs
-(densities and temperatures, used by `wdian`/`wdiat` in `KineticForces/Torque.jl`).
+Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures, ExB rotation,
+collisional diagnostics) on the regular kinetic ψ grid, with derivative views of the densities and
+temperatures for the diamagnetic frequencies of the NTV kernel.
 
 # Fields
 
@@ -302,8 +299,7 @@ end
 """
     PlasmaEquilibrium(...)
 
-The final, self-contained result of the equilibrium reconstruction.
-This object provides a complete representation of the processed plasma equilibrium in flux coordinates.
+The final, self-contained result of the equilibrium reconstruction, in flux coordinates.
 
 # Fields
 

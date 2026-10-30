@@ -1,25 +1,17 @@
 """
-Converts inverse equilibrium to straight-fieldline coordinates. Based on inverse.f
-Of the entries we need to return: PlasmaEquilibrium(equil_params, sq_out, rzphi_out, eqfun_out, ro, zo, psio),
-we only need to generate: sq_out, rzphi_out, eqfun_out. This is because we pass in InverseRunInput(equil_in,
-sq_in, rz_in, ro, zo, psio).
-
+Converts an inverse equilibrium (`InverseRunInput`, R and Z on a (ψ, θ) grid) to straight-fieldline coordinates.
+Based on Fortran inverse.f.
 """
 
 """
     inverse_extrap(xx::Matrix{Float64}, ff::Matrix{Float64}, x::Float64) -> Vector{Float64}
 
-Performs component-wise Lagrange extrapolation for a vector-valued function.
+Component-wise Lagrange extrapolation of a vector-valued function to `x`.
 
-## Arguments:
+## Arguments
 
-  - `xx`: A (m × n) matrix where each row contains the x-values for each component.
-  - `ff`: A (m × n) matrix where each row contains function values at the corresponding `xx`.
-  - `x`: A scalar Float64 value at which to extrapolate.
-
-## Returns:
-
-  - A vector of length n representing the extrapolated function values at `x`.
+  - `xx`: `m × n` abscissae, row `i` holding the x-values of point `i` for each of the n components
+  - `ff`: `m × n` function values at `xx`
 """
 function inverse_extrap(xx::Matrix{Float64}, ff::Matrix{Float64}, x::Float64)::Vector{Float64}
     m, n = size(ff)             # m = number of data points, n = number of components
@@ -77,9 +69,6 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     psihigh = input.psihigh_resolved
     newq0 = config.newq0
 
-    # c-----------------------------------------------------------------------
-    # c     allocate and define local arrays.
-    # c-----------------------------------------------------------------------
     # Access grid dimensions from the interpolants
     mx = length(rz_in_xs) - 1
     my = length(rz_in_ys) - 1
@@ -103,9 +92,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         end
     end
 
-    # c-----------------------------------------------------------------------
-    # c     transform input coordinates from cartesian to polar.
-    # c-----------------------------------------------------------------------
+    # Transform input coordinates from Cartesian to polar
     for ipsi in 0:mx
         for itheta in 1:my
             Δ = deta[ipsi+1, itheta+1] - deta[ipsi+1, itheta]
@@ -122,15 +109,13 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         end
     end
 
-    # Replicate Fortran inverse.f: overwrite deta at the axis (r²=0) by extrapolating from
-    # the innermost non-zero surfaces. Only applies when the grid includes the axis (rz_in_xs[1]=0).
+    # As in Fortran inverse.f: when the grid includes the axis, extrapolate deta there from the innermost surfaces.
     me = 3
     if rz_in_xs[1] == 0.0
         deta[1, :] .= inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
     end
 
-    # Ensure periodicity: copy first theta column to last
-    # (The computation above may have broken periodicity due to subtracting rz_in_ys values)
+    # Restore exact θ periodicity, broken by subtracting rz_in_ys
     @views r2[:, end] .= r2[:, 1]
     @views deta[:, end] .= deta[:, 1]
 
@@ -139,9 +124,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     # Create 2D interpolants for r² and dη
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; itp_opts2d...)
     rz_deta = cubic_interp((rz_in_xs, rz_in_ys), deta; itp_opts2d...)
-    # c-----------------------------------------------------------------------
-    # c     set up radial grid
-    # c-----------------------------------------------------------------------
+    # Radial grid
     if override_psi_nodes !== nothing
         sq_xs = _validate_psi_nodes(override_psi_nodes, psilow, psihigh)
         mpsi = length(sq_xs) - 1
@@ -200,24 +183,20 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     sq_fs = zeros(Float64, mpsi+1, 4)
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
 
-    # c-----------------------------------------------------------------------
-    # c     prepare new bicube type for coordinates.
-    # c-----------------------------------------------------------------------
+    # Coordinate grids
     if mtheta == 0
         mtheta = my
     end
 
     theta_range = range(0.0, 1.0; length=mtheta+1)
 
-    # (/"  r2  "," deta "," dphi ","  jac "/)
+    # rzphi components: r², deta, dphi, jac
     rzphi_fs = zeros(Float64, mpsi+1, mtheta+1, 4)
     rzphi_xs = copy(sq_xs)
-    # rzphi_ys is the materialized Vector stored in PlasmaEquilibrium for indexing/diagnostics.
-    # The Range form (theta_range) is used for the interpolant: it skips index search during
-    # evaluation (O(1) vs binary search) and may differ at machine-precision level from Vector.
+    # Vector copy stored in PlasmaEquilibrium; interpolants use the faster Range theta_range (equal to machine precision).
     rzphi_ys = collect(theta_range)
 
-    # (/"  b0  ","      ","      " /)
+    # eqfun components: |B|, metric1, metric2
     eqfun_fs = zeros(Float64, mpsi+1, mtheta+1, 3)
     eqfun_xs = copy(sq_xs)
 
@@ -268,12 +247,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
             spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.power_bp * b^config.power_b / (r^config.power_r * max(rfac, eps(Float64))^config.power_rc)
 
         end
-        # c-----------------------------------------------------------------------
-        # c     fit to cubic splines and integrate.
-        # c-----------------------------------------------------------------------
-
-        # Ensure periodicity: copy first theta row to last
-        # (Numerical operations may have broken exact periodicity)
+        # Fit periodic splines in θ and integrate; snap the periodic endpoint first
         @views spl_fs[end, :] .= spl_fs[1, :]
 
         spl = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
@@ -287,10 +261,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         @views spl_fs[:, 4] .= (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) .* (spl_fsi[mtheta+1, 3] * twopi * pi)
         @views spl_fs[:, 3] .= (f_sq_in_buf[1] * pi / psio) .* (spl_fsi[:, 4] .- spl_fsi[mtheta+1, 4] .* spl_xs)
 
-        # Build spline on the post-SFL theta grid (spl_xs) from the modified spl_fs,
-        # then evaluate at the uniform SFL theta grid (rzphi_ys). This correctly
-        # propagates the SFL coordinate transformation into the rzphi splines.
-        # (Using spl.y directly would give pre-transformation values — wrong for eqfun.)
+        # Re-spline on the SFL angles spl_xs and evaluate at the uniform rzphi_ys (spl.y holds pre-transform values).
         spl_post = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
         hint_post = Ref(1)
         for itheta in 0:mtheta

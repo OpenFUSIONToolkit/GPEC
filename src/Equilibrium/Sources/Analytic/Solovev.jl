@@ -1,7 +1,7 @@
 """
     SolovevConfig(...)
 
-A struct holding parameters for the Solev'ev (SOL) plasma equilibrium model.
+A struct holding parameters for the Solov'ev (SOL) plasma equilibrium model.
 
 ## Fields:
 
@@ -30,26 +30,10 @@ A struct holding parameters for the Solev'ev (SOL) plasma equilibrium model.
 end
 
 """
-This function handles the Solovev analytical equilibrium model, transforming the input parameters
-into the necessary splines and scalar values for equilibrium construction. This is a Julia version
-of the Fortran code in sol.f, with no major differences except for arrays going from 0:n to 1:n+1.
+    sol_run(equil_inputs, sol_inputs) -> DirectRunInput
 
-## Arguments:
-
-  - `mr`: Number of radial grid zones
-  - `mz`: Number of axial grid zones
-  - `ma`: Number of flux grid zones
-  - `e`: Elongation
-  - `a`: Minor radius
-  - `r0`: Major radius
-  - `q0`: Safety factor at the o-point
-  - `p0fac`: Scales on axis pressure (s*P. beta changes. Phi,q constant)
-  - `b0fac`: Scales on toroidal field (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
-  - `f0fac`: Scales on toroidal field (s*f. bt,q changes. Phi,p,bp constant)
-
-## Returns:
-
-  - `DirectRunInput` object
+Build the Solov'ev analytic ψ(R, Z) and 1D profiles from `sol_inputs` as direct-solver input.
+Port of Fortran `sol.f`.
 """
 function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
 

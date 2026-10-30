@@ -51,7 +51,7 @@ function run_input(eq_config::EquilibriumConfig, input::InverseRunInput)
 end
 
 """
-    PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; override_psi_nodes=nothing) -> PlasmaEquilibrium
+    PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; override_psi_nodes=nothing, kinetic=nothing) -> PlasmaEquilibrium
 
 Form the equilibrium `eq_config` describes from `source` (see [`run_input`](@ref)), run the
 solver, and return it with global parameters, q-profile, and GSE diagnostics. Every other
@@ -59,9 +59,8 @@ constructor ends here.
 
 `override_psi_nodes` bypasses the config-driven radial grid (`grid_type`/`mpsi`) and forms
 the equilibrium on the given strictly increasing ψ_N node vector, whose endpoints must match
-`psilow`/`psihigh`. Used by the two-pass auto-grid refinement through [`reform`](@ref); standalone
-callers with `mpsi=0` get the coarse first-pass grid unless they refine and re-form. The kinetic
-profiles named by `kinetic_file` are read and attached, unless `kinetic` passes already-read ones.
+`psilow`/`psihigh` (used by [`reform`](@ref)). The kinetic profiles named by `kinetic_file` are read
+and attached, unless `kinetic` passes already-read ones.
 """
 function PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing,
     kinetic::Union{Nothing,KineticProfileData}=nothing)
@@ -92,9 +91,8 @@ end
     reform(equil::PlasmaEquilibrium, psi_nodes::Vector{Float64}) -> PlasmaEquilibrium
 
 Re-form `equil` on the ψ_N nodes `psi_nodes` from the source it remembers: the stored
-`analytic` config, else its raw `ingest`, so no file is re-read. Its kinetic profiles carry over. Only an equilibrium carrying
-neither (one built with the positional constructor, or by a reader that captures no ingest)
-falls back to re-reading `config.eq_filename`. The node endpoints must match `psilow`/`psihigh`.
+`analytic` config, else its raw `ingest`, so no file is re-read; with neither it re-reads
+`config.eq_filename`. Its kinetic profiles carry over. The node endpoints must match `psilow`/`psihigh`.
 """
 function reform(equil::PlasmaEquilibrium, psi_nodes::Vector{Float64})
     source = if equil.analytic !== nothing
