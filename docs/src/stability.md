@@ -352,10 +352,15 @@ flattening against an electron parallel conductivity, so its χ_⊥ is the elect
 in every case. `[SLAYER] chi_perp_Dc` (optional) sets that electron diffusivity for the critical Δ
 alone, leaving `P_perp` on its own χ inputs. The deck key is one value for every surface, over
 any `chi_e` profile; `build_slayer_inputs` also takes a function of ψ. It moves the critical
-resonant field through the critical Δ. It is for a run whose `P_perp` uses a diffusivity
-the critical Δ should not, for example a one-fluid χ_eff in both channels of `D_⊥` when an
-interpretive power balance splits the conducted heat between species unreliably, while the
-critical Δ takes the electron χ that balance allows. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
+resonant field through the critical Δ. It is for a run where one χ⊥,e cannot serve
+both formulas. `D_⊥` needs only the total conducted heat, so a run can use a one-fluid χ_eff in both
+channels when an interpretive power balance cannot separate the species; where T_i ≈ T_e the
+electron-ion exchange term makes that split uncertain, and it can return χ⊥,i < 0. The critical Δ
+still needs an electron diffusivity, which χ_eff is not, and `chi_perp_Dc` makes that choice
+explicit. Where the split is uncertain the electron χ is uncertain too, so treat the value as a
+modeling choice and scan it. The same split can often be reached without this key, by choosing
+`chi_e` and `chi_i` to keep the `D_⊥` total, but not when the wanted `chi_e` would leave `chi_i ≤ 0`.
+`[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
 the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code), from
 `chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
 confinement time (`"tau_E"`); see `slayer_parameters`. `"tau_E"` is for a plasma with no χ
