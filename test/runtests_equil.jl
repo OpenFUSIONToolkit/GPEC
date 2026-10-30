@@ -16,7 +16,12 @@ using TOML
             psilow=0.01,
             psihigh=0.994
         )
-        global plasma_eq_efit = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(efit_config)
+        # A healthy g-file takes the plain Newton path to the magnetic axis, without the bisection restart.
+        logger = Test.TestLogger(; min_level=Base.CoreLogging.Warn)
+        global plasma_eq_efit = Base.CoreLogging.with_logger(logger) do
+            GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(efit_config)
+        end
+        @test !any(occursin("bisection", log.message) for log in logger.logs)
 
         @test plasma_eq_efit isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
@@ -522,6 +527,17 @@ using TOML
         q_lar = plasma_eq_lar.profiles.q_spline.y
         @test all(>(0), q_lar)
         @test issorted(q_lar)
+
+        # The "hollow" current profile keeps q(0) = q0 but drives an off-axis current peak, giving reversed shear:
+        # q falls to an interior minimum and rises again, crossing q = 2 on both legs.
+        hollow_input = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(;
+            r0=10.0, a=1.0, q0=2.4, beta0=1e-3, p_sig=2.0, sigma_type="hollow", hollow=6.0, mtheta=64, ma=64
+        )
+        q_rs = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(lar_config, hollow_input).profiles.q_spline.y
+        jmin = argmin(q_rs)
+        @test 1 < jmin < length(q_rs)
+        @test q_rs[jmin] < 2 < min(q_rs[1], q_rs[end])
+        @test isapprox(q_rs[1], 2.4; rtol=0.05)
     end
 
     @testset "Solovev Equilibrium" begin

@@ -4,6 +4,7 @@ const TEST_SUITES = [
     "runtests_fouriertransforms.jl" => "core",
     "runtests_vacuum.jl" => "core",
     "runtests_equil.jl" => "core",
+    "runtests_equil_axis_newton.jl" => "core",
     "runtests_sfl_sampling.jl" => "core",
     "runtests_grid_refinement.jl" => "api",
     "runtests_core_capped_knots.jl" => "core",

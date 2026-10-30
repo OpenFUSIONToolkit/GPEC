@@ -117,7 +117,7 @@ const TEARING_H5_ANNOTATIONS = [
         (; long_name="real E×B Doppler offset ΔRe(Q) = −τ_k·n·Ω_E applied to each surface's inner-layer Q in the coupled determinant (0 in uncoupled mode)", dims=("surface",)),
     "PerSurface/tau_R" => (; long_name="resistive diffusion time τ_R = μ₀r_s²/η per surface", units="s", dims=("surface",)),
     "PerSurface/Delta_prime_norm" => (; long_name="Δ'-normalization factor S^(1/3)/r_s per surface", units="1/m", dims=("surface",)),
-    "PerSurface/rs" => (; long_name="minor radius of each rational surface", units="m", dims=("surface",)),
+    "PerSurface/rs" => (; long_name="minor radius √(2ψ_t/B₀) of each rational surface (toroidal-flux label)", units="m", dims=("surface",)),
     "PerSurface/R0" => (; long_name="major radius", units="m", dims=("surface",)),
     "PerSurface/bt" => (; long_name="toroidal field", units="T", dims=("surface",)),
     "PerSurface/sval_r" => (; long_name="r-based magnetic shear r_s·(dq/dr)/q (Fitzpatrick convention)", dims=("surface",)),

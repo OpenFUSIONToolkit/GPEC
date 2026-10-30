@@ -42,27 +42,32 @@ end
     rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
 
 Unique ψ_N locations of all rational surfaces q = m/n for n in `nlow:nhigh`, sorted
-increasing. Used as mandatory knots for the two-pass equilibrium grid refinement (the
-same physical surface reached through several (m, n) pairs is deduplicated by q value).
+increasing. Used as mandatory knots for the two-pass equilibrium grid refinement. Roots
+are deduplicated by (q, ψ), so several (m, n) of equal ratio collapse to one node while the
+two crossings of one rational on a reverse-shear profile stay distinct.
 """
 function rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
     surfaces = _find_rational_surfaces(equil, nlow, nhigh)
-    nodes = Float64[]
-    qs = Float64[]
+    kept = @NamedTuple{q::Float64, psifac::Float64}[]
     for s in surfaces
-        any(q -> isapprox(q, s.m / s.n; atol=1e-8), qs) && continue
-        push!(qs, s.m / s.n)
-        push!(nodes, s.psifac)
+        q = s.m / s.n
+        any(k -> _same_surface(k.q, k.psifac, q, s.psifac), kept) && continue
+        push!(kept, (q=q, psifac=s.psifac))
     end
-    return sort!(nodes)
+    return sort!([k.psifac for k in kept])
 end
+
+# Two rational-surface roots are one physical surface when both q and ψ agree.
+const SURFACE_TOLERANCE = 1e-8
+_same_surface(q_a, psi_a, q_b, psi_b) = isapprox(q_a, q_b; atol=SURFACE_TOLERANCE) && isapprox(psi_a, psi_b; atol=SURFACE_TOLERANCE)
 
 """
     sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
 
-Locate singular rational q-surfaces (q = m/nn) using a bisection method
-between extrema of the q-profile, and store their properties in `intr.sing`.
-Performs the same function as `sing_find` in the Fortran code.
+Locate singular rational q-surfaces (q = m/n) by bisection between extrema of the q-profile,
+and store their properties in `intr.sing`, sorted by increasing ψ. Roots of equal ratio m/n at
+the same ψ (e.g. (2,1) and (4,2)) merge into one surface carrying all its (m, n); the two
+crossings of one rational on a reverse-shear profile stay separate surfaces with opposite-sign q′.
 """
 function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     profiles = equil.profiles
@@ -70,10 +75,8 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 
     for s in _find_rational_surfaces(equil, intr.nlow, intr.nhigh)
         m, n, psifac = s.m, s.n, s.psifac
-        if any(sg -> isapprox(sg.q, m / n; atol=1e-8), intr.sing)
-            # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
-            # Technically only need m or n, but simplifies some later code and cheap to store both
-            idx = findfirst(sg -> isapprox(sg.q, m / n; atol=1e-8), intr.sing)
+        idx = findfirst(sg -> _same_surface(sg.q, sg.psifac, m / n, psifac), intr.sing)
+        if idx !== nothing
             push!(intr.sing[idx].m, m)
             push!(intr.sing[idx].n, n)
         else
@@ -163,8 +166,10 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 
     # If truncate_at_rational_offset decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
-        # Find nearest ψ index where q ≈ qlim
-        _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
+        # Seed from the edge inward at the outermost node with q ≤ qlim, so a reversed-shear profile, which crosses
+        # qlim on both legs of its minimum, gets the outer crossing.
+        qy = profiles.q_spline.y
+        jpsi = something(findlast(<=(intr.qlim), qy), argmin(abs.(qy .- intr.qlim)))
         jpsi = min(jpsi, length(profiles.xs) - 1)
 
         hint = Ref(jpsi)
@@ -178,13 +183,13 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
-    remove_singular_surfs!(intr; qmin=-Inf, psimax=intr.psilim) -> keep
+    remove_singular_surfs!(intr; psimin=-Inf, psimax=intr.psilim) -> keep
 
-Drop rational surfaces with `q < qmin` or `psifac > psimax` from `intr.sing`, logging any dropped,
+Drop rational surfaces outside `psimin ≤ psifac ≤ psimax` from `intr.sing`, logging any dropped,
 and return the indices of those kept.
 """
-function remove_singular_surfs!(intr::ForceFreeStatesInternal; qmin::Real=-Inf, psimax::Real=intr.psilim)
-    keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin && intr.sing[j].psifac <= psimax]
+function remove_singular_surfs!(intr::ForceFreeStatesInternal; psimin::Real=-Inf, psimax::Real=intr.psilim)
+    keep = [j for j in 1:intr.msing if psimin <= intr.sing[j].psifac <= psimax]
     if length(keep) < intr.msing
         excluded = [(intr.sing[j].m, intr.sing[j].q) for j in setdiff(1:intr.msing, keep)]
         @info "Filtered $(length(excluded)) singular surface(s) outside integration domain: $(excluded)"
@@ -195,38 +200,36 @@ function remove_singular_surfs!(intr::ForceFreeStatesInternal; qmin::Real=-Inf, 
 end
 
 """
+    qlow_start_psi(qlow, equil) -> ψ
+
+Lower integration bound set by `qlow`: the outermost crossing of q = qlow, so the whole q < qlow
+region inside it is excluded, whether a monotonic core (q ≤ 1 sawtooth surfaces) or a reversed-shear
+ring around q_min. Read from the same spline q extrema `sing_find!` brackets its roots with, so a dip
+between grid nodes counts; the root is bracketed on the monotone stretch past the outermost extremum
+below qlow. Returns the first grid node when q ≥ qlow everywhere.
+"""
+function qlow_start_psi(qlow::Real, equil::Equilibrium.PlasmaEquilibrium)
+    psiex, qex = equil.params.qextrema_psi, equil.params.qextrema_q
+    k = findlast(<(qlow), qex)
+    k === nothing && return equil.profiles.xs[1]
+    k < length(qex) || error("qlow=$qlow: q < qlow up to the edge of the ψ grid (q there is $(qex[end])), so no integration domain remains.")
+    return find_zero(psi -> equil.profiles.q_spline(psi) - qlow, (psiex[k], psiex[k+1]), Roots.Brent())
+end
+
+"""
     sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
-Set the lower integration bound `intr.psilow`. Port of Fortran RDCON `sing_min` (sing.f):
-when `qlow > qmin`, the q < qlow core (including any q ≤ 1 sawtooth/internal-kink surfaces) must be
-excluded from the outer-region Galerkin domain — otherwise the Hermite FEM integrates through those
-ideal singularities without imposing the ideal constraint, contaminating Δ′ at the innermost kept
-surface. A Newton iteration locates ψ where q = qlow; scanning starts from the edge inward for
-robustness in reverse-shear cores. When `qlow ≤ qmin` the axis value is kept.
+Set the lower integration bound `intr.psilow` to `qlow_start_psi`, the one bound every
+integrator starts from. Excluding the q < qlow region matters most for the outer-region Galerkin
+solve, whose Hermite FEM would otherwise integrate through unhandled q ≤ 1 ideal singularities and
+contaminate Δ′ at the innermost kept surface.
 """
 function sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
     profiles = equil.profiles
-    intr.psilow = profiles.xs[1]   # default: equilibrium axis-side bound
-    ctrl.qlow > equil.params.qmin || return intr.psilow
-
-    # Scan from the edge inward for the first node with q < qlow (robust for reverse-shear q).
-    qy = profiles.q_spline.y
-    jpsi = 1
-    for j in (length(profiles.xs)-1):-1:1
-        if qy[j] < ctrl.qlow
-            jpsi = j
-            break
-        end
-    end
-
-    hint = Ref(jpsi)
-    intr.psilow = find_zero(
-        (psi -> profiles.q_spline(psi; hint=hint) - ctrl.qlow,
-            psi -> profiles.q_deriv(psi; hint=hint)),
-        profiles.xs[jpsi], Roots.Newton()
-    )
-    @info "sing_min: qlow=$(@sprintf("%.3f", ctrl.qlow)) > qmin=$(@sprintf("%.3f", equil.params.qmin)); " *
-          "raising psilow from $(@sprintf("%.5f", profiles.xs[1])) to $(@sprintf("%.5f", intr.psilow)) (excludes q<qlow core)"
+    intr.psilow = qlow_start_psi(ctrl.qlow, equil)
+    intr.psilow > profiles.xs[1] &&
+        @info "sing_min: qlow=$(@sprintf("%.3f", ctrl.qlow)); raising psilow from $(@sprintf("%.5f", profiles.xs[1])) " *
+              "to $(@sprintf("%.5f", intr.psilow)) (excludes the q < qlow region)"
     return intr.psilow
 end
 

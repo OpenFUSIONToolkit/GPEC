@@ -151,9 +151,9 @@ Riccati solve; `delta_s` is solved per surface as a reported comparison only.
     ψ = 1 on the real q. Geometry needs no clamp of its own -- `radial_label` derivatives are
     analytic and valid under extrapolation
   - `extrapolate` -- search past `psihigh_safe` on the separatrix q-law (default `true`)
-  - `theta` -- poloidal angle for the minor-radius chord (default `0.0`)
+  - `theta` -- poloidal angle for the minor-radius chord, used only by `rs_method=:midplane` (default `0.0`)
   - `rs_method` -- radial label the widths and their ψ-conversion Jacobian are taken in
-    (default `:midplane`; see `radial_label`). The caller wiring this scan into the domain
+    (default `:flux`; see `radial_label`). The caller wiring this scan into the domain
     truncation passes `:flux`, the label Fitzpatrick Eq. (100) is anchored to
   - `bt`, `mu_i`, `zeff`, `chi_perp_e`, `chi_perp_i`, `chi_tor`, `tau_E`, `P_perp_model`, `resistivity_model`, `lnLambda_form`
     -- passed through to `build_slayer_inputs`. The defaults are placeholders: a caller
@@ -172,7 +172,7 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
     psi_gap::Real=1e-9,
     extrapolate::Bool=true,
     theta::Real=0.0,
-    rs_method::Symbol=:midplane,
+    rs_method::Symbol=:flux,
     bt=nothing,
     mu_i::Real=2.0,
     zeff=1.0,

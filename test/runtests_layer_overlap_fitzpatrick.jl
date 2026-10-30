@@ -221,6 +221,8 @@ end
     kin = Equilibrium.read_kinetic_file(joinpath(trunc_dir, trunc_deck["Equilibrium"]["kinetic_file"]))
     model = GeneralizedPerturbedEquilibrium.slayer_model(trunc_deck)
     @test model.P_perp_model === :chi_perp_e
+    # theta_sample only matters for the :midplane label; the flux label the layers use ignores it, so a nonzero value warns.
+    @test (@test_logs (:warn, r"theta_sample") match_mode = :any SLAYERModel(; theta_sample=0.3)).theta_sample == 0.3
     scan(data, ns=1:1; m=model) = (attach_kinetic_profiles!(equil, data); GeneralizedPerturbedEquilibrium.Tearing.layer_overlap_scan(equil, m, ns))
     widths(; kwargs...) = scan(KineticProfileData(kin; kwargs...)).width_dr
     w_ref = widths()
