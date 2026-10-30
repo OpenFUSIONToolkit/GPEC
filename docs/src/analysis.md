@@ -101,9 +101,10 @@ The result holds the seven integrands `(b_eff_sq, K1, K2, K3, b_sq, j_b_xi, divx
 
 ### Grid and accuracy
 
-The radial nodes are the equilibrium ``\psi`` knots inside the solution domain, plus the solution edge.
-On the knots all geometry is read from `ffs.metric`, and the standard-form surface integral equals
-``2/\psi_0^2`` times the DCON Lagrangian ``\xi'^\dagger F\xi' + 2\,\mathrm{Re}(\xi'^\dagger K\xi) + \xi^\dagger G\xi``
+The radial nodes are the equilibrium ``\psi`` knots inside the solution domain, plus each end of the
+domain that falls between knots: the start of the ODE sweep (`max(psilow, first knot)`, or a `qlow`
+crossing) and the solution edge. On the knots all geometry is read from `ffs.metric`, and the
+standard-form surface integral equals ``2/\psi_0^2`` times the DCON Lagrangian ``\xi'^\dagger F\xi' + 2\,\mathrm{Re}(\xi'^\dagger K\xi) + \xi^\dagger G\xi``
 to roundoff, so the standard-form total differs from ``e_{p,k}`` only by the ``\psi`` quadrature of the knot
 grid. ``\xi`` at each node is integrated from the nearest saved ODE step that no singular surface
 separates from it (`ForceFreeStates.solution_state_at`), not splined between saved steps.
@@ -121,20 +122,26 @@ Every call reports two checks per eigenmode and warns when either fails:
 
 - `relative_error_effective`, `relative_error_standard`: the mismatch of each total against
   ``e_{p,k}``, warned above 5 %. It is the ``\psi`` quadrature error of the knot grid, so a large value
-  means `mpsi` is too coarse; it converges as in the table below.
-- `curl_residual`: the largest relative ``(\nabla\times\delta\mathbf B_{\rm eff})\cdot\nabla\psi`` over the
-  knots, warned above 1e-8. It is an algebraic identity there, so it checks how ``\delta\mathbf B_{\rm eff}``
-  is assembled from ``\delta\mathbf B``, ``\xi_n`` and the metric, not the radial ``\xi`` solution, the
-  kernel ``K`` or the radial integral.
+  means `mpsi` is too coarse; it converges as in the table below. It does not check the algebra: an
+  error that moves a total by a few percent, such as a factor 2 lost in ``K_3`` (4.8 % on the test
+  fixture), stays below 5 %.
+- `curl_residual`: the largest ``(\nabla\times\delta\mathbf B_{\rm eff})\cdot\nabla\psi`` over the knots,
+  relative to the largest ``(|\partial_\theta \delta B_{{\rm eff},\zeta}| + |\partial_\zeta \delta B_{{\rm eff},\theta}|)/\mathcal J``
+  it cancels, warned above 1e-8; normalization and threshold are those of the Fortran `gpeq_cveri`. It is
+  an algebraic identity on the knots, so it checks how ``\delta\mathbf B_{\rm eff}`` is assembled from
+  ``\delta\mathbf B``, ``\xi_n``, the metric and the equilibrium current, not the radial ``\xi`` solution,
+  the kernel ``K`` or the radial integral. It is roundoff (4e-14) on the Solovev test fixture and 4e-12
+  on the DIII-D-like example, but that example reaches 2e-5 with a uniform `mpsi = 512` grid and 5e-5 in
+  PEST coordinates, all from knots inside ``\psi = 0.1``, without an error in ``\delta\mathbf B_{\rm eff}``.
 
 Relative error of both forms against ``e_{p,k}`` on the Solovev test fixture (`mpert = 8`):
 
 | `mpsi` | mode 1 effective / standard | mode 2 effective / standard |
 |---|---|---|
-| 16 | +1.39e-2 / +1.39e-2 | −1.98e-2 / −1.97e-2 |
-| 32 | −1.42e-3 / −1.42e-3 | +1.07e-2 / +1.07e-2 |
-| 64 | +2.10e-4 / +2.10e-4 | +6.43e-4 / +6.43e-4 |
-| 128 | +1.62e-4 / +1.62e-4 | −4.18e-5 / −4.18e-5 |
+| 16 | +1.38e-2 / +1.38e-2 | −1.99e-2 / −1.98e-2 |
+| 32 | −1.53e-3 / −1.53e-3 | +1.01e-2 / +1.01e-2 |
+| 64 | +2.40e-4 / +2.40e-4 | +8.36e-4 / +8.36e-4 |
+| 128 | +1.66e-4 / +1.66e-4 | −1.63e-5 / −1.63e-5 |
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Analysis.EnergyDecomposition]

@@ -41,20 +41,23 @@ Names of the seven density terms, in the order of the third axis of `density` an
 """
 const TERMS = (:b_eff_sq, :K1, :K2, :K3, :b_sq, :j_b_xi, :divxi_gradp)
 
-# ψ_N gap below which the last equilibrium knot counts as the solution edge.
+# ψ_N gap below which an equilibrium knot counts as an end of the solution domain.
 const EDGE_KNOT_TOL = 1e-10
 
 """
     radial_nodes(ffs) -> Vector{Float64}
 
-The equilibrium ψ knots inside the ξ solution domain, plus the solution edge when the last knot
-falls short of it. On the knots the metric, the Euler-Lagrange matrices and the geometry are exact.
+The equilibrium ψ knots inside the ξ solution domain, plus each end of the domain (the ODE start,
+e.g. a `qlow` crossing, and the solution edge) that falls between knots. On the knots the metric,
+the Euler-Lagrange matrices and the geometry are exact.
 """
 function radial_nodes(ffs::FFS.ForceFreeStatesResult)
     sol = ffs.solution
-    lo, hi = sol.psi_store[1], sol.psi_store[sol.step]
+    # The sweep starts at max(psilow, first profile knot), as initialize_el_at_axis! does, but saves its first state one step later.
+    lo, hi = max(ffs.psilow, ffs.equil.profiles.xs[1]), sol.psi_store[sol.step]
     psi = [x for x in ffs.equil.rzphi_xs if lo <= x <= hi]
-    (isempty(psi) || psi[end] < hi - EDGE_KNOT_TOL) && push!(psi, hi)
+    (isempty(psi) || psi[1] > lo + EDGE_KNOT_TOL) && pushfirst!(psi, lo)
+    psi[end] < hi - EDGE_KNOT_TOL && push!(psi, hi)
     return psi
 end
 
@@ -210,25 +213,25 @@ function effective_field(geo::NamedTuple, f::NamedTuple, i::Int, k::Int)
     return (Jbp, Jct, Jcz, cp, bt + xw * jz, bz - xw * jt, bp, bt, bz, xw / (J * sqrt(d2)))
 end
 
-# Relative (∇×b_eff)·∇ψ residual above which the effective field is reported as inconsistent.
+# Relative (∇×b_eff)·∇ψ residual above which the effective field is reported as inconsistent (Fortran cveri_tol).
 const CURL_RESIDUAL_TOL = 1e-8
 # Relative mismatch of a δW_p total against ep[k] above which the radial grid is reported as too coarse.
 const ENERGY_MISMATCH_TOL = 0.05
 
 """
-    curl_residual(c_theta, c_zeta, jac, ft, n) -> Float64
+    curl_maxima(c_theta, c_zeta, jac, ft, n) -> (residual, scale)
 
-Relative (∇×b_eff)·∇ψ = (∂_θ b_eff,ζ − ∂_ζ b_eff,θ)/J on one surface (Fortran `gpeq_cveri`), from the
-covariant components `c_theta`, `c_zeta` on the θ grid of `ft`, normalized by max|∂_θ b_eff,ζ/J|. On
-the knots it is an algebraic identity, so it checks how b_eff is assembled from b, ξ_n and the metric,
-not the radial ξ solution, the kernel K or the radial integral.
+Largest |(∇×b_eff)·∇ψ| = |∂_θ b_eff,ζ − ∂_ζ b_eff,θ|/J on one surface and the largest
+(|∂_θ b_eff,ζ| + |∂_ζ b_eff,θ|)/J that it cancels, from the covariant components `c_theta`, `c_zeta`
+on the θ grid of `ft`. Perturbations vary as exp(2πi(mθ − nζ)), so ∂_ζ → −2πin. As in Fortran
+`gpeq_cveri`, the reported residual is the largest `residual` over all surfaces divided by the
+largest `scale`.
 """
-function curl_residual(c_theta::Vector{ComplexF64}, c_zeta::Vector{ComplexF64}, jac::AbstractVector{Float64}, ft::FourierTransform, n::Int)
+function curl_maxima(c_theta::Vector{ComplexF64}, c_zeta::Vector{ComplexF64}, jac::AbstractVector{Float64}, ft::FourierTransform, n::Int)
     m = ft.mlow:(ft.mlow+ft.mpert-1)
-    theta_modes, zeta_modes = ft(c_theta), ft(c_zeta)
-    curl = inverse(ft, 2π * im .* (m .* zeta_modes .+ n .* theta_modes)) ./ jac
-    dtheta_c_zeta = inverse(ft, 2π * im .* m .* zeta_modes) ./ jac
-    return maximum(abs, curl) / maximum(abs, dtheta_c_zeta)
+    dtheta_c_zeta = inverse(ft, 2π * im .* m .* ft(c_zeta)) ./ jac
+    dzeta_c_theta = inverse(ft, -2π * im * n .* ft(c_theta)) ./ jac
+    return maximum(abs, dtheta_c_zeta .- dzeta_c_theta), maximum(abs.(dtheta_c_zeta) .+ abs.(dzeta_c_theta))
 end
 
 """
@@ -244,11 +247,14 @@ with the vacuum response (`vac_flag = true`). Fields of the result:
   - `profile` - `(npsi, 7, neig)` surface integrals ∮J·density dθ
   - `dW_effective`, `dW_standard` - ½∫ of the effective-field and standard-form combinations
   - `relative_error_effective`, `relative_error_standard` - `(dW − real(ep[k])) / abs(ep[k])` of each total
-  - `curl_residual` - largest relative (∇×b_eff)·∇ψ over the knots (`curl_residual`)
+  - `curl_residual` - largest (∇×b_eff)·∇ψ on the knots relative to the largest term it cancels (`curl_maxima`)
 
-These last two are the success checks of the decomposition: a curl residual above `CURL_RESIDUAL_TOL`
-means b_eff was assembled inconsistently, and a mismatch against `ep[k]` above `ENERGY_MISMATCH_TOL`
-means the radial grid is too coarse for the ψ quadrature (it converges with `mpsi`). Both are warned.
+These last two are the success checks of the decomposition, and both are warned. On the knots
+(∇×b_eff)·∇ψ vanishes identically, so a curl residual above `CURL_RESIDUAL_TOL` flags b_eff inconsistent
+with the metric and the equilibrium current; near the axis of a reconstructed equilibrium the radial grid
+and the coordinates can raise it too. A mismatch against `ep[k]` above `ENERGY_MISMATCH_TOL` means the
+radial grid is too coarse for the ψ quadrature (it converges with `mpsi`); it is not a check of the
+algebra, since an error that moves a total by a few percent stays below it.
 """
 function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::AbstractVector{<:Integer}=[1])
     ffs.integrator === :forward && ffs.solution !== nothing || throw(ArgumentError("energy decomposition needs a forward-integrator solve"))
@@ -269,7 +275,7 @@ function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::Abs
     scale = 2 * MU_0 / equil.psio^2
 
     density = zeros(ComplexF64, length(psi), mtheta, length(TERMS), length(eigenmodes))
-    curl = zeros(length(eigenmodes))
+    curl_max, curl_scale = zeros(length(eigenmodes)), zeros(length(eigenmodes))
     c_theta, c_zeta = zeros(ComplexF64, mtheta), zeros(ComplexF64, mtheta)
     for (m, k) in enumerate(eigenmodes)
         f = eigenmode_fields(ffs, k, psi, states, ft)
@@ -290,9 +296,13 @@ function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::Abs
                     density[i, j, t, m] = scale * terms[t]
                 end
             end
-            psi[i] in equil.rzphi_xs && (curl[m] = max(curl[m], curl_residual(c_theta, c_zeta, view(geo.jac, i, :), ft, n)))
+            if psi[i] in equil.rzphi_xs
+                residual, cancelled = curl_maxima(c_theta, c_zeta, view(geo.jac, i, :), ft, n)
+                curl_max[m], curl_scale[m] = max(curl_max[m], residual), max(curl_scale[m], cancelled)
+            end
         end
     end
+    curl = curl_max ./ curl_scale
     profile = dropdims(sum(density .* geo.jac; dims=2); dims=2) ./ mtheta
     # The imaginary parts of the surface integrals are roundoff, so the ψ integrals take the real part.
     total(t, m) = FastInterpolations.integrate(cubic_interp(psi, real.(profile[:, t, m]); bc=CubicFit()))
