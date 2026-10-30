@@ -1,0 +1,95 @@
+# Regression case: DIII-D-like n = 1, 2 kinetic stability with the calculated kinetic matrices.
+# Reuses the DIIID-like_ideal_example deck (which ships the kinetic profiles) via [overrides]: the
+# coupled n = 1, 2 mode space at full kinetic strength, ending after ForceFreeStates because the
+# KineticForces torque stage is single-n. Guards the per-n geometric matrices and the per-n-block
+# kinetic singular-surface scan. Each [quantities.*] block names an HDF5 path, how to extract it,
+# and the noise floor below which a diff is treated as zero.
+[case]
+name = "diiid_kinetic_multi_n"
+description = "DIII-D-like equilibrium, n = 1, 2, KineticForces kinetic matrices, kinetic_factor=1.0, stability only, truncation at psihigh."
+example_dir = "examples/DIIID-like_ideal_example"
+# Without a perturbed equilibrium the run ends after ForceFreeStates; the torque stage needs one and skips.
+remove_sections = ["PerturbedEquilibrium", "ErrorFields"]
+
+[overrides]
+"ForceFreeStates.nn" = [1, 2]                         # Toroidal mode number, or consecutive numbers as a list
+"ForceFreeStates.kinetic" = "KineticForces"           # Kinetic source: the drift-kinetic matrices of the [KineticForces] model
+"ForceFreeStates.kinetic_factor" = 1.0                # Uniform scale on the kinetic matrices of a kinetic run
+"ForceFreeStates.truncate_at_rational_offset" = false # Multi-n runs truncate at psihigh; set explicitly
+
+# Energies — leading generalized (W,N) pencil eigenvalues over the coupled n = 1, 2 mode space
+[quantities.et_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+order = 10
+
+[quantities.et_imag]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "imag_first"
+label = "total energy Im(et[1])"
+noise_threshold = 1e-10
+order = 11
+
+[quantities.et_all]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "all_complex"
+label = "total energy (all)"
+noise_threshold = 1e-10
+order = 12
+
+# Kinetic singular surfaces from the per-n-block cond(F̄) scan
+[quantities.kinsing_count]
+h5path = "SingularSurfaces/Kinetic/rational_count"
+type = "int_scalar"
+extract = "value"
+label = "# kinetic singular surfaces"
+noise_threshold = 0
+order = 20
+
+[quantities.kinsing_psi]
+h5path = "SingularSurfaces/Kinetic/rational_psi"
+type = "real_vector"
+extract = "all_real"
+label = "kinetic singular psi locations"
+noise_threshold = 1e-8
+order = 21
+
+# Integration
+[quantities.nstep]
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (saved)"
+noise_threshold = 0
+order = 30
+
+# Mode space
+[quantities.mpert]
+h5path = "Info/mpert"
+type = "int_scalar"
+extract = "value"
+label = "mpert"
+noise_threshold = 0
+order = 40
+
+[quantities.npert]
+h5path = "Info/npert"
+type = "int_scalar"
+extract = "value"
+label = "npert"
+noise_threshold = 0
+order = 41
+
+# Runtime
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999

@@ -234,24 +234,24 @@ function sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
-    evaluate_fbar_condition(psi, kin, equil, intr; hint=Ref(1))
+    fbar_block_conditions(psi, kin, equil, intr; hint=Ref(1)) -> Vector{Float64}
 
-Evaluate the condition number of the kinetic F̄ matrix at a given ψ. Uses cond(F̄)
-as a scale-invariant measure of near-singularity. Mirrors the intent of Fortran
-`sing_get_f_det` (`sing.f:1298-1481`) which computes det(F̄).
+Condition number of each toroidal-mode block of the kinetic F̄ matrix at ψ, one entry per n in
+`intr.nlow:intr.nhigh`. Mirrors the intent of Fortran `sing_get_f_det` (`sing.f:1298-1481`), which
+computes det(F̄) for a single n.
 
 F̄(i,j) = q₁·f0(i,j)·q₂ - q₁·P(i,j) - conj(P†(j,i))·q₂ + R1(i,j)
 
-where q₁ = m₁ - n·q(ψ), q₂ = m₂ - n·q(ψ) are the direct singularity factors.
+where q₁ = m₁ - n·q(ψ), q₂ = m₂ - n·q(ψ) are the direct singularity factors. The axisymmetric F̄ is
+block-diagonal in n, so each block is conditioned on its own; the condition number of the whole
+matrix would mix the scales of different n.
 """
-function evaluate_fbar_condition(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
+function fbar_block_conditions(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
     np = intr.numpert_total
+    mpert = intr.mpert
 
-    # Evaluate q(ψ) and compute singfac = m - n*q
     q = equil.profiles.q_spline(psi; hint=hint)
-    singfac = Float64[(m - q * n) for m in intr.mlow:intr.mhigh for n in intr.nlow:intr.nhigh]
 
-    # Evaluate FKG sub-matrices from splines
     f0_vec = zeros(ComplexF64, np * np)
     p_vec = zeros(ComplexF64, np * np)
     pa_vec = zeros(ComplexF64, np * np)
@@ -265,18 +265,32 @@ function evaluate_fbar_condition(psi::Float64, kin::FKGMatrices, equil::Equilibr
     paat = reshape(pa_vec, np, np)
     r1mat = reshape(r1_vec, np, np)
 
-    # Assemble F̄ [Fortran sing.f lines 1412-1423, sing_get_f_det with fkg_kmats_flag=true]
-    fbar = zeros(ComplexF64, np, np)
-    for j in 1:np
-        q2 = singfac[j]
-        for i in 1:np
-            q1 = singfac[i]
-            fbar[i, j] = q1 * f0mat[i, j] * q2 - q1 * pmat[i, j] - conj(paat[j, i]) * q2 + r1mat[i, j]
+    # Assemble each n-block of F̄ [Fortran sing.f lines 1412-1423, sing_get_f_det with fkg_kmats_flag=true]
+    conds = zeros(Float64, intr.npert)
+    fbar = zeros(ComplexF64, mpert, mpert)
+    for in_idx in 1:intr.npert
+        n = intr.nlow + in_idx - 1
+        off = (in_idx - 1) * mpert
+        for j in 1:mpert
+            q2 = (intr.mlow + j - 1) - n * q
+            for i in 1:mpert
+                q1 = (intr.mlow + i - 1) - n * q
+                fbar[i, j] = q1 * f0mat[off+i, off+j] * q2 - q1 * pmat[off+i, off+j] - conj(paat[off+j, off+i]) * q2 + r1mat[off+i, off+j]
+            end
         end
+        conds[in_idx] = cond(fbar)
     end
-
-    return cond(fbar)
+    return conds
 end
+
+"""
+    evaluate_fbar_condition(psi, kin, equil, intr; hint=Ref(1))
+
+Largest per-n-block condition number of the kinetic F̄ matrix at ψ (see `fbar_block_conditions`),
+a scale-invariant measure of how close any toroidal mode is to a kinetic singularity.
+"""
+evaluate_fbar_condition(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1)) =
+    maximum(fbar_block_conditions(psi, kin, equil, intr; hint=hint))
 
 # Kinetic F̄ counts as singular above this condition number; structure within
 # KINETIC_RELAXED_FRAC of it is reported as near-singular (the shifted/split resonances).
@@ -294,8 +308,10 @@ Mirrors the intent of Fortran `ksing_find` (`sing.f:1486-1616`) which finds zero
 det(F̄) via adaptive bisection. Here we use condition number peaks instead of
 determinant zeros for better numerical robustness and scale invariance.
 
-Evaluates cond(F̄) on a dense ψ grid, finds its local maxima, refines each with golden-section
-minimization of -cond, then filters by threshold and resonance condition.
+Each toroidal-mode block of F̄ is scanned on a dense ψ grid on its own; its local maxima are refined
+by golden-section minimization of -cond and filtered by threshold and the resonance condition. Each
+surface records the (m, n) of the blocks that produced it, and peaks of different n within one scan
+spacing of each other are merged into a single surface.
 """
 function find_kinetic_singular_surfaces!(
     mats::MatrixSplines,
@@ -308,18 +324,20 @@ function find_kinetic_singular_surfaces!(
     kin === nothing && error("find_kinetic_singular_surfaces! requires a kinetic fit; call build_kinetic_matrix_splines first")
     psilow = equil.profiles.xs[1]
     psihigh = intr.psilim
+    npert = intr.npert
 
-    # Evaluate cond(F̄) on a dense grid
+    # Evaluate cond(F̄) of every n-block on a dense grid
     psi_grid = collect(range(psilow, psihigh; length=ngrid))
-    cond_vals = zeros(ngrid)
+    block_conds = zeros(ngrid, npert)
     hint = Ref(1)
     for i in 1:ngrid
         try
-            cond_vals[i] = evaluate_fbar_condition(psi_grid[i], kin, equil, intr; hint=hint)
+            block_conds[i, :] .= fbar_block_conditions(psi_grid[i], kin, equil, intr; hint=hint)
         catch
-            cond_vals[i] = Inf  # singular matrix — definitely a kinsing surface
+            block_conds[i, :] .= Inf  # singular matrix — definitely a kinsing surface
         end
     end
+    cond_vals = vec(maximum(block_conds; dims=2))
 
     # Persist the scan so callers/HDF5 output can plot cond(F̄) vs ψ and show why peaks
     # were (or weren't) accepted as kinetic singular surfaces.
@@ -327,62 +345,56 @@ function find_kinetic_singular_surfaces!(
     intr.kinsing_scan_cond = cond_vals
     intr.kinsing_scan_threshold = cond_threshold
 
-    # Find local maxima of cond(F̄): points where cond increases then decreases
-    local_maxima = [i for i in 2:(ngrid-1) if cond_vals[i] > cond_vals[i-1] && cond_vals[i] > cond_vals[i+1]]
-    peak_indices = filter(i -> cond_vals[i] > cond_threshold, local_maxima)
+    # Local maxima of each block's cond(F̄): points where cond increases then decreases
+    is_peak(c, i) = c[i] > c[i-1] && c[i] > c[i+1]
+    block_peaks = [[i for i in 2:(ngrid-1) if is_peak(view(block_conds, :, k), i)] for k in 1:npert]
 
     # Peaks below threshold mark near-singular structure (the shifted/split resonances of Park &
     # Logan Eq. 70); report the strongest few so sharp kinetic structure is visible rather than silent.
-    subthreshold = filter(i -> KINETIC_RELAXED_FRAC * cond_threshold < cond_vals[i] <= cond_threshold, local_maxima)
+    subthreshold = [(i, k) for k in 1:npert for i in block_peaks[k] if KINETIC_RELAXED_FRAC * cond_threshold < block_conds[i, k] <= cond_threshold]
     if !isempty(subthreshold)
-        top = sort(subthreshold; by=i -> cond_vals[i], rev=true)[1:min(3, length(subthreshold))]
+        top = sort(subthreshold; by=ik -> block_conds[ik...], rev=true)[1:min(3, length(subthreshold))]
         @info "Kinetic F̄ near-singular structure below the singular threshold at " *
-              join(["ψ=$(round(psi_grid[i]; digits=4)) (cond=$(round(cond_vals[i]; sigdigits=3)))" for i in top], ", ") *
+              join(["ψ=$(round(psi_grid[i]; digits=4)) (n=$(intr.nlow + k - 1), cond=$(round(block_conds[i, k]; sigdigits=3)))" for (i, k) in top], ", ") *
               " — full scan in SingularSurfaces/Kinetic/scan_cond; check the ψ grid resolves these if results look grid-sensitive"
     end
 
-    # Refine each peak to find the precise ψ location
-    kinsing_surfaces = SingType[]
-    for idx in peak_indices
-        psi_lo = psi_grid[max(idx - 1, 1)]
-        psi_hi = psi_grid[min(idx + 1, ngrid)]
-
-        # Golden-section search to maximize cond (minimize -cond)
-        psi_refined = _golden_section_max(psi_lo, psi_hi, psi -> evaluate_fbar_condition(psi, kin, equil, intr))
-
-        # Evaluate q and q' at refined location
-        hint_ref = Ref(1)
-        q_val = equil.profiles.q_spline(psi_refined; hint=hint_ref)
-        q1_val = equil.profiles.q_deriv(psi_refined; hint=hint_ref)
-
-        # Check resonance: at least one mode m satisfies mlow ≤ n*q ≤ mhigh
-        has_resonant = false
-        for n in intr.nlow:intr.nhigh
-            nq = n * q_val
-            if intr.mlow <= nq && nq <= intr.mhigh
-                has_resonant = true
-                break
-            end
+    # Refine each block's peaks on that block's condition number
+    found = Tuple{Float64,Int}[]  # (ψ, n)
+    for k in 1:npert
+        n = intr.nlow + k - 1
+        for idx in block_peaks[k]
+            block_conds[idx, k] > cond_threshold || continue
+            psi_lo = psi_grid[max(idx - 1, 1)]
+            psi_hi = psi_grid[min(idx + 1, ngrid)]
+            psi_refined = _golden_section_max(psi_lo, psi_hi, psi -> fbar_block_conditions(psi, kin, equil, intr)[k])
+            nq = n * equil.profiles.q_spline(psi_refined)
+            intr.mlow <= nq <= intr.mhigh || continue
+            push!(found, (psi_refined, n))
         end
-        if !has_resonant
-            continue
-        end
+    end
+    sort!(found)
 
-        push!(
-            kinsing_surfaces,
-            SingType(;
-                psifac=psi_refined,
-                rho=sqrt(psi_refined),
-                m=[round(Int, n * q_val) for n in intr.nlow:intr.nhigh],
-                n=collect(intr.nlow:intr.nhigh),
-                q=q_val,
-                q1=q1_val
-            )
-        )
+    # Merge peaks of different n that coincide to within one scan spacing (e.g. integer q at n = 1 and 2)
+    dpsi = psi_grid[2] - psi_grid[1]
+    groups = Vector{Vector{Tuple{Float64,Int}}}()
+    for f in found
+        if !isempty(groups) && f[1] - groups[end][1][1] <= dpsi && all(g -> g[2] != f[2], groups[end])
+            push!(groups[end], f)
+        else
+            push!(groups, [f])
+        end
     end
 
-    # Sort by ψ location
-    sort!(kinsing_surfaces; by=s -> s.psifac)
+    kinsing_surfaces = SingType[]
+    for g in groups
+        psi_s = g[1][1]
+        hint_ref = Ref(1)
+        q_val = equil.profiles.q_spline(psi_s; hint=hint_ref)
+        q1_val = equil.profiles.q_deriv(psi_s; hint=hint_ref)
+        ns = [f[2] for f in g]
+        push!(kinsing_surfaces, SingType(; psifac=psi_s, rho=sqrt(psi_s), m=[round(Int, n * q_val) for n in ns], n=ns, q=q_val, q1=q1_val))
+    end
 
     intr.kinsing = kinsing_surfaces
     intr.kmsing = length(kinsing_surfaces)
@@ -390,7 +402,7 @@ function find_kinetic_singular_surfaces!(
     if intr.kmsing > 0
         @info "Found $(intr.kmsing) kinetic singular surface(s):"
         for (i, ks) in enumerate(intr.kinsing)
-            @info @sprintf("   kinsing[%d]: ψ = %.6f, q = %.4f", i, ks.psifac, ks.q)
+            @info @sprintf("   kinsing[%d]: ψ = %.6f, q = %.4f, n = %s", i, ks.psifac, ks.q, join(ks.n, ","))
         end
     else
         @info "No kinetic singular surfaces found (cond threshold = $(cond_threshold))"

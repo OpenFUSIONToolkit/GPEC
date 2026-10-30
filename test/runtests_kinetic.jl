@@ -848,4 +848,73 @@ using TOML
             @test any(sp -> sp.electron, with_e)
         end
     end
+
+    # =========================================================================
+    # Multi-n kinetic geometry: each n-block must match an independent single-n build
+    # =========================================================================
+    @testset "multi-n kinetic geometry and F̄ blocks" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # The default Solovev plasma on a coarse 16-interval grid, with the n = 1, 2 mode space truncated at psihigh.
+        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; eq_type="sol", jac_type="pest",
+            grid_type="core_edge_packed", psilow=1e-4, psihigh=0.9995, mpsi=16, mtheta=256, flux_surface_rtol=1e-7)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig())
+        ctrl = FFS.ForceFreeStatesControl(; nn_low=1, nn_high=2, qlow=1.02, qhigh=1e3, singfac_min=1e-4, truncate_at_rational_offset=false)
+        # One shared poloidal band so the blocks of every mode space are directly comparable.
+        mlow = floor(Int, min(equil.params.qmin, 0)) - 4
+        mhigh = trunc(Int, 2 * equil.params.qmax)
+        function mode_space(nlow, nhigh)
+            intr = FFS.ForceFreeStatesInternal()
+            intr.nlow, intr.nhigh, intr.npert = nlow, nhigh, nhigh - nlow + 1
+            FFS.sing_lim!(intr, ctrl, equil)
+            intr.mlow, intr.mhigh = mlow, mhigh
+            intr.mpert = mhigh - mlow + 1
+            intr.numpert_total = intr.mpert * intr.npert
+            return intr
+        end
+        intr12 = mode_space(1, 2)
+        mpert = intr12.mpert
+        metric = FFS.make_metric(equil, mpert)
+        geom12 = FFS.build_kinetic_metric_matrices(equil, intr12, metric)
+        psis = [0.05, 0.3, 0.61, 0.87]
+
+        # Every geometric matrix of block k equals the single-n build at n = k.
+        for n in 1:2
+            geom_n = FFS.build_kinetic_metric_matrices(equil, mode_space(n, n), metric)
+            for name in (:smats, :tmats, :xmats, :ymats, :zmats), psi in psis
+                @test FFS.kinetic_metric_block(geom12[name], psi, mpert, n) ≈ reshape(geom_n[name](psi), mpert, mpert) rtol = 1e-13
+            end
+        end
+        # Y and Z carry n, so the n = 2 block is not a copy of n = 1.
+        @test !(FFS.kinetic_metric_block(geom12.ymats, 0.3, mpert, 2) ≈ FFS.kinetic_metric_block(geom12.ymats, 0.3, mpert, 1))
+        @test !(FFS.kinetic_metric_block(geom12.zmats, 0.3, mpert, 2) ≈ FFS.kinetic_metric_block(geom12.zmats, 0.3, mpert, 1))
+
+        # The condition number of each F̄ block equals the single-n F̄ built from the same kinetic block.
+        # Single-n kinetic matrices are tiled into a block-diagonal multi-n set, as the calculated source does.
+        mats12 = FFS.build_matrix_splines(equil, intr12, metric)
+        xs = metric.xs
+        mpsi = length(xs)
+        kw12 = zeros(ComplexF64, mpsi, (2mpert)^2, 6)
+        kt12 = zeros(ComplexF64, mpsi, (2mpert)^2, 6)
+        singles = map(1:2) do n
+            intr = mode_space(n, n)
+            mats = FFS.build_matrix_splines(equil, intr, metric)
+            kw, _ = FFS.fixed_kinetic_matrices(mpert, mpert, mpsi, 0.05, mlow, mats, xs)
+            kt = 0.3im .* kw
+            for k in 1:6, j in 1:mpert, i in 1:mpert
+                idx = ((n - 1) * mpert + j - 1) * 2mpert + (n - 1) * mpert + i
+                kw12[:, idx, k] .= kw[:, i+(j-1)*mpert, k]
+                kt12[:, idx, k] .= kt[:, i+(j-1)*mpert, k]
+            end
+            (intr, FFS._compute_fkg_matrices(mats, equil, intr, metric, kw, kt))
+        end
+        kin12 = FFS._compute_fkg_matrices(mats12, equil, intr12, metric, kw12, kt12).kinetic
+        for psi in psis
+            conds12 = FFS.fbar_block_conditions(psi, kin12, equil, intr12)
+            for n in 1:2
+                intr_n, mats_n = singles[n]
+                @test conds12[n] ≈ only(FFS.fbar_block_conditions(psi, mats_n.kinetic, equil, intr_n)) rtol = 1e-8
+            end
+            @test FFS.evaluate_fbar_condition(psi, kin12, equil, intr12) == maximum(conds12)
+        end
+    end
 end
