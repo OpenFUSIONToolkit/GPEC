@@ -57,6 +57,7 @@ const TEST_SUITES = [
     "runtests_coils.jl" => "api",
     "runtests_imas.jl" => "api",
     "runtests_rerun_from_h5.jl" => "api",
+    "runtests_deck_roundtrip.jl" => "api",
     "runtests_frozen_equilibrium.jl" => "api",
     "runtests_h5_schema.jl" => "api"
 ]

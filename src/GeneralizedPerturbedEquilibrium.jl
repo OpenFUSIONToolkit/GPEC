@@ -201,7 +201,7 @@ function main_from_inputs(
         save_to_hdf5(output_file, pe)
     end
 
-    if haskey(inputs, "KineticForces")
+    if deck.kinetic_forces !== nothing
         if pe === nothing
             @info "Skipping the kinetic torque: it needs a perturbed equilibrium (no [PerturbedEquilibrium] section)."
         else
@@ -217,7 +217,7 @@ function main_from_inputs(
         error_fields = _timed_stage(runtimes, "error_fields", "ErrorFields") do
             scenario = ef.scenario === nothing ? nothing : ErrorFields.ScenarioParameters(equil; ef.scenario...)
             ErrorFields.error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(deck.forcing); ef.ctrl, ef.tolerances, ef.monte_carlo,
-                scenario, ef.risk, ef.ntv, kinetic=deck.kinetic_forces, pe.regularization_width, verbose)
+                scenario, ef.risk, ef.ntv, kinetic=something(deck.kinetic_forces, KineticForcesControl()), pe.regularization_width, verbose)
         end
         save_to_hdf5(output_file, error_fields)
     end

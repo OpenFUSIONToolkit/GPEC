@@ -398,8 +398,8 @@ end
 """
     error_fields_from_deck(inputs, path) -> Union{Nothing,NamedTuple}
 
-`(; ctrl, tolerances, monte_carlo, risk, ntv, scenario)`: the `[ErrorFields]` control, the tolerance set its
-`tolerance_file` names (`nothing` when none), the controls of its `MonteCarlo`, `Risk` and `NTV` sub-tables, and the
+`(; ctrl, tolerance_file, tolerances, monte_carlo, risk, ntv, scenario)`: the `[ErrorFields]` control, the
+`tolerance_file` path and the tolerance set it names (`""` and `nothing` when none), the controls of its `MonteCarlo`, `Risk` and `NTV` sub-tables, and the
 `[ErrorFields.scenario]` keywords of `ErrorFields.ScenarioParameters` (`nothing` when absent). `nothing` without
 `[ErrorFields]`.
 """
@@ -413,7 +413,8 @@ function error_fields_from_deck(inputs::AbstractDict, path::AbstractString)
     isempty(file) || isfile(file) || error("[ErrorFields] tolerance_file not found: $file")
     scenario = haskey(table, "scenario") ? section_keywords(table["scenario"], "ErrorFields.scenario", _struct_fields(ErrorFields.ScenarioParameters)) : nothing
     scenario === nothing || haskey(scenario, :n_e) || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
-    return (; ctrl, tolerances=isempty(file) ? nothing : ErrorFields.read_tolerance_toml(file), monte_carlo=sub("MonteCarlo", ErrorFields.MonteCarloControl),
+    return (; ctrl, tolerance_file=file, tolerances=isempty(file) ? nothing : ErrorFields.read_tolerance_toml(file),
+        monte_carlo=sub("MonteCarlo", ErrorFields.MonteCarloControl),
         risk=sub("Risk", ErrorFields.RiskControl), ntv=sub("NTV", ErrorFields.NTVControl), scenario)
 end
 
@@ -455,5 +456,120 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     haskey(inputs, "SLAYER") && tearing_model != "SLAYER" && !(has_ffs && get(inputs["ForceFreeStates"], "psilim_from_layer_overlap", false) === true) &&
         error("[SLAYER] is set but neither [Tearing] inner_model = \"SLAYER\" nor [ForceFreeStates] psilim_from_layer_overlap = true uses it")
     return (; run=run_settings(inputs, path), force_balance, local_stability=local_stability_from_deck(inputs), match, tearing,
-        kinetic_forces=kinetic_forces_control(inputs), perturbed_equilibrium, forcing, error_fields=error_fields_from_deck(inputs, path))
+        kinetic_forces=haskey(inputs, "KineticForces") ? kinetic_forces_control(inputs) : nothing, perturbed_equilibrium, forcing,
+        error_fields=error_fields_from_deck(inputs, path))
+end
+
+# ---------------------------------------------------------------------------------------------------------------------
+# The inverse: the API objects of a parsed deck back to the deck that states them, so every run can record a deck that
+# reproduces it.
+
+# A value as a deck states it: Symbols as strings, tuples, ranges and vectors as arrays, structs as tables.
+_deck_out(v) = v
+_deck_out(v::Symbol) = String(v)
+_deck_out(v::Union{Tuple,AbstractVector}) = Any[_deck_out(x) for x in v]
+_deck_out(v::AbstractDict) = Dict{String,Any}(String(k) => _deck_out(x) for (k, x) in v)
+_deck_out(v::Equilibrium.IonSpecies) = _deck_table(v)
+
+# The fields of `x` as a deck table, less `exclude`; a `nothing` field is left out, as the parser's default.
+_deck_table(x, exclude=()) =
+    Dict{String,Any}(String(f) => _deck_out(getfield(x, f)) for f in fieldnames(typeof(x)) if !(f in exclude) && getfield(x, f) !== nothing)
+_deck_table(kwargs::AbstractDict) = Dict{String,Any}(String(k) => _deck_out(v) for (k, v) in kwargs if v !== nothing)
+
+"""
+    deck_sections(config::EquilibriumConfig, analytic) -> Dict{String,Any}
+
+The `[Equilibrium]` section of `config` and, for an analytic equilibrium, the section of its config `analytic`
+(`nothing` for a file-based one), which then implies `eq_type`.
+"""
+function deck_sections(config::Equilibrium.EquilibriumConfig, analytic)
+    table = _deck_table(config, (:power_bp, :power_b, :power_r, :power_rc))
+    analytic === nothing && return Dict{String,Any}("Equilibrium" => table)
+    # An analytic equilibrium reads no file: its section implies eq_type.
+    delete!(table, "eq_type")
+    delete!(table, "eq_filename")
+    return Dict{String,Any}("Equilibrium" => table, Equilibrium.ANALYTIC_EQ[config.eq_type].section => _deck_table(analytic))
+end
+
+deck_sections(ctrl::KineticForces.KineticForcesControl) = Dict{String,Any}("KineticForces" => _deck_table(ctrl))
+deck_sections(model::SLAYERModel) = Dict{String,Any}("SLAYER" => merge(_deck_table(model), Dict{String,Any}("variant" => String(typeof(model).parameters[1]))))
+deck_sections(model::GGJModel) = Dict{String,Any}("GGJ" => merge(_deck_table(Dict(pairs(model.options))), Dict{String,Any}("solver" => String(typeof(model).parameters[1]))))
+deck_sections(wall::Vacuum.WallSettings) = Dict{String,Any}("Wall" => merge(_deck_table(wall), Dict{String,Any}("shape" => only(k for (k, T) in Vacuum.WALL_SHAPES if wall isa T))))
+
+"""
+    deck_sections(keywords, algorithm::AbstractIntegrator) -> Dict{String,Any}
+
+The `[ForceFreeStates]` section, the integrator's own section and the sections its keywords bring with them
+(`[Wall]`, `[KineticForces]` for a KineticForces source with non-default settings, `[SLAYER]` for the layer-overlap
+cap's closures): the inverse of [`force_balance_keywords`](@ref) and [`force_balance_algorithm`](@ref). `[KineticForces]`
+also runs the torque stage when present, so a run with non-default source settings and no torque stage records a
+deck that adds that stage.
+"""
+function deck_sections(keywords::AbstractDict{Symbol}, algorithm::ForceFreeStates.AbstractIntegrator)
+    kwargs = copy(keywords)
+    wall, kinetic, cap = pop!(kwargs, :wall, nothing), pop!(kwargs, :kinetic, nothing), pop!(kwargs, :psilim_from_layer_overlap, false)
+    nn = pop!(kwargs, :nn)
+    section = _deck_table(kwargs)
+    section["nn"] = first(nn) == last(nn) ? first(nn) : collect(nn)
+    name = String(nameof(typeof(algorithm)))
+    section["integrator"] = name
+    sections = Dict{String,Any}("ForceFreeStates" => section, name => _deck_table(algorithm))
+    if kinetic isa KineticForces.KineticForcesControl
+        section["kinetic"] = "KineticForces"
+        # The source reads [KineticForces], whose presence alone also runs the torque stage: state it only when it differs.
+        isequal(_deck_table(kinetic), _deck_table(KineticForces.KineticForcesControl())) || merge!(sections, deck_sections(kinetic))
+    elseif kinetic !== nothing
+        section["kinetic"] = String(nameof(typeof(kinetic)))
+    end
+    cap === false || (section["psilim_from_layer_overlap"] = true)
+    cap isa SLAYERModel && merge!(sections, deck_sections(cap))
+    wall === nothing || merge!(sections, deck_sections(wall))
+    return sections
+end
+
+"""
+    deck_inputs(deck, config, analytic) -> Dict{String,Any}
+
+The deck a parsed deck `deck` (see [`parse_deck`](@ref)) states, with the equilibrium `config` and its `analytic`
+config: the inverse of `parse_deck`, `equilibrium_config` and `analytic_config`. Every value is explicit and every path
+absolute; `[Run] output_file` is left to whoever runs it.
+"""
+function deck_inputs(deck::NamedTuple, config::Equilibrium.EquilibriumConfig, analytic)
+    inputs = deck_sections(config, analytic)
+    inputs["Run"] = Dict{String,Any}("verbose" => deck.run.verbose)
+    fb = deck.force_balance
+    fb === nothing || merge!(inputs, deck_sections(fb.keywords, fb.algorithm))
+    ls = deck.local_stability
+    ls === nothing || merge!(inputs, Dict{String,Any}("LocalStability" => _deck_table(ls.problem), "Ballooning" => _deck_table(ls.algorithm)))
+    if deck.match !== nothing
+        merge!(inputs, deck_sections(deck.match.model))
+        inputs["Match"] = merge(_deck_table(deck.match.problem), Dict{String,Any}("inner_model" => "GGJ"))
+    end
+    if deck.tearing !== nothing
+        (; problem, model, config) = deck.tearing
+        merge!(inputs, deck_sections(model))
+        table = _deck_table(filter(p -> p.first != :critical_resonant_field, problem))
+        table["inner_model"] = model isa SLAYERModel ? "SLAYER" : "GGJ"
+        table["search"] = _deck_table(config)
+        crf = get(problem, :critical_resonant_field, nothing)
+        crf === nothing || (table["CriticalResonantField"] = _deck_table(crf))
+        inputs["Tearing"] = table
+    end
+    deck.kinetic_forces === nothing || merge!(inputs, deck_sections(deck.kinetic_forces))
+    pe = deck.perturbed_equilibrium
+    pe === nothing || (inputs["PerturbedEquilibrium"] = _deck_table(merge(pe.response, pe.drive)))
+    if pe !== nothing || deck.error_fields !== nothing
+        forcing = _deck_table(deck.forcing, (:coil_sets_raw,))
+        isempty(deck.forcing.coil_sets_raw) || (forcing["coil_set"] = Any[_deck_out(d) for d in deck.forcing.coil_sets_raw])
+        inputs["ForcingTerms"] = forcing
+    end
+    ef = deck.error_fields
+    if ef !== nothing
+        table = _deck_table(ef.ctrl)
+        isempty(ef.tolerance_file) || (table["tolerance_file"] = ef.tolerance_file)
+        table["MonteCarlo"], table["Risk"], table["NTV"] = _deck_table(ef.monte_carlo), _deck_table(ef.risk), _deck_table(ef.ntv)
+        ef.scenario === nothing || (table["scenario"] = _deck_table(ef.scenario))
+        inputs["ErrorFields"] = table
+    end
+    return inputs
 end
