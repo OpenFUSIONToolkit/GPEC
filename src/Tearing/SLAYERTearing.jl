@@ -1,7 +1,7 @@
-# run_slayer.jl
+# SLAYERTearing.jl
 #
-# Tearing scan core: profile loading, the slab Δ′ reference conversion, and
-# `run_slayer_from_inputs` (scan + growth-rate extraction). `TearingProblem` builds its inputs.
+# Tearing scan core: χ inputs, the slab Δ′ reference conversion, `run_slayer_from_inputs`
+# (scan + growth-rate extraction), and the critical resonant field.
 
 # χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the kinetic data's
 # `chi_*_default`. With `warn`, a default is reported only for a χ the selected P_perp model
@@ -38,8 +38,7 @@ function _slayer_chi_inputs(loaded, control, data::KineticProfileData; warn::Boo
         chi_tor=pick(loaded.chi_tor, data.chi_phi_default))
 end
 
-# Human-readable surface label for warnings. SLAYER params carry (m, n);
-# GGJ params carry only the singular-surface index `ising`.
+# Surface label for warnings; GGJ params carry only the singular-surface index `ising`.
 _surface_label(p::SLAYERParameters) = "m=$(p.m), n=$(p.n)"
 _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 
@@ -47,20 +46,14 @@ _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 _is_ggj(::GGJModel) = true
 _is_ggj(::Any) = false
 
-# ---------------------------------------------------------------------
 # Scan dispatch
-# ---------------------------------------------------------------------
 function _run_scan(f, control::TearingConfig)
     if control.scan_mode === :brute_force
         return brute_force_scan(f, control.Q_re_range, control.Q_im_range;
             nre=control.nre, nim=control.nim)
     elseif control.scan_mode === :amr
         if !isempty(control.boxes)
-            # Multi-box stripe layout. Pole magnitude threshold for the
-            # activity check is derived from a coarse 16×6 sample of the
-            # union of all boxes, using 10 × median(|Δ|) (median is robust
-            # to near-pole sample inflation; see the adaptive threshold note
-            # below).
+            # Multi-box layout: pole threshold 10 × median(|Δ|) over a coarse 16×6 sample of the boxes' union.
             ω_lo = minimum(b[1] for b in control.boxes)
             ω_hi = maximum(b[2] for b in control.boxes)
             γ_lo = minimum(b[3] for b in control.boxes)
@@ -71,7 +64,6 @@ function _run_scan(f, control::TearingConfig)
             coarse_Δ = ComplexF64[ComplexF64(f(q)) for q in coarse_pts]
             finite = filter(z -> isfinite(z) && abs(z) < 1e30, coarse_Δ)
             pole_thr = isempty(finite) ? 1e8 : 10.0 * median(abs.(finite))
-            # Convert NTuple{4,Float64} → ((ω_lo,ω_hi),(γ_lo,γ_hi)) tuples
             boxes_in = [((b[1], b[2]), (b[3], b[4])) for b in control.boxes]
             return multi_box_amr_scan(f, boxes_in;
                 pole_magnitude_threshold=pole_thr,
@@ -91,11 +83,7 @@ function _run_scan(f, control::TearingConfig)
     throw(ArgumentError("_run_scan: unknown scan_mode=$(control.scan_mode)"))
 end
 
-# ---------------------------------------------------------------------
-# Surface-coupling builder — dispatches on model type to thread the
-# correct `scale` and `tauk` through the Dispersion API.
-# ---------------------------------------------------------------------
-# SLAYER: scale = lu^(1/3), tauk from the surface, dc from the χ‖ proxy.
+# Surface coupling for SLAYER: scale = lu^(1/3), tauk from the surface, dc from the χ‖ proxy.
 function _build_surface_coupling(model::SLAYERModel, params::SLAYERParameters,
     dp_diag, q_shift::Real)
     return surface_coupling(model, params, dp_diag; dc=params.dc_tmp, q_shift=q_shift)
@@ -105,8 +93,7 @@ end
 _mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
 _mn_label(::InnerLayerParameters) = nothing
 
-# Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
-# rational surface (NaN when there is none), replaced on every surface whose m/n `labels` entry `problem.omega_E_kHz` lists.
+# Per-surface Ω_E per unit n [rad/s]: the kinetic file's `omega_E` (NaN if none), overridden by `omega_E_kHz` by m/n.
 function _omega_E_per_surface(control, labels::AbstractVector, omega_E_file::AbstractVector{<:Real})
     n = length(labels)
     isempty(omega_E_file) || length(omega_E_file) == n ||
@@ -142,40 +129,20 @@ function _q_shift(p::SLAYERParameters, Ω_E::Real)
     return -p.tauk * p.n * Ω_E
 end
 
-# ---------------------------------------------------------------------
 # Reference-length conversion of the outer Δ' for the slab layer
-# ---------------------------------------------------------------------
 """
     delta_prime_to_rs_reference(dp_matrix, params) -> Matrix{ComplexF64}
 
-Convert the outer-region Δ' matrix from its ψ_N reference length (the
-STRIDE/BVP convention: Frobenius coefficients normalized per unit Δψ_N) to
-the r_s-based `x̂ = (r − r_s)/r_s` reference the slab layer works in
-(Fitzpatrick 2023 convention — the same reference used by `dc_tmp` and by
-the `S^(1/3)` Δ(Q) scale, both built on r_s).
-
-Near surface `k` the outer solution combines the large and small Frobenius
-solutions with the Mercier exponent `α = √(−D_I)`, `D_I = E + F + H − 1/4`
-(Glasser, Greene & Johnson 1975, Eqs. 16, 24; STRIDE's `alpha`). The displacement
-scales as `|x|^(−1/2 ± α)` (Glasser, Wang & Park 2016, Eq. 26), so the
-flux-like variable `ψ ∝ x·ξ` of the slab Δ' definition scales as
-`A_L·|x|^(1/2−α) + A_S·|x|^(1/2+α)`. Rescaling the radial variable
-`x_ψ = K·x̂` with `K = r_s·(dψ_N/dr)|_s` maps the flux coefficients as
-`Â_L = A_L·K^(1/2−α)` and `Â_S = A_S·K^(1/2+α)`, so the response matrix
-(small coefficient at surface `i` per unit large coefficient at surface `j`)
-transforms as
+Convert the outer-region Δ' matrix from its ψ_N reference length (STRIDE/BVP convention) to the
+r_s-based `x̂ = (r − r_s)/r_s` reference of the slab layer (Fitzpatrick 2023 convention, shared by
+`dc_tmp` and the `S^(1/3)` Δ(Q) scale). With the Mercier exponent `α = √(−D_I)` (Glasser, Greene &
+Johnson 1975, Eqs. 16, 24; Glasser, Wang & Park 2016, Eq. 26) and `K = r_s·(dψ_N/dr)|_s`,
 
     Δ̂_ij = K_i^(1/2+α_i) · Δ'_ij · K_j^(α_j−1/2)
 
-whose diagonal is `K^(2α)·Δ'_kk`; at D_I = −1/4 (α = 1/2) this reduces to
-the textbook `Δ̂ = r_s·Δ'_phys`. The diagonal factor is the exponent gap and
-is the same whichever variable carries the coefficients; using the
-displacement instead shifts both exponents by one and changes the
-off-diagonal split by `K_i/K_j`, a diagonal similarity transform `D·Δ'·D⁻¹`
-that leaves every uncoupled and coupled dispersion root unchanged. `K` and
-`α` are carried per surface in `SLAYERParameters.k_ref` / `.alpha_mercier`;
-hand-built parameters default to `k_ref = 1`, making the conversion the
-identity.
+which reduces to `Δ̂ = r_s·Δ'` at α = 1/2. The off-diagonal split is a similarity transform that
+leaves every dispersion root unchanged. `K` and `α` come from `SLAYERParameters.k_ref` /
+`.alpha_mercier`; hand-built parameters default to `k_ref = 1`, making this the identity.
 """
 function delta_prime_to_rs_reference(dp_matrix::AbstractMatrix,
     params::AbstractVector{<:SLAYERParameters})
@@ -184,24 +151,16 @@ function delta_prime_to_rs_reference(dp_matrix::AbstractMatrix,
     return Diagonal(dl) * Matrix{ComplexF64}(dp_matrix) * Diagonal(dr)
 end
 
-# ---------------------------------------------------------------------
-# Core analysis entry point that takes pre-built parameters.
-# ---------------------------------------------------------------------
+# Core analysis entry point on pre-built parameters
 """
     run_slayer_from_inputs(model::InnerLayerModel, params, dp_matrix, problem, config;
                            rational_psi, rational_q, omega_E) -> TearingResult
 
-Run the tearing analysis scan core given the inner-layer dispatch `model`, the pre-built
-per-surface parameters, and the outer-region Δ' matrix. Bypasses the orchestration of the
-`TearingProblem` solve — use this when the parameters are already known (e.g. in unit
-tests or when rebuilding from cached HDF5 output). The model is a typed object end to
-end. `omega_E` is the E×B angular
-frequency per unit n at each surface [rad/s], replaced on any surface whose m/n
-`problem.omega_E_kHz` lists; empty means none is known. A surface with no known value applies no
-shift and is reported as NaN. In coupled mode it Doppler-shifts each surface's inner-layer Q; in
-both modes the resolved value is reported as `result.omega_E`. Roots are reported in the lab frame
-in both modes: an uncoupled layer is solved in its own E×B frame and its root is then moved by
-τ_k·n·Ω_E (Ω_E = 0 where it is unknown), so `γ` is the same and ω carries n·Ω_E.
+Run the tearing scan and root extraction for SLAYER `model` on pre-built per-surface parameters
+and the outer-region Δ' matrix, skipping the `TearingProblem` setup. `omega_E` is the E×B angular
+frequency per unit n at each surface in `rad/s`, overridden by `problem.omega_E_kHz`; empty means
+unknown (no shift, reported as NaN). In coupled mode it Doppler-shifts each surface's Q; an uncoupled
+layer is solved in its own E×B frame and its root moved by τ_k·n·Ω_E. Roots are reported in the lab frame.
 """
 function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     params::AbstractVector{<:InnerLayerParameters},
@@ -223,8 +182,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                             "≠ ($n, $n)"))
     dp = Matrix{ComplexF64}(dp_matrix)
 
-    # Guard: the inner-layer model and the parameter eltype must match, or
-    # `_build_surface_coupling` throws an opaque MethodError downstream.
+    # Without this, a parameter-type mismatch is an opaque MethodError in `_build_surface_coupling`.
     expected_P = SLAYERParameters
     all(p -> p isa expected_P, params) ||
         throw(
@@ -259,10 +217,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
             "Q_re_range=$(config.Q_re_range); widen it or the coupled root may be missed.")
     end
 
-    # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
-    # Independent of the dispersion scan / coupling mode — a pure diagnostic.
-    # SLAYER-only: the del_s Riccati is defined on SLAYERParameters. GGJ
-    # surfaces carry no analogous layer-thickness diagnostic, so leave it empty.
+    # Diagnostic layer thickness [m] from the del_s Riccati solve (SLAYER only).
     layer_widths = eltype(params) <: SLAYERParameters ?
                    LayerWidths[slayer_layer_thickness(params[k]) for k in 1:n] :
                    LayerWidths[]
@@ -274,19 +229,9 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     coupled_extraction = nothing
     scan_data_list = Union{ScanResult,AMRResult}[]
 
-    # Helper: compute the pole_threshold actually passed to find_growth_rates.
-    # When `config.pole_threshold_adaptive` is true, override with
-    # `10 × median(|Δ|)` over the scan's dispersion residual array.
-    #
-    # The median formulation is robust against pre-screen samples landing
-    # near a pole. A single near-pole sample inflates `|mean(Δ)|` by orders
-    # of magnitude (and `|mean|` further collapses on oscillating residuals
-    # whose phases cancel in the complex sum). 10 × median(|Δ|) reflects
-    # "10× the typical residual magnitude" with median robust to both
-    # pathologies.
+    # Adaptive pole threshold 10 × median(|Δ|) over the scan; the median is robust to near-pole samples.
     function _pole_threshold_for(scan)
         config.pole_threshold_adaptive || return config.pole_threshold
-        # ScanResult and AMRResult both carry `.Δ` — abstract over both
         Δ_arr = hasproperty(scan, :Δ) ? scan.Δ : nothing
         Δ_arr === nothing && return config.pole_threshold
         finite = filter(z -> isfinite(z) && abs(z) < 1e30, Δ_arr)
@@ -330,13 +275,8 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         scan = _run_scan(mc, config)
         pthr = _pole_threshold_for(scan)
         ref_tauk = scs[ref_idx].tauk
-        # Coupled path: no root polishing / validity gate. The m×m coupled
-        # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
-        # above zero), so |det|-based polishing is a no-op and the residual-scale
-        # gate is unreliable. The coupled root is therefore the raw contour
-        # intersection and carries the triangulation's interpolation error. With
-        # root_classification = :winding the determinant is evaluated around
-        # each intersection only to count its zeros and poles.
+        # No polishing or validity gate: det(D'−D(Q)) is ill-conditioned, so the root is the raw contour
+        # intersection with its interpolation error. :winding uses the determinant only to count zeros and poles.
         gr = find_growth_rates(scan, ref_tauk;
             pole_threshold=pthr,
             filter_above_poles=config.filter_above_poles,
@@ -363,9 +303,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
         run_critical_resonant_field(model, params, Ω_E, real.(diag(dp)), problem.critical_resonant_field))
 end
 
-# ---------------------------------------------------------------------
 # Critical resonant field (torque balance)
-# ---------------------------------------------------------------------
 """
     run_critical_resonant_field(model, params, omega_E, dp_diag, ctrl) -> CriticalResonantFieldResult
 

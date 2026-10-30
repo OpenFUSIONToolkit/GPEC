@@ -1,22 +1,6 @@
-# ContourSearchAMR.jl
-#
-# Cell-based adaptive mesh refinement scanner of the complex Q plane.
-#
-# Each `AMRCell` is an axis-aligned rectangle holding its 4 corner Q values
-# and the corresponding Δ values evaluated by the user-supplied residual
-# `f(Q)`. After `passes` refinement steps, every cell that brackets a zero
-# in `Re(Δ)` or `Im(Δ)` has been subdivided into 4 quadrant children
-# carrying 5 freshly evaluated midpoint Δ values.
-#
-# All evaluations of `f(Q)` are deduplicated through a `Dict{ComplexF64,
-# ComplexF64}` hash cache so that adjacent cells sharing a corner (and
-# adjacent refinement levels sharing an edge midpoint) cost only one
-# evaluation.
-#
-# Output: `AMRResult` holds the final list of `AMRCell`s (preserving the
-# axis-aligned-rectangle structure that downstream marching-squares contour
-# extraction in `GrowthRateExtraction.jl` exploits) plus the flat
-# (Q::Vector, Δ::Vector) of all unique evaluations.
+# Cell-based adaptive mesh refinement of the complex Q plane: cells whose corner residuals straddle
+# zero in Re or Im are split into quadrants, and every f(Q) evaluation is shared through a hash cache.
+# The axis-aligned cells feed the marching-squares extraction in `GrowthRateExtraction.jl`.
 
 # Corner ordering: 1 = BL, 2 = BR, 3 = TL, 4 = TR.
 
@@ -49,10 +33,7 @@ Output of `amr_scan`.
 | `cells`     | Final list of `AMRCell` after all refinement passes      |
 | `Q`         | Flat `Vector{ComplexF64}` of every unique residual eval  |
 | `Δ`         | Corresponding `Vector{ComplexF64}` of residual values    |
-| `truncated` | `true` if `max_cells` was hit and remaining refinement   |
-|             | passes were skipped (`max_cells_action=:warn_truncate`). |
-|             | A `true` result is NOT fully converged — distinguish it  |
-|             | from a converged scan in convergence studies.            |
+| `truncated` | `true` if `max_cells` was hit under `:warn_truncate`; the scan is then not converged |
 """
 struct AMRResult
     cells::Vector{AMRCell}
@@ -61,12 +42,11 @@ struct AMRResult
     truncated::Bool
 end
 
-# Back-compat constructor: a scan that ran to completion is not truncated.
+# A scan that ran to completion is not truncated.
 AMRResult(cells::Vector{AMRCell}, Q::Vector{ComplexF64}, Δ::Vector{ComplexF64}) =
     AMRResult(cells, Q, Δ, false)
 
-# Hash-cached residual evaluator. Returns the cached Δ value if `q` is
-# already known, otherwise evaluates `f(q)`, stores it, and returns it.
+# Return the cached residual at `q`, evaluating and storing it on a miss.
 @inline function _cached_eval!(cache::Dict{ComplexF64,ComplexF64},
     f, q::ComplexF64)
     haskey(cache, q) && return cache[q]
@@ -75,16 +55,12 @@ AMRResult(cells::Vector{AMRCell}, Q::Vector{ComplexF64}, Δ::Vector{ComplexF64})
     return Δ
 end
 
-# Parallel-friendly bulk filler: given a list of Q values, evaluates the
-# residual at each one that isn't already in `cache` and stores the result.
-# When `parallel=true` AND more than one Julia thread is available, the
-# evaluations run via `@threads`; the cache is populated serially afterward
-# to avoid Dict data races. Per-call evaluations of `f` are assumed to be
-# thread-safe (true for `mc_fort(Q)` which constructs its own local state).
+# Evaluate `f` at every uncached point of `qs` (threaded when `parallel` and several threads exist),
+# then fill `cache` serially to avoid Dict races. `f` must be thread-safe.
 function _bulk_eval_into_cache!(cache::Dict{ComplexF64,ComplexF64}, f,
     qs::AbstractVector{ComplexF64};
     parallel::Bool)
-    # First pass: partition `qs` into already-cached vs new. Keep uniqueness.
+    # Collect the unique uncached points.
     seen = Set{ComplexF64}()
     new_qs = Vector{ComplexF64}()
     for q in qs
@@ -96,12 +72,8 @@ function _bulk_eval_into_cache!(cache::Dict{ComplexF64,ComplexF64}, f,
     isempty(new_qs) && return
     new_vals = Vector{ComplexF64}(undef, length(new_qs))
     if parallel && Threads.nthreads() > 1
-        # Pin BLAS to one thread for the Julia-level parallel region. The
-        # residual `f(Q)` calls `det()` (LAPACK); concurrent multithreaded-BLAS
-        # calls from several Julia threads give non-reproducible reductions that
-        # perturb `f` at the ULP level — enough to flip the extracted root
-        # between near-degenerate solutions run-to-run. The residual matrices are
-        # tiny (≤ a few ×msing), so single-threaded BLAS costs nothing here.
+        # Pin BLAS to one thread: concurrent multithreaded `det()` reductions are not reproducible
+        # and can flip the extracted root between near-degenerate solutions.
         _blas0 = BLAS.get_num_threads()
         BLAS.set_num_threads(1)
         try
@@ -122,14 +94,9 @@ function _bulk_eval_into_cache!(cache::Dict{ComplexF64,ComplexF64}, f,
     return
 end
 
-# Sign-crossing test: does `vals` straddle zero? Used in both Re and Im
-# directions on a cell's 4 corners (mirrors check_cell_crossing_sub).
+# Does `vals` straddle zero? A non-finite corner (the layer's NaN sentinel near a pole) counts as
+# a crossing so the cell is refined rather than silently dropped.
 @inline function _crosses_zero(vals)
-    # A non-finite corner (NaN/Inf) marks a divergence — typically a pole, where
-    # the inner-layer solver returns a NaN sentinel. Flag such cells as active so
-    # they are refined / pre-screened rather than silently dropped: a NaN corner
-    # makes both the product test below and the `abs >= threshold` pole check
-    # evaluate to false, which would hide the pole region entirely.
     any(!isfinite, vals) && return true
     return minimum(vals) * maximum(vals) <= 0
 end
@@ -142,44 +109,22 @@ end
               snapshot_callback=nothing,
               parallel=Threads.nthreads() > 1) -> AMRResult
 
-Adaptively refine a Q-plane scan of the residual `f(Q)`. An initial
-`nre0 × nim0` axis-aligned grid of cells is built over `Q_re_range × Q_im_range` and `passes` rounds of refinement are applied. Each pass:
-
- 1. flags any cell whose 4 corner residuals straddle zero in `Re(Δ)` or
-    `Im(Δ)`;
- 2. subdivides each flagged cell into 4 quadrant children, evaluating `f`
-    at 5 new midpoints;
- 3. unflagged cells are kept unchanged.
-
-All evaluations of `f` are deduplicated through a `Dict{ComplexF64, ComplexF64}` hash cache so that adjacent cells share a single evaluation
-per corner. The returned `AMRResult` carries both the final cell list (for
-marching-squares contour extraction) and the flat list of all unique Q/Δ
-evaluations.
+Adaptively refine a Q-plane scan of the residual `f(Q)`. Starting from an `nre0 × nim0` grid of cells
+over `Q_re_range × Q_im_range`, each of `passes` passes splits every cell whose corner residuals
+straddle zero in `Re(Δ)` or `Im(Δ)` into 4 quadrants. Evaluations are cached, so shared corners cost
+one evaluation. The `AMRResult` holds the final cells and every unique Q/Δ evaluation.
 
 # Keyword arguments
 
-  - `nre0`, `nim0`   -- initial coarse-grid cell counts along each axis
+  - `nre0`, `nim0`   -- initial grid cell counts along each axis
   - `passes`         -- number of refinement passes
-  - `max_cells`      -- safety cap on total cells; behavior on hit is set
-    by `max_cells_action`
-  - `max_cells_action` -- `:error` (raises) or `:warn_truncate` (logs a
-    warning and returns the partial result). The latter is useful for
-    convergence-vs-resolution studies where we deliberately push max_cells
-    and want graceful degradation. Default `:error` preserves the prior
-    safety-rail behaviour.
-  - `snapshot_callback` -- if not `nothing`, a function called after each
-    pass (and once for the initial grid, pass=0) with arguments
-    `(pass::Int, cells::Vector{AMRCell}, cache::Dict{ComplexF64,ComplexF64})`.
-    The callback receives live references — copy if you need persistence.
-    Used by convergence studies to extract intermediate γ at each pass count.
-  - `parallel`       -- evaluate `f` in parallel via `Threads.@threads` within
-    each phase (initial grid + each refinement pass). Defaults to `true`
-    when more than one Julia thread is available. Per-call evaluations of
-    `f` must be thread-safe. The result is deterministic regardless of thread
-    count: cache updates and cell-list construction stay serial, AND BLAS is
-    pinned to one thread during the parallel region so the `det()`-based
-    residual does not pick up non-reproducible multithreaded-LAPACK reductions
-    (which otherwise flip the extracted root between near-degenerate solutions).
+  - `max_cells`      -- cap on total cells
+  - `max_cells_action` -- on hitting the cap, `:error` throws and `:warn_truncate` warns and returns the
+    partial result with `truncated = true`
+  - `snapshot_callback` -- if set, called as `(pass, cells, cache)` after the initial grid (pass 0) and
+    each pass; the arguments are live references, so copy them to keep them
+  - `parallel`       -- evaluate `f` with `Threads.@threads`; `f` must be thread-safe. The result does
+    not depend on the thread count.
 """
 function amr_scan(f, Q_re_range::NTuple{2,<:Real},
     Q_im_range::NTuple{2,<:Real};
@@ -202,9 +147,7 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
 
     cache = Dict{ComplexF64,ComplexF64}()
 
-    # ---- 1. coarse initial grid (nre0 × nim0 cells, (nre0+1)·(nim0+1) corners)
-    # Collect every corner Q, evaluate in parallel, then build the cells using
-    # cache lookups (no further evaluation happens in the build step).
+    # Coarse initial grid: evaluate all corners, then build cells from the cache.
     ncorners_x = nre0 + 1
     ncorners_y = nim0 + 1
     corners = Vector{ComplexF64}(undef, ncorners_x * ncorners_y)
@@ -216,10 +159,7 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
 
     cells = Vector{AMRCell}(undef, nre0 * nim0)
     @inbounds for j in 0:nim0-1, i in 0:nre0-1
-        # Read corner Q values from the same `corners` array used to populate
-        # the cache. Recomputing them with `x + re_step` here would differ in
-        # the last floating-point bit from the cache keys, causing spurious
-        # KeyErrors on lookup.
+        # Reuse the cached corner values exactly; recomputing them can miss the cache by one ulp.
         q_bl = corners[j*ncorners_x+i+1]
         q_br = corners[j*ncorners_x+(i+1)+1]
         q_tl = corners[(j+1)*ncorners_x+i+1]
@@ -229,15 +169,13 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
             cache[q_tl], cache[q_tr])
     end
 
-    # Snapshot the initial grid (pass 0) before any refinement.
     snapshot_callback === nothing || snapshot_callback(0, cells, cache)
 
-    # ---- 2. refinement passes
+    # Refinement passes
     truncated = false   # set true when max_cells is hit and action == :warn_truncate
     for pass_idx in 1:passes
         truncated && break
-        # Phase A: identify flagged parent cells and collect the midpoints we
-        # need to evaluate: the 5 midpoints per parent (BM, TM, LM, RM, MM).
+        # Flag cells with a zero crossing and collect their 5 midpoints (BM, TM, LM, RM, MM).
         flagged_idx = Int[]
         new_qs = Vector{ComplexF64}()
         sizehint!(new_qs, length(cells))
@@ -257,10 +195,9 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
             end
         end
 
-        # Phase B: evaluate all new midpoints in parallel, fill the cache.
         _bulk_eval_into_cache!(cache, f, new_qs; parallel=parallel)
 
-        # Phase C: build the refined cell list using cache lookups.
+        # Build the refined cell list from the cache.
         new_cells = Vector{AMRCell}()
         sizehint!(new_cells, length(cells) + 3 * length(flagged_idx))
         flagged_set = Set(flagged_idx)
@@ -306,11 +243,10 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
             end
         end
         cells = new_cells
-        # Snapshot after this pass.
         snapshot_callback === nothing || snapshot_callback(pass_idx, cells, cache)
     end
 
-    # ---- 3. flatten the cache into output Q/Δ vectors
+    # Flatten the cache into output Q/Δ vectors
     n = length(cache)
     Q = Vector{ComplexF64}(undef, n)
     Δ = Vector{ComplexF64}(undef, n)
@@ -322,30 +258,9 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
     return AMRResult(cells, Q, Δ, truncated)
 end
 
-# =============================================================================
-# Multi-box AMR scan with pre-screen
-# =============================================================================
-#
-# Motivation. A single wide AMR box (e.g. ω ∈ [-100, +100] kHz, γ ∈ [-25, +25])
-# spends most of its evaluations on regions that contain neither roots nor
-# poles. Splitting the same area into several smaller boxes and pre-screening
-# each on a coarse 25×25 grid lets us skip refinement on inactive boxes
-# entirely, while keeping full AMR sensitivity on the active ones.
-#
-# A box is flagged ACTIVE if any cell of its pre-screen grid satisfies AT LEAST
-# ONE of:
-#   - sign change in Re(Δ) across the cell's 4 corners (zero-isoline of Re(Δ)
-#     crosses the cell — root candidate);
-#   - sign change in Im(Δ) across the cell's 4 corners (zero-isoline of Im(Δ)
-#     crosses the cell — root candidate);
-#   - any corner with |Δ| ≥ `pole_magnitude_threshold` (likely pole inside or
-#     near the box; sign-only criteria miss poles unless their fringe sign
-#     change happens to land inside the pre-screen resolution).
-#
-# The pole-magnitude criterion is essential: a tight pole tucked inside one
-# pre-screen cell can leave all four corners with the same large-magnitude sign
-# (because Re(Δ) and Im(Δ) flip together as you orbit the pole, and at the
-# corners we may sample the same lobe), so the sign-change tests would miss it.
+# Multi-box AMR scan with pre-screen: skip refinement on boxes whose coarse grid shows no zero
+# crossing and no large |Δ|. The magnitude test catches a pole inside one pre-screen cell whose
+# corners all sample the same lobe, which the sign tests would miss.
 
 """
     BoxActivity
@@ -357,9 +272,7 @@ criterion fired first.
 """
 @enum BoxActivity NoActivity ReZeroCrossing ImZeroCrossing PoleMagnitude
 
-# Pre-screen activity check: scan the pre-built cells and return the first
-# satisfied criterion (or NoActivity if none fire). Designed for early exit so
-# fully-quiet boxes cost just enough cell scans to confirm.
+# Return the first activity criterion met by any pre-screen cell, or `NoActivity`.
 function _check_box_activity(cells::AbstractVector{AMRCell},
     pole_magnitude_threshold::Real)
     @inbounds for cell in cells
@@ -416,71 +329,20 @@ end
                        max_cells_action=:error,
                        parallel=Threads.nthreads() > 1) -> MultiBoxAMRResult
 
-Run `amr_scan` over multiple Q-plane boxes with a coarse pre-screen step that
-skips inactive boxes entirely. The typical use case is the three-stripe ω-axis
-scan for SLAYER coupled tearing dispersion:
-
-    ω ∈ [-75, -25],  γ ∈ [-25, +25]   (left stripe)
-    ω ∈ [-25, +25],  γ ∈ [-25, +25]   (centre stripe)
-    ω ∈ [+25, +75],  γ ∈ [-25, +25]   (right stripe)
-
-A single 150×50 box is wasteful when the dispersion is concentrated near a
-narrow ω band; splitting into stripes and pre-screening lets the AMR effort
-land on the active stripe.
-
-# Pre-screen logic
-
-Each box is sampled on a `prescreen_nre × prescreen_nim` corner grid (default
-25×25, matching the typical AMR initial-grid resolution). A box is ACTIVE if
-ANY pre-screen cell satisfies at least one criterion:
-
- 1. sign change of `Re(Δ)` across the cell's 4 corners (zero-isoline of
-    `Re(Δ)` crosses the cell — root candidate);
- 2. sign change of `Im(Δ)` across the cell's 4 corners (zero-isoline of
-    `Im(Δ)` crosses the cell — root candidate);
- 3. any corner with `|Δ| ≥ pole_magnitude_threshold` (likely pole — the
-    sign-only criteria miss poles whose fringe doesn't straddle a corner).
-
-Active boxes get the full `amr_scan` treatment. Inactive boxes are dropped
-(their `AMRResult` is `nothing`).
+Run `amr_scan` over several Q-plane boxes, skipping boxes that a coarse pre-screen finds inactive.
+A box is active if any `prescreen_nre × prescreen_nim` pre-screen cell has a sign change of `Re(Δ)`
+or `Im(Δ)` across its corners, or a corner with `|Δ| ≥ pole_magnitude_threshold`. Active boxes get a
+full `amr_scan`; inactive ones get `nothing`.
 
 # Arguments
 
-  - `f`: residual function `Q::ComplexF64 → Δ::ComplexF64`. Must be thread-safe
-    if `parallel=true`.
-  - `boxes`: vector of `(Q_re_range, Q_im_range)` tuples, one per box. Boxes
-    may overlap or share boundaries; the aggregator deduplicates Q values.
+  - `f`: residual `Q::ComplexF64 → Δ::ComplexF64`; must be thread-safe if `parallel=true`.
+  - `boxes`: vector of `(Q_re_range, Q_im_range)` tuples; boxes may overlap or share edges.
+  - `pole_magnitude_threshold`: `|Δ|` activity threshold, e.g. the adaptive `pole_threshold` used in
+    `find_growth_rates`.
+  - `nre0, nim0, passes, max_cells, max_cells_action, parallel`: forwarded to each `amr_scan`.
 
-# Required keyword
-
-  - `pole_magnitude_threshold`: activity threshold for `|Δ|`. A natural choice
-    is `≈ |mean(Δ)|` from a baseline (or the same value used for adaptive
-    pole_threshold in `find_growth_rates`).
-
-# Optional keywords
-
-  - `prescreen_nre`, `prescreen_nim` (default 25 each): pre-screen grid
-    resolution. Coarser misses small features; finer wastes evaluations on
-    inactive boxes.
-  - `nre0, nim0, passes, max_cells, max_cells_action, parallel`: forwarded to
-    each per-box `amr_scan` call. Defaults match `amr_scan`.
-
-# Returns
-
-A `MultiBoxAMRResult`. The aggregated `(cells, Q, Δ)` can be wrapped in an
-`AMRResult` (helper `as_amr_result` below) for direct use with
-`find_growth_rates`.
-
-# Notes / TODO
-
-  - Each per-box `amr_scan` rebuilds its own cache, so the 25×25 pre-screen
-    corners get re-evaluated by the AMR initial pass on active boxes
-    (≈ 676 wasted evals per active box). A future refactor could thread a
-    shared cache through `amr_scan`. For now the cost is small relative to
-    the AMR refinement evals.
-  - Boxes that share a boundary line (e.g. the three ω-stripe layout above)
-    duplicate ≈ `prescreen_nim+1` corner evaluations per shared edge. Also
-    small.
+Pass the result through `as_amr_result` for `find_growth_rates`.
 
 # Example
 
@@ -492,8 +354,7 @@ result = multi_box_amr_scan(f_residual, boxes;
     pole_magnitude_threshold=1e-3,
     prescreen_nre=25, prescreen_nim=25,
     nre0=25, nim0=25, passes=4)
-amr = AMRResult(result.cells, result.Q, result.Δ)
-roots = find_growth_rates(amr, tauk; pole_threshold=1e-3)
+roots = find_growth_rates(as_amr_result(result), tauk; pole_threshold=1e-3)
 ```
 """
 function multi_box_amr_scan(f,
@@ -514,10 +375,7 @@ function multi_box_amr_scan(f,
     box_activity = Vector{BoxActivity}(undef, n_boxes)
     prescreen_evals_total = 0
 
-    # Aggregator: dedupe Q/Δ across all per-box caches and the pre-screen samples.
-    # Using a Dict keyed by Q gives O(1) dedup and lets us merge results in any
-    # order. We also collect cells (from active boxes only) for downstream
-    # marching-squares extraction.
+    # Deduplicated Q/Δ over all boxes and pre-screens; cells from active boxes only.
     qd_aggregate = Dict{ComplexF64,ComplexF64}()
     cells_aggregate = AMRCell[]
 
@@ -530,9 +388,7 @@ function multi_box_amr_scan(f,
         ncorners_x = prescreen_nre + 1
         ncorners_y = prescreen_nim + 1
 
-        # Pre-screen corners for THIS box. Local cache so we can both drive the
-        # activity check and feed into the aggregate without polluting an
-        # eventual per-box AMR cache.
+        # Separate pre-screen cache, merged into the aggregate below.
         box_cache = Dict{ComplexF64,ComplexF64}()
         corners = Vector{ComplexF64}(undef, ncorners_x * ncorners_y)
         @inbounds for j in 0:prescreen_nim, i in 0:prescreen_nre
@@ -542,7 +398,6 @@ function multi_box_amr_scan(f,
         _bulk_eval_into_cache!(box_cache, f, corners; parallel=parallel)
         prescreen_evals_total += length(box_cache)
 
-        # Build pre-screen cells
         ps_cells = Vector{AMRCell}(undef, prescreen_nre * prescreen_nim)
         @inbounds for j in 0:prescreen_nim-1, i in 0:prescreen_nre-1
             q_bl = corners[j*ncorners_x+i+1]
@@ -555,12 +410,10 @@ function multi_box_amr_scan(f,
                     box_cache[q_tl], box_cache[q_tr])
         end
 
-        # Activity check
         activity = _check_box_activity(ps_cells, pole_magnitude_threshold)
         box_activity[b_idx] = activity
 
-        # Merge pre-screen evals into aggregate (for both active and skipped
-        # boxes — diagnostics see all samples).
+        # Keep pre-screen samples of skipped boxes too.
         for (q, d) in box_cache
             qd_aggregate[q] = d
         end
@@ -581,7 +434,6 @@ function multi_box_amr_scan(f,
         end
     end
 
-    # Flatten aggregator
     n = length(qd_aggregate)
     Q_all = Vector{ComplexF64}(undef, n)
     Δ_all = Vector{ComplexF64}(undef, n)

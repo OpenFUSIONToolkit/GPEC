@@ -3,34 +3,23 @@ import ..Utilities.HDF5Annotations: replace_group!, write_ragged!
 
 # HDF5Output.jl
 #
-# Write a `TearingResult` into an HDF5 group. Designed to be called by the
-# existing `PerturbedEquilibrium.write_outputs_to_HDF5` path — the
-# top-level GPEC runner wires that up; this file only defines the pure
-# writer.
-#
-# Output layout (relative to the parent group the caller provides;
-# settings are not echoed here — inputs live only under Input/):
+# Writer for a `TearingResult`. Layout under the caller's parent group (inputs live only under Input/):
 #
 #   Tearing/
-#   ├── PerSurface/         -- struct-of-arrays for SLAYERParameters fields
-#   │   ├── psi, q, q1, ...
-#   │   └── ...
-#   ├── Roots/              -- complex Q_root, omega, gamma
-#   ├── Diagnostics/        -- ValidRoots, Poles, FilteredRoots (uncoupled: each surface's E×B frame;
-#   │                          + *Winding when root_classification = :winding)
-#   │                           (flat-plus-offsets ragged encoding)
-#   ├── Scan/               -- optional: full Q/Δ scan data
-#   └── CriticalResonantField/ -- optional: torque-balance b_r/B_φ crit per surface
+#   ├── PerSurface/            -- layer parameters (SLAYER or GGJ set), Δ' matrix, omega_E, q_shift
+#   ├── Roots/                 -- Q_root, omega, gamma, no_root (lab frame)
+#   ├── LayerWidths/           -- resistive layer thickness per surface
+#   ├── Diagnostics/           -- ValidRoots, Poles, FilteredRoots (+ *Winding), flat-plus-offsets ragged;
+#   │                             uncoupled entries are in each surface's E×B frame
+#   ├── Scan/                  -- optional: full Q/Δ scan data
+#   └── CriticalResonantField/ -- optional: torque-balance critical b_r/B_φ per surface
 
 using HDF5
 
 """
-    save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
-                        result::TearingResult)
+    save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, result::TearingResult)
 
-Write `result` into a `Tearing/` subgroup of `parent`. The subgroup is
-created if missing and overwritten if it already exists (keeps the
-output file reproducible across reruns).
+Write `result` into a `Tearing/` subgroup of `parent`, replacing any existing one.
 """
 function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     result::TearingResult)
@@ -262,7 +251,6 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     # Physics names for the interchange/geometric inputs (struct fields keep *_val).
     ps["D_R"] = Float64[p.dr_val for p in params]
     ps["D_geo"] = Float64[p.dgeo_val for p in params]
-    # Store dc_type per-surface as string array
     ps["D_c_type"] = String[String(p.dc_type) for p in params]
     # Reference-length conversion applied to Δ' (ψ_N → r_s): K, α, and the
     # diagonal factor K^(2α) actually multiplying each Δ'_kk.
@@ -299,9 +287,7 @@ function _write_roots!(g, r::TearingResult)
     roots["Q_root"] = r.Q_root
     roots["omega"] = r.omega
     roots["gamma"] = r.gamma
-    # `no_root[k] == 1` flags entries where the extraction found NO usable
-    # root (Q_root is NaN; omega/gamma are 0 placeholders, not a true
-    # γ≈0 result). Aligned element-wise with Q_root/omega/gamma.
+    # no_root[k] = 1 where extraction found no usable root (Q_root NaN; omega/gamma are 0 placeholders, not γ ≈ 0).
     extractions = r.coupled_extraction !== nothing ? [r.coupled_extraction] :
                   r.per_surface_extraction
     roots["no_root"] = Int[(:no_root in gr.warning_flags) ? 1 : 0

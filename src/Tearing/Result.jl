@@ -1,8 +1,6 @@
 # Result.jl
 #
-# `TearingResult` packages the output of a tearing solve:
-# per-surface layer parameters, the extracted tearing eigenvalues, and (if
-# `config.store_scan`) the full Q-plane scan data for plotting.
+# Result types of the tearing solve and the critical-resonant-field analysis.
 
 """
     CriticalResonantFieldScan
@@ -53,46 +51,35 @@ empty_critical_resonant_field_result() =
 """
     TearingResult
 
-Output of the tearing solve. Carries both summary eigenvalues (ω, γ) and
-full diagnostic detail (valid roots, poles, filtered roots, contours) for
-downstream inspection and HDF5 output.
+Output of the tearing solve: summary eigenvalues (ω, γ) and the full root-extraction diagnostics.
 
-# Fields
+## Fields
 
   - `enabled`             -- `true` only when the analysis actually ran
   - `problem`             -- producing TearingProblem, or nothing for a low-level scan
   - `config`              -- resolved scan configuration used by the model
   - `model`               -- the inner-layer model solved; `nothing` when the analysis did not run
   - `params`              -- SLAYER or GGJ layer parameters, one per surface
-  - `rational_psi`, `rational_q` -- normalized poloidal flux ψ_N and safety
-    factor q of each analyzed surface, aligned with `params`. Empty when the
-    analysis was built from bare parameters (`run_slayer_from_inputs` without
-    the surface list), in which case the HDF5 writer skips them.
-  - `dp_matrix`           -- outer-region Δ' matrix used in the analysis.
-    SLAYER path: r_s-referenced (the ψ_N BVP matrix transformed by
-    `delta_prime_to_rs_reference`, written as `PerSurface/Delta_prime_matrix_rs`);
-    GGJ path: the ψ_N matrix unchanged (written as `PerSurface/Delta_prime_matrix`)
+  - `rational_psi`, `rational_q` -- ψ_N and q of each surface, aligned with `params`; empty when
+    built from bare parameters, and then not written to HDF5
+  - `dp_matrix`           -- outer-region Δ' matrix used: r_s-referenced for SLAYER (`delta_prime_to_rs_reference`,
+    written as `PerSurface/Delta_prime_matrix_rs`), the ψ_N matrix for GGJ (`PerSurface/Delta_prime_matrix`)
   - `Q_root`              -- tearing eigenvalue(s) in normalized Q
 
       + length `nsurfaces` in `:uncoupled` mode
       + length `1` in `:coupled` mode (global eigenvalue normalized by
         `params[1].tauk`)
-  - `omega`, `gamma` -- rotation angular frequency Re(Q)/τ_k [rad/s] and growth rate
-    Im(Q)/τ_k [1/s] for SLAYER. SLAYER roots are in the lab frame; an uncoupled root is
-    moved from its layer's E×B frame by τ_k·n·Ω_E, with Ω_E = 0 where unknown.
-    GGJ roots are in the lab frame too: each coupled layer sees s + i·n·Ω_E, and an uncoupled root is
-    moved by n·Ω_E. Positive gamma means instability.
-  - `per_surface_extraction` -- `Vector{GrowthRateResult}` of length
-    `nsurfaces` in uncoupled mode (each includes polelines, pole list,
-    valid roots, filtered roots), in each surface's E×B frame. Empty in coupled mode.
+  - `omega`, `gamma` -- lab-frame angular frequency Re(Q)/τ_k in `rad/s` and growth rate Im(Q)/τ_k in `1/s`;
+    positive gamma is unstable. An uncoupled root is moved from its layer's E×B frame by n·Ω_E
+    (Ω_E = 0 where unknown); a coupled GGJ layer sees s + i·n·Ω_E
+  - `per_surface_extraction` -- `Vector{GrowthRateResult}`, one per surface in uncoupled mode, in each
+    surface's E×B frame. Empty in coupled mode.
   - `coupled_extraction`  -- single `GrowthRateResult` in coupled mode.
     `nothing` otherwise.
-  - `layer_widths`        -- `Vector{LayerWidths}`, one per surface: the
-    resistive layer thickness (in meters) from the `del_s` Riccati solve
-    plus FKR / visco-resistive sanity scales. Empty when disabled.
-  - `omega_E`             -- E×B angular frequency Ω_E per unit n [rad/s] resolved on each
-    surface: the kinetic file's value, or the `problem.omega_E_kHz` override for that m/n;
-    NaN where neither gives one. Recorded in both coupling modes
+  - `layer_widths`        -- `Vector{LayerWidths}`, one per SLAYER surface: the `del_s` Riccati layer
+    thickness in meters plus FKR / visco-resistive scales. Empty for GGJ.
+  - `omega_E`             -- E×B angular frequency Ω_E per unit n in `rad/s` on each surface: the kinetic
+    file's value or the `problem.omega_E_kHz` override; NaN where neither gives one
   - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
     inner-layer Q; zero outside `:coupled` mode, where rotation does not enter. Zero for GGJ, whose
     shift n·Ω_E acts on the growth-rate variable
@@ -122,7 +109,7 @@ struct TearingResult{P,C}
     critical_resonant_field::CriticalResonantFieldResult
 end
 
-# Empty result (enabled=false path)
+# Result of an analysis that did not run (enabled=false).
 function empty_tearing_result(problem, config::TearingConfig, model)
     return TearingResult(problem, false, config, model,
         SLAYERParameters[],

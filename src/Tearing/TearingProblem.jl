@@ -21,7 +21,7 @@ Both models report lab-frame roots from each surface's E×B rotation.
   - `omega_E_kHz` - Per-surface E×B rotation overrides keyed by m/n, replacing the kinetic data's `omega_E`.
   - `critical_resonant_field` - The SLAYER penetration-threshold calculation, a `CriticalResonantFieldControl`; `nothing` (default) skips it.
   - `eta`, `rho` - GGJ resistivity in Ω·m and mass density in kg/m³, a scalar or one value per surface
-    (core to edge), as in [`MatchProblem`](@ref). `nothing` (default) derives them from the kinetic data:
+    (core to edge), as in [`MatchProblem`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.MatchProblem). `nothing` (default) derives them from the kinetic data:
     η from its resistivity closure, the one SLAYER uses, and ρ = m_i·n_i of its main ion. Unused by `SLAYERModel`.
   - `gamma` - GGJ ratio of specific heats.
 """
@@ -83,16 +83,12 @@ function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::Tea
 
     params = _tearing_params(model, equil, surfaces, loaded)
 
-    # Δ' matrix: prefer the full inter-surface matrix; fall back to a
-    # diagonal built from each SingType's scalar delta_prime.
+    # Prefer the full inter-surface Δ' matrix; fall back to a diagonal of each surface's scalar delta_prime.
     dpm = ffs.delta_prime === nothing ? Matrix{ComplexF64}(undef, 0, 0) : ffs.delta_prime.matrix
     dp = if !isempty(dpm) && size(dpm) == (length(params), length(params))
         Matrix{ComplexF64}(dpm)
     else
-        # The full Δ' matrix is unavailable (e.g. the parallel-FM stage that
-        # populates it was not run). The scalar-diagonal fallback uses
-        # `sing.delta_prime`, which is a coarse per-surface stub; surfaces
-        # with no entry default to Δ'=0, giving γ computed from zero drive.
+        # Coarse fallback; surfaces with no entry get Δ'=0 (zero tearing drive).
         n_missing = count(s -> isempty(s.delta_prime), surfaces)
         @warn(
             "SLAYER: delta_prime_matrix is empty or wrong-sized " *
