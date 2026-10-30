@@ -190,9 +190,7 @@ function MonteCarloResult(h5path::AbstractString)
         haskey(f, _MC_GROUP) || throw(ArgumentError("$h5path has no $_MC_GROUP group (run with a tolerance_file)"))
         g = f[_MC_GROUP]
         inputs = TOML.parse(read(f["Input/gpec_toml_raw"]))
-        # Read the two settings this needs by name rather than splatting the whole stored table into
-        # MonteCarloControl: a file written by a version that knows one more key would otherwise be
-        # unreadable here, and reading a result back should not depend on the writer's vintage.
+        # Read only the needed settings by name, so files with extra keys stay readable.
         mc_tbl = get(get(inputs, "ErrorFields", Dict{String,Any}()), "MonteCarlo", Dict{String,Any}())
         defaults = MonteCarloControl()
         nsample = get(mc_tbl, "nsample", defaults.nsample)

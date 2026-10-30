@@ -8,9 +8,8 @@ sample is a handful of complex multiply-adds per coil set; no field is recompute
 histograms are accumulated per run, the intrinsic `|δ|` and the corrected one in which every
 correctable contribution is divided by the error-field-correction factor.
 
-The projection the table was built with (ψ_N window, singular mode) is an analysis choice, so
-the run writes the full-window summary and [`run_monte_carlo`](@ref) re-evaluates any other
-choice in memory or from `gpec.h5` in about a second.
+The run writes the full-window summary; [`run_monte_carlo`](@ref) re-evaluates any other ψ_N window
+or singular mode in memory or from `gpec.h5`.
 """
 
 """
@@ -40,8 +39,8 @@ Settings of the tolerance Monte Carlo, the `[ErrorFields.MonteCarlo]` TOML table
     `tolerance_scale`; names absent from the map are unscaled by it. A name in `scale_subset` or
     `scale_map` that is neither a coil set of the run nor a group of the tolerance file is an error
 
-The effective multiplier of a name is `(name in scale_subset or scale_subset empty ? tolerance_scale : 1) × get(scale_map, name, 1)`. None of these change which random numbers are drawn, so two runs with the
-same seed differ only through the tolerances they scale.
+The effective multiplier of a name is `(name in scale_subset or scale_subset empty ? tolerance_scale : 1) × get(scale_map, name, 1)`.
+None of these change which random numbers are drawn.
 """
 Base.@kwdef struct MonteCarloControl
     nsample::Int = 1_000_000
@@ -101,7 +100,7 @@ Histograms of the dominant-mode overlap magnitude over the sampled misalignments
 ## Fields
 
   - `abs_delta_bin_edges`: `|δ|` bin edges `[nbins + 1]`; samples above the last edge are counted in the last bin
-  - `pdf`, `abs_delta_efc_pdf`: probability density of the intrinsic and of the corrected `|δ|`, averaged
+  - `abs_delta_pdf`, `abs_delta_efc_pdf`: probability density of the intrinsic and of the corrected `|δ|`, averaged
     over batches `[nbins]`
   - `abs_delta_pdf_batches`, `abs_delta_efc_pdf_batches`: the same per batch `[nbins × nbatch]`
   - `abs_delta_total_as_designed`: `|Σ δ_as_designed|`, the as-designed overlap with every coil at its design position
@@ -193,10 +192,8 @@ The corrected histogram divides every correctable term (coils and groups not lis
 uncorrectable, and the unattributed budget) by `efc_factor`.
 
 `coil_sets` supply the major radii for tilt tolerances given in metres and the heights of
-group members; coil sets of the run without a tolerance block contribute their nominal overlap
-only. The file form rebuilds the coupling from `gpec.h5`, windows it, projects the stored
-linearization, and reads the tolerance snapshot the run echoed; `kwargs` are
-[`MonteCarloControl`](@ref) fields.
+group members; coil sets without a tolerance block contribute their nominal overlap only. The file
+form rebuilds the inputs from `gpec.h5`; `kwargs` are [`MonteCarloControl`](@ref) fields.
 """
 function run_monte_carlo(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}, ctrl::MonteCarloControl=MonteCarloControl())
     ctrl.nsample > 0 && ctrl.nbatch > 0 && ctrl.nbins > 0 || throw(ArgumentError("nsample, nbatch and nbins must be positive"))
@@ -319,14 +316,8 @@ end
 
 The rigid rotation angle, in degrees, that a coherent group's tilt tolerance stands for.
 
-A group rotates as one body, so it has one angle. Declared in degrees that angle is the tolerance
-itself. Declared in metres it is a rim displacement, which only names an angle once a radius is
-chosen — and the members do not have to share one. The reference implementation sidesteps this by
-converting per coil, giving every member the same rim displacement and therefore a *different*
-angle each, which is no longer a rigid rotation of the group.
-
-Rather than pick a member's radius and hide the choice, this errors when the members disagree.
-Declare such a group in degrees, which is unambiguous and is what the reference's own tables do.
+A tilt in metres is a rim displacement and names one angle only if the members share a major radius
+(or `tilt_lever_arm_m` is set); errors when their radii differ by more than 1%. Declare such a group in degrees.
 """
 function group_tilt_deg(g::CoherentGroupTolerance, set_of)
     g.tilt_units == "deg" && return Float64(g.tilt_tol)
@@ -447,11 +438,8 @@ that make it up, so the tolerance budget can be read coil by coil. Per coil set:
 or, under the cylinder model, the angle the axis line can reach, `atan(shift_tol / half_height)`.
 Per coherent group (`group_names`): `abs_delta_group_shift_tolerance` and `abs_delta_group_tilt_tolerance`, the latter including the
 lateral displacement a rigid rotation gives each member. `abs_delta_unattributed` is the unattributed budget at
-`magnitude + 3σ`. `abs_delta_worst_case` is the bound itself, the sum of every term; uncertainties enter at
-three standard deviations exactly as in the bound. Every coil set is counted (no `coil_subset`);
-`tolerance_scale`, `scale_subset` and `scale_map` multiply the tolerances and the coils'
-`current_factor` scales the table, both as in the Monte Carlo. The file form rebuilds the
-inputs from `gpec.h5` as `run_monte_carlo` does.
+`magnitude + 3σ`. `abs_delta_worst_case` is the sum of every term. Every coil set is counted (no `coil_subset`);
+`tolerance_scale`, `scale_subset`, `scale_map` and `current_factor` apply as in the Monte Carlo.
 """
 function worst_case_terms(table::SensitivityTable, ts::ToleranceSet, coil_sets::Vector{CoilSet}; tolerance_scale::Real=1.0,
     scale_subset::AbstractVector{<:AbstractString}=String[], scale_map::AbstractDict=Dict{String,Float64}())

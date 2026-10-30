@@ -12,14 +12,11 @@ never inputs: the full spectra are stored and projected post hoc with [`sensitiv
   - `fd_step_shift_m`: central-difference step for the rigid shifts, in metres
   - `fd_step_tilt_deg`: central-difference step for the rigid tilts, in degrees
   - `rotation_center`: pivot of the tilt taps — `"conductor"` rotates every conductor of a set
-    about its own arc-length centre (the Fortran `coil_read` convention the OMFIT tolerance tool
-    inherited), `"set"` rotates the whole set rigidly about its common arc-length centre (a
-    winding pack moving as one body, which is what an axis-line tolerance constrains)
-  - `exclude_coils`: coil sets of the run that are not error-field sources, such as a correction
-    array energized to tabulate its couplings or a diagnostic coil. Their sensitivities are still
-    tabulated, but they are left out of the as-designed error field, the tolerance Monte Carlo,
-    the worst-case bound and the tolerance scans, and no tolerance may name them. The correction
-    arrays in `[ErrorFields.NTV] efc_coils` are excluded whether or not they are listed here
+    about its own arc-length centre, `"set"` rotates the whole set rigidly about its common
+    arc-length centre (a winding pack moving as one body)
+  - `exclude_coils`: coil sets of the run that are not error-field sources (e.g. a correction array).
+    Their sensitivities are tabulated, but they are left out of the error field, Monte Carlo,
+    worst-case bound and scans, and no tolerance may name them. `[ErrorFields.NTV] efc_coils` are always excluded
 """
 Base.@kwdef struct ErrorFieldsControl
     fd_step_shift_m::Float64 = 1e-3

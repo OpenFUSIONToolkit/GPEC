@@ -97,9 +97,8 @@ amplitudes.
   - `rotation_center_z_m`: height of the pivot of the group's rigid rotation on the machine axis,
     metres; a member at height `z` tilted by θ also shifts laterally by `(z − z_pivot)·θ`
   - `tilt_lever_arm_m`: the lever arm, metres, that converts a tilt tolerance given in metres
-    into the group's rotation angle (`asin(tilt_tol / lever_arm)`); `NaN` when absent, in which
-    case the members' common major radius is used. A group that stands for a reference structure
-    has the structure's lever arm, not any member coil's radius
+    into the group's rotation angle (`asin(tilt_tol / lever_arm)`); `NaN` uses the members' common
+    major radius
 """
 struct CoherentGroupTolerance
     name::String

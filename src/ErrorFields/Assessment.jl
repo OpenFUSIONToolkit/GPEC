@@ -72,8 +72,7 @@ function error_fields(
         @info "Tolerances: $(length(tolerances.coils)) coil sets, $(length(tolerances.groups)) coherent groups"
     end
 
-    # The run's Monte Carlo is the full-window, dominant-mode summary; other windows are re-run
-    # post hoc with run_monte_carlo.
+    # The run's Monte Carlo is the full-window, dominant-mode summary; other windows are re-run post hoc.
     dom = dominant_coupling(rc)
     table = without_coils(sensitivity_table(sens, dom), excluded)
     isempty(excluded) || @info "Error field: $(join(table.coil_names, ", ")); excluded $(join(excluded, ", "))"
@@ -86,7 +85,6 @@ function error_fields(
               "(nominal $(@sprintf("%.3e", mc.abs_delta_total_as_designed)))"
     end
 
-    # Locking risk needs the operating point.
     lock = nothing
     scan = nothing
     if mc !== nothing && scenario !== nothing
