@@ -9,41 +9,35 @@ the force-balance problem's `kinetic` source is a `KineticForcesControl` (via th
 
 """
     compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, mats;
-                                        kf_ctrl=KineticForcesControl(),
-                                        kinetic_profiles)
+                                        kf_ctrl=KineticForcesControl(), kinetic_profiles,
+                                        species=nothing, psis=Float64[], axis_psi_c=0.0)
         → (kw_flat, kt_flat)
 
-Drive the KineticForces matrix kernel over the ψ grid stored in `metric.xs` and
+Drive the KineticForces matrix kernel over the ψ grid (`metric.xs` unless `psis` is given) and
 return `(kw_flat, kt_flat)` arrays of shape `(mpsi, np^2, 6)` matching the
 contract that `ForceFreeStates._compute_fkg_matrices` consumes.
 
 The arrays carry the six bounce-averaged kinetic energy / torque matrices
 (Logan 2015 Eqs 7.30–7.35) for every ψ on the equilibrium grid, packed as
 block-diagonal matrices over toroidal mode number n ∈ [nlow, nhigh] and
-flattened to `(np = mpert·npert)²`.
-
-This routine reads equilibrium-derived profiles (q, dV/dψ, ⟨r⟩, ⟨R⟩) directly
-from named splines on `equil.profiles` and `equil.geometry`, and kinetic
-profiles (n, T, ω_E, ν) from the `kinetic_profiles` argument, avoiding the
-former shadow-copy pattern in KineticForcesInternal. The perturbation-mode
-interpolants (`kf_intr.dbob_m`, `kf_intr.divx_m`) are not wired into this routine.
+flattened to `(np = mpert·npert)²`. The species contributions are summed.
 
 # Arguments
 
-  - `ffs_ctrl`: ForceFreeStatesControl (carries `kinetic` and `kinetic_factor`)
+  - `ffs_ctrl`: ForceFreeStatesControl (unused; kept for the callback signature)
   - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
   - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
-  - `metric`: MetricData (provides ψ grid via `metric.xs`)
-  - `mats`: MatrixSplines (used only for `numpert_total` cross-check)
-  - `psis`: ψ grid for the kernel; empty (default) evaluates on `metric.xs`
+  - `metric`: MetricData (default ψ grid `metric.xs`, Fourier fit for the geometric matrices)
+  - `mats`: MatrixSplines (unused)
 
 # Keyword arguments
 
-  - `kf_ctrl`: KineticForcesControl, defaults to `KineticForcesControl()`. Used to
-    carry NTV-specific knobs (nl, zi, mi, wdfac, electron) that the
-    KineticForces kernel needs but ForceFreeStatesControl does not expose.
-  - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-
-    profile splines built by `Equilibrium.kinetic_profile_splines`.
+  - `kf_ctrl`: KineticForcesControl with the kinetic model settings ForceFreeStatesControl does not expose
+  - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-profile splines
+    built by `Equilibrium.kinetic_profile_splines`.
+  - `species`: resolved species set to sum; `nothing` uses the equilibrium's main ion alone
+  - `psis`: ψ grid for the kernel; empty (default) evaluates on `metric.xs`
+  - `axis_psi_c`: near-axis validity boundary; used when `kf_ctrl.axis_validity_suppression` is set
 
 # Returns
 
@@ -104,10 +98,7 @@ function compute_calculated_kinetic_matrices(
     thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
     thread_block_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
 
-    # Species set summed into the kinetic matrices: the resolved multi-species set
-    # (main ions + neutrality impurity + electrons) when provided, else a single species
-    # from the equilibrium's main ion. The kinetic W/torque matrices are additive over species, so we
-    # accumulate (+=) each species' block-diagonal contribution.
+    # Species summed into the matrices (additive over species): the resolved set, else the main ion alone.
     splist = species === nothing ?
              [Equilibrium.ResolvedNTVSpecies(main_ion(equil)..., kf_ctrl.electron, "single", kinetic_profiles)] : species
 
@@ -139,7 +130,7 @@ function compute_calculated_kinetic_matrices(
             block_t = thread_block_t[tid]
             psi = xs[ipsi]
             env[ipsi] == 0.0 && continue   # inside the near-axis validity band: kernel skipped
-            # (n, ℓ)-independent surface setup, built once per ψ on this thread's `intr` copy.
+            # (n, ℓ)-independent surface setup, built once per ψ.
             state = _setup_surface_state(psi, z_s, m_s, el_s, equil, kf_intr, prof_s)
             for in_idx in 1:npert
                 n = ffs_intr.nlow + in_idx - 1

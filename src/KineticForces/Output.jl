@@ -155,7 +155,7 @@ function ForceFreeStates.write_kinetic_validity!(h5file::Union{HDF5.File,HDF5.Gr
 end
 
 """
-    write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil)
+    write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil, rationals=Float64[])
 
 Write `KineticForces/Validity`: the drift-kinetic validity diagnostics (orbit-width scales, local
 geometry, profile gradient lengths, the near-axis boundary and its applied envelope, and the

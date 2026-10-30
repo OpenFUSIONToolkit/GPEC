@@ -18,9 +18,7 @@ For trapped particles (λ > B₀/Bmax): single bounce contribution
 """
     PitchGARParams
 
-Parameters for the GAR pitch-angle integrand.
-Uses a unified fbnce interpolant that returns [ωb, ωd, f₁, f₂, ...] at each λ,
-matching Fortran `lambdaintgrl_lsode`.
+Parameters for the GAR pitch-angle integrand; `fbnce(λ)` returns [ωb, ωd, f₁, f₂, ...].
 """
 struct PitchGARParams{F}
     wn::Float64        # density gradient diamagnetic drift frequency
@@ -156,16 +154,10 @@ end
     integrate_pitch_gar_quadgk_wt(wn, wt, we, nuk, bobmax, epsr, q, fbnce, fbnce_norm,
                                    nqty, ell, n, psi, method; ...) → Vector{ComplexF64}
 
-Dual-output variant for the kinetic-matrix path. Emits both the wmm half
-(rex=0, imx=1 → Fortran kwmat) and the tmm half (rex=1, imx=0 → Fortran ktmat)
-in a single pitch integration, sharing one energy integration per (λ, E).
+Dual-output variant for the kinetic-matrix path: one pitch integration, sharing each energy integral, yields
+both the wmm half (rex=0, imx=1; Fortran kwmat) and the tmm half (rex=1, imx=0; Fortran ktmat).
 
-Returns a length-`2*nqty` packed buffer: `[wmm | tmm]`. The two halves each
-reproduce Fortran's independent-pass result at Fortran's element-by-element
-convention (verified via matrix-dump comparison vs Fortran `dcon/fourfit.F`
-`kwmat_l`/`ktmat_l`). Downstream `kwmat ± ktmat` combinations in
-`ForceFreeStates/Kinetic.jl` then reproduce `sing.f:967-1075` exactly for the
-non-Hermitian B_k, C_k, E_k diagonals.
+Returns a length-`2*nqty` packed buffer `[wmm | tmm]`.
 """
 function integrate_pitch_gar_quadgk_wt(
     wn::Float64, wt::Float64, we::Float64, nuk::Float64,

@@ -11,8 +11,6 @@ Single source of truth for the NTV calculation methods. Each entry is a NamedTup
     three special-cased methods)
   - `doc`   — one-line description printed in verbose output
 
-The method names/docs and the `Compute.jl` enable list are all derived from this
-tuple, and `Torque.jl` routes on `kind`, so the methods are enumerated in one place.
 To add a method: append an entry here and add the matching `*_flag` field
 to `KineticForcesControl`.
 """
@@ -56,7 +54,8 @@ end
     KineticForcesControl
 
 User-facing control parameters from the TOML `[KineticForces]` section.
-Configures which NTV methods to run, whether electrons join the species sum, and tolerances. The plasma's species composition is read from the equilibrium's kinetic data (`equil.kinetic`).
+Configures which NTV methods to run, whether electrons join the species sum, and tolerances. The species
+composition comes from the equilibrium's kinetic data (`equil.kinetic`).
 
 Constructed via keyword arguments or from a TOML dict:
 
@@ -64,22 +63,17 @@ Constructed via keyword arguments or from a TOML dict:
 ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
 
-Immutable: vary a field by building a new control rather than assigning to one (the
-multi-species loop does this per species, and `check_psi_quadrature_convergence`'s test
-builds a second control for its differing tolerance).
+Immutable: vary a field by building a new control.
 
-  - `axis_validity_suppression::Bool` - Suppress the calculated kinetic terms where the
-    zero-orbit-width ordering fails near the axis: below ψ_c — the outermost ψ at which a thermal
-    orbit width of the widest-orbit species reaches ⟨r⟩, moved clear of any rational surface the
-    transition would otherwise cut through — the increments are zeroed and the kernel is skipped,
-    rising to full strength at 2ψ_c through a C² envelope. Boundary and envelope come from the
-    equilibrium and kinetic profiles; there are no tuning parameters. Default `true`.
-  - Quadrature tolerances form a ladder, outermost in: `rtol_psi` (the accuracy asked of the torque, default
-    1e-2) ⊃ `rtol_pitch` (default `psi_tolerance_margin × rtol_psi` = 1e-3) ⊃ `rtol_x` (default
-    `nested_tolerance_margin × rtol_pitch` = 1e-5). Each inner integral is the outer one's integrand, so it is
-    resolved tighter than the outer tolerance by its margin and no further: QuadGK bounds the error of the
-    whole integral, so a level tighter than its margin only multiplies evaluations. Set `rtol_pitch`/`rtol_x`
-    explicitly to override the derivation (see `torque_pitch_rtol`, `matrix_pitch_rtol`).
+## Fields
+
+  - `axis_validity_suppression::Bool` - Suppress the calculated kinetic terms below ψ_c, where the zero-orbit-width
+    ordering fails (a thermal orbit width of the widest-orbit species reaches ⟨r⟩; moved clear of rational surfaces),
+    rising to full strength at 2ψ_c through a C² envelope. No tuning parameters. Default `true`.
+  - Quadrature tolerances form a ladder, outermost in: `rtol_psi` (default 1e-2) ⊃ `rtol_pitch` (default
+    `psi_tolerance_margin × rtol_psi` = 1e-3) ⊃ `rtol_x` (default `nested_tolerance_margin × rtol_pitch` = 1e-5).
+    Each inner level is resolved one margin tighter than the outer and no further. Set `rtol_pitch`/`rtol_x`
+    explicitly to override (see `torque_pitch_rtol`, `matrix_pitch_rtol`).
 """
 @kwdef struct KineticForcesControl
     # Method flags (which methods to calculate)
@@ -133,7 +127,7 @@ builds a second control for its differing tolerance).
 
     collisionality_factor::Float64 = 1.0 # Collisionality scaling
     divxi_factor::Float64 = 1.0     # div(xi_perp) scaling
-    axis_validity_suppression::Bool = true  # documented in the `## Fields` docstring
+    axis_validity_suppression::Bool = true  # see the `## Fields` docstring
 
     # Energy integration parameters
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
@@ -166,37 +160,26 @@ solve, so there is no outer quadrature tolerance to derive from.
 matrix_pitch_rtol(ctrl::KineticForcesControl) = isnan(ctrl.rtol_pitch) ? MATRIX_RTOL_PITCH : ctrl.rtol_pitch
 
 
-# ============================================================================
-# Internal State/Working Variables
-# ============================================================================
+# Internal state
 
-# Concrete type of the geometric-matrix interpolants built by
-# `ForceFreeStates.build_kinetic_metric_matrices`, derived from a representative
-# `cubic_interp` call so the 7-parameter `CubicSeriesInterpolant{...}` need not be
-# spelled out. Used to concretely type the smats..zmats fields below so the per-ψ
-# `intr.smats(psi)` reads in `Torque.jl` are statically dispatched, not boxed
-# `Any` calls.
+# Concrete type of the `ForceFreeStates.build_kinetic_metric_matrices` interpolants, so the smats..zmats
+# fields below are concretely typed and their per-ψ reads in `Torque.jl` dispatch statically.
 const GeomInterp = typeof(cubic_interp(collect(0.0:0.25:1.0), Series(zeros(ComplexF64, 5, 1)); extrap=ExtendExtrap()))
 
 """
     KineticForcesInternal
 
-Internal working state for KineticForces calculations.
-Holds equilibrium-derived quantities, profile interpolants, and integration results.
+Internal working state for KineticForces calculations: equilibrium-derived scalars, mode indexing, and
+perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles are read from the
+`PlasmaEquilibrium` and `KineticProfileSplines`, not copied here.
 
-Fields replacing former module-level globals:
+## Fields
 
   - `ro`, `bo`, `chi1`: Equilibrium geometry parameters
   - `mthsurf`, `mfac`: Poloidal grid info
   - `dbob_m`, `divx_m`: Perturbation mode interpolants
-  - `sing_psis`: Rational-surface ψ locations (sorted, from the stability analysis), used as
-    panel boundaries for the outer ψ torque quadrature so the resonant peaks fall on
-    Gauss-Kronrod interval endpoints instead of driving deep adaptive bisection
-
-Equilibrium and kinetic profile data are read directly from the
-`PlasmaEquilibrium` (`equil.profiles`, `equil.geometry`) and the
-externally-loaded `KineticProfileSplines` — no shadow copies are kept on
-this struct.
+  - `sing_psis`: Sorted rational-surface ψ locations, used as panel boundaries of the outer ψ torque
+    quadrature so resonant peaks fall on interval endpoints
 """
 @kwdef mutable struct KineticForcesInternal
     # Equilibrium-derived quantities
@@ -228,8 +211,7 @@ this struct.
     # θ knot grid (length mthsurf+1) read by the per-surface setup; never written after construction.
     tpsi_xs::Vector{Float64} = Float64[]
 
-    # Raw geometric matrices for kinetic W vector construction
-    # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
+    # Geometric matrices s/t/x/y/z for the kinetic W vectors (not the DCON a/b/c/d/e/h matrices)
     smats::Union{Nothing,GeomInterp} = nothing   # CubicSeriesInterpolant over ψ, one mpert² block per n
     tmats::Union{Nothing,GeomInterp} = nothing
     xmats::Union{Nothing,GeomInterp} = nothing
@@ -237,7 +219,7 @@ this struct.
     zmats::Union{Nothing,GeomInterp} = nothing
 
     # Clebsch displacement vectors for mode-coupled dW contraction
-    xs_m::Any = nothing            # Vector of 3 CubicSeriesInterpolants: [ξ_ψ, ξ_+, ξ_-]
+    xs_m::Any = nothing            # Vector of 3 CubicSeriesInterpolants: [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α]
 
     # Method tracking — available methods/docs come from `METHOD_REGISTRY`.
     method::String = ""
@@ -269,20 +251,10 @@ end
 """
     set_perturbation_data!(kf_intr, pe_state, ffs, equil, metric)
 
-Populate perturbation data from PerturbedEquilibriumState into KineticForcesInternal.
-
-Builds three interpolant sets from PE Clebsch displacements:
-
- 1. `xs_m` — [ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] CubicSeriesInterpolants over ψ
- 2. `dbob_m` — δB/B Fourier modes via JBB deweighting (Fortran set_peq)
- 3. `divx_m` — ∇·ξ⊥ Fourier modes via JBB deweighting
-
-The JBB deweighting algorithm (Fortran pentrc/inputs.f90:828-868):
-
- 1. Apply geometric matrices S,T,X,Y,Z in m-space
- 2. Inverse DFT to θ-space
- 3. Divide by J·B² at each θ
- 4. Forward DFT back to m-space
+Populate the perturbation interpolants of `kf_intr` from the PE Clebsch displacements: `xs_m`
+([ξ^ψ, ∂ξ^ψ/∂ψ, ξ^α] over ψ), and the δB/B (`dbob_m`) and ∇·ξ⊥ (`divx_m`) Fourier modes, obtained by applying
+the S,T,X,Y,Z geometric matrices and removing the J·B² weight (see `_jbb_deweight!`). Port of Fortran
+`set_peq` (pentrc/inputs.f90). Errors unless the run has a single toroidal mode.
 """
 function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::PerturbedEquilibrium.PerturbedEquilibriumState,
     ffs::ForceFreeStates.ForceFreeStatesResult,
@@ -375,8 +347,7 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
         ymat = reshape(ymat_flat, mpert, mpert)
         zmat = reshape(zmat_flat, mpert, mpert)
 
-        # Apply geometric matrices in m-space. xs_m ordering: (1)=∂ξ^ψ/∂ψ, (2)=ξ^ψ, (3)=ξ^α.
-        #   jbb_kapx = smat·xsp + tmat·xms;  jbb_divx = xmat·xmp1 + ymat·xsp + zmat·xms
+        # jbb_kapx = smat·xsp + tmat·xms;  jbb_divx = xmat·xmp1 + ymat·xsp + zmat·xms
         mul!(jbb_kapx, smat, xsp)
         mul!(jbb_kapx, tmat, xms, 1.0 + 0.0im, 1.0 + 0.0im)   # += tmat * xms
         mul!(jbb_divx, xmat, xmp1)
@@ -402,10 +373,7 @@ end
 """
     _jbb_deweight!(out, jbb_modes, ft, psi, equil, mthsurf, theta_buf)
 
-JBB deweighting step: inverse DFT → divide by J(ψ,θ)·B(ψ,θ)² → forward DFT.
-
-Matches Fortran set_peq lines 859-868: transforms JBB-weighted m-space data
-to θ-space, removes the J·B² weighting at each poloidal angle, and transforms back.
+Remove the J·B² weight from m-space modes: inverse DFT, divide by J(ψ,θ)·B(ψ,θ)², forward DFT into `out`.
 """
 function _jbb_deweight!(out::AbstractVector{ComplexF64}, jbb_modes::Vector{ComplexF64},
     ft::Utilities.FourierTransforms.FourierTransform,
@@ -429,9 +397,7 @@ function _jbb_deweight!(out::AbstractVector{ComplexF64}, jbb_modes::Vector{Compl
 end
 
 
-# ============================================================================
-# Result Structs
-# ============================================================================
+# Result structs
 
 """
     MethodResult
