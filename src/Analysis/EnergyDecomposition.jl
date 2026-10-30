@@ -210,6 +210,27 @@ function effective_field(geo::NamedTuple, f::NamedTuple, i::Int, k::Int)
     return (Jbp, Jct, Jcz, cp, bt + xw * jz, bz - xw * jt, bp, bt, bz, xw / (J * sqrt(d2)))
 end
 
+# Relative (∇×b_eff)·∇ψ residual above which the effective field is reported as inconsistent.
+const CURL_RESIDUAL_TOL = 1e-8
+# Relative mismatch of a δW_p total against ep[k] above which the radial grid is reported as too coarse.
+const ENERGY_MISMATCH_TOL = 0.05
+
+"""
+    curl_residual(c_theta, c_zeta, jac, ft, n) -> Float64
+
+Relative (∇×b_eff)·∇ψ = (∂_θ b_eff,ζ − ∂_ζ b_eff,θ)/J on one surface (Fortran `gpeq_cveri`), from the
+covariant components `c_theta`, `c_zeta` on the θ grid of `ft`, normalized by max|∂_θ b_eff,ζ/J|. On
+the knots it is an algebraic identity, so it checks how b_eff is assembled from b, ξ_n and the metric,
+not the radial ξ solution, the kernel K or the radial integral.
+"""
+function curl_residual(c_theta::Vector{ComplexF64}, c_zeta::Vector{ComplexF64}, jac::AbstractVector{Float64}, ft::FourierTransform, n::Int)
+    m = ft.mlow:(ft.mlow+ft.mpert-1)
+    theta_modes, zeta_modes = ft(c_theta), ft(c_zeta)
+    curl = inverse(ft, 2π * im .* (m .* zeta_modes .+ n .* theta_modes)) ./ jac
+    dtheta_c_zeta = inverse(ft, 2π * im .* m .* zeta_modes) ./ jac
+    return maximum(abs, curl) / maximum(abs, dtheta_c_zeta)
+end
+
 """
     decompose_plasma_energy(ffs; eigenmodes=[1]) -> NamedTuple
 
@@ -222,9 +243,12 @@ with the vacuum response (`vac_flag = true`). Fields of the result:
   - `density` - `(npsi, mtheta, 7, neig)` pointwise integrands, scaled by 2μ₀/ψ₀²
   - `profile` - `(npsi, 7, neig)` surface integrals ∮J·density dθ
   - `dW_effective`, `dW_standard` - ½∫ of the effective-field and standard-form combinations
+  - `relative_error_effective`, `relative_error_standard` - `(dW − real(ep[k])) / abs(ep[k])` of each total
+  - `curl_residual` - largest relative (∇×b_eff)·∇ψ over the knots (`curl_residual`)
 
-The relative error against the DCON energy is `(dW − real(ep[k])) / abs(ep[k])` with
-`ep = ffs.free_boundary.ep`.
+These last two are the success checks of the decomposition: a curl residual above `CURL_RESIDUAL_TOL`
+means b_eff was assembled inconsistently, and a mismatch against `ep[k]` above `ENERGY_MISMATCH_TOL`
+means the radial grid is too coarse for the ψ quadrature (it converges with `mpsi`). Both are warned.
 """
 function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::AbstractVector{<:Integer}=[1])
     ffs.integrator === :forward && ffs.solution !== nothing || throw(ArgumentError("energy decomposition needs a forward-integrator solve"))
@@ -245,12 +269,15 @@ function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::Abs
     scale = 2 * MU_0 / equil.psio^2
 
     density = zeros(ComplexF64, length(psi), mtheta, length(TERMS), length(eigenmodes))
+    curl = zeros(length(eigenmodes))
+    c_theta, c_zeta = zeros(ComplexF64, mtheta), zeros(ComplexF64, mtheta)
     for (m, k) in enumerate(eigenmodes)
         f = eigenmode_fields(ffs, k, psi, states, ft)
         for i in eachindex(psi)
             p1 = equil.profiles.P_deriv(psi[i]) / MU_0
             for j in 1:mtheta
                 Jcp, Jct, Jcz, cp, ct, cz, bp, bt, bz, xi_n = effective_field(geo, f, i, j)
+                c_theta[j], c_zeta[j] = ct, cz
                 J, xw = geo.jac[i, j], geo.jac[i, j] * f.xi[i, j]
                 jt, jz = geo.mu0_j_theta[i, j], geo.mu0_j_zeta[i, j]
                 divxi = f.xi1[i, j] + geo.jac_psi[i, j] / J * f.xi[i, j] + f.dJxt[i, j] / J - 2π * im * n * f.Jxz[i, j] / J
@@ -263,6 +290,7 @@ function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::Abs
                     density[i, j, t, m] = scale * terms[t]
                 end
             end
+            psi[i] in equil.rzphi_xs && (curl[m] = max(curl[m], curl_residual(c_theta, c_zeta, view(geo.jac, i, :), ft, n)))
         end
     end
     profile = dropdims(sum(density .* geo.jac; dims=2); dims=2) ./ mtheta
@@ -270,7 +298,18 @@ function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::Abs
     total(t, m) = FastInterpolations.integrate(cubic_interp(psi, real.(profile[:, t, m]); bc=CubicFit()))
     dW_effective = [0.5 * (total(1, m) - total(2, m) - total(3, m) - total(4, m)) for m in eachindex(eigenmodes)]
     dW_standard = [0.5 * (total(5, m) - total(6, m) + total(7, m)) for m in eachindex(eigenmodes)]
-    return (; psi, theta=equil.rzphi_ys[1:mtheta], R=geo.R, Z=geo.Z, terms=TERMS, eigenmodes=collect(eigenmodes), density, profile, dW_effective, dW_standard)
+    ep = real.(ffs.free_boundary.ep[eigenmodes])
+    relative_error_effective = (dW_effective .- ep) ./ abs.(ep)
+    relative_error_standard = (dW_standard .- ep) ./ abs.(ep)
+    for (m, k) in enumerate(eigenmodes)
+        curl[m] > CURL_RESIDUAL_TOL && @warn "Energy decomposition: (∇×b_eff)·∇ψ of eigenmode $k does not vanish (relative residual $(curl[m]))"
+        for (form, err) in (("effective-field", relative_error_effective[m]), ("standard-form", relative_error_standard[m]))
+            abs(err) > ENERGY_MISMATCH_TOL &&
+                @warn "Energy decomposition: $form δW_p of eigenmode $k differs from ep[$k] by $(round(100 * err; sigdigits=3)) %; refine mpsi"
+        end
+    end
+    return (; psi, theta=equil.rzphi_ys[1:mtheta], R=geo.R, Z=geo.Z, terms=TERMS, eigenmodes=collect(eigenmodes), density, profile,
+        dW_effective, dW_standard, relative_error_effective, relative_error_standard, curl_residual=curl)
 end
 
 """

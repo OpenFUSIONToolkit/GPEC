@@ -108,16 +108,24 @@ to roundoff, so the standard-form total differs from ``e_{p,k}`` only by the ``\
 grid. ``\xi`` at each node is integrated from the nearest saved ODE step that no singular surface
 separates from it (`ForceFreeStates.solution_state_at`), not splined between saved steps.
 
-``(\nabla\times\delta\mathbf B_{\rm eff})\cdot\nabla\psi = 0`` is an algebraic identity of
-the construction on the knots. It checks how ``\delta\mathbf B_{\rm eff}`` is assembled from ``\delta\mathbf B``,
-``\xi_n`` and the metric, not the radial ``\xi`` solution, the kernel ``K`` or the radial integral.
-
 Choices that differ from the Fortran: ``B^2`` is the metric field strength
 ``(\chi'/\mathcal J)^2(g_{\theta\theta} + 2q g_{\theta\zeta} + q^2 g_{\zeta\zeta})``, which makes ``K_2|\xi_n|^2``
 cancel against ``|\delta\mathbf B_{\rm eff}|^2``; the covariant field, ``\xi_n`` and ``\delta\mathbf B_{\rm eff}``
 are formed pointwise in ``\theta`` rather than band-truncated; ``\partial_\theta(\mathcal J\xi^\theta)`` is
 spectral; the reconstruction is unregularized; and the totals integrate over the knots rather than the ODE
 `psifac` grid.
+
+### Success checks
+
+Every call reports two checks per eigenmode and warns when either fails:
+
+- `relative_error_effective`, `relative_error_standard`: the mismatch of each total against
+  ``e_{p,k}``, warned above 5 %. It is the ``\psi`` quadrature error of the knot grid, so a large value
+  means `mpsi` is too coarse; it converges as in the table below.
+- `curl_residual`: the largest relative ``(\nabla\times\delta\mathbf B_{\rm eff})\cdot\nabla\psi`` over the
+  knots, warned above 1e-8. It is an algebraic identity there, so it checks how ``\delta\mathbf B_{\rm eff}``
+  is assembled from ``\delta\mathbf B``, ``\xi_n`` and the metric, not the radial ``\xi`` solution, the
+  kernel ``K`` or the radial integral.
 
 Relative error of both forms against ``e_{p,k}`` on the Solovev test fixture (`mpert = 8`):
 

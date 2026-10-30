@@ -7,7 +7,6 @@ using Plots
     ENV["GKSwstype"] = "100"
     GPEC = GeneralizedPerturbedEquilibrium
     ED = GPEC.Analysis.EnergyDecomposition
-    FT = GPEC.Utilities.FourierTransforms
 
     template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
@@ -23,7 +22,6 @@ using Plots
     knots = findall(in(equil.rzphi_xs), psi)
     geo = ED.surface_geometry(ffs, psi)
     states = ED.node_states(ffs, psi)
-    ep = real.(ffs.free_boundary.ep)
 
     @testset "standard form equals the DCON Lagrangian on the knots" begin
         # On a knot the standard-form surface integral is 2/ψ₀² times the Euler-Lagrange quadratic form ξ'†Fξ' + 2Re(ξ'†Kξ) + ξ†Gξ.
@@ -48,27 +46,14 @@ using Plots
         end
     end
 
-    @testset "both forms reproduce the DCON plasma energy" begin
-        for (m, k) in enumerate(ed.eigenmodes)
-            # The forms agree only after integration, so they differ by the knot-grid quadrature (measured 1.3e-5 and 8.3e-5).
-            @test ed.dW_effective[m] ≈ ed.dW_standard[m] rtol = 2e-4
-            # ψ-quadrature error of the mpsi = 16 knot grid (measured 1.4 % and 2.0 %); it converges with mpsi.
-            @test abs(ed.dW_standard[m] - ep[k]) / abs(ep[k]) < 0.025
-        end
-    end
-
-    @testset "(∇×b_eff)·∇ψ vanishes on the knots" begin
-        # An algebraic identity of the b_eff construction on the knots, so this checks the effective-field formulas only.
-        ft = FT.FourierTransform(mtheta, ffs.mpert, ffs.mlow)
-        mvals = ffs.mlow:ffs.mhigh
-        f = ED.eigenmode_fields(ffs, 1, psi, states, ft)
-        for i in knots
-            c = [ED.effective_field(geo, f, i, k) for k in 1:mtheta]
-            c_theta, c_zeta = ft(getindex.(c, 5)), ft(getindex.(c, 6))
-            curl = FT.inverse(ft, 2π * im .* (mvals .* c_zeta .+ ffs.nlow .* c_theta)) ./ geo.jac[i, :]
-            dtheta_c_zeta = FT.inverse(ft, 2π * im .* mvals .* c_zeta) ./ geo.jac[i, :]
-            @test maximum(abs, curl) < 1e-10 * maximum(abs, dtheta_c_zeta)
-        end
+    @testset "success checks: δW_p against ep and the curl residual" begin
+        # ψ-quadrature error of the mpsi = 16 knot grid (measured 1.4 % and 2.0 %); it converges with mpsi.
+        @test all(abs.(ed.relative_error_effective) .< 0.025)
+        @test all(abs.(ed.relative_error_standard) .< 0.025)
+        # The forms agree only after integration, so they differ by the knot-grid quadrature (measured 1.3e-5 and 8.3e-5).
+        @test ed.dW_effective ≈ ed.dW_standard rtol = 2e-4
+        # (∇×b_eff)·∇ψ is an algebraic identity on the knots (measured 8e-13), a check of the b_eff assembly.
+        @test all(ed.curl_residual .< 1e-10)
     end
 
     @testset "flux-surface average of the shear" begin
