@@ -8,13 +8,21 @@ ForceFreeStates (FFS) solve on the (ψ, θ) grid, in two forms:
     standard form          2δW_p = ∫ [ |b|²/μ₀ − j·(b×ξ*) + (∇·ξ)*(ξ·∇p) ] dV
 
 with b_eff = b + ξ_n(μ₀ j × n̂) and K₁ = |∇ψ|²σS (shear current), K₂ = μ₀B²σ² (parallel current),
-K₃ = 2p'κ_ψ (pressure curvature) (Bernstein et al. 1958; Bernstein 1983; Chance et al. 1992;
-Boozer 2004 Sec. V.C). The Fortran counterpart is `gpout_recon` with `effective_field_flag` and
-`standard_form_flag`. Both totals are scaled by 2μ₀/ψ₀² so they read in the normalization of
+K₃ = 2p'κ_ψ (pressure curvature). The Fortran counterpart is `gpout_recon` with `effective_field_flag`
+and `standard_form_flag`. Both totals are scaled by 2μ₀/ψ₀² so they read in the normalization of
 `ffs.free_boundary.ep`.
 
 Call [`decompose_plasma_energy`](@ref) on a `ForceFreeStatesResult` and plot the result with
 [`plot_energy_decomposition`](@ref).
+
+## References
+
+  - I. B. Bernstein, E. A. Frieman, M. D. Kruskal and R. M. Kulsrud, Proc. R. Soc. A 244, 17 (1958):
+    the energy principle and its standard form.
+  - I. B. Bernstein, Handbook of Plasma Physics Vol. 1, p. 421 (North-Holland, 1983): the effective-field form.
+  - M. S. Chance et al., PPPL-CFP-2687 (1992), Eqs. 12a–12c and 15–17: both forms and the split of K.
+  - A. H. Boozer, Rev. Mod. Phys. 76, 1071 (2004), Sec. V.C, Eqs. 98–100: the effective field and
+    (∇×b_eff)·∇ψ = 0.
 """
 module EnergyDecomposition
 

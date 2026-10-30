@@ -70,15 +70,14 @@ It needs `integrator = "forward"`, `vac_flag = true`, a single toroidal mode num
 
 ### The two forms
 
-The energy principle (Bernstein et al. 1958; Boozer 2004, Sec. V.C) gives the *standard form*
+The energy principle gives the *standard form*
 
 ```math
 2\,\delta W_p = \int d\psi \oint d\theta\, \mathcal J \left[ \frac{|\delta\mathbf B|^2}{\mu_0}
 - \mathbf j\cdot(\delta\mathbf B\times\boldsymbol\xi^*) + (\nabla\cdot\boldsymbol\xi)^*\,(\boldsymbol\xi\cdot\nabla p) \right],
 ```
 
-and completing the square with the equilibrium current (Bernstein 1983; Chance et al. 1992, Eq. 12c;
-Boozer 2004, Eq. 100) gives the *effective-field form*
+and completing the square with the equilibrium current gives the *effective-field form*
 
 ```math
 2\,\delta W_p = \int d\psi \oint d\theta\, \mathcal J \left[ \frac{|\delta\mathbf B_{\rm eff}|^2}{\mu_0} - K\,|\xi_n|^2 \right],
@@ -90,8 +89,8 @@ K = K_1 + K_2 + K_3,\qquad K_1 = |\nabla\psi|^2\,\sigma S,\quad K_2 = \mu_0 B^2 
 \qquad \sigma = \frac{\mathbf j\cdot\mathbf B}{B^2},
 ```
 
-with ``S`` the local shear and ``\kappa_\psi`` the curvature projection (Chance et al. 1992, Eqs. 15–17):
-the shear–current, parallel-current and pressure–curvature drives. Both forms omit the compressional
+with ``S`` the local shear and ``\kappa_\psi`` the curvature projection: the shear–current,
+parallel-current and pressure–curvature drives. Both forms omit the compressional
 ``\gamma p|\nabla\cdot\boldsymbol\xi|^2`` term, as the Fortran does. The code keeps the shorthand `b` for
 ``\delta\mathbf B``.
 
@@ -109,7 +108,7 @@ to roundoff, so the standard-form total differs from ``e_{p,k}`` only by the ``\
 grid. ``\xi`` at each node is integrated from the nearest saved ODE step that no singular surface
 separates from it (`ForceFreeStates.solution_state_at`), not splined between saved steps.
 
-``(\nabla\times\delta\mathbf B_{\rm eff})\cdot\nabla\psi = 0`` (Boozer 2004, Eq. 99) is an algebraic identity of
+``(\nabla\times\delta\mathbf B_{\rm eff})\cdot\nabla\psi = 0`` is an algebraic identity of
 the construction on the knots. It checks how ``\delta\mathbf B_{\rm eff}`` is assembled from ``\delta\mathbf B``,
 ``\xi_n`` and the metric, not the radial ``\xi`` solution, the kernel ``K`` or the radial integral.
 
