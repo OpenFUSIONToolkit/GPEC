@@ -272,9 +272,7 @@ function _galerkin_workspace(x_nodes::Vector{Float64}, etypes::Vector{CellType})
 
         emap_local = Int[]
         if et == CT_EXT
-            # Extra asymptotic DOFs: emap = (imap, imap+1, imap+2).
-            # With noexp, ndim = imap so only emap[1] is active; emap[2,3] > ndim
-            # and are skipped during assembly.
+            # Asymptotic DOFs (imap, imap+1, imap+2); with noexp only emap[1] ≤ ndim, the rest are skipped.
             emap_local = [imap, imap + 1, imap + 2]
             map_extra = [imap; imap + 1; imap + 2]  # 3-element column
             map_local = hcat(map_local, map_extra)
@@ -390,7 +388,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
                 cell_mat[1, :, ep+1, ip+1] .+= w .* term2
             end
 
-            # (phi_1^T, L*phi_1) self-interaction
+            # (φ, Lφ) self-interaction
             ua2_s = ua_bdy[:, 1] * pb[3] + dua_bdy[:, 1] * pb[4]
             dua2_s = ua_bdy[:, 1] * qb[3] + dua_bdy[:, 1] * qb[4]
             term = transpose(dua2_s) * Imat * dua1 + transpose(ua2_s) * Vmat * dua1 + transpose(ua2_s) * Umat * ua1
@@ -466,9 +464,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
     return ComplexF64(val_11), ComplexF64(val_12)
 end
 
-# -----------------------------------------------------------------------
 # Global assembly and solve.
-# -----------------------------------------------------------------------
 
 function _assemble_and_solve!(ws::GalerkinWorkspace,
     params::GGJParameters, Q::ComplexF64,
@@ -488,7 +484,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     for ix in 1:ws.nx
         cell = ws.cells[ix]
 
-        # Gauss quadrature for the Hermite contribution (all cells but CT_RES)
+        # Hermite contribution (all cells but CT_RES)
         if cell.np >= 0
             np_eff = cell.np
             fill!(cell_mat, 0)
@@ -504,7 +500,6 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
             fill!(cell_rhs_ext, 0)
             _extension!(cell_mat_ext, cell_rhs_ext, cell, quad_nodes, quad_weights, params, Q, cache)
 
-            # Assemble ext contributions
             npp = np_eff
             for ip in 0:npp, ipert in 1:mpert
                 i = ip < size(cell.map, 2) ? cell.map[ipert, ip+1] : cell.emap[1]
@@ -584,11 +579,9 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q:
     mpert = 3
     offset = ws.kl + ws.kl + 1
 
-    # Copy base matrix/rhs for both parities
     ws.mat[:, :, 2] .= ws.mat[:, :, 1]
     ws.rhs[:, 2] .= ws.rhs[:, 1]
 
-    # Boundary condition at x = 0 (parity BCs)
     cell1 = ws.cells[1]
     Imat0, _, _ = _physical_uv(params, Q, cell1.x_left)
 
@@ -662,8 +655,8 @@ end
 
 Hermite Galerkin solve on the all-`CT_NONE` grid of `ws` along the ray x = e^{iθ}s, with the
 far-field condition imposed strongly at the last node: its state is v = Us + Δ·Ub + c₁E₁ + c₂E₂,
-with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives. The last node's six DOFs are
-replaced by (Δ, c₁, c₂), tested in the same three directions. Returns the raw Δ and decaying-pair coefficients per parity
+with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives; the last node's six DOFs are
+replaced by (Δ, c₁, c₂). Returns the raw Δ and decaying-pair coefficients per parity
 (isol = 1 even/Δ₊, 2 odd/Δ₋); `ws.sol` holds the full nodal solution afterwards.
 """
 function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64,
