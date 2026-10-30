@@ -56,7 +56,8 @@ SLAYER extraction: `gamma_Hz` is γ [s⁻¹], `omega_Hz` is −ω [rad/s], and
 stable zero in the box. Each surface's layer is evaluated in its own E×B frame,
 `s_k = s + i·n·Ω_E,k` from the `omega_E` and `n` given to `surface_coupling`;
 the scanned s, and so ω, is then in the lab frame, and in the plasma frame when
-no surface rotates. Without drifts or rotation the GGJ roots come in ±ω pairs,
+no surface rotates, so with rotation set `omega_range` must cover the lab-frame ω,
+shifted by about n·Ω_E from the plasma frame. Without drifts or rotation the GGJ roots come in ±ω pairs,
 so either member of a pair can be reported.
 
 `gamma_range` must lie at γ > 0: the GGJ layer is evaluated on the principal

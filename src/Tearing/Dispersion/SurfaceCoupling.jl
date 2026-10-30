@@ -54,8 +54,7 @@ function (sc::SurfaceCoupling)(Q::Number)
     return sc.dp_diag - sc.scale * Δ - sc.dc
 end
 
-# The layer's own frequency argument for a scanned value already on this surface's normalization:
-# a real Doppler shift of SLAYER's Q, an imaginary one of GGJ's s = γ + iω.
+# Doppler-shift a scanned value into the layer's own frequency variable: real for SLAYER's Q, imaginary for GGJ's s.
 layer_argument(sc::SurfaceCoupling, Q::Number) = ComplexF64(Q) + sc.q_shift
 layer_argument(sc::SurfaceCoupling{<:GGJModel}, s::Number) = ComplexF64(s) + im * sc.q_shift
 
