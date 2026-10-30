@@ -29,7 +29,7 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 
 ## Inputs live only under `Input/`
 
-`Input/gpec_toml_raw` stores the full merged TOML, and `Input/RawInputs/` stores the raw equilibrium/forcing/coil data — together they make `gpec.h5` a self-contained rerun snapshot (`Rerun.jl` reconstructs every control struct from them; the writer and rerun reader carry cross-reference comments marking the mirrored path pair). **Never echo TOML flags or control-struct values into any other group** — every group outside `Input/` is derived output. (The former `kinetic/` and `slayer/settings/` echoes were removed under this rule.)
+`Input/gpec_toml_raw` stores the deck that reproduces the run: each result's save adds the sections stating the problem, algorithm and controls it was computed with (`Utilities.record_inputs!`), so a deck run and a script run of the same workflow record the same deck. `Input/RawInputs/` stores the raw equilibrium/forcing/coil data and tolerance file — together they make `gpec.h5` a self-contained rerun snapshot (`Rerun.jl` reconstructs every control struct from them; the writer and rerun reader carry cross-reference comments marking the mirrored path pair). **Never echo TOML flags or control-struct values into any other group** — every group outside `Input/` is derived output. (The former `kinetic/` and `slayer/settings/` echoes were removed under this rule.)
 
 ## Schema
 

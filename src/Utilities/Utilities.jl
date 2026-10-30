@@ -42,7 +42,7 @@ export KineticProfiles
 
 using .HDF5Annotations
 export HDF5Annotations
-export save_to_hdf5
+export save_to_hdf5, deck_sections, record_inputs!
 
 # Adaptive one-dimensional sampling for expensive scans
 using .AdaptiveSampling

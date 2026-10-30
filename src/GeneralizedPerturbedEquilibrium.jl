@@ -185,9 +185,8 @@ function main_from_inputs(
             ffs = solve(MatchProblem(ffs; deck.match.problem...), deck.match.model)
             match = ffs.match
         end
-        forcing_snapshot = deck.perturbed_equilibrium === nothing ? nothing : ForcingTerms.snapshot_forcing_modes(deck.forcing; verbose)
         h5open(output_file, "w") do target
-            save_to_hdf5(target, ffs; git_version, inputs, forcing_snapshot, local_stability)
+            save_to_hdf5(target, ffs; git_version, local_stability)
         end
         @info "Results written to $output_file"
     end

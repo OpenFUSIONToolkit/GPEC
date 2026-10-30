@@ -3,6 +3,8 @@
 #
 # Included directly into the GeneralizedPerturbedEquilibrium module.
 
+import .Utilities: deck_sections
+
 const _DEPRECATED_FFS_KEYS = ("mer_flag", "force_wv_symmetry", "ode_flag", "cyl_flag", "mat_flag", "reform_eq_with_psilim",
     "use_riccati", "use_parallel", "parallel_threads", "populate_dense_xi",
     "gal_flag", "nstep", "diagnose_ca", "diagnose", "ksing", "local_stability_flag", "gal_solver", "gal_sing_order", "force_termination",
@@ -474,7 +476,7 @@ _deck_out(v::Equilibrium.IonSpecies) = _deck_table(v)
 # The fields of `x` as a deck table, less `exclude`; a `nothing` field is left out, as the parser's default.
 _deck_table(x, exclude=()) =
     Dict{String,Any}(String(f) => _deck_out(getfield(x, f)) for f in fieldnames(typeof(x)) if !(f in exclude) && getfield(x, f) !== nothing)
-_deck_table(kwargs::AbstractDict) = Dict{String,Any}(String(k) => _deck_out(v) for (k, v) in kwargs if v !== nothing)
+_deck_table(kwargs::AbstractDict, exclude=()) = Dict{String,Any}(String(k) => _deck_out(v) for (k, v) in kwargs if v !== nothing && !(k in exclude))
 
 """
     deck_sections(config::EquilibriumConfig, analytic) -> Dict{String,Any}
@@ -547,29 +549,77 @@ function deck_inputs(deck::NamedTuple, config::Equilibrium.EquilibriumConfig, an
     end
     if deck.tearing !== nothing
         (; problem, model, config) = deck.tearing
-        merge!(inputs, deck_sections(model))
-        table = _deck_table(filter(p -> p.first != :critical_resonant_field, problem))
-        table["inner_model"] = model isa SLAYERModel ? "SLAYER" : "GGJ"
-        table["search"] = _deck_table(config)
-        crf = get(problem, :critical_resonant_field, nothing)
-        crf === nothing || (table["CriticalResonantField"] = _deck_table(crf))
-        inputs["Tearing"] = table
+        merge!(inputs, _tearing_sections(filter(p -> p.first != :critical_resonant_field, problem), get(problem, :critical_resonant_field, nothing),
+            model, config))
     end
     deck.kinetic_forces === nothing || merge!(inputs, deck_sections(deck.kinetic_forces))
     pe = deck.perturbed_equilibrium
     pe === nothing || (inputs["PerturbedEquilibrium"] = _deck_table(merge(pe.response, pe.drive)))
-    if pe !== nothing || deck.error_fields !== nothing
-        forcing = _deck_table(deck.forcing, (:coil_sets_raw,))
-        isempty(deck.forcing.coil_sets_raw) || (forcing["coil_set"] = Any[_deck_out(d) for d in deck.forcing.coil_sets_raw])
-        inputs["ForcingTerms"] = forcing
-    end
+    (pe !== nothing || deck.error_fields !== nothing) && (inputs["ForcingTerms"] = _forcing_table(deck.forcing))
     ef = deck.error_fields
-    if ef !== nothing
-        table = _deck_table(ef.ctrl)
-        isempty(ef.tolerance_file) || (table["tolerance_file"] = ef.tolerance_file)
-        table["MonteCarlo"], table["Risk"], table["NTV"] = _deck_table(ef.monte_carlo), _deck_table(ef.risk), _deck_table(ef.ntv)
-        ef.scenario === nothing || (table["scenario"] = _deck_table(ef.scenario))
-        inputs["ErrorFields"] = table
-    end
+    ef === nothing || merge!(inputs, _error_fields_sections(ef, ef.tolerance_file))
     return inputs
+end
+
+# [Tearing] with its search and critical-resonant-field sub-tables, and the section of its layer model.
+function _tearing_sections(problem, crf, model, config)
+    table = _deck_table(problem, (:ffs, :critical_resonant_field))
+    table["inner_model"] = model isa SLAYERModel ? "SLAYER" : "GGJ"
+    table["search"] = _deck_table(config)
+    crf === nothing || (table["CriticalResonantField"] = _deck_table(crf))
+    return merge(deck_sections(model), Dict{String,Any}("Tearing" => table))
+end
+
+# [ForcingTerms] of a forcing control, its coil sets as [[ForcingTerms.coil_set]].
+function _forcing_table(ctrl::ForcingTerms.ForcingTermsControl)
+    table = _deck_table(ctrl, (:coil_sets_raw,))
+    isempty(ctrl.coil_sets_raw) || (table["coil_set"] = Any[_deck_out(d) for d in ctrl.coil_sets_raw])
+    return table
+end
+
+# [ErrorFields] with its sub-tables, from the settings an error-field assessment takes.
+function _error_fields_sections(settings, tolerance_file::AbstractString)
+    table = _deck_table(settings.ctrl)
+    isempty(tolerance_file) || (table["tolerance_file"] = tolerance_file)
+    table["MonteCarlo"], table["Risk"], table["NTV"] = _deck_table(settings.monte_carlo), _deck_table(settings.risk), _deck_table(settings.ntv)
+    settings.scenario === nothing || (table["scenario"] = _deck_table(settings.scenario))
+    return Dict{String,Any}("ErrorFields" => table)
+end
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Every saved result records the deck sections stating its inputs (`Utilities.record_inputs!`), so a script run and a
+# deck run of the same workflow record the same deck, and either replays from its gpec.h5.
+
+# Where a replay finds what a deck cannot state by path: the recorded forcing modes and tolerance file.
+const _RECORDED_FORCING = "Input/RawInputs/ForcingTerms"
+const _RECORDED_TOLERANCES = "Input/RawInputs/ErrorFields/tolerance_toml_raw"
+
+deck_sections(equil::Equilibrium.PlasmaEquilibrium) = deck_sections(equil.config, equil.analytic)
+deck_sections(ls::LocalStabilityResult) = Dict{String,Any}("LocalStability" => _deck_table(ls.problem, (:equil,)), "Ballooning" => _deck_table(ls.algorithm))
+deck_sections(m::ForceFreeStates.MatchResult) =
+    merge(deck_sections(m.model), Dict{String,Any}("Match" => merge(_deck_table(m.problem, (:ffs,)), Dict{String,Any}("inner_model" => "GGJ"))))
+deck_sections(kf::KineticForcesResult) = deck_sections(kf.control)
+deck_sections(t::TearingResult) = t.model === nothing ? Dict{String,Any}() : _tearing_sections(t.problem, t.problem.critical_resonant_field, t.model, t.config)
+deck_sections(ef::ErrorFieldsResult) = _error_fields_sections(ef.settings, ef.tolerances === nothing ? "" : _RECORDED_TOLERANCES)
+
+function deck_sections(ffs::ForceFreeStatesResult)
+    ctrl = ffs.control
+    keywords = Dict{Symbol,Any}(f => getfield(ctrl, f) for f in fieldnames(typeof(ctrl)) if !(f in (:algorithm, :nn_low, :nn_high)))
+    keywords[:nn] = ctrl.nn_low:ctrl.nn_high
+    keywords[:wall] = ffs.wall_settings
+    sections = merge(deck_sections(ffs.equil), deck_sections(keywords, ctrl.algorithm))
+    ffs.match === nothing || merge!(sections, deck_sections(ffs.match))
+    return sections
+end
+
+# A single unweighted source is its own [ForcingTerms]; any other field replays from the modes its save records.
+function deck_sections(pe::PerturbedEquilibrium.PerturbedEquilibriumState)
+    resp, forcing = pe.response, pe.forcing
+    table = Dict{String,Any}("compute_singular_coupling" => resp.compute_singular_coupling,
+        "compute_torque_response" => resp.compute_torque_response, "regularization_width" => pe.regularization_width)
+    sections = Dict{String,Any}("PerturbedEquilibrium" => table)
+    forcing === nothing && return sections
+    sections["ForcingTerms"] = forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? _forcing_table(forcing.ctrl) :
+                               Dict{String,Any}("forcing_data_format" => "hdf5", "forcing_data_file" => _RECORDED_FORCING)
+    return sections
 end

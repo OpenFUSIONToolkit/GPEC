@@ -43,6 +43,7 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
 
     if !result.enabled    # nothing else to write
         _annotate_tearing!(g)
+        Utilities.record_inputs!(parent, result)
         return g
     end
 
@@ -64,6 +65,7 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     end
     result.critical_resonant_field.enabled && _write_critical_resonant_field!(g, result.critical_resonant_field)
     _annotate_tearing!(g)
+    Utilities.record_inputs!(parent, result)
     return g
 end
 

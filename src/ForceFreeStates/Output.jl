@@ -4,19 +4,16 @@ import ..ForcingTerms
 import ..Utilities: apply_main_h5_metadata!
 
 """
-    save_to_hdf5(target, result::ForceFreeStatesResult; git_version="unknown",
-                 inputs=nothing, forcing_snapshot=nothing, local_stability=nothing)
+    save_to_hdf5(target, result::ForceFreeStatesResult; git_version="unknown", local_stability=nothing)
 
-Save the FFS solutions, operators, singular-surface diagnostics, and vacuum products.
-The associated equilibrium and optional local-stability result use their own save methods.
-Input provenance is serialized separately; unavailable numerical products use empty datasets.
+Save the FFS solutions, operators, singular-surface diagnostics, and vacuum products, and record the deck that
+reproduces the solve (equilibrium, force balance and any match) in `Input/`. The associated equilibrium and optional
+local-stability result use their own save methods. Unavailable numerical products use empty datasets.
 """
 function save_to_hdf5(
     out_h5::Union{HDF5.File,HDF5.Group},
     result::ForceFreeStatesResult;
     git_version::String="unknown",
-    inputs::Union{Nothing,Dict{String,Any}}=nothing,
-    forcing_snapshot::Union{Nothing,Tuple{Vector{ForcingTerms.ForcingMode},String}}=nothing,
     local_stability::Union{LocalStability.LocalStabilityResult,Nothing}=nothing
 )
 
@@ -54,7 +51,8 @@ function save_to_hdf5(
         out_h5["$gal/xi_s"] = gal_solution.xi_s_store
     end
 
-    save_input_snapshot!(out_h5, result; inputs, forcing_snapshot)
+    save_equilibrium_ingest!(out_h5, equil)
+    Utilities.record_inputs!(out_h5, result)
 
     # Write derived run parameters
     out_h5["Info/mpert"] = result.mpert

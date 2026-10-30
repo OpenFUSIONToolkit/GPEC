@@ -34,7 +34,10 @@ The same `save_to_hdf5(target, result)` function saves an equilibrium, local-sta
 result, perturbed-equilibrium state, kinetic-force state, tearing result, or error-field
 result. Each module owns the datasets for its result. Paths open or create an HDF5
 file; an open file or group remains owned by the caller. Stage computations return
-results without writing anything.
+results without writing anything. Each save also records, in `Input/gpec_toml_raw`, the deck
+sections stating the problem, algorithm and controls the result was computed with, so a script
+run's file replays like a deck run's: `main(["gpec.h5"])`. A forcing no deck can state (a weighted
+field, a spectrum or a sum) is replayed from the control-surface modes the save records.
 
 A deck runs through these same calls. `main` translates each section of `gpec.toml` into the
 problem, algorithm or control it names, calls the function above for every section present,

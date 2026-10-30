@@ -143,6 +143,7 @@ function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, kf::KineticForcesResu
     end
     save_to_hdf5(h5file, kf.total; dVdpsi_spline)
     ForceFreeStates.write_kinetic_validity!(h5file, kf.control, ffs)
+    Utilities.record_inputs!(h5file, kf)
     return nothing
 end
 

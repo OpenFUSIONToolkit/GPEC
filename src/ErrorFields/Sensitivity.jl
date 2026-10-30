@@ -208,7 +208,7 @@ end
 
 The coil sets a run leaves out of its error field: `[ErrorFields] exclude_coils` together with
 the correction arrays in `[ErrorFields.NTV] efc_coils`, read from the parsed `[ErrorFields]`
-section of a deck or from the deck echoed into a run file (none when the file carries no deck).
+section of a deck or from the deck recorded in a run file (none when the file carries no deck).
 """
 function excluded_coil_names(ef_raw::AbstractDict)
     listed = vcat(get(ef_raw, "exclude_coils", String[]), get(get(ef_raw, "NTV", Dict{String,Any}()), "efc_coils", String[]))

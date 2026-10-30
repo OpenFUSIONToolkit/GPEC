@@ -66,7 +66,7 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
     # A run has at most one ξ solution, already closed at the rationals and carrying populated
     # Ξ′ / Ξ_s stores. The gal-native basis takes the analytic Galerkin Ξ′ downstream.
     solution = ffs.solution
-    resp = PlasmaResponse(; ffs, m_modes, n_modes,
+    resp = PlasmaResponse(; ffs, m_modes, n_modes, compute_singular_coupling, compute_torque_response,
         odet_from_gal=solution !== nothing && solution.basis === :gal_native)
 
     if ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
@@ -138,7 +138,8 @@ function compute_perturbed_equilibrium(
 )::PerturbedEquilibriumState
     ffs = resp.ffs
     modes, coil_sets = materialize_forcing_modes(ffs, forcing; preloaded_coil_sets, verbose)
-    state = PerturbedEquilibriumState(; response=resp, forcing_modes=modes,
+    state = PerturbedEquilibriumState(; response=resp, forcing=forcing isa ForcingTerms.RMPField ? forcing : ForcingTerms.RMPField(forcing),
+        forcing_modes=modes,
         coil_sets=isempty(coil_sets) ? preloaded_coil_sets : coil_sets, regularization_width=Float64(regularization_width))
 
     isempty(resp.permeability_flux) || apply_response!(state; verbose)

@@ -102,9 +102,12 @@ using TOML
         mktempdir() do dir
             run = GPEC.main([_deck(dir; sections=ls_section)])
             for name in fieldnames(LocalStabilityResult)
-                name === :di_psi && continue
+                name in (:di_psi, :problem) && continue
                 @test isequal(getfield(run.local_stability, name), getfield(res, name))
             end
+            # Each run solves its own equilibrium, so the problems compare by their settings.
+            @test run.local_stability.problem.theta_k == res.problem.theta_k
+            @test run.local_stability.problem.alpha_boundary_scan == res.problem.alpha_boundary_scan
             h5 = _h5_local_stability(dir)
             @test h5["D_I"] == res.D_I
             @test isequal(h5["alpha_critical"], res.alpha_critical)

@@ -6,7 +6,7 @@ using HDF5
 """
     save_to_hdf5(target, equil::PlasmaEquilibrium)
 
-Save the processed equilibrium profiles, geometry, and derived scalar quantities.
+Save the processed equilibrium profiles, geometry, and derived scalar quantities, and record its deck sections in `Input/`.
 """
 function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, equil::PlasmaEquilibrium)
     replace_group!(out_h5, "Equilibrium")
@@ -36,5 +36,6 @@ function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, equil::PlasmaEquilibr
     out_h5["Equilibrium/Geometry/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
     Utilities.HDF5Annotations.annotate!(out_h5, MAIN_H5_ANNOTATIONS)
+    Utilities.record_inputs!(out_h5, equil)
     return nothing
 end

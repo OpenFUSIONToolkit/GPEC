@@ -59,6 +59,7 @@ Data structure for a single forcing mode.
 
       + `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
       + `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
+      + `"unit_flux"`: already unit-norm (a run's materialized forcing, recorded for replay); loaded as is
 """
 Base.@kwdef mutable struct ForcingMode
     n::Int = 0
@@ -78,6 +79,7 @@ from the file (or `"normal_field_T"` by default if no tag is present).
     Most intuitive for users; converted to unit-norm (Phi_x) on load.
   - `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
     Multiplied by (2π)² on load to reach unit-norm (Phi_x).
+  - `"unit_flux"`: already unit-norm (Phi_x), as a run records its materialized forcing for replay; loaded as is.
 
 **ASCII format** — optional `# normalization: <tag>` header line, then data rows:
 

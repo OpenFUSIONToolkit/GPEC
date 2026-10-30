@@ -431,7 +431,8 @@ three harmonics have no edge to judge and are not checked.
 ## Arguments
 
   - `modes`: `Vector{ForcingMode}` of one toroidal mode `n` (not modified)
-  - `from_tag`: source normalization — `"normal_field_T"` or `"sfl_flux_Wb"`
+  - `from_tag`: source normalization — `"normal_field_T"`, `"sfl_flux_Wb"`, or `"unit_flux"` for modes already in the
+    unit-norm Φ_x convention the response consumes (a run's materialized forcing, recorded for replay)
   - `equil`: `PlasmaEquilibrium` providing boundary geometry
   - `n`: toroidal mode number
   - `m_out`: poloidal harmonics of the converted flux
@@ -449,13 +450,14 @@ function convert_forcing_normalization(
     mtheta::Int=256,
     truncation_tol::Float64=0.1
 )
+    from_tag == "unit_flux" && return [ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes]
     if from_tag == "sfl_flux_Wb"
         # User provided 2π-angle SFL flux; scale by (2π)² to reach unit-norm (= Phi_x)
         return [ForcingMode(; n=mode.n, m=mode.m, amplitude=(2π)^2 * mode.amplitude) for mode in modes]
     end
 
     if from_tag != "normal_field_T"
-        error("Unknown forcing normalization: \"$from_tag\". Supported: \"normal_field_T\", \"sfl_flux_Wb\".")
+        error("Unknown forcing normalization: \"$from_tag\". Supported: \"normal_field_T\", \"sfl_flux_Wb\", \"unit_flux\".")
     end
 
     m_in = minimum(mode.m for mode in modes):maximum(mode.m for mode in modes)

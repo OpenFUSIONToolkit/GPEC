@@ -82,7 +82,7 @@ _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name fo
     delta_as_designed=[o.delta for o in ovs], resonant_fraction_percent=[o.resonant_fraction_percent for o in ovs],
     b_t0=isempty(ovs) ? nothing : first(ovs).b_t0))
 
-# The finite-difference steps the run's sensitivities were taken at, from the echoed deck; a
+# The finite-difference steps the run's sensitivities were taken at, from the recorded deck; a
 # file without one gets the control defaults, which is what an unset deck used.
 function _fd_steps(f)
     defaults = EF.ErrorFieldsControl()
@@ -432,7 +432,7 @@ shows the ratio at the finite-difference steps the run used; `at = :tolerance` r
 by `tolerance / step` (the second difference grows as `h²`, the first as `h`), which is the
 curvature the linear model neglects over the coil's own tolerance range. Coherent-group
 amplitudes are not added. Tolerances come from the file's snapshot or `tolerances`; a coil
-without a tolerance block draws at zero. The steps come from the file's echoed deck, or from
+without a tolerance block draws at zero. The steps come from the file's recorded deck, or from
 `fd_step_shift_m` and `fd_step_tilt_deg` for in-memory `CoilSensitivities`. The dashed line is
 the 1 % level at which the sensitivity calculation itself warns; on a linear axis it sets the
 scale and hides sub-percent residuals, so `yscale = :log10` draws them as stems and markers

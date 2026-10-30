@@ -180,9 +180,10 @@ source HDF5, applies any overrides, and reconstructs the pipeline inputs — a p
 or an analytic `*Config` for sol/lar/tj. Never touches the source file's original ingest
 paths. The returned tuple is fed straight into `main_from_inputs`.
 
-A file-forcing snapshot (`Input/RawInputs/ForcingTerms/`) is written next to the rerun output
-as `<stem>_forcing.h5` and `[ForcingTerms]` is pointed at it before overrides apply, so the
-replay reads and normalizes it against its own equilibrium exactly as a deck run reads its file.
+The recorded forcing (`Input/RawInputs/ForcingTerms/`) is written next to the rerun output as
+`<stem>_forcing.h5` and `[ForcingTerms]` is pointed at it before overrides apply, so the replay reads
+and normalizes it against its own equilibrium exactly as a deck run reads its file; a recorded
+tolerance file is written as `<stem>_tolerances.toml` and `[ErrorFields] tolerance_file` points at it.
 """
 function build_inputs_from_h5(args::Vector{String})
     cli = parse_rerun_cli(args)
@@ -193,7 +194,7 @@ function build_inputs_from_h5(args::Vector{String})
     # source file. The snapshot exists only for a file-forced run with a [PerturbedEquilibrium]
     # section.
     use_coils = cli.coil_source == "coils"
-    toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils = h5open(source_h5, "r") do in_h5
+    toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils, tolerance_raw = h5open(source_h5, "r") do in_h5
         haskey(in_h5, "Input/gpec_toml_raw") ||
             error("Source HDF5 $source_h5 has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
         forcing_modes = if !haskey(in_h5, "Input/RawInputs/ForcingTerms")
@@ -218,7 +219,8 @@ function build_inputs_from_h5(args::Vector{String})
             read_equilibrium_ingest(in_h5),
             haskey(in_h5, "Info/git_version") ? read(in_h5, "Info/git_version") : "unknown",
             forcing_modes,
-            coil_sets
+            coil_sets,
+            haskey(in_h5, _RECORDED_TOLERANCES) ? read(in_h5, _RECORDED_TOLERANCES) : nothing
         )
     end
 
@@ -238,6 +240,11 @@ function build_inputs_from_h5(args::Vector{String})
         ft = get!(inputs, "ForcingTerms", Dict{String,Any}())
         ft["forcing_data_file"] = forcing_file
         ft["forcing_data_format"] = "hdf5"
+    end
+    if tolerance_raw !== nothing && haskey(inputs, "ErrorFields")
+        tolerance_file = splitext(output_name)[1] * "_tolerances.toml"
+        write(joinpath(output_dir, tolerance_file), tolerance_raw)
+        inputs["ErrorFields"]["tolerance_file"] = tolerance_file
     end
     if cli.override_file !== nothing
         isfile(cli.override_file) || error("Override file not found: $(cli.override_file)")

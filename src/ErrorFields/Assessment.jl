@@ -14,6 +14,8 @@ The error-field assessment of a plasma response, from [`error_fields`](@ref). Pr
   - `scan::Union{Nothing,ToleranceScan}` - The locking risk against a tolerance scale; needs `RiskControl.scan_scales`.
   - `couplings::Union{Nothing,Vector{EFCCoupling}}` - The correction arrays' couplings and NTV torques; needs `NTVControl.efc_coils`.
   - `response::PerturbedEquilibrium.PlasmaResponse` - The plasma response the assessment was made on.
+  - `settings::NamedTuple` - The settings it was made with: `ctrl`, `monte_carlo`, `risk`, `ntv`, `kinetic`,
+    `scenario` and `regularization_width`, as given to `error_fields`.
 """
 struct ErrorFieldsResult
     sensitivities::CoilSensitivities
@@ -24,6 +26,7 @@ struct ErrorFieldsResult
     scan::Union{Nothing,ToleranceScan}
     couplings::Union{Nothing,Vector{EFCCoupling}}
     response::PerturbedEquilibrium.PlasmaResponse
+    settings::NamedTuple
 end
 
 """
@@ -114,5 +117,6 @@ function error_fields(
         @info "NTV couplings of $(length(couplings)) correction arrays in $(@sprintf("%.1f", time() - ntv_start)) s"
     end
 
-    return ErrorFieldsResult(sens, dom, tolerances, mc, lock, scan, couplings, resp)
+    settings = (; ctrl, monte_carlo, risk, ntv, kinetic, scenario, regularization_width=Float64(regularization_width))
+    return ErrorFieldsResult(sens, dom, tolerances, mc, lock, scan, couplings, resp, settings)
 end

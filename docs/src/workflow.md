@@ -184,7 +184,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 | Group | Contents |
 |---|---|
 | `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
-| `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
+| `Input/` | Self-contained rerun snapshot: the recorded deck, raw equilibrium/forcing/coil inputs |
 | `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/` (opt-in: `write_el_matrices = true`), `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |

@@ -243,6 +243,22 @@ function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilib
         coils = replace_group!(file, "Input/RawInputs/Coils")
         ForcingTerms.save_coils_to_h5(state.coil_sets, coils)
     end
+    _record_forcing_snapshot!(file, state)
+    Utilities.record_inputs!(file, state)
+    return nothing
+end
+
+# The forcing a replay reads back from Input/RawInputs/ForcingTerms: a file source's raw contents with their
+# normalization, or the materialized control-surface modes of a field no deck can state (a weighted source, a spectrum,
+# a sum). Coil forcing is replayed from its recorded geometry instead.
+function _record_forcing_snapshot!(file, state::PerturbedEquilibriumState)
+    forcing = state.forcing
+    forcing === nothing && return nothing
+    snapshot = forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? ForcingTerms.snapshot_forcing_modes(forcing.ctrl) :
+               (state.forcing_modes, "unit_flux")
+    snapshot === nothing && return nothing
+    modes, normalization = snapshot
+    ForcingTerms.save_forcing_to_h5(modes, replace_group!(file, "Input/RawInputs/ForcingTerms"); normalization)
     return nothing
 end
 

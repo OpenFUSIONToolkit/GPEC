@@ -108,6 +108,7 @@ function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, ef::ErrorFieldsResult
     ef.monte_carlo === nothing || save_to_hdf5(h5file, ef.monte_carlo)
     ef.risk === nothing || save_to_hdf5(h5file, ef.risk; scan=ef.scan)
     ef.couplings === nothing || save_to_hdf5(h5file, ef.couplings)
+    Utilities.record_inputs!(h5file, ef)
     return nothing
 end
 

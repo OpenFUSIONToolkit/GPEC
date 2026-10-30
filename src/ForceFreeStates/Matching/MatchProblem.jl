@@ -271,7 +271,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     end
 
     return MatchResult(cout, cin, deltar, rpec_eig, residual, bpen, reconnected_flux,
-        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model)
+        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model, prob)
 end
 
 # Copy of ffs with the match applied; the ideal reference keeps closure :ideal, its zero bpen and δW.

@@ -50,6 +50,7 @@ spectra.
   - `m_modes`, `n_modes` - Poloidal and toroidal mode number of each entry of a spectrum [numpert_total].
   - `odet_from_gal::Bool` - The solution is the gal-native matched basis, whose `du_store` carries the
     analytic Galerkin Ξ′; selects that branch of the singular-coupling Ξ′ evaluation.
+  - `compute_singular_coupling::Bool`, `compute_torque_response::Bool` - The [`plasma_response`](@ref) options it was built with.
   - `flux_matrix::Matrix{ComplexF64}` - Control-surface flux of the free-boundary eigenmodes [mode × eigenmode].
   - `plasma_inductance_flux`, `surface_inductance_flux`, `permeability_flux` - Λ, L and P = Λ·L⁻¹ acting
     on the physical control-surface flux Φ_x; the applied quantities and energies are evaluated with these.
@@ -101,6 +102,8 @@ on a `ResonantCoupling`):
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
     odet_from_gal::Bool = false
+    compute_singular_coupling::Bool = true
+    compute_torque_response::Bool = false
 
     # Flux-space operators [numpert_total × numpert_total]
     flux_matrix::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
@@ -152,6 +155,7 @@ The perturbed equilibrium driven by one external field: the forcing materialized
 ## Fields
 
   - `response::PlasmaResponse` - The operators this field was applied to.
+  - `forcing` - The [`ForcingTerms.RMPField`](@ref) applied.
   - `forcing_modes::Vector{ForcingMode}` - The materialized control-surface forcing Φ_x.
   - `coil_sets::Vector{CoilSet}` - Coil geometry used (coil-format forcing); captured for the gpec.h5 rerun snapshot.
   - `regularization_width::Float64` - Width the profiles were reconstructed with (Fortran `reg_spot`): 0, no
@@ -206,6 +210,7 @@ Torque response (kinetic forward solves with `compute_torque_response`):
 """
 @kwdef mutable struct PerturbedEquilibriumState
     response::PlasmaResponse
+    forcing::Union{Nothing,ForcingTerms.RMPField} = nothing
     forcing_modes::Vector{ForcingMode} = ForcingMode[]
     coil_sets::Vector{CoilSet} = CoilSet[]
     regularization_width::Float64 = 0.0

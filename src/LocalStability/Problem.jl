@@ -65,6 +65,8 @@ The local-stability profiles returned by `solve(::LocalStabilityProblem, ::Ballo
   - `alpha::Vector{Float64}` - Experimental α on `ballooning_psi`, NaN outside the scan window.
   - `alpha_critical::Vector{Float64}` - First-boundary critical α on `ballooning_psi`, NaN outside the scan window or with no boundary.
   - `di_psi` - Cubic interpolant of `D_I·ψ` over `psi`, for evaluating `D_I` off the grid (see [`mercier_D_I`](@ref)).
+  - `problem::LocalStabilityProblem` - The problem solved.
+  - `algorithm::Ballooning` - The ballooning settings it was solved with.
 """
 struct LocalStabilityResult{S}
     psi::Vector{Float64}
@@ -75,6 +77,8 @@ struct LocalStabilityResult{S}
     alpha::Vector{Float64}
     alpha_critical::Vector{Float64}
     di_psi::S
+    problem::LocalStabilityProblem
+    algorithm::Ballooning
 end
 
 """
@@ -98,5 +102,5 @@ function CommonSolve.solve(prob::LocalStabilityProblem, alg::Ballooning; verbose
     # A Series spline, not a plain-vector one: the two differ in the last bits off the knots.
     di_psi = cubic_interp(xs, Series(locstab_fs[:, 1:1]); extrap=ExtendExtrap())
     return LocalStabilityResult(collect(xs), locstab_fs[:, 1] ./ xs, locstab_fs[:, 2] ./ xs, locstab_fs[:, 4],
-        boundary.psi, boundary.alpha, boundary.alpha_critical, di_psi)
+        boundary.psi, boundary.alpha, boundary.alpha_critical, di_psi, prob, alg)
 end
