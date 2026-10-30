@@ -554,6 +554,24 @@ include("h5_metadata_check.jl")
             @test_throws "needs kinetic profiles" GPEC.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
             pe.response.ffs.equil.kinetic = attached
 
+            # Species-resolved torque of the run's own perturbation, on the diagnostics' axis boundary: the
+            # deck's main ion resolved on its own reproduces the single-ion torque, and a D-T list's torque
+            # is the sum of its members' own torques.
+            KF, EQ = GPEC.KineticForces, GPEC.Equilibrium
+            kf_ctrl = KF.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
+            kp = KF.ntv_profiles(kf_ctrl, ffs.equil)
+            resolve(list) = EQ.resolve_ntv_species(ffs.equil.kinetic, list; electron=false, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass)
+            kf_intr = KF.KineticForcesInternal(ffs.equil; verbose=false)
+            KF.set_perturbation_data!(kf_intr, pe, ffs, ffs.equil, ffs.metric)
+            psi_c = KF.axis_validity_boundary(kf_ctrl, nothing, kp, ffs.equil, Float64[sng.psifac for sng in ffs.surfaces])
+            torque(species) = GPEC.ntv_torque_state(kf_intr, kf_ctrl, ffs.equil, kp, species, 0.0; axis_psi_c=psi_c).method_results["fgar"].total_torque
+            single = torque(nothing)
+            @test isfinite(single) && single != 0
+            @test torque(resolve([KF.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)])) ≈ single rtol = 1e-6
+            dt = resolve([KF.IonSpecies(; z=kf_ctrl.ion_charge, m=2, fraction=0.5), KF.IonSpecies(; z=kf_ctrl.ion_charge, m=3, fraction=0.5)])
+            @test length(dt) >= 2 && !any(s.electron for s in dt)
+            @test torque(dt) ≈ sum(torque(dt[i:i]) for i in eachindex(dt)) rtol = 1e-12
+
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets[1:1], rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; fd_step_shift_m=2e-3, fd_step_tilt_deg=0.2); psi=ffs.psilim, b_t0=sens.b_t0)

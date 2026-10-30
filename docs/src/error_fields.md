@@ -362,7 +362,9 @@ published zero-rotation limits, `C_c √(T_0/T_residual)` (SPARC, `residual_only
 evaluates each one's `C_c`, resonant fraction, and NTV torque per kAt² for its whole field and
 for its field with the dominant mode projected out — two plasma-response evaluations of the
 unit-current spectrum followed by the kinetic torque, which needs a `[KineticForces]` section —
-and writes `ErrorFields/NTV/`. The spectrum is evaluated on the run's `[ForcingTerms]` boundary
+and writes `ErrorFields/NTV/`. With `ion_species` or `electron = true` in that section, the torques
+are the same species sum as the NTV diagnostics, and the reference rotation is the main ion's. The
+spectrum is evaluated on the run's `[ForcingTerms]` boundary
 grid and normalized by the magnitude of the array's ampere-turns, `|nw| × max|I|`, so the winding
 sense and current pattern of the deck stay the phase reference; the torques are stored with their
 sign, and the limits consume the budget with their magnitude (the sign depends on the rotation
