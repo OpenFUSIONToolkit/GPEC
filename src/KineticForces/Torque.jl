@@ -595,11 +595,12 @@ function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method:
     end
 
     if need_matrices && !isnothing(intr.smats)
-        smat_f = reshape(intr.smats(psi), intr.mpert, intr.mpert)
-        tmat_f = reshape(intr.tmats(psi), intr.mpert, intr.mpert)
-        xmat_f = reshape(intr.xmats(psi), intr.mpert, intr.mpert)
-        ymat_f = reshape(intr.ymats(psi), intr.mpert, intr.mpert)
-        zmat_f = reshape(intr.zmats(psi), intr.mpert, intr.mpert)
+        k = (n === nothing ? intr.nlow : n) - intr.nlow + 1
+        smat_f = ForceFreeStates.kinetic_metric_block(intr.smats, psi, intr.mpert, k)
+        tmat_f = ForceFreeStates.kinetic_metric_block(intr.tmats, psi, intr.mpert, k)
+        xmat_f = ForceFreeStates.kinetic_metric_block(intr.xmats, psi, intr.mpert, k)
+        ymat_f = ForceFreeStates.kinetic_metric_block(intr.ymats, psi, intr.mpert, k)
+        zmat_f = ForceFreeStates.kinetic_metric_block(intr.zmats, psi, intr.mpert, k)
     else
         smat_f = tmat_f = xmat_f = ymat_f = zmat_f = nothing
     end
@@ -676,12 +677,13 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     ro = intr.ro
     bo = intr.bo
 
-    # Geometric matrices at this ψ
-    smat_f = reshape(intr.smats(psi), mpert, mpert)
-    tmat_f = reshape(intr.tmats(psi), mpert, mpert)
-    xmat_f = reshape(intr.xmats(psi), mpert, mpert)
-    ymat_f = reshape(intr.ymats(psi), mpert, mpert)
-    zmat_f = reshape(intr.zmats(psi), mpert, mpert)
+    # Geometric matrices of this n at this ψ
+    k = n - intr.nlow + 1
+    smat_f = ForceFreeStates.kinetic_metric_block(intr.smats, psi, mpert, k)
+    tmat_f = ForceFreeStates.kinetic_metric_block(intr.tmats, psi, mpert, k)
+    xmat_f = ForceFreeStates.kinetic_metric_block(intr.xmats, psi, mpert, k)
+    ymat_f = ForceFreeStates.kinetic_metric_block(intr.ymats, psi, mpert, k)
+    zmat_f = ForceFreeStates.kinetic_metric_block(intr.zmats, psi, mpert, k)
 
     # Matrix-only path: dbob/divx perturbation coefficients are not used
     # (compute_bounce_data folds them into the scalar dJdJ we discard).
