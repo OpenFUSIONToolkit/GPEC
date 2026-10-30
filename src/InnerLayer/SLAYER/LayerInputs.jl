@@ -7,10 +7,9 @@
 # round-trip.
 #
 # Geometry extraction:
-#   - Minor radius at the outboard midplane (θ = 0) via
-#     `equil.rzphi_rsquared((ψ, 0.0))`.
-#   - `da/dψ` from the interpolant's own analytic ψ-derivative.
-#   - r-based magnetic shear via `r_based_shear(rs, q, q1, da/dψ)` (defined
+#   - r_s and dr/dψ from one radial label (`radial_label`; by default the
+#     toroidal-flux label r = √(2ψ_t/B₀)), both analytic.
+#   - r-based magnetic shear via `r_based_shear(rs, q, q1, dr/dψ)` (defined
 #     in LayerParameters.jl).
 
 using ..Utilities: KineticProfiles
@@ -54,7 +53,7 @@ end
 end
 
 """
-    radial_label(equil; rs_method=:midplane, theta=0.0) -> (r_at, dr_dpsi_at)
+    radial_label(equil; rs_method=:flux, theta=0.0) -> (r_at, dr_dpsi_at)
 
 Build the pair of closures `r_at(ψ)` and `dr_dpsi_at(ψ)` defining one radial
 label for the layer stack. Both closures must come from the same label,
@@ -91,7 +90,7 @@ On shaped equilibria the labels agree at low-q surfaces and diverge strongly
 near the edge, where the slab-layer matching is label-ambiguous regardless of
 choice. The label is selected programmatically; it is not exposed via TOML.
 """
-function radial_label(equil; rs_method::Symbol=:midplane, theta::Real=0.0, q_beyond=nothing)
+function radial_label(equil; rs_method::Symbol=:flux, theta::Real=0.0, q_beyond=nothing)
     theta_f = Float64(theta)
 
     _flux_r, _flux_dr = if rs_method === :flux
@@ -294,14 +293,14 @@ profiles, without an intermediate file round-trip.
     without one it falls back to the cylindrical `n·|s|/R₀` with a warning.
   - `dc_type`   -- `:none` (default), `:lar`, `:fitzpatrick`, or `:toroidal`.
   - `rs_method` -- radial label defining `r_s` for the whole layer stack:
-    `:midplane` (default), `:halfwidth`, `:fsa`, `:volume`, or `:flux`. See
+    `:flux` (default), `:midplane`, `:halfwidth`, `:fsa`, or `:volume`. See
     [`radial_label`](@ref) for the definitions. S, the r-based shear, W_d,
     and the Δ' reference-length factor `k_ref` all follow the choice
     together, so every option is self-consistent. Not exposed via TOML —
     programmatic use only.
 
-  - `theta`     -- poloidal angle at which to measure minor radius (default
-    `0.0`, outboard midplane).
+  - `theta`     -- poloidal angle of the minor-radius chord, used only by
+    `rs_method=:midplane` (default `0.0`, outboard midplane).
 
   - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`,
     `SpitzerModel()`, or `SpitzerHarmModel()` (legacy Fitzpatrick σ_∥).
@@ -317,7 +316,7 @@ profiles, without an intermediate file round-trip.
 function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     bt=nothing,
     R0=nothing,
-    rs_method::Symbol=:midplane,
+    rs_method::Symbol=:flux,
     q_beyond=nothing,
     mu_i::Real=2.0,
     zeff=1.0,

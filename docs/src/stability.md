@@ -379,7 +379,7 @@ do not resolve the H-mode pedestal transport barrier, where power-balance χ fal
 
 | Dataset | Contents |
 |---|---|
-| `psi`, `m`, `n`, `r_s` | scanned surfaces and their minor radius |
+| `psi`, `m`, `n`, `r_s` | scanned surfaces and their minor radius √(2ψ_t/B₀) |
 | `delta_s_abs`, `width_delta_s` | Riccati layer thickness, in metres and as a Δψ width |
 | `width_visco`, `width_dr` | visco-resistive and diffusive-resistive (Eq. 100) Δψ widths; `width_dr` sets the cut |
 | `extrapolated` | 1 where the surface lies beyond the equilibrium grid |

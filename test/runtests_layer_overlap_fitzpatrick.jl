@@ -226,14 +226,14 @@ end
     @test binding([s1]) === s1
 
     # The scan must see the run's own plasma: every [SLAYER] setting the layer width depends on
-    # reaches it, and changing one changes the widths.
+    # reaches it, and changing one changes the widths. theta_sample is passed through but warns: the flux label ignores it.
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
     trunc_deck = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
     slayer_section = trunc_deck["SLAYER"]
     kin = Equilibrium.read_kinetic_file(joinpath(trunc_dir, trunc_deck["Equilibrium"]["kinetic_file"]))
     slayer_inputs(over) = Dict{String,Any}("SLAYER" => merge(slayer_section, over))
     overlap_inputs(over; kinetic=kin) = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(slayer_inputs(over), kinetic)
-    oi = overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
+    oi = @test_logs (:warn, r"theta_sample") match_mode = :any overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
     @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
 
     # A disabled section feeds the scan whatever its inner model, and missing kinetic profiles only skip the scan;
