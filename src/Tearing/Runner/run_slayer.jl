@@ -227,8 +227,6 @@ function _q_shift(p::SLAYERParameters, Ω_E::Real)
         throw(ArgumentError("run_slayer: E×B rotation Ω_E=$(Ω_E) rad/s needs the toroidal mode number, but SLAYERParameters has n=$(p.n)"))
     return -p.tauk * p.n * Ω_E
 end
-# GGJ carries no time normalization (tauk = 1), so a physical rotation has no Q-space image.
-_q_shift(::InnerLayerParameters, ::Real) = 0.0
 
 # ---------------------------------------------------------------------
 # Reference-length conversion of the outer Δ' for the slab layer
