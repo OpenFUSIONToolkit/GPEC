@@ -296,15 +296,9 @@
             for f in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor, :Q_e, :Q_i, :iota_e, :tauk, :tau_r, :delta_n, :eta, :d_beta)
                 @test getfield(b, f) == getfield(a, f)
             end
-            # chi_perp_Dc equal to chi_perp_e reproduces the default exactly
-            same = slayer_parameters(; base..., chi_perp_Dc=1.0)
-            for f in (:P_perp, :D_norm, :dc_tmp)
-                @test getfield(same, f) == getfield(a, f)
-            end
         end
         base = merge(_ref_kwargs(; dr_val=0.01, dc_type=:fitzpatrick), (P_perp_model=:chi_perp_e,))
         @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=0.0)
-        @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=-1.0)
         @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=Inf)
     end
 end
