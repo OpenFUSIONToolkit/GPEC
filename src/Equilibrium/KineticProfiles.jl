@@ -348,6 +348,14 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
 end
 
 """
+    has_ntv_fields(data::KineticProfileData) -> Bool
+
+Whether `data` carries the profiles the NTV view needs (`n_e`, `T_i`, `T_e` and `omega_E`), so that
+`kinetic_profile_splines` and `resolve_ntv_species` can be built from it.
+"""
+has_ntv_fields(data::KineticProfileData) = all(!isnothing, (data.n_e, data.T_i, data.T_e, data.omega_E))
+
+"""
     kinetic_profile_splines(data::KineticProfileData;
                             zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
                             density_factor::Float64=1.0, temperature_factor::Float64=1.0,

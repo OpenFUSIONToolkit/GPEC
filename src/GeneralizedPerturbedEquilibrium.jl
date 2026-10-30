@@ -479,6 +479,16 @@ end
 # Whether a run reads the kinetic profiles through KineticForces (its stage, or the calculated EL source).
 _needs_kinetic_profiles(inputs, ctrl) = haskey(inputs, "KineticForces") || (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
 
+# The NTV view and species of the attached kinetic profiles for the EL stage and the grid. A calculated
+# kinetic source needs them, so a missing profile errors; otherwise they are built only when the profiles
+# carry the NTV fields, and profiles read for another consumer (e.g. SLAYER without omega_E) are left alone.
+function _ntv_views(kf_ctrl::KineticForces.KineticForcesControl, equil::Equilibrium.PlasmaEquilibrium, ctrl::ForceFreeStatesControl)
+    needed = ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated"
+    data = equil.kinetic
+    (data === nothing || !(needed || Equilibrium.has_ntv_fields(data))) && return (nothing, nothing)
+    return KineticForces.ntv_profiles(kf_ctrl, equil), KineticForces.ntv_species(kf_ctrl, equil)
+end
+
 """
     maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl=KineticForcesControl()) -> equil
 
@@ -495,12 +505,14 @@ function maybe_reform_equilibrium(
 )
     eq_config = equil.config
     Equilibrium.wants_two_pass(eq_config) || return equil
-    kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, equil)
+    kinetic_profiles, species = _ntv_views(kf_ctrl, equil, ctrl)
+    (equil.kinetic === nothing || kinetic_profiles !== nothing) ||
+        @info "Two-pass psi grid: the kinetic profiles lack an NTV field (n_e, T_i, T_e, omega_E), so the grid follows the equilibrium alone"
 
     mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
     # Kinetic-resonance nodes are located here rather than at the call site so the validity
     # boundary that filters them is cleared against this pass's rationals (intr.sing is empty yet).
-    pinned = KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, KineticForces.ntv_species(kf_ctrl, equil), equil, intr;
+    pinned = KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, species, equil, intr;
         rationals=mandatory)
     # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
     # so the rational-surface brackets clear a zone large enough for every mode.
@@ -705,8 +717,7 @@ function prepare_force_free_states!(
         # Inject the KineticForces callback so the "calculated" source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
-        kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, equil)
-        species = KineticForces.ntv_species(kf_ctrl, equil)
+        kinetic_profiles, species = _ntv_views(kf_ctrl, equil, ctrl)
         # One boundary for the whole run: the widest-orbit species, moved clear of any rational
         # surface whose window the transition band would otherwise cut through.
         axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
