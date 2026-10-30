@@ -464,27 +464,44 @@ end
 
 The `[KineticForces]` control of the run, defaults when the deck has no such section. A run that
 needs kinetic profiles (a `[KineticForces]` section, or the calculated kinetic source) errors
-here when the equilibrium carries none; every consumer derives its view from `equil.kinetic`.
+here when the equilibrium carries none or they lack an NTV field; every consumer derives its view
+from `equil.kinetic`.
 """
 function kinetic_forces_control(inputs::Dict{String,Any}, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
     kf_ctrl =
         haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
         KineticForces.KineticForcesControl()
-    _needs_kinetic_profiles(inputs, ctrl) && equil.kinetic === nothing &&
-        error("this run needs kinetic profiles ([KineticForces], or kinetic_source = \"calculated\"): set kinetic_file in [Equilibrium]")
+    if _needs_kinetic_profiles(inputs, ctrl)
+        equil.kinetic === nothing &&
+            error("this run needs kinetic profiles ([KineticForces], or kinetic_source = \"calculated\"): set kinetic_file in [Equilibrium]")
+        Equilibrium.has_ntv_fields(equil.kinetic) ||
+            error("this run needs n_e, T_i, T_e and omega_E in the kinetic profiles ([KineticForces], or kinetic_source = \"calculated\"); the kinetic file lacks at least one")
+    end
     return kf_ctrl
 end
 
+# Whether the EL stage computes its kinetic matrices from the profiles.
+_calculated_kinetic(ctrl) = ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated"
+
 # Whether a run reads the kinetic profiles through KineticForces (its stage, or the calculated EL source).
-_needs_kinetic_profiles(inputs, ctrl) = haskey(inputs, "KineticForces") || (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+_needs_kinetic_profiles(inputs, ctrl) = haskey(inputs, "KineticForces") || _calculated_kinetic(ctrl)
+
+# The NTV view and species of the attached kinetic profiles for the EL stage and the grid. A calculated
+# kinetic source needs them, so a missing profile errors; otherwise they are built only when the profiles
+# carry the NTV fields, and profiles read for another consumer (e.g. SLAYER without omega_E) are left alone.
+function _ntv_views(kf_ctrl::KineticForces.KineticForcesControl, equil::Equilibrium.PlasmaEquilibrium, ctrl::ForceFreeStatesControl)
+    data = equil.kinetic
+    (data === nothing || !(_calculated_kinetic(ctrl) || Equilibrium.has_ntv_fields(data))) && return (nothing, nothing)
+    return KineticForces.ntv_profiles(kf_ctrl, equil), KineticForces.ntv_species(kf_ctrl, equil)
+end
 
 """
     maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl=KineticForcesControl()) -> equil
 
 Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, and the NTV
-view of its attached kinetic profiles), pin knots on rational surfaces, and re-form on the refined
-grid with `Equilibrium.reform` from the source the equilibrium remembers. Returns `equil` untouched
+view of its attached kinetic profiles when they carry the NTV fields), pin knots on rational surfaces,
+and re-form on the refined grid with `Equilibrium.reform` from the source the equilibrium remembers. Returns `equil` untouched
 when its configuration wants a single pass.
 """
 function maybe_reform_equilibrium(
@@ -495,12 +512,14 @@ function maybe_reform_equilibrium(
 )
     eq_config = equil.config
     Equilibrium.wants_two_pass(eq_config) || return equil
-    kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, equil)
+    kinetic_profiles, species = _ntv_views(kf_ctrl, equil, ctrl)
+    equil.kinetic !== nothing && kinetic_profiles === nothing &&
+        @info "Two-pass psi grid: the kinetic profiles lack an NTV field (n_e, T_i, T_e, omega_E), so the grid follows the equilibrium alone"
 
     mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
     # Kinetic-resonance nodes are located here rather than at the call site so the validity
     # boundary that filters them is cleared against this pass's rationals (intr.sing is empty yet).
-    pinned = KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, KineticForces.ntv_species(kf_ctrl, equil), equil, intr;
+    pinned = KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, species, equil, intr;
         rationals=mandatory)
     # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
     # so the rational-surface brackets clear a zone large enough for every mode.
@@ -705,8 +724,9 @@ function prepare_force_free_states!(
         # Inject the KineticForces callback so the "calculated" source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
-        kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, equil)
-        species = KineticForces.ntv_species(kf_ctrl, equil)
+        kinetic_profiles, species = _ntv_views(kf_ctrl, equil, ctrl)
+        equil.kinetic !== nothing && kinetic_profiles === nothing && kf_ctrl.axis_validity_suppression &&
+            @info "Kinetic matrices: the kinetic profiles lack an NTV field (n_e, T_i, T_e, omega_E), so the near-axis validity suppression is off"
         # One boundary for the whole run: the widest-orbit species, moved clear of any rational
         # surface whose window the transition band would otherwise cut through.
         axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
@@ -921,7 +941,7 @@ function solve(prob::EulerLagrangeProblem, alg::ForceFreeStates.AbstractIntegrat
     ForceFreeStates._apply_alg!(ctrl_kwargs, alg)
     ctrl = ForceFreeStatesControl(; ctrl_kwargs...)
 
-    ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated" && equil.kinetic === nothing &&
+    _calculated_kinetic(ctrl) && equil.kinetic === nothing &&
         error("kinetic_source = \"calculated\" needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
     ctrl.kinetic_factor > 0 && !(alg isa ForceFreeStates.Forward) &&
         error("$(nameof(typeof(alg)))() does not support kinetic runs (kinetic_factor > 0); use Forward().")
