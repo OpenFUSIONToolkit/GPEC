@@ -234,7 +234,7 @@ using HDF5
             @test perturbed_equilibrium(resp, RMPField(pe.forcing_modes) + RMPField(forcing); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
 
             # No regularization by default; an explicit width changes the regularized profiles, not the control-surface quantities.
-            @test resp.regularization_width == pe.regularization_width == 0.0
+            @test pe.regularization_width == 0.0
             reg = perturbed_equilibrium(resp, RMPField(forcing); regularization_width=0.05, pe_kw...)
             @test reg.regularization_width == 0.05
             @test reg.forcing_b == pe.forcing_b

@@ -100,7 +100,7 @@ include("h5_metadata_check.jl")
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
-            sens, pe, ffs = res.coil_sensitivities, res.pe, res.ffs
+            sens, pe, ffs = res.error_fields.sensitivities, res.pe, res.ffs
             h5path = joinpath(dir, "gpec.h5")
 
             @test sens isa EF.CoilSensitivities
@@ -188,7 +188,7 @@ include("h5_metadata_check.jl")
             @test [c.name for c in snapshot.coils] == ["hoop_tilted", "hoop_axi"]
 
             # The run's Monte Carlo (full window, dominant mode) is written and re-runnable from the file.
-            mc = res.monte_carlo
+            mc = res.error_fields.monte_carlo
             @test mc isa EF.MonteCarloResult
             @test mc.nsample == 512 && mc.nbatch == 2 && mc.seed == 5
             @test mc.abs_delta_total_as_designed ≈ abs(sum(ef_table.delta_as_designed))
@@ -207,7 +207,7 @@ include("h5_metadata_check.jl")
             @test windowed_mc.abs_delta_total_as_designed ≈ abs(sum(EF.without_coils(windowed, ["hoop_efc"]).delta_as_designed))
 
             # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
-            risk = res.locking_risk
+            risk = res.error_fields.risk
             @test risk isa EF.RiskResult
             @test risk.scaling.n == 1 && risk.scaling.year == 2020 && risk.scaling.dataset == "O,L" && risk.scaling.fit == "WLS"
             @test risk.threshold_fit == EF.fitted_threshold(risk.scaling, EF.ScenarioParameters(ffs.equil; n_e=12.0))
@@ -487,6 +487,12 @@ include("h5_metadata_check.jl")
 
             # Post-hoc entry point: equilibrium and coupling rebuilt from the file, same coils.
             cfg = FT.CoilConfig(GPEC.forcing_terms_control(inputs, dir))
+            # The deck's [ErrorFields] stage is error_fields on its plasma response and coil sets; only what is asked for is computed.
+            @test res.error_fields isa ErrorFieldsResult && res.error_fields.response === pe.response
+            script = error_fields(pe.response, pe.coil_sets, cfg; ctrl=EF.ErrorFieldsControl(; exclude_coils=["hoop_efc"]))
+            @test script.sensitivities.field_as_designed == sens.field_as_designed
+            @test script.dominant.right_singular_vectors == res.error_fields.dominant.right_singular_vectors
+            @test all(isnothing, (script.tolerances, script.monte_carlo, script.risk, script.scan, script.couplings))
             sets = FT.load_coil_sets(cfg, 1; equil=ffs.equil)
             rebuilt = GPEC.equilibrium_from_h5(h5path)
             @test rebuilt.psilim == ffs.psilim
@@ -499,7 +505,7 @@ include("h5_metadata_check.jl")
             # Correction-coil couplings: the third hoop as the correction array. Its overlap per kAt is
             # the table's nominal overlap over its ampere-turns; the residual field carries no dominant
             # mode; the torques are finite and written with the metadata contract.
-            couplings = res.efc_couplings
+            couplings = res.error_fields.couplings
             @test couplings isa Vector{EF.EFCCoupling} && length(couplings) == 1
             c = couplings[1]
             kat = sets[3].nw * 2.0e3 / 1e3
@@ -548,7 +554,7 @@ include("h5_metadata_check.jl")
             @test with_profiles[3].series_list[2][:y] == c.torque_residual_profile[:, 2]
             attached = pe.response.ffs.equil.kinetic
             pe.response.ffs.equil.kinetic = nothing
-            @test_throws "needs kinetic profiles" GPEC.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
+            @test_throws "needs kinetic profiles" EF.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
             pe.response.ffs.equil.kinetic = attached
 
             # Central differences: doubling the step moves the derivatives at O(h²).

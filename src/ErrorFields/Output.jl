@@ -96,6 +96,22 @@ end
 const _TOLERANCE_SNAPSHOT = "Input/RawInputs/ErrorFields/tolerance_toml_raw"
 
 """
+    save_to_hdf5(target, ef::ErrorFieldsResult)
+
+Write every product of the error-field assessment: the coil sensitivities with their dominant-mode projections, the
+tolerance set echoed into `Input/RawInputs/`, and the Monte Carlo, locking risk and correction-coil couplings when
+they were computed.
+"""
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, ef::ErrorFieldsResult)
+    save_to_hdf5(h5file, ef.sensitivities; dom=ef.dominant)
+    ef.tolerances === nothing || write_tolerance_snapshot!(h5file, ef.tolerances)
+    ef.monte_carlo === nothing || save_to_hdf5(h5file, ef.monte_carlo)
+    ef.risk === nothing || save_to_hdf5(h5file, ef.risk; scan=ef.scan)
+    ef.couplings === nothing || save_to_hdf5(h5file, ef.couplings)
+    return nothing
+end
+
+"""
     write_tolerance_snapshot!(h5file, ts::ToleranceSet)
 
 Echo the tolerance file's text into `Input/RawInputs/ErrorFields/tolerance_toml_raw`, the raw

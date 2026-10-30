@@ -48,10 +48,6 @@ spectra.
 
   - `ffs::ForceFreeStatesResult` - The result the operators were built from.
   - `m_modes`, `n_modes` - Poloidal and toroidal mode number of each entry of a spectrum [numpert_total].
-  - `regularization_width::Float64` - Default profile-reconstruction width (Fortran `reg_spot`): 0, no
-    regularization (Fortran `reg_flag = f`). Set it, typically to 0.05, only to drive KineticForces with an
-    ideal solve, whose 1/(m−nq) divergence leaves the NTV torque integral unconverged; a kinetic solve has
-    none to smooth (Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D).
   - `odet_from_gal::Bool` - The solution is the gal-native matched basis, whose `du_store` carries the
     analytic Galerkin Ξ′; selects that branch of the singular-coupling Ξ′ evaluation.
   - `flux_matrix::Matrix{ComplexF64}` - Control-surface flux of the free-boundary eigenmodes [mode × eigenmode].
@@ -104,7 +100,6 @@ on a `ResonantCoupling`):
     ffs::ForceFreeStatesResult
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
-    regularization_width::Float64 = 0.0
     odet_from_gal::Bool = false
 
     # Flux-space operators [numpert_total × numpert_total]
@@ -159,7 +154,10 @@ The perturbed equilibrium driven by one external field: the forcing materialized
   - `response::PlasmaResponse` - The operators this field was applied to.
   - `forcing_modes::Vector{ForcingMode}` - The materialized control-surface forcing Φ_x.
   - `coil_sets::Vector{CoilSet}` - Coil geometry used (coil-format forcing); captured for the gpec.h5 rerun snapshot.
-  - `regularization_width::Float64` - Width the profiles were reconstructed with.
+  - `regularization_width::Float64` - Width the profiles were reconstructed with (Fortran `reg_spot`): 0, no
+    regularization (Fortran `reg_flag = f`). Set it, typically to 0.05, only to drive KineticForces with an
+    ideal solve, whose 1/(m−nq) divergence leaves the NTV torque integral unconverged; a kinetic solve has
+    none to smooth (Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D).
 
 Response fields (mode space):
 
@@ -210,7 +208,7 @@ Torque response (kinetic forward solves with `compute_torque_response`):
     response::PlasmaResponse
     forcing_modes::Vector{ForcingMode} = ForcingMode[]
     coil_sets::Vector{CoilSet} = CoilSet[]
-    regularization_width::Float64 = response.regularization_width
+    regularization_width::Float64 = 0.0
 
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
     psi_grid::Vector{Float64} = Float64[]

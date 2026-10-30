@@ -82,7 +82,7 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
 end
 
 """
-    compute_perturbed_equilibrium(resp, forcing; regularization_width=resp.regularization_width, verbose=true,
+    compute_perturbed_equilibrium(resp, forcing; regularization_width=0.0, verbose=true,
                                   preloaded_coil_sets=CoilSet[])::PerturbedEquilibriumState
 
 Drive the operators of `resp` with one external field: materialize `forcing` (a `ForcingTermsControl`
@@ -100,7 +100,7 @@ forcing spectrum.
 function compute_perturbed_equilibrium(
     resp::PlasmaResponse,
     forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField};
-    regularization_width::Real=resp.regularization_width,
+    regularization_width::Real=0.0,
     verbose::Bool=true,
     preloaded_coil_sets::Vector{CoilSet}=CoilSet[]
 )::PerturbedEquilibriumState

@@ -60,6 +60,9 @@ The objects map one-to-one onto the pipeline stages:
   - [`kinetic_torque`](@ref) evaluates the kinetic (NTV) torque of a perturbed equilibrium with the
     model settings of a `KineticForcesControl` — the `[KineticForces]` section — and returns a
     `KineticForcesResult`: `kf = kinetic_torque(pe, KineticForcesControl())`.
+  - [`error_fields`](@ref) assesses the error field of a set of coils on a plasma response — the
+    `[ErrorFields]` section — and returns an `ErrorFieldsResult`:
+    `ef = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl); tolerances)`.
 
 ## Kinetic profiles
 

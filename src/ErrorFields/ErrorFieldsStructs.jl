@@ -15,9 +15,6 @@ never inputs: the full spectra are stored and projected post hoc with [`sensitiv
     about its own arc-length centre (the Fortran `coil_read` convention the OMFIT tolerance tool
     inherited), `"set"` rotates the whole set rigidly about its common arc-length centre (a
     winding pack moving as one body, which is what an axis-line tolerance constrains)
-  - `tolerance_file`: manufacturing-tolerance TOML (see `ToleranceTOML`), relative to the deck
-    directory; empty means none. It is validated against the run's coil sets and echoed into
-    `Input/RawInputs/ErrorFields/tolerance_toml_raw`
   - `exclude_coils`: coil sets of the run that are not error-field sources, such as a correction
     array energized to tabulate its couplings or a diagnostic coil. Their sensitivities are still
     tabulated, but they are left out of the as-designed error field, the tolerance Monte Carlo,
@@ -28,7 +25,6 @@ Base.@kwdef struct ErrorFieldsControl
     fd_step_shift_m::Float64 = 1e-3
     fd_step_tilt_deg::Float64 = 0.1
     rotation_center::String = "conductor"
-    tolerance_file::String = ""
     exclude_coils::Vector{String} = String[]
 end
 

@@ -398,20 +398,23 @@ end
 """
     error_fields_from_deck(inputs, path) -> Union{Nothing,NamedTuple}
 
-`(; ctrl, monte_carlo, risk, ntv, scenario, excluded)`: the `[ErrorFields]` control and those of its
-`MonteCarlo`, `Risk` and `NTV` sub-tables, the `[ErrorFields.scenario]` keywords (`nothing` when
-absent) and the coil sets excluded from the error field. `nothing` without `[ErrorFields]`.
+`(; ctrl, tolerances, monte_carlo, risk, ntv, scenario)`: the `[ErrorFields]` control, the tolerance set its
+`tolerance_file` names (`nothing` when none), the controls of its `MonteCarlo`, `Risk` and `NTV` sub-tables, and the
+`[ErrorFields.scenario]` keywords of `ErrorFields.ScenarioParameters` (`nothing` when absent). `nothing` without
+`[ErrorFields]`.
 """
 function error_fields_from_deck(inputs::AbstractDict, path::AbstractString)
     haskey(inputs, "ErrorFields") || return nothing
     table = _deck_paths(inputs["ErrorFields"], path, ("tolerance_file",))
     sub(name, T) = T(; section_keywords(get(table, name, Dict{String,Any}()), "ErrorFields.$name", _struct_fields(T))...)
-    ctrl = ErrorFields.ErrorFieldsControl(;
-        section_keywords(_without(table, "MonteCarlo", "Risk", "scenario", "NTV"), "ErrorFields", _struct_fields(ErrorFields.ErrorFieldsControl))...)
-    scenario = get(table, "scenario", nothing)
-    return (; ctrl, monte_carlo=sub("MonteCarlo", ErrorFields.MonteCarloControl), risk=sub("Risk", ErrorFields.RiskControl),
-        ntv=sub("NTV", ErrorFields.NTVControl), scenario=scenario === nothing ? nothing : Dict{Symbol,Any}(Symbol(k) => v for (k, v) in scenario),
-        excluded=ErrorFields.excluded_coil_names(table))
+    ctrl = ErrorFields.ErrorFieldsControl(; section_keywords(_without(table, "MonteCarlo", "Risk", "scenario", "NTV", "tolerance_file"),
+        "ErrorFields", _struct_fields(ErrorFields.ErrorFieldsControl))...)
+    file = get(table, "tolerance_file", "")
+    isempty(file) || isfile(file) || error("[ErrorFields] tolerance_file not found: $file")
+    scenario = haskey(table, "scenario") ? section_keywords(table["scenario"], "ErrorFields.scenario", _struct_fields(ErrorFields.ScenarioParameters)) : nothing
+    scenario === nothing || haskey(scenario, :n_e) || error("[ErrorFields.scenario] must give n_e (electron density, 1e19 m^-3)")
+    return (; ctrl, tolerances=isempty(file) ? nothing : ErrorFields.read_tolerance_toml(file), monte_carlo=sub("MonteCarlo", ErrorFields.MonteCarloControl),
+        risk=sub("Risk", ErrorFields.RiskControl), ntv=sub("NTV", ErrorFields.NTVControl), scenario)
 end
 
 """
@@ -436,12 +439,18 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     force_balance = has_ffs ? (; keywords=force_balance_keywords(inputs, path), algorithm=force_balance_algorithm(inputs)) : nothing
     match = match_from_deck(inputs)
     tearing = tearing_from_deck(inputs)
+    perturbed_equilibrium = perturbed_equilibrium_from_deck(inputs)
+    forcing = forcing_terms_control(inputs, path)
+    if haskey(inputs, "ErrorFields")
+        perturbed_equilibrium === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section")
+        forcing.forcing_data_format == "coil" ||
+            error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(forcing.forcing_data_format)\")")
+    end
     tearing_model = haskey(inputs, "Tearing") ? get(inputs["Tearing"], "inner_model", nothing) : nothing
     haskey(inputs, "GGJ") && match === nothing && tearing_model != "GGJ" &&
         error("[GGJ] is set but neither [Match] nor [Tearing] inner_model = \"GGJ\" uses it")
     haskey(inputs, "SLAYER") && tearing_model != "SLAYER" && !(has_ffs && get(inputs["ForceFreeStates"], "psilim_from_layer_overlap", false) === true) &&
         error("[SLAYER] is set but neither [Tearing] inner_model = \"SLAYER\" nor [ForceFreeStates] psilim_from_layer_overlap = true uses it")
     return (; run=run_settings(inputs, path), force_balance, local_stability=local_stability_from_deck(inputs), match, tearing,
-        kinetic_forces=kinetic_forces_control(inputs), perturbed_equilibrium=perturbed_equilibrium_from_deck(inputs),
-        forcing=forcing_terms_control(inputs, path), error_fields=error_fields_from_deck(inputs, path))
+        kinetic_forces=kinetic_forces_control(inputs), perturbed_equilibrium, forcing, error_fields=error_fields_from_deck(inputs, path))
 end

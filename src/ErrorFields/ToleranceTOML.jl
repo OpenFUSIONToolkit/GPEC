@@ -2,7 +2,7 @@
     ToleranceTOML
 
 The manufacturing-tolerance input of an error-field assessment: a TOML file, separate from
-`gpec.toml` and named by `ErrorFieldsControl.tolerance_file`, holding one `[[ErrorFields.coil]]`
+`gpec.toml` and named by a deck's `[ErrorFields] tolerance_file`, holding one `[[ErrorFields.coil]]`
 block per coil set that may move on its own, `[[ErrorFields.coherent_group]]` blocks for coil
 sets that move together, and the `[ErrorFields.correctability]` and `[ErrorFields.other_field]`
 tables. Tolerances are human-authored engineering data, so the format is diffable, commentable

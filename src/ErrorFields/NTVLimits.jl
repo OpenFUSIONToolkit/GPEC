@@ -479,3 +479,150 @@ function efc_current_curve(c::EFCCoupling; delta_threshold::Real, torque_budget:
         limits_optimistic=max_correctable_overlap(c; kw(optimistic)...),
         max_correctable_overlap(c; kw(torque_budget)...)...)
 end
+
+"""
+    efc_couplings(resp, coil_sets, rc, dom, cfg, kf_ctrl; mode=1, method="fgar",
+                  regularization_width=0.0, verbose=false) -> Vector{EFCCoupling}
+
+The couplings of each correction coil array in `coil_sets` per kilo-ampere-turn: its
+dominant-mode overlap and resonant fraction from its spectrum on the control surface, and its
+NTV torque for the whole field and for the field with mode `mode` of `dom` projected out. The
+torque is a quadratic form of the applied spectrum, so each is one evaluation of the run's plasma
+response `resp` on the unit-current spectrum (a spectrum-literal `RMPField`, nothing written, with the
+run's perturbed-equilibrium `regularization_width`) followed by the kinetic torque of `method`; both scale exactly with the
+square of the current. `cfg` is the run's `[ForcingTerms]` coil configuration, so the boundary grid
+matches the one the run's sensitivities were evaluated on; `rc` must be the coupling of `resp`; the
+torque uses the NTV view of the kinetic profiles attached to `resp.ffs.equil`. The spectrum is normalized by the magnitude of the
+array's ampere-turns, `|nw| × max|I|`, keeping its winding sense and current pattern as the
+phase reference; the torque is stored with its sign.
+"""
+function efc_couplings(
+    resp::PerturbedEquilibrium.PlasmaResponse,
+    coil_sets::Vector{CoilSet},
+    rc::ResonantCoupling,
+    dom::DominantCoupling,
+    cfg::CoilConfig,
+    kf_ctrl::KineticForces.KineticForcesControl;
+    mode::Int=1,
+    method::AbstractString="fgar",
+    rotation_scan::Bool=true,
+    scan_points::Int=9,
+    scan_max_points::Int=21,
+    scan_tolerance::Real=0.05,
+    span_factor::Real=1.0,
+    offset_factor::Real=2.0,
+    regularization_width::Real=0.0,
+    verbose::Bool=false
+)
+    ffs = resp.ffs
+    ffs.equil.kinetic === nothing && error("efc_couplings needs kinetic profiles: set kinetic_file in [Equilibrium]")
+    getfield(kf_ctrl, Symbol(method * "_flag")) || error("efc_couplings: KineticForces method \"$method\" is not enabled in the control")
+    equil = ffs.equil
+    grids = [(n, CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)) for n in sort(unique(rc.n_modes))]
+    m_low, m_high = extrema(rc.m_modes)
+    v = dom.right_singular_vectors[:, mode]
+
+    # Reference rotation and scan span from the kinetic profiles, with the torque kernel's own
+    # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
+    kp = KineticForces.ntv_profiles(kf_ctrl, equil)
+    chi1 = 2π * equil.psio
+    chrg = KineticForces.main_ion(equil)[1] * Utilities.E_CHG
+    ψk = kp.xs
+    ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
+    ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
+    ω_star_n = [
+        (n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
+    ]
+    ω_φ = ω_E .+ ω_star_n .+ ω_star_T
+    # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
+    w = [ψ <= ffs.psilim ? max(kp.ni_spline(ψ), 0.0) * equil.profiles.dVdpsi_spline(clamp(ψ, equil.profiles.xs[1], equil.profiles.xs[end])) : 0.0 for ψ in ψk]
+    ω_ref = sum(w .* ω_φ) / sum(w)
+    span, ω_offset = rotation_scan_span(ω_E[1], ω_star_T[1]; span_factor, offset_factor)
+    npts = isodd(scan_points) ? scan_points : scan_points + 1
+    grid0 = rotation_scan ? collect(range(-span, span; length=max(npts, 3))) : [0.0]
+    verbose && @info "NTV couplings: ω_ref = $(@sprintf("%.3e", ω_ref)) rad/s, rough offset $(@sprintf("%.3e", ω_offset)) rad/s, " *
+          "scan ±$(@sprintf("%.3e", span)) rad/s on $(length(grid0)) initial points (max $(scan_max_points))"
+
+    function response_of(modes::Vector{ForcingMode})
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(resp, ForcingTerms.RMPField(modes); regularization_width, verbose)
+        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=verbose)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
+        return kf_intr
+    end
+    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.
+    function torque_of(kf_intr, profiles)
+        kf_state = KineticForces.KineticForcesState()
+        logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
+        Base.CoreLogging.with_logger(logger) do
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, profiles)
+        end
+        r = kf_state.method_results[String(method)]
+        T = real(r.total_torque)
+        prof = zeros(Float64, length(ψk))
+        if length(r.psi_grid) >= 2
+            # Cubic spline of the cumulative torque on the quadrature's own ψ points (deduplicated), zero
+            # inside the first point and the total beyond the last.
+            keep = [i == 1 || r.psi_grid[i] > r.psi_grid[i-1] for i in eachindex(r.psi_grid)]
+            pg, tc = r.psi_grid[keep], real.(r.t_cumulative[keep])
+            spl = length(pg) >= 4 ? cubic_interp(pg, tc) : nothing
+            for (k, ψ) in enumerate(ψk)
+                prof[k] = ψ <= pg[1] ? 0.0 : ψ >= pg[end] ? tc[end] : spl === nothing ? tc[searchsortedlast(pg, ψ)] : spl(ψ)
+            end
+        end
+        return T, prof
+    end
+
+    out = EFCCoupling[]
+    for cs in coil_sets
+        kat = abs(cs.nw) * maximum(abs, cs.currents) / 1e3
+        kat > 0 || error("efc_couplings: coil set \"$(cs.name)\" carries no current")
+        # Unit-current spectrum: per kilo-ampere-turn of the array's current pattern.
+        modes = ForcingMode[]
+        for (n, grid) in grids
+            append!(modes, coil_forcing_modes(cs, grid, n, m_low, m_high))
+        end
+        modes = [ForcingMode(; n=m.n, m=m.m, amplitude=m.amplitude / kat) for m in modes]
+        b̃ = rootarea_field(rc, modes)
+        δ = dot(v, b̃) / equil.params.bt0
+        overlap = 100 * abs(dot(v, b̃)) / norm(b̃)
+        # The residual field as forcing modes: back through the conform operator to Φ_x.
+        Φ_res = rc.flux_conform * residual_spectrum(dom, b̃; mode)
+        residual_modes = [ForcingMode(; n=rc.n_modes[k], m=rc.m_modes[k], amplitude=Φ_res[k]) for k in eachindex(Φ_res)]
+        t_start = time()
+        kf_full = response_of(modes)
+        kf_res = response_of(residual_modes)
+        profiles_full = Dict{Float64,Vector{Float64}}()
+        profiles_res = Dict{Float64,Vector{Float64}}()
+        function torques(Δ)
+            profiles = Δ == 0 ? kp : Equilibrium.shift_exb_rotation(kp, Δ)
+            T_f, p_f = torque_of(kf_full, profiles)
+            T_r, p_r = torque_of(kf_res, profiles)
+            profiles_full[Δ] = p_f
+            profiles_res[Δ] = p_r
+            verbose && @info "    $(cs.name) Δω = $(@sprintf("%+.3e", Δ)) rad/s: torque $(@sprintf("%.3e", T_f)) N·m per kAt² (residual $(@sprintf("%.3e", T_r)))"
+            return [T_f, T_r]
+        end
+        if rotation_scan
+            Δs, Ts = Utilities.adaptive_sample(torques, grid0; max_points=scan_max_points, rtol=scan_tolerance)
+        else
+            Δs = [0.0]
+            Ts = permutedims(torques(0.0))
+        end
+        i0 = findfirst(==(0.0), Δs)
+        T_full, T_res = Ts[i0, 1], Ts[i0, 2]
+        c = EFCCoupling(cs.name, abs(δ), overlap, T_full, T_res, Δs, Ts[:, 1], Ts[:, 2],
+            rotation_scan ? ω_ref : NaN, rotation_scan ? ω_offset : NaN, rotation_scan ? collect(ψk) : Float64[],
+            rotation_scan ? reduce(hcat, profiles_full[Δ] for Δ in Δs) : zeros(0, 1),
+            rotation_scan ? reduce(hcat, profiles_res[Δ] for Δ in Δs) : zeros(0, 1))
+        if rotation_scan
+            crossings = torque_zero_crossings(c)
+            isempty(crossings) && @warn "NTV couplings: the residual torque of $(cs.name) does not change sign within ±$(@sprintf("%.3e", span)) rad/s; " *
+                  "raise rotation_span_factor to reach the neoclassical offset"
+        end
+        verbose && @info "  $(cs.name): |δ| = $(@sprintf("%.3e", abs(δ))) per kAt, resonant fraction $(@sprintf("%.1f", overlap)) %, " *
+              "torque $(@sprintf("%.3e", T_full)) N·m per kAt² (residual $(@sprintf("%.3e", T_res))) at the nominal rotation, " *
+              "$(length(Δs)) scan points in $(@sprintf("%.1f", time() - t_start)) s"
+        push!(out, c)
+    end
+    return out
+end

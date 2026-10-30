@@ -56,6 +56,18 @@ curvature diagnostic per tap, the current pattern the spectra were evaluated at,
 its shift and tilt sensitivities, their direction-averaged in-plane magnitudes, and the in-plane
 shift and tilt that would cancel `delta_as_designed`).
 
+From a script, the same stage is one call on the plasma response and the coil sets of a coil-forced
+perturbed equilibrium; it returns an `ErrorFieldsResult`, and products not asked for are `nothing`:
+
+```julia
+resp = plasma_response(ffs)
+pe = perturbed_equilibrium(resp, RMPField(ft_ctrl))
+ef = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl);
+                  tolerances=ErrorFields.read_tolerance_toml("tolerances.toml"),
+                  scenario=ErrorFields.ScenarioParameters(ffs.equil; n_e=5.0))
+save_to_hdf5("gpec.h5", ef)
+```
+
 `examples/DIIID-like_error_field_example/` is a complete case: the DIII-D-like equilibrium with
 the C-coil as the nominal n = 1 source and the eighteen DIII-D F coils added as single-filament
 hoops at the centroids of their winding packs (from OpenFUSIONToolkit's TokaMaker
@@ -439,7 +451,7 @@ table.tilt_sensitivity_per_deg[1, :]               # ∂δ/∂θx per degree, pe
 # In memory, from the run's returned state (no I/O)
 rc  = PerturbedEquilibrium.ResonantCoupling(run.pe.response)
 dom = PerturbedEquilibrium.dominant_coupling(rc; psi_low=0.5)
-table = EF.sensitivity_table(run.coil_sensitivities, dom; mode=1)
+table = EF.sensitivity_table(run.error_fields.sensitivities, dom; mode=1)
 ```
 
 ### How far the linear model holds
