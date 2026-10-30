@@ -61,7 +61,7 @@ The objects map one-to-one onto the pipeline stages:
     refined two-pass grid the deck uses; `Equilibrium.reform(eq, psi_nodes)` re-forms it on any grid.
   - `solve` runs the force-free-states stage — the `[ForceFreeStates]` section — and returns
     a `ForceFreeStatesResult`, exactly the object the TOML driver publishes.
-  - [`RMPField`](@ref) describes the external field — the `[ForcingTerms]` section — without
+  - [`RMPField`](@ref GeneralizedPerturbedEquilibrium.ForcingTerms.RMPField) describes the external field — the `[ForcingTerms]` section — without
     reading anything from disk until it is applied.
   - [`plasma_response`](@ref) builds the plasma-response and singular-coupling operators of a
     `ForceFreeStatesResult` once, and `perturbed_equilibrium(resp, rmp)` drives them with one field —
