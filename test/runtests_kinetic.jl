@@ -1,3 +1,4 @@
+using TOML
 
 @testset "KineticForces Unit Tests" begin
 
@@ -766,8 +767,8 @@
         end
 
         @testset "NTV splines identical: ASCII vs HDF5" begin
-            ka = E.load_kinetic_profiles(gpeckf)
-            kb = E.load_kinetic_profiles(h5)
+            ka = E.kinetic_profile_splines(E.read_kinetic_file(gpeckf))
+            kb = E.kinetic_profile_splines(E.read_kinetic_file(h5))
             for p in 0.0:0.1:1.0
                 @test ka.ne_spline(p) == kb.ne_spline(p)
                 @test ka.Ti_spline(p) == kb.Ti_spline(p)
@@ -791,13 +792,64 @@
             rm(tmp; force=true)
         end
 
+        @testset "schema table matches the data fields" begin
+            # Every profile dataset the reader and writer iterate is a KineticProfileData field, and vice versa.
+            table = Set(Symbol(first(p)) for p in E._KINETIC_H5_PROFILES)
+            @test table == setdiff(Set(fieldnames(E.KineticProfileData)), Set([:psi, :species_densities, :provenance]))
+        end
+
         @testset "missing required field errors" begin
-            # HDF5 with only psi + n_e: NTV load must error on the missing T_i
-            tmp = tempname() * ".h5"
+            # Only psi + n_e: the NTV view must error on the missing T_i
             d = E.KineticProfileData(; psi=[0.0, 0.5, 1.0], n_e=[1e19, 9e18, 8e18])
-            E.write_kinetic_h5(tmp, d)
-            @test_throws ErrorException E.load_kinetic_profiles(tmp)
-            rm(tmp; force=true)
+            @test_throws "missing required 'T_i'" E.kinetic_profile_splines(d)
+        end
+
+        @testset "attached to the equilibrium" begin
+            template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+            sol = E.SolovevConfig(deck["SOL_INPUT"])
+            # A relative kinetic_file resolves against the deck directory, like eq_filename.
+            config = E.EquilibriumConfig(merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))), template)
+            @test config.kinetic_file == normpath(h5)
+            raw = E.read_kinetic_file(h5)
+            equil = E.PlasmaEquilibrium(config, sol)
+            @test equil.kinetic.psi == raw.psi
+            @test equil.kinetic.T_i == raw.T_i
+            @test equil.kinetic.chi_e == raw.chi_e
+            # A re-form passes the data through instead of reading the file again.
+            @test E.PlasmaEquilibrium(config, sol; kinetic=equil.kinetic).kinetic === equil.kinetic
+
+            bare = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), sol)
+            @test bare.kinetic === nothing
+            E.attach_kinetic_profiles!(bare, gpeckf)
+            @test bare.kinetic.n_e == E.read_kinetic_file(gpeckf).n_e
+            @test E.attach_kinetic_profiles!(bare, raw).kinetic === raw
+        end
+
+        @testset "NTV views of the attached profiles" begin
+            GPEC = GeneralizedPerturbedEquilibrium
+            KF = GPEC.KineticForces
+            template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+            equil = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), E.SolovevConfig(deck["SOL_INPUT"]))
+            kf = KF.KineticForcesControl()
+            @test KF.ntv_profiles(kf, equil) === nothing
+            @test_throws "set kinetic_file in [Equilibrium]" GPEC.kinetic_forces_control(
+                Dict{String,Any}("KineticForces" => Dict{String,Any}()), GPEC.ForceFreeStates.ForceFreeStatesControl(), equil)
+
+            raw = E.read_kinetic_file(h5)
+            E.attach_kinetic_profiles!(equil, raw)
+            view = KF.ntv_profiles(kf, equil)
+            ref = E.kinetic_profile_splines(raw; zi=kf.ion_charge, zimp=kf.impurity_charge, mi=kf.ion_mass, mimp=kf.impurity_mass,
+                chi1=2π * equil.psio)
+            for ψ in 0.0:0.1:1.0
+                @test view.Ti_spline(ψ) == ref.Ti_spline(ψ)
+                @test view.nui_spline(ψ) == ref.nui_spline(ψ)
+                @test view.zeff_spline(ψ) == ref.zeff_spline(ψ)
+            end
+            @test KF.ntv_species(kf, equil) === nothing
+            with_e = KF.ntv_species(KF.KineticForcesControl(; electron=true), equil)
+            @test any(sp -> sp.electron, with_e)
         end
     end
 end

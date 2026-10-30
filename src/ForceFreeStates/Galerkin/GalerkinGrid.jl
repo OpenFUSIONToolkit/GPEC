@@ -50,8 +50,8 @@ end
     gal_resonant_surfaces(intr, equil) -> (sings, psilow, psihigh)
 
 Resonant surfaces inside the integration domain, in increasing ψ (Fortran `sing(1:msing)`), with the
-domain bounds. `psilow` is raised above the axis by `sing_min!` when `qlow > qmin` (excludes the q<qlow
-core); it falls back to the equilibrium axis bound if `sing_min!` was not run (`intr.psilow` still 0).
+domain bounds. `psilow` is raised above the axis by `sing_min!` when q < qlow somewhere on the grid (excludes
+that region); it falls back to the equilibrium axis bound if `sing_min!` was not run (`intr.psilow` still 0).
 """
 function gal_resonant_surfaces(intr::ForceFreeStatesInternal, equil)
     psilow = intr.psilow > 0 ? intr.psilow : equil.profiles.xs[1]

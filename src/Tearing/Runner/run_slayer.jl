@@ -4,34 +4,23 @@
 # `run_slayer_from_inputs` (scan + growth-rate extraction). `TearingProblem` builds its inputs.
 
 # ---------------------------------------------------------------------
-# Profile loading
+# Kinetic-profile view
 # ---------------------------------------------------------------------
-# Read kinetic profiles through the shared `Equilibrium.read_kinetic_file`
-# reader and adapt them to the SLAYER inner layer. Returns the spline-based
-# `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from the file's
-# `chi_e`/`chi_i`/`chi_phi` (or `nothing` when the file carries no usable χ, in which
-# case the caller falls back to the scalar `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), and
-# a Z_eff(ψ) callable: the file's own `zeff` profile when it carries one, else
-# derived from its `n_i/n_e` (or `nothing` when the file carries neither, in which
-# case the caller falls back to the scalar `control.zeff`), and whether the file
-# carries an `omega_E` profile.
-function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
-    isempty(control.profile_file) &&
-        error("run_slayer: [SLAYER] profile_file is empty — point it at a " *
-              "kinetic-profile file (HDF5 GPEC kinetic schema or ASCII table).")
-    path = isabspath(control.profile_file) ? control.profile_file :
-           joinpath(dir_path, control.profile_file)
-    data = read_kinetic_file(path; group=control.profile_group)
-
+# The SLAYER view of raw kinetic profiles (`equil.kinetic`), on their own ψ grid. Returns the
+# spline-based `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from `chi_e`/`chi_i`/`chi_phi`
+# (or `nothing` when the data carry no usable χ, in which case the caller falls back to the scalar
+# `control.chi_perp_e`/`chi_perp_i`/`chi_tor`), a Z_eff(ψ) callable: the data's own `zeff` profile when
+# they carry one, else derived from `n_i/n_e` (or `nothing` when they carry neither, in which case the
+# caller falls back to the scalar `control.zeff`), and whether the data carry an `omega_E` profile.
+function _slayer_profiles(data::KineticProfileData, control::SLAYERControl)
+    source = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
     for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))
         v === nothing &&
-            error("run_slayer: kinetic file '$path' is missing required " *
-                  "dataset '$name' for the SLAYER inner layer.")
+            error("run_slayer: $source missing required dataset '$name' for the SLAYER inner layer.")
     end
-    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the file has it, else zero (no shift);
+    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the data have it, else zero (no shift);
     # ω_*e/ω_*i are derived per surface from the density and temperature splines by `build_slayer_inputs`.
-    npsi = length(data.psi)
-    omega_E = data.omega_E === nothing ? zeros(npsi) : data.omega_E
+    omega_E = data.omega_E === nothing ? zeros(length(data.psi)) : data.omega_E
     profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
         T_i=data.T_i, omega_E=omega_E)
 
@@ -43,7 +32,7 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     psi_xs = collect(Float64, data.psi)
     function _chi_spline(name, v)
         (v === nothing || all(iszero, v)) && return nothing
-        minimum(v) > 0 || error("run_slayer: kinetic file '$path' has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
+        minimum(v) > 0 || error("run_slayer: $source has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
         return cubic_interp(psi_xs, collect(Float64, v))
     end
     model = control.P_perp_model
@@ -58,14 +47,14 @@ function _load_profiles(control::SLAYERControl, dir_path::AbstractString)
     _usable(v) = v !== nothing && !all(iszero, v)
     zeff = if _usable(data.zeff)
         minimum(data.zeff) >= 1.0 - 1e-8 ||
-            error("run_slayer: kinetic file '$path' has zeff = $(minimum(data.zeff)) < 1 — unphysical")
+            error("run_slayer: $source has zeff = $(minimum(data.zeff)) < 1 — unphysical")
         cubic_interp(psi_xs, collect(Float64, data.zeff))
     elseif !_usable(data.n_i)
         nothing
     else
         z = [ne > 0 ? control.impurity_charge - (ni / ne) * (control.impurity_charge - 1.0) : control.impurity_charge for (ni, ne) in zip(data.n_i, data.n_e)]
         minimum(z) >= 1.0 - 1e-8 ||
-            error("run_slayer: kinetic file '$path' has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
+            error("run_slayer: $source has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
@@ -241,8 +230,6 @@ function _q_shift(p::SLAYERParameters, Ω_E::Real)
         throw(ArgumentError("run_slayer: E×B rotation Ω_E=$(Ω_E) rad/s needs the toroidal mode number, but SLAYERParameters has n=$(p.n)"))
     return -p.tauk * p.n * Ω_E
 end
-# GGJ carries no time normalization (tauk = 1), so a physical rotation has no Q-space image.
-_q_shift(::InnerLayerParameters, ::Real) = 0.0
 
 # ---------------------------------------------------------------------
 # Reference-length conversion of the outer Δ' for the slab layer
