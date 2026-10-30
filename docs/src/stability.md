@@ -360,8 +360,8 @@ any `chi_e` profile; `build_slayer_inputs` also takes a function of ψ. It moves
 resonant field through the critical Δ. It is for a run where one χ⊥,e cannot serve
 both formulas. `D_⊥` needs only the total conducted heat, so a run can use a one-fluid χ_eff in both
 channels when an interpretive power balance cannot separate the species; where T_i ≈ T_e the
-electron-ion exchange term makes that split uncertain, and it can return χ⊥,i < 0. On that reading the
-critical Δ still needs an electron diffusivity, which χ_eff is not, and `chi_perp_Dc` makes the choice
+electron-ion exchange term makes that split uncertain, and it can return χ⊥,i < 0. On the electron reading,
+the critical Δ still needs an electron diffusivity, which χ_eff is not, and `chi_perp_Dc` makes the choice
 explicit. Where the split is uncertain the electron χ is uncertain too, so treat the value as a
 modeling choice and scan it. The same split can often be reached without this key, by choosing
 `chi_e` and `chi_i` to keep the `D_⊥` total, but not when the wanted `chi_e` would leave `chi_i ≤ 0`.
