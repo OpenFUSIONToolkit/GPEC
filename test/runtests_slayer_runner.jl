@@ -86,6 +86,10 @@
         @test_throws "needs the confinement time" Tearing._slayer_chi_inputs(no_chi, SLAYERModel(; P_perp_model=:tau_E), data(); warn=false)
         @test_throws ArgumentError data(; chi_i_default=-0.5)
         @test_throws ArgumentError data(; tau_E=Inf)
+        # The critical-Δ diffusivity is optional, read from the deck, validated, and forwarded to the layer parameters.
+        @test GeneralizedPerturbedEquilibrium.slayer_model(Dict{String,Any}("SLAYER" => Dict{String,Any}("chi_perp_Dc" => 1.4))).chi_perp_Dc == 1.4
+        @test SLAYERModel().chi_perp_Dc === nothing
+        @test_throws "chi_perp_Dc must be positive" SLAYERModel(; chi_perp_Dc=-1.0)
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin

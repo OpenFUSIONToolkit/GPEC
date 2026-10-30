@@ -239,7 +239,8 @@ end
 The SLAYER layer model of the `[SLAYER]` section, the default `SLAYERModel()` when absent.
 """
 function slayer_model(inputs::AbstractDict)
-    fields = Dict{Symbol,Any}(:variant => Symbol, :P_perp_model => Any, :D_c_type => Any, :D_R => Any, :D_geo => Any, :theta_sample => Any)
+    fields = Dict{Symbol,Any}(:variant => Symbol, :P_perp_model => Any, :D_c_type => Any, :D_R => Any, :D_geo => Any, :chi_perp_Dc => Any,
+        :theta_sample => Any)
     return SLAYERModel(; section_keywords(get(inputs, "SLAYER", Dict{String,Any}()), "SLAYER", fields)...)
 end
 

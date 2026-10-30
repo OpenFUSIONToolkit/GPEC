@@ -356,7 +356,11 @@ total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular 
 `D_⊥` of Fitzpatrick, Phys. Plasmas **29**, 032507 (2022), Eq. 16, which weights the electron and ion energy diffusivities by
 `n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
 flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
-in every case. `SLAYERModel`'s `P_perp_model` (`[SLAYER] P_perp_model` in a deck) selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
+in every case. `SLAYERModel`'s `chi_perp_Dc` (`[SLAYER] chi_perp_Dc`, optional) sets that electron diffusivity for the critical Δ
+alone, leaving `P_perp` on its own χ inputs. It is for a run whose `P_perp` uses a diffusivity
+the critical Δ should not, for example a one-fluid χ_eff in both channels of `D_⊥` when an
+interpretive power balance splits the conducted heat between species unreliably, while the
+critical Δ takes the electron χ that balance allows. `SLAYERModel`'s `P_perp_model` (`[SLAYER] P_perp_model` in a deck) selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
 the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code), from
 `chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
 confinement time (`"tau_E"`); see `slayer_parameters`. `"tau_E"` is for a plasma with no χ

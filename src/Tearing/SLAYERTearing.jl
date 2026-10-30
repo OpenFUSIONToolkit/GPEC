@@ -28,6 +28,8 @@ function _slayer_chi_inputs(loaded, control, data::KineticProfileData; warn::Boo
         uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_phi_default = $(data.chi_phi_default)")
         isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
                                     "$(join(fallbacks, ", ")); using the default."
+        control.chi_perp_Dc !== nothing && control.D_c_type !== :none &&
+            @info "SLAYER: the critical Δ uses chi_perp_Dc = $(control.chi_perp_Dc) m²/s for χ⊥,e; P_perp keeps its own χ inputs."
         model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
               "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(data.tau_E) s; the χ_φ profile is not used."
     end
