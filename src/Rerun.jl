@@ -2,19 +2,17 @@
 # a self-contained snapshot rerunnable from any directory, with optional overrides, without the
 # original g-file / CHEASE / wall inputs.
 #
-# Included directly into the GeneralizedPerturbedEquilibrium module, so these functions share
-# its imports (TOML, HDF5, Equilibrium, ForcingTerms, etc.).
+# Included directly into the GeneralizedPerturbedEquilibrium module.
 
 """
     read_equilibrium_ingest(in_h5) -> EquilibriumIngest
 
 Reconstruct the [`DirectIngest`](@ref)/[`InverseIngest`](@ref) stored under
-`Input/RawInputs/Equilibrium/` (the inverse of the field-by-field write in
-`write_outputs_to_HDF5`). Returns `nothing` when the group is absent, which marks an
-analytic equilibrium — replayed from its TOML section rather than stored arrays.
+`Input/RawInputs/Equilibrium/` by `save_equilibrium_ingest!`. Returns `nothing` when the group is absent,
+which marks an analytic equilibrium, replayed from its TOML section.
 """
 function read_equilibrium_ingest(in_h5)
-    group_path = "Input/RawInputs/Equilibrium"  # mirrors the write in write_outputs_to_HDF5
+    group_path = "Input/RawInputs/Equilibrium"  # written by save_equilibrium_ingest!
     haskey(in_h5, group_path) || return nothing
     group = in_h5[group_path]
     kind = read(group, "ingest_kind")
@@ -22,21 +20,14 @@ function read_equilibrium_ingest(in_h5)
         kind == "direct" ? Equilibrium.DirectIngest :
         kind == "inverse" ? Equilibrium.InverseIngest :
         error("Unknown equilibrium ingest_kind in gpec.h5: $kind (expected \"direct\" or \"inverse\")")
-    # Positional reconstruction: relies on the default constructor, so `fieldnames(T)` order
-    # must match the struct definition and the field-by-field write in write_outputs_to_HDF5.
-    # Files written before the plasma-current sign was stored carry no ip_sign; they were all
-    # positive-current runs in effect, so that field defaults to +1.
+    # Positional reconstruction in `fieldnames(T)` order; a file without ip_sign was a positive-current run, so it defaults to +1.
     return T((haskey(group, String(f)) ? read(group, String(f)) : (f == :ip_sign ? 1 : error("missing equilibrium ingest field $f in gpec.h5")) for f in fieldnames(T))...)
 end
 
 """
     apply_toml_overrides!(inputs, overrides)
 
-In-place deep-merge of a nested override dict onto `inputs`. Later values
-replace earlier ones at the leaf level; intermediate tables are merged
-recursively. Used by the rerun path so users can tweak individual
-ForceFreeStates / Equilibrium / PerturbedEquilibrium fields without
-re-editing the whole TOML blob.
+In-place deep merge of a nested override dict onto `inputs`: leaf values replace, tables merge recursively.
 """
 function apply_toml_overrides!(inputs::Dict{String,Any}, overrides::Dict{String,Any})
     for (k, v) in overrides
@@ -52,9 +43,8 @@ end
 """
     parse_override_flag(expr::AbstractString) -> Dict{String,Any}
 
-Parse a `--override section.key=value` expression into a nested override dict.
-Values are parsed as Julia literals via `TOML.parse("_k=_v")` so users can pass
-numbers, booleans, and quoted strings without worrying about shell quoting.
+Parse a `--override section.key=value` expression into a nested override dict. The value is
+parsed as a TOML literal; one that does not parse is kept as a string, with a warning.
 """
 function parse_override_flag(expr::AbstractString)
     eqidx = findfirst(==('='), expr)
@@ -71,14 +61,12 @@ function parse_override_flag(expr::AbstractString)
     parsed_val = try
         TOML.parse("$sentinel = $rhs")[sentinel]
     catch e
-        # Warn instead of silently stringifying a bare word, which would otherwise only fail
-        # much later where the field expects a number/bool.
+        # Warn rather than silently stringify a bare word, which would fail later where a number is expected.
         @warn "Could not parse --override value as a TOML literal; storing it as a string. " *
               "Quote it explicitly if a string was intended." key = lhs value = rhs error = e
         rhs
     end
 
-    # Build nested dict from dotted path.
     root = Dict{String,Any}()
     cursor = root
     for p in parts[1:end-1]
@@ -174,11 +162,9 @@ end
     build_inputs_from_h5(args::Vector{String})
         -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_coils)
 
-Rerun input builder. Parses the rerun-specific CLI flags, reads the snapshot out of the
-source HDF5, applies any overrides, and reconstructs the pipeline inputs — a prebuilt
-`DirectRunInput`/`InverseRunInput` rebuilt from the stored ingest for file-based equilibria,
-or an analytic `*Config` for sol/lar/tj. Never touches the source file's original ingest
-paths. The returned tuple is fed straight into `main_from_inputs`.
+Rerun input builder for `main_from_inputs`: parse the rerun CLI flags, read the snapshot out of the source
+HDF5, apply overrides, and rebuild the equilibrium input (a `DirectRunInput`/`InverseRunInput` from the
+stored ingest, or an analytic `*Config`).
 
 The recorded forcing (`Input/RawInputs/ForcingTerms/`) is written next to the rerun output as
 `<stem>_forcing.h5` and `[ForcingTerms]` is pointed at it before overrides apply, so the replay reads
@@ -190,9 +176,7 @@ function build_inputs_from_h5(args::Vector{String})
     source_h5 = cli.source_h5
     isfile(source_h5) || error("Source HDF5 not found: $source_h5")
 
-    # Pull the stored TOML, equilibrium ingest, and (if present) file-forcing snapshot out of the
-    # source file. The snapshot exists only for a file-forced run with a [PerturbedEquilibrium]
-    # section.
+    # Stored TOML, equilibrium ingest and the forcing snapshot (present only with [PerturbedEquilibrium]).
     use_coils = cli.coil_source == "coils"
     toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils, tolerance_raw = h5open(source_h5, "r") do in_h5
         haskey(in_h5, "Input/gpec_toml_raw") ||
@@ -284,8 +268,7 @@ deprecated equilibrium keys.
 """
 function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir::AbstractString)
     _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
-    # Clear eq_filename on a copy: unused on replay, a stale absolute path could mislead
-    # downstream code, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
+    # Clear eq_filename on a copy: unused on replay, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))
     eq_config = equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => equil_dict)), String(output_dir))
 
@@ -320,7 +303,6 @@ Restore the processed `PlasmaEquilibrium` from the profile and geometry arrays s
 `gpec.h5`, using the native spline constructors without retracing flux surfaces. `inputs` is the
 stored TOML and `psilim` the original control surface (`Info/psilim`), so post-hoc analyses use
 one consistent frozen equilibrium and the surface described by the stored response matrices.
-The full rerun entry point still rebuilds equilibrium inputs and executes the requested stages.
 """
 function equilibrium_from_h5(h5path::AbstractString)
     isfile(h5path) || error("HDF5 file not found: $h5path")
@@ -385,10 +367,8 @@ Gather everything a post-hoc coil analysis needs from a finished run: the resona
 from `gpec.h5`, the equilibrium rebuilt by [`equilibrium_from_h5`](@ref), the deck's coil
 configuration, and the boundary grids. Nothing is written.
 
-A stored deck records the absolute path its own machine read coil files from, which need not exist
-here, so a missing `dat_dir` is warned about rather than failing later inside the loader; pass
-`dat_dir` to point somewhere else. `mtheta_coil` and `nzeta_coil` override the boundary resolution
-the deck supplies, which is otherwise inherited silently.
+The stored deck's `dat_dir` is an absolute path on the machine that ran it; a missing one is warned
+about, and `dat_dir` points elsewhere. `mtheta_coil` and `nzeta_coil` override the deck's boundary resolution.
 """
 function ErrorFields.ResonantDriveContext(h5path::AbstractString; dat_dir=nothing, kwargs...)
     rc = PerturbedEquilibrium.ResonantCoupling(h5path)

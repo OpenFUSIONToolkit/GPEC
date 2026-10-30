@@ -133,12 +133,9 @@ end
     main_from_inputs(inputs, eq_config, additional_input, path, git_version;
                      preloaded_coil_sets=nothing)
 
-Shared pipeline body that every input source funnels into. The caller (one of the
-`build_inputs_from_*` builders) is responsible for producing a fully merged
-`inputs::Dict`, an `EquilibriumConfig`, and a ready `additional_input` — this body
-does no source dispatch of its own. `additional_input` is forwarded directly to
-`PlasmaEquilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun path), an
-analytic `*Config` or IMAS `dd` (TOML path), or `nothing` for file-based equilibria.
+Run the pipeline every input source (`build_inputs_from_*`) funnels into. `additional_input` is forwarded
+to `PlasmaEquilibrium`: a prebuilt `DirectRunInput`/`InverseRunInput` (rerun), an analytic `*Config` or
+IMAS `dd`, or `nothing` for file-based equilibria.
 
 Each section present runs its stage through the public API, exactly as a script would, and saves
 the result into the one `[Run] output_file`; a deck without `[ForceFreeStates]` stops after the
@@ -255,13 +252,9 @@ end
 """
     _write_runtimes!(h5_path::String, runtimes)
 
-Write the per-stage wall-clock seconds collected during a run into `Info/Runtimes/` of an
-existing gpec.h5 file. `runtimes` iterates `stage => seconds` pairs; only the stages that ran
-are recorded. Metadata comes from `RUNTIME_H5_ANNOTATIONS`, which skips the absent stages.
-These timings are informational only — machine- and load-dependent, never a regression quantity.
-
-Call it only when this run produced the file; the `isfile` guard alone would also stamp a
-stale gpec.h5 left over from an earlier run.
+Write the `stage => seconds` pairs of `runtimes` into `Info/Runtimes/` of an existing gpec.h5. The
+timings are informational, never a regression quantity. Call it only when this run produced the file:
+the `isfile` guard alone would also stamp a stale gpec.h5.
 """
 function _write_runtimes!(h5_path::String, runtimes)
     isfile(h5_path) || return nothing
@@ -278,14 +271,8 @@ end
 """
     write_imas(dd, result)
 
-Write GPEC stability results into `dd.mhd_linear`. Creates one `toroidal_mode` entry per
-requested toroidal mode number, storing the least-stable (minimum real part) `energy_perturbed`
-for that `n_tor`. For multi-n runs the eigenvalue array `et` is sorted by stability across all
-n-blocks; `n_tor_idx[i]` identifies which n-block eigenvalue `i` belongs to, so each n_tor
-receives the correct least-stable δW regardless of how modes are interleaved in `et`.
-
-The `result` argument is the named tuple returned by `main`; its `ffs` field carries the
-force-free-states result the energies are read from.
+Write one `dd.mhd_linear` `toroidal_mode` entry per toroidal mode number, with the least-stable
+(minimum real part) free-boundary `energy_perturbed` of that n. `result` is the named tuple `main` returns.
 """
 function write_imas(dd, result)
     ffs = result.ffs
@@ -300,12 +287,10 @@ function write_imas(dd, result)
     dd.mhd_linear.code.name = "GPEC"
     dd.mhd_linear.ideal_flag = 1
 
-    # Add a time_slice at the current global_time (wipe=false reuses an existing slice
-    # at the same time, or appends a new one if none exists yet)
+    # Time slice at the current global_time; wipe=false reuses an existing one or appends.
     ts = resize!(dd.mhd_linear.time_slice; wipe=false)
 
-    # Write the least-stable energy for each toroidal mode number
-    # n_tor_idx[i] (0-based) identifies which n-block eigenvalue i belongs to.
+    # n_tor_idx[i] (0-based) is the n-block of eigenvalue i.
     resize!(ts.toroidal_mode, ffs.npert)
     for j in 0:(ffs.npert-1)
         n_indices = findall(==(j), free_energies.n_tor_idx) # indices of eigenvalues in the j-th n-block

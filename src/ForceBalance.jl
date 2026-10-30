@@ -14,12 +14,8 @@ using .ForceFreeStates: resolve_mode_space!, run_force_free_states, _mode_range_
 
 The perturbed force-balance problem posed on an equilibrium, whose solutions are the force-free
 (or, with a `kinetic` source, kinetic) perturbed states. With kinetic terms the force operator
-is not self-adjoint, so this is not always an energy extremization.
-
-This is the WHAT of a stability solve; the integrator passed to
-[`solve`](@ref) is the HOW. A `PlasmaEquilibrium` hosts many possible problems — this type
-names this one, so `solve` stays unambiguous as other problem classes appear. Inner-layer
-matching is a separate problem posed on the finished solve: see `MatchProblem`.
+is not self-adjoint, so this is not always an energy extremization. The integrator passed to
+[`solve`](@ref) sets the numerics; inner-layer matching is a separate `MatchProblem` on the finished solve.
 
 `nn` is the toroidal mode number or range and `wall` the vacuum wall shape. Remaining keywords describe physics and workflow controls;
 numerical settings belong on the integrator passed to `solve`. `nn_low`/`nn_high` are rejected — they
@@ -210,10 +206,9 @@ function prepare_force_free_states!(
     cap = ctrl.psilim_from_layer_overlap
     overlap = cap === false ? nothing : Tearing.layer_overlap_scan(equil, cap === true ? SLAYERModel() : cap, intr.nlow:intr.nhigh)
 
-    # Determine psilim and qlim (where we will integrate to)
+    # psilim and qlim, the integration limits
     sing_lim!(intr, ctrl, equil; psilim_cap=overlap === nothing ? nothing : overlap.psihigh)
 
-    # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
     # Lower bound from qlow for every integrator, then keep only surfaces inside [psilow, psilim],
@@ -221,14 +216,12 @@ function prepare_force_free_states!(
     sing_min!(intr, ctrl, equil)
     remove_singular_surfs!(intr; psimin=intr.psilow)
 
-    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H, K, M) for each
-    # surviving singular surface; `ggj_parameters` layers τ_A / τ_R on top.
+    # GGJ geometric coefficients (E, F, G, H, K, M) of each surviving singular surface; `ggj_parameters` adds τ_A / τ_R.
     if intr.msing > 0
         ForceFreeStates.resist_eval_all!(intr, equil)
     end
 
-    # Determine poloidal mode numbers
-    # TODO: delta_mhigh is doubled for consistency with Fortran - why is this present in the Fortran?
+    # Poloidal mode range; delta_mhigh is doubled to match Fortran.
     delta_mhigh = 2 * ctrl.delta_mhigh
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
@@ -238,7 +231,6 @@ function prepare_force_free_states!(
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.numpert_total = intr.mpert * intr.npert
 
-    # Fit equilibrium quantities to Fourier-spline functions.
     if intr.verbose
         @info "Run parameters:\n" *
               "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
@@ -248,14 +240,12 @@ function prepare_force_free_states!(
               "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
     end
 
-    # Compute metric tensor
     metric = make_metric(equil, intr.mpert)
 
     if intr.verbose
         @info "Computing F, G, and K matrices"
     end
 
-    # Compute matrices and build the MatrixSplines container
     mats = build_matrix_splines(equil, intr, metric)
 
     km = nothing
@@ -267,9 +257,7 @@ function prepare_force_free_states!(
         km = evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric)
     elseif ctrl.kinetic !== nothing
         intr.verbose && @info "Computing kinetic matrices (KineticForces model)"
-        # Inject the KineticForces callback so the KineticForces source can
-        # invoke compute_calculated_kinetic_matrices without ForceFreeStates
-        # importing KineticForces (which would invert the load order).
+        # Pass KineticForces in as a callback: ForceFreeStates loads first and cannot import it.
         kf_ctrl = ctrl.kinetic
         kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, equil)
         species = KineticForces.ntv_species(kf_ctrl, equil)
@@ -287,9 +275,7 @@ function prepare_force_free_states!(
     end
     km === nothing || (mats = build_kinetic_matrix_splines(mats, equil, intr, metric, km, ctrl.kinetic_factor))
 
-    # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
-    # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
-    # singfac_min == 0 preserves single-chunk behavior.
+    # Kinetically displaced singular surfaces (zeros of det(F̄)) for ODE crossings; singfac_min == 0 keeps a single chunk.
     if ctrl.kinetic !== nothing && ctrl.singfac_min > 0
         find_kinetic_singular_surfaces!(mats, equil, intr)
     end
