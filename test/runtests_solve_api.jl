@@ -351,7 +351,9 @@ using HDF5
 
     @testset "MatchProblem defaults its layer inputs from the kinetic data" begin
         gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
-        @test_throws "attach kinetic profiles" MatchProblem(gal)
+        # Without kinetic data the error names exactly the inputs still to give.
+        @test_throws "MatchProblem: give eta, rho and rotation, or load kinetic profiles" MatchProblem(gal)
+        @test_throws "MatchProblem: give rho, or load kinetic profiles" MatchProblem(gal; eta=1e-7, rotation=1.0)
         n = length(gal.surfaces)
         # A flat deuterium plasma rotating at 1 kHz per unit n.
         psi = collect(range(0.0, 1.0; length=64))
@@ -367,6 +369,9 @@ using HDF5
         # Explicit values override each default on its own.
         given = MatchProblem(kgal; eta=1e-7, rotation=fill(3.0, n))
         @test given.eta == fill(1e-7, n) && given.rho == prob.rho && given.rotation == fill(3.0, n)
+        # The derived inputs solve the same as those values given explicitly.
+        explicit = MatchProblem(kgal; eta=prob.eta, rho=prob.rho, rotation=prob.rotation)
+        @test solve(prob, GGJModel()).bpen == solve(explicit, GGJModel()).bpen
         # Data without an E×B rotation need an explicit rotation.
         attach_kinetic_profiles!(kgal.equil, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3), T_i=flat(1e3)))
         @test_throws "give rotation" MatchProblem(kgal)
@@ -422,7 +427,7 @@ using HDF5
             prob = MatchProblem(gal; ideal=true)
             @test_throws ErrorException solve(prob, SLAYERModel())
             # A resistive match needs every layer input.
-            @test_throws ErrorException MatchProblem(gal; eta=1e-7)
+            @test_throws "give rho and rotation" MatchProblem(gal; eta=1e-7)
             @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(gal.surfaces) + 1), rho=1e-7, rotation=1.0)
             # The tearing model is the solve argument, never a TearingProblem keyword.
             @test_throws MethodError TearingProblem(gal; inner_model=:ggj_ray)

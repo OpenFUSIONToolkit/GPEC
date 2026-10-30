@@ -66,8 +66,7 @@ function MatchProblem(
         error("MatchProblem: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $msing surfaces")
 
     ideal && return MatchProblem(ffs, zeros(msing), zeros(msing), zeros(msing), Float64(gamma), true)
-    any(isnothing, (eta, rho, rotation)) && ffs.equil.kinetic === nothing &&
-        error("MatchProblem: give eta, rho and rotation, or attach kinetic profiles to the equilibrium")
+    InnerLayer._require_layer_inputs("MatchProblem", ffs.equil; eta, rho, rotation)
     eta === nothing && (eta = InnerLayer.layer_eta(ffs.equil, ffs.surfaces))
     rho === nothing && (rho = InnerLayer.layer_rho(ffs.equil, ffs.surfaces))
     if rotation === nothing

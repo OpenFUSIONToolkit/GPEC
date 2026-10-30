@@ -32,9 +32,7 @@ function _ggj_layer_inputs(prob::TearingProblem)
     ffs = prob.ffs
     surfaces = ffs.surfaces
     count = length(surfaces)
-    data = ffs.equil.kinetic
-    (prob.eta === nothing || prob.rho === nothing) && data === nothing &&
-        throw(ArgumentError("GGJ tearing: give eta and rho, or attach kinetic profiles to the equilibrium"))
+    InnerLayer._require_layer_inputs("GGJ tearing", ffs.equil; prob.eta, prob.rho)
     eta = prob.eta === nothing ? InnerLayer.layer_eta(ffs.equil, surfaces) : prob.eta
     rho = prob.rho === nothing ? InnerLayer.layer_rho(ffs.equil, surfaces) : prob.rho
     return _ggj_per_surface(eta, "eta", count), _ggj_per_surface(rho, "rho", count)

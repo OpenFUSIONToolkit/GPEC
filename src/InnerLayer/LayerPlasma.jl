@@ -7,6 +7,14 @@ function _layer_kinetic_data(equil, what::AbstractString)
     return equil.kinetic
 end
 
+# Throw, naming exactly the layer inputs `who` was not given, when there is no kinetic data to derive them from.
+function _require_layer_inputs(who::AbstractString, equil; given...)
+    absent = [String(name) for (name, value) in pairs(given) if value === nothing]
+    (isempty(absent) || equil.kinetic !== nothing) && return nothing
+    throw(ArgumentError("$who: give $(join(absent, ", ", " and ")), or load kinetic profiles to derive them " *
+                        "(kinetic_file in [Equilibrium], or attach_kinetic_profiles!)"))
+end
+
 """
     layer_eta(equil, surfaces) -> Vector{Float64}
 
