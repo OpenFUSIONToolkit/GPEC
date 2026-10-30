@@ -84,6 +84,7 @@ include("LayerParameters.jl")
 include("Riccati.jl")
 include("LayerThickness.jl")
 include("LayerInputs.jl")
+include("KineticView.jl")
 
 export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear

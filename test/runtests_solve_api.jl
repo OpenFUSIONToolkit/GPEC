@@ -349,6 +349,30 @@ using HDF5
         end
     end
 
+    @testset "MatchProblem defaults its layer inputs from the kinetic data" begin
+        gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
+        @test_throws "attach kinetic profiles" MatchProblem(gal)
+        n = length(gal.surfaces)
+        # A flat deuterium plasma rotating at 1 kHz per unit n.
+        psi = collect(range(0.0, 1.0; length=64))
+        flat(v) = fill(v, length(psi))
+        kgal = deepcopy(gal)
+        attach_kinetic_profiles!(kgal.equil, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3), T_i=flat(1e3),
+            omega_E=flat(2π * 1e3)))
+        # The defaults are the tearing problem's: η by the resistivity closure, ρ = m_i·n_i, and f = Ω_E/2π.
+        prob = MatchProblem(kgal)
+        @test prob.eta == GPEC.InnerLayer.layer_eta(kgal.equil, kgal.surfaces) && all(>(0), prob.eta)
+        @test prob.rho ≈ fill(2 * GPEC.Utilities.M_P * 5e19, n)
+        @test prob.rotation ≈ fill(1e3, n)
+        # Explicit values override each default on its own.
+        given = MatchProblem(kgal; eta=1e-7, rotation=fill(3.0, n))
+        @test given.eta == fill(1e-7, n) && given.rho == prob.rho && given.rotation == fill(3.0, n)
+        # Data without an E×B rotation need an explicit rotation.
+        attach_kinetic_profiles!(kgal.equil, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3), T_i=flat(1e3)))
+        @test_throws "give rotation" MatchProblem(kgal)
+        @test MatchProblem(kgal; rotation=1.0).rotation == fill(1.0, n)
+    end
+
     @testset "matched inner profiles: opt-in, and parity columns agree across inner models" begin
         mktempdir() do dir
             gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)

@@ -3,66 +3,6 @@
 # Tearing scan core: profile loading, the slab Δ′ reference conversion, and
 # `run_slayer_from_inputs` (scan + growth-rate extraction). `TearingProblem` builds its inputs.
 
-# ---------------------------------------------------------------------
-# Kinetic-profile view
-# ---------------------------------------------------------------------
-# The layer view of raw kinetic profiles (`equil.kinetic`), on their own ψ grid. Returns the
-# spline-based `KineticProfiles` plus χ⊥,e(ψ)/χ⊥,i(ψ)/χ_φ(ψ) callables built from `chi_e`/`chi_i`/`chi_phi`
-# (or `nothing` when the data carry no usable χ, in which case the caller falls back to the data's
-# `chi_*_default`), a Z_eff(ψ) callable: the data's own `zeff` profile when they carry one, else derived
-# from `n_i/n_e` (or `nothing` when they carry neither, in which case the caller falls back to
-# `zeff_default`), and whether the data carry an `omega_E` profile. The `SLAYERModel` selects which χ the layer uses.
-function _slayer_profiles(data::KineticProfileData, control)
-    source = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
-    for (name, v) in (("n_e", data.n_e), ("T_e", data.T_e), ("T_i", data.T_i))
-        v === nothing &&
-            error("run_slayer: $source missing required dataset '$name' for the SLAYER inner layer.")
-    end
-    # `omega_E` carries the E×B rotation Ω_E (per unit n) when the data have it, else zero (no shift);
-    # ω_*e/ω_*i are derived per surface from the density and temperature splines by `build_slayer_inputs`.
-    omega_E = data.omega_E === nothing ? zeros(length(data.psi)) : data.omega_E
-    profiles = KineticProfiles(; psi=data.psi, n_e=data.n_e, T_e=data.T_e,
-        T_i=data.T_i, omega_E=omega_E)
-
-    # χ⊥(ψ)/χ_φ(ψ) splines from the file. A χ array that is absent OR all-zero
-    # is treated as "not provided" — χ must be positive (χ=0 ⇒ τ_⊥→∞), and the
-    # all-zero sentinel lets a file keep the chi_e/chi_phi keys while deferring
-    # to the data's chi_e_default/chi_phi_default. Build the spline only
-    # from a usable (present, not all-zero) array.
-    psi_xs = collect(Float64, data.psi)
-    function _chi_spline(name, v)
-        (v === nothing || all(iszero, v)) && return nothing
-        minimum(v) > 0 || error("run_slayer: $source has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
-        return cubic_interp(psi_xs, collect(Float64, v))
-    end
-    model = control.P_perp_model
-    uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
-    chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
-    chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
-    chi_tor = model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
-    # Z_eff(ψ): a profile supplied in the file wins, since a real impurity mix is not recoverable
-    # from n_i/n_e. Otherwise quasi-neutrality with one impurity species of charge `impurity_charge` and a
-    # charge-1 main ion, the single-ion closure the kinetic spline set uses:
-    # Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
-    _usable(v) = v !== nothing && !all(iszero, v)
-    zeff = if _usable(data.zeff)
-        minimum(data.zeff) >= 1.0 - 1e-8 ||
-            error("run_slayer: $source has zeff = $(minimum(data.zeff)) < 1 — unphysical")
-        cubic_interp(psi_xs, collect(Float64, data.zeff))
-    elseif !_usable(data.n_i)
-        nothing
-    else
-        zimp = Float64(data.impurity_charge)
-        z = [ne > 0 ? zimp - (ni / ne) * (zimp - 1.0) : zimp for (ni, ne) in zip(data.n_i, data.n_e)]
-        minimum(z) >= 1.0 - 1e-8 ||
-            error("run_slayer: $source has n_i > n_e, giving Z_eff = $(minimum(z)) < 1 — unphysical")
-        cubic_interp(psi_xs, z)
-    end
-    zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
-        has_omega_E=(data.omega_E !== nothing))
-end
-
 # χ⊥,e/χ⊥,i/χ_φ for the layer: the kinetic file's profiles where present, else the kinetic data's
 # `chi_*_default`. With `warn`, a default is reported only for a χ the selected P_perp model
 # (and, for χ⊥,e, the critical Δ) actually uses.
@@ -94,15 +34,6 @@ function _slayer_chi_inputs(loaded, control, data::KineticProfileData; warn::Boo
     return (; chi_perp_e=pick(loaded.chi_perp_e, data.chi_e_default),
         chi_perp_i=pick(loaded.chi_perp_i, data.chi_i_default),
         chi_tor=pick(loaded.chi_tor, data.chi_phi_default))
-end
-
-# Map the TOML resistivity_model symbol to a NeoResistivityModel instance.
-function _build_resistivity_model(name::Symbol)
-    name === :sauter && return SauterNeoModel()
-    name === :redl && return RedlNeoModel()
-    name === :spitzer && return SpitzerModel()
-    name === :spitzer_harm && return SpitzerHarmModel()
-    throw(ArgumentError("_build_resistivity_model: unknown model $name"))
 end
 
 # Human-readable surface label for warnings. SLAYER params carry (m, n);

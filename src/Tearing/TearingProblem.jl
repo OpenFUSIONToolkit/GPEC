@@ -60,25 +60,6 @@ function _tearing_params(model::SLAYERModel, equil, surfaces, loaded)
         lnLambda_form=data.lnLambda_form)
 end
 
-# The layer models take one main ion: its mass in proton masses.
-function _layer_ion_mass(data::KineticProfileData)
-    length(data.ion_species) == 1 ||
-        throw(ArgumentError("The tearing layers take one main-ion species; the kinetic data list $(length(data.ion_species))"))
-    return Float64(only(data.ion_species).m)
-end
-
-# Z_eff(ψ) for the layers, reporting where it came from: the file's profile, the n_i/n_e closure, or the default.
-function _layer_zeff(loaded, data::KineticProfileData)
-    if loaded.zeff_source === :scalar
-        @warn "Tearing: kinetic file has no usable zeff or n_i profile (dataset absent or all-zero); " *
-              "using zeff_default = $(data.zeff_default) at every surface."
-        return data.zeff_default
-    end
-    zeff_origin = loaded.zeff_source === :file ? "zeff profile" : "n_i/n_e with impurity_charge = $(data.impurity_charge)"
-    @info "Tearing: Z_eff(ψ) from the kinetic file's $zeff_origin"
-    return loaded.zeff
-end
-
 """
     solve(prob::TearingProblem, model) -> TearingResult
 

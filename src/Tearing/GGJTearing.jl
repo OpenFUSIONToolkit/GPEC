@@ -35,20 +35,8 @@ function _ggj_layer_inputs(prob::TearingProblem)
     data = ffs.equil.kinetic
     (prob.eta === nothing || prob.rho === nothing) && data === nothing &&
         throw(ArgumentError("GGJ tearing: give eta and rho, or attach kinetic profiles to the equilibrium"))
-    eta = if prob.eta !== nothing
-        _ggj_per_surface(prob.eta, "eta", count)
-    else
-        loaded = _slayer_profiles(data, SLAYERModel())
-        InnerLayer.SLAYER.layer_resistivity(ffs.equil, surfaces, loaded.profiles; zeff=_layer_zeff(loaded, data),
-            resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
-    end
-    rho = if prob.rho !== nothing
-        _ggj_per_surface(prob.rho, "rho", count)
-    else
-        data.n_i === nothing && throw(ArgumentError("GGJ tearing: ρ = m_i·n_i needs an n_i profile in the kinetic data, or give rho"))
-        n_i = cubic_interp(collect(Float64, data.psi), data.n_i)
-        _layer_ion_mass(data) * Utilities.M_P .* Float64[n_i(s.psifac) for s in surfaces]
-    end
+    eta = prob.eta === nothing ? InnerLayer.layer_eta(ffs.equil, surfaces) : prob.eta
+    rho = prob.rho === nothing ? InnerLayer.layer_rho(ffs.equil, surfaces) : prob.rho
     return _ggj_per_surface(eta, "eta", count), _ggj_per_surface(rho, "rho", count)
 end
 
@@ -57,11 +45,9 @@ end
 function _ggj_omega_E(prob::TearingProblem)
     ffs = prob.ffs
     data = ffs.equil.kinetic
-    has_omega_E = data !== nothing && data.omega_E !== nothing
-    data === nothing || has_omega_E ||
+    data === nothing || data.omega_E !== nothing ||
         @warn "GGJ tearing: the kinetic data have no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
-    omega_E = has_omega_E ? (spline = _slayer_profiles(data, SLAYERModel()).profiles.omega_E; Float64[spline(s.psifac) for s in ffs.surfaces]) : Float64[]
-    return _omega_E_per_surface(prob, ["$(only(s.m))/$(only(s.n))" for s in ffs.surfaces], omega_E)
+    return _omega_E_per_surface(prob, ["$(only(s.m))/$(only(s.n))" for s in ffs.surfaces], InnerLayer.layer_omega_E(ffs.equil, ffs.surfaces))
 end
 
 # The SLAYER-only physics fields must stay at their defaults, so a GGJ solve never silently ignores one.

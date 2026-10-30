@@ -8,6 +8,7 @@ module InnerLayer
 
 using LinearAlgebra
 using StaticArrays
+using FastInterpolations: cubic_interp
 
 using ..Utilities
 
@@ -22,6 +23,8 @@ import .SLAYER: SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 import .SLAYER: riccati_del_s, slayer_layer_thickness, LayerWidths
 import .SLAYER: surface_minor_radius, surface_da_dpsi, radial_label, build_slayer_inputs, toroidal_dgeo, toroidal_kpar
 
+include("LayerPlasma.jl")
+
 """
     model_name(model) -> String
 
@@ -31,6 +34,7 @@ model_name(::GGJModel{S}) where {S} = "ggj_$S"
 model_name(::SLAYERModel{S}) where {S} = "slayer_$S"
 
 export InnerLayerModel, InnerLayerParameters, InnerLayerResponse, solve_inner, solve_inner_profile
+export layer_eta, layer_rho, layer_omega_E
 export GGJ, GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
 export solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_profile

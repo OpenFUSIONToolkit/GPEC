@@ -32,6 +32,7 @@ using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
     GGJModel, GGJParameters,
     LayerWidths, slayer_layer_thickness
+using .InnerLayer.SLAYER: _slayer_profiles, _layer_zeff, _layer_ion_mass, _build_resistivity_model
 
 include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")
