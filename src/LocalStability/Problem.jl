@@ -1,5 +1,3 @@
-# Problem.jl
-#
 # The LocalStability stage posed as solve(problem, algorithm): Mercier D_I, resistive D_R,
 # ballooning Δ' and the first ballooning α boundary over the equilibrium ψ grid.
 
