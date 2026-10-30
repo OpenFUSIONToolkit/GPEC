@@ -347,16 +347,21 @@ on or off, GPEC warns.
 different quantities. The layer width goes through `P_perp`, which multiplies the diffusion of the
 total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular particle diffusivity
 `D_⊥` of Fitzpatrick, Phys. Plasmas **29**, 032507 (2022), Eq. 16, which weights the electron and ion energy diffusivities by
-`n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
-flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
-in every case. `[SLAYER] chi_perp_Dc` (optional) sets that electron diffusivity for the critical Δ
+`n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` is the
+width above which parallel transport, through an electron parallel conductivity, makes the electron
+temperature a flux function (Fitzpatrick, Phys. Plasmas **32**, 062509 (2025), Eqs. 230–234). That
+paper and the `"lar"` and `"toroidal"` forms of Connor et al., Plasma Phys. Control. Fusion **57**,
+065001 (2015), Eqs. 59 and 61, are single-fluid: they have one χ_⊥, which in Connor et al. diffuses
+the total pressure. GPEC reads it as the electron channel and uses `chi_e` for every `D_c_type`,
+since the width is set by electron heat transport; that reading is a modeling choice, not a result of
+those papers. `[SLAYER] chi_perp_Dc` (optional) sets that electron diffusivity for the critical Δ
 alone, leaving `P_perp` on its own χ inputs. The deck key is one value for every surface, over
 any `chi_e` profile; `build_slayer_inputs` also takes a function of ψ. It moves the critical
 resonant field through the critical Δ. It is for a run where one χ⊥,e cannot serve
 both formulas. `D_⊥` needs only the total conducted heat, so a run can use a one-fluid χ_eff in both
 channels when an interpretive power balance cannot separate the species; where T_i ≈ T_e the
-electron-ion exchange term makes that split uncertain, and it can return χ⊥,i < 0. The critical Δ
-still needs an electron diffusivity, which χ_eff is not, and `chi_perp_Dc` makes that choice
+electron-ion exchange term makes that split uncertain, and it can return χ⊥,i < 0. On that reading the
+critical Δ still needs an electron diffusivity, which χ_eff is not, and `chi_perp_Dc` makes the choice
 explicit. Where the split is uncertain the electron χ is uncertain too, so treat the value as a
 modeling choice and scan it. The same split can often be reached without this key, by choosing
 `chi_e` and `chi_i` to keep the `D_⊥` total, but not when the wanted `chi_e` would leave `chi_i ≤ 0`.
