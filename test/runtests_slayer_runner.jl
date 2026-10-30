@@ -116,6 +116,12 @@
         # Scalar diffusivities must be positive.
         @test_throws "chi_perp_i must be positive" Runner.validate(SLAYERControl(; chi_perp_i=-0.5))
         @test_throws "chi_perp_e must be positive" Runner.validate(SLAYERControl(; chi_perp_e=0.0))
+        # The critical-Δ diffusivity is optional, read from the deck, validated, and forwarded unchanged.
+        c_dc = slayer_control_from_toml(merge(section, Dict{String,Any}("chi_perp_Dc" => 1.4)))
+        @test c_dc.chi_perp_Dc == 1.4 && Runner.validate(c_dc) === c_dc
+        @test_throws "chi_perp_Dc must be positive" Runner.validate(SLAYERControl(; chi_perp_Dc=-1.0))
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7, chi_perp_Dc=1.4); warn=false).chi_perp_Dc == 1.4
+        @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7); warn=false).chi_perp_Dc === nothing
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin

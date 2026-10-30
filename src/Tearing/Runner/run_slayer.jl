@@ -85,11 +85,14 @@ function _slayer_chi_inputs(loaded, control::SLAYERControl; warn::Bool=true)
         uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_tor = $(control.chi_tor)")
         isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
                                     "$(join(fallbacks, ", ")); using the scalar fallback."
+        control.chi_perp_Dc !== nothing && control.D_c_type !== :none &&
+            @info "SLAYER: the critical Δ uses chi_perp_Dc = $(control.chi_perp_Dc) m²/s for χ⊥,e; P_perp keeps its own χ inputs."
         model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
               "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(control.tau_E) s; the χ_φ profile is not used."
     end
     return (; chi_perp_e=pick(loaded.chi_perp_e, control.chi_perp_e),
         chi_perp_i=pick(loaded.chi_perp_i, control.chi_perp_i),
+        chi_perp_Dc=control.chi_perp_Dc,
         chi_tor=pick(loaded.chi_tor, control.chi_tor))
 end
 

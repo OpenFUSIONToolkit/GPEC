@@ -51,6 +51,7 @@ function _tearing_params(::SLAYERModel, equil, surfaces, loaded, control)
         zeff=zeff,
         chi_perp_e=chi.chi_perp_e,
         chi_perp_i=chi.chi_perp_i,
+        chi_perp_Dc=chi.chi_perp_Dc,
         chi_tor=chi.chi_tor,
         tau_E=control.tau_E,
         P_perp_model=control.P_perp_model,
