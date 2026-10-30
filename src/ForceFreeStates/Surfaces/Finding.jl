@@ -244,7 +244,7 @@ F̄(i,j) = q₁·f0(i,j)·q₂ - q₁·P(i,j) - conj(P†(j,i))·q₂ + R1(i,j)
 
 where q₁ = m₁ - n·q(ψ), q₂ = m₂ - n·q(ψ) are the direct singularity factors.
 """
-function evaluate_fbar_condition(psi::Float64, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
+function evaluate_fbar_condition(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
     np = intr.numpert_total
 
     # Evaluate q(ψ) and compute singfac = m - n*q

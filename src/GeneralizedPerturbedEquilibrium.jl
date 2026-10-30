@@ -71,7 +71,7 @@ include("Rerun.jl")
 
 # Scripting-API surface: the integrator selectors, the published result, the equilibrium
 # constructor and the forcing description, re-exported so a user needs one `using`.
-using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, ForceFreeStatesResult
+using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl
@@ -320,7 +320,7 @@ end
 export main, write_imas
 export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fields
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
-export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, ForceFreeStatesResult, RMPField, PlasmaResponse
+export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult

@@ -298,3 +298,4 @@ Write the validity diagnostics of the force operator's kinetic source `kinetic`.
 owns the source adds a method (KineticForces does, for `KineticForcesControl`).
 """
 write_kinetic_validity!(target, kinetic, result) = nothing
+write_kinetic_validity!(target, km::KineticMatrices, result) = write_kinetic_validity!(target, km.source, result)

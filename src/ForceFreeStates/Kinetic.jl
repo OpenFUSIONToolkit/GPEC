@@ -16,7 +16,7 @@ above the near-axis validity band, and are capped at `max_add`; each costs one k
 and the existing values are reused. A well-resolved grid inserts nothing.
 """
 function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3}, kt::Array{ComplexF64,3},
-    evaluate::Function, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium,
+    evaluate::Function, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal, psi_c::Float64;
     ngrid::Int=1000, relaxed_frac::Float64=KINETIC_RELAXED_FRAC, target::Int=3, max_add::Int=24,
     cond_threshold::Float64=KINETIC_SINGULAR_COND)
@@ -69,29 +69,57 @@ function refine_grid_at_fbar_peaks(xs::Vector{Float64}, kw::Array{ComplexF64,3},
 end
 
 """
-    build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
-                        calculated_source=nothing)
+    KineticMatrices
 
-Construct kinetic energy (W) and torque (T) matrices and pre-compute the FKG derived
-matrices used by `sing_der!`, returning a new `MatrixSplines` carrying both alongside the
-ideal matrices of the input `mats`.
+The kinetic energy and torque matrices of one perturbed-plasma problem, from [`kinetic_matrices`](@ref) or computed
+inside `solve`. Pass them back as `ForceBalanceProblem(eq; kinetic=km)` to solve again without evaluating the kinetic
+model, for example in a `kinetic_factor` scan; `solve` rejects matrices made for another ψ grid or mode range. The
+matrices are stored unscaled and `solve` applies its own `kinetic_factor`, but the knots the build added where F̄ is
+near-singular were placed at the `kinetic_factor` recorded here.
 
-Dispatches on `ctrl.kinetic`:
+## Fields
+
+  - `source` - The kinetic source evaluated: a `KineticForces.KineticForcesControl` or a [`TestKineticMatrices`](@ref).
+  - `kinetic_factor::Float64` - The `kinetic_factor` the ψ grid was refined at.
+  - `psi::Vector{Float64}` - The ψ grid of the matrices: the problem's grid plus the knots the build added.
+  - `problem_psi::Vector{Float64}` - The problem's own ψ grid, which a solve reusing the matrices must have.
+  - `nlow`, `nhigh`, `mlow`, `mhigh` - The toroidal and poloidal mode ranges.
+  - `axis_psi_c::Float64` - The near-axis validity boundary of the kinetic model; 0 for test matrices.
+  - `kw::Array{ComplexF64,3}`, `kt::Array{ComplexF64,3}` - The energy (W) and torque (T) matrices, indexed (ψ, mode
+    pair, component) with the six components A, B, C, D, E, H.
+"""
+struct KineticMatrices
+    source::Any
+    kinetic_factor::Float64
+    psi::Vector{Float64}
+    problem_psi::Vector{Float64}
+    nlow::Int
+    nhigh::Int
+    mlow::Int
+    mhigh::Int
+    axis_psi_c::Float64
+    kw::Array{ComplexF64,3}
+    kt::Array{ComplexF64,3}
+end
+
+# The kinetic source behind a problem's `kinetic`, looking through reused matrices.
+kinetic_source(kinetic) = kinetic isa KineticMatrices ? kinetic.source : kinetic
+
+"""
+    evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric; calculated_source=nothing, axis_validity_psi_c=0.0)
+        -> KineticMatrices
+
+Evaluate the kinetic energy (W) and torque (T) matrices of `ctrl.kinetic` on the problem's ψ grid:
 
   - [`TestKineticMatrices`](@ref): X-shaped test matrices of its `scale` relative to
     ideal matrix Frobenius norms (Ak, Dk, Hk Hermitian; Bk, Ck, Ek non-Hermitian)
-  - a `KineticForcesControl`: compute via the `calculated_source` callback. This is
-    expected to be `KineticForces.compute_calculated_kinetic_matrices` injected
-    by `GeneralizedPerturbedEquilibrium.main`. The callback receives
-    `(ctrl, equil, intr, metric, mats)` and returns `(kw_flat, kt_flat)` of
-    shape `(mpsi, np^2, 6)`. Callback injection is used because ForceFreeStates
-    is loaded before KineticForces, so a direct import would invert the
-    dependency order.
-
-Both paths apply `ctrl.kinetic_factor` as a global scale before the FKG Schur
-reduction.
+  - a `KineticForcesControl`: compute via the `calculated_source` callback, which receives
+    `(ctrl, equil, intr, metric, mats)` and returns `(kw_flat, kt_flat)` of shape `(mpsi, np^2, 6)`.
+    `solve` injects `KineticForces.compute_calculated_kinetic_matrices`, because ForceFreeStates is loaded
+    before KineticForces. Knots are added across the near-axis validity band and where F̄ at
+    `ctrl.kinetic_factor` has near-singular structure the grid does not resolve.
 """
-function build_kinetic_matrix_splines(
+function evaluate_kinetic_matrices(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     mats::MatrixSplines,
@@ -102,56 +130,63 @@ function build_kinetic_matrix_splines(
 )
     xs = metric.xs
     mpsi = length(xs)
+    factor = ctrl.kinetic_factor
+    matrices(psi, kw, kt) = KineticMatrices(ctrl.kinetic, factor, psi, collect(metric.xs), intr.nlow, intr.nhigh, intr.mlow, intr.mhigh,
+        axis_validity_psi_c, kw, kt)
 
     # Coarse equilibrium grids cannot represent env·(increment) across the validity band, and the
     # spline overshoot can land on a rational; pin the band ends (C² there) and resolve the middle.
     band_knots(lo, hi) = axis_validity_psi_c > 0 ?
                          [x for x in range(axis_validity_psi_c, 2 * axis_validity_psi_c; length=BAND_KNOTS) if lo < x < hi] : Float64[]
 
-    # Get raw kinetic matrices (scaling is baked into each source)
-    calculated = !(ctrl.kinetic isa TestKineticMatrices)
-    if !calculated
+    if ctrl.kinetic isa TestKineticMatrices
         kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, intr.numpert_total, mpsi, ctrl.kinetic.scale, intr.mlow, mats, xs)
-        kw_flat .*= ctrl.kinetic_factor
-        kt_flat .*= ctrl.kinetic_factor
-    else
-        isnothing(calculated_source) && error(
-            "The KineticForces kinetic source requires the KineticForces callback. " *
-            "Drive the run via `GeneralizedPerturbedEquilibrium.main` instead of " *
-            "calling build_kinetic_matrix_splines directly, or pass " *
-            "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
-        )
-        band = band_knots(xs[1], xs[end])
-        if isempty(band)
-            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats)
-        else
-            xs = sort!(unique!(vcat(collect(xs), band)))
-            mpsi = length(xs)
-            kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats; psis=xs)
-        end
-        kw_flat .*= ctrl.kinetic_factor
-        kt_flat .*= ctrl.kinetic_factor
+        return matrices(collect(xs), kw_flat, kt_flat)
     end
-
-    # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
-    mats = _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat; xs=xs)
+    isnothing(calculated_source) && error(
+        "The KineticForces kinetic source requires the KineticForces callback: solve the problem, or pass " *
+        "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
+    )
+    band = band_knots(xs[1], xs[end])
+    if isempty(band)
+        kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats)
+    else
+        xs = sort!(unique!(vcat(collect(xs), band)))
+        kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, mats; psis=xs)
+    end
+    km = matrices(collect(xs), kw_flat, kt_flat)
 
     # The FKG splines now exist, so F̄ can be scanned: add knots only where near-singular structure
     # (shifted/split kinetic resonances) falls in an interval that does not resolve it.
-    if calculated && calculated_source !== nothing && mats.kinetic !== nothing
-        xs2, kw_flat, kt_flat = refine_grid_at_fbar_peaks(
-            collect(xs), kw_flat, kt_flat,
-            psis -> begin
-                kwn, ktn = calculated_source(ctrl, equil, intr, metric, mats; psis=psis)
-                (kwn .* ctrl.kinetic_factor, ktn .* ctrl.kinetic_factor)
-            end,
-            mats.kinetic, equil, intr, axis_validity_psi_c)
-        if length(xs2) != length(xs)
-            xs = xs2
-            mats = _compute_fkg_matrices(mats, equil, intr, metric, kw_flat, kt_flat; xs=xs)
-        end
-    end
-    return mats
+    fkg = build_kinetic_matrix_splines(mats, equil, intr, metric, km, factor).kinetic
+    fkg === nothing && return km
+    xs2, kw_flat, kt_flat = refine_grid_at_fbar_peaks(km.psi, kw_flat, kt_flat,
+        psis -> calculated_source(ctrl, equil, intr, metric, mats; psis=psis), fkg, equil, intr, axis_validity_psi_c)
+    return matrices(xs2, kw_flat, kt_flat)
+end
+
+"""
+    build_kinetic_matrix_splines(mats, equil, intr, metric, km::KineticMatrices, kinetic_factor) -> MatrixSplines
+
+Scale the kinetic matrices `km` by `kinetic_factor` and pre-compute the FKG derived matrices used by `sing_der!`,
+returning a new `MatrixSplines` carrying them alongside the ideal matrices of `mats`.
+"""
+build_kinetic_matrix_splines(mats::MatrixSplines, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData,
+    km::KineticMatrices, kinetic_factor::Real) =
+    _compute_fkg_matrices(mats, equil, intr, metric, km.kw .* kinetic_factor, km.kt .* kinetic_factor; xs=km.psi)
+
+"""
+    check_kinetic_matrices(km::KineticMatrices, intr, metric)
+
+Throw unless `km` was evaluated on this problem's ψ grid and mode range.
+"""
+function check_kinetic_matrices(km::KineticMatrices, intr::ForceFreeStatesInternal, metric::MetricData)
+    made = (km.nlow, km.nhigh, km.mlow, km.mhigh)
+    here = (intr.nlow, intr.nhigh, intr.mlow, intr.mhigh)
+    made == here || error("the kinetic matrices were made for (nlow, nhigh, mlow, mhigh) = $made, but this problem has $here")
+    km.problem_psi == metric.xs ||
+        error("the kinetic matrices were made on another ψ grid ($(length(km.problem_psi)) points, this problem has $(length(metric.xs)))")
+    return nothing
 end
 
 """
@@ -334,7 +369,7 @@ function _compute_fkg_matrices(
     end
 
     itp_opts = (; extrap=ExtendExtrap())
-    kinetic = KineticMatrices(;
+    kinetic = FKGMatrices(;
         # kinetic-modified A/B/C consumed by sing_der!; A is non-Hermitian here
         A_spline=cubic_interp(xs, Series(ak_flat); itp_opts...),
         B_spline=cubic_interp(xs, Series(bk_flat); itp_opts...),

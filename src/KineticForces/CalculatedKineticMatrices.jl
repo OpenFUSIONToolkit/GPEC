@@ -2,7 +2,7 @@
     CalculatedKineticMatrices
 
 Bridge from KineticForces' bounce-averaged matrix kernels into the kinetic-MHD
-stability path in ForceFreeStates. Used by `build_kinetic_matrix_splines` when
+stability path in ForceFreeStates. Used by `evaluate_kinetic_matrices` when
 the force-balance problem's `kinetic` source is a `KineticForcesControl` (via the
 `calculated_source` callback injected by the force-balance solve).
 """

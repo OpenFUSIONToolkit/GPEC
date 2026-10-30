@@ -102,6 +102,10 @@ using HDF5
         @test factored.free_boundary.et[1] ≈ scaled.free_boundary.et[1] rtol = 1e-10
         @test factored.kinetic.kmsing == scaled.kinetic.kmsing
         @test [s.psifac for s in factored.kinetic.kinsing] ≈ [s.psifac for s in scaled.kinetic.kinsing]
+        # Matrices evaluated once rescale in a later solve exactly as the source does.
+        km = kinetic_matrices(ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs..., kinetic=TestKineticMatrices(; scale=1.0)), forward)
+        @test solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic=km, kinetic_factor=kf).free_boundary.et == factored.free_boundary.et
+        @test_throws "no kinetic source" kinetic_matrices(ForceBalanceProblem(equil; nn=1, ffs_kwargs...), forward)
 
         # Too large a scale for this coarse deck: the integration aborts near ψ = 0.4 and says so.
         @test_throws "Euler-Lagrange integration aborted" solve(equil, forward; nn=1, wall=wall, ffs_kwargs..., kinetic=TestKineticMatrices(; scale=0.1))
@@ -128,6 +132,16 @@ using HDF5
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-10
             @test api.diagnostics.nzero == reference.diagnostics.nzero
             @test api.kinetic.kmsing == reference.kinetic.kmsing
+
+            # The KineticForces matrices evaluated once solve identically when reused, and only on the problem they were made for.
+            alg = GPEC.force_balance_algorithm(kdeck)
+            km = kinetic_matrices(ForceBalanceProblem(kequil; nn=1, wall=kwall, kkwargs...), alg)
+            @test km.source === kkwargs[:kinetic] && size(km.kw, 1) == length(km.psi) >= length(km.problem_psi)
+            reused = solve(kequil, alg; nn=1, wall=kwall, merge(kkwargs, Dict(:kinetic => km))...)
+            @test reused.free_boundary.et == api.free_boundary.et && reused.free_boundary.wt == api.free_boundary.wt
+            @test reused.kinetic.kmsing == api.kinetic.kmsing
+            shifted = merge(kkwargs, Dict(:kinetic => km, :delta_mlow => get(kkwargs, :delta_mlow, FFS.ForceFreeStatesControl().delta_mlow) + 1))
+            @test_throws "kinetic matrices were made for" solve(kequil, alg; nn=1, wall=kwall, shifted...)
         end
     end
 

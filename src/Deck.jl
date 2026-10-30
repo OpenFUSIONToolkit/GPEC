@@ -509,7 +509,7 @@ deck that adds that stage.
 """
 function deck_sections(keywords::AbstractDict{Symbol}, algorithm::ForceFreeStates.AbstractIntegrator)
     kwargs = copy(keywords)
-    wall, kinetic, cap = pop!(kwargs, :wall, nothing), pop!(kwargs, :kinetic, nothing), pop!(kwargs, :psilim_from_layer_overlap, false)
+    wall, kinetic, cap = pop!(kwargs, :wall, nothing), ForceFreeStates.kinetic_source(pop!(kwargs, :kinetic, nothing)), pop!(kwargs, :psilim_from_layer_overlap, false)
     nn = pop!(kwargs, :nn)
     section = _deck_table(kwargs)
     section["nn"] = first(nn) == last(nn) ? first(nn) : collect(nn)

@@ -6,6 +6,7 @@
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, ForceFreeStatesResult
 using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!
 using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines, find_kinetic_singular_surfaces!
+using .ForceFreeStates: KineticMatrices, evaluate_kinetic_matrices, check_kinetic_matrices, kinetic_source
 using .ForceFreeStates: resolve_mode_space!, run_force_free_states, _mode_range_label
 
 """
@@ -67,7 +68,8 @@ sugar building the problem from an equilibrium and the problem keywords in one c
 Knobs owned by `alg` are rejected as `ForceFreeStatesControl` keywords. Kinetic runs
 (a `kinetic` source) take `Forward()`. `kinetic=KineticForcesControl(; ...)` evaluates the
 KineticForces model with those settings on the equilibrium's kinetic profiles (`kinetic_file`, or
-`attach_kinetic_profiles!`); `kinetic=TestKineticMatrices(; scale)` uses synthetic test matrices.
+`attach_kinetic_profiles!`); `kinetic=TestKineticMatrices(; scale)` uses synthetic test matrices; `kinetic=km` reuses
+the [`KineticMatrices`](@ref) from [`kinetic_matrices`](@ref).
 
 ```julia
 eq = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada")
@@ -78,12 +80,42 @@ ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 """
 function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrator; verbose::Bool=false)
     total_start = time()
+    ctrl, intr, equil, metric, mats, layer_overlap = _prepare_solve(prob, alg; verbose)
+    result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa ForceFreeStates.Galerkin && alg.cut_solution)
+    result = ForceFreeStates._with(result; problem=prob, algorithm=alg, layer_overlap=layer_overlap)
 
+    @info "Force-Free States completed in $(@sprintf("%.3f", time() - total_start)) s"
+
+    return result
+end
+
+"""
+    kinetic_matrices(prob::ForceBalanceProblem, alg=Forward(); verbose=false) -> KineticMatrices
+
+Evaluate the kinetic matrices of `prob`'s kinetic source once, running the part of [`solve`](@ref) before the
+Euler-Lagrange integration. Pass them back as the problem's `kinetic` to solve without evaluating them again: the solve
+is identical to one with the source itself, and may change `kinetic_factor`.
+
+```julia
+km = kinetic_matrices(ForceBalanceProblem(eq; nn=1, kinetic=KineticForcesControl()))
+scan = [solve(ForceBalanceProblem(eq; nn=1, kinetic=km, kinetic_factor=f), Forward()) for f in (0.5, 1.0, 2.0)]
+```
+"""
+function kinetic_matrices(prob::ForceBalanceProblem, alg::ForceFreeStates.Forward=ForceFreeStates.Forward(); verbose::Bool=false)
+    get(prob.ctrl_kwargs, :kinetic, nothing) === nothing &&
+        error("kinetic_matrices: the problem has no kinetic source; pass kinetic=KineticForcesControl(...) or TestKineticMatrices(; scale)")
+    return last(_prepare_solve(prob, alg; verbose))
+end
+
+# Everything solve does before the integration: the control, the mode space, the (re-formed) equilibrium, the metric,
+# the matrices, the layer-overlap scan and the kinetic matrices.
+function _prepare_solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrator; verbose::Bool=false)
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
     ctrl = ForceFreeStatesControl(; algorithm=alg, ctrl_kwargs...)
     ForceFreeStates.validate_algorithm(ctrl)
 
+    source = kinetic_source(ctrl.kinetic)
     ctrl.kinetic isa KineticForces.KineticForcesControl && equil.kinetic === nothing &&
         error("the KineticForces kinetic source needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
     ctrl.kinetic !== nothing && !(alg isa ForceFreeStates.Forward) &&
@@ -103,17 +135,12 @@ function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrato
     resolve_mode_space!(intr, ctrl)
 
     # The kinetic model's control, when there is one, sets the views of the attached kinetic profiles.
-    kf_ctrl = ctrl.kinetic isa KineticForces.KineticForcesControl ? ctrl.kinetic : KineticForces.KineticForcesControl()
+    kf_ctrl = source isa KineticForces.KineticForcesControl ? source : KineticForces.KineticForcesControl()
 
     equil = maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl)
 
-    metric, mats, layer_overlap = prepare_force_free_states!(intr, ctrl, equil)
-    result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa ForceFreeStates.Galerkin && alg.cut_solution)
-    result = ForceFreeStates._with(result; problem=prob, algorithm=alg, layer_overlap=layer_overlap)
-
-    @info "Force-Free States completed in $(@sprintf("%.3f", time() - total_start)) s"
-
-    return result
+    metric, mats, layer_overlap, km = prepare_force_free_states!(intr, ctrl, equil)
+    return ctrl, intr, equil, metric, mats, layer_overlap, km
 end
 
 """
@@ -168,11 +195,11 @@ function maybe_reform_equilibrium(
 end
 
 """
-    prepare_force_free_states!(intr, ctrl, equil) -> (metric, mats, overlap)
+    prepare_force_free_states!(intr, ctrl, equil) -> (metric, mats, overlap, km)
 
 Set up the force-free-states solve on `intr`: integration limits, the surviving singular
 surfaces and their GGJ coefficients, the poloidal mode range, and the metric plus
-Euler-Lagrange (and, when requested, kinetic) matrices.
+Euler-Lagrange (and, when requested, kinetic) matrices. `km` is the run's [`KineticMatrices`](@ref), or `nothing`.
 """
 function prepare_force_free_states!(
     intr::ForceFreeStatesInternal,
@@ -240,11 +267,15 @@ function prepare_force_free_states!(
     # Compute matrices and build the MatrixSplines container
     mats = build_matrix_splines(equil, intr, metric)
 
-    if ctrl.kinetic isa ForceFreeStates.TestKineticMatrices
-        intr.verbose && @info "Computing kinetic matrices (synthetic test matrices, scale $(ctrl.kinetic.scale), factor $(ctrl.kinetic_factor))"
-        mats = build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric)
+    km = nothing
+    if ctrl.kinetic isa KineticMatrices
+        check_kinetic_matrices(ctrl.kinetic, intr, metric)
+        km = ctrl.kinetic
+    elseif ctrl.kinetic isa ForceFreeStates.TestKineticMatrices
+        intr.verbose && @info "Computing kinetic matrices (synthetic test matrices, scale $(ctrl.kinetic.scale))"
+        km = evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric)
     elseif ctrl.kinetic !== nothing
-        intr.verbose && @info "Computing kinetic matrices (KineticForces model, factor $(ctrl.kinetic_factor))"
+        intr.verbose && @info "Computing kinetic matrices (KineticForces model)"
         # Inject the KineticForces callback so the KineticForces source can
         # invoke compute_calculated_kinetic_matrices without ForceFreeStates
         # importing KineticForces (which would invert the load order).
@@ -261,9 +292,9 @@ function prepare_force_free_states!(
                     c, e, i, m, f;
                     kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species, psis=psis,
                     axis_psi_c=axis_psi_c)
-        mats = build_kinetic_matrix_splines(ctrl, equil, mats, intr, metric;
-            calculated_source=calculated_cb, axis_validity_psi_c=axis_psi_c)
+        km = evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric; calculated_source=calculated_cb, axis_validity_psi_c=axis_psi_c)
     end
+    km === nothing || (mats = build_kinetic_matrix_splines(mats, equil, intr, metric, km, ctrl.kinetic_factor))
 
     # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
     # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
@@ -272,5 +303,5 @@ function prepare_force_free_states!(
         find_kinetic_singular_surfaces!(mats, equil, intr)
     end
 
-    return metric, mats, overlap
+    return metric, mats, overlap, km
 end

@@ -12,7 +12,7 @@ the Galerkin solver's variant of the same matrix.
 ## Fields
 
   - `A_spline`, `B_spline`, `C_spline` - the ideal A, B, C. In a kinetic run these are NOT what the
-    ODE integrates; see [`KineticMatrices`](@ref).
+    ODE integrates; see [`FKGMatrices`](@ref).
   - `D_spline_prim`, `E_spline_prim` - pre-Schur-reduction geometric forms
     (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)). Downstream
     kinetic FKG Schur complements consume these primitive forms; the alternate singular-layer path
@@ -44,7 +44,7 @@ the Galerkin solver's variant of the same matrix.
 end
 
 """
-    KineticMatrices
+    FKGMatrices
 
 Kinetic-MHD matrix ψ-splines assembled by [`build_kinetic_matrix_splines`](@ref). Present on a
 [`MatrixSplines`](@ref) only for kinetic runs; its presence means the solution obeys the FKG ODE
@@ -72,7 +72,7 @@ All nine reduced blocks are pre-computed per ψ by the FKG Schur complement
 (Logan 2015 Appendix C, Eqs C.1-C.11) so `sing_der!` can assemble the ODE right-hand side with
 explicit (m−nq) factors instead of 1/(m−nq).
 """
-@kwdef struct KineticMatrices{S<:CubicSeriesInterpolant}
+@kwdef struct FKGMatrices{S<:CubicSeriesInterpolant}
     A_spline::S
     B_spline::S
     C_spline::S
@@ -99,13 +99,13 @@ and for the Galerkin/vacuum paths that are defined only in the ideal basis.
 ## Fields
 
   - `ideal::IdealMatrices` - always present.
-  - `kinetic::Union{Nothing,KineticMatrices}` - present iff the solve is kinetic (`ctrl.kinetic !== nothing`).
+  - `kinetic::Union{Nothing,FKGMatrices}` - present iff the solve is kinetic (`ctrl.kinetic !== nothing`).
   - `_hint::Base.RefValue{Int}` - shared bracket-search hint for sequential (single-threaded)
     evaluation. Not thread-safe: parallel paths must pass their own hint.
 """
 @kwdef struct MatrixSplines{S<:CubicSeriesInterpolant}
     ideal::IdealMatrices{S}
-    kinetic::Union{Nothing,KineticMatrices{S}} = nothing
+    kinetic::Union{Nothing,FKGMatrices{S}} = nothing
     _hint::Base.RefValue{Int} = Ref(1)
 end
 

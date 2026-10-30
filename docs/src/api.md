@@ -195,8 +195,10 @@ Kinetic runs take `Forward()`. The problem's `kinetic` keyword selects the sourc
 `kinetic=KineticForcesControl(; ...)` evaluates the KineticForces drift-kinetic
 matrices with those settings on the equilibrium's kinetic profiles and species, and
 `kinetic=TestKineticMatrices(; scale)` uses synthetic test matrices. `kinetic_factor` (default 1)
-scales either. A deck selects the KineticForces model with `[ForceFreeStates] kinetic =
-"KineticForces"`, using its `[KineticForces]` section.
+scales either. `km = kinetic_matrices(prob)` evaluates the source once, and `kinetic=km` reuses those
+[`KineticMatrices`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.KineticMatrices) in later solves, for example a
+`kinetic_factor` scan. A deck selects the KineticForces model with `[ForceFreeStates] kinetic = "KineticForces"`, using
+its `[KineticForces]` section.
 
 ## Local stability
 
@@ -218,6 +220,7 @@ ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundar
 ```@docs
 GeneralizedPerturbedEquilibrium.ForceBalanceProblem
 GeneralizedPerturbedEquilibrium.solve
+GeneralizedPerturbedEquilibrium.kinetic_matrices
 GeneralizedPerturbedEquilibrium.perturbed_equilibrium
 ```
 
