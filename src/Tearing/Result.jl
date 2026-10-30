@@ -80,8 +80,8 @@ downstream inspection and HDF5 output.
   - `omega`, `gamma` -- rotation angular frequency Re(Q)/τ_k [rad/s] and growth rate
     Im(Q)/τ_k [1/s] for SLAYER. SLAYER roots are in the lab frame; an uncoupled root is
     moved from its layer's E×B frame by τ_k·n·Ω_E, with Ω_E = 0 where unknown.
-    GGJ uses its reference growth-rate scale and retains the existing common plasma frame,
-    without differential-rotation coupling. Positive gamma means instability.
+    GGJ roots are in the lab frame too: each coupled layer sees s + i·n·Ω_E, and an uncoupled root is
+    moved by n·Ω_E. Positive gamma means instability.
   - `per_surface_extraction` -- `Vector{GrowthRateResult}` of length
     `nsurfaces` in uncoupled mode (each includes polelines, pole list,
     valid roots, filtered roots), in each surface's E×B frame. Empty in coupled mode.
@@ -94,7 +94,8 @@ downstream inspection and HDF5 output.
     surface: the kinetic file's value, or the `problem.omega_E_kHz` override for that m/n;
     NaN where neither gives one. Recorded in both coupling modes
   - `q_shift`             -- real Doppler offset `−τ_k·n·Ω_E` applied to each surface's
-    inner-layer Q; zero outside `:coupled` mode, where rotation does not enter
+    inner-layer Q; zero outside `:coupled` mode, where rotation does not enter. Zero for GGJ, whose
+    shift n·Ω_E acts on the growth-rate variable
   - `scan_data`           -- scan results (per-surface in uncoupled, single
     entry in coupled). Empty unless `config.store_scan == true`.
   - `critical_resonant_field` -- `CriticalResonantFieldResult`; `enabled=false`

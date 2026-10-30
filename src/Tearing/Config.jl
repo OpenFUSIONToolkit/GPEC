@@ -25,7 +25,8 @@ end
 
 Numerical scan and root-search settings for `solve(TearingProblem(...), model; config)`.
 GGJ uses physical `gamma_range` and `omega_range`, with positive growth rates and frequencies
-in the result's plasma-frame convention. SLAYER uses its normalized Q box. The default
+in the result's convention: lab-frame ω for a coupled solve, each surface's E×B-frame ω for an
+uncoupled one. SLAYER uses its normalized Q box. The default
 classification selects threshold classification for SLAYER and winding classification for GGJ.
 
 ## Fields

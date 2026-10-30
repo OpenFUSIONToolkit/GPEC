@@ -11,14 +11,14 @@ GGJ layer inputs; the SLAYER layer closures belong to [`SLAYERModel`](@ref) and 
 Z_eff and transport defaults, confinement time and resistivity closure) is the equilibrium's kinetic
 data, `ffs.equil.kinetic` (see [`KineticProfileData`](@ref)), so every layer model sees one plasma.
 Solve with `solve(problem, GGJModel(); config)` or `solve(problem, SLAYERModel(); config)`.
-GGJ needs the raw Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`)
-and takes no rotation: its roots are in the plasma frame. SLAYER reports lab-frame roots.
+GGJ needs the raw Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`).
+Both models report lab-frame roots from each surface's E×B rotation.
 
 ## Fields
 
   - `ffs` - Outer solution, retained by reference.
   - `coupling_mode`, `msing_max` - Uncoupled or coupled analysis and its maximum number of surfaces.
-  - `omega_E_kHz` - SLAYER per-surface rotation overrides keyed by m/n.
+  - `omega_E_kHz` - Per-surface E×B rotation overrides keyed by m/n, replacing the kinetic data's `omega_E`.
   - `critical_resonant_field` - The SLAYER penetration-threshold calculation, a `CriticalResonantFieldControl`; `nothing` (default) skips it.
   - `eta`, `rho` - GGJ resistivity in Ω·m and mass density in kg/m³, a scalar or one value per surface
     (core to edge), as in [`MatchProblem`](@ref). `nothing` (default) derives them from the kinetic data:

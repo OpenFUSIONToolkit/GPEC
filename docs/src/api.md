@@ -176,8 +176,10 @@ save_to_hdf5("gpec.h5", tear)
 
 GGJ needs the raw Δ′ matrix and validates the surface ordering. Its η and ρ default from the
 kinetic data: η by the resistivity closure SLAYER uses, ρ = m_i·n_i of the main ion; pass `eta`
-and `rho` to `TearingProblem` to override them. GGJ takes no rotation and reports plasma-frame
-frequencies; SLAYER reports lab-frame frequencies with its per-surface E×B shifts. Both expose
+and `rho` to `TearingProblem` to override them. Both models report lab-frame frequencies with
+per-surface E×B shifts: a coupled solve evaluates each layer in its own E×B frame (GGJ's s_k = s + i·n·Ω_E,
+Johnson & Greene 1967 Appendix B), and an uncoupled root is moved from its layer's frame by n·Ω_E. Ω_E comes
+from the kinetic data's `omega_E`, or from `omega_E_kHz` for the m/n it lists. Both expose
 `omega` in rad/s and `gamma` in 1/s, positive for instability, and the HDF5 roots group records
 `frequency_frame`. SLAYER searches a normalized Q box, GGJ a physical (γ, ω) box.
 

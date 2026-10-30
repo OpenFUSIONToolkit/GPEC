@@ -52,8 +52,20 @@ function _ggj_layer_inputs(prob::TearingProblem)
     return _ggj_per_surface(eta, "eta", count), _ggj_per_surface(rho, "rho", count)
 end
 
+# E×B rotation Ω_E per unit n at each surface: the kinetic data's omega_E (NaN where there is none), replaced on the
+# surfaces whose m/n `problem.omega_E_kHz` lists.
+function _ggj_omega_E(prob::TearingProblem)
+    ffs = prob.ffs
+    data = ffs.equil.kinetic
+    has_omega_E = data !== nothing && data.omega_E !== nothing
+    data === nothing || has_omega_E ||
+        @warn "GGJ tearing: the kinetic data have no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
+    omega_E = has_omega_E ? (spline = _slayer_profiles(data, SLAYERModel()).profiles.omega_E; Float64[spline(s.psifac) for s in ffs.surfaces]) : Float64[]
+    return _omega_E_per_surface(prob, ["$(only(s.m))/$(only(s.n))" for s in ffs.surfaces], omega_E)
+end
+
 # The SLAYER-only physics fields must stay at their defaults, so a GGJ solve never silently ignores one.
-const _SLAYER_ONLY_FIELDS = (:omega_E_kHz, :critical_resonant_field)
+const _SLAYER_ONLY_FIELDS = (:critical_resonant_field,)
 
 function _check_ggj_inputs(prob::TearingProblem, config::TearingConfig)
     defaults = TearingProblem(prob.ffs)
@@ -78,13 +90,19 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
     count = length(surfaces)
     eta, rho = _ggj_layer_inputs(prob)
     params = [ggj_parameters(s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k) for (k, s) in enumerate(surfaces)]
-    couplings = [surface_coupling(model, p, 0.0) for p in params]
+    coupled = prob.coupling_mode === :coupled
+    Ω_E = _ggj_omega_E(prob)
+    # A surface with no known rotation applies no shift.
+    Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
+    n = ffs.nlow
 
-    # Uncoupled: each surface with its own 2×2 block of Δ′. Coupled: the leading msing_max surfaces together.
-    determinants = if prob.coupling_mode === :uncoupled
-        [Dispersion.multi_surface_coupling_full(couplings[k:k], raw[(2k-1):2k, (2k-1):2k]) for k in 1:count]
-    else
+    # Coupled: each layer sees the lab-frame growth rate in its own E×B frame, s_k = s + i·n·Ω_E,k, so differential
+    # rotation enters the determinant. Uncoupled: each surface with its own 2×2 block of Δ′, solved in its own frame.
+    determinants = if coupled
+        couplings = [surface_coupling(model, p, 0.0; omega_E=Ω_shift[k], n) for (k, p) in enumerate(params)]
         [Dispersion.multi_surface_coupling_full(couplings, raw; msing_max=min(prob.msing_max, count))]
+    else
+        [Dispersion.multi_surface_coupling_full([surface_coupling(model, params[k], 0.0)], raw[(2k-1):2k, (2k-1):2k]) for k in 1:count]
     end
     # The result reports ω = Re(Q)/τ, the negative of the determinant's Im(s), so the box flips.
     omega_range = (-config.omega_range[2], -config.omega_range[1])
@@ -96,10 +114,19 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
         push!(extractions, extraction)
         config.store_scan && push!(scans, scan)
     end
-    coupled = prob.coupling_mode === :coupled
+    Q_root = ComplexF64[e.Q_root for e in extractions]
+    omega = Float64[e.omega for e in extractions]
+    if !coupled
+        # Each uncoupled layer is solved in its own E×B frame; report its root in the lab frame, ω_lab = ω + n·Ω_E.
+        for (k, e) in enumerate(extractions)
+            :no_root in e.warning_flags && continue
+            omega[k] += n * Ω_shift[k]
+            Q_root[k] += n * Ω_shift[k] / InnerLayer.GGJ.q0(params[k])
+        end
+    end
     return TearingResult(prob, true, config, model, params,
         Float64[s.psifac for s in surfaces], Float64[s.q for s in surfaces], Matrix{ComplexF64}(ffs.delta_prime.matrix),
-        ComplexF64[e.Q_root for e in extractions], Float64[e.omega for e in extractions], Float64[e.gamma for e in extractions],
+        Q_root, omega, Float64[e.gamma for e in extractions],
         coupled ? GrowthRateResult[] : extractions, coupled ? only(extractions) : nothing,
-        LayerWidths[], fill(NaN, count), zeros(count), scans, empty_critical_resonant_field_result())
+        LayerWidths[], Ω_E, zeros(count), scans, empty_critical_resonant_field_result())
 end

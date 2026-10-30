@@ -180,17 +180,15 @@ _mn_label(p::SLAYERParameters) = "$(p.m)/$(p.n)"
 _mn_label(::InnerLayerParameters) = nothing
 
 # Per-surface E×B angular frequency Ω_E per unit n [rad/s]: the kinetic file's `omega_E` at each
-# rational surface (NaN when there is none), replaced on every surface whose m/n `problem.omega_E_kHz` lists.
-function _omega_E_per_surface(control, params::AbstractVector, omega_E_file::AbstractVector{<:Real})
-    n = length(params)
+# rational surface (NaN when there is none), replaced on every surface whose m/n `labels` entry `problem.omega_E_kHz` lists.
+function _omega_E_per_surface(control, labels::AbstractVector, omega_E_file::AbstractVector{<:Real})
+    n = length(labels)
     isempty(omega_E_file) || length(omega_E_file) == n ||
         throw(ArgumentError("run_slayer: omega_E has $(length(omega_E_file)) entries but " *
                             "$n rational surfaces were analysed."))
     Ω_E = isempty(omega_E_file) ? fill(NaN, n) : Float64.(omega_E_file)
     isempty(control.omega_E_kHz) && return Ω_E
-    labels = [_mn_label(p) for p in params]
-    any(isnothing, labels) &&
-        throw(ArgumentError("run_slayer: omega_E_kHz is keyed by m/n, which $(eltype(params)) surfaces do not carry."))
+    any(isnothing, labels) && throw(ArgumentError("run_slayer: omega_E_kHz is keyed by m/n, which these surfaces do not carry."))
     unknown = setdiff(keys(control.omega_E_kHz), labels)
     isempty(unknown) ||
         throw(ArgumentError("run_slayer: omega_E_kHz lists m/n $(sort(collect(unknown))) matching no analysed surface; " *
@@ -320,7 +318,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     # E×B rotation only Doppler-shifts the coupled determinant: each uncoupled layer is already
     # solved in its own plasma frame, so a shift there would only relabel the reported frequency.
     coupled = problem.coupling_mode === :coupled
-    Ω_E = _omega_E_per_surface(problem, params, omega_E)
+    Ω_E = _omega_E_per_surface(problem, [_mn_label(p) for p in params], omega_E)
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
     q_shifts = coupled ? Float64[_q_shift(params[k], Ω_shift[k]) for k in 1:n] : zeros(Float64, n)

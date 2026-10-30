@@ -292,7 +292,7 @@ end
 # ---------- eigenvalue roots ----------
 function _write_roots!(g, r::TearingResult)
     roots = create_group(g, "Roots")
-    attrs(roots)["frequency_frame"] = r.model isa GGJModel ? "plasma" : "lab"
+    attrs(roots)["frequency_frame"] = "lab"
     roots["Q_root"] = r.Q_root
     roots["omega"] = r.omega
     roots["gamma"] = r.gamma

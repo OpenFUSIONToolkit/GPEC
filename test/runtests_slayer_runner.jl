@@ -152,6 +152,26 @@
                 Q_re_range=(-1.0, 1.0), Q_im_range=(-0.5, 0.8), nre=20, nim=20, pole_threshold=1e5)
             @test r.enabled
             @test r.coupled_extraction isa GrowthRateResult
+
+            # GGJ tearing on the same solve: each layer sees its own E×B rotation and the roots are lab-frame, as SLAYER's.
+            ggj(mode, rotation, box) = solve(TearingProblem(ffs; eta=1e-7, rho=1e-7, coupling_mode=mode, omega_E_kHz=rotation), GGJModel();
+                config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=box, nre=4, nim=4, amr_passes=1))
+            rotation = Dict("2/1" => 1.0, "3/1" => -0.5)
+            still = ggj(:uncoupled, Dict{String,Float64}(), (-1500.0, 1500.0))
+            moving = ggj(:uncoupled, rotation, (-1500.0, 1500.0))
+            @test all(isnan, still.omega_E) && moving.omega_E ≈ [2π * 1e3, -π * 1e3]
+            # Uncoupled, a layer is solved in its own frame: γ is unchanged and the 2/1 root moves by n·Ω_E.
+            @test still.gamma[1] > 0 && moving.gamma == still.gamma
+            @test moving.omega[1] ≈ still.omega[1] + 2π * 1e3 atol = 1e-6
+            # Coupled, the rotation enters the determinant: the root sits in a lab-frame box an unshifted solve has no root in,
+            # and the shear between the surfaces decouples them, so γ approaches the 2/1 surface's own.
+            coupled = ggj(:coupled, rotation, (4800.0, 7800.0))
+            @test coupled.omega[1] ≈ 2π * 1e3 rtol = 1e-2
+            @test coupled.gamma[1] ≈ still.gamma[1] rtol = 1e-2
+            @test coupled.gamma[1] != still.gamma[1]
+            @test_throws "SLAYER input" solve(TearingProblem(ffs; eta=1e-7, rho=1e-7,
+                    critical_resonant_field=GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantFieldControl()), GGJModel();
+                config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
         end
     end
 
