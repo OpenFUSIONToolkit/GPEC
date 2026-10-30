@@ -224,11 +224,9 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `qextrema_q::Union{Nothing,Vector{Float64}}` - Safety factor values at extrema
   - `mextrema::Union{Nothing,Int}` - Number of extrema in q-profile
   - `psi_norm::Union{Nothing,Float64}` - Normalized poloidal flux
-  - `b_norm::Union{Nothing,Float64}` - Normalized magnetic field strength
   - `psi_axis::Union{Nothing,Float64}` - Poloidal flux at the axis
   - `psi_boundary::Union{Nothing,Float64}` - Poloidal flux at the boundary
   - `psi_boundary_norm::Union{Nothing,Float64}` - Normalized boundary flux
-  - `psi_axis_norm::Union{Nothing,Float64}` - Normalized axis flux
   - `psi_boundary_offset::Union{Nothing,Float64}` - Boundary flux offset
   - `psi_axis_offset::Union{Nothing,Float64}` - Axis flux offset
   - `psi_boundary_sign::Union{Nothing,Int}` - Sign of boundary flux
@@ -277,11 +275,9 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     qextrema_q::Union{Nothing,Vector{Float64}} = nothing # Safety factor values at the extrema points
     mextrema::Union{Nothing,Int} = nothing # Number of extrema points in the q-profile
     psi_norm::Union{Nothing,Float64} = nothing # Normalized poloidal flux at the axis
-    b_norm::Union{Nothing,Float64} = nothing # Normalized total magnetic field strength at the axis
     psi_axis::Union{Nothing,Float64} = nothing # Normalized poloidal flux at the axis
     psi_boundary::Union{Nothing,Float64} = nothing # Poloidal flux at the boundary
     psi_boundary_norm::Union{Nothing,Float64} = nothing # Normalized poloidal flux at the boundary
-    psi_axis_norm::Union{Nothing,Float64} = nothing # Normalized poloidal flux at the axis
     psi_boundary_offset::Union{Nothing,Float64} = nothing # Offset for the boundary poloidal flux
     psi_axis_offset::Union{Nothing,Float64} = nothing  # Offset for the axis poloidal flux
     psi_boundary_sign::Union{Nothing,Int} = nothing # Sign of the boundary poloidal flux

@@ -44,7 +44,6 @@ struct PitchGARParams{F}
     imx::Float64       # imaginary part multiplier for resonance operator
     nqty::Int          # number of flux quantities to integrate
     fbnce::F           # CubicSeriesInterpolant: fbnce(λ) → [wb, wd, f₁, ...] (typed for stability)
-    fbnce_norm::Vector{Float64}  # normalization factors (1/median)
     fbnce_hint::Base.RefValue{Int}  # sticky bracket-search hint for fbnce(λ)
     fvals::Vector{ComplexF64}    # reusable buffer for the in-place fbnce(fvals, λ) evaluation; must be complex — the wt-path fbnce carries complex op_wmats data
     esegbuf::Vector{QuadGK.Segment{Float64,ComplexF64,Float64}}  # reusable energy-integral QuadGK segment buffer
@@ -87,7 +86,7 @@ function integrate_pitch_gar_quadgk(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
         nutype, f0type, nufac, qt,
         energy_atol, energy_rtol,
-        rex, imx, nqty, fbnce, fbnce_norm, Ref(1),
+        rex, imx, nqty, fbnce, Ref(1),
         Vector{ComplexF64}(undef, 2 + nqty),
         QuadGK.alloc_segbuf(Float64, ComplexF64, Float64))
 
@@ -184,7 +183,7 @@ function integrate_pitch_gar_quadgk_wt(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
         nutype, f0type, nufac, qt,
         energy_atol, energy_rtol,
-        1.0, 1.0, nqty, fbnce, fbnce_norm, Ref(1),
+        1.0, 1.0, nqty, fbnce, Ref(1),
         Vector{ComplexF64}(undef, 2 + nqty),
         QuadGK.alloc_segbuf(Float64, ComplexF64, Float64))
 

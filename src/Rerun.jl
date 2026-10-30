@@ -340,7 +340,6 @@ function equilibrium_from_h5(h5path::AbstractString)
         params.zo === nothing && error("$h5path has no Equilibrium/Z_axis")
         params.psio === nothing && error("$h5path has no Equilibrium/psi_total")
         params.psi0 = params.psi_axis = params.psio
-        params.psi_axis_norm = 0.0
         params.zsep = params.zext === nothing ? nothing : copy(params.zext)
         profiles = Equilibrium.ProfileSplines((Vector{Float64}(read(f, "Equilibrium/Profiles/$name")) for name in ("psi", "2piF", "mu0p", "dVdpsi", "q"))...)
         xs = Vector{Float64}(read(f, "Equilibrium/Geometry/psi"))
@@ -398,7 +397,7 @@ function ErrorFields.ResonantDriveContext(h5path::AbstractString; dat_dir=nothin
     cfg = ErrorFields.regrid(cfg; dat_dir)
     isempty(cfg.dat_dir) || isdir(cfg.dat_dir) ||
         @warn "Coil geometry directory from the stored deck does not exist here: $(cfg.dat_dir). Pass dat_dir to point at a local copy."
-    return ErrorFields.ResonantDriveContext(equil, rc, cfg; psilim, b_t0=equil.params.bt0, inputs, kwargs...)
+    return ErrorFields.ResonantDriveContext(equil, rc, cfg; psilim, b_t0=equil.params.bt0, kwargs...)
 end
 
 """

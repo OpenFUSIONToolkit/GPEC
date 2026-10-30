@@ -55,7 +55,6 @@ Build it with the `gpec.h5` constructor and hand it to [`coil_overlaps`](@ref) o
 ## Fields
 
   - `equil`: the run's equilibrium, rebuilt on its own ψ grid
-  - `inputs`: the parsed TOML the run used
   - `psilim`: the control surface the solve integrated to
   - `cfg`: coil configuration, with any grid or directory override already applied
   - `rc`: the resonant coupling matrix and its mode ordering
@@ -65,7 +64,6 @@ Build it with the `gpec.h5` constructor and hand it to [`coil_overlaps`](@ref) o
 """
 struct ResonantDriveContext
     equil::Equilibrium.PlasmaEquilibrium
-    inputs::Dict{String,Any}
     psilim::Float64
     cfg::CoilConfig
     rc::ResonantCoupling
@@ -92,7 +90,7 @@ end
 
 """
     ResonantDriveContext(equil, rc, cfg; psilim, b_t0, psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH,
-                   mtheta_coil=nothing, nzeta_coil=nothing, inputs=Dict{String,Any}())
+                   mtheta_coil=nothing, nzeta_coil=nothing)
     ResonantDriveContext(h5path; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH, mtheta_coil=nothing,
                    nzeta_coil=nothing, dat_dir=nothing)
 
@@ -111,15 +109,14 @@ function ResonantDriveContext(
     psi_low::Real=PerturbedEquilibrium.CORE_PSI_LOW,
     psi_high::Real=PerturbedEquilibrium.CORE_PSI_HIGH,
     mtheta_coil=nothing,
-    nzeta_coil=nothing,
-    inputs::Dict{String,Any}=Dict{String,Any}()
+    nzeta_coil=nothing
 )
     b_t0 > 0 || throw(ArgumentError("ResonantDriveContext: b_t0 must be a positive field magnitude (got $b_t0)"))
     cfg = regrid(cfg; mtheta_coil, nzeta_coil)
     _warn_coarse_toroidal_grid(cfg, rc)
     dom = dominant_coupling(rc; psi_low, psi_high)
     grids = forcing_grids(rc, equil, cfg; psi=Float64(psilim))
-    return ResonantDriveContext(equil, inputs, Float64(psilim), cfg, rc, dom, Float64(b_t0), grids)
+    return ResonantDriveContext(equil, Float64(psilim), cfg, rc, dom, Float64(b_t0), grids)
 end
 
 function _warn_coarse_toroidal_grid(cfg::CoilConfig, rc::ResonantCoupling)

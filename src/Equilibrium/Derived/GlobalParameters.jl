@@ -124,7 +124,6 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.psi_axis = pe.psio
     pe.params.psi_boundary = 1.0
     pe.params.psi_boundary_norm = 1.0
-    pe.params.psi_axis_norm = 0.0
     pe.params.psi_norm = 0.0
     pe.params.psi_axis_offset = 0.0
     pe.params.psi_boundary_offset = 0.0

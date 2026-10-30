@@ -98,8 +98,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
 
-  - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
 
     # Initialization parameters
@@ -169,7 +167,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     q::Float64 = 0.0
     u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
     ising_start::Int = 0
-    psimax::Float64 = 0.0
     needs_crossing::Bool = false
     nzero::Int = 0
 

@@ -29,8 +29,6 @@ are the Cartesian and polar partitions of unity; `Gpou = -χ`.
 
 ## Fields
 
-    - `qx::Vector{Float64}`: Radial quadrature points in [0,1]
-    - `qw::Vector{Float64}`: Radial quadrature weights
     - `Gpou::Matrix{Float64}`: Partition of unity on Cartesian grid (PATCH_DIM × PATCH_DIM)
     - `Ppou::Matrix{Float64}`: Partition of unity on polar grid (RAD_DIM × ANG_DIM)
     - `P2G::SparseMatrixCSC{Float64,Int}`: Sparse interpolation matrix (Ngrid × Npolar) mapping polar quadrature points to Cartesian grid
@@ -43,8 +41,6 @@ are the Cartesian and polar partitions of unity; `Gpou = -χ`.
     - `INTERP_ORDER::Int`: Lagrange interpolation order
 """
 struct SingularQuadratureData
-    qx::Vector{Float64}
-    qw::Vector{Float64}
     Gpou::Matrix{Float64}
     Ppou::Matrix{Float64}
     P2G::SparseMatrixCSC{Float64,Int}
@@ -166,7 +162,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
     # Assemble sparse interpolation matrix
     P2G = sparse(I_coo, J_coo, V_coo, Ngrid, Npolar)
 
-    return SingularQuadratureData(qx, qw, Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, INTERP_ORDER)
+    return SingularQuadratureData(Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, INTERP_ORDER)
 end
 
 # Cached singular quadrature; rebuilt if PATCH_RAD / RAD_DIM / INTERP_ORDER change

@@ -47,7 +47,7 @@ const EQUIL_H5_NAMES = Dict(
     :ip_sign => "I_p_sign",
     :psio => "psi_total"
 )
-const EQUIL_H5_SKIP = Set([:psi0, :psi_axis, :psi_axis_norm, :zsep, :verbose, :diagnose_src, :diagnose_maxima])
+const EQUIL_H5_SKIP = Set([:psi0, :psi_axis, :zsep, :verbose, :diagnose_src, :diagnose_maxima])
 
 const MAIN_H5_ANNOTATIONS = [
     # --- Info/ ---
