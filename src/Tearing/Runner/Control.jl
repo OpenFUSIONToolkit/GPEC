@@ -98,8 +98,10 @@ constructor.
     unless `chi_perp_Dc` is set
   - `chi_perp_Dc` -- electron perpendicular heat diffusivity [m²/s] used only by the critical Δ
     (default `nothing`: the critical Δ uses the same χ⊥,e as P_perp, from the kinetic file's
-    `chi_e` or `chi_perp_e`). When set, this scalar replaces χ⊥,e in the critical Δ only;
-    P_perp keeps the file's profiles or the `chi_perp_e`/`chi_perp_i` fallbacks. Must be positive
+    `chi_e` or `chi_perp_e`). When set, this one value replaces χ⊥,e in the critical Δ at every
+    surface, over any `chi_e` profile; P_perp keeps the file's profiles or the
+    `chi_perp_e`/`chi_perp_i` fallbacks. It reaches the critical resonant field through the
+    critical Δ, and has no effect with `D_c_type = "none"`. Must be positive and finite
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the

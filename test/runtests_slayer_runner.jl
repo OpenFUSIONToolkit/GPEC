@@ -122,6 +122,12 @@
         @test_throws "chi_perp_Dc must be positive" Runner.validate(SLAYERControl(; chi_perp_Dc=-1.0))
         @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7, chi_perp_Dc=1.4); warn=false).chi_perp_Dc == 1.4
         @test Runner._slayer_chi_inputs(no_chi, SLAYERControl(; chi_perp_i=0.7); warn=false).chi_perp_Dc === nothing
+        # With it set, the critical Δ needs no χ⊥,e fallback; without a critical Δ, it does nothing and says so.
+        tau_E_ctrl(; kw...) = SLAYERControl(; P_perp_model=:tau_E, tau_E=0.1, D_c_type=:toroidal, kw...)
+        @test_logs (:warn, r"chi_e → chi_perp_e") min_level = Base.CoreLogging.Warn Runner._slayer_chi_inputs(no_chi, tau_E_ctrl())
+        @test_logs min_level = Base.CoreLogging.Warn Runner._slayer_chi_inputs(no_chi, tau_E_ctrl(; chi_perp_Dc=1.4))
+        @test_logs (:warn, r"chi_perp_Dc has no effect") min_level = Base.CoreLogging.Warn Runner._slayer_chi_inputs(no_chi,
+            SLAYERControl(; P_perp_model=:tau_E, tau_E=0.1, chi_perp_Dc=1.4))
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin

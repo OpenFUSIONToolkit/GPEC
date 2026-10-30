@@ -350,7 +350,9 @@ total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular 
 `n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
 flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
 in every case. `[SLAYER] chi_perp_Dc` (optional) sets that electron diffusivity for the critical Δ
-alone, leaving `P_perp` on its own χ inputs. It is for a run whose `P_perp` uses a diffusivity
+alone, leaving `P_perp` on its own χ inputs. The deck key is one value for every surface, over
+any `chi_e` profile; `build_slayer_inputs` also takes a function of ψ. It moves the critical
+resonant field through the critical Δ. It is for a run whose `P_perp` uses a diffusivity
 the critical Δ should not, for example a one-fluid χ_eff in both channels of `D_⊥` when an
 interpretive power balance splits the conducted heat between species unreliably, while the
 critical Δ takes the electron χ that balance allows. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
