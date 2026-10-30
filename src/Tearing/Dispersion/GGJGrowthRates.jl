@@ -7,12 +7,11 @@
 # by winding number (`find_growth_rates(...; classification=:winding)`).
 #
 # Plane convention. The determinant takes the complex growth rate
-# s = γ + iω [s⁻¹]. The SLAYER scans use Q = τ·(−ω + iγ), so s = −i·Q/τ; with
+# s = γ − iω [s⁻¹]. The SLAYER scans use Q = τ·(ω + iγ), so s = −i·Q/τ; with
 # τ = 1/Q₀ of the reference surface (Q₀ = S^(−1/3)/τ_A, GWP2016 Eq. A16) the
 # scanned variable is the GGJ scaled growth rate rotated by a quarter turn,
-# Im Q = γ/Q₀ and Re Q = −ω/Q₀, and `GrowthRateResult.gamma` is γ in s⁻¹.
-# s ↦ Q is holomorphic, so a zero of the determinant winds +1 (the SLAYER
-# residual, a function of conj(Q), winds −1).
+# Im Q = γ/Q₀ and Re Q = ω/Q₀, and `GrowthRateResult.gamma` is γ in s⁻¹.
+# s ↦ Q is holomorphic, so a zero of the determinant winds +1.
 
 """
     GGJDispersion(mc::MultiSurfaceCouplingFull)
@@ -94,7 +93,7 @@ function ggj_growth_rates(mc::MultiSurfaceCouplingFull;
     amr = amr_scan(g, re_range, im_range; nre0=nre0, nim0=nim0, passes=passes,
         max_cells=max_cells, parallel=parallel)
     gr = find_growth_rates(amr, τ; residual=g, polish=polish,
-        classification=:winding, zero_winding=1, winding_rfrac=winding_rfrac)
+        classification=:winding, winding_rfrac=winding_rfrac)
     :no_root in gr.warning_flags && @warn "ggj_growth_rates: no root found in the box; gamma = 0 is a placeholder"
     :winding_unresolved in gr.warning_flags &&
         @warn "ggj_growth_rates: some contour intersections could not be classified (the determinant failed or had a zero or pole on the circle)"

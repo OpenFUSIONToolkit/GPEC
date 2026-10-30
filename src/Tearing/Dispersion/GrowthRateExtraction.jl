@@ -56,8 +56,8 @@ Output of `find_growth_rates`.
 |                          | this flag to tell that apart from a true γ≈0 result). |
 |                          | Empty if root is clean.                               |
 | `valid_roots`            | Intersections classified as roots (threshold: not a   |
-|                          | pole and passed the validity gate; winding: a zero    |
-|                          | count of the sign of `zero_winding`)                  |
+|                          | pole and passed the validity gate; winding: a         |
+|                          | positive zero count)                                  |
 | `poles`                  | Intersections classified as poles                     |
 | `filtered_roots`         | Gate-rejected near-misses and roots rejected by the   |
 |                          | above-pole/outside-Re filter (threshold), or          |
@@ -143,8 +143,7 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
   - `polish_maxit` -- max polish iterations per root (default 20). Each costs a
     handful of `f` evaluations (two for the real 2×2 Jacobian, one trial step,
     at most three backtracks); failures fall back to the unpolished point. The
-    polish does not assume `f` is holomorphic, so it also converges on the SLAYER
-    residual, which is a function of conj(Q).
+    polish does not assume `f` is holomorphic.
   - `validity_rtol` -- with `residual` supplied, a polished root is kept only if
     `|residual| < validity_rtol · median(|Δ|)` (default 1e-3). Intersections
     that don't polish to a true zero (contour near-misses, or surfaces whose
@@ -155,10 +154,6 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
     `false` keeps the raw contour estimate, e.g. to classify by winding number
     without polishing.
   - `classification` -- `:threshold` (default) or `:winding`; see below.
-  - `zero_winding` -- `:winding` mode only: the winding number of an isolated
-    zero of `residual`, `+1` for a function holomorphic in Q and `-1` for one
-    that is anti-holomorphic (a function of conj(Q)), such as the SLAYER
-    residual. Default `-1`.
   - `winding_rfrac` -- `:winding` mode only: radius of the classifying circle
     in units of the local contour-segment length at the intersection (default
     0.5), capped at 0.45 × the distance to the nearest other intersection.
@@ -168,13 +163,11 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
 Each distinct contour intersection is classified by the argument principle
 instead of the pole-threshold heuristics. The counter-clockwise winding number
 of `residual` on a small circle around the intersection counts the zeros minus
-the poles inside it (for a holomorphic function; the sign is reversed for an
-anti-holomorphic one, hence `zero_winding`). The circle is resampled until no
+the poles inside it, for a residual holomorphic in Q. The circle is resampled until no
 sampled phase step exceeds π/2. This numerical criterion can miss rapid phase
 turns between samples and does not certify the count. Additional midpoint and
 count-convergence checks are possible defensive extensions. An intersection is
-classified as a root when the estimated count has the sign of
-`zero_winding`, a pole when it has the opposite sign, and is moved to
+classified as a root when the estimated count is positive, a pole when it is negative, and is moved to
 `filtered_roots` (flag `:spurious`) when the count is zero, e.g. a contour
 near-miss or an unresolved pole-zero pair. A zero count is checked once more on
 a circle eight times wider, reaching up to 0.9 of the distance to the nearest
@@ -223,9 +216,8 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
     validity_rtol::Real=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Integer=-1,
     winding_rfrac::Real=0.5)
-    _check_classification(classification, residual, zero_winding)
+    _check_classification(classification, residual)
     return _extract_growth_rates(scan.re_axis, scan.im_axis, scan.Δ,
         Float64(tauk);
         re_target=Float64(re_target),
@@ -240,7 +232,6 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
         validity_rtol=Float64(validity_rtol),
         polish=polish,
         classification=classification,
-        zero_winding=Int(zero_winding),
         winding_rfrac=Float64(winding_rfrac))
 end
 
@@ -270,9 +261,8 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
     validity_rtol::Real=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Integer=-1,
     winding_rfrac::Real=0.5)
-    _check_classification(classification, residual, zero_winding)
+    _check_classification(classification, residual)
     return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
         re_target=Float64(re_target),
         im_target=Float64(im_target),
@@ -286,7 +276,6 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
         validity_rtol=Float64(validity_rtol),
         polish=polish,
         classification=classification,
-        zero_winding=Int(zero_winding),
         winding_rfrac=Float64(winding_rfrac))
 end
 
@@ -597,8 +586,7 @@ end
 # |f|-decrease backtracking keep it strictly "improve-or-no-op": it cannot
 # diverge, jump to another root, or be pulled into a pole.
 #
-# The local model is the real 2×2 forward-difference Jacobian of (Re f, Im f), exact for holomorphic
-# and anti-holomorphic f alike; SLAYER's residual is a function of conj(Q) (see Riccati.jl).
+# The local model is the real 2×2 forward-difference Jacobian of (Re f, Im f), so f need not be holomorphic.
 # Radius of a disk contained in the residual's supported domain; unrestricted by default.
 _residual_domain_radius(f, Q::ComplexF64) = Inf
 
@@ -683,7 +671,6 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     validity_rtol::Float64=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Int=-1,
     winding_rfrac::Float64=0.5)
     winding = classification === :winding
     raw_intersections = _all_intersections(re_paths, im_paths)
@@ -717,7 +704,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         R_root = 0.0   # trust radius for the polish; the classifying circle in :winding mode
         if winding
             kind, W, r = _winding_classify(residual, raw_intersections, i_pt, re_paths, im_paths, h_grid;
-                zero_winding=zero_winding, rfrac=winding_rfrac)
+                rfrac=winding_rfrac)
             if kind === :pole
                 push!(poles, pt)
                 push!(w_poles, W)
@@ -899,22 +886,18 @@ end
 # Re(Δ) along the Im=0 contour, then prunes with geometric heuristics. Both
 # can misjudge a root that sits close to a pole, and none of them is a proof.
 # The argument principle is: the winding number of f on a closed curve counts
-# zeros minus poles inside it (holomorphic f; the sign flips for a function of
-# conj(Q)). Finite sampling can miss phase turns between points and is not a proof of the count.
+# zeros minus poles inside it (holomorphic f). Finite sampling can miss phase turns between points and is not a proof of the count.
 # ---------------------------------------------------------------------
 
 const _VALID_CLASSIFICATIONS = (:threshold, :winding)
 
-function _check_classification(classification::Symbol, residual, zero_winding::Integer)
+function _check_classification(classification::Symbol, residual)
     classification in _VALID_CLASSIFICATIONS ||
         throw(ArgumentError("find_growth_rates: classification=$(classification) " *
                             "not in $(_VALID_CLASSIFICATIONS)"))
     classification === :winding || return nothing
     residual === nothing &&
         throw(ArgumentError("find_growth_rates: classification=:winding needs a residual callable"))
-    abs(zero_winding) == 1 ||
-        throw(ArgumentError("find_growth_rates: zero_winding must be +1 (holomorphic residual) " *
-                            "or -1 (anti-holomorphic), got $(zero_winding)"))
     return nothing
 end
 
@@ -977,7 +960,7 @@ end
 # pole can lie outside the small one; that circle only has to exclude the other intersections, so it may reach 0.9 of the
 # distance to the nearest.
 function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, im_paths, h_grid::Float64;
-    zero_winding::Int, rfrac::Float64)
+    rfrac::Float64)
     pt = pts[i]
     h_loc = _local_segment_length(re_paths, im_paths, pt, h_grid)
     domain_radius = _residual_domain_radius(residual, pt)
@@ -1000,8 +983,8 @@ function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, 
             end
         end
     end
-    n * zero_winding >= 1 && return (:root, W, r)
-    n * zero_winding <= -1 && return (:pole, W, r)
+    n >= 1 && return (:root, W, r)
+    n <= -1 && return (:pole, W, r)
     return (:none, W, r)
 end
 
@@ -1023,7 +1006,6 @@ function _extract_growth_rates(re_axis::Vector{Float64},
     validity_rtol::Float64=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Int=-1,
     winding_rfrac::Float64=0.5)
     re_field = real.(Δ_grid)
     im_field = imag.(Δ_grid)
@@ -1047,7 +1029,6 @@ function _extract_growth_rates(re_axis::Vector{Float64},
         validity_rtol=validity_rtol,
         polish=polish,
         classification=classification,
-        zero_winding=zero_winding,
         winding_rfrac=winding_rfrac)
 end
 
@@ -1206,7 +1187,6 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
     validity_rtol::Float64=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Int=-1,
     winding_rfrac::Float64=0.5)
     length(Q) == length(Δ) ||
         throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
@@ -1252,6 +1232,5 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
         validity_rtol=validity_rtol,
         polish=polish,
         classification=classification,
-        zero_winding=zero_winding,
         winding_rfrac=winding_rfrac)
 end

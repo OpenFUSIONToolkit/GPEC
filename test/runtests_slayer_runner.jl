@@ -302,8 +302,8 @@
         # rescaling: surface 2 sees Q_target * tauk_1/tauk_2).
         Q_1 = Q_target * (p1.tauk / p1.tauk)         # = Q_target
         Q_2 = Q_target * (p1.tauk / p2.tauk)
-        Δ1 = InnerLayer.solve_inner(model, p1, Q_1).tearing * p1.lu^(1 / 3)
-        Δ2 = InnerLayer.solve_inner(model, p2, Q_2).tearing * p2.lu^(1 / 3)
+        Δ1 = InnerLayer.layer_response(model, p1, Q_1).tearing * p1.lu^(1 / 3)
+        Δ2 = InnerLayer.layer_response(model, p2, Q_2).tearing * p2.lu^(1 / 3)
         # Setting dp[k,k] = Δ_k at Q_target makes both diagonals of M vanish,
         # which makes det(M) = 0 at Q_target.
         dp = ComplexF64[Δ1 0.0; 0.0 Δ2]
@@ -391,8 +391,8 @@
         # in its own normalization), so the coupled determinant has two
         # distinct zeros. Both points are off the scan nodes and away from Q = 0.
         Q1, Q2 = -0.1213 + 0.0537im, 0.1517 + 0.1029im
-        Δ1 = InnerLayer.solve_inner(model, p1, Q1).tearing * p1.lu^(1 / 3)
-        Δ2 = InnerLayer.solve_inner(model, p2, Q2).tearing * p2.lu^(1 / 3)
+        Δ1 = InnerLayer.layer_response(model, p1, Q1).tearing * p1.lu^(1 / 3)
+        Δ2 = InnerLayer.layer_response(model, p2, Q2).tearing * p2.lu^(1 / 3)
         dp = ComplexF64[Δ1 0.0; 0.0 Δ2]
         for mode in (:uncoupled, :coupled)
             run(dp, cls; surfaces=(;)) = _run([p1, p2], dp; model, surfaces, scan_mode=:brute_force, coupling_mode=mode,
@@ -402,7 +402,7 @@
             ref = run(dp, :threshold)
             exts = mode === :coupled ? [r.coupled_extraction] : r.per_surface_extraction
             @test all(gr -> gr.classification === :winding, exts)
-            @test all(gr -> all(w -> w ≈ -1, gr.valid_roots_winding), exts)
+            @test all(gr -> all(w -> w ≈ 1, gr.valid_roots_winding), exts)
             if mode === :uncoupled
                 # Polished. The SLAYER residual is only smooth to |r| ~ 1e-2 within
                 # 1e-4 of these zeros, which bounds any polish; the grid step is 0.026.
@@ -419,12 +419,12 @@
             end
             if mode === :coupled
                 # A Hermitian off-diagonal coupling moves the zeros off the diagonal entries' own; both classifications must
-                # still agree on the reported root, and every winding root counts −1.
+                # still agree on the reported root, and every winding root counts +1.
                 dpc = ComplexF64[Δ1 0.3*sqrt(abs(Δ1 * Δ2)); 0.3*sqrt(abs(Δ1 * Δ2)) Δ2]
                 rc = run(dpc, :winding; surfaces=(; rational_psi=[0.45, 0.72], rational_q=[2.0, 3.0]))
                 refc = run(dpc, :threshold)
                 @test !isempty(rc.coupled_extraction.valid_roots)
-                @test all(w -> w ≈ -1, rc.coupled_extraction.valid_roots_winding)
+                @test all(w -> w ≈ 1, rc.coupled_extraction.valid_roots_winding)
                 @test rc.Q_root == refc.Q_root
             end
             mktemp() do path, io
@@ -441,7 +441,7 @@
                         @test haskey(g, k)
                     end
                     @test read(g["ValidRootsWinding/offsets"]) == read(g["ValidRoots/offsets"])
-                    @test all(w -> w ≈ -1, read(g["ValidRootsWinding/flat"]))
+                    @test all(w -> w ≈ 1, read(g["ValidRootsWinding/flat"]))
                 end
             end
         end

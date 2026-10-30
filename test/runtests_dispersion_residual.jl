@@ -1,6 +1,6 @@
 @testset "Dispersion residual (SurfaceCoupling)" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
+    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner, layer_response
     using GeneralizedPerturbedEquilibrium.InnerLayer.GGJ: glasser_wang_2020_eq55
     using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using StaticArrays
@@ -75,7 +75,7 @@
         p = _slayer_ref()
         m = SLAYERModel()
         Q_pin = 0.3 + 0.4im
-        Δ_pin = solve_inner(m, p, Q_pin).tearing
+        Δ_pin = layer_response(m, p, Q_pin).tearing
         dp_diag = p.lu^(1/3) * Δ_pin
 
         sc = surface_coupling(m, p, dp_diag)

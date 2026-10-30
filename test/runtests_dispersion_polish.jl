@@ -33,8 +33,7 @@
         @test abs(Qp - r) < 1e-10
     end
 
-    # The SLAYER residual is a function of conj(Q) (solve_inner evaluates
-    # conj(Δ̂(ĝ))), so the polish must not assume a holomorphic f.
+    # The polish must not assume a holomorphic f.
     @testset "_polish_root: anti-holomorphic residual converges" begin
         r = 0.42 + 0.27im
         f(Q) = (2 - 1im) * conj(ComplexF64(Q) - r)

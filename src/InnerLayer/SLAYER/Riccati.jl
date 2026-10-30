@@ -10,9 +10,9 @@
 # formulation; the full C(p) form is retained in every regime (no low-D
 # reduction).
 #
-# The complex normalized growth rate `Q = ω + iγ` is passed directly to
-# `solve_inner` rather than carried on the parameter struct. All other
-# inputs come from `SLAYERParameters` (see `LayerParameters.jl`).
+# The layer is evaluated at Fitzpatrick's normalized eigenvalue ĝ = (γ − iω)·τ_k: `solve_inner` takes the
+# growth rate s = γ − iω (ĝ = s·τ_k) and `layer_response` the dispersion scans' Q = (ω + iγ)·τ_k (ĝ = −i·Q).
+# All other inputs come from `SLAYERParameters` (see `LayerParameters.jl`).
 #
 # Returns the parity-projected matching data as an `InnerLayerResponse`
 # with only the `tearing` channel populated so callers can treat SLAYER and
@@ -32,28 +32,28 @@ using OrdinaryDiffEq
 # ---------------------------------------------------------------------
 
 # Pre-computed x-independent constants for the Fitzpatrick Riccati ODE.
-# Derived from `(p::SLAYERParameters, Q::ComplexF64)` once per solve. Used as
+# Derived from `(p::SLAYERParameters, g::ComplexF64)` once per solve. Used as
 # the integrator `params` so `_riccati_f_rhs` and `_riccati_f_jac` only need
 # the x-dependent algebra.
 struct _RiccatiConsts
-    Q_plus_iQe::ComplexF64    # constant part of denom = Q + iQe + x²
-    A::ComplexF64             # Q·(Q + iQi)               — fB constant term
-    B::ComplexF64             # (Q + iQi)·(P_perp + P_tor) — fB · x² coefficient
+    g_minus_iQe::ComplexF64   # constant part of denom = g − iQe + x²
+    A::ComplexF64             # g·(g − iQi)               — fB constant term
+    B::ComplexF64             # (g − iQi)·(P_perp + P_tor) — fB · x² coefficient
     C::Float64                # P_perp · P_tor            — fB · x⁴ coefficient
-    E::ComplexF64             # (Q + iQi) · D² + P_perp   — fC · x² coefficient
+    E::ComplexF64             # (g − iQi) · D² + P_perp   — fC · x² coefficient
     G::Float64                # P_tor · D² / iota_e       — fC · x⁴ coefficient
 end
 
-@inline function _build_riccati_consts(p::SLAYERParameters, Q::ComplexF64)
-    Q_plus_iQe = Q + im * p.Q_e
-    Q_plus_iQi = Q + im * p.Q_i
+@inline function _build_riccati_consts(p::SLAYERParameters, g::ComplexF64)
+    g_minus_iQe = g - im * p.Q_e
+    g_minus_iQi = g - im * p.Q_i
     D2 = p.D_norm * p.D_norm
     return _RiccatiConsts(
-        Q_plus_iQe,
-        Q * Q_plus_iQi,                                   # A
-        Q_plus_iQi * (p.P_perp + p.P_tor),                # B
+        g_minus_iQe,
+        g * g_minus_iQi,                                  # A
+        g_minus_iQi * (p.P_perp + p.P_tor),               # B
         p.P_perp * p.P_tor,                               # C
-        p.P_perp + Q_plus_iQi * D2,                       # E
+        p.P_perp + g_minus_iQi * D2,                      # E
         p.P_tor * D2 / p.iota_e                          # G
     )
 end
@@ -64,7 +64,7 @@ end
 @inline function _riccati_f_coeffs(c::_RiccatiConsts, x::Real)
     p2 = x * x
     p4 = p2 * p2
-    denom = c.Q_plus_iQe + p2
+    denom = c.g_minus_iQe + p2
 
     fA = p2 / denom
     # Use the numerator-subtracts-twice-p² form rather than the algebraic
@@ -76,7 +76,7 @@ end
     fA_prime = (denom - 2 * p2) / denom
 
     fB = c.A + c.B * p2 + c.C * p4
-    fC = c.Q_plus_iQe + c.E * p2 + c.G * p4
+    fC = c.g_minus_iQe + c.E * p2 + c.G * p4
 
     return fA, fA_prime, fB, fC
 end
@@ -98,7 +98,7 @@ end
 # 1×1 Jacobian of the scalar ODE.
 @inline function _riccati_f_jac(W::Number, consts::_RiccatiConsts, x::Real)
     p2 = x * x
-    denom = consts.Q_plus_iQe + p2
+    denom = consts.g_minus_iQe + p2
     fA_prime = (denom - 2 * p2) / denom
     return -(fA_prime / x) - 2 * W / x
 end
@@ -110,7 +110,7 @@ end
 # ---------------------------------------------------------------------
 
 # Returns (p_start, W_at_p_start, branch) where `branch ∈ (:large_D, :small_D)`.
-function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
+function _riccati_f_initial(p::SLAYERParameters, g::ComplexF64;
     p_floor::Real=6.0)
     D2 = p.D_norm * p.D_norm
     Pperp_over_Ptor23 = p.P_perp / p.P_tor^(2 / 3)
@@ -121,12 +121,12 @@ function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
         p_start = max(((p.P_tor * D2) / (p.iota_e * p.P_tor * p.P_perp))^0.25,
             p_floor)
 
-        ak = -(Q + im * p.Q_e)
+        ak = -(g - im * p.Q_e)
         bk = (p.iota_e * p.P_perp * p.P_tor) / (p.P_tor * D2)
-        ck = bk * (1 + (Q + im * p.Q_i) * ((p.P_tor + p.P_perp) /
+        ck = bk * (1 + (g - im * p.Q_i) * ((p.P_tor + p.P_perp) /
                                            (p.P_tor * p.P_perp))
                    -
-                   (p.P_perp + (Q + im * p.Q_i) * D2) *
+                   (p.P_perp + (g - im * p.Q_i) * D2) *
                    (p.iota_e / (p.P_tor * D2)))
         sqrt_bk = sqrt(bk)
         xk = (ck - sqrt_bk * (1 - sqrt_bk * ak)) / (2 * sqrt_bk)
@@ -137,9 +137,9 @@ function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
         # Small-D_norm branch.
         p_start = max(1.0 / p.P_tor^(1 / 6), p_floor)
 
-        ak = -(Q + im * p.Q_e)
+        ak = -(g - im * p.Q_e)
         bk = ComplexF64(p.P_tor)        # promoted to ComplexF64 for sqrt below
-        ck = -im * (p.Q_e - p.Q_i) * (p.P_tor / p.P_perp) + (Q + im * p.Q_i)
+        ck = im * (p.Q_e - p.Q_i) * (p.P_tor / p.P_perp) + (g - im * p.Q_i)
         sqrt_bk = sqrt(bk)
         xk = (ak * bk - ck) / (2 * sqrt_bk)
 
@@ -153,17 +153,14 @@ end
 # ---------------------------------------------------------------------
 
 """
-    solve_inner(::SLAYERModel{:fitzpatrick},
-                p::SLAYERParameters, Q::Number;
-                pmin=1e-6, p_floor=6.0,
-                reltol=1e-10, abstol=1e-10,
-                maxiters=50_000,
+    solve_inner(::SLAYERModel{:fitzpatrick}, p::SLAYERParameters, s::Number;
+                pmin=1e-6, p_floor=6.0, reltol=1e-10, abstol=1e-10, maxiters=50_000,
                 solver=Rodas5P(autodiff=false)) -> InnerLayerResponse
 
-Solve the Fitzpatrick SLAYER inner-layer Riccati ODE for the complex
-normalized growth rate `Q = ω + iγ`. Returns an `InnerLayerResponse` with
-`tearing = Δ` and `interchange = 0`, so the result is interface-compatible
-with `GGJModel.solve_inner` (which populates both channels); SLAYER's
+Solve the Fitzpatrick SLAYER inner-layer Riccati ODE at the complex growth rate `s = γ − iω` in 1/s, in the
+surface's E×B frame. The layer is evaluated at Fitzpatrick's normalized eigenvalue ĝ = s·τ_k (Fitzpatrick 2023:
+γ = Re(ĝ)/τ_k, ω = −Im(ĝ)/τ_k), and the diamagnetic drifts enter as ĝ − i·Q_e and ĝ − i·Q_i, so the layer co-rotates
+with the electron fluid at ω = ω_*e. Returns an `InnerLayerResponse` with `tearing = Δ` and `interchange = 0`: SLAYER's
 pressureless layer produces only the tearing channel.
 
 # Algorithm
@@ -202,38 +199,27 @@ fields (`n_valid_roots`, `n_poles`), not just γ.
   - `solver`   -- any OrdinaryDiffEq algorithm; pass `Tsit5()` for the
     non-stiff path (rarely needed here)
 """
-function solve_inner(::SLAYERModel{:fitzpatrick},
-    p::SLAYERParameters, Q::Number;
+solve_inner(::SLAYERModel{:fitzpatrick}, p::SLAYERParameters, s::Number; kwargs...) = _slayer_delta(p, ComplexF64(s) * p.tauk; kwargs...)
+
+# The dispersion scans run in the plane Q = (ω + iγ)·τ_k (Park et al. 2022), a −90° rotation of ĝ: ĝ = −i·Q.
+layer_response(::SLAYERModel{:fitzpatrick}, p::SLAYERParameters, Q::Number; kwargs...) =
+    _slayer_delta(p, ComplexF64(imag(Q), -real(Q)); kwargs...)
+
+# Δ of the layer at the normalized eigenvalue ĝ.
+function _slayer_delta(p::SLAYERParameters, g::ComplexF64;
     pmin::Real=1e-6,
     p_floor::Real=6.0,
     reltol::Real=1e-10,
     abstol::Real=1e-10,
     maxiters::Integer=50_000,
     solver=Rodas5P(; autodiff=false))
-    # Convention bridge between our scan plane and the layer eigenvalue.
-    # We scan in the Park plane `Q = ω + iγ` (+γ on the +imag axis; Park
-    # et al. 2022). Fitzpatrick's normalized layer eigenvalue is
-    # `ĝ = (γ − iω)·τ_k` in the co-rotating frame (Fitzpatrick 2023:
-    # γ = Re(ĝ)/τ_k, ω = −Im(ĝ)/τ_k), so +γ sits on his +real axis. The two
-    # planes differ by a pure −90° rotation, `ĝ = −i·Q` — relabeling which
-    # axis is growth, no physics.
-    #
-    # The layer ODE coefficients are analytic in ĝ with Q_e, Q_i, D, P_⊥,
-    # P_φ all real, so Schwarz reflection gives `Δ̂_s(conj ĝ) = conj(Δ̂_s(ĝ))`.
-    # We feed `Q_c = i·conj(Q) = conj(−i·Q) = conj(ĝ)`, hence evaluate
-    # `conj(Δ̂_s(ĝ))`. Conjugation maps zeros to zeros, so the extracted
-    # growth-rate roots are identical to those of Δ̂_s(ĝ); it only reflects
-    # the off-root residual surface, fixing the integration-path orientation
-    # so |Δ| contours are consistent across the scan plane.
-    # Real-Q callers see a mirrored axis; the critical resonant field maps back via conj(Δ(−Q)).
-    Q_c = im * conj(ComplexF64(Q))
 
     # Boundary condition at p_start
-    p_start, W_bound, _ = _riccati_f_initial(p, Q_c; p_floor=p_floor)
+    p_start, W_bound, _ = _riccati_f_initial(p, g; p_floor=p_floor)
 
     # Pre-compute x-independent constants ONCE; the integrator threads this
     # through to every RHS / Jacobian call instead of recomputing per-step.
-    rhs_params = _build_riccati_consts(p, Q_c)
+    rhs_params = _build_riccati_consts(p, g)
 
     # Scalar `u0`: the ODE state is a single `ComplexF64`, not a 1-element
     # vector. OrdinaryDiffEq supports scalar problems via the out-of-place

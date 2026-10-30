@@ -57,18 +57,26 @@ InnerLayerResponse(; tearing::Number=0, interchange::Number=0) =
     InnerLayerResponse(ComplexF64(tearing), ComplexF64(interchange))
 
 """
-    solve_inner(model::InnerLayerModel, params, γ::Number; kwargs...) -> InnerLayerResponse
+    solve_inner(model::InnerLayerModel, params, s::Number; kwargs...) -> InnerLayerResponse
 
 Compute the parity-projected matching data (the `tearing` and `interchange` fields of
-`InnerLayerResponse`) for
-the given inner-layer `model`, physical parameters `params`, and complex
-growth rate `γ`. Concrete models specialize this function.
+`InnerLayerResponse`) for the given inner-layer `model`, physical parameters `params`, and complex
+growth rate `s = γ − iω` in 1/s, in the surface's E×B frame. Every model takes this same `s`.
+Concrete models specialize this function.
 
 See `InnerLayerResponse` for the physics-oriented field definitions.
 Pressureless models (SLAYER) populate only `tearing` and leave
 `interchange` at zero; finite-pressure models (GGJ) populate both.
 """
 function solve_inner end
+
+"""
+    layer_response(model::InnerLayerModel, params, z::Number; kwargs...) -> InnerLayerResponse
+
+[`solve_inner`](@ref) in the variable `model`'s dispersion scans run in, so the layer is evaluated at exactly the value
+scanned: the growth rate `s` itself for GGJ, and Q = (ω + iγ)·τ_k = i·s·τ_k for SLAYER.
+"""
+layer_response(model::InnerLayerModel, params, z::Number; kwargs...) = solve_inner(model, params, z; kwargs...)
 
 """
     solve_inner_profile(model::InnerLayerModel, params, γ::Number; kwargs...)

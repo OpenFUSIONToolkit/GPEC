@@ -1,6 +1,6 @@
 @testset "Dispersion per-surface rotation shift" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
+    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner, layer_response
     using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using GeneralizedPerturbedEquilibrium.Tearing: validate, _q_shift, _build_surface_coupling
     using LinearAlgebra
@@ -70,14 +70,17 @@
     @testset "Scanned Re(Q) runs along the ζ axis of Ω_E" begin
         # The Doppler sign holds only if the scanned Re(Q) shares the ζ axis of the kinetic file's Ω_E, as
         # GPEC's ω_*e from `build_slayer_inputs` does. The layer Δ vanishes where the mode co-rotates with the
-        # electron fluid, so that zero must sit at Re(Q) = +τ_k·ω_*e: reversing either `Q_e = −τ_k·ω_*e` or
-        # the `i·conj(Q)` bridge in `solve_inner` moves it to −τ_k·ω_*e.
+        # electron fluid, so that zero must sit at Re(Q) = +τ_k·ω_*e: reversing the sign of `Q_e = −τ_k·ω_*e` or
+        # of its entry ĝ − i·Q_e in the layer moves it to −τ_k·ω_*e.
         slayer = SLAYERModel(; variant=:fitzpatrick)
         for (ω_e, ω_i) in ((-1.0e4, 5.0e3), (1.0e4, -5.0e3), (-1.0e4, 0.0))
             p = slayer_parameters(; P_perp_model=:chi_perp_e, n_e=5.0e19, t_e=1000.0, t_i=1000.0, omega_e=ω_e, omega_i=ω_i,
                 qval=2.0, sval_r=1.0, bt=2.0, rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0, chi_perp_e=1.0, chi_tor=1.0, m=2, n=1)
             Q_electron = p.tauk * ω_e + 0.01im
-            @test abs(solve_inner(slayer, p, Q_electron).tearing) < 0.1 * abs(solve_inner(slayer, p, -conj(Q_electron)).tearing)
+            @test abs(layer_response(slayer, p, Q_electron).tearing) < 0.1 * abs(layer_response(slayer, p, -conj(Q_electron)).tearing)
+            # solve_inner takes the growth rate s = γ − iω of that same point, s = −i·Q/τ_k.
+            s = -im * Q_electron / p.tauk
+            @test solve_inner(slayer, p, s).tearing ≈ layer_response(slayer, p, Q_electron).tearing rtol = 1e-8
         end
     end
 

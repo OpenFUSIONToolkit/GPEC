@@ -36,7 +36,7 @@ using LinearAlgebra
 using StaticArrays
 
 using ..InnerLayer
-using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
+using ..InnerLayer: InnerLayerModel, layer_response, GGJModel, GGJParameters,
     SLAYERModel, SLAYERParameters
 
 include("SurfaceCoupling.jl")

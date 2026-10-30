@@ -42,7 +42,7 @@ GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GG
         f = GGJDomainTestResidual(g, Q -> Q + 0.1im, ComplexF64[])
         gr = D._run_analysis(re_paths, im_paths, [zeros(2)], 1.0;
             pole_threshold=10.0, filter_above_poles=false, filter_outside_re=false,
-            residual=f, classification=:winding, zero_winding=1)
+            residual=f, classification=:winding)
         @test :no_root in gr.warning_flags
         @test isempty(gr.valid_roots)
         @test !isempty(f.evaluated) && all(Q -> imag(Q) > 0, f.evaluated)
@@ -50,7 +50,7 @@ GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GG
         # Expansion may find a nearby unstable root, but its returned trust disk must remain in-domain.
         nearby = GGJDomainTestResidual(g, Q -> Q - 0.014im, ComplexF64[])
         kind, W, radius = D._winding_classify(nearby, ComplexF64[center], 1, re_paths, im_paths, 2.0;
-            zero_winding=1, rfrac=0.001)
+            rfrac=0.001)
         @test kind === :root
         @test W ≈ 1
         @test 0 < radius < imag(center)
@@ -66,7 +66,7 @@ GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GG
         empty!(f.evaluated)
         @test D._polish_root(f, 0.0im, 1.0) == (0.0im, 0, false)
         kind, _, _ = D._winding_classify(f, ComplexF64[0.0im], 1, re_paths, im_paths, 2.0;
-            zero_winding=1, rfrac=0.5)
+            rfrac=0.5)
         @test kind === :unresolved
         @test isempty(f.evaluated)
     end

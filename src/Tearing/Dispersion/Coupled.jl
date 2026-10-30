@@ -104,7 +104,7 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
         # form is equivalent for pressureless SLAYER surfaces
         # (Δ_interchange=0) and approximate for GGJ surfaces (drops
         # Glasser stabilization).
-        Δ_k = solve_inner(sc.model, sc.params, Q_k).tearing * sc.scale
+        Δ_k = layer_response(sc.model, sc.params, Q_k).tearing * sc.scale
         # The inner-layer solver returns NaN when the Riccati integration fails
         # (clustered near poles). Propagate it as the residual so the scan flags
         # this Q-cell via its isfinite checks, rather than feeding NaN into the

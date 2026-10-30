@@ -14,15 +14,14 @@
 # Type-parameter `S` of `SLAYERModel{S}` selects the Riccati formulation
 # used for the dispersion relation; only `:fitzpatrick` is implemented.
 #
-# `Q = ω + iγ` is passed directly to `solve_inner` rather than stored on
-# the parameter struct.
+# The growth rate is passed to `solve_inner` rather than stored on the parameter struct.
 
 module SLAYER
 
 using LinearAlgebra
 using StaticArrays
 
-import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner, ..InnerLayerParameters
+import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner, ..layer_response, ..InnerLayerParameters
 using ...Utilities.PhysicalConstants
 using ...Utilities.NeoclassicalResistivity
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,

@@ -28,7 +28,7 @@ using ..Equilibrium: KineticProfileData
 using ..ForceFreeStates: ForceFreeStatesResult, ggj_parameters
 
 import ..InnerLayer as InnerLayer
-using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
+using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner, layer_response,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
     GGJModel, GGJParameters,
     LayerWidths, slayer_layer_thickness

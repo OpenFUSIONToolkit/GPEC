@@ -24,7 +24,7 @@
 Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk, q_shift)`. Calling `sc(Q)` returns the complex residual
 
 ```
-r(Q) = dp_diag - scale * solve_inner(model, params, Q + q_shift).tearing - dc
+r(Q) = dp_diag - scale * layer_response(model, params, Q + q_shift).tearing - dc
 ```
 
 `q_shift` is the surface's E×B Doppler shift, a real frequency offset in the layer's own
@@ -50,7 +50,7 @@ struct SurfaceCoupling{M<:InnerLayerModel,P}
 end
 
 function (sc::SurfaceCoupling)(Q::Number)
-    Δ = solve_inner(sc.model, sc.params, layer_argument(sc, Q)).tearing
+    Δ = layer_response(sc.model, sc.params, layer_argument(sc, Q)).tearing
     return sc.dp_diag - sc.scale * Δ - sc.dc
 end
 

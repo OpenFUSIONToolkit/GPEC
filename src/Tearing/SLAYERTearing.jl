@@ -45,13 +45,6 @@ _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 _is_ggj(::GGJModel) = true
 _is_ggj(::Any) = false
 
-# Winding number of an isolated zero of the dispersion residual, for
-# root_classification = :winding. The SLAYER residual is a function of conj(Q)
-# (solve_inner evaluates conj(Δ̂(ĝ)); see Riccati.jl), so a zero winds −1.
-_zero_winding(::SLAYERModel{:fitzpatrick}) = -1
-_zero_winding(model) =
-    throw(ArgumentError("root_classification=:winding is not available for inner model $(typeof(model))"))
-
 # ---------------------------------------------------------------------
 # Scan dispatch
 # ---------------------------------------------------------------------
@@ -140,9 +133,6 @@ the coupled scan runs in the lab frame, so
 ```
 Q_layer = τ_k·ω_lab − τ_k·n·Ω_E    ⇒    q_shift = −τ_k·n·Ω_E
 ```
-
-The conjugated layer Δ and the opposite-sign diamagnetic inputs (`Q_e = −τ_k·ω_*e`) flip together
-and leave this sign unchanged.
 """
 function _q_shift(p::SLAYERParameters, Ω_E::Real)
     iszero(Ω_E) || p.n >= 1 ||
@@ -304,7 +294,6 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
 
     classification = config.root_classification === :auto ? :threshold : config.root_classification
     winding = classification === :winding
-    zw = winding ? _zero_winding(model) : -1
 
     if problem.coupling_mode === :uncoupled
         for (k, sc) in enumerate(scs)
@@ -318,8 +307,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
                 residual=(config.polish_roots || winding) ? sc : nothing,
                 polish=config.polish_roots,
                 validity_rtol=config.validity_rtol,
-                classification=classification,
-                zero_winding=zw)
+                classification=classification)
             :no_root in gr.warning_flags && @warn(
                 "SLAYER: no usable growth-rate root found for surface " *
                 "$(_surface_label(params[k])); reported γ=0 is a " *
@@ -354,8 +342,7 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
             gamma_gap_threshold=config.gamma_gap_threshold,
             residual=winding ? mc : nothing,
             polish=false,
-            classification=classification,
-            zero_winding=zw)
+            classification=classification)
         :no_root in gr.warning_flags && @warn(
             "SLAYER: no usable growth-rate root found for the coupled " *
             "$(m_use)-surface determinant; reported γ=0 is a placeholder, " *

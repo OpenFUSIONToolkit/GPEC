@@ -152,7 +152,7 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
         # Map the shared scanned Q onto this surface's normalization, then Doppler it into
         # the surface's E×B frame (GGJ carries tauk = 1, so the ratio is a no-op there).
         Q_k = layer_argument(sc, Qc * (sc.tauk / ref_tauk))
-        resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
+        resp = layer_response(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
         # delta1 = interchange (parity +), delta2 = tearing (parity −); named
         # fields expose the two channels directly. sc.scale converts inner-basis

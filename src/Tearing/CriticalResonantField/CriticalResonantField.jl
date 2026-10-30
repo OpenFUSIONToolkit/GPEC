@@ -9,7 +9,7 @@ module CriticalResonantField
 
 using Printf
 
-using ..InnerLayer: InnerLayerModel, solve_inner
+using ..InnerLayer: InnerLayerModel, layer_response
 
 include("TorqueBalance.jl")
 

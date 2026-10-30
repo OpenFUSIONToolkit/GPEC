@@ -33,7 +33,7 @@ The `inner_model` token the tearing output records for `model`, e.g. `"ggj_ray"`
 model_name(::GGJModel{S}) where {S} = "ggj_$S"
 model_name(::SLAYERModel{S}) where {S} = "slayer_$S"
 
-export InnerLayerModel, InnerLayerParameters, InnerLayerResponse, solve_inner, solve_inner_profile
+export InnerLayerModel, InnerLayerParameters, InnerLayerResponse, solve_inner, solve_inner_profile, layer_response
 export layer_eta, layer_rho, layer_omega_E
 export GGJ, GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta

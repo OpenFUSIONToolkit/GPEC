@@ -11,17 +11,17 @@ _crf_target(Q) = 0.1 + exp(-(Q - 1)^2 / 0.01) + 2exp(-(Q - 3)^2 / 0.01)
 _CRFStubLayer() = _CRFStubLayer(_crf_target)
 # A fold at Q = 3, then a dip, then a rise past the fold's height toward Q_e = 0.5.
 _crf_target_rising(Q) = 0.1 + exp(-(Q - 3)^2 / 0.01) + 0.6 * max(2.5 - Q, 0.0)
-function InnerLayer.solve_inner(s::_CRFStubLayer, p, Q::Number)
-    Qc = -real(Q)   # undo the axis mirror cole_delta applies
+function InnerLayer.layer_response(s::_CRFStubLayer, p, Q::Number)
+    Qc = -real(Q)   # cole_delta evaluates the scans' variable at −Q
     jxb = 2 * (_CRF_Q0_STUB - Qc) / s.target(Qc)
-    return (; tearing=conj(im / jxb - 1e-2))
+    return (; tearing=im / jxb - 1e-2)
 end
 
 # Cole and Fitzpatrick (2006) Table I visco-resistive layer on Cole's axis, Δ̂ = 2.104[i(Q−Q_i)]^(1/6)[i(Q−Q_e)]^(5/6)P^(1/6).
 struct _VRiStub <: InnerLayerModel end
 const _VRI_P = 4.0
 _vri(Q, Q_e, Q_i) = 2.104 * (im * (Q - Q_i))^(1 / 6) * (im * (Q - Q_e))^(5 / 6) * _VRI_P^(1 / 6)
-InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q), p.Q_e, p.Q_i)))
+InnerLayer.layer_response(::_VRiStub, p, Q::Number) = (; tearing=_vri(-real(Q), p.Q_e, p.Q_i))
 
 @testset "CriticalResonantField: torque balance" begin
     using GeneralizedPerturbedEquilibrium
@@ -43,7 +43,8 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
 
     @testset "Cole axis: branch lies between Q_e and Q0" begin
         p = _mk()
-        @test cole_delta(model, p, 0.7) ≈ conj(InnerLayer.solve_inner(model, p, -0.7).tearing)
+        # Cole's Q is the layer at ĝ = i·Q, the growth rate s = i·Q/τ_k.
+        @test cole_delta(model, p, 0.7) ≈ InnerLayer.solve_inner(model, p, 0.7im / p.tauk).tearing rtol = 1e-10
         Q0 = 5.45
         tb = TorqueBalance(model, p, Q0, 1.0, p.lu, 2 / p.sval_r^2, 1e-2)
         Qs, bal, Qpeak, br, idx, _ = torque_balance_scan(tb; n=401)
