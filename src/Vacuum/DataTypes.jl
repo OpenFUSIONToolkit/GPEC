@@ -697,8 +697,8 @@ Expects a full-torus boundary on the same `mtheta`/`nzeta` grid as `plasma_surf`
 
 # Notes
 
-  - Axisymmetric boundaries (`nzeta_in == 1`) support nowall, conformal, elliptical, dee, mod_dee and
-    from_file; non-axisymmetric boundaries support nowall and conformal
+  - Axisymmetric boundaries (`nzeta_in == 1`) take `nothing` (no wall), `ConformalWall`, `EllipticalWall`,
+    `DeeWall`, `ModDeeWall` or `FileWall`; non-axisymmetric boundaries take `nothing` or `ConformalWall`
   - The non-axisymmetric conformal wall displaces each plasma point along its own normal, so wall grid
     index `(i, j)` is the closest wall point to plasma index `(i, j)` — the correspondence the near-field
     patch of `compute_3D_kernel_matrices!` assumes. The revolved branch does not share it: the wall sits

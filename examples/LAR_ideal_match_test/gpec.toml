@@ -1,6 +1,6 @@
 # LAR ideal-limit reference: large-aspect-ratio analytic TJ equilibrium, epsilon = a/R0 = 0.2, n = 1.
 #
-# The ideal-limit companion to LAR_resistive_match_test, identical except that gal_ideal_flag skips
+# The ideal-limit companion to LAR_resistive_match_test, identical except that [Match] ideal = true skips
 # the resistive inner layer entirely and builds the bare (perfectly shielded) coil columns. Running
 # the two side by side isolates what the inner layer contributes on this geometry. The per-surface
 # resistivity, density and rotation inputs are omitted here because the ideal limit never reads them.
@@ -33,7 +33,7 @@ mtheta           = 128         # Poloidal grid points
 shape = "conformal"            # Wall shape (conformal, elliptical, dee, mod_dee, file)
 standoff_fraction = 20         # Wall standoff in plasma minor radii
 
-# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)

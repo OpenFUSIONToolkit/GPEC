@@ -116,7 +116,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
 
 9. **Tearing** (`src/Tearing/`) - Tearing mode dispersion and drivers
    - `Dispersion/` - Dispersion relation solvers
-   - `Runner/` - Orchestration across surfaces and toroidal mode numbers
+   - `TearingProblem.jl`, `GGJTearing.jl`, `SLAYERTearing.jl` - The tearing problem and its solve with each inner-layer model
+   - `CriticalResonantField/` - Critical resonant field (field penetration threshold)
    - Re-binds `InnerLayer` and exposes it alongside its own submodules
 
 10. **KineticForces** (`src/KineticForces/`) - Kinetic contributions to the force balance

@@ -20,7 +20,7 @@ mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
 flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace each flux surface
 
-# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)

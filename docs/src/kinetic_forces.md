@@ -45,7 +45,7 @@ attach_kinetic_profiles!(equil, "kinetic.h5"; ion_species=[IonSpecies(; z=1, m=2
 
 or copy loaded data with new settings, `KineticProfileData(equil.kinetic; impurity_charge=6)`.
 The default is one deuterium main ion carrying all of `n_i`, with a carbon impurity. In a deck
-the species keys are still read from `[KineticForces]`.
+they are `[Equilibrium]` keys: `[[Equilibrium.ion_species]]`, `impurity_charge` and `impurity_mass`.
 
 ## Multi-ion runs
 

@@ -73,7 +73,7 @@ Modules, with the abbreviation to use in prose:
 
 `EQUIL`, `VAC`, `FFS`, and `PE` were already in common use; the rest are new. Short module names take no abbreviation.
 
-A submodule may be named where it helps triage: `ForceFreeStates.Galerkin`, `InnerLayer.GGJ`, `InnerLayer.SLAYER`, `Tearing.Dispersion`, `Tearing.Runner`. Only directories holding Julia sources qualify, so data directories are not Areas.
+A submodule may be named where it helps triage: `ForceFreeStates.Galerkin`, `InnerLayer.GGJ`, `InnerLayer.SLAYER`, `Tearing.Dispersion`. Only directories holding Julia sources qualify, so data directories are not Areas.
 
 Areas outside `src/`: `Benchmarks`, `Build`, `CI`, `Docs`, `Examples`, `Regression`, `Repo`, `Test`.
 

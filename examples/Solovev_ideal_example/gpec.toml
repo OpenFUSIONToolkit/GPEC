@@ -40,7 +40,7 @@ regularization_width = 0.0              # Regularization width for singular surf
 # The SLAYER example and regression case use the DIII-D-like geqdsk instead
 # (see examples/DIIID-like_SLAYER_example).
 
-# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)

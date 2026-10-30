@@ -13,7 +13,7 @@ example_dir = "examples/DIIID-like_gal_resistive_pe_example"
 # Stop after force-free states so the run completes; the follow-up Galerkin-PE PR removes this.
 remove_sections = ["ForcingTerms", "PerturbedEquilibrium"]
 
-# Full-pipeline coverage for gal_match_flag → gal_matched_odestate → PerturbedEquilibrium. Tracks the
+# Full-pipeline coverage for the [Match] section → matched solution → PerturbedEquilibrium. Tracks the
 # FINITE, per-rational-surface singular-coupling scalars (the physics-meaningful driven quantities) — not
 # any whole-profile ξ/ξ′ norm (those diverge at the rationals and are ill-posed as benchmarks).
 

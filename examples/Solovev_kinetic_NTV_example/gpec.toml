@@ -38,7 +38,7 @@ forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Bi
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
 
-# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
