@@ -80,6 +80,41 @@ end
         @test odet.u[:, :, 1] ≈ S_expected rtol = 1e-12
     end
 
+    @testset "zero crossings of an oscillator: per step and Morse split" begin
+        # U₁' = ω U₂, U₂' = -ω U₁ per mode (B = ω > 0): U₁ = sin(ωψ + φ) vanishes as W⁻¹ = tan(ωψ + φ) rises through 0.
+        # The principal solution (ω = 1, φ = 0) on (0, 7] crosses at π and 2π; its poles at π/2 and 3π/2 do not count.
+        u, u_prev = zeros(ComplexF64, 1, 1, 2), zeros(ComplexF64, 1, 1, 2)
+        u_prev[1, 1, 2] = 1
+        ncross, nneg = 0, 0
+        for ψ in 0.1:0.1:7.0
+            u[1, 1, 1], u[1, 1, 2] = sin(ψ), cos(ψ)
+            k, nneg = FFS.step_zero_crossings(u, u_prev, nneg, 1)
+            ncross += k
+            u_prev .= u
+        end
+        @test ncross == 2
+
+        # Two modes on [0, L]: mode 1 crosses once more than its principal solution, mode 2 as often.
+        ω, φ, L = [1.0, 2.0], [1.5, 0.3], 2.0
+        function state(ψ)
+            y = zeros(ComplexF64, 2, 2, 2)
+            for j in 1:2
+                y[j, j, 1], y[j, j, 2] = sin(ω[j] * ψ + φ[j]), cos(ω[j] * ψ + φ[j])
+            end
+            return y
+        end
+        P12 = diagm(ComplexF64.(sin.(ω .* L)))
+        @test FFS.crossings_beyond_principal(P12, state(0.0), state(L), 1) == 1
+        # Independent of the column basis and its scales
+        T = ComplexF64[2 1; 1 3] * Diagonal([1e-9, 1e9])
+        rebase(y) = cat(y[:, :, 1] * T, y[:, :, 2] * T; dims=3)
+        @test FFS.crossings_beyond_principal(P12, rebase(state(0.0)), rebase(state(L)), 1) == 1
+        # Integrated backward from L, where the backward propagator's P₁₂ is -sin(ωL)
+        @test FFS.crossings_beyond_principal(-P12, state(L), state(0.0), -1) == 1
+        # A 2×2 Bunch–Kaufman pivot block holds one negative eigenvalue
+        @test FFS.count_negative_eigenvalues!(Hermitian(ComplexF64[0 1; 1 0])) == 1
+    end
+
     # ── Shared Solovev setup ──────────────────────────────────────────────────
     #
     # equil (Grad-Shafranov solve) and mats (metric matrices) are expensive and
@@ -122,6 +157,11 @@ end
         # Riccati stores chunk endpoints, the forward path stores every saved ODE step,
         # so the Riccati store is always the sparser of the two.
         @test odet_ric.step <= odet_fwd.step
+
+        # Both find this example fixed-boundary unstable, the Riccati core from its chunk propagators. Only the
+        # verdict is compared: the example is Mercier unstable at q = 2, where the crossings accumulate
+        # log-periodically into the surface, so their number depends on resolution.
+        @test odet_ric.nzero > 0 && odet_fwd.nzero > 0
     end
 
     # Note: a Solovev per-surface Δ' regression testset previously lived here,
