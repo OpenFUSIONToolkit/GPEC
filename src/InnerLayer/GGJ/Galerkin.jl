@@ -12,100 +12,62 @@ using FastGaussQuadrature: gausslobatto
 using QuadGK: quadgk
 
 """
+    ggj_rows([CT,] params, Q, x) -> (Ũ, Ṽ)
+
+GWP2016 Eq. 11 solved for the second derivatives, `u'' = Ũ·u + Ṽ·u'` for u = (Ψ, Ξ, Υ), at real or complex
+`x` (used as given). `CT` is the element type (default `ComplexF64`). The Galerkin weak form scales the rows by
+diag(1, Q², Q) ([`_physical_uv`](@ref)); the ray march takes them as the lower half of its companion matrix
+([`ode_matrix`](@ref)).
+"""
+ggj_rows(params::GGJParameters, Q::Number, x::Number) = ggj_rows(ComplexF64, params, Q, x)
+
+function ggj_rows(::Type{CT}, params::GGJParameters, Q::Number, x::Number) where {CT<:Complex}
+    e = CT(params.E)
+    f = CT(params.F)
+    g = CT(params.G)
+    h = CT(params.H)
+    k = CT(params.K)
+    q = CT(Q)
+    q2 = q * q
+    x2 = x * x
+    # Ψ'' = Q Ψ − Q x Ξ + H Υ';  Ξ'' = −(x/Q) Ψ + (x²/Q) Ξ − ((E+F)/Q²) Υ − (H/Q²) Ψ';
+    # Υ'' = −(x/Q) Ψ − Q(G−KE) Ξ + (x²/Q + Q(G+KF)) Υ + HKQ Ψ'
+    #! format: off
+    Ũ = SMatrix{3,3,CT}(
+        q,          -x / q,             -x / q,
+        -q * x,     x2 / q,             -(g - k * e) * q,
+        0,          -(e + f) / q2,      x2 / q + (g + k * f) * q)
+    Ṽ = SMatrix{3,3,CT}(
+        0,          -h / q2,            h * k * q,
+        0,          0,                  0,
+        h,          0,                  0)
+    #! format: on
+    return Ũ, Ṽ
+end
+
+"""
     _physical_uv(params, Q, x) -> (I, U, V)
 
 3×3 coefficients of `I·u'' − V·u' − U·u = 0` for u = (Ψ, Ξ, Υ) at real or complex `x`, with
-(I, V, U) = (A, −B, −C) of GWP2016 Eqs. 12–15; each row is one equation of GWP2016 Eq. 11.
+(I, V, U) = (A, −B, −C) of GWP2016 Eqs. 12–15: the rows of [`ggj_rows`](@ref) scaled by diag(1, Q², Q).
 """
 function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Number)
-    e = ComplexF64(params.E)
-    f = ComplexF64(params.F)
-    h = ComplexF64(params.H)
-    g = ComplexF64(params.G)
-    k = ComplexF64(params.K)
-    q = Q
-    q2 = q * q
-    x2 = x * x
-
+    Ũ, Ṽ = ggj_rows(params, Q, x)
+    q, q2 = Q, Q * Q
     Imat = @SMatrix ComplexF64[1 0 0; 0 q2 0; 0 0 q]
-
-    # U = −C (GWP2016 Eq. 15) and V = −B (Eq. 14), rows scaled by diag(1, Q², Q) like `Imat`.
     #! format: off
     U = @SMatrix ComplexF64[
-        q                     (-q * x)                       0
-        (-x / q) * q2         (x2 / q) * q2                  (-(e + f) / q2) * q2
-        (-x / q) * q          (-(g - k * e) * q) * q         (x2 / q + (g + k * f) * q) * q
+        Ũ[1, 1]         Ũ[1, 2]         0
+        Ũ[2, 1] * q2    Ũ[2, 2] * q2    Ũ[2, 3] * q2
+        Ũ[3, 1] * q     Ũ[3, 2] * q     Ũ[3, 3] * q
     ]
     V = @SMatrix ComplexF64[
-        0                       0         h
-        (-h / q2) * q2          0         0
-        (h * k * q) * q         0         0
+        0               0               Ṽ[1, 3]
+        Ṽ[2, 1] * q2    0               0
+        Ṽ[3, 1] * q     0               0
     ]
     #! format: on
-
     return Imat, U, V
-end
-
-# Hermite cubic basis on [x0, x1]: values pb and derivatives qb, slots 1:4 ↔ (u₀, u₀', u₁, u₁').
-function _hermite(x::Real, x0::Real, x1::Real)
-    dx = x1 - x0
-    t0 = (x - x0) / dx
-    t1 = 1 - t0
-    t02 = t0 * t0
-    t12 = t1 * t1
-    pb = SVector{4,Float64}(
-        t12 * (1 + 2t0),
-        t12 * t0 * dx,
-        t02 * (1 + 2t1),
-        -t02 * t1 * dx
-    )
-    qb = SVector{4,Float64}(
-        -6t0 * t1 / dx,
-        t0 * (3t0 - 4) + 1,
-        6t1 * t0 / dx,
-        t0 * (3t0 - 2)
-    )
-    return pb, qb
-end
-
-# Grid packing: pfac > 1 concentrates nodes near X = 0 (GWP2016 Eq. 33), pfac = 1 is uniform,
-# 0 < pfac < 1 packs toward the edge (Eq. 5).
-function _pack(nx::Int, pfac::Float64, side::String)
-    xi = zeros(Float64, 2nx + 1)
-    if side == "right"
-        for i in 0:(2nx)
-            xi[i+1] = i / (2.0 * nx)
-        end
-    elseif side == "left"
-        for i in (-2nx):0
-            xi[i+2nx+1] = i / (2.0 * nx)
-        end
-    else # "both"
-        for i in (-nx):nx
-            xi[i+nx+1] = i / Float64(nx)
-        end
-    end
-
-    x = similar(xi)
-    if pfac > 1
-        λ = sqrt(1 - 1 / pfac)
-        @. x = log((1 + λ * xi) / (1 - λ * xi)) / log((1 + λ) / (1 - λ))
-    elseif pfac == 1
-        x .= xi
-    elseif pfac > 0
-        λ = sqrt(1 - pfac)
-        a = log((1 + λ) / (1 - λ))
-        @. x = (exp(a * xi) - 1) / (exp(a * xi) + 1) / λ
-    else
-        @. x = xi^(-pfac)
-    end
-
-    if side == "left"
-        @. x = 2x + 1
-    elseif side == "right"
-        @. x = 2x - 1
-    end
-    return x
 end
 
 # x_max and the two thin matching cells inside it, from where the series residual (GW2020 Eq. 54)
@@ -250,7 +212,7 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     xm = (x1_packed + x0) / 2
     dxp = (x1_packed - x0) / 2
     mx = ixmax ÷ 2
-    packed = xm .+ dxp .* _pack(mx, pfac, side)
+    packed = xm .+ dxp .* pack_grid(mx, pfac, side)
     for i in 1:(ixmax+1)
         x_nodes[i] = packed[i]
     end
@@ -310,9 +272,7 @@ function _galerkin_workspace(x_nodes::Vector{Float64}, etypes::Vector{CellType})
 
         emap_local = Int[]
         if et == CT_EXT
-            # Extra asymptotic DOFs: emap = (imap, imap+1, imap+2).
-            # With noexp, ndim = imap so only emap[1] is active; emap[2,3] > ndim
-            # and are skipped during assembly.
+            # Asymptotic DOFs (imap, imap+1, imap+2); with noexp only emap[1] ≤ ndim, the rest are skipped.
             emap_local = [imap, imap + 1, imap + 2]
             map_extra = [imap; imap + 1; imap + 2]  # 3-element column
             map_local = hcat(map_local, map_extra)
@@ -373,7 +333,7 @@ function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
             Imat, U0, V0 = _physical_uv(params, Q, cis(θ) * x)
             Umat, Vmat = cis(2θ) * U0, cis(θ) * V0
         end
-        pb, qb = _hermite(x, cell.x_left, cell.x_right)
+        pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
 
         for ip in 0:np_cell, jp in 0:np_cell
             for jpert in 1:3, ipert in 1:3
@@ -410,7 +370,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
             w = dxc * quad_weights[iq]
             uax, duax = physical_ua_dua(cache, x)
             Imat, Umat, Vmat = _physical_uv(params, Q, x)
-            pb, qb = _hermite(x, cell.x_left, cell.x_right)
+            pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
 
             # Extra DOF φ = ua₁(x_r)·H₁₀ + ua₁'(x_r)·H₁₁, the large solution Hermite-blended at the right
             # node; assembles (hᵢ, Lφ), (φ, Lhᵢ) and (φ, Lφ).
@@ -428,7 +388,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
                 cell_mat[1, :, ep+1, ip+1] .+= w .* term2
             end
 
-            # (phi_1^T, L*phi_1) self-interaction
+            # (φ, Lφ) self-interaction
             ua2_s = ua_bdy[:, 1] * pb[3] + dua_bdy[:, 1] * pb[4]
             dua2_s = ua_bdy[:, 1] * qb[3] + dua_bdy[:, 1] * qb[4]
             term = transpose(dua2_s) * Imat * dua1 + transpose(ua2_s) * Vmat * dua1 + transpose(ua2_s) * Umat * ua1
@@ -452,7 +412,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
             x = x0c + dxc * quad_nodes[iq]
             w = dxc * quad_weights[iq]
             Imat, Umat, Vmat = _physical_uv(params, Q, x)
-            pb, qb = _hermite(x, cell.x_left, cell.x_right)
+            pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
 
             if cell.etype == CT_EXT1
                 uax, duax = physical_ua_dua(cache, x)
@@ -504,9 +464,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
     return ComplexF64(val_11), ComplexF64(val_12)
 end
 
-# -----------------------------------------------------------------------
 # Global assembly and solve.
-# -----------------------------------------------------------------------
 
 function _assemble_and_solve!(ws::GalerkinWorkspace,
     params::GGJParameters, Q::ComplexF64,
@@ -526,7 +484,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     for ix in 1:ws.nx
         cell = ws.cells[ix]
 
-        # Gauss quadrature for the Hermite contribution (all cells but CT_RES)
+        # Hermite contribution (all cells but CT_RES)
         if cell.np >= 0
             np_eff = cell.np
             fill!(cell_mat, 0)
@@ -542,7 +500,6 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
             fill!(cell_rhs_ext, 0)
             _extension!(cell_mat_ext, cell_rhs_ext, cell, quad_nodes, quad_weights, params, Q, cache)
 
-            # Assemble ext contributions
             npp = np_eff
             for ip in 0:npp, ipert in 1:mpert
                 i = ip < size(cell.map, 2) ? cell.map[ipert, ip+1] : cell.emap[1]
@@ -622,11 +579,9 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q:
     mpert = 3
     offset = ws.kl + ws.kl + 1
 
-    # Copy base matrix/rhs for both parities
     ws.mat[:, :, 2] .= ws.mat[:, :, 1]
     ws.rhs[:, 2] .= ws.rhs[:, 1]
 
-    # Boundary condition at x = 0 (parity BCs)
     cell1 = ws.cells[1]
     Imat0, _, _ = _physical_uv(params, Q, cell1.x_left)
 
@@ -700,8 +655,8 @@ end
 
 Hermite Galerkin solve on the all-`CT_NONE` grid of `ws` along the ray x = e^{iθ}s, with the
 far-field condition imposed strongly at the last node: its state is v = Us + Δ·Ub + c₁E₁ + c₂E₂,
-with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives. The last node's six DOFs are
-replaced by (Δ, c₁, c₂), tested in the same three directions. Returns the raw Δ and decaying-pair coefficients per parity
+with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives; the last node's six DOFs are
+replaced by (Δ, c₁, c₂). Returns the raw Δ and decaying-pair coefficients per parity
 (isol = 1 even/Δ₊, 2 odd/Δ₋); `ws.sol` holds the full nodal solution afterwards.
 """
 function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64,
@@ -792,7 +747,7 @@ function _solution_profile(ws::GalerkinWorkspace; npc::Int=10)
         cell.np >= 0 || continue
         for t in range(0, 1; length=npc + 1)[1:(end-1)]
             x = cell.x_left + t * (cell.x_right - cell.x_left)
-            pb, _ = _hermite(x, cell.x_left, cell.x_right)
+            pb, _ = hermite_basis(x, cell.x_left, cell.x_right)
             fill!(vals, 0)
             for isol in 1:2, ipert in 1:mpert, ip in 0:cell.np
                 g = cell.map[ipert, ip+1]

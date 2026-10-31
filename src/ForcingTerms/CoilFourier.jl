@@ -31,9 +31,7 @@ Pre-computed plasma boundary grid for evaluating coil fields.
   - `phi_grid`: base toroidal angle grid `[nzeta]` in radians = `-helicity × 2π × j/nzeta`
   - `phi_offset`: per-θ toroidal angle correction `[mtheta]` from SFL coordinates:
     `ν(ψ, θ)` scaled by `-helicity`, so the physical toroidal angle at `(i, j)` is
-    `phi_grid[j] + phi_offset[i]`. Matches Fortran's `phi = -helicity*(2π*ζ + dphi(ψ,θ))`.
-    Zero for axisymmetric equilibria on-axis; non-zero off-axis due to SFL coordinate
-    transform (Hamada/SFL θ ≠ geometric θ introduces a toroidal offset).
+    `phi_grid[j] + phi_offset[i]`, as Fortran's `phi = -helicity*(2π*ζ + dphi(ψ,θ))`
   - `dR_dtheta`, `dZ_dtheta`: poloidal derivatives w.r.t. unit-norm angle θ_norm ∈ [0,1]
     `dR_dtheta[i] = dR/dθ_norm = 2π × dR/dθ_phys`
 """
@@ -51,61 +49,17 @@ end
 """
     sample_boundary_grid(equil, mtheta, nzeta; psi=equil.rzphi_xs[end]) -> BoundaryGrid
 
-Evaluate plasma geometry at a uniform (mtheta × nzeta) grid on the flux surface `psi`.
+Evaluate the plasma geometry on a uniform `mtheta × nzeta` grid on the flux surface `psi`, from the
+`equil.rzphi_rsquared`, `rzphi_offset` and `rzphi_nu` splines. dR/dθ_norm and dZ/dθ_norm (θ_norm ∈ [0,1])
+come from periodic cubic splines of R and Z.
 
-Uses `equil.rzphi_rsquared` and `equil.rzphi_offset` splines at the given `psi`.
+The default `psi` is the outermost computed surface `psihigh`, the last knot of the geometry splines;
+ψ_N = 1 would extrapolate them and can drive `rzphi_rsquared` negative. The physical control surface is
+`psilim` (Fortran evaluates the coil field there, `field_bs_psi`), which lies inside `psihigh` when edge
+truncation fires: pass `psi = psilim` whenever a ForceFreeStates solve is at hand, as the production paths do.
 
-Defaults to the **outermost computed surface** `equil.rzphi_xs[end]` (i.e. `psihigh`), NOT
-ψ_N = 1, matching Fortran GPEC.
-
-**Fortran reference** (PrincetonUniversity/GPEC v1.5.7): the coil field is evaluated at
-`psilim`, never at ψ_N = 1 — `CALL field_bs_psi(psilim, coilmn(:,j), ...)` (`gpec/gpec.f:431`).
-`field_bs_psi` is the direct analog of this function, using the same two splines and the same
-square root: `rfac = SQRT(crzphi_f(1))` (`coil/field.F:170`, where `crzphi_f(1)` is
-`rzphi_rsquared` and `crzphi_f(2)` is `rzphi_offset`); `coil/field.F:133` calls that mesh the
-"control surface mesh". `psilim = psihigh` (`dcon/sing.f:170`) and is only ever moved *inward*
-by `sas_flag`/`qhigh`/`dW_edge_scan_start` truncation. Since `psihigh` is the last knot of the radial
-grid these splines are built on (`equil/inverse.f:142`), Fortran evaluates exactly ON the last
-knot and never extrapolates. The docs state it directly: the external field is specified "on
-the surface of the GPEC plasma boundary defined by the psihigh variable in equil.in"
-(`docs/index.rst:60`). The previous ψ_N = 1 default was a port divergence.
-
-Both Fortran-comparison benchmarks already pass the correct surface explicitly
-(`benchmark_against_fortran_run.jl:548` and `benchmark_coil_ForcingTerms_against_fortran.jl:236`,
-both using Fortran's own `psilim` attribute), so the ψ_N = 1 default was never exercised on any
-Fortran-validated path — only by callers that omitted the keyword.
-
-Why it mattered numerically: the geometry splines are defined only out to `psihigh`, so ψ_N = 1
-extrapolates a cubic past its last knot with no guarantee of remaining physical. On the
-DIII-D-like example (psihigh = 0.995) `rzphi_rsquared` is +0.29 at ψ_N = 0.995 but −22.6 at
-ψ_N = 1, negative over 15 of 96 θ points, so the `sqrt` below throws a DomainError. The
-extrapolated distance is a fixed 1 − psihigh while the final spline interval shrinks with edge
-packing, so the error grows with resolution — which is why this surfaced only once the pass-1
-auto grid was refined.
-
-NOTE ON THE DEFAULT: the physically correct control surface is `psilim`, the *integration*
-limit, not `psihigh`, the *equilibrium spline* limit. They are equal unless
-`rational_offset_fraction`/`qhigh`/`dW_edge_scan_start` truncation fires, in which case `psilim < psihigh`. PPPL shipped a fix
-for exactly this confusion (`docs/releases.rst:281`: "Fixes inappropriate uses of psihigh, which
-may not be the end of integration psilim if sas_flag, qhigh, or peak_flag are used").
-
-**Both production paths pass `psi = ffs_intr.psilim` explicitly** (PerturbedEquilibrium.jl, coil
-and forcing-file branches), as do both Fortran-comparison benchmarks. This default of `psihigh`
-therefore applies only to direct callers holding a bare `PlasmaEquilibrium` with no
-ForceFreeStates solve — for which it is the outermost surface that exists, and always a strict
-improvement on extrapolating to ψ_N = 1. Pass `psi` explicitly whenever `psilim` is known.
-
-The coupling surface therefore moves inward by (1 − psihigh): 0.05 % of flux at the default
-psihigh = 0.9995, 0.5 % on the example, which lowers psihigh to 0.995 to capture q=6.
-Poloidal derivatives dR/dθ_norm and dZ/dθ_norm (unit-norm θ_norm ∈ [0,1]) are computed
-via periodic cubic splines on the resulting R(θ_norm), Z(θ_norm) data.
-
-The toroidal grid direction follows the Fortran GPEC convention:
-`phi_j = -helicity × 2π × j/nzeta`   where `helicity = sign(Bt) × sign(Ip)`.
-This is derived from `equil.params.bt_sign` and `equil.params.ip_sign` (the signs the equilibrium
-file states; the computed current `crnt` is always positive and carries no direction).
-For DIII-D (Bt < 0, Ip > 0 → helicity = -1): phi increases with j (standard direction).
-For positive-helicity machines (Bt > 0, Ip > 0 → helicity = +1): phi decreases with j.
+Toroidal grid direction (Fortran GPEC convention): `phi_j = -helicity × 2π × j/nzeta`, with
+`helicity = sign(Bt) × sign(Ip)` from `equil.params.bt_sign` and `equil.params.ip_sign`.
 """
 function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int, nzeta::Int;
     psi::Float64=equil.rzphi_xs[end])
@@ -137,15 +91,11 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
         dZ_dθ[i] = spline_Z(theta_grid[i]; deriv=DerivOp(1), hint=hint_Z)   # dZ/dθ_norm
     end
 
-    # Helicity sets the direction of the toroidal angle grid to match Fortran convention:
-    #   phi_j = -helicity × 2π × j/nzeta,  helicity = sign(Bt) × sign(Ip)
+    # Toroidal grid direction: phi_j = -helicity × 2π × j/nzeta (Fortran convention)
     helicity = equil.params.bt_sign * equil.params.ip_sign
     phi_grid = collect(range(0; length=nzeta, step=(-helicity * 2π / nzeta)))
 
-    # Toroidal angle offset ν(ψ, θ_SFL): in SFL coordinates the physical toroidal angle at
-    # grid point (θ_SFL, ζ_SFL) is  φ_phys = -helicity*(2π*ζ_SFL + ν(ψ,θ_SFL)).
-    # This matches Fortran's  phi = -helicity*(twopi*czeta + crzphi_f(3)).
-    # For a circular boundary ν≈0, but for D-shaped DIII-D geometry it can be several radians.
+    # SFL toroidal offset: φ_phys = -helicity*(2π*ζ_SFL + ν(ψ,θ_SFL)), as Fortran's phi = -helicity*(twopi*czeta + crzphi_f(3))
     phi_offset = zeros(mtheta)
     hint_nu = (Ref(1), Ref(1))
     for (i, θ_sfl) in enumerate(theta_grid)
@@ -211,9 +161,6 @@ and negative m modes are related by conjugation.
 
 When called after `project_normal_flux!`, the returned amplitudes are in unit-norm
 convention equal to Fortran `Phi_x` (T·m² per unit-norm cell).
-
-Uses `compute_fourier_coefficients` from `Utilities.FourierTransforms` with the
-3D (mpert, mtheta×nzeta) basis matrix (npert=1, nlow=n).
 """
 function fourier_decompose_bn(
     bn::Matrix{Float64},
@@ -229,7 +176,7 @@ function fourier_decompose_bn(
     # Using 3D call with npert=1, nlow=n gives shape (mpert, mtheta*nzeta)
     basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
 
-    bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j] ✓
+    bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j]
     scale = 2.0 / (mtheta * nzeta)
 
     bmn = scale .* (basis * bn_flat)
@@ -373,10 +320,8 @@ Top-level entry point: compute Fourier mode amplitudes of the normal magnetic fl
 coil sets on the plasma boundary — a [`CoilForcingGrid`](@ref) at `psi` followed by
 [`coil_forcing_modes`](@ref) over the whole assembly in one Biot-Savart pass.
 
-Output amplitudes are in unit-norm convention (= Fortran `Phi_x`).
-No normalization conversion is needed when using these modes to drive a plasma response.
-
-Result is appended to `forcing_modes` (existing content is cleared first).
+Output amplitudes are in unit-norm convention (= Fortran `Phi_x`) and drive a plasma response
+directly. `forcing_modes` is overwritten with the result.
 """
 function compute_coil_forcing_modes!(
     forcing_modes::Vector{ForcingMode},
@@ -431,7 +376,8 @@ three harmonics have no edge to judge and are not checked.
 ## Arguments
 
   - `modes`: `Vector{ForcingMode}` of one toroidal mode `n` (not modified)
-  - `from_tag`: source normalization — `"normal_field_T"` or `"sfl_flux_Wb"`
+  - `from_tag`: source normalization — `"normal_field_T"`, `"sfl_flux_Wb"`, or `"unit_flux"` for modes already in the
+    unit-norm Φ_x convention the response consumes (a run's materialized forcing, recorded for replay)
   - `equil`: `PlasmaEquilibrium` providing boundary geometry
   - `n`: toroidal mode number
   - `m_out`: poloidal harmonics of the converted flux
@@ -449,13 +395,14 @@ function convert_forcing_normalization(
     mtheta::Int=256,
     truncation_tol::Float64=0.1
 )
+    from_tag == "unit_flux" && return [ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes]
     if from_tag == "sfl_flux_Wb"
         # User provided 2π-angle SFL flux; scale by (2π)² to reach unit-norm (= Phi_x)
         return [ForcingMode(; n=mode.n, m=mode.m, amplitude=(2π)^2 * mode.amplitude) for mode in modes]
     end
 
     if from_tag != "normal_field_T"
-        error("Unknown forcing normalization: \"$from_tag\". Supported: \"normal_field_T\", \"sfl_flux_Wb\".")
+        error("Unknown forcing normalization: \"$from_tag\". Supported: \"normal_field_T\", \"sfl_flux_Wb\", \"unit_flux\".")
     end
 
     m_in = minimum(mode.m for mode in modes):maximum(mode.m for mode in modes)

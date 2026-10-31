@@ -2,9 +2,7 @@
     GeometryProfiles
 
 Flux-surface-averaged geometric quantities (area, ⟨r⟩, ⟨R⟩) computed once at
-equilibrium construction time. Mirrors Fortran `pentrc/dcon_interface.f:set_geom`
-via the same `issurfint` weighting (`wegt ∈ {0,1,3}`, `ave ∈ {0,1}`), and uses
-the nodal_derivs access pattern from `ForceFreeStates/Mercier.jl`.
+equilibrium construction time. Port of Fortran `set_geom` (pentrc/dcon_interface.f).
 """
 
 """
@@ -13,12 +11,7 @@ the nodal_derivs access pattern from `ForceFreeStates/Mercier.jl`.
         → GeometryProfileSplines
 
 Build named cubic splines for flux-surface-averaged area, ⟨r⟩, and ⟨R⟩ from the
-equilibrium's 2D rzphi interpolants. Uses trapezoidal sums in θ across the
-non-periodic θ nodes (the trailing duplicate at θ = 1 is skipped, mthsurf =
-length(rzphi_ys) - 1).
-
-The integrand `delpsi = |∇ψ|` (in geometry units) applies `metric_from_primitives`
-to the bicubic's nodal values.
+equilibrium's 2D rzphi interpolants, by trapezoidal sums over the θ nodes at the bicubic's nodal values.
 """
 function compute_geometry_profiles(
     rzphi_xs::Vector{Float64},
@@ -61,8 +54,7 @@ end
 """
     compute_geometry_profiles(pe::PlasmaEquilibrium) → GeometryProfileSplines
 
-Convenience method that pulls the rzphi grids and interpolants directly off a
-`PlasmaEquilibrium`. Useful for tests and after-the-fact recomputation.
+Convenience method that takes the rzphi grids and interpolants from a `PlasmaEquilibrium`.
 """
 function compute_geometry_profiles(pe::PlasmaEquilibrium)
     return compute_geometry_profiles(

@@ -8,8 +8,7 @@
 # ξ′ is evaluated analytically from the Hermite derivative basis (gal_hermite qb) and the asymptotic-series
 # derivative (sing_get_dua_gal), never by spline-differentiating ξ at the packed edge.
 #
-# Fortran module flags restore_uh/us/ul default .TRUE. (gal.f); the full reconstruction is always
-# performed. The `cut=true` path swaps the resonant Frobenius series for its leading-order term
+# The `cut=true` path swaps the resonant Frobenius series for its leading-order term
 # (`sing_get_ua_gal_cut`); the resulting cut solution supplies the regular background that the
 # resistive inner-layer solution is added to when forming the composite solution at a rational
 # surface (see MatchProblem).
@@ -68,7 +67,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     dsol = want_d ? zeros(ComplexF64, mpert) : nothing
 
     # --- non-resonant (Hermite) part: same coefficients, value basis pb → ξ, derivative basis qb → ξ′ ---
-    pbt, qbt = gal_hermite(x, cell.x[1], cell.x[2])
+    pbt, qbt = hermite_basis(x, cell.x[1], cell.x[2])
     swap = iintvl == msing && icell == ws.nx       # last edge cell: swap node-2/3 DOFs (gal.f)
     pb = swap ? (pbt[1], pbt[2], pbt[4], pbt[3]) : pbt
     qb = swap ? (qbt[1], qbt[2], qbt[4], qbt[3]) : qbt
@@ -87,7 +86,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     # sing_get_*_gal returns only the two resonant columns: 1 = big solution, 2 = small solution.
 
     # Edge Hermite weights (fresh, unswapped) for ext/ext2 cells (gal.f)
-    pbe, qbe = gal_hermite(x, cell.x[1], cell.x[2])
+    pbe, qbe = hermite_basis(x, cell.x[1], cell.x[2])
     if cell.extra == GAL_SIDE_LEFT
         epb1, epb2 = pbe[3], pbe[4]
         eqb1, eqb2 = qbe[3], qbe[4]
@@ -148,8 +147,7 @@ end
 
 Build the gal-native packed radial grid (inner→edge; `GAL_INTERP_NP_RES` points per resonant/extension
 cell, `GAL_INTERP_NP` elsewhere, plus the edge point ψ=psihigh) and evaluate ξ AND the analytic ξ′ over
-it for every solution column. Port of `gal_output_solution` (gal.f); the binary/ASCII writes
-and the `b_flag` ξ→b^ψ conversion (off by default) are not ported — we keep ξ itself.
+it for every solution column. Port of `gal_output_solution` (gal.f), returning ξ rather than b^ψ.
 
 When `delta` (the `(nsol, 2·msing)` small-solution coefficient matrix) is supplied, the cut solution
 `xi_cut` is evaluated on the same grid, as the background of MatchProblem's composite inner solution.

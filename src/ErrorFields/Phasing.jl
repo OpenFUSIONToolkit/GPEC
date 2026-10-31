@@ -5,8 +5,7 @@ Coil-array phasing: how the dominant-mode overlap of several independently power
 arrays (an error-field correction coil set's upper, middle and lower rows, say) depends on the
 relative toroidal phases of their current patterns. The overlap is linear in each array's
 field, so the map is the closed form `|Σ_k δ_k e^{iφ_k}|` on a grid of relative phases, per
-kilo-ampere-turn of each array, together with the fraction of the applied field that is
-resonant. No solve, no field evaluation, no optimizer: the extremes are read off the grid.
+kilo-ampere-turn of each array, together with the fraction of the applied field that is resonant.
 """
 
 """
@@ -47,13 +46,9 @@ the applied field. Rotating a current pattern by `Δφ` multiplies the spectrum 
 phase of the pattern itself, `n` times the toroidal angle it is rotated through). `nphase`
 points per phase axis, spanning `[0, 360)` degrees.
 
-Each array's spectrum is its stored nominal spectrum divided by the magnitude of its
-ampere-turns, `|winding_multiplier| × peak_current`. The zero of each phase axis is therefore
-the array's current pattern exactly as the run specified it, with the winding sense of its
-geometry file included: a negative winding multiplier and a negated current pattern each
-remain in the map as the half-turn they physically are. Normalizing by the signed product
-would erase how the device defines positive current in that array, which is device-specific
-information the map must keep.
+Each array's spectrum is normalized by the magnitude of its ampere-turns,
+`|winding_multiplier| × peak_current`, so the zero of each phase axis is the array's current pattern
+exactly as the run specified it, winding sign included.
 """
 function phasing_map(sens::CoilSensitivities, dom::DominantCoupling, coil_names::AbstractVector{<:AbstractString}; mode::Int=1, nphase::Int=180)
     length(coil_names) >= 2 || throw(ArgumentError("phasing_map needs at least two coil arrays"))

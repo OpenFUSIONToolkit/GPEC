@@ -152,8 +152,8 @@ end
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
     equil = Equilibrium.PlasmaEquilibrium(
-        Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path),
-        Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+        GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dir_path),
+        GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
     _fresh() = (i = ForceFreeStatesInternal(); i.nlow = 1; i.nhigh = 1; i)
     ctrl = ForceFreeStatesControl(; truncate_at_rational_offset=false, qhigh=1e3)
@@ -215,65 +215,50 @@ end
     # The control flag exists and is opt-in.
     @test ForceFreeStatesControl().psilim_from_layer_overlap == false
 
-    # Multi-n: the innermost overlap point binds; scans with no overlap never do.
-    Scan = GeneralizedPerturbedEquilibrium.Tearing.LayerOverlapScan
-    mkscan(ph) = Scan(; psihigh_dr=ph, psihigh=ph, first_overlap=(ph === nothing ? nothing : 1))
-    binding = GeneralizedPerturbedEquilibrium._binding_overlap
-    s1, s2, s_none = mkscan(0.9997), mkscan(0.9952), mkscan(nothing)
-    @test binding([s1, s2, s_none]) === s2
-    @test binding([s_none, s1]) === s1
-    @test binding([s_none, mkscan(nothing)]) === s_none
-    @test binding([s1]) === s1
-
-    # The scan must see the run's own plasma: every [SLAYER] setting the layer width depends on
-    # reaches it, and changing one changes the widths. theta_sample is passed through but warns: the flux label ignores it.
+    # The scan sees the run's own plasma, the equilibrium's kinetic data, through the [SLAYER] closures.
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
     trunc_deck = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
-    slayer_section = trunc_deck["SLAYER"]
     kin = Equilibrium.read_kinetic_file(joinpath(trunc_dir, trunc_deck["Equilibrium"]["kinetic_file"]))
-    slayer_inputs(over) = Dict{String,Any}("SLAYER" => merge(slayer_section, over))
-    overlap_inputs(over; kinetic=kin) = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(slayer_inputs(over), kinetic)
-    oi = @test_logs (:warn, r"theta_sample") match_mode = :any overlap_inputs(Dict("ion_mass" => 3.0, "bt" => 1.7, "theta_sample" => 0.3, "lnLambda_form" => "sauter"))
-    @test (oi.mu_i, oi.bt, oi.theta, oi.lnLambda_form) == (3.0, 1.7, 0.3, :sauter)
-
-    # A disabled section feeds the scan whatever its inner model, and missing kinetic profiles only skip the scan;
-    # with tearing enabled they are an error, raised here rather than after every other stage.
-    @test overlap_inputs(Dict("inner_model" => "ggj_ray")) !== nothing
-    @test (@test_logs overlap_inputs(Dict{String,Any}(); kinetic=nothing)) === nothing
-    @test_throws ErrorException overlap_inputs(Dict("enabled" => true); kinetic=nothing)
-
-    # Z_eff(psi) comes from the kinetic file's own n_i/n_e with the [SLAYER] impurity charge.
-    j = length(kin.psi) ÷ 2
-    @test oi.zeff(kin.psi[j]) ≈ 6.0 - kin.n_i[j] / kin.n_e[j] * 5.0
-    @test overlap_inputs(Dict("impurity_charge" => 10.0)).zeff(kin.psi[j]) ≈ 10.0 - kin.n_i[j] / kin.n_e[j] * 9.0
-    @test 1.0 < oi.zeff(kin.psi[j]) < 6.0
-    # A zeff profile supplied in the file overrides the n_i/n_e closure; a file with neither falls
-    # back to the scalar [SLAYER] zeff.
-    mktempdir() do tmp
-        own = fill(3.2, length(kin.psi))
-        base = (; psi=kin.psi, n_e=kin.n_e, T_i=kin.T_i, T_e=kin.T_e, omega_E=kin.omega_E, chi_e=kin.chi_e, chi_phi=kin.chi_phi)
-        Equilibrium.write_kinetic_h5(joinpath(tmp, "own_zeff.h5"), Equilibrium.KineticProfileData(; base..., n_i=kin.n_i, zeff=own))
-        @test Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5")).zeff == own
-        @test overlap_inputs(Dict("impurity_charge" => 10.0, "zeff" => 2.5); kinetic=Equilibrium.read_kinetic_file(joinpath(tmp, "own_zeff.h5"))).zeff(kin.psi[j]) ≈ 3.2
-        Equilibrium.write_kinetic_h5(joinpath(tmp, "no_ni.h5"), Equilibrium.KineticProfileData(; base...))
-        no_ni = Equilibrium.read_kinetic_file(joinpath(tmp, "no_ni.h5"))
-        @test overlap_inputs(Dict("zeff" => 2.5); kinetic=no_ni).zeff == 2.5
-        # A P_perp_model whose χ⊥,i the profiles lack skips the scan with a warning rather than aborting the run.
-        @test (@test_logs (:warn, r"Layer-overlap scan skipped") match_mode = :any overlap_inputs(Dict("P_perp_model" => "D_perp"); kinetic=no_ni)) === nothing
-    end
-
-    widths(over) = GeneralizedPerturbedEquilibrium._layer_overlap_scan(overlap_inputs(over), _fresh(), equil).width_dr
-    w_ref = widths(Dict{String,Any}())
+    model = GeneralizedPerturbedEquilibrium.slayer_model(trunc_deck)
+    @test model.P_perp_model === :chi_perp_e
+    # theta_sample only matters for the :midplane label; the flux label the layers use ignores it, so a nonzero value warns.
+    @test (@test_logs (:warn, r"theta_sample") match_mode = :any SLAYERModel(; theta_sample=0.3)).theta_sample == 0.3
+    scan(data, ns=1:1; m=model) = (attach_kinetic_profiles!(equil, data); GeneralizedPerturbedEquilibrium.Tearing.layer_overlap_scan(equil, m, ns))
+    widths(; kwargs...) = scan(KineticProfileData(kin; kwargs...)).width_dr
+    w_ref = widths()
     @test !isempty(w_ref) && all(isfinite, w_ref)
-    for over in (Dict("impurity_charge" => 10.0), Dict("resistivity_model" => "spitzer"), Dict("lnLambda_form" => "sauter"))
-        @test all(.!isapprox.(widths(over), w_ref; rtol=1e-3))
+    for over in ((; impurity_charge=10), (; resistivity_model=:spitzer), (; lnLambda_form=:sauter))
+        @test all(.!isapprox.(widths(; over...), w_ref; rtol=1e-3))
     end
-    # Ion mass and field strength cancel between the Lundquist number and the ion sound radius in
-    # Eq. (100), so the criterion width does not depend on them; the scalar zeff is only a
-    # fallback, so it is inert while the file carries n_i.
-    for over in (Dict("ion_mass" => 1.0), Dict("bt" => 1.0), Dict("zeff" => 3.0))
-        @test all(isapprox.(widths(over), w_ref; rtol=1e-10))
+    # Ion mass cancels between the Lundquist number and the ion sound radius in Eq. (100), so the
+    # criterion width does not depend on it; zeff_default is only a fallback, inert while the file carries n_i.
+    for over in ((; ion_species=[IonSpecies(; z=1, m=1, fraction=1.0)]), (; zeff_default=3.0))
+        @test all(isapprox.(widths(; over...), w_ref; rtol=1e-10))
     end
+
+    # Z_eff(ψ): the file's profile wins, else Z_imp − (n_i/n_e)(Z_imp − 1), else nothing (the zeff_default fallback).
+    layer_view(data) = GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER._slayer_profiles(data, model)
+    j = length(kin.psi) ÷ 2
+    closure = layer_view(KineticProfileData(kin))
+    @test closure.zeff_source === :closure
+    @test closure.zeff(kin.psi[j]) ≈ 6.0 - kin.n_i[j] / kin.n_e[j] * 5.0
+    @test layer_view(KineticProfileData(kin; impurity_charge=10)).zeff(kin.psi[j]) ≈ 10.0 - kin.n_i[j] / kin.n_e[j] * 9.0
+    own = layer_view(KineticProfileData(kin; impurity_charge=10, zeff=fill(3.2, length(kin.psi))))
+    @test own.zeff_source === :file && own.zeff(kin.psi[j]) ≈ 3.2
+    no_ni = layer_view(KineticProfileData(kin; n_i=nothing))
+    @test no_ni.zeff === nothing && no_ni.zeff_source === :scalar
+
+    # Multi-n: the innermost overlap point binds; scans with no overlap never do.
+    per_n = [scan(KineticProfileData(kin), n:n) for n in 1:2]
+    overlapping = [sc.psihigh for sc in per_n if sc.psihigh !== nothing]
+    both = scan(KineticProfileData(kin), 1:2)
+    @test both.psihigh == (isempty(overlapping) ? nothing : minimum(overlapping))
+
+    # A P_perp_model whose χ⊥,i the profiles lack, and missing profiles, stop the scan.
+    no_chi_i = KineticProfileData(; psi=kin.psi, n_e=kin.n_e, n_i=kin.n_i, T_i=kin.T_i, T_e=kin.T_e, omega_E=kin.omega_E, chi_e=kin.chi_e, chi_phi=kin.chi_phi)
+    @test_throws "needs the ion diffusivity" scan(no_chi_i; m=SLAYERModel(; P_perp_model=:D_perp))
+    equil.kinetic = nothing
+    @test_throws "needs kinetic profiles" GeneralizedPerturbedEquilibrium.Tearing.layer_overlap_scan(equil, model, 1:1)
 
     # The no-surfaces path must return an empty scan with a note, not throw (m_max=0 with
     # extrapolation off forces it deterministically).
@@ -315,7 +300,7 @@ end
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
     trunc_inputs = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
     diiid(psihigh) = Equilibrium.PlasmaEquilibrium(
-        Equilibrium.EquilibriumConfig(merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh)), trunc_dir), nothing)
+        GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" => merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh))), trunc_dir), nothing)
     long, short = diiid(0.9999), diiid(0.995)
 
     # One lower X-point, 1e-4 outside this file's boundary; the law reproduces the traced shear.
@@ -336,10 +321,9 @@ end
 
     # The scan's overlap point must therefore not depend on where the grid stops, and no
     # rational may fall between the in-grid search and the law.
-    oi = GeneralizedPerturbedEquilibrium._overlap_slayer_inputs(trunc_inputs, long.kinetic)
-    one_n() = (i = ForceFreeStatesInternal(); i.nlow = 1; i.nhigh = 1; i)
-    scan_long = GeneralizedPerturbedEquilibrium._layer_overlap_scan(oi, one_n(), long)
-    scan_short = GeneralizedPerturbedEquilibrium._layer_overlap_scan(oi, one_n(), short)
+    model = GeneralizedPerturbedEquilibrium.slayer_model(trunc_inputs)
+    scan_long = GeneralizedPerturbedEquilibrium.Tearing.layer_overlap_scan(long, model, 1:1)
+    scan_short = GeneralizedPerturbedEquilibrium.Tearing.layer_overlap_scan(short, model, 1:1)
     @test scan_short.psihigh ≈ scan_long.psihigh atol = 5e-5
     @test scan_short.first_overlap == scan_long.first_overlap
     @test all(diff(scan_short.m) .== 1) && all(diff(scan_long.m) .== 1)
@@ -355,6 +339,6 @@ end
     sol_dir = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     sol_inputs = TOML.parsefile(joinpath(sol_dir, "gpec.toml"))
     solovev = Equilibrium.PlasmaEquilibrium(
-        Equilibrium.EquilibriumConfig(sol_inputs["Equilibrium"], sol_dir), Equilibrium.SolovevConfig(sol_inputs["SOL_INPUT"]))
+        GeneralizedPerturbedEquilibrium.equilibrium_config(sol_inputs, sol_dir), GeneralizedPerturbedEquilibrium.analytic_config(sol_inputs))
     @test separatrix_q_law(solovev) === nothing
 end

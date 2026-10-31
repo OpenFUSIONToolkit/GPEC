@@ -1,5 +1,5 @@
 """
-    read_chease_binary(equil_config)
+    read_chease_binary(config) -> InverseRunInput
 
 Parses a binary CHEASE file, creates initial 1D and 2D splines with proper
 normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object.
@@ -18,18 +18,14 @@ function read_chease_binary(config::EquilibriumConfig)
         nsym = read(io, Int32)
         read(io, UInt32)
 
-        read(io, UInt32)
-        axx = [read(io, Float64) for _ in 1:5]
-        read(io, UInt32)
+        axx = _read_fortran_reals(io, 5)
 
         # 1D array allocation
         zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim =
             [zeros(i == 1 || i == 10 ? npsi1 - 1 : npsi1) for i in 1:10]
 
         for arr in (zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim)
-            read(io, UInt32)
-            read!(io, arr)
-            read(io, UInt32)
+            arr .= _read_fortran_reals(io, length(arr))
         end
 
         # --- Normalization (1D) ---
@@ -46,37 +42,30 @@ function read_chease_binary(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        # Compute cumulative integral of pressure column for normalization using FastInterpolations
+        # Pressure from the cumulative integral of the P′ column.
         itp_pressure = cubic_interp(xs, fs[:, 2])
         fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
-        # Make a writable copy and normalize pressure integral
         fs_copy = copy(fs)
         fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
-        # Create final spline with modified data
         sq_in = cubic_interp(xs, Series(fs_copy); extrap=ExtendExtrap())
 
         # --- 2D Geometry ---
         mtau = ntnova + 1  # Same with ASCII
-        poloidal_start = 3 # This 3 is to skip ghost datas, which are used for derivatives
+        poloidal_start = 3 # skip the two ghost points CHEASE stores for derivatives
         poloidal_stop = ntnova + 3
 
         fs_2d = zeros(npsi1, mtau, 2)
         buffer = zeros(Float64, ntnova + 3, npsi1) # CHEASE binary record size
 
         # Reading R data
-        read(io, UInt32)
-        read!(io, buffer)
-        read(io, UInt32)
+        buffer .= reshape(_read_fortran_reals(io, length(buffer)), size(buffer))
         buffer .*= R0EXP
 
-        # sart reading with ASCII
         ro = buffer[poloidal_start, 1]
         fs_2d[:, :, 1] .= transpose(buffer[poloidal_start:poloidal_stop, :])
 
         # Reading Z data
-        read(io, UInt32)
-        read!(io, buffer)
-        read(io, UInt32)
+        buffer .= reshape(_read_fortran_reals(io, length(buffer)), size(buffer))
         buffer .*= R0EXP
 
         zo = buffer[poloidal_start, 1]
@@ -98,18 +87,10 @@ end
 
 
 """
-    read_chease_ascii(config)
+    read_chease_ascii(config) -> InverseRunInput
 
-Parses a ascii CHEASE file, creates initial 1D and 2D splines, finds magnetic axis, and bundles
-them into a `InverseRunInput` object.
-
-## Arguments:
-
-  - `config`: The `EquilibriumConfig` object containing the filename and parameters.
-
-## Returns:
-
-  - A `InverseRunInput` object ready for the inverse solver.
+Parse an ASCII CHEASE file, build the 1D and 2D splines with R0/B0 normalization, find the
+magnetic axis, and bundle them into an `InverseRunInput` for the inverse solver.
 """
 function read_chease_ascii(config::EquilibriumConfig)
     @info "Reading CHEASE file (ASCII): $(config.eq_filename)"
@@ -124,7 +105,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     nsym = parse(Int, header_parts[3])
 
     # --- Parse axx (FORMAT 20: 1E22.15) ---
-    axx = parse(Float64, split(lines[2])[1])   # RBOXLEN - compuational box lenth
+    axx = parse(Float64, split(lines[2])[1])   # RBOXLEN, computational box length
     # --- Pre-allocate Arrays ---
     zcpr = zeros(npsi1 - 1) # normalized P(ψ)
     zcppr = zeros(npsi1) # normalized dP/dψ
@@ -132,15 +113,15 @@ function read_chease_ascii(config::EquilibriumConfig)
     zdq = zeros(npsi1) # dq/dψ
     ztmf = zeros(npsi1) # normalized F(ψ)
     ztp = zeros(npsi1) # normalized dF/dψ
-    zfb = zeros(npsi1) # normazlied F(ψ)/q(ψ)
+    zfb = zeros(npsi1) # normalized F(ψ)/q(ψ)
     zfbp = zeros(npsi1) # d/dψ [F(ψ)/q(ψ) ]
     zpsi = zeros(npsi1) # ψ Poloidal flux
     zpsim = zeros(npsi1 - 1) # ψ mid
 
     zrcp = zeros(ntnova + 3, npsi1) # normalized R
     zzcp = zeros(ntnova + 3, npsi1) # normalized Z
-    zjacm = zeros(ntnova + 3, npsi1) # 𝒥(Jacobian)
-    zjac = zeros(ntnova + 3, npsi1) # 𝒥(Jacobian
+    zjacm = zeros(ntnova + 3, npsi1) # 𝒥 (Jacobian)
+    zjac = zeros(ntnova + 3, npsi1) # 𝒥 (Jacobian)
 
     # --- Helper to parse 5E22.15 data per line ---
     function parse_floats(lines_range)
@@ -209,7 +190,6 @@ function read_chease_ascii(config::EquilibriumConfig)
     psio = psio_norm * R0EXP^2 * B0EXP
 
     # Scale Toroidal Field Function F
-    # zfb .*= (R0EXP * B0EXP)
     ztmf .*= (R0EXP * B0EXP)
 
     # Scale Pressure Gradient P'
@@ -222,19 +202,15 @@ function read_chease_ascii(config::EquilibriumConfig)
     xs = (zpsi .- zpsi[1]) ./ psio_norm # Use normalized range for x axis [0,1]
 
     fs = zeros(npsi1, 4)
-    # Both zq * zfb and ztmf are the same ! But I don't know why current GPEC follows zq .*zfb - JB.Cho
-    # fs[:, 1] .= zq .* zfb
+    # ztmf equals zq .* zfb (both are F).
     fs[:, 1] .= ztmf
     fs[:, 2] .= zcppr # normalized Pressure
     fs[:, 3] .= zq # q profile
-    # Fit spline with extrapolation boundary condition (bctype = 3)
-    # Compute cumulative integral of pressure column for normalization using FastInterpolations
+    # Pressure from the cumulative integral of the P′ column.
     itp_pressure = cubic_interp(xs, fs[:, 2])
     fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
-    # Make a writable copy and normalize pressure integral
     fs_copy = copy(fs)
     fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
-    # Create final spline with modified data
     sq_in = cubic_interp(xs, Series(fs_copy); extrap=ExtendExtrap())
 
     # --- Copy 2D geometry arrays ---

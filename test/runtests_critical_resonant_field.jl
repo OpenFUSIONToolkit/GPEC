@@ -11,24 +11,24 @@ _crf_target(Q) = 0.1 + exp(-(Q - 1)^2 / 0.01) + 2exp(-(Q - 3)^2 / 0.01)
 _CRFStubLayer() = _CRFStubLayer(_crf_target)
 # A fold at Q = 3, then a dip, then a rise past the fold's height toward Q_e = 0.5.
 _crf_target_rising(Q) = 0.1 + exp(-(Q - 3)^2 / 0.01) + 0.6 * max(2.5 - Q, 0.0)
-function InnerLayer.solve_inner(s::_CRFStubLayer, p, Q::Number)
-    Qc = -real(Q)   # undo the axis mirror cole_delta applies
+function InnerLayer.layer_response(s::_CRFStubLayer, p, Q::Number)
+    Qc = -real(Q)   # cole_delta evaluates the scans' variable at −Q
     jxb = 2 * (_CRF_Q0_STUB - Qc) / s.target(Qc)
-    return (; tearing=conj(im / jxb - 1e-2))
+    return (; tearing=im / jxb - 1e-2)
 end
 
 # Cole and Fitzpatrick (2006) Table I visco-resistive layer on Cole's axis, Δ̂ = 2.104[i(Q−Q_i)]^(1/6)[i(Q−Q_e)]^(5/6)P^(1/6).
 struct _VRiStub <: InnerLayerModel end
 const _VRI_P = 4.0
 _vri(Q, Q_e, Q_i) = 2.104 * (im * (Q - Q_i))^(1 / 6) * (im * (Q - Q_e))^(5 / 6) * _VRI_P^(1 / 6)
-InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q), p.Q_e, p.Q_i)))
+InnerLayer.layer_response(::_VRiStub, p, Q::Number) = (; tearing=_vri(-real(Q), p.Q_e, p.Q_i))
 
 @testset "CriticalResonantField: torque balance" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, SLAYERModel, SLAYERParameters, GGJModel
     using GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField
-    using GeneralizedPerturbedEquilibrium.Runner
+    using GeneralizedPerturbedEquilibrium.Tearing
     using HDF5
 
     include("h5_metadata_check.jl")
@@ -39,11 +39,12 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         Q_e=Q_e, Q_i=Q_i, iota_e=Q_e / (Q_e - Q_i), tauk=1.31e-4, tau_r=21.1,
         delta_n=885.0, rs=0.453, R0=1.74, bt=2.0, sval_r=1.09, eta=1.22e-8,
         d_beta=3.6e-3, m=2, n=n, ising=ising)
-    model = SLAYERModel{:fitzpatrick}()
+    model = SLAYERModel()
 
     @testset "Cole axis: branch lies between Q_e and Q0" begin
         p = _mk()
-        @test cole_delta(model, p, 0.7) ≈ conj(InnerLayer.solve_inner(model, p, -0.7).tearing)
+        # Cole's Q is the layer at ĝ = i·Q, the growth rate s = i·Q/τ_k.
+        @test cole_delta(model, p, 0.7) ≈ InnerLayer.solve_inner(model, p, 0.7im / p.tauk).tearing rtol = 1e-10
         Q0 = 5.45
         tb = TorqueBalance(model, p, Q0, 1.0, p.lu, 2 / p.sval_r^2, 1e-2)
         Qs, bal, Qpeak, br, idx, _ = torque_balance_scan(tb; n=401)
@@ -145,7 +146,7 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
     @testset "runner: P from P_tor, Q0 = τ_k·n·Ω_E" begin
         ω_E = 4.0e4
         params = [_mk(; n=1, P_tor=3.0, ising=1), _mk(; n=2, P_tor=5.0, ising=2)]
-        ctrl = CriticalResonantFieldControl(; enabled=true, n=201, store_scan=true)
+        ctrl = CriticalResonantFieldControl(; n=201, store_scan=true)
         r = run_critical_resonant_field(model, params, [ω_E, ω_E], [-2.0, -3.0], ctrl)
         @test r.enabled
         @test r.Q0 ≈ [p.tauk * p.n * ω_E for p in params]
@@ -158,21 +159,22 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         r_zero = run_critical_resonant_field(model, params[1:1], [0.0], [-2.0], ctrl)
         @test r_zero.Q0 == [0.0] && isfinite(r_zero.br_crit[1]) && r_zero.br_crit[1] > 0
         @test length(r.scan) == 2 && length(r.scan[1].Q) == 201
-        @test !run_critical_resonant_field(model, params, [ω_E, ω_E], [-2.0, -3.0], CriticalResonantFieldControl()).enabled
+        @test !run_critical_resonant_field(model, params, [ω_E, ω_E], [-2.0, -3.0], nothing).enabled
         # Only the SLAYER layer defines the Cole-axis mirror the scan relies on.
         @test_throws "needs the SLAYER" run_critical_resonant_field(GGJModel(), params, [ω_E, ω_E], [-2.0, -3.0], ctrl)
 
         # The analysis runs inside run_slayer_from_inputs, so script callers get it too, and its
         # HDF5 output honours the metadata contract.
-        c = SLAYERControl(; enabled=true, scan_mode=:brute_force, nre=4, nim=4, critical_resonant_field=ctrl)
+        c = TearingProblem(nothing; critical_resonant_field=ctrl)
+        scan = TearingConfig(; scan_mode=:brute_force, nre=4, nim=4)
         dp = ComplexF64[-2.0 0.0; 0.0 -3.0]
-        res = run_slayer_from_inputs(model, params, dp, c; rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5], omega_E=[ω_E, ω_E])
+        res = run_slayer_from_inputs(model, params, dp, c, scan; rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5], omega_E=[ω_E, ω_E])
         @test res.critical_resonant_field.enabled
         @test isequal(res.critical_resonant_field.br_crit, r.br_crit)
         mktemp() do path, io
             close(io)
             h5open(path, "w") do f
-                write_slayer_hdf5!(f, res)
+                save_to_hdf5(f, res)
             end
             h5open(path, "r") do f
                 @test isempty(_collect_metadata_violations(f))
@@ -186,24 +188,24 @@ InnerLayer.solve_inner(::_VRiStub, p, Q::Number) = (; tearing=conj(_vri(-real(Q)
         end
 
         # Without any rotation there is no threshold to compute, so the run stops rather than assume Ω_E = 0.
-        @test_throws "needs the E×B rotation" run_slayer_from_inputs(model, params, dp, c; rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5])
+        @test_throws "needs the E×B rotation" run_slayer_from_inputs(model, params, dp, c, scan; rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5])
         # A surface the override leaves without a rotation is skipped; the others are still computed.
-        c_part = SLAYERControl(; enabled=true, scan_mode=:brute_force, nre=4, nim=4, critical_resonant_field=ctrl,
-            omega_E_kHz=Dict("2/1" => ω_E / (2π * 1e3)))
-        r_part = (@test_logs (:warn, r"2/2 surface skipped") match_mode = :any run_slayer_from_inputs(model, params, dp, c_part;
+        c_part = TearingProblem(nothing; critical_resonant_field=ctrl, omega_E_kHz=Dict("2/1" => ω_E / (2π * 1e3)))
+        r_part = (@test_logs (:warn, r"2/2 surface skipped") match_mode = :any run_slayer_from_inputs(model, params, dp, c_part, scan;
             rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5])).critical_resonant_field
         @test r_part.Q0[1] ≈ r.Q0[1] && isnan(r_part.Q0[2])
         @test isequal(r_part.br_crit[1], r.br_crit[1]) && isnan(r_part.br_crit[2])
     end
 
-    @testset "control: TOML parsing and validation" begin
-        c = critical_resonant_field_control_from_toml(Dict("enabled" => true, "n" => 500))
-        @test c.enabled && c.n == 500 && c.Qmin === nothing && !c.store_scan
-        @test critical_resonant_field_control_from_toml(Dict("Qmin" => -2.0)).Qmin == -2.0
-        @test_throws ArgumentError critical_resonant_field_control_from_toml(Dict("pole_width" => 0.02))
-        @test_throws ArgumentError critical_resonant_field_control_from_toml(Dict("viscous_input" => 1.0))
-        s = slayer_control_from_toml(Dict("enabled" => true, "CriticalResonantField" => Dict("enabled" => true)))
-        @test s.critical_resonant_field.enabled
-        @test_throws "n must be ≥ 3" Runner.validate(SLAYERControl(; critical_resonant_field=CriticalResonantFieldControl(; n=2)))
+    @testset "control: deck parsing and validation" begin
+        tearing(crf) = GeneralizedPerturbedEquilibrium.tearing_from_deck(Dict{String,Any}("Tearing" =>
+            Dict{String,Any}("inner_model" => "SLAYER", "CriticalResonantField" => crf))).problem[:critical_resonant_field]
+        c = tearing(Dict{String,Any}("n" => 500))
+        @test c.n == 500 && c.Qmin === nothing && !c.store_scan
+        @test tearing(Dict{String,Any}("Qmin" => -2.0)).Qmin == -2.0
+        @test_throws ArgumentError tearing(Dict{String,Any}("pole_width" => 0.02))
+        @test_throws ArgumentError tearing(Dict{String,Any}("enabled" => true))
+        @test TearingProblem(nothing).critical_resonant_field === nothing
+        @test_throws "at least three points" Tearing.validate(TearingProblem(nothing; critical_resonant_field=CriticalResonantFieldControl(; n=2)), TearingConfig())
     end
 end

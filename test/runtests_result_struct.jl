@@ -9,20 +9,27 @@ include("h5_metadata_check.jl")
     FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
     template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
-    # Copy a deck into `dir` and apply `[ForceFreeStates]` overrides / extra sections.
+    # Copy a deck into `dir` and apply `[ForceFreeStates]` overrides / extra sections. An `integrator`
+    # override carries the old integrator's ODE numerics over to the new one's section.
     function _stage_deck(dir, source; ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
         for name in readdir(source)
             cp(joinpath(source, name), joinpath(dir, name))
         end
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
+        old = get(inputs["ForceFreeStates"], "integrator", "Riccati")
         merge!(inputs["ForceFreeStates"], ffs_overrides)
-        merge!(inputs, extra_sections)
-        if haskey(inputs, "TJ_ANALYTIC_INPUT")
+        new = get(inputs["ForceFreeStates"], "integrator", "Riccati")
+        old == new || haskey(inputs, old) && (new == "Galerkin" ? delete!(inputs, old) : (inputs[new] = pop!(inputs, old)))
+        for (name, section) in extra_sections
+            haskey(inputs, name) ? merge!(inputs[name], section) : (inputs[name] = section)
+        end
+        if haskey(inputs, "TJAnalytic")
             # Interface checks need two rational surfaces, not a converged production grid.
             merge!(inputs["Equilibrium"], Dict("mpsi" => 32, "mtheta" => 64))
-            merge!(inputs["TJ_ANALYTIC_INPUT"], Dict("ma" => 32, "mtheta" => 32))
-            merge!(inputs["ForceFreeStates"], Dict("gal_nx" => 32, "delta_mlow" => 2, "delta_mhigh" => 2, "mtheta_vacuum" => 64))
+            merge!(inputs["TJAnalytic"], Dict("ma" => 32, "mtheta" => 32))
+            merge!(inputs["ForceFreeStates"], Dict("delta_mlow" => 2, "delta_mhigh" => 2, "mtheta_vacuum" => 64))
+            inputs["Galerkin"]["nx"] = 32
         end
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir
@@ -36,7 +43,9 @@ include("h5_metadata_check.jl")
             _stage_deck(dir, template)
             ret = GeneralizedPerturbedEquilibrium.main([dir])
 
-            @test keys(ret)[1:3] == (:ffs, :pe, :slayer)   # later stages append their own outputs
+            # One field per stage, nothing for the sections the deck does not hold.
+            @test keys(ret) == (:equil, :local_stability, :ffs, :match, :resp, :pe, :kinetic, :error_fields, :tearing)
+            @test ret.equil === ret.ffs.equil && all(isnothing, (ret.match, ret.resp, ret.pe, ret.kinetic, ret.error_fields, ret.tearing))
             ffs = ret.ffs
             forward_result[] = ffs
             @test ffs isa FFS.ForceFreeStatesResult
@@ -74,14 +83,13 @@ include("h5_metadata_check.jl")
             @test ffs.numpert_total == ffs.mpert * ffs.npert
             @test 0 < ffs.psilim <= 1
             @test !isempty(ffs.surfaces)
-            @test ffs.control.integrator == "forward"
-            @test ffs.dir_path == dir
+            @test ffs.integrator === :forward
         end
     end
 
     @testset "riccati run publishes Δ′ and diagnostics but no ξ solution" begin
         mktempdir() do dir
-            _stage_deck(dir, template; ffs_overrides=Dict{String,Any}("integrator" => "riccati"))
+            _stage_deck(dir, template; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"))
             ret = GeneralizedPerturbedEquilibrium.main([dir])
 
             ffs = ret.ffs
@@ -120,15 +128,13 @@ include("h5_metadata_check.jl")
     @testset "PerturbedEquilibrium warn-skips on a riccati result" begin
         mktempdir() do dir
             _stage_deck(dir, template;
-                ffs_overrides=Dict{String,Any}("integrator" => "riccati"),
+                ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
                 extra_sections=Dict{String,Any}(
                     "ForcingTerms" => Dict{String,Any}(
                         "forcing_data_file" => "forcing.dat",
                         "forcing_data_format" => "ascii"),
                     "PerturbedEquilibrium" => Dict{String,Any}(
-                        "compute_singular_coupling" => true,
-                        "verbose" => false,
-                        "write_outputs_to_HDF5" => false)))
+                        "compute_singular_coupling" => true)))
             cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"),
                 joinpath(dir, "forcing.dat"))
 
@@ -201,7 +207,7 @@ include("h5_metadata_check.jl")
                     # The closed profiles land in the shared Solutions layout: same names and
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-                    HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+                    HDF5.h5open(GeneralizedPerturbedEquilibrium.run_settings(TOML.parsefile(joinpath(dir, "gpec.toml")), dir).output_file, "r") do f
                         @test ffs.galerkin.solver in ("cholesky", "LU")
                         @test read(f["$gal/solver"]) == ffs.galerkin.solver
                         @test haskey(attrs(f["$gal/solver"]), "long_name")
@@ -226,13 +232,13 @@ include("h5_metadata_check.jl")
             end
         end
     end
-    @testset "gal_basis_output dumps the raw outer basis" begin
+    @testset "Galerkin basis_output dumps the raw outer basis" begin
         mktempdir() do dir
             _stage_deck(dir, joinpath(@__DIR__, "..", "examples", "LAR_ideal_match_test");
-                extra_sections=Dict{String,Any}("DEBUG" => Dict{String,Any}("gal_basis_output" => true)))
+                extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("basis_output" => true)))
             ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
             gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-            HDF5.h5open(joinpath(dir, ffs.control.HDF5_filename), "r") do f
+            HDF5.h5open(GeneralizedPerturbedEquilibrium.run_settings(TOML.parsefile(joinpath(dir, "gpec.toml")), dir).output_file, "r") do f
                 @test haskey(f, "$gal/Basis/xi_psi")
                 basis = read(f["$gal/Basis/xi_psi"])
                 # (mode, solution, psi) on the FULL gal grid, on-surface nodes included; the

@@ -29,7 +29,7 @@ function make_config(path::String, eq_type::String, psilow::Float64)
     raw["Equilibrium"]["eq_type"] = eq_type
     raw["Equilibrium"]["psilow"] = psilow
     base = dirname(path)
-    return Equilibrium.EquilibriumConfig(raw["Equilibrium"], base)
+    return GeneralizedPerturbedEquilibrium.equilibrium_config(raw, base)
 end
 
 # Read EFIT q-axis value from header (simag line)

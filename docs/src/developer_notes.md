@@ -31,6 +31,16 @@ regenerate-only-when-`depends`-change rule — is in
 The `Ballooning and Mercier Local Stability` and `Inner Layer Module` pages are
 the reference exemplars.
 
+## Deck and API parity
+
+Every capability must be reachable both from a `gpec.toml` deck (through `main`) and from the
+scripting API (`solve` and the problem and result types). A feature that exists on only one path
+is not finished. A new feature, deck key, or API keyword also adds a case to the `"deck and API parity"`
+testset in `test/runtests_solve_api.jl`. That case runs the workflow once from a deck and once
+from the same inputs through the API, and checks that the two results agree. A known drift
+between the paths is marked `@test_broken`, not dropped, so the change that fixes it shows up
+as an unexpected pass.
+
 ## Regression Testing
 
 The regression harness **must be run on every pull request before merging into `develop`**. It is the project's primary safeguard for tracking how numerical results evolve across changes, so it is only useful if every PR exercises it. When you open a PR, paste the regression report into the PR thread so reviewers can see what moved (and what did not). If your change touches a quantity that is not yet tracked, add a new regression case — or extend an existing one — in the same PR.

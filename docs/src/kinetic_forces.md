@@ -29,9 +29,23 @@ extension:
 The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_i`/`chi_phi`/`zeff`,
 when present, are carried for the resistive-layer (SLAYER) analysis and ignored
 here. That analysis takes ``Z_\mathrm{eff}(\psi)`` from the `zeff` dataset when the file
-has one, otherwise from `n_i/n_e` with the `[SLAYER]` `impurity_charge`, otherwise
-from the scalar `[SLAYER] zeff`. Supply `zeff` whenever the impurity content is not a
+has one, otherwise from `n_i/n_e` with the kinetic data's `impurity_charge`, otherwise
+from its `zeff_default`. Supply `zeff` whenever the impurity content is not a
 single species fixed by `n_i/n_e`.
+
+The plasma's species composition (main ions, impurity charge and mass), the defaults that stand
+in for absent χ and Z_eff profiles, the confinement time and the resistivity closure belong to the
+equilibrium's kinetic data, not to any one physics stage, so KineticForces and the tearing layers
+see one plasma. In a script, set them where the profiles are attached:
+
+```julia
+attach_kinetic_profiles!(equil, "kinetic.h5"; ion_species=[IonSpecies(; z=1, m=2, fraction=0.5),
+    IonSpecies(; z=1, m=3, fraction=0.5)], impurity_charge=6, impurity_mass=12)
+```
+
+or copy loaded data with new settings, `KineticProfileData(equil.kinetic; impurity_charge=6)`.
+The default is one deuterium main ion carrying all of `n_i`, with a carbon impurity. In a deck
+they are `[Equilibrium]` keys: `[[Equilibrium.ion_species]]`, `impurity_charge` and `impurity_mass`.
 
 ## Multi-ion runs
 
@@ -40,34 +54,38 @@ per species under one shared full-composition ``Z_\mathrm{eff}`` and summed
 (``\tau = \sum_s \tau_s``) over the main ions, the quasineutrality-closing
 impurity, and (with `electron = true`) the electrons. This applies to both NTV
 paths: the post-PE ψ-quadrature diagnostic and the self-consistent
-`kinetic_source = "calculated"` matrices.
+kinetic matrices of a `kinetic = "KineticForces"` force-balance solve.
 
 ```toml
 [Equilibrium]
 kinetic_file = "kinetic.h5"    # n_i column/dataset = TOTAL main-ion density
-
-[KineticForces]
-electron = true                # add electron NTV in addition to the ion species
 impurity_charge = 6            # impurity charge (closes quasineutrality)
 impurity_mass = 12             # impurity mass
 
-[[KineticForces.ion_species]]
+[[Equilibrium.ion_species]]
 z = 1
 m = 2
 fraction = 0.5                 # this species' share of the total n_i
-[[KineticForces.ion_species]]
+[[Equilibrium.ion_species]]
 z = 1
 m = 3
 density = "n_T"                # or: explicit n_* dataset from the HDF5 kinetic file
+
+[KineticForces]
+electron = true                # add electron NTV in addition to the ion species
 ```
+
+The composition describes the plasma, so it sits on the equilibrium's kinetic data beside
+`kinetic_file`, where every kinetic consumer (NTV, the tearing layers) reads it.
 
 Each species sets exactly one of `fraction` (share of the file's total `n_i`)
 or `density` (a named `n_*` dataset). An all-fraction list must sum to 1; in a
 mixed list the impurity content is set by the file's `n_i`/`n_e` deficit, not
 by a fraction shortfall, and fractions may sum below (never above) 1. Every
-main-ion charge must satisfy `z < impurity_charge`. An empty `ion_species` list runs the
-single main ion from `ion_charge`/`ion_mass` (with `electron = true` still adding the
-electron species — the electron flag always means *in addition to* the ions).
+main-ion charge must satisfy `z < impurity_charge`. A single main ion carrying all of `n_i`
+runs the single-species NTV (with `electron = true` still adding the electron species — the
+electron flag, a `KineticForcesControl` setting, always means *in addition to* the ions). Without
+an `ion_species` list the plasma is one deuterium main ion.
 
 The summed total is written to `KineticForces/<method>/` exactly as in a single-ion
 run, and each species' own contribution to `KineticForces/PerSpecies/<label>/<method>/`
@@ -154,7 +172,7 @@ The torque is three nested adaptive Gauss–Kronrod integrals: over ψ (paneled 
 | λ | `rtol_pitch` | `psi_tolerance_margin × rtol_psi` = 1e-3 |
 | x | `rtol_x` | `nested_tolerance_margin × rtol_pitch` = 1e-5 |
 
-QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The calculated kinetic matrix build (`kinetic_source = "calculated"`) has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
+QuadGK bounds the error of the whole integral, not of each step as the LSODE integrators of Fortran PENTRC did, so a level tighter than its margin only multiplies evaluations: the ψ quadrature cannot see λ-level noise below `rtol_psi/10`. The kinetic matrix build of a `kinetic = "KineticForces"` solve has no ψ quadrature; it uses `rtol_pitch` when set and 1e-3 otherwise. Tightening `rtol_psi` tightens the whole ladder.
 
 ## Regularization: off by default, and never needed by kinetic runs
 

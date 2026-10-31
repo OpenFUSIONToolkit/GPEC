@@ -402,11 +402,7 @@ function _pack_qp_coefs(cache::InnerAsymptoticsCache)
     return dd
 end
 
-# -----------------------------------------------------------------------
-# Evaluator — back-substitution U = TPQSY of GW2020 Eq. (53), assembled from
-# the cached Y-series (Eq. 50), Q and the P[r2,r1] block, the shearing matrix
-# S of Eq. (41), and the Jordan basis T of Eq. (7).
-# -----------------------------------------------------------------------
+# Evaluator: U = TPQSY of GW2020 Eq. (53).
 
 """
     evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Number; derivative=true, apply_T=true) -> (U, dU)
@@ -456,8 +452,7 @@ function evaluate_asymptotics(cache::InnerAsymptoticsCache, x::Number;
     U = pp * qsy
 
     if derivative
-        # Apply chain rule: derivatives from horner are wrt xfac, convert to
-        # derivatives wrt x via factor (-2*xfac/x) = d(xfac)/dx.
+        # Horner derivatives are with respect to xfac = 1/x²; d(xfac)/dx = −2·xfac/x.
         chain = -2 * xfac / x
         dy_v = chain .* dyy
         dz_v = chain .* dzz
@@ -512,9 +507,6 @@ function physical_ua_dua(cache::InnerAsymptoticsCache, x::Number)
     end
     return ua, dua
 end
-
-# Series residual, the analogue of GW2020 Eq. (54) for v' = xJv (Eq. 6), used to choose the matching
-# radius (`pick_smax`, `_xmax_3level`; GW2020 Sec. III, Fig. 3).
 
 """
     asymptotic_residual(cache::InnerAsymptoticsCache, x::Number) -> SVector{2,Float64}

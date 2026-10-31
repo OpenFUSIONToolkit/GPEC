@@ -9,13 +9,13 @@ function (f::GGJDomainTestResidual)(Q)
     return f.residual(Q)
 end
 
-GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainTestResidual, Q::ComplexF64) =
-    GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f.dispersion, Q)
+GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GGJDomainTestResidual, Q::ComplexF64) =
+    GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f.dispersion, Q)
 
 @testset "Dispersion GGJ growth rates (full matching, winding classification)" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: GGJModel, solve_inner
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     GGJ = GeneralizedPerturbedEquilibrium.InnerLayer.GGJ
 
     # Glasser & Wang (2020) Eq. 55 layer, one surface. The 2 × 2 raw Δ' block is
@@ -33,7 +33,7 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
     mc = multi_surface_coupling_full([surface_coupling(model, p, r0.tearing)], dp_raw)
 
     @testset "GGJ classification and polishing stay at positive growth" begin
-        D = GeneralizedPerturbedEquilibrium.Dispersion
+        D = GeneralizedPerturbedEquilibrium.Tearing.Dispersion
         g = GGJDispersion(mc)
         center = 0.01im
         re_paths = [ComplexF64[-1 + center, 1 + center]]
@@ -42,7 +42,7 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
         f = GGJDomainTestResidual(g, Q -> Q + 0.1im, ComplexF64[])
         gr = D._run_analysis(re_paths, im_paths, [zeros(2)], 1.0;
             pole_threshold=10.0, filter_above_poles=false, filter_outside_re=false,
-            residual=f, classification=:winding, zero_winding=1)
+            residual=f, classification=:winding)
         @test :no_root in gr.warning_flags
         @test isempty(gr.valid_roots)
         @test !isempty(f.evaluated) && all(Q -> imag(Q) > 0, f.evaluated)
@@ -50,7 +50,7 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
         # Expansion may find a nearby unstable root, but its returned trust disk must remain in-domain.
         nearby = GGJDomainTestResidual(g, Q -> Q - 0.014im, ComplexF64[])
         kind, W, radius = D._winding_classify(nearby, ComplexF64[center], 1, re_paths, im_paths, 2.0;
-            zero_winding=1, rfrac=0.001)
+            rfrac=0.001)
         @test kind === :root
         @test W ≈ 1
         @test 0 < radius < imag(center)
@@ -66,7 +66,7 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
         empty!(f.evaluated)
         @test D._polish_root(f, 0.0im, 1.0) == (0.0im, 0, false)
         kind, _, _ = D._winding_classify(f, ComplexF64[0.0im], 1, re_paths, im_paths, 2.0;
-            zero_winding=1, rfrac=0.5)
+            rfrac=0.5)
         @test kind === :unresolved
         @test isempty(f.evaluated)
     end
@@ -84,13 +84,13 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
     end
 
     @testset "ggj_growth_rates finds the constructed root, winding +1" begin
-        gr, amr = ggj_growth_rates(mc; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.031Q0, 0.047Q0),
+        gr, amr = ggj_growth_rates(mc; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.047Q0, 0.031Q0),
             nre0=6, nim0=6, passes=3, parallel=false)
         @test gr.classification === :winding
         @test !(:no_root in gr.warning_flags)
         @test all(w -> w ≈ 1, gr.valid_roots_winding)
-        @test gr.gamma_Hz ≈ s0 rtol = 1e-6
-        @test abs(gr.omega_Hz) < 1e-6 * Q0
+        @test gr.gamma ≈ s0 rtol = 1e-6
+        @test abs(gr.omega) < 1e-6 * Q0
         @test abs(gr.Q_root - 0.1234im) < 1e-6
         # The GGJ layer's branch cut runs along γ ≤ 0, so a box reaching there is refused.
         @test_throws ArgumentError ggj_growth_rates(mc; gamma_range=(-0.01Q0, 0.17Q0), omega_range=(-0.031Q0, 0.047Q0))
@@ -121,7 +121,7 @@ GeneralizedPerturbedEquilibrium.Dispersion._residual_domain_radius(f::GGJDomainT
         end
         b = secant_root(g2, 0.1234im)
         @test abs(b - 0.1234im) > 1e-5                 # the coupling moved the root
-        gr2, _ = ggj_growth_rates(mc2; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.031Q0, 0.047Q0),
+        gr2, _ = ggj_growth_rates(mc2; gamma_range=(0.08Q0, 0.17Q0), omega_range=(-0.047Q0, 0.031Q0),
             nre0=6, nim0=6, passes=3, parallel=false)
         @test length(gr2.valid_roots) == 1 && all(w -> w ≈ 1, gr2.valid_roots_winding)
         @test abs(gr2.Q_root - b) < 1e-8 * abs(b)

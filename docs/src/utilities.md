@@ -38,6 +38,14 @@ Dimension Scales); see the metadata contract in `docs/development/hdf5-conventio
 Modules = [GeneralizedPerturbedEquilibrium.Utilities.HDF5Annotations]
 ```
 
+## Hermite FEM
+
+The Hermite-cubic basis and packed grid shared by the outer-region and inner-layer Galerkin solvers.
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Utilities.HermiteFEM]
+```
+
 ## IMAS Output
 
 ```@docs

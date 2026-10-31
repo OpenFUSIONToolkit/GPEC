@@ -17,12 +17,13 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 ```@docs
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibrium
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.write_outputs_to_HDF5
 ```
+
+Save a computed state with [`save_to_hdf5`](@ref); computing the response does not write a file.
 
 ## Several toroidal modes
 
-With `nn_low < nn_high` every `mode` axis in `PerturbedEquilibrium/` runs over the full
+With several toroidal modes (`nn = [1, 2, ...]`) every `mode` axis in `PerturbedEquilibrium/` runs over the full
 `numpert_total = mpert·npert` space, with m varying fastest and one block of `mpert` entries for each n.
 `PerturbedEquilibrium/mode_m` and `mode_n` label each entry. The equilibrium is axisymmetric, so
 different n never couple:
@@ -86,7 +87,7 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_dominant_coupling!
 
 ## Torque response matrices
 
-A kinetic forward solve (`integrator = "forward"`, `kinetic_factor > 0`) carries the
+A kinetic forward solve (`integrator = "Forward"`, `kinetic = "KineticForces"`) carries the
 drift-kinetic response inside its Euler-Lagrange energy: the complex plasma energy inside a
 flux surface, `δW(ψ) = ξ†·U₂(ψ)·U₁(ψ)⁻¹·ξ/(2μ₀)`, has an anti-Hermitian part that is the
 neoclassical toroidal viscosity torque (Logan & Park 2013, eq. 19). On request,

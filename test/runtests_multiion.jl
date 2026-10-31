@@ -25,12 +25,13 @@ using HDF5
     end
 
     @testset "IonSpecies + TOML conversion" begin
-        # TOML.jl parses [[KineticForces.ion_species]] as a Vector{Any} of Dicts.
+        # TOML.jl parses [[Equilibrium.ion_species]] as a Vector{Any} of Dicts.
         v = Any[Dict("z" => 1, "m" => 2, "fraction" => 0.5), Dict("z" => 1, "m" => 3, "fraction" => 0.5)]
-        c = KF.KineticForcesControl(; ion_species=v)
+        c = GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" =>
+            Dict{String,Any}("eq_type" => "efit", "kinetic_file" => "k.h5", "ion_species" => v)), ".")
         @test length(c.ion_species) == 2
         @test (c.ion_species[1].z, c.ion_species[1].m, c.ion_species[1].fraction) == (1, 2, 0.5)
-        @test isempty(KF.KineticForcesControl().ion_species)     # default single-ion
+        @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig().ion_species === nothing     # default single-ion
     end
 
     @testset "resolve_ntv_species" begin
@@ -230,9 +231,9 @@ using HDF5
         )
         h5 = tempname() * ".h5"
         HDF5.h5open(h5, "cw") do f
-            KF.write_to_hdf5!(f, mk(1.0); species_label="ion_z1_m2")
-            KF.write_to_hdf5!(f, mk(2.0); species_label="electron")
-            KF.write_to_hdf5!(f, mk(3.0))          # summed total
+            KF.save_to_hdf5(f, mk(1.0); species_label="ion_z1_m2")
+            KF.save_to_hdf5(f, mk(2.0); species_label="electron")
+            KF.save_to_hdf5(f, mk(3.0))          # summed total
         end
         HDF5.h5open(h5, "r") do f
             @test sort(collect(keys(f["KineticForces"]))) == ["PerSpecies", "fgar"]

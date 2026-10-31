@@ -32,6 +32,7 @@ using StaticArrays
 using Random
 using Printf
 using DoubleFloats: Double64
+using ...Utilities.HermiteFEM: hermite_basis, pack_grid
 
 import ..InnerLayerModel, ..InnerLayerResponse, ..InnerLayerParameters
 import ..solve_inner, ..solve_inner_profile

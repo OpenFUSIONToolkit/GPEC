@@ -1,6 +1,5 @@
 module ForceFreeStates
 
-# All imports and includes for the ForceFreeStates module
 using LinearAlgebra
 using LinearAlgebra.LAPACK
 using TOML
@@ -17,6 +16,8 @@ import CommonSolve
 
 import ..Equilibrium
 import ..Utilities
+import ..Utilities: save_to_hdf5
+using ..Utilities.HermiteFEM: hermite_basis, pack_grid
 import ..Vacuum
 import ..InnerLayer
 using Printf
@@ -25,6 +26,7 @@ import StaticArrays: @MMatrix
 
 # Types with cross-subsystem consumers, loaded before the code that dispatches on them
 include("Surfaces/Types.jl")
+include("Integrators.jl")
 include("CoreTypes.jl")
 include("Riccati/Types.jl")
 include("Fourfit.jl")
@@ -59,8 +61,6 @@ include("Galerkin/GalerkinAssembly.jl")
 include("Galerkin/GalerkinSolution.jl")
 include("Galerkin/GalerkinSolve.jl")
 
-# Scripting-API integrator selectors: pure configuration translated onto ForceFreeStatesControl.
-include("Integrators.jl")
 
 # The published solve product; last, so it can name every type the stages above define.
 include("Result.jl")
@@ -68,8 +68,11 @@ include("Result.jl")
 # Post-solve inner-layer matching: consumes and produces ForceFreeStatesResult, so it loads
 # after the result machinery.
 include("Matching/MatchProblem.jl")
+include("InputSnapshot.jl")
+include("Output.jl")
+include("Run.jl")
 
-# These are used for various small tolerances and root finders throughout ForceFreeStates
+# Small tolerance and root-finder iteration cap used throughout ForceFreeStates
 global eps = 1e-10
 global itmax = 50
 

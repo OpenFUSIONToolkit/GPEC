@@ -3,7 +3,7 @@
 # Driven inner-layer matching on a finished solve (rmatch match_rpec + match_output_solution, match.f).
 
 """
-    MatchProblem(ffs; eta, rho, rotation, gamma=5/3, ideal=false)
+    MatchProblem(ffs; eta=nothing, rho=nothing, rotation=nothing, gamma=5/3, ideal=false)
 
 Driven inner-layer matching on a finished force-free-states solve `ffs`: each rational surface
 is matched at the forced eigenvalue γ = 2πi·n·f, with f the plasma rotation frequency there.
@@ -15,7 +15,10 @@ with `vac_flag=true`.
 
   - `eta`, `rho`, `rotation`: resistivity in Ω·m, mass density in kg/m³ and rotation frequency
     in Hz, a scalar for every surface or one value per `ffs.surfaces` entry (core to edge).
-    Required unless `ideal=true`.
+    Each one not given comes from the equilibrium's kinetic data, as the tearing problem's do:
+    η from [`InnerLayer.layer_eta`](@ref), ρ from [`InnerLayer.layer_rho`](@ref), and the
+    rotation f = Ω_E/2π from the E×B rotation of [`InnerLayer.layer_omega_E`](@ref). Unused
+    with `ideal=true`.
   - `gamma`: ratio of specific heats.
   - `ideal`: skip the inner layer and return the perfectly shielding solution.
 
@@ -63,8 +66,15 @@ function MatchProblem(
         error("MatchProblem: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $msing surfaces")
 
     ideal && return MatchProblem(ffs, zeros(msing), zeros(msing), zeros(msing), Float64(gamma), true)
+    InnerLayer._require_layer_inputs("MatchProblem", ffs.equil; eta, rho, rotation)
+    eta === nothing && (eta = InnerLayer.layer_eta(ffs.equil, ffs.surfaces))
+    rho === nothing && (rho = InnerLayer.layer_rho(ffs.equil, ffs.surfaces))
+    if rotation === nothing
+        omega_E = InnerLayer.layer_omega_E(ffs.equil, ffs.surfaces)
+        any(isnan, omega_E) && error("MatchProblem: the kinetic data carry no omega_E; give rotation")
+        rotation = omega_E ./ 2π
+    end
     per_surface(name, v) =
-        v === nothing ? error("MatchProblem: $name is required (a scalar, or one value per surface, core to edge)") :
         v isa Real ? fill(Float64(v), msing) :
         length(v) == msing ? collect(Float64, v) :
         error("MatchProblem: $name has length $(length(v)), expected $msing (one per surface, core to edge)")
@@ -260,7 +270,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     end
 
     return MatchResult(cout, cin, deltar, rpec_eig, residual, bpen, reconnected_flux,
-        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model)
+        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model, prob)
 end
 
 # Copy of ffs with the match applied; the ideal reference keeps closure :ideal, its zero bpen and δW.

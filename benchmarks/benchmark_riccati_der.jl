@@ -13,7 +13,7 @@
 # the two expressions differ — so this script compares riccati_der! against the
 # explicit formula rather than against sing_der!.
 #
-# Usage (from JPEC_main root):
+# Usage (from the repository root):
 #   julia --project=. benchmarks/benchmark_riccati_der.jl
 
 using LinearAlgebra, Random, Printf, TOML
@@ -22,27 +22,12 @@ using GeneralizedPerturbedEquilibrium
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
 function setup_solovev()
+    GPEC = GeneralizedPerturbedEquilibrium
     ex = joinpath(@__DIR__, "..", "test", "test_data", "regression_solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-    inputs["ForceFreeStates"]["verbose"] = false
-    intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
-    ctrl = FFS.ForceFreeStatesControl(;
-        (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-    eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-    equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config)
-    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-        (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    FFS.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low;
-    intr.nhigh = ctrl.nn_high;
-    intr.npert = 1
-    FFS.sing_find!(intr, equil)
-    intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-    intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-    intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.numpert_total = intr.mpert * intr.npert
-    metric = FFS.make_metric(equil, intr.mpert)
-    mats = FFS.build_matrix_splines(equil, intr, metric)
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
+    prob = GPEC.ForceBalanceProblem(equil; GPEC.force_balance_keywords(inputs, ex)...)
+    ctrl, intr, equil, _, mats = GPEC._prepare_solve(prob, GPEC.force_balance_algorithm(inputs))
     return ctrl, equil, mats, intr
 end
 
@@ -80,8 +65,8 @@ println("Test state: Hermitian S (physical constraint). Expected error: ~machine
 ctrl, equil, mats, intr = setup_solovev()
 N = intr.numpert_total
 
-odet = FFS.OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-FFS.initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+odet = FFS.OdeState(N, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 chunks = FFS.chunk_el_integration_bounds(odet, ctrl, intr)
 
 # 30% into each chunk: well inside the interval, away from singularities at psi_end

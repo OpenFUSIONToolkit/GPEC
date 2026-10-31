@@ -21,8 +21,9 @@ fields are empty when the solve kept no Galerkin basis; the inner fields are emp
     inner model returns real-ψ profiles (`GGJModel(; solver=:galerkin)` or `GGJModel(; real_profiles=true)`).
   - `inner_params`: per-surface `GGJParameters` used.
   - `model`: the inner-layer model solved, with its backend options.
+  - `problem`: the [`MatchProblem`](@ref) solved, with its per-surface η, ρ and rotation.
 """
-struct MatchResult
+struct MatchResult{P}
     cout::Matrix{ComplexF64}
     cin::Matrix{ComplexF64}
     deltar::Matrix{ComplexF64}
@@ -37,6 +38,7 @@ struct MatchResult
     inner_b::Vector{Matrix{ComplexF64}}
     inner_params::Vector{InnerLayer.GGJParameters}
     model::InnerLayer.InnerLayerModel
+    problem::P
 end
 
 # Solve the 4·msing system mat·[cout; cin] = rmat (rmatch match_rpec).
@@ -73,7 +75,7 @@ function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::
 end
 
 # Write `m` under SingularSurfaces/Match/, annotated per the metadata contract.
-function write_match!(out_h5, m::MatchResult)
+function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, m::MatchResult)
     g = "SingularSurfaces/Match"
     out_h5["$g/cout"] = m.cout
     out_h5["$g/cin"] = m.cin

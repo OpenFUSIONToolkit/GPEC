@@ -1,19 +1,11 @@
 # LayerOverlap.jl
 #
-# Resistive-layer overlap scan: where adjacent rational surfaces' resistive layers run into each
-# other. Past that point neither surface keeps a well-separated inner region, so the
-# matched-asymptotic treatment is not defined there. Criterion: Fitzpatrick, Nucl. Fusion 2025
-# (doi 10.1088/1741-4326/ae4fdd) Sect. 5.9, judged with the diffusive-resistive width of its
-# Eq. (100). How the result is used is documented in the integration-domain truncation section of
-# docs/src/stability.md.
-#
-# Lives in `Tearing` rather than `InnerLayer/SLAYER` because it needs
-# `ForceFreeStates._find_rational_surfaces`, and `InnerLayer` loads before `ForceFreeStates`.
-#
-# Surfaces beyond the equilibrium's own ψ grid are located on `Equilibrium.separatrix_q_law`: the
-# logarithmic divergence of q at the X-point(s) on the last closed flux surface, with its
-# location and slope taken from the 2D flux and its constant from the traced q on the outermost
-# grid surface. The scan only recommends a domain; nothing here re-forms the equilibrium.
+# Resistive-layer overlap scan: where adjacent rational surfaces' resistive layers run into each other,
+# past which the matched-asymptotic treatment is not defined. Criterion: Fitzpatrick, Nucl. Fusion 2025
+# (doi 10.1088/1741-4326/ae4fdd) Sect. 5.9, with the diffusive-resistive width of its Eq. (100).
+# Usage is documented in the integration-domain truncation section of docs/src/stability.md.
+# Lives in `Tearing` because it needs `ForceFreeStates._find_rational_surfaces`, and `InnerLayer` loads first.
+# The scan only recommends a domain; nothing here re-forms the equilibrium.
 using ..Utilities: KineticProfiles
 using ..ForceFreeStates: _find_rational_surfaces, SingType
 using ..InnerLayer.SLAYER: SLAYERParameters, build_slayer_inputs, slayer_algebraic_widths, riccati_del_s,
@@ -30,12 +22,10 @@ using Printf: @sprintf
 Per-surface resistive layer widths and the `psihigh` they imply, from
 [`resistive_layer_overlap`](@ref).
 
-All widths are in **normalized flux**, converted from the metre-valued
-`LayerWidths` scales by `Δψ = w / |da/dψ|` so they can be compared against
-surface *separations* in ψ. Comparing the metre values directly against ψ is a
-dimensional error.
+All widths are in **normalized flux**, converted from metres by `Δψ = w / |da/dψ|` so they compare
+against surface separations in ψ.
 
-# Fields
+## Fields
 
   - `m`, `n` -- resonant mode numbers per surface, ordered by increasing ψ
   - `psi` -- surface location in normalized flux
@@ -43,9 +33,8 @@ dimensional error.
   - `delta_s_m` -- `|δ_s|`, the Riccati resistive layer width, in meters
   - `width_delta_s` -- the same width in normalized flux, `|δ_s|/|da/dψ|`
   - `width_visco` -- the visco-resistive comparison scale as a Δψ width
-  - `width_dr` -- the diffusive-resistive width of Fitzpatrick (2025) Eq. (100) as a Δψ
-    width. This is the criterion the recommendation uses: the paper's Sect. 5.6 shows that
-    strong shear near the separatrix forces every layer there into the DR regime
+  - `width_dr` -- the diffusive-resistive width of Fitzpatrick (2025) Eq. (100) as a Δψ width; the
+    criterion the recommendation uses (Sect. 5.6: strong shear near the separatrix puts every layer in the DR regime)
   - `extrapolated` -- true when the surface was located outside the
     equilibrium's ψ grid via the edge q-law
   - `psihigh_delta_s`, `psihigh_visco`, `psihigh_dr` -- domain implied by each width
@@ -85,10 +74,7 @@ LayerOverlapScan(; m=Int[], n=Int[], psi=Float64[], rs=Float64[], delta_s_m=Floa
     LayerOverlapScan(m, n, psi, rs, delta_s_m, width_delta_s, width_visco, width_dr, extrapolated,
         psihigh_delta_s, psihigh_visco, psihigh_dr, psihigh, first_overlap, caveats, notes)
 
-# An inverse equilibrium is solved on a prescribed boundary and carries its own q out to ψ = 1,
-# so the scan reads the real q there instead of extrapolating, and searches to ψ = 1 rather than
-# stopping short of a separatrix it does not have. The direct/EFIT path cannot: GPEC recomputes q
-# by field-line tracing only out to psihigh.
+# Real q spline of an inverse equilibrium, which carries q out to ψ = 1 (the direct path traces q only to psihigh).
 _inverse_q_spline(ingest::InverseIngest) =
     cubic_interp(collect(Float64, ingest.sq_xs), collect(Float64, ingest.sq_fs[:, 3]);
         extrap=ExtendExtrap())
@@ -109,60 +95,40 @@ Locate the q = m/`n_tor` rational surfaces, compute each one's resistive layer
 width, and report the outermost `psihigh` at which adjacent layers are still
 separated.
 
-Surfaces inside the equilibrium grid come from
-`ForceFreeStates._find_rational_surfaces` (Brent root-finding segmented between
-q-extrema, so reverse shear is handled). Surfaces beyond the grid come from
-[`separatrix_q_law`](@ref) when `extrapolate=true`, which is what lets the scan
-recommend a domain *larger* than the one it was handed. That law diverges at the
-X-point flux, which a reconstruction may place slightly outside its own boundary,
-so rationals can lie at ψ > 1: inside the real separatrix but beyond the
-equilibrium GPEC holds. Only the first of them is placed, to judge whether the
-outermost surface inside is clean, and it is scored only if the kinetic profiles
-extend that far. The recommendation never exceeds ψ = 1, and when no overlap can
-be established the domain keeps its requested limit.
+Surfaces beyond the grid come from the inverse equilibrium's own q, or from
+[`separatrix_q_law`](@ref) on the direct path, when `extrapolate=true`; only the first rational
+past ψ = 1 is placed, and it is scored only if the kinetic profiles reach it. The recommendation
+never exceeds ψ = 1, and when no overlap is established the domain keeps its requested limit.
+Widths come from [`slayer_algebraic_widths`](@ref) via [`build_slayer_inputs`](@ref), with the
+same plasma inputs and resistivity closure as the SLAYER analysis; `delta_s` is a Riccati
+comparison only.
 
-Layer widths come from [`slayer_algebraic_widths`](@ref) via
-[`build_slayer_inputs`](@ref), so the scan uses the same plasma inputs and the
-same resistivity closure as the SLAYER analysis itself. The criterion channel needs no
-Riccati solve; `delta_s` is solved per surface as a reported comparison only.
-
-# Arguments
+## Arguments
 
   - `equil` -- a formed `PlasmaEquilibrium`
   - `profiles` -- `KineticProfiles` spanning the scanned ψ range
 
-# Keyword arguments
+## Keyword arguments
 
   - `n_tor` -- toroidal mode number; surfaces are q = m/`n_tor`
 
-  - `m_max` -- runaway backstop on the poloidal mode number (default `2000`), **not** the
-    physics limit: the outward search should terminate within `psi_gap` of the separatrix
-    flux, and if `m_max` is what stops it instead, the scan says so in `caveats`
-    because "no overlap found" would then rest on a non-physical cutoff
-  - `max_layer_solves` -- bound on how many surfaces get a Riccati layer solve (default `64`,
-    innermost kept). The first overlap decides the answer, so surfaces far beyond it only cost
-    time; when the bound bites, `caveats` records that a "no overlap" verdict is inconclusive
+  - `m_max` -- runaway backstop on the poloidal mode number (default `2000`), not a physics limit;
+    if it stops the outward search, `caveats` says so
+  - `max_layer_solves` -- maximum number of surfaces scored, innermost kept (default `64`); `caveats`
+    records when it truncates
   - `psihigh_safe` -- treat this as the outer edge of trusted equilibrium data
     (default `equil.profiles.xs[end]`)
-  - `psi_gap` -- never place a surface closer than this to the separatrix flux on the
-    **direct** path (default `1e-9`, purely numerical: it stops the outward search from
-    crowding indefinitely onto the separatrix where surfaces become indistinguishable).
-    Inverse equilibria ignore it: they have a prescribed boundary and the search runs to
-    ψ = 1 on the real q. Geometry needs no clamp of its own -- `radial_label` derivatives are
-    analytic and valid under extrapolation
+  - `psi_gap` -- minimum distance from the separatrix flux for a placed surface on the direct path
+    (default `1e-9`, numerical); inverse equilibria ignore it
   - `extrapolate` -- search past `psihigh_safe` on the separatrix q-law (default `true`)
   - `theta` -- poloidal angle for the minor-radius chord, used only by `rs_method=:midplane` (default `0.0`)
-  - `rs_method` -- radial label the widths and their ψ-conversion Jacobian are taken in
-    (default `:flux`; see `radial_label`). The caller wiring this scan into the domain
-    truncation passes `:flux`, the label Fitzpatrick Eq. (100) is anchored to
+  - `rs_method` -- radial label of the widths and their ψ Jacobian (default `:flux`, the label
+    Fitzpatrick Eq. (100) is anchored to; see `radial_label`)
   - `bt`, `mu_i`, `zeff`, `chi_perp_e`, `chi_perp_i`, `chi_tor`, `tau_E`, `P_perp_model`, `resistivity_model`, `lnLambda_form`
-    -- passed through to `build_slayer_inputs`. The defaults are placeholders: a caller
-    scanning a real run must pass that run's own values, as the domain-truncation wiring does
+    -- passed through to `build_slayer_inputs`. The defaults are placeholders: pass the run's own values
 
-The overlap criterion is that surface `k` overlaps its inner neighbour when
-`ψ_k − w_k/2 < ψ_{k-1} + w_{k-1}/2`. When that happens **both** surfaces are
-contaminated, so the recommendation cuts at the inner edge of surface `k-1`,
-leaving `k-2` as the outermost trustworthy surface.
+Surface `k` overlaps its inner neighbour when `ψ_k − w_k/2 < ψ_{k-1} + w_{k-1}/2`. Both surfaces are
+then contaminated, so the recommendation is surface `k-1`'s own ψ.
 """
 function resistive_layer_overlap(equil, profiles::KineticProfiles;
     n_tor::Integer,
@@ -229,15 +195,11 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
                 "there, so no surfaces are placed beyond ψ = $(@sprintf("%.6f", psihigh_safe))"
             )
         else
-            # Every q = m/n above the anchor lies beyond the grid, so the search starts at the
-            # first such m whatever the in-grid search returned: no surface can fall between
-            # the two locators.
+            # Every q = m/n above the anchor lies beyond the grid, so start at the first such m.
             m_start = floor(Int, n_tor * abs(edge_fit.q_anchor)) + 1
             m_grid = isempty(found) ? 0 : maximum(s.m for s in found)
             n_before = length(found)
-            # Terminates within psi_gap of the separatrix flux -- surfaces indistinguishable from
-            # it -- not on m_max. Reaching m_max means the scan was cut short for a non-physical
-            # reason and any "no overlap" verdict from it is unsafe, so record that.
+            # Should stop within psi_gap of the separatrix flux; stopping on m_max is recorded as a caveat.
             reached_separatrix = false
             for m in m_start:Int(m_max)
                 psi_m = separatrix_q_psi(edge_fit, sign(edge_fit.q_anchor) * m / n_tor; psi_gap=psi_gap)
@@ -246,9 +208,7 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
                     break
                 end
                 push!(found, (m=m, psi=psi_m, extrap=true))
-                # One rational past the equilibrium's boundary is enough: it decides whether the
-                # outermost surface inside is clean. Pairs further out lie wholly outside the
-                # equilibrium and cannot constrain a domain that ends at or before ψ = 1.
+                # One rational past ψ = 1 decides whether the outermost surface inside is clean.
                 if psi_m > 1.0
                     reached_separatrix = true
                     break
@@ -276,20 +236,17 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         return LayerOverlapScan(; caveats=caveats, notes=notes)
     end
 
-    # Beyond the grid the equilibrium's q spline is a cubic extrapolation, so the radial label
-    # takes q there from whichever source placed the surfaces.
+    # Beyond the grid the radial label takes q from whichever source placed the surfaces.
     q_beyond = inv_q !== nothing ? (ψ -> Float64(inv_q(ψ))) :
                edge_fit !== nothing ? (ψ -> separatrix_q(edge_fit, ψ)) : nothing
-    # Widths come back in metres of whichever radial label `rs_method` selects, so the
-    # conversion into normalised flux must use that same label's Jacobian.
+    # Widths are in metres of the `rs_method` label, so convert to flux with that label's Jacobian.
     _, _dr_dpsi = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
 
     ms, ns, psis, rss = Int[], Int[], Float64[], Float64[]
     dels_m, w_dels, w_visc, w_dr, extraps = Float64[], Float64[], Float64[], Float64[], Bool[]
     unscored = Float64[]
 
-    # Bound the per-surface Riccati work, and say so when the bound bites: a "no overlap"
-    # verdict from a truncated list is not conclusive.
+    # Bound the per-surface work; a "no overlap" verdict from a truncated list is not conclusive.
     if length(found) > max_layer_solves
         push!(caveats,
             "surface list truncated from $(length(found)) to the innermost $max_layer_solves for " *
@@ -315,8 +272,7 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         end
 
         sing = SingType(; m=[s.m], n=[Int(n_tor)], psifac=s.psi, rho=sqrt(s.psi), q=q_val, q1=q1_val)
-        # Built one surface at a time so a single degenerate surface (e.g. ω_*e == ω_*i,
-        # which makes iota_e singular) is recorded and skipped rather than aborting the scan.
+        # One surface at a time, so a degenerate surface (e.g. ω_*e == ω_*i) is skipped, not fatal.
         params = try
             build_slayer_inputs(equil, [sing], profiles; rs_method=rs_method, q_beyond=q_beyond,
                 bt=bt, mu_i=mu_i, zeff=zeff, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor,
@@ -324,9 +280,7 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
                 dr_val=0.0, dc_type=:none, theta=theta,
                 resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
         catch err
-            # Any single-surface failure is recorded and skipped, never fatal. A DomainError is
-            # the common one: profiles that stop short of the extrapolated surfaces, or a
-            # negative-shear surface reaching a sqrt/fractional power in the layer parameters.
+            # Typically a DomainError: profiles that stop short of the surface, or negative shear under a sqrt.
             err isa Union{ArgumentError,DomainError} || rethrow()
             msg = err isa ArgumentError ? err.msg : sprint(showerror, err)
             push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): skipped -- $(replace(msg, '\n' => ' '))")
@@ -334,9 +288,8 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
             continue
         end
 
-        # The criterion needs only the algebraic DR width, so the Riccati solve never gates it:
-        # dropping a surface here would leave _first_overlap_limit comparing its neighbours across
-        # a gap twice the physical one, which hides an overlap and reports too wide a domain.
+        # The criterion needs only the algebraic DR width; a Riccati failure must not drop the surface,
+        # or _first_overlap_limit would compare its neighbours across a doubled gap and miss an overlap.
         alg = slayer_algebraic_widths(params[1])
         if !isfinite(alg.delta_dr)
             push!(
@@ -347,8 +300,7 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
             push!(unscored, s.psi)
             continue
         end
-        # delta_s is reported for comparison only. A failure leaves it NaN, which makes its own
-        # channel report no overlap, and leaves the DR criterion untouched.
+        # delta_s is a comparison only; a failure leaves it NaN without touching the DR criterion.
         delta_s_m = try
             w = abs(riccati_del_s(params[1]) * params[1].d_beta)
             isfinite(w) || push!(notes, "m=$(s.m) at ψ=$(@sprintf("%.6f", s.psi)): del_s Riccati did not converge; " *
@@ -377,11 +329,9 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
     ph_dels, _ = _first_overlap_limit(psis, w_dels)
     ph_visc, _ = _first_overlap_limit(psis, w_visc)
     ph_dr, k_dr = _first_overlap_limit(psis, w_dr)
-    # The DR channel is the criterion (see the `width_dr` field above); the other two are
-    # reported for comparison only.
+    # The DR channel is the criterion; the other two are for comparison.
     recommended = ph_dr
-    # A surface that could not be scored hides any overlap with its neighbours, so it matters
-    # wherever it sits inside the reported overlap point, or anywhere when none was found.
+    # An unscored surface inside the overlap point (or anywhere, if none) may hide an overlap.
     n_hidden = count(p -> k_dr === nothing || p < psis[k_dr], unscored)
     n_hidden > 0 &&
         push!(caveats,
@@ -439,4 +389,34 @@ function Base.show(io::IO, ::MIME"text/plain", s::LayerOverlapScan)
         println(io, "  note: ", note)
     end
     return nothing
+end
+
+"""
+    layer_overlap_scan(equil, model::SLAYERModel, ns) -> Union{Nothing,LayerOverlapScan}
+
+The binding resistive-layer overlap scan over the toroidal mode numbers `ns`: the one with the
+innermost overlap point, or the first scan when none overlaps. Uses the equilibrium's kinetic data
+and `model`'s layer closures, as the SLAYER tearing solve does, in the flux label Fitzpatrick (2025)
+Eq. (100) is anchored to. Caveats are logged as warnings and notes as info.
+"""
+function layer_overlap_scan(equil, model::SLAYERModel, ns)
+    data = equil.kinetic
+    data === nothing && error("psilim_from_layer_overlap needs kinetic profiles: set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
+    loaded = _slayer_profiles(data, model)
+    chi = _slayer_chi_inputs(loaded, model, data; warn=false)
+    zeff = loaded.zeff === nothing ? data.zeff_default : loaded.zeff
+    scans = [
+        resistive_layer_overlap(equil, loaded.profiles; n_tor=n, rs_method=:flux, chi..., tau_E=data.tau_E,
+            P_perp_model=model.P_perp_model, mu_i=_layer_ion_mass(data), zeff=zeff, theta=model.theta_sample,
+            resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
+        for n in ns
+    ]
+    for (n, scan) in zip(ns, scans)
+        foreach(msg -> @warn("Layer-overlap scan (n = $n): $msg"), scan.caveats)
+        foreach(msg -> @info("Layer-overlap scan (n = $n): $msg"), scan.notes)
+    end
+    isempty(scans) && return nothing
+    overlapping = filter(sc -> sc.psihigh !== nothing, scans)
+    isempty(overlapping) && return first(scans)
+    return overlapping[argmin([sc.psihigh for sc in overlapping])]
 end

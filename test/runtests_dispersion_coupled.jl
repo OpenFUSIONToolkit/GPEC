@@ -1,8 +1,8 @@
 @testset "Dispersion coupled determinant" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
+    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner, layer_response
     using GeneralizedPerturbedEquilibrium.InnerLayer.GGJ: glasser_wang_2020_eq55
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using LinearAlgebra
     using StaticArrays
 
@@ -214,8 +214,8 @@
         ref_tauk = sc1.tauk
 
         # Compute the diagonal modifications at Q_pin
-        Δ1 = solve_inner(m, p_a, Q_pin * (sc1.tauk / ref_tauk)).tearing * sc1.scale
-        Δ2 = solve_inner(m, p_b, Q_pin * (sc2.tauk / ref_tauk)).tearing * sc2.scale
+        Δ1 = layer_response(m, p_a, Q_pin * (sc1.tauk / ref_tauk)).tearing * sc1.scale
+        Δ2 = layer_response(m, p_b, Q_pin * (sc2.tauk / ref_tauk)).tearing * sc2.scale
 
         # Build dp such that M(Q_pin) is exactly singular.
         # Choose off-diagonal couplings, then set diagonals so M[k,k]=Δ_k

@@ -199,22 +199,57 @@ using TOML
         # A listed deck key must not still be a control field, or listing it would stop runs that set a live key.
         @test !any(k -> hasfield(GPEC.ForceFreeStates.ForceFreeStatesControl, Symbol(k)), GPEC._DEPRECATED_FFS_KEYS)
         @test !any(k -> hasfield(GPEC.KineticForces.KineticForcesControl, Symbol(k)), GPEC._DEPRECATED_KF_KEYS)
-        @test !any(k -> hasfield(GPEC.Runner.SLAYERControl, Symbol(k)), GPEC._DEPRECATED_SLAYER_KEYS)
         # The kinetic-profile file moved to [Equilibrium]; the stop names the new home instead of "remove".
         mktempdir() do deck_dir
             template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
             foreach(name -> cp(joinpath(template_dir, name), joinpath(deck_dir, name)), readdir(template_dir))
             inputs = TOML.parsefile(joinpath(deck_dir, "gpec.toml"))
-            inputs["SLAYER"] = Dict{String,Any}("enabled" => false, "profile_file" => "kinetic.h5")
+            inputs["SLAYER"] = Dict{String,Any}("profile_file" => "kinetic.h5")
             open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
-            @test_throws r"\[SLAYER\] sets `profile_file`, which is no longer a key; name the kinetic-profile file once, as kinetic_file" GPEC.main([deck_dir])
+            @test_throws r"\[SLAYER\] sets keys that moved: `profile_file` \(name the kinetic-profile file once, as kinetic_file" GPEC.main([deck_dir])
             delete!(inputs, "SLAYER")
             inputs["KineticForces"] = Dict{String,Any}("kinetic_file" => "kinetic.dat")
             open(io -> TOML.print(io, inputs), joinpath(deck_dir, "gpec.toml"), "w")
-            @test_throws r"\[KineticForces\] sets `kinetic_file`, which is no longer a key; name the kinetic-profile file once" GPEC.main([deck_dir])
+            @test_throws r"\[KineticForces\] sets keys that moved: `kinetic_file` \(name the kinetic-profile file once" GPEC.main([deck_dir])
         end
         pe_keywords = union((Base.kwarg_decl(m) for f in (GPEC.plasma_response, GPEC.perturbed_equilibrium) for m in methods(f))...)
         @test !any(k -> Symbol(k) in pe_keywords, GPEC._DEPRECATED_PE_KEYS)
+    end
+
+    @testset "Deck sections parse into constructor keywords" begin
+        GPEC = GeneralizedPerturbedEquilibrium
+        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+        with(f) = (d = deepcopy(deck); f(d); d)
+        @test GPEC.parse_deck(deck, template).force_balance.algorithm isa Forward
+        # Unknown keys and sections, keys that moved, and sections nothing reads all stop the run.
+        @test_throws r"unknown key \"qlw\" in \[ForceFreeStates\]" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["qlw"] = 1.0), template)
+        @test_throws r"unknown section \[Galerkn\]" GPEC.parse_deck(with(d -> d["Galerkn"] = Dict{String,Any}()), template)
+        @test_throws r"`nn_low` \(set nn = n" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn_low"] = 1), template)
+        @test_throws r"`gal_nx` \(moved to \[Galerkin\] as nx\)" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["gal_nx"] = 32), template)
+        @test_throws r"\[DEBUG\] is retired" GPEC.parse_deck(with(d -> d["DEBUG"] = Dict{String,Any}()), template)
+        @test_throws r"\[Riccati\] is set but \[ForceFreeStates\] integrator = \"Forward\"" GPEC.parse_deck(with(d -> d["Riccati"] = Dict{String,Any}()), template)
+        @test_throws r"\[GGJ\] is set but neither" GPEC.parse_deck(with(d -> d["GGJ"] = Dict{String,Any}()), template)
+        @test_throws r"consecutive" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 3]), template)
+        no_ffs = with(d -> foreach(k -> delete!(d, k), ("ForceFreeStates", "Wall", "Forward")))
+        @test_throws r"\[LocalStability\] is set but there is no \[ForceFreeStates\]" GPEC.parse_deck(no_ffs, template)
+        @test_throws r"\[ForcingTerms\] is set but there is no \[PerturbedEquilibrium\]" GPEC.parse_deck(with(d -> d["ForcingTerms"] = Dict{String,Any}()), template)
+        @test_throws r"\[KineticForces\] is set but neither" GPEC.parse_deck(with(d -> d["KineticForces"] = Dict{String,Any}()), template)
+        @test_throws r"set kinetic_file in \[Equilibrium\]" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["kinetic"] = "KineticForces"), template)
+        # Values take their field types: an array becomes a range or a tuple, a string a Symbol.
+        @test GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 2]), template).force_balance.keywords[:nn] == 1:2
+        tearing = GPEC.tearing_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("inner_model" => "SLAYER", "coupling_mode" => "coupled",
+            "search" => Dict{String,Any}("Q_re_range" => [-2, 2]), "CriticalResonantField" => Dict{String,Any}("n" => 500))))
+        @test tearing.problem[:coupling_mode] === :coupled
+        @test tearing.config.Q_re_range === (-2.0, 2.0)
+        @test tearing.problem[:critical_resonant_field].n == 500
+        @test tearing.model isa SLAYERModel
+        # The kinetic composition rides on [Equilibrium] and needs the kinetic file it describes.
+        species = Dict{String,Any}("ion_species" => [Dict{String,Any}("z" => 1, "m" => 2, "fraction" => 1.0)], "impurity_charge" => 6)
+        @test_throws r"set kinetic_file" GPEC.equilibrium_config(with(d -> merge!(d["Equilibrium"], species)), template)
+        config = GPEC.equilibrium_config(with(d -> merge!(d["Equilibrium"], species, Dict{String,Any}("kinetic_file" => "k.h5"))), template)
+        @test config.ion_species == [IonSpecies(; z=1, m=2, fraction=1.0)]
+        @test GPEC.Equilibrium.kinetic_composition(config) == (; ion_species=config.ion_species, impurity_charge=6)
     end
 
     @testset "Inverse grid types (original, rho)" begin

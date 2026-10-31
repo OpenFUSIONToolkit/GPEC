@@ -60,12 +60,12 @@ columns of ``U_2`` that correspond to resonant modes are zeroed via Gaussian red
 keeping the solution bounded; `transform_u!` undoes the reduction at the end, so `u_store`
 comes back dense in the axis (Euler-Lagrange) basis.  This is the reference path for
 correctness comparisons, the only path whose solution the perturbed-equilibrium stage can
-consume, and the only path that supports `kinetic_factor > 0`.
+consume, and the only path that supports a kinetic source.
 
 Enable with:
 ```toml
 [ForceFreeStates]
-integrator = "forward"
+integrator = "Forward"
 ```
 
 ### Riccati integration
@@ -101,7 +101,9 @@ forced at the end of each chunk.  At singular surface crossings,
 Enable with:
 ```toml
 [ForceFreeStates]
-integrator = "riccati"
+integrator = "Riccati"
+
+[Riccati]
 nchunks    = 0         # 0 = auto: derived from the singular-surface count alone
 ```
 
@@ -140,26 +142,26 @@ zeroing vs GR), not from ODE tolerance; it is present at every thread count.
 
 ### Galerkin
 
-`integrator = "galerkin"` solves the same EL system variationally instead of integrating it:
+`integrator = "Galerkin"` solves the same EL system variationally instead of integrating it:
 the outer region is discretized on packed Hermite-cubic elements and solved as one global banded
 system, giving the RDCON resistive ``\Delta'`` matrix and the PEST-3 matching blocks.  It computes its own vacuum response and
 returns no free-boundary energies, no ODE trace, and no fixed-boundary `crit` scan.  With
-`gal_match_flag` it also matches the inner layer, producing a driven ``\xi`` solution.
+a `[Match]` section it also matches the inner layer, producing a driven ``\xi`` solution.
 Kinetic runs are not supported.  See
-`docs/src/galerkin.md` for the solver and its `gal_*` knobs.
+`docs/src/galerkin.md` for the solver and its `[Galerkin]` settings.
 
 Enable with:
 ```toml
 [ForceFreeStates]
-integrator = "galerkin"
+integrator = "Galerkin"
 ```
 
 ## Local stability: Mercier and ballooning (s–α)
 
 A `[LocalStability]` section in the deck runs a local high-``n`` stability scan over every
 flux surface, as its own stage before the global ideal analysis above. The section's keys are
-the [`Ballooning`](@ref) keywords (the ballooning angle, ODE tolerance and the α-boundary scan
-knobs), and a script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning())`
+the problem settings (`theta_k`, `alpha_boundary_scan`); an optional `[Ballooning]` section holds the
+[`Ballooning`](@ref) numerical settings, and `[Run] verbose` the solve verbosity. A script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning(); verbose=false)`
 (see the [scripting API](api.md)).
 For the derivation and implementation details behind these diagnostics, see
 [Ballooning and Mercier Local Stability](ballooning.md).
@@ -323,15 +325,21 @@ TokaMaker's `save_eqdsk` writes such files when `lcfs_pad` (``p``) is set with t
 ``\psi = 1/(1 - p)``. Writing with `truncate_eq=False` keeps the whole plasma; EFIT-written files
 place their boundary on the X-point flux.
 
-The scan takes its kinetic profiles from the equilibrium (`[Equilibrium] kinetic_file`) through the
-same view and `[SLAYER]` control the SLAYER analysis uses, so both see the same profiles and the
-same χ⊥(ψ) — the layer widths cannot disagree between them. A deck without a `[SLAYER]` section or
-kinetic profiles does not get the scan. Because the layer settings come from the run's `[SLAYER]`
-section, the scan only runs on the `gpec.toml` entry point: the programmatic `solve(prob, alg)` path
-has no such section, so the cap cannot be applied there and setting the flag warns instead. Its result is always written to
-`ForceFreeStates/LayerOverlap/`, but it only constrains the domain when
-`psilim_from_layer_overlap = true`. It then caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction`
-still selects the final surface from inside the cap. A cap beyond `psihigh` has no effect.
+The scan runs only when the cap is switched on, and it needs kinetic profiles on the equilibrium.
+It reads the plasma from the equilibrium's kinetic data and the layer closures from a
+`SLAYERModel`, the same inputs the SLAYER tearing solve uses, so the layer widths cannot disagree
+between them. In a script, `psilim_from_layer_overlap = true` scans with the default closures and a
+model sets others:
+
+```julia
+ffs = solve(eq, Riccati(); nn=1, psilim_from_layer_overlap=SLAYERModel(; P_perp_model=:chi_perp_e))
+ffs.layer_overlap.psihigh      # the overlap point
+```
+
+In a deck, `psilim_from_layer_overlap = true` takes its closures from the `[SLAYER]` section. The
+scan is carried on the result as `layer_overlap` and written to `ForceFreeStates/LayerOverlap/`. It
+caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction` still selects
+the final surface from inside the cap. A cap beyond `psihigh` has no effect.
 
 The flag is off by default, so every shipped deck is unchanged by it. With the default
 `P_perp_model = "D_perp"` the layers on the shipped DIII-D-like profiles do not overlap inside
@@ -340,8 +348,7 @@ The flag is off by default, so every shipped deck is unchanged by it. With the d
 0.9995, where the cap would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
 pins `"chi_perp_e"` and raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and
 q = 8, and the resulting domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen
-`psihigh = 0.995` of the ideal deck. Whenever `psilim` lands past the overlap point, with the flag
-on or off, GPEC warns.
+`psihigh = 0.995` of the ideal deck.
 
 **Which perpendicular diffusivity.** The two formulas that take a perpendicular diffusivity want
 different quantities. The layer width goes through `P_perp`, which multiplies the diffusion of the
@@ -349,16 +356,16 @@ total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular 
 `D_⊥` of Fitzpatrick, Phys. Plasmas **29**, 032507 (2022), Eq. 16, which weights the electron and ion energy diffusivities by
 `n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` describes electron-temperature
 flattening against an electron parallel conductivity, so its χ_⊥ is the electron channel `chi_e`
-in every case. `[SLAYER] chi_perp_Dc` (optional) sets that electron diffusivity for the critical Δ
+in every case. `SLAYERModel`'s `chi_perp_Dc` (`[SLAYER] chi_perp_Dc`, optional) sets that electron diffusivity for the critical Δ
 alone, leaving `P_perp` on its own χ inputs. It is for a run whose `P_perp` uses a diffusivity
 the critical Δ should not, for example a one-fluid χ_eff in both channels of `D_⊥` when an
 interpretive power balance splits the conducted heat between species unreliably, while the
-critical Δ takes the electron χ that balance allows. `[SLAYER] P_perp_model` selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
+critical Δ takes the electron χ that balance allows. `SLAYERModel`'s `P_perp_model` (`[SLAYER] P_perp_model` in a deck) selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
 the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code), from
 `chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
 confinement time (`"tau_E"`); see `slayer_parameters`. `"tau_E"` is for a plasma with no χ
 profiles: its uniform χ_E sets both `P_perp` and the toroidal `P_tor`, so the file's `chi_phi`
-and `[SLAYER] chi_tor` are not used in that mode. On the DIII-D-like
+and the kinetic data's `chi_phi_default` are not used in that mode. On the DIII-D-like
 profiles `D_⊥` is 0.22–0.32 of `chi_e` at the outer rational surfaces, because the weights sum to
 less than one where density gradients carry part of `p′`. Since the widths scale as `χ^{1/4}`, a
 factor-2 change in χ moves them by about 19%, which can be enough to move the overlap cut by a
@@ -392,29 +399,25 @@ do not resolve the H-mode pedestal transport barrier, where power-balance χ fal
 
 ## Configuration reference
 
-All `ForceFreeStates` options are set in the `[ForceFreeStates]` section of `gpec.toml`.
+The `[ForceFreeStates]` section holds the [`ForceBalanceProblem`](@ref) keywords and names the
+integrator; the integrator's numerical settings sit in its own section, `[Forward]`, `[Riccati]` or
+`[Galerkin]`, with the fields of that type.
 
 ```toml
 [ForceFreeStates]
-# Integration driver
-integrator   = "riccati"  # "forward" for dense xi profiles and kinetic runs; "galerkin" for the RDCON outer-region solve
-nchunks      = 0          # Riccati chunk-count target (0 = auto, from msing alone)
+integrator   = "Riccati"  # "Forward" for dense xi profiles and kinetic runs; "Galerkin" for the RDCON outer-region solve
 
 # Mode space
-nn_low       = 1       # lowest toroidal mode number
-nn_high      = 1       # highest toroidal mode number
+nn           = 1       # toroidal mode number, or consecutive numbers as a list ([1, 2, 3])
 delta_mlow   = 0       # extra low poloidal modes (m < mlow)
 delta_mhigh  = 0       # extra high poloidal modes (m > mhigh)
 
-# ODE solver
-numsteps_init     = 200    # initial step budget per chunk
-numunorms_init    = 50     # renorm checkpoint budget
-reltol            = 1e-6   # ODE relative tolerance
-
 # Output
-verbose              = true
-write_outputs_to_HDF5 = true
 write_el_matrices    = false  # also write ForceFreeStates/EulerLagrangeMatrices (mpert² × npsi per matrix)
+
+[Riccati]
+nchunks                 = 0      # chunk-count target (0 = auto, from msing alone)
+eulerlagrange_tolerance = 1e-8   # ODE relative tolerance
 ```
 
 The number of Julia threads is controlled at startup via `-t N` or the `JULIA_NUM_THREADS`
@@ -427,7 +430,7 @@ The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separa
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedKineticMatrices.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
 
 ## Example usage
@@ -435,64 +438,25 @@ Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Typ
 ### Run stability analysis from a TOML configuration
 
 ```julia
-using GeneralizedPerturbedEquilibrium, TOML
+using GeneralizedPerturbedEquilibrium
 
-const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+ffs = main(["examples/DIIID-like_riccati_deltaprime_example"]).ffs
+println("Energy eigenvalue et[1] = ", real(ffs.free_boundary.et[1]))
+```
 
-ex     = "examples/Solovev_ideal_example"
-inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+The same solve from a script, with the deck's keys as keywords:
 
-ctrl  = FFS.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-            GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
-
-intr  = FFS.ForceFreeStatesInternal(; dir_path=ex)
-intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-    (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
-FFS.sing_lim!(intr, ctrl, equil)
-FFS.sing_find!(intr, equil)
-intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-intr.mpert = intr.mhigh - intr.mlow + 1
-intr.numpert_total = intr.mpert * intr.npert
-
-metric = FFS.make_metric(equil, intr.mpert)
-mats   = FFS.build_matrix_splines(equil, intr, metric)
-
-# Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
-# on ctrl.integrator and always returns a 4-tuple
-# (odet, propagators, chunks, S_at_surface_left).  The trailing three are `nothing`
-# on the forward path.
-odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
-
-vac = FFS.free_run(odet, ctrl, equil, mats, intr)
-println("Energy eigenvalue et[1] = ", real(vac.et[1]))
+```julia
+eq  = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada")
+ffs = solve(eq, Riccati(; eulerlagrange_tolerance=1e-10); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true, qlow=1.02)
 ```
 
 ### Inspect Δ' at singular surfaces
 
 ```julia
-for s in 1:intr.msing
-    sing = intr.sing[s]
-    println("Surface $s: ψ = $(sing.psi_s), m/n = $(sing.m[1])/$(sing.n[1])")
-    println("  Δ' = $(real(sing.delta_prime[1]))")
-end
-```
-
-### Access inter-surface Δ' matrix (Riccati path)
-
-```julia
-# intr.delta_prime_matrix is msing × msing after riccati_eulerlagrange_integration.
-# Internally the solver builds a 2·msing × 2·msing raw matrix; the stored Δ' is
-# the PEST3 four-term combination that folds the raw block into a per-surface
-# tearing parameter.
-dpm = intr.delta_prime_matrix
-println("Δ' matrix size: ", size(dpm))
-println("Diagonal (self-response Δ'):")
-for j in 1:intr.msing
-    println("  Surface $j: ", real(dpm[j, j]))
+for (s, sing) in enumerate(ffs.surfaces)
+    println("Surface $s: ψ = $(sing.psifac), m/n = $(sing.m[1])/$(sing.n[1])")
+    println("  Δ' = $(real(ffs.delta_prime.matrix[s, s]))")
 end
 ```
 

@@ -16,15 +16,35 @@ pe   = perturbed_equilibrium(resp, rmp)
 ```
 
 `solve(eq, alg; kwargs...)` is sugar for the canonical problem form: a
-[`EulerLagrangeProblem`](@ref) names WHAT is being solved (the perturbed-plasma
-Euler-Lagrange system posed on this equilibrium, with this mode range, wall and closure)
+[`ForceBalanceProblem`](@ref) names WHAT is being solved (the perturbed-plasma
+force-balance equation posed on this equilibrium, with this mode range, wall and closure)
 and the integrator names HOW. A `PlasmaEquilibrium` hosts many possible problems; the
 problem type keeps `solve` unambiguous as other problem classes appear.
 
 ```julia
-prob = EulerLagrangeProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
+prob = ForceBalanceProblem(eq; nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)
 ffs  = solve(prob, Riccati())
+save_to_hdf5("gpec.h5", ffs)
 ```
+
+`solve` returns its result without writing a file. Call `save_to_hdf5(path, ffs)`
+or pass an open HDF5 file or group to save it explicitly.
+
+The same `save_to_hdf5(target, result)` function saves an equilibrium, local-stability
+result, perturbed-equilibrium state, kinetic-force state, tearing result, or error-field
+result. Each module owns the datasets for its result. Paths open or create an HDF5
+file; an open file or group remains owned by the caller. Stage computations return
+results without writing anything. Each save also records, in `Input/gpec_toml_raw`, the deck
+sections stating the problem, algorithm and controls the result was computed with, so a script
+run's file replays like a deck run's: `main(["gpec.h5"])`. A forcing no deck can state (a weighted
+field, a spectrum or a sum) is replayed from the control-surface modes the save records.
+
+A deck runs through these same calls. `main` translates each section of `gpec.toml` into the
+problem, algorithm or control it names, calls the function above for every section present,
+and saves each result into the one `[Run] output_file`, so a deck can never take a path a script
+cannot. It returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing)`,
+each `nothing` when its section is absent; `ffs` is the result the later stages read (matched
+when the deck has `[Match]`) and `match` its `MatchResult`.
 
 The objects map one-to-one onto the pipeline stages:
 
@@ -41,11 +61,17 @@ The objects map one-to-one onto the pipeline stages:
     refined two-pass grid the deck uses; `Equilibrium.reform(eq, psi_nodes)` re-forms it on any grid.
   - `solve` runs the force-free-states stage — the `[ForceFreeStates]` section — and returns
     a `ForceFreeStatesResult`, exactly the object the TOML driver publishes.
-  - [`RMPField`](@ref) describes the external field — the `[ForcingTerms]` section — without
+  - [`RMPField`](@ref GeneralizedPerturbedEquilibrium.ForcingTerms.RMPField) describes the external field — the `[ForcingTerms]` section — without
     reading anything from disk until it is applied.
   - [`plasma_response`](@ref) builds the plasma-response and singular-coupling operators of a
     `ForceFreeStatesResult` once, and `perturbed_equilibrium(resp, rmp)` drives them with one field —
     together the `[PerturbedEquilibrium]` section.
+  - [`kinetic_torque`](@ref) evaluates the kinetic (NTV) torque of a perturbed equilibrium with the
+    model settings of a `KineticForcesControl` — the `[KineticForces]` section — and returns a
+    `KineticForcesResult`: `kf = kinetic_torque(pe, KineticForcesControl())`.
+  - [`error_fields`](@ref) assesses the error field of a set of coils on a plasma response — the
+    `[ErrorFields]` section — and returns an `ErrorFieldsResult`:
+    `ef = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl); tolerances)`.
 
 ## Kinetic profiles
 
@@ -88,11 +114,12 @@ with a failed conductor is `nominal - failed_coil`, not `0.9 * nominal`.
 ## Choosing an integrator
 
 The second argument of `solve` picks the formalism, and its fields are that formalism's
-tunables. Everything else is a `ForceFreeStatesControl` keyword, so the TOML keys and the
-`solve` keywords are the same knobs:
+numerical settings. Physical inputs belong on `ForceBalanceProblem`; ODE tolerances and
+storage settings belong on `Forward` or `Riccati`, and `extended_precision_bvp` belongs only
+on `Riccati`. The current deck reader translates its existing section layout into those objects:
 
 ```julia
-ffs = solve(eq, Forward(); nn=1, vac_flag=true)                 # dense ξ profiles for PerturbedEquilibrium
+ffs = solve(eq, Forward(; eulerlagrange_tolerance=1e-8); nn=1, vac_flag=true) # dense ξ profiles for PerturbedEquilibrium
 ffs = solve(eq, Riccati(; nchunks=40); nn=1, vac_flag=true)     # chunked propagators, Δ′ matrix
 ffs = solve(eq, Galerkin(; nx=512); nn=1)                       # RDCON outer-region Galerkin Δ′
 ```
@@ -100,6 +127,11 @@ ffs = solve(eq, Galerkin(; nx=512); nn=1)                       # RDCON outer-re
 Which products each formalism can supply differs; a result carries `nothing` in the fields
 its integrator does not produce and consumers warn and skip rather than erroring. See the
 [Stability Analysis](stability.md) page for the result struct and its capability gates.
+
+`singfac_min`, `frobenius_order`, `frobenius_psi_max`, `truncate_at_dW_peak`, and
+`dW_edge_scan_start` remain problem settings. `Galerkin` rejects non-default values of the
+last three. Its per-surface order adjustment is controlled by `frobenius_order_ceiling`,
+and its factorization is selected automatically.
 
 ## Inner-layer matching
 
@@ -127,38 +159,58 @@ Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the reso
 accepted — `GGJModel()` today; `SLAYERModel()` is slab-only and drives the free-eigenvalue tearing
 solve instead.
 
+A deck poses the match with a `[Match]` section (`eta`, `rho`, `rotation`, `gamma`, `ideal`,
+`inner_model = "GGJ"`), and `[GGJ]` holds the `GGJModel` keywords (`solver` and its options).
+
 ## Tearing stability
 
-The free-eigenvalue tearing solve is the second flavor of inner-layer matching: instead of
-prescribing the layer rotation, a `TearingProblem` holds the outer Δ′ fixed and root-finds
-the growth rate where the inner-layer response matches it. The same model slot applies —
-`SLAYERModel()` is the slab layer that exists for exactly this problem. GGJ growth-rate
-extraction is not implemented yet, so `GGJModel()` errors here.
+A `TearingProblem` holds the outer solution and the surface coupling. The plasma is the
+equilibrium's kinetic data (profiles, species, transport defaults, resistivity closure), the
+inner-layer model holds its own closures, and `TearingConfig` holds the scan and root-search
+settings.
 
 ```julia
-ffs  = solve(eq, Riccati(); nn=1, vac_flag=true)            # Δ′ matrix for the dispersion
-tear = solve(TearingProblem(ffs), SLAYERModel())            # coupling_mode=:coupled returns one global root instead
-tear.gamma_Hz, tear.rational_q                               # root-found rate at each rational surface
+tear = solve(TearingProblem(ffs), SLAYERModel(; P_perp_model=:chi_perp_e);
+    config=TearingConfig(; Q_re_range=(-2.0, 2.0), Q_im_range=(-0.5, 3.0)))
+ggj = solve(TearingProblem(ffs; coupling_mode=:coupled), GGJModel(; solver=:ray);
+    config=TearingConfig(; gamma_range=(1.0, 1e4), omega_range=(-1e4, 1e4)))
+save_to_hdf5("gpec.h5", tear)
 ```
 
-Keyword arguments of `TearingProblem` are the `[SLAYER]` deck section's procedure knobs
-(scan mode and Q-domain, coupling mode, critical-Δ convention, extraction filters);
-kinetic profiles come from the equilibrium the solve was posed on (see Kinetic profiles above).
+GGJ needs the raw Δ′ matrix and validates the surface ordering. Its η and ρ default from the
+kinetic data: η by the resistivity closure SLAYER uses, ρ = m_i·n_i of the main ion; pass `eta`
+and `rho` to `TearingProblem` to override them. Both models report lab-frame frequencies with
+per-surface E×B shifts: a coupled solve evaluates each layer in its own E×B frame (GGJ's s_k = s + i·n·Ω_E,
+Johnson & Greene 1967 Appendix B), and an uncoupled root is moved from its layer's frame by n·Ω_E. Ω_E comes
+from the kinetic data's `omega_E`, or from `omega_E_kHz` for the m/n it lists. Both expose
+`omega` in rad/s and `gamma` in 1/s, positive for instability, and the HDF5 roots group records
+`frequency_frame`. SLAYER searches a normalized Q box, GGJ a physical (γ, ω) box.
 
-Kinetic runs (`kinetic_factor > 0`) take `Forward()`. The `"calculated"` source reads the
-equilibrium's kinetic profiles, with the default `KineticForcesControl` species and collision
-settings.
+A deck runs the solve with a `[Tearing]` section: the `TearingProblem` keywords and
+`inner_model = "SLAYER"` or `"GGJ"`, with `[Tearing.search]` for the `TearingConfig` keys and
+`[Tearing.CriticalResonantField]` for the penetration threshold. The model's keywords sit in
+`[SLAYER]` or `[GGJ]`; `[SLAYER]` also gives the layer-overlap cap its closures.
+
+Kinetic runs take `Forward()`. The problem's `kinetic` keyword selects the source:
+`kinetic=KineticForcesControl(; ...)` evaluates the KineticForces drift-kinetic
+matrices with those settings on the equilibrium's kinetic profiles and species, and
+`kinetic=TestKineticMatrices(; scale)` uses synthetic test matrices. `kinetic_factor` (default 1)
+scales either. `km = kinetic_matrices(prob)` evaluates the source once, and `kinetic=km` reuses those
+[`KineticMatrices`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.KineticMatrices) in later solves, for example a
+`kinetic_factor` scan. A deck selects the KineticForces model with `[ForceFreeStates] kinetic = "KineticForces"`, using
+its `[KineticForces]` section.
 
 ## Local stability
 
 The Mercier, resistive interchange and ballooning profiles are their own stage, posed on the
-equilibrium alone. A [`LocalStabilityProblem`](@ref) holds the equilibrium, the
-[`Ballooning`](@ref) algorithm holds the scan knobs, and `solve` returns a
-[`LocalStabilityResult`](@ref) with the profiles as named fields. A deck runs the same solve
-through its `[LocalStability]` section, whose keys are the `Ballooning` keywords.
+equilibrium. A [`LocalStabilityProblem`](@ref) holds the equilibrium, ballooning angle
+`theta_k`, and `alpha_boundary_scan` choice. [`Ballooning`](@ref) holds numerical tolerances
+and scan settings. `solve` returns a [`LocalStabilityResult`](@ref); its `verbose` keyword
+defaults to `false`. A deck states the problem in `[LocalStability]` and the numerics in `[Ballooning]`.
 
 ```julia
-ls = solve(LocalStabilityProblem(eq), Ballooning(; n_scan=64))
+problem = LocalStabilityProblem(eq; theta_k=0.0, alpha_boundary_scan=true)
+ls = solve(problem, Ballooning(; n_scan=64); verbose=false)
 ls.psi, ls.D_I, ls.D_R, ls.ballooning_Delta_prime     # profiles on the equilibrium ψ grid
 ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundary, NaN outside its scan window
 ```
@@ -166,8 +218,9 @@ ls.ballooning_psi, ls.alpha, ls.alpha_critical        # first ballooning boundar
 ## Entry points
 
 ```@docs
-GeneralizedPerturbedEquilibrium.EulerLagrangeProblem
+GeneralizedPerturbedEquilibrium.ForceBalanceProblem
 GeneralizedPerturbedEquilibrium.solve
+GeneralizedPerturbedEquilibrium.kinetic_matrices
 GeneralizedPerturbedEquilibrium.perturbed_equilibrium
 ```
 

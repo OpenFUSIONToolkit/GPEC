@@ -1,16 +1,7 @@
 # LayerInputs.jl
 #
-# Build per-surface `SLAYERParameters` from an in-memory `PlasmaEquilibrium`,
-# the `SingType` rational-surface data produced by `ForceFreeStates`, and a
-# `KineticProfiles` object. Everything needed is already held in memory, so
-# the layer inputs are assembled directly without an intermediate file
-# round-trip.
-#
-# Geometry extraction:
-#   - r_s and dr/dψ from one radial label (`radial_label`; by default the
-#     toroidal-flux label r = √(2ψ_t/B₀)), both analytic.
-#   - r-based magnetic shear via `r_based_shear(rs, q, q1, dr/dψ)` (defined
-#     in LayerParameters.jl).
+# Build per-surface `SLAYERParameters` from an in-memory `PlasmaEquilibrium`, the `SingType` rational-surface
+# data from `ForceFreeStates`, and a `KineticProfiles` object.
 
 using ..Utilities: KineticProfiles
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
@@ -53,7 +44,7 @@ end
 end
 
 """
-    radial_label(equil; rs_method=:flux, theta=0.0) -> (r_at, dr_dpsi_at)
+    radial_label(equil; rs_method=:flux, theta=0.0, q_beyond=nothing) -> (r_at, dr_dpsi_at)
 
 Build the pair of closures `r_at(ψ)` and `dr_dpsi_at(ψ)` defining one radial
 label for the layer stack. Both closures must come from the same label,
@@ -66,7 +57,7 @@ derivatives are analytic — no label carries a finite-difference stencil.
 # Labels
 
   - `:midplane` -- outboard-midplane chord from the magnetic axis at `theta`
-    (historical default), natural for comparison with midplane diagnostics.
+    natural for comparison with midplane diagnostics.
   - `:halfwidth` -- midplane half-chord, the mean of the outboard and inboard
     chords at `θ = 0` and `θ = 0.5`; shift-free. Coincides with the flux label
     on circular equilibria but is its own convention on shaped ones.
@@ -225,95 +216,45 @@ end
 """
     build_slayer_inputs(equil, sings, profiles; …) -> Vector{SLAYERParameters}
 
-Build a `SLAYERParameters` for each rational surface in `sings`, pulling
-geometry (minor radius, r-based shear, q, dq/dψ, R₀) from the in-memory
-`equil::PlasmaEquilibrium` and kinetic data (n_e, T_e, T_i, ω, ω\\_\\*e,
-ω\\_\\*i) from `profiles::KineticProfiles`.
-
-Layer inputs are assembled directly from the in-memory equilibrium and
-profiles, without an intermediate file round-trip.
+Build a `SLAYERParameters` for each rational surface in `sings` from the in-memory `equil::PlasmaEquilibrium`
+(geometry, q, dq/dψ, R₀) and `profiles::KineticProfiles` (n_e, T_e, T_i, and ω\\_\\*e, ω\\_\\*i from their gradients).
+Keywords documented as scalar-or-callable are evaluated per surface at ψ.
 
 # Arguments
 
-  - `equil`    -- `PlasmaEquilibrium`
-  - `sings`    -- `Vector{SingType}` (one per resonant surface)
+  - `equil` -- `PlasmaEquilibrium`
+  - `sings` -- `Vector{SingType}`, one per resonant surface
   - `profiles` -- `KineticProfiles` valid across all `sings` ψ values
 
 # Keyword arguments
 
-  - `bt`        -- toroidal field [T]. Scalar, callable of `psi`, or
-    `nothing` (default). When `nothing`, the physical `B_T = F(ψ) / (2π·R₀)`
-    is computed per surface from the equilibrium's F-spline. Note:
-    `equil.config.b0_norm` is a *normalization* (often just `1.0`), not the
-    physical field, so passing it as a scalar is almost always wrong.
-
-  - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
-
-  - `zeff`      -- effective charge. Scalar or a callable of `psi`, evaluated per
-    surface (default `1.0`).
-  - `chi_perp_e`  -- electron perpendicular heat diffusivity [m²/s]. Scalar or a
-    callable of `psi` (default `1.0`).
-  - `chi_perp_i` -- ion perpendicular heat diffusivity [m²/s], scalar or callable of `psi`;
-    required by `P_perp_model = :chi_perp_i` and `:D_perp` (default `nothing`).
-  - `chi_perp_Dc` -- electron perpendicular heat diffusivity [m²/s] used only by the critical Δ,
-    scalar or callable of `psi`; `nothing` (default) uses `chi_perp_e`. See [`slayer_parameters`](@ref).
-  - `tau_E` -- whole-plasma energy confinement time τ̄_E [s], required by `P_perp_model = :tau_E`
-    (default `nothing`). That mode takes the minor radius `a` of the ψ = 1 surface from the
-    `:flux` label, whatever `rs_method` is.
-  - `P_perp_model` -- how `P_perp` is built; see [`slayer_parameters`](@ref)
-    (default `:D_perp`, as in the `[SLAYER]` deck).
-  - `chi_tor`   -- toroidal momentum diffusivity χ_φ [m²/s], setting the momentum
-    Prandtl number `P_tor` = τ_R/τ_φ with τ_φ = r_s²/χ_φ (Fitzpatrick, Phys. Plasmas
-    30, 092512 (2023)). Scalar or a callable of `psi` (default `1.0`).
-
-  - `dr_val`    -- resistive interchange index `D_R = E + F + H²`
-    (Glasser-Greene-Johnson 1975) feeding the critical-Δ formulas
-    (`:lar`, `:fitzpatrick`, `:toroidal`). When `nothing` (default), Julia
-    derives it per-surface from the equilibrium as
-    `dr_val_k = D_R(ψ_k) = E_k + F_k + H_k²`,
-    consistent with Connor, Ham, Hastie & Liu 2015 (PPCF 57 065001) Eq. 59,
-    which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar or a
-    callable of `psi` to override.
-
-    **NOTE**: the χ_‖-matching critical-Δ requires the resistive
-    interchange index `D_R = E + F + H²` (Glasser-Greene-Johnson 1975),
-    NOT the Mercier index `D_I = E + F + H − 1/4`. The two differ by
-    `(H − 1/2)²`, which is non-trivial on shaped equilibria (~factor 3 on
-    DIII-D); this code uses the physically correct `D_R`.
-  - `dgeo_val`  -- Connor et al. 2015 (PPCF 57 065001) Eq. 59 geometric
-    factor of the toroidal critical-Δ, in the `r_s` reference (see
-    [`toroidal_dgeo`](@ref)). When `nothing` (default), it is derived
-    per-surface from the equilibrium through the surface's `ResistGeometry`
-    (`sing.restype`, populated by `ForceFreeStates.resist_eval_all!`); an
-    error is raised if `dc_type=:toroidal` is requested on a surface without
-    one. Pass a scalar or a callable of `psi` to prescribe it; a prescribed
-    value must already be in the `r_s` reference, i.e. Eq. 59's own value
-    times `k_ref·v1/V_s` (≈ 2 at large aspect ratio). Only `dc_type=:toroidal`
-    consumes it. The same dc_type's χ∥ closure also uses the toroidal
-    parallel-wavenumber gradient [`toroidal_kpar`](@ref), which is always derived
-    from the surface's `ResistGeometry`, also when `dgeo_val` is prescribed;
-    without one it falls back to the cylindrical `n·|s|/R₀` with a warning.
-  - `dc_type`   -- `:none` (default), `:lar`, `:fitzpatrick`, or `:toroidal`.
-  - `rs_method` -- radial label defining `r_s` for the whole layer stack:
-    `:flux` (default), `:midplane`, `:halfwidth`, `:fsa`, or `:volume`. See
-    [`radial_label`](@ref) for the definitions. S, the r-based shear, W_d,
-    and the Δ' reference-length factor `k_ref` all follow the choice
-    together, so every option is self-consistent. Not exposed via TOML —
-    programmatic use only.
-
-  - `theta`     -- poloidal angle of the minor-radius chord, used only by
-    `rs_method=:midplane` (default `0.0`, outboard midplane).
-
-  - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`,
-    `SpitzerModel()`, or `SpitzerHarmModel()` (legacy Fitzpatrick σ_∥).
-    Sets the η entering τ_R = μ₀r_s²/η. With a neoclassical model, `f_trap`
-    and ν*_e are taken from the surface's `ResistGeometry` if populated
-    (via `ForceFreeStates.resist_eval_all!`), otherwise fall back to the
-    ε-only Lin-Liu-Miller form and `rs/R_0` aspect ratio.
-
-  - `lnLambda_form` -- Coulomb-log form passed through to `slayer_parameters`
-    (default `:nrl`; `:wesson` + `SpitzerHarmModel()` reproduces legacy
-    SLAYER exactly).
+  - `bt` -- toroidal field in T, scalar or callable; `nothing` (default) uses B_T = F(ψ)/(2π·R₀). `equil.config.b0_norm` is a
+    normalization, not this field
+  - `R0` -- major radius in m (default `equil.ro`)
+  - `rs_method` -- radial label of the whole layer stack: `:flux` (default), `:midplane`, `:halfwidth`, `:fsa` or `:volume`;
+    see [`radial_label`](@ref). Programmatic only, not exposed via TOML
+  - `q_beyond` -- callable q(ψ) the `:flux` label uses beyond the ψ grid (default `nothing`)
+  - `mu_i` -- ion mass in proton masses (default `2.0`, D)
+  - `zeff` -- effective charge, scalar or callable (default `1.0`)
+  - `z_i` -- main-ion charge entering ω_*i (default `1.0`)
+  - `chi_perp_e` -- electron perpendicular heat diffusivity in m²/s, scalar or callable (default `1.0`)
+  - `chi_perp_i` -- ion perpendicular heat diffusivity in m²/s, scalar or callable; needed by `P_perp_model = :chi_perp_i` and `:D_perp`
+  - `chi_perp_Dc` -- electron χ⊥ in m²/s used only by the critical Δ, scalar or callable; `nothing` (default) uses `chi_perp_e`
+  - `tau_E` -- whole-plasma energy confinement time τ̄_E in s, needed by `P_perp_model = :tau_E`, which takes `a` from the `:flux` label
+  - `P_perp_model` -- how `P_perp` is built (default `:D_perp`); see [`slayer_parameters`](@ref)
+  - `chi_tor` -- toroidal momentum diffusivity χ_φ in m²/s, scalar or callable, setting P_tor = τ_R/τ_φ with τ_φ = r_s²/χ_φ
+    (Fitzpatrick, Phys. Plasmas 30, 092512 (2023)) (default `1.0`)
+  - `dr_val` -- resistive interchange index D_R = E + F + H² (Glasser-Greene-Johnson 1975) of the critical Δ, **not** the Mercier
+    D_I; `nothing` (default) derives it from `sing.restype`, a scalar or callable overrides it
+  - `dgeo_val` -- Connor et al. 2015 (PPCF 57 065001) Eq. 59 factor in the `r_s` reference ([`toroidal_dgeo`](@ref)), used only by
+    `dc_type = :toroidal`; `nothing` (default) derives it from `sing.restype` (required then). A prescribed value must already be in
+    the `r_s` reference, i.e. Eq. 59 times `k_ref·v1/V_s` (≈ 2 at large aspect ratio)
+  - `dc_type` -- critical-Δ formula: `:none` (default), `:lar`, `:fitzpatrick` or `:toroidal`; `:toroidal` takes K∥ from
+    [`toroidal_kpar`](@ref), or the cylindrical `n·|s|/R₀` with a warning when the surface has no `ResistGeometry`
+  - `theta` -- poloidal angle of the minor-radius chord, used only by `rs_method = :midplane` (default `0.0`, outboard midplane)
+  - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`, `SpitzerModel()` or `SpitzerHarmModel()`; the
+    neoclassical `f_trap` and ν*_e come from `sing.restype` when populated, else the ε-only forms
+  - `lnLambda_form` -- Coulomb-log form (default `:nrl`; `:wesson` with `SpitzerHarmModel()` reproduces the legacy SLAYER)
 """
 function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     bt=nothing,
@@ -338,8 +279,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     R0_use = R0 === nothing ? equil.ro : Float64(R0)
     _eval(x, ψ) = x === nothing ? nothing : x isa Real ? Float64(x) : Float64(x(ψ))
 
-    # Compute physical B_T = F(ψ) / (2π·R₀) per surface from the F spline
-    # when `bt` is not explicitly supplied.
+    # Physical B_T = F(ψ) / (2π·R₀) per surface when `bt` is not supplied.
     _bt_at(ψ) =
         if bt === nothing
             Float64(equil.profiles.F_spline(ψ)) / (2π * R0_use)
@@ -353,10 +293,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     # Boundary minor radius on the flux label, needed only to turn a whole-plasma τ̄_E into a uniform χ_E.
     a_minor = P_perp_model === :tau_E ? first(radial_label(equil; rs_method=:flux, theta=theta, q_beyond=q_beyond))(1.0) : nothing
 
-    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline derivatives.
-    # In flux coordinates ω_* = n·(dp/dψ)/(e·n_e), so the surface's toroidal mode
-    # number enters here. Main-ion density is taken equal to the electron density
-    # (quasi-neutrality, matching the staging step).
+    # Per-surface ω_*e, ω_*i from spline derivatives: ω_* = n·(dp/dψ)/(e·n_e) in flux coordinates, with n_i = n_e.
     chi1 = 2π * equil.psio
     _kinetic_at(ψ) = (n_e=Float64(profiles.n_e(ψ)), dn_e=Float64(profiles.n_e(ψ; deriv=DerivOp(1))),
         T_e=Float64(profiles.T_e(ψ)), dT_e=Float64(profiles.T_e(ψ; deriv=DerivOp(1))),
@@ -378,9 +315,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         da_dpsi = _da_dpsi_at(psi)
         sval_r = r_based_shear(rs, q, q1, da_dpsi)
 
-        # Resonant (m, n): take the first element of the mode-number vectors.
-        # Parallel-FM `sing.m`/`sing.n` hold exactly one entry each; ideal
-        # DCON may hold multiple — we pick the first and document the choice.
+        # Resonant (m, n): the first entry of `sing.m`/`sing.n`, which may hold several.
         m_res = sing.m[1]
         n_res = sing.n[1]
 
@@ -389,28 +324,13 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         # ω_*e, ω_*i from the density and temperature spline derivatives, at this surface's n.
         ω_e_use, ω_i_use = _omega_star_at(psi, n_res)
 
-        # Pull geometric trapped-fraction inputs from ResistGeometry when
-        # available (populated by ForceFreeStates.resist_eval_all!); else
-        # fall back to nothing and let slayer_parameters compute them from
-        # aspect ratio + Lin-Liu-Miller ε-only form.
+        # Trapped-fraction inputs from ResistGeometry when populated; else slayer_parameters uses the ε-only forms.
         rg = sing.restype
-        f_trap_kw = rg === nothing ? nothing : rg.f_trap
-        R_major_eff = rg === nothing ? nothing : rg.R_major
-        nu_e_star_kw = if rg === nothing ||
-                          resistivity_model isa Union{SpitzerModel,SpitzerHarmModel}
-            nothing
-        else
-            lnL = coulomb_log_e(prof.n_e, prof.T_e; form=lnLambda_form)
-            nu_star_e(prof.n_e, prof.T_e, rg.R_major, rg.eps_local,
-                q, _eval(zeff, psi); lnLamb=lnL)
-        end
+        (; f_trap, nu_e_star, R_major_eff) = _resistivity_geometry(rg, prof.n_e, prof.T_e, q, _eval(zeff, psi);
+            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
 
-        # dr_val: per-surface resistive interchange index D_R = E + F + H²
-        # (Glasser-Greene-Johnson 1975). Used by `_solve_dc_tmp` to compute
-        # the χ_‖-matching critical-Δ via Connor, Ham, Hastie & Liu 2015 Eq. 59,
-        # which has `(−D_R)` as a multiplier. NOT the Mercier index
-        # D_I = E + F + H − 1/4 (see this function's docstring); we use the
-        # physically correct D_R here.
+        # Resistive interchange index D_R = E + F + H² (Glasser-Greene-Johnson 1975), the (−D_R) of Connor et al. 2015 Eq. 59;
+        # not the Mercier index D_I = E + F + H − 1/4.
         dr_val_k = if dr_val === nothing
             rg === nothing &&
                 throw(
@@ -497,8 +417,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             kpar_val=kpar_val_k,
             dc_type=dc_type, ising=k,
             resistivity_model=resistivity_model,
-            f_trap=f_trap_kw,
-            nu_e_star=nu_e_star_kw,
+            f_trap=f_trap,
+            nu_e_star=nu_e_star,
             R_major_eff=R_major_eff,
             lnLambda_form=lnLambda_form,
             k_ref=k_ref_k,
@@ -506,4 +426,42 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         )
     end
     return out
+end
+
+# Trapped fraction, electron collisionality and effective major radius of the neoclassical resistivity
+# closure at one surface, from its `ResistGeometry` when populated; `nothing` lets `surface_resistivity`
+# fall back to the ε = r_s/R form.
+function _resistivity_geometry(rg, n_e, T_e, q, zeff; resistivity_model::NeoResistivityModel, lnLambda_form::Symbol)
+    rg === nothing && return (f_trap=nothing, nu_e_star=nothing, R_major_eff=nothing)
+    nu_e_star = if resistivity_model isa Union{SpitzerModel,SpitzerHarmModel}
+        nothing
+    else
+        lnL = coulomb_log_e(n_e, T_e; form=lnLambda_form)
+        nu_star_e(n_e, T_e, rg.R_major, rg.eps_local, q, zeff; lnLamb=lnL)
+    end
+    return (f_trap=rg.f_trap, nu_e_star=nu_e_star, R_major_eff=rg.R_major)
+end
+
+"""
+    layer_resistivity(equil, sings, profiles::KineticProfiles; zeff=1.0, R0=nothing, rs_method=:midplane,
+                      theta=0.0, q_beyond=nothing, resistivity_model=SauterNeoModel(), lnLambda_form=:nrl) -> Vector{Float64}
+
+Parallel resistivity η in Ω·m at each surface of `sings`, with the same closure and per-surface inputs
+`build_slayer_inputs` gives the SLAYER layer, so every resistive inner layer of a run sees one η.
+`zeff` is a scalar or a callable of ψ.
+"""
+function layer_resistivity(equil, sings, profiles::KineticProfiles;
+    zeff=1.0, R0=nothing, rs_method::Symbol=:midplane, theta::Real=0.0, q_beyond=nothing,
+    resistivity_model::NeoResistivityModel=SauterNeoModel(), lnLambda_form::Symbol=:nrl)
+    R0_use = R0 === nothing ? equil.ro : Float64(R0)
+    rs_at, _ = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
+    return map(sings) do sing
+        psi = sing.psifac
+        prof = profiles(psi)
+        z = zeff isa Real ? Float64(zeff) : Float64(zeff(psi))
+        geometry = _resistivity_geometry(sing.restype, prof.n_e, prof.T_e, sing.q, z;
+            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
+        surface_resistivity(; n_e=prof.n_e, t_e=prof.T_e, zeff=z, qval=sing.q, rs=rs_at(psi), R0=R0_use,
+            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form, geometry...)
+    end
 end

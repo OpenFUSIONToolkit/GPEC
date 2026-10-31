@@ -3,10 +3,12 @@
 # response is computed the neoclassical toroidal viscosity torque is integrated over ψ as a
 # post-processing diagnostic (adaptive quadrature paneled at the rational surfaces).
 # The kinetic profiles (kinetic.dat) are constructed to be consistent with this equilibrium's
-# pressure; the equilibrium is generated analytically from the embedded [SOL_INPUT] section.
+# pressure; the equilibrium is generated analytically from the embedded [Solovev] section.
+
+[Run]
+verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "core_edge_packed"          # Radial grid packing type
@@ -16,7 +18,6 @@ mpsi = 128                              # Number of radial grid points (0 = auto
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 flux_surface_rtol = 1e-7                # Relative tolerance of the ODE solves that trace each flux surface
-force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
 # Close conformal wall is required to stabilize this Solovev fixture's n=1 external kink:
@@ -25,13 +26,8 @@ force_termination = false               # Terminate after equilibrium setup (ski
 # (dpm magnitudes ~ 10¹¹, |Im/Re| ≫ 1). This fixture's role is integration-pipeline
 # smoke testing + et[1] regression, NOT BVP Δ' regression — DIIID-like is the canonical
 # Δ'-matrix fixture (stable et[1] = +1.6, clean BVP Δ').
-shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-standoff_fraction = 0.2415              # Wall standoff in plasma minor radii (conformal, dee)
-half_thickness = 0.05                   # Half-thickness parameter for Dee-shaped walls
-elongation = 1.5                        # Elongation parameter for wall shapes
-center_offset = 0                       # Offset of wall center from major radius
-triangularity = 0.5                     # Triangularity parameter for wall shapes
-corner_sharpness = 0.05                 # Sharpness of wall corners (try 0.05 as initial value)
+shape = "conformal"                     # Wall shape (conformal, elliptical, dee, mod_dee, file)
+standoff_fraction = 0.2415              # Wall standoff in plasma minor radii
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
 [ForcingTerms]
@@ -40,20 +36,20 @@ forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Bi
 
 [PerturbedEquilibrium]
 compute_singular_coupling = true        # Compute singular layer coupling metrics
-verbose = true                          # Enable verbose logging
-write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 regularization_width = 0.05             # Regularization width for singular surfaces (0 = disabled)
 
-# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
-ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = true                # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
@@ -61,27 +57,27 @@ vac_flag = true               # Compute plasma, vacuum, and total energies for f
 dW_edge_scan_start = 0.99     # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
-sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                    # Smallest toroidal mode number to include
-nn_high = 1                   # Largest toroidal mode number to include
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960           # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
-kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
-kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-6            # Fractional distance from rational q at which ideal jump enforced
+
+# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
+integrator = "Forward" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
+truncate_at_rational_offset = false # FALSE for limited/analytical equilibria — rationals sparse, rational_offset_fraction would chop too much edge
+rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction)/n (used when truncate_at_rational_offset = true)
+
+# Numerical settings of the forward integrator
+[Forward]
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 save_interval = 1             # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 
-# Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
-integrator            = "forward" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
-truncate_at_rational_offset = false # FALSE for limited/analytical equilibria — rationals sparse, rational_offset_fraction would chop too much edge
-rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction)/n (used when truncate_at_rational_offset = true)
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

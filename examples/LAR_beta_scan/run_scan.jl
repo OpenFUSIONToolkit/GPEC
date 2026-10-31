@@ -3,7 +3,7 @@
     run_scan.jl — TJ-analytic β (pressure factor) scan
 
 Fixed geometry (ε=0.2), varying pressure via the `pc` parameter of the
-TJ-analytic equilibrium model (eq_type="tj_analytic").  The TJ-analytic model
+TJ-analytic equilibrium model ([TJAnalytic]).  The TJ-analytic model
 follows the profile family of R. Fitzpatrick's TJ code
 (https://github.com/rfitzp/TJ); no geqdsk files are needed.
 
@@ -41,9 +41,9 @@ const PC_TEST = [0.001, 0.10, 0.17]
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "beta_scan.h5")
 
-# All baseline parameters (Equilibrium, TJ_ANALYTIC_INPUT, Wall, ForceFreeStates)
+# All baseline parameters (Equilibrium, TJAnalytic, Wall, ForceFreeStates)
 # live in gpec.toml next to this script — there is no side-car TOML file.
-# The scan below reads gpec.toml once and overrides ONLY `TJ_ANALYTIC_INPUT.p0`
+# The scan below reads gpec.toml once and overrides ONLY `TJAnalytic.p0`
 # per scan point before writing the per-point gpec.toml into a tempdir.
 const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 
@@ -54,10 +54,9 @@ const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 function run_single(pc::Float64)
     run_dir = mktempdir(; prefix="gpec_tj_analytic_beta_")
     try
-        # Per-point gpec.toml = baseline gpec.toml with TJ_ANALYTIC_INPUT.p0 overridden.
+        # Per-point gpec.toml = baseline gpec.toml with TJAnalytic.p0 overridden.
         config = deepcopy(GPEC_BASE)
-        config["TJ_ANALYTIC_INPUT"]["p0"] = pc
-        config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
+        config["TJAnalytic"]["p0"] = pc
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
         GeneralizedPerturbedEquilibrium.main([run_dir])
@@ -102,7 +101,7 @@ function main()
     test_mode = "--test" in ARGS
     pcs = test_mode ? PC_TEST : PC_FULL
 
-    tj = GPEC_BASE["TJ_ANALYTIC_INPUT"]
+    tj = GPEC_BASE["TJAnalytic"]
     @info "TJ-analytic β scan: $(length(pcs)) points, ε=$(tj["a"]/tj["r0"]), B0=$(tj["B0"])T, q0=$(tj["q0"]), qa=$(tj["qa"])" *
           (test_mode ? " (test mode)" : "")
 

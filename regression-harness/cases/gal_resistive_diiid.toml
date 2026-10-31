@@ -71,11 +71,10 @@ label = "gal α per surface"
 noise_threshold = 1e-8
 order = 31
 
-# --- DRIVEN (RPEC) inner-layer matching (gal_match_flag) ---
+# --- DRIVEN (RPEC) inner-layer matching ([Match]) ---
 # Only finite, well-defined matching quantities are tracked. The reconstructed ξ/ξ′ are deliberately
 # NOT regressed via norms: ξ′ diverges at the rational surfaces, so any whole-array norm is dominated by
-# the (grid- and ULP-fragile) near-singular points — an ill-posed benchmark. The producer is validated
-# separately by benchmarks/verify_gal_solution.jl (finite-difference self-consistency).
+# the (grid- and ULP-fragile) near-singular points — an ill-posed benchmark.
 
 # Inner-layer matching data Δ(Q) per surface (surface geometry + GGJ inner solver). (msing × 2)
 [quantities.gal_match_deltar_norm]

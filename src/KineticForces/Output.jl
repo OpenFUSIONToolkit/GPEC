@@ -1,3 +1,6 @@
+import ..Utilities: save_to_hdf5
+import ..Utilities.HDF5Annotations: ensure_group, replace_group!, write_fields!
+
 """
     Output
 
@@ -7,14 +10,14 @@ then write to gpec.h5 in a single pass.
 """
 
 """
-    write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
+    save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, state::KineticForcesState; dVdpsi_spline=nothing,
                    species_label=nothing)
 
 Write KineticForces results to the "KineticForces" group in gpec.h5.
 
 # Arguments
 
-  - `h5file::HDF5.File`: Open HDF5 file handle
+  - `h5file::Union{HDF5.File,HDF5.Group}`: Open HDF5 file handle
   - `state::KineticForcesState`: Accumulated computation results
   - `dVdpsi_spline`: Optional dV/dψ_N profile interpolant; when given, dV/dψ_N is
     written at the quadrature points so the torque density dT/dV = (dT/dψ)/(dV/dψ)
@@ -24,9 +27,9 @@ Write KineticForces results to the "KineticForces" group in gpec.h5.
     `KineticForces/PerSpecies/<label>/<method>/`. A multi-species run calls this once per
     species and once for the summed total, so the group is opened-or-created each time.
 """
-function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spline=nothing,
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, state::KineticForcesState; dVdpsi_spline=nothing,
     species_label::Union{Nothing,AbstractString}=nothing)
-    root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
+    root = ensure_group(h5file, "KineticForces")
     g = root
     if species_label !== nothing
         per = if haskey(root, "PerSpecies")
@@ -36,7 +39,7 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
             attributes(p)["long_name"] = "per-species NTV contributions; their sum is the KineticForces total"
             p
         end
-        g = create_group(per, species_label)
+        g = replace_group!(per, species_label)
     end
 
     # Method groups actually written here, so the metadata pass annotates the method level
@@ -44,7 +47,7 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState; dVdpsi_spl
     method_names = String[]
 
     for (method_name, result) in state.method_results
-        mg = create_group(g, method_name)
+        mg = replace_group!(g, method_name)
         push!(method_names, method_name)
         mg["n"] = result.nn
         # Torque and kinetic energy are the two real physical quantities packed into the
@@ -127,24 +130,49 @@ const KF_METHOD_H5_ANNOTATIONS = [
 ]
 
 """
-    write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil)
+    save_to_hdf5(target, kf::KineticForcesResult)
+
+Write the kinetic torque under `KineticForces/`: the total by method, each species' contribution under
+`PerSpecies/<label>/`, and the `Validity` diagnostics.
+"""
+function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, kf::KineticForcesResult)
+    ffs = kf.pe.response.ffs
+    dVdpsi_spline = ffs.equil.profiles.dVdpsi_spline
+    for (label, state) in kf.species
+        save_to_hdf5(h5file, state; dVdpsi_spline, species_label=label)
+    end
+    save_to_hdf5(h5file, kf.total; dVdpsi_spline)
+    ForceFreeStates.write_kinetic_validity!(h5file, kf.control, ffs)
+    Utilities.record_inputs!(h5file, kf)
+    return nothing
+end
+
+# A force-balance run whose kinetic source is the KineticForces model records that model's validity diagnostics.
+function ForceFreeStates.write_kinetic_validity!(h5file::Union{HDF5.File,HDF5.Group}, ctrl::KineticForcesControl,
+    ffs::ForceFreeStates.ForceFreeStatesResult)
+    equil = ffs.equil
+    return write_validity!(h5file, ctrl, ntv_species(ctrl, equil), ntv_profiles(ctrl, equil), equil, Float64[sng.psifac for sng in ffs.surfaces])
+end
+
+"""
+    write_validity!(h5file, kf_ctrl, species, kinetic_profiles, equil, rationals=Float64[])
 
 Write `KineticForces/Validity`: the drift-kinetic validity diagnostics (orbit-width scales, local
 geometry, profile gradient lengths, the near-axis boundary and its applied envelope, and the
 `is_valid` flag). Diagnostic only — nothing outside the near-axis envelope is suppressed, so the
 far edge and steep-gradient regions are flagged rather than zeroed.
 """
-function write_validity!(h5file::HDF5.File, kf_ctrl::KineticForcesControl, species,
+function write_validity!(h5file::Union{HDF5.File,HDF5.Group}, kf_ctrl::KineticForcesControl, species,
     kinetic_profiles, equil, rationals::Vector{Float64}=Float64[])
     kinetic_profiles === nothing && return nothing
     # One species sets all three of psi_c, envelope and is_valid: the widest-orbit species when a
-    # resolved set is available, else the control's single species.
+    # resolved set is available, else the equilibrium's main ion.
     vp =
         species === nothing ?
-        kinetic_validity_profiles(kinetic_profiles, equil; zi=kf_ctrl.ion_charge, mi=kf_ctrl.ion_mass, electron=kf_ctrl.electron) :
+        kinetic_validity_profiles(kinetic_profiles, equil; zi=main_ion(equil)[1], mi=main_ion(equil)[2], electron=kf_ctrl.electron) :
         kinetic_validity_profiles(species, equil)
     psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
-    root = haskey(h5file, "KineticForces") ? h5file["KineticForces"] : create_group(h5file, "KineticForces")
+    root = ensure_group(h5file, "KineticForces")
     haskey(root, "Validity") && return nothing
     g = create_group(root, "Validity")
     g["psi"] = vp.psi

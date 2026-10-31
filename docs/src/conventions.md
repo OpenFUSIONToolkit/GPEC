@@ -135,7 +135,7 @@ q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p .
 
 ### Toroidal Mode Number ``n``
 
-- Set as a **positive integer** via `nn_low`/`nn_high` in `gpec.toml`. ``n < 1`` is not supported
+- Set as a **positive integer** via `[ForceFreeStates] nn` in `gpec.toml`. ``n < 1`` is not supported
   and is clamped to 1 with a warning (`src/GeneralizedPerturbedEquilibrium.jl`). Results for
   multiple ``n`` can be superposed.
 

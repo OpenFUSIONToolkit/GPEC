@@ -56,11 +56,13 @@ Modules, with the abbreviation to use in prose:
 | Area | Prose | Source |
 |---|---|---|
 | `Analysis` | — | `src/Analysis/` |
+| `Deck` | — | `src/Deck.jl` |
 | `Equilibrium` | EQUIL | `src/Equilibrium/` |
 | `ErrorFields` | EF | `src/ErrorFields/` |
+| `ForceBalance` | — | `src/ForceBalance.jl` |
 | `ForceFreeStates` | FFS | `src/ForceFreeStates/` |
 | `ForcingTerms` | FT | `src/ForcingTerms/` |
-| `HDF5Schema` | — | `src/HDF5Schema.jl` |
+| `HDF5Schema` | — | `src/Utilities/HDF5Schema.jl` |
 | `InnerLayer` | IL | `src/InnerLayer/` |
 | `KineticForces` | KF | `src/KineticForces/` |
 | `LocalStability` | LS | `src/LocalStability/` |
@@ -73,7 +75,7 @@ Modules, with the abbreviation to use in prose:
 
 `EQUIL`, `VAC`, `FFS`, and `PE` were already in common use; the rest are new. Short module names take no abbreviation.
 
-A submodule may be named where it helps triage: `ForceFreeStates.Galerkin`, `InnerLayer.GGJ`, `InnerLayer.SLAYER`, `Tearing.Dispersion`, `Tearing.Runner`. Only directories holding Julia sources qualify, so data directories are not Areas.
+A submodule may be named where it helps triage: `ForceFreeStates.Galerkin`, `InnerLayer.GGJ`, `InnerLayer.SLAYER`, `Tearing.Dispersion`. Only directories holding Julia sources qualify, so data directories are not Areas.
 
 Areas outside `src/`: `Benchmarks`, `Build`, `CI`, `Docs`, `Examples`, `Regression`, `Repo`, `Test`.
 

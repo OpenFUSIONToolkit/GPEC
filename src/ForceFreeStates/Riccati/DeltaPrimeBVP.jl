@@ -1,7 +1,7 @@
 # STRIDE global boundary-value problem: Delta-prime matrix assembly, solve, PEST-3 decomposition.
 
 """
-    compute_delta_prime_matrix!(intr, propagators, chunks; wv, psio, debug, ctrl, equil, mats)
+    compute_delta_prime_matrix!(intr, propagators, chunks; wv, psio, debug, S_at_surface_left, ctrl, equil, mats)
 
 Compute the inter-surface tearing stability matrix (msing × msing) using the
 STRIDE global BVP formulation [Glasser 2018 Phys. Plasmas 25, 032501, Sec. III.B].
@@ -16,31 +16,19 @@ The BVP encodes the full plasma response with unknowns at each surface boundary:
   Total unknowns: nMat = (2 + 4·msing)·N
 ```
 
-## Edge boundary condition
+## Boundary conditions
 
-When `wv` is provided (the vacuum response matrix, singfac-scaled), the edge BC
-follows the Fortran STRIDE convention:
-
-```
-  U₁ = c,  U₂ = -wv·ψ₀²·c
-```
-
-which is the free-boundary condition `wp + wv = 0` at the edge.
-When `wv` is `nothing`, a conducting wall BC (`U₁ = 0`) is used.
-
-## Gaussian reduction (conditioning)
-
-Forward-propagated segment propagators (axis→surface, surface→surface) can be
-extremely ill-conditioned (cond ~ 10²⁴) due to exponential growth of the big
-solution. Following STRIDE's `ode_fixup`, Gaussian reduction is applied to each
-assembled propagator's U₂ columns before inserting into the BVP matrix. This
-keeps the BVP matrix full-rank and well-conditioned.
+With `wv` (the singfac-scaled vacuum response) the edge BC is `U₁ = c, U₂ = -wv·ψ₀²·c`, i.e.
+`wp + wv = 0`; with `wv = nothing` it is a conducting wall (`U₁ = 0`). When `S_at_surface_left`
+is given (one per crossed surface), the axis is matched through a QR-conditioned axis propagator and
+ua-initialized shooting propagators; otherwise through a Gaussian-reduced axis FM (STRIDE `ode_fixup`),
+which requires forward crossing chunks.
 
 ## Output: PEST3-convention Δ' (deltap)
 
 The raw BVP solution is a 2·msing × 2·msing matrix `dp` with left/right
-sub-indices at each surface. The PEST3-convention Δ' matrix is the linear
-combination [Chance, PPPL-2527]:
+sub-indices at each surface, stored in `intr.delta_prime_raw`. The PEST3-convention Δ' is
+[Chance, PPPL-2527]:
 
 ```
   deltap(i,j) = dp(2i,2j) - dp(2i,2j-1) - dp(2i-1,2j) + dp(2i-1,2j-1)
@@ -50,21 +38,11 @@ stored in `intr.delta_prime_matrix` (msing × msing).
 
 ## Limitations
 
-This routine currently assumes exactly one resonant mode per singular surface
-(the standard single-`n` case).  When **any** surface carries more than one
-resonant mode — i.e., a multi-`n` run where a single q value satisfies two
-distinct `(m, n)` tuples (e.g. q = 2 with `(m=2, n=1)` AND `(m=4, n=2)`) —
-the routine emits a warning and skips the inter-surface BVP rather than
-crashing.  Generalizing the BVP to multi-resonance surfaces is tracked as a
-follow-up: the matrix shape becomes `n_res_total × n_res_total` with
-`n_res_total = sum(length(intr.sing[j].m))` and a `(surface, mode, side)`
-↔ BVP-row map; see PR discussion.
+Assumes one resonant mode per surface: if any surface carries several (a multi-`n` run where one
+q satisfies two `(m, n)`, e.g. q = 2 with (2, 1) and (4, 2)), it warns and skips the BVP.
 
-Note: `intr.delta_prime_matrix` is the **only physically valid Δ'** produced
-by this code. The per-surface ca-based stub `intr.sing[*].delta_prime` /
-`delta_prime_col` (populated by `riccati_cross_ideal_singular_surf!`) is a
-diagnostic placeholder for future intra-surface coupling work and is not
-expected to agree with `delta_prime_matrix`.
+`intr.delta_prime_matrix` is the only physically valid Δ'; the per-surface ca-based
+`intr.sing[*].delta_prime` is a diagnostic placeholder and need not agree with it.
 """
 function compute_delta_prime_matrix!(
     intr::ForceFreeStatesInternal,
@@ -87,12 +65,7 @@ function compute_delta_prime_matrix!(
 
     use_S_axis = S_at_surface_left !== nothing && length(S_at_surface_left) == msing
 
-    # The FM-axis-BC fallback (use_S_axis=false) wires Phi_L_mats[j] as forward propagators
-    # in the BVP matrix. Crossing chunks with direction=-1 (bidirectional parallel FM) hold
-    # *backward* propagators, so applying them as forward would produce a silently wrong
-    # Δ' BVP. Forbid that combination explicitly — the parallel path always supplies
-    # S_at_surface_left (so use_S_axis=true) and any new caller hitting the FM-axis path
-    # needs forward crossing chunks.
+    # The FM-axis fallback uses crossing-chunk propagators as forward maps; backward chunks would give a wrong Δ'.
     if !use_S_axis
         for ic in i_crossings
             chunks[ic].direction == 1 ||
@@ -142,10 +115,7 @@ function compute_delta_prime_matrix!(
     deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
         M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
 
-    # Persist both the PEST3 tearing projection (msing × msing) and the raw 2msing × 2msing
-    # D' matrix (side-major ordering, byte-compatible with Fortran rdcon/gal.f::gal_write_delta).
-    # The raw matrix is consumed by `pest3_decompose` to recover (A', B', Γ', Δ') for the full
-    # det(D' − D(γ)) = 0 eigenvalue problem; see the `delta_prime_raw` docstring in CoreTypes.jl.
+    # The raw side-major D' (Fortran gal_write_delta layout) feeds `pest3_decompose`.
     intr.delta_prime_matrix = deltap
     intr.delta_prime_raw = dp_raw_persisted
 end
@@ -155,9 +125,7 @@ end
 _col_left(j::Int, N::Int) = (N+4N*(j-1)+1):(N+4N*(j-1)+2N)
 _col_right(j::Int, N::Int) = (N+4N*(j-1)+2N+1):(N+4N*j)
 
-# Multi-resonance surfaces (one q value satisfying multiple (m,n) tuples in a multi-n run)
-# are not yet handled by the inter-surface BVP. Returns true if any surface has >1 modes;
-# emits a warning as a side effect. The stub per-surface delta_prime is unaffected.
+# True (with a warning) if any surface carries more than one resonant (m, n), which the BVP does not handle.
 function _has_unsupported_multi_resonance(intr::ForceFreeStatesInternal)
     msing = intr.msing
     n_res_per_surface = [length(intr.sing[j].m) for j in 1:msing]
@@ -186,11 +154,8 @@ function _select_active_surfaces(intr::ForceFreeStatesInternal, chunks::Vector{I
     return sing, i_crossings, msing_active
 end
 
-# Assemble all segment propagators: per-surface single-chunk FMs (Phi_L), inter-surface
-# and edge multi-chunk FMs (Phi_R), and midpoint-split halves (Phi_R_halves) used by the
-# diagnostic comparisons. Phi_R[1] is only built when use_S_axis=false (FM-axis fallback).
-# Midpoint splitting halves each inter-surface span's condition number — STRIDE's trick:
-# cond(full) = 10¹⁵ → cond(half) ≈ 10⁷·⁵, an 8-digit accuracy gain.
+# Assemble per-surface crossing FMs (Phi_L), inter-surface and edge FMs (Phi_R; Phi_R[1] only for the
+# FM-axis fallback), and midpoint-split halves (Phi_R_halves) used only by the debug diagnostics.
 function _assemble_segment_propagators(propagators::Vector{ChunkPropagator},
     chunks::Vector{IntegrationChunk},
     i_crossings::Vector{Int}, msing::Int, N::Int,
@@ -222,10 +187,8 @@ function _assemble_segment_propagators(propagators::Vector{ChunkPropagator},
     return Phi_L_mats, Phi_R_mats, Phi_R_halves
 end
 
-# Asymptotic-basis transformation T = [ua[:,:,1]; ua[:,:,2]] maps (small/big) coefficients
-# to raw (ξ,η) state. Column ordering of ua: 1:N = big solutions (z^{-α}, diverging),
-# N+1:2N = small solutions (z^{+α}, bounded). Fortran STRIDE bakes T into the shooting
-# propagators (uFM_sing_init); we multiply T into the BVP propagator blocks at each surface.
+# Asymptotic-basis transformation T = [ua[:,:,1]; ua[:,:,2]] maps (big, small) coefficients to the raw
+# state; ua columns 1:N are big (z^{-α}) and N+1:2N small (z^{+α}) solutions.
 function _build_asymptotic_basis_matrices(sing::Vector{SingType}, has_ua::Bool, N::Int, msing::Int)
     T_left_mats = Vector{Matrix{ComplexF64}}(undef, msing)
     T_right_mats = Vector{Matrix{ComplexF64}}(undef, msing)
@@ -243,11 +206,8 @@ function _build_asymptotic_basis_matrices(sing::Vector{SingType}, has_ua::Bool, 
     return T_left_mats, T_right_mats, T_left_inv, T_right_inv
 end
 
-# Build the S-axis shooting propagators uShootR (forward from surface j right → midpoint)
-# and uShootL (backward from surface j left → midpoint), and the conditioned axis
-# propagator uAxis. uShootL[1] is built specially using the QR-conditioned axis path
-# (Fortran ode_fixup) so that surface 1 inherits the well-conditioned S axis BC instead
-# of going through a catastrophically ill-conditioned full axis FM.
+# Build the S-axis shooting propagators uShootR (surface j right → midpoint), uShootL (surface j
+# left → midpoint, backward), and the QR-conditioned axis propagator uAxis that uShootL[1] meets.
 function _build_S_axis_shooting_propagators(
     propagators::Vector{ChunkPropagator}, chunks::Vector{IntegrationChunk},
     i_crossings::Vector{Int}, sing::Vector{SingType}, msing::Int, N::Int,
@@ -304,11 +264,9 @@ function _build_S_axis_shooting_propagators(
     return uShootR, uShootL, uAxis
 end
 
-# Locate the chunk midpoint between two singular surfaces (or surface↔edge) in ψ space.
-# Side `:right` returns the range from chunk(i_crossings[j]+1) to the ψ-midpoint chunk
-# (or to the last chunk for j==msing). Side `:left` returns the range from the midpoint
-# chunk+1 to chunk(i_crossings[j]-1). The ψ midpoint is used (not the chunk-index midpoint)
-# because chunks near singularities are packed tighter in ψ — Fortran convention.
+# Chunk range from surface j to the ψ midpoint toward the next surface (`:right`; the edge for
+# j == msing) or from the midpoint after surface j-1 to surface j (`:left`). The ψ midpoint, not the
+# chunk-index midpoint, matches Fortran since chunks pack tighter near singularities.
 function _midpoint_shoot_range(chunks::Vector{IntegrationChunk}, i_crossings::Vector{Int},
     j::Int, msing::Int; side::Symbol)
     if side === :right
@@ -331,10 +289,8 @@ function _midpoint_shoot_range(chunks::Vector{IntegrationChunk}, i_crossings::Ve
     return side === :right ? (chunk_start:i_mid_inter) : ((i_mid_inter+1):chunk_end)
 end
 
-# Build a well-conditioned axis propagator by forward-propagating [0; I] through the
-# pre-first-crossing chunks with QR fixup after each chunk (Fortran ode_fixup). The axis
-# midpoint is placed one chunk before the first surface so that uShootL[1] covers only the
-# last chunk, keeping it well-conditioned.
+# Propagate [0; I] from the axis with a QR fixup after each chunk (Fortran ode_fixup), stopping one
+# chunk before the first surface so uShootL[1] spans a single well-conditioned chunk.
 function _build_conditioned_axis_propagator(propagators::Vector{ChunkPropagator},
     i_crossings::Vector{Int}, N::Int)
     n_pre_cross = i_crossings[1] - 1
@@ -358,9 +314,8 @@ function _build_conditioned_axis_propagator(propagators::Vector{ChunkPropagator}
     return uAxis, i_axis_mid
 end
 
-# Build uShootL[1]: backward propagator from surface 1 left boundary to the axis midpoint.
-# Falls back to T_left_mats[1] (or identity if no ua) when there's only 1 chunk before the
-# first crossing.
+# uShootL[1]: backward propagator from surface 1's left boundary to the axis midpoint; T_left_mats[1]
+# (or the identity without ua) when that range is empty.
 function _build_uShootL_first(propagators::Vector{ChunkPropagator},
     chunks::Vector{IntegrationChunk}, i_crossings::Vector{Int},
     sing::Vector{SingType}, T_left_mats::Vector{Matrix{ComplexF64}},
@@ -379,10 +334,8 @@ function _build_uShootL_first(propagators::Vector{ChunkPropagator},
     end
 end
 
-# Assemble the BVP matrix M with S-based axis BC. The Riccati S matrix at surface 1's left
-# boundary encodes the axis BC (U₁ = S·U₂) in a well-conditioned form (cond ~ 10⁶), avoiding
-# the catastrophically ill-conditioned axis FM. Fortran-matched structure with
-# nMat = (2 + 4·msing)·N. Returns (M, nMat, col_edge).
+# Assemble the BVP matrix M with the axis matched to the conditioned axis propagator, avoiding the
+# ill-conditioned full axis FM. Fortran-matched layout, nMat = (2 + 4·msing)·N. Returns (M, nMat, col_edge).
 function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     uShootL::Vector{Matrix{ComplexF64}},
     uAxis::Matrix{ComplexF64}, ipert_all::Vector{Int},
@@ -440,11 +393,9 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
-# Coil-response block for the Eq. (37) edge [Glasser-Kolemen 2018 PoP 25, 032501]: impose the rpec edge
-# boundary condition — identity edge plus a unit source per poloidal mode, matching RDCON's
-# `gal_set_boundary` rpec branch — then read the small-solution (+N slot) coefficient at every surface.
-# The BC is the same for every edge mode, so the matrix is factorized once and all N modes are solved
-# together as columns of one right-hand side. Returns delta_coil (2·msing × N), rows = surface side.
+# Coil-response block for the Eq. (37) edge [Glasser-Kolemen 2018 PoP 25, 032501]: impose the rpec edge BC
+# (RDCON `gal_set_boundary`, unit source per poloidal mode) and read the small-solution coefficient at each
+# surface side, solving all N modes with one factorization. Returns delta_coil (2·msing × N).
 function _solve_bvp_edge_coil(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
     nMat = size(M, 1)
     bot = (nMat-2msing-N+1):(nMat-2msing)   # Eq. (38) bottom rows, carrying the W_V block
@@ -522,7 +473,7 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
     ctrl, debug::Bool)
     s2 = 2 * msing
-    Tc = (ctrl === nothing || ctrl.extended_precision_bvp) ? Complex{Double64} : ComplexF64
+    Tc = (ctrl === nothing || ctrl.algorithm.extended_precision_bvp) ? Complex{Double64} : ComplexF64
     M_solve = Tc.(M)
     M_lu = lu(M_solve; check=false)
     use_lu = issuccess(M_lu)
@@ -558,7 +509,6 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     end
 
     debug && _log_bvp_pest3(dp_raw, deltap, s2, msing)
-    # Return the PEST3-combined matrix AND the raw 2msing×2msing D' matrix.
     return ComplexF64.(deltap), ComplexF64.(dp_raw)
 end
 
@@ -669,7 +619,7 @@ function _log_bvp_pest3(dp_raw, deltap, s2, msing)
 end
 
 """
-    pest3_decompose(dp_raw::AbstractMatrix) -> (A', B', Γ', Δ')
+    pest3_decompose(dp_raw::AbstractMatrix) -> NamedTuple{(:A, :B, :Γ, :Δ)}
 
 Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
 ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
@@ -686,10 +636,7 @@ B'(i,j) = RR − RL + LR − LL    (even-i, odd-j)    — interchange↔tearing
 where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
 `LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
 
-Matches Fortran exactly — no ½ prefactor (Pletzer–Dewar multiply by ½, but
-the Fortran RDCON code leaves it commented out and our Julia port follows
-Fortran to keep the benchmark bit-identical; the prefactor cancels in
-`det(D' − D(γ)) = 0`).
+No Pletzer–Dewar ½ prefactor, matching Fortran RDCON; it cancels in `det(D' − D(γ)) = 0`.
 
 The Δ' block returned here equals `intr.delta_prime_matrix` (the m×m PEST3
 tearing projection computed inside `compute_delta_prime_matrix!`).
@@ -700,11 +647,8 @@ tearing projection computed inside `compute_delta_prime_matrix!`).
 
 # Returns
 
-Named tuple `(A=A', B=B', Γ=Gp, Δ=Dp)` of four m×m complex matrices. In the
-full `det(D' − D(γ)) = 0` eigenvalue problem, these fill the 2m×2m outer
-matrix as `D' = [[A' B'] [Γ' Δ']]` with the interchange channel (Glasser
-stabilization) in the upper-left block and the tearing channel in the
-lower-right.
+Named tuple `(A, B, Γ, Δ)` of m×m matrices, the blocks of `D' = [[A' B'] [Γ' Δ']]` in the
+`det(D' − D(γ)) = 0` problem (interchange upper-left, tearing lower-right).
 """
 function pest3_decompose(dp_raw::AbstractMatrix)
     s2 = size(dp_raw, 1)

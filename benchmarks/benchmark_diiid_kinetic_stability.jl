@@ -5,7 +5,7 @@
 Benchmark the self-consistent kinetic-DCON path (KF → FFS → PE) against
 Fortran GPEC's kinetic DCON reference.
 
-Runs `GPE.main()` with `kinetic_source="calculated"` and `kinetic_factor=1.0`
+Runs `GPE.main()` with `kinetic = "KineticForces"`
 against the EFIT g-file and `.kin` profile taken from a Fortran GPEC
 kinetic example directory, then compares the least-stable total-energy
 eigenvalue `ForceFreeStates/FreeBoundaryStability/eigenmode_energies[1]` against `W_t_eigenvalue[:, 0]` in the Fortran
@@ -123,8 +123,6 @@ function build_benchmark_tomldir(eq_file::String, kin_file::String)
 [Equilibrium]
 eq_filename = "$eq_name"
 kinetic_file = "$kin_file"
-eq_type = "efit"
-jac_type = "hamada"
 grid_type = "pow1"             # Matches Fortran DIIID_kinetic_example (equil/grid.f90 powspace)
 psilow = 0.01
 psihigh = 0.993
@@ -133,39 +131,30 @@ mtheta = 256
 newq0 = 0
 flux_surface_rtol = 1e-7
 
-[Wall]
-shape = "nowall"
-
 [LocalStability]
 
 [ForceFreeStates]
 vac_flag = true
-force_termination = true       # Skip PE+KF post-processing — we only need FFS eigenvalues
 
 dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
 qhigh = 1e3
-sing_start = 0
 
-nn_low = 1
-nn_high = 1
+nn = 1
 delta_mlow = 8
 delta_mhigh = 8
 mtheta_vacuum = 512
-thmax0 = 1
 
-kinetic_source = "calculated"
-kinetic_factor = 1.0
-eulerlagrange_tolerance = 1e-7
+integrator = "Forward"
+kinetic = "KineticForces"
 singfac_min = 1e-4
+
+[Forward]
+eulerlagrange_tolerance = 1e-7
 renorm_threshold = 1e4
-write_outputs_to_HDF5 = true
 
 [KineticForces]
-nn = 1
-nl = 4
-zi = 1
-mi = 2
+bounce_harmonic_max = 4
 nutype = "harmonic"
 f0type = "maxwellian"
 """
@@ -192,7 +181,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
 
     tomldir = build_benchmark_tomldir(inputs.eq_file, inputs.kin_file)
 
-    _p("\n--- Running GPE.main with kinetic_source=\"calculated\" ---")
+    _p("\n--- Running GPE.main with kinetic = \"KineticForces\" ---")
     t0 = time()
     GPE.main([tomldir])
     wall = time() - t0

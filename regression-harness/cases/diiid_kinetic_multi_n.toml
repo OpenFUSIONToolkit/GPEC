@@ -1,20 +1,21 @@
 # Regression case: DIII-D-like n = 1, 2 kinetic stability with the calculated kinetic matrices.
 # Reuses the DIIID-like_ideal_example deck (which ships the kinetic profiles) via [overrides]: the
-# coupled n = 1, 2 mode space at full kinetic strength, stopped after ForceFreeStates because the
+# coupled n = 1, 2 mode space at full kinetic strength, ending after ForceFreeStates because the
 # KineticForces torque stage is single-n. Guards the per-n geometric matrices and the per-n-block
 # kinetic singular-surface scan. Each [quantities.*] block names an HDF5 path, how to extract it,
 # and the noise floor below which a diff is treated as zero.
 [case]
 name = "diiid_kinetic_multi_n"
-description = "DIII-D-like equilibrium, n = 1, 2, kinetic_source=calculated, kinetic_factor=1.0, stability only (force_termination), truncation at psihigh."
+description = "DIII-D-like equilibrium, n = 1, 2, KineticForces kinetic matrices, kinetic_factor=1.0, stability only, truncation at psihigh."
 example_dir = "examples/DIIID-like_ideal_example"
+# Without a perturbed equilibrium the run ends after ForceFreeStates; [KineticForces] stays as the kinetic source.
+remove_sections = ["ForcingTerms", "PerturbedEquilibrium", "ErrorFields"]
 
 [overrides]
-"ForceFreeStates.nn_high" = 2                        # Largest toroidal mode number to include
-"ForceFreeStates.kinetic_source" = "calculated"      # Kinetic matrices from the KineticForces bounce-averaged kernel
-"ForceFreeStates.kinetic_factor" = 1.0               # Full-strength kinetic matrices
+"ForceFreeStates.nn" = [1, 2]                         # Toroidal mode number, or consecutive numbers as a list
+"ForceFreeStates.kinetic" = "KineticForces"           # Kinetic source: the drift-kinetic matrices of the [KineticForces] model
+"ForceFreeStates.kinetic_factor" = 1.0                # Uniform scale on the kinetic matrices of a kinetic run
 "ForceFreeStates.truncate_at_rational_offset" = false # Multi-n runs truncate at psihigh; set explicitly
-"ForceFreeStates.force_termination" = true           # Stop after ForceFreeStates (the KineticForces torque stage is single-n)
 
 # Energies — leading generalized (W,N) pencil eigenvalues over the coupled n = 1, 2 mode space
 [quantities.et_real]

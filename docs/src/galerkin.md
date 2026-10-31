@@ -19,20 +19,19 @@ The solve produces the inter-surface Δ′ matrix and the PEST-3 matching blocks
 whichever formalism produced it.  These are the outer-region inputs to resistive matched-asymptotic stability analysis
 [Glasser 2016, Phys. Plasmas **23**, 072505].
 
-Select it with `integrator = "galerkin"` in `[ForceFreeStates]`. It replaces the radial ODE
+Select it with `integrator = "Galerkin"` in `[ForceFreeStates]`; its settings go in `[Galerkin]`. It replaces the radial ODE
 integration rather than supplementing it: the run computes its own vacuum response at the
 control surface (when `vac_flag`) and produces no free-boundary energies or ODE trace.
-Setting `gal_match_flag` additionally matches the inner layer, giving a driven ξ solution. The
-composite inner-region profiles are a scripting diagnostic: they need `Galerkin(; cut_solution=true)`
-followed by `solve(MatchProblem(...))`, and a deck run does not write them.
+A `[Match]` section additionally matches the inner layer, giving a driven ξ solution. The
+composite inner-region profiles need the cut solution, `[Galerkin] cut_solution = true` (or
+`Galerkin(; cut_solution=true)` followed by `solve(MatchProblem(...))`).
 
-`gal_solver` picks the banded solver. `"auto"` (the default) tries a Hermitian Cholesky
+The banded solve automatically tries a Hermitian Cholesky
 factorization of the lower band (LAPACK `zpbtrf`/`zpbtrs`, with the Dirichlet rows' columns moved
 to the right-hand side). The free block's off-diagonal entries must be Hermitian within
 `1e-10 * sqrt(abs(A_ii)) * sqrt(abs(A_jj))`; the diagonal's imaginary part is deliberately
 discarded. Unequal bandwidths, off-diagonal asymmetry, or failure of positive definiteness
-trigger a reported fallback to Jacobi-scaled LU. `"LU"` skips the Cholesky attempt;
-`"cholesky"` stops with an error instead of falling back. The factorization actually used is
+trigger a reported fallback to Jacobi-scaled LU. The factorization actually used is
 recorded as `ForceFreeStates/Solutions/GalerkinIntegration/solver` in `gpec.h5`.
 
 The implementation lives in `src/ForceFreeStates/Galerkin/`:

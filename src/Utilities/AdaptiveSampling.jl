@@ -13,21 +13,19 @@ export adaptive_sample
 """
     adaptive_sample(f, xs0; max_points=21, rtol=0.05, min_width=0.0, crossing_width=nothing, feature_ratio=10.0) -> (x, y)
 
-Evaluate the vector-valued function `f(x) -> AbstractVector{<:Real}` on the initial grid `xs0`
-(sorted, every point evaluated; keep `0` in it when the unshifted point must be reproduced
-exactly), then repeatedly bisect the interval whose midpoint is predicted worst until every
-interval is resolved or `max_points` evaluations have been spent. The prediction error of an
-interval is the distance between the linear and the piecewise-cubic (Catmull-Rom) estimates of
-its midpoint, scaled by the interval width relative to the mean width; an interval across which
-any component of `f` changes sign is refined first, until it is narrower than `crossing_width`
-(default: an eighth of the initial spacing), so zero crossings end up bracketed tightly.
-Resolution means every interval's prediction error is below `rtol` times the range of each
-component (or is narrower than `min_width`). A second, scale-free trigger catches a narrow
-feature riding on a large smooth background, whose tails are far below `rtol` of the range:
-an interval whose prediction error exceeds `feature_ratio` times the median error of all
-intervals is refined too. Deterministic for given inputs. A feature that leaves no trace at all
-at the initial spacing cannot be found by any refinement rule; the initial grid sets that
-guarantee.
+Evaluate the vector-valued `f(x) -> AbstractVector{<:Real}` on the initial grid `xs0` (keep `0` in it
+when the unshifted point must be reproduced exactly), then bisect the interval whose midpoint is
+predicted worst (linear vs Catmull-Rom estimate, relative to each component's range) until every
+interval's error is below `rtol`, narrower than `min_width`, or `max_points` evaluations are spent.
+
+## Arguments
+
+  - `crossing_width`: intervals where a component changes sign are refined first until narrower than this
+    (default: an eighth of the initial spacing).
+  - `feature_ratio`: an interval whose error exceeds this multiple of the median error is refined even
+    below `rtol`, to catch a narrow feature on a large smooth background.
+
+A feature invisible at the initial spacing cannot be found; the initial grid sets that resolution.
 
 Returns the sorted sample points `x` and the matrix `y` (`length(x) × ncomponents`).
 """

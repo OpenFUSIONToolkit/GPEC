@@ -35,6 +35,7 @@ struct CaseSpec
     quantities::Vector{QuantitySpec}
     kind::String
     overrides::Dict{String,Any}  # gpec.toml keys patched for this run; dotted keys e.g. "KineticForces.nutype" => "zero". Empty = run the deck in place.
+    remove_sections::Vector{String}  # gpec.toml sections dropped for this run, e.g. ["PerturbedEquilibrium"] to stop before that stage
     precompile_workload::Bool
 end
 

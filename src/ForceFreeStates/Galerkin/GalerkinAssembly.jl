@@ -1,7 +1,7 @@
 # GalerkinAssembly.jl
 #
 # Element-level assembly for the outer-region Galerkin solver. Ports:
-#   gal_hermite       (gal.f)   Hermite cubic basis
+#   gal_hermite       (gal.f)   Hermite cubic basis: Utilities.HermiteFEM.hermite_basis
 #   gal_get_fkg       (gal.f)  F, K, G at a point from F̄/K̄/Ḡ + singfac
 #   gal_gauss_quad    (gal.f) nonresonant stiffness via Gauss-Lobatto quadrature
 #   gal_extension     (gal.f) extension-cell matrix/rhs (big-solution driving + surface terms)
@@ -42,30 +42,12 @@
 end
 
 """
-    gal_hermite(x, x0, x1) -> (pb, qb)
+    gal_get_fkg(mats, intr, x, q; Fbuf=nothing, Kbuf=nothing, Gbuf=nothing) -> (F, K, G)
 
-Hermite cubic basis values `pb` and derivatives `qb` on `[x0, x1]` (length 4, Fortran `0:3`).
-Port of `gal_hermite` (gal.f).
-"""
-function gal_hermite(x::Real, x0::Real, x1::Real)
-    dx = x1 - x0
-    t0 = (x - x0) / dx
-    t1 = 1 - t0
-    t02 = t0 * t0
-    t12 = t1 * t1
-    pb = (t12 * (1 + 2t0), t12 * t0 * dx, t02 * (1 + 2t1), -t02 * t1 * dx)
-    qb = (-6t0 * t1 / dx, t0 * (3t0 - 4) + 1, 6t1 * t0 / dx, t0 * (3t0 - 2))
-    return pb, qb
-end
-
-"""
-    gal_get_fkg(mats, intr, x, q) -> (F, K, G)
-
-Evaluate the `mpert×mpert` matrices `F = Q F̄ Qᴴ`, `K = Q K̄`, `G = Ḡ` at flux `x` with safety factor
-`q`, where `Q = diag(singfac)` and `singfac = m - n q` (direct). Port of `gal_get_fkg` (gal.f).
-Reconstructs F̄ = LLᴴ from `mats.ideal.F_spline_lower`, matching the Euler–Lagrange kernel and singular
-expansions, and uses `mats.ideal.K_spline` (K̄), `mats.ideal.G_spline` (Ḡ). F/K/G are the
-ideal-MHD Euler–Lagrange coefficient matrices of the outer-region weak form (Glasser 2016, PoP 23, 112506).
+Evaluate the ideal-MHD Euler–Lagrange coefficients of the outer-region weak form (Glasser 2016, PoP 23,
+112506), `F = Q F̄ Qᴴ`, `K = Q K̄`, `G = Ḡ`, at flux `x` with safety factor `q`, where `Q = diag(m - n q)`.
+F̄ is rebuilt from its Cholesky factor `mats.ideal.F_spline_lower`, matching the Euler–Lagrange kernel.
+Optional `*buf` matrices are filled and returned instead of allocating. Port of `gal_get_fkg` (gal.f).
 """
 function gal_get_fkg(mats::MatrixSplines, intr::ForceFreeStatesInternal, x::Float64, q::Float64;
     Fbuf::Union{Nothing,Matrix{ComplexF64}}=nothing, Kbuf::Union{Nothing,Matrix{ComplexF64}}=nothing,
@@ -117,7 +99,7 @@ function gal_gauss_quad!(cell::GalCell, mats::MatrixSplines, profiles, intr::For
         w = dxc * weights[iq]
         q = profiles.q_spline(x; hint=qhint)
         F, K, G = gal_get_fkg(mats, intr, x, q; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
-        pbt, qbt = gal_hermite(x, x1, x2)
+        pbt, qbt = hermite_basis(x, x1, x2)
         # swap the right-node value/slope DOFs (Fortran pb(2)↔pb(3)) for the free-boundary edge
         pb = swap_edge ? (pbt[1], pbt[2], pbt[4], pbt[3]) : pbt
         qb = swap_edge ? (qbt[1], qbt[2], qbt[4], qbt[3]) : qbt
@@ -203,7 +185,7 @@ function gal_extension!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles
         # surface term at xb
         qb = profiles.q_spline(xb; hint=qhint)
         Fb, Kb, _ = gal_get_fkg(mats, intr, xb, qb; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
-        pbt, _ = gal_hermite(xb, x1, x2)
+        pbt, _ = hermite_basis(xb, x1, x2)
         Fdu_Ku = Fb * du .+ Kb * u
         for ip in 0:np
             @views cell.emat[:, ip+1] .+= Fdu_Ku .* (pbt[ip+1] * ws)
@@ -227,7 +209,7 @@ function gal_extension!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles
             w = dxc * weights[iq]
             q = profiles.q_spline(x; hint=qhint)
             F, K, G = gal_get_fkg(mats, intr, x, q; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
-            pbt, qbt = gal_hermite(x, x1, x2)
+            pbt, qbt = hermite_basis(x, x1, x2)
             uax = ua_at(x)
             ub = uax[:, 1, 1]
             dub = dua_at(x)[:, 1, 1]
@@ -255,7 +237,7 @@ function gal_extension!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles
     # --- surface terms (always; gal.f) ---
     q_l = profiles.q_spline(x1; hint=qhint)
     Fl, Kl, _ = gal_get_fkg(mats, intr, x1, q_l; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
-    pbt, _ = gal_hermite(x1, x1, x2)
+    pbt, _ = hermite_basis(x1, x1, x2)
     surf_l = Fl * du1 .+ Kl * ua1
     for ip in 0:np
         @views cell.rhs[:, ip+1] .-= surf_l .* (pbt[ip+1] * w1)
@@ -266,7 +248,7 @@ function gal_extension!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles
 
     q_r = profiles.q_spline(x2; hint=qhint)
     Fr, Kr, _ = gal_get_fkg(mats, intr, x2, q_r; Fbuf=Fbuf, Kbuf=Kbuf, Gbuf=Gbuf)
-    pbt, _ = gal_hermite(x2, x1, x2)
+    pbt, _ = hermite_basis(x2, x1, x2)
     surf_r = Fr * du2 .+ Kr * ua2
     for ip in 0:np
         @views cell.rhs[:, ip+1] .+= surf_r .* (pbt[ip+1] * w2)
@@ -302,8 +284,7 @@ function gal_resonant!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles,
     x1l = cell.x_lsode
     sgn_u = (cell.extra == GAL_SIDE_RIGHT) ? -1.0 : 1.0
 
-    # Reused per-integrand buffers (col 1 = big, col 2 = small): sing_get_*_gal! fills them in place.
-    # sing_matvec! scratch and the quadgk! output buffer are hoisted too, so the integrand allocates nothing.
+    # Preallocated buffers (col 1 = big, col 2 = small) so the integrand allocates nothing
     ua_buf = Array{ComplexF64,3}(undef, N, 2, 2)
     dua_buf = Array{ComplexF64,3}(undef, N, 2, 2)
     kmat = Matrix{ComplexF64}(undef, N, N)
@@ -322,7 +303,7 @@ function gal_resonant!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles,
         sing_get_dua_gal!(dua_buf, asymp, z)
         q = profiles.q_spline(x; hint=qhint)
         sing_matvec!(mv, kmat, gmat, d1, mvtmp, sfvec, mats, intr, x, q, ua_buf, dua_buf)  # N×2 (col1=big, col2=small)
-        pbt, _ = gal_hermite(x, x1, x2)
+        pbt, _ = hermite_basis(x, x1, x2)
         # Pairwise sum over the materialized product (reuses buffers) — matches sum(w .* mv) bit-for-bit.
         w .= conj.(@view ua_buf[:, 2, 1])               # conj small solution, qty1
         pbuf .= w .* @view mv[:, 1]
@@ -341,9 +322,8 @@ function gal_resonant!(cell::GalCell, ising::Int, mats::MatrixSplines, profiles,
         return out
     end
 
-    # QuadGK (adaptive Gauss-Kronrod) replaces Fortran gal_lsode_int over the same integrand/limits — not
-    # bit-exact; gal_tol/gal_gnstep cap the evals so a near-singular integrand cannot hang. The in-place
-    # quadgk!/integrand! pair avoids a per-eval vector allocation in this hot adaptive loop.
+    # QuadGK replaces Fortran LSODE over the same integrand (not bit-exact); gal_gnstep caps evals so a
+    # near-singular integrand cannot hang.
     result = Vector{ComplexF64}(undef, L)
     raw, qerr = quadgk!(integrand!, result, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=gal_gnstep)
     if verbose
@@ -432,16 +412,14 @@ end
     gal_set_boundary!(ws, mpert, wv_edge)
 
 Apply the axis (`u(0)=0` identity) and edge boundary conditions to the boundary cells' `mat`, plus the
-rpec coil-source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f),
-including its full three-way edge branch (rpec count `ncoil = ws.nsol - 2*msing`):
+rpec coil-source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f). The edge
+branch is one of:
 
-  - rpec (`ncoil > 0`): identity edge **and** a unit source at the edge value DOF of coil column
-    `2*msing+ipert` for each poloidal mode `ipert` (gal.f). `ws.rhs` is already allocated and
-    `gal_assemble_rhs!` only fills columns `1:2*msing`, so the injection is not clobbered.
-  - free boundary (`wv_edge !== nothing`): add the vacuum block `wvac·psio²` at the edge value DOF
-    (gal.f).
-  - fixed boundary (else): identity edge (gal.f).
-    `wv_edge` is `nothing` for the rpec and fixed cases.
+  - rpec (`ncoil = ws.nsol - 2*msing > 0`): identity edge and a unit source at the edge value DOF of coil
+    column `2*msing+ipert` for each poloidal mode `ipert`. `gal_assemble_rhs!` only fills columns
+    `1:2*msing`, so the injection is not clobbered.
+  - free boundary (`wv_edge !== nothing`): add the vacuum block `wvac·psio²` at the edge value DOF.
+  - fixed boundary (else): identity edge.
 """
 function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
     msing = length(ws.intvl) - 1

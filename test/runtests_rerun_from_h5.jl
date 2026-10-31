@@ -65,11 +65,9 @@ end
         cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), forcing_dat)
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_singular_coupling" => true,
-            "verbose" => false, "write_outputs_to_HDF5" => true)
+            "compute_singular_coupling" => true)
         open(io -> TOML.print(io, inputs), toml_path, "w")
 
         @info "Generating source gpec.h5 for rerun tests"
@@ -99,13 +97,13 @@ end
         # both override flags are covered through the real code path with no extra runs.
         @testset "override flags propagate through build_inputs_from_h5" begin
             mktempdir() do out_dir
-                inline = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.eulerlagrange_tolerance=1e-6"])
-                @test inline[1]["ForceFreeStates"]["eulerlagrange_tolerance"] == 1e-6
+                inline = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.qlow=1.05"])
+                @test inline[1]["ForceFreeStates"]["qlow"] == 1.05
 
                 override_toml = joinpath(out_dir, "overrides.toml")
-                write(override_toml, "[ForceFreeStates]\neulerlagrange_tolerance = 2e-6\n")
+                write(override_toml, "[ForceFreeStates]\nqlow = 1.06\n")
                 from_file = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override-file", override_toml])
-                @test from_file[1]["ForceFreeStates"]["eulerlagrange_tolerance"] == 2e-6
+                @test from_file[1]["ForceFreeStates"]["qlow"] == 1.06
             end
         end
 
@@ -128,14 +126,6 @@ end
                     h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
                 end
                 @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
-            end
-        end
-
-        @testset "the LocalStability section replays" begin
-            mktempdir() do out_dir
-                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
-                @test haskey(inputs, "LocalStability")
-                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
             end
         end
 
@@ -184,10 +174,8 @@ end
 
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_singular_coupling" => true,
-            "verbose" => false, "write_outputs_to_HDF5" => true)
+            "compute_singular_coupling" => true)
         inputs["ForcingTerms"] = Dict{String,Any}(
             "forcing_data_format" => "coil", "mtheta_coil" => 64, "nzeta_coil" => 32,
             "coil_set" => [Dict{String,Any}(
@@ -334,23 +322,27 @@ end
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
 
-# Drift guard for the analytic-equilibrium registry: `run_input` and the rerun builder both
-# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
-# empty section) would silently break one path. Asserting each entry is well-formed and that
-# build_analytic_config resolves it keeps adding a new analytic kind a one-row change.
-@testset "ANALYTIC_EQ registry is well-formed and drives build_analytic_config" begin
-    Equil = GeneralizedPerturbedEquilibrium.Equilibrium
-    bac = GeneralizedPerturbedEquilibrium.build_analytic_config
+# Drift guard for the analytic-equilibrium registry: `run_input` and the deck parser both
+# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed row would silently break one path.
+@testset "ANALYTIC_EQ registry is well-formed and drives the deck's analytic sections" begin
+    GPEC = GeneralizedPerturbedEquilibrium
+    Equil = GPEC.Equilibrium
     for (eq_type, spec) in Equil.ANALYTIC_EQ
-        @test spec.section isa String && !isempty(spec.section)
-        # config_type must build from a parsed TOML table (the embedded-section path).
-        @test hasmethod(spec.config_type, Tuple{Dict{String,Any}})
-        # run_fn must accept (EquilibriumConfig, <its config type>).
+        # The section is the config type's name without "Config".
+        @test spec.section * "Config" == String(nameof(spec.config_type))
         @test hasmethod(spec.run_fn, Tuple{Equil.EquilibriumConfig,spec.config_type})
-        # build_analytic_config resolves the section to the right config type using defaults.
-        cfg = bac(eq_type, Dict{String,Any}(spec.section => Dict{String,Any}()))
-        @test cfg isa spec.config_type
+        # The section alone selects the equilibrium: its config with defaults, and the implied eq_type.
+        deck = Dict{String,Any}("Equilibrium" => Dict{String,Any}(), spec.section => Dict{String,Any}())
+        @test GPEC.analytic_config(deck) isa spec.config_type
+        @test GPEC.equilibrium_config(deck, ".").eq_type == eq_type
+        @test Equil.analytic_eq_type(spec.config_type()) == eq_type
     end
-    # Unregistered kinds are rejected, not silently mis-built.
-    @test_throws ErrorException bac("not_a_real_kind", Dict{String,Any}())
+    # An analytic deck sets no eq_type, holds one analytic section, and does not name the internal token.
+    stated = Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol"), "Solovev" => Dict{String,Any}())
+    @test_throws ErrorException GPEC.equilibrium_config(stated, ".")
+    @test_throws ErrorException GPEC.equilibrium_config(Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol")), ".")
+    @test_throws ErrorException GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}(), "TJAnalytic" => Dict{String,Any}()))
+    @test_throws ArgumentError GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}("lar_r0" => 1.0)))
+    @test GPEC.analytic_config(Dict{String,Any}("TJAnalytic" => Dict{String,Any}("solver" => "direct"))).solver === :direct
+    @test_throws ErrorException GPEC._stop_on_deprecated_deck_keys(Dict{String,Any}("SOL_INPUT" => Dict{String,Any}()))
 end

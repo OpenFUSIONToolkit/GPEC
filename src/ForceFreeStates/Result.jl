@@ -52,9 +52,8 @@ so bpen and closure are always present.
   - `equil::Equilibrium.PlasmaEquilibrium` - The equilibrium actually integrated against (the re-formed one on the two-pass path).
   - `mlow`, `mhigh`, `mpert`, `nlow`, `nhigh`, `npert`, `numpert_total` - Resolved (m, n) mode space; see `ModeSpace`.
   - `psilow`, `psilim`, `qlim`, `q1lim` - Integration bounds, and q with its ψ-derivative at `psilim`.
-  - `dir_path::String` - Working directory of the run.
-  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape used by the vacuum calculation.
-  - `debug_settings::DebugSettings` - Diagnostic dump settings (the `[DEBUG]` deck section / `debug=` API keyword).
+  - `problem`, `algorithm` - Problem and integrator retained by the public solve for reproducible output.
+  - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape used by the vacuum calculation.
   - `metric::MetricData`, `mats::MatrixSplines` - Metric data and Euler-Lagrange matrix interpolants.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
@@ -68,19 +67,21 @@ so bpen and closure are always present.
     formalism produced none (Riccati, and Galerkin without a match).
   - `diagnostics::Union{Nothing,OdeState}` - The integrator's raw ODE state (ψ trace, `crit`,
     edge scan, asymptotic coefficients). Written to HDF5; not a consumable solution.
-  - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix
-    `W_p = (U₂·U₁⁻¹)/ψ₀²` at `psilim`. Present for any Euler-Lagrange sweep (forward or
-    Riccati) regardless of `vac_flag` — the fixed-boundary run's energy product — and
-    identical to `free_boundary.wp` when the free-boundary calculation ran.
+  - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix `W_p = (U₂·U₁⁻¹)/ψ₀²` at
+    `psilim`. Present for any Euler-Lagrange sweep regardless of `vac_flag`; equals `free_boundary.wp` when that ran.
   - `free_boundary::Union{Nothing,FreeBoundaryResult}` - Free-boundary energies and eigenmodes; `nothing` when the vacuum step was skipped or the formalism computes none.
   - `delta_prime::Union{Nothing,DeltaPrimeData}` - Δ′/outer-region matching payload from
     whichever formalism ran (Riccati BVP or Galerkin); `nothing` when neither produced one.
   - `galerkin::Union{Nothing,GalerkinResult}` - RDCON Galerkin solver internals and FEM
     diagnostics. Its Δ′ payload lives in `delta_prime`, not here.
+  - `layer_overlap` - The binding resistive-layer overlap scan (`Tearing.LayerOverlapScan`) when
+    `psilim_from_layer_overlap` capped the domain; `nothing` otherwise.
 """
-struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} <: ModeSpace
+struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P,A,C<:ForceFreeStatesControl,L} <: ModeSpace
+    problem::P
+    algorithm::A
     integrator::Symbol
-    control::ForceFreeStatesControl
+    control::C
     equil::E
 
     # Mode space and integration domain, copied out of the solve-time scratch.
@@ -95,9 +96,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} 
     psilim::Float64
     qlim::Float64
     q1lim::Float64
-    dir_path::String
-    wall_settings::Vacuum.WallShapeSettings
-    debug_settings::DebugSettings
+    wall_settings::Union{Nothing,Vacuum.WallSettings}
 
     # Assembly products, always present.
     metric::MetricData
@@ -117,6 +116,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines} 
     free_boundary::Union{Nothing,FreeBoundaryResult}
     delta_prime::Union{Nothing,DeltaPrimeData}
     galerkin::Union{Nothing,GalerkinResult}
+    layer_overlap::L
 end
 
 """
@@ -144,12 +144,8 @@ function require_solution(result::ForceFreeStatesResult, calc::AbstractString)
     return false
 end
 
-# Pack the RPEC-matched Galerkin solution into `SolutionProfiles`. Mirrors Fortran
-# `idcon_build`'s gal branch (idcon.f) and `globalsol.bin` (match.f): the on-surface `issing`
-# grid points are dropped as zero placeholders where the resonant series diverges, Ξ′ is the
-# analytic Galerkin derivative rather than a differenced value spline, and
-# Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) is the same outer ideal-MHD relation `sing_der!` uses. The grid runs
-# inner→edge, so the last node is the control surface and carries the edge boundary condition.
+# Pack the matched Galerkin solution into `SolutionProfiles`: on-surface `issing` points are dropped, Ξ′ is the
+# analytic Galerkin derivative, and Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) as in `sing_der!`. Grid runs inner→edge.
 function _matched_gal_profiles(gal_result::GalerkinResult, m::MatchResult, mats::MatrixSplines, intr::ModeSpace)
     sol = gal_result.solution
     npert = intr.numpert_total
@@ -183,15 +179,12 @@ end
     build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
         -> ForceFreeStatesResult
 
-Assemble the published result once the solve is finished — the one place that decides what a
-formalism's raw output means downstream. Beyond materializing the forward path's derivative
-stores and forming the fixed-boundary `W_p` when the free-boundary stage did not run, every
-field is copied or aliased from what the stages already produced. The integrator always
-publishes the ideal closure; a `MatchProblem` solve transforms the result afterwards.
+Assemble the published result once the solve is finished, with the ideal closure (a `MatchProblem`
+solve transforms it afterwards). Materializes the forward path's derivative stores and forms `W_p`
+when the free-boundary stage did not run; everything else is copied or aliased.
 
-`odet` is the integrator's ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` the Galerkin
-solver internals and its Δ′ payload (`nothing` otherwise). The two formalisms are never both
-present: additive Galerkin does not exist.
+`odet` is the ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` are the Galerkin internals and
+its Δ′ payload (`nothing` otherwise).
 """
 function build_result(
     integrator::Symbol,
@@ -241,11 +234,11 @@ function build_result(
     end
 
     return ForceFreeStatesResult(
-        integrator, ctrl, equil,
+        nothing, nothing, integrator, ctrl, equil,
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
-        intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.dir_path, intr.wall_settings, intr.debug_settings,
+        intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.wall_settings,
         metric, mats, intr.sing, kinetic,
         closure, bpen, nothing,
-        solution, odet, wp, free_energies, delta_prime, gal_data
+        solution, odet, wp, free_energies, delta_prime, gal_data, nothing
     )
 end

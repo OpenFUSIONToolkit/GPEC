@@ -12,7 +12,6 @@ function _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int
     profiles = equil.profiles
     surfaces = @NamedTuple{m::Int, n::Int, psifac::Float64}[]
 
-    # Loop over all toroidal mode numbers
     for n in nlow:nhigh
         hint = Ref(1)
         # Loop over extrema of q, find all rational values in between
@@ -24,7 +23,6 @@ function _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int
             end
             dm = Int(sign(dq * n))
 
-            # Loop over possible m's in interval
             while (m - n * equil.params.qextrema_q[iex-1]) * (m - n * equil.params.qextrema_q[iex]) <= 0
                 psi0 = equil.params.qextrema_psi[iex-1]
                 psi1 = equil.params.qextrema_psi[iex]
@@ -91,7 +89,6 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
             intr.msing += 1
         end
     end
-    # Sort singular surfaces by increasing ψ
     intr.sing = sort(intr.sing; by=s -> s.psifac)
 end
 
@@ -99,11 +96,7 @@ end
     sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium;
               psilim_cap=nothing)
 
-Compute and set integration ψ, q, and q' limits by handling cases where user truncates
-before the last singular surface. Performs a similar function to `sing_lim`
-in the Fortran code. Main differences include renaming of sas_flag -> truncate_at_rational_offset,
-removing dW edge storage variables since we now store all integration terms in memory, and
-simplification of the logic.
+Set the outer integration limits `intr.psilim`, `intr.qlim` and `intr.q1lim`.
 
 The target `qlim` starts at `min(equil.params.qmax, ctrl.qhigh)`. When `psilim_cap` is given
 and lies inside the domain, `qlim` is further capped at `q(psilim_cap)`: the resistive-layer
@@ -113,11 +106,8 @@ well-separated inner region. The cap only ever narrows the domain; one beyond `p
 If `truncate_at_rational_offset` is true, `qlim` is then moved to `(last rational + rational_offset_fraction) / n` and
 stepped back by `1/n` until it no longer exceeds the bound above, so `rational_offset_fraction` never extends the
 domain past `qmax`, `qhigh` or the cap. A bound that falls exactly on, or less than `rational_offset_fraction / n`
-above, a rational excludes that rational. If `qlim < qmax`, a Newton iteration finds the
-corresponding `psilim` to integrate to.
-
-Note that the Newton iteration will be triggered if either `truncate_at_rational_offset` is true
-or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
+above, a rational excludes that rational. If `qlim < qmax`, a Newton iteration finds the matching
+`psilim` (outer crossing on a reversed-shear profile); otherwise the equilibrium edge values are used.
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium;
     psilim_cap::Union{Nothing,Real}=nothing)
@@ -139,19 +129,13 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         end
     end
 
-    # Optionally override qlim based on rational_offset_fraction (Fortran sas_flag=t equivalent). The cutoff reads
-    # the *resolved* toroidal range on `intr`, so callers must assign intr.nlow / intr.nhigh
-    # before calling; an unresolved range is an error rather than a silent change of truncation
-    # strategy. Multi-n runs are not supported — the "outermost rational + rational_offset_fraction/n" cutoff depends
-    # on which n is used — and fall back to qhigh / psihigh truncation with a warning.
+    # Rational-offset cutoff needs the resolved single-n range on `intr`; multi-n falls back to qhigh / psihigh.
     if ctrl.truncate_at_rational_offset && intr.nlow <= 0
-        error(
-            "sing_lim!: truncate_at_rational_offset = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
-            "Assign intr.nlow / intr.nhigh (from ctrl.nn_low / ctrl.nn_high) before calling sing_lim!, " *
-            "or set truncate_at_rational_offset = false to truncate via qhigh / psihigh instead."
-        )
+        error("sing_lim!: truncate_at_rational_offset = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+              "Assign intr.nlow / intr.nhigh (resolve_mode_space!) before calling sing_lim!, " *
+              "or set truncate_at_rational_offset = false to truncate via qhigh / psihigh instead.")
     elseif ctrl.truncate_at_rational_offset && intr.nlow != intr.nhigh
-        @warn "truncate_at_rational_offset = true is ignored for multi-n runs (nn_low=$(intr.nlow), nn_high=$(intr.nhigh)); falling back to qhigh / psihigh truncation."
+        @warn "truncate_at_rational_offset = true is ignored for multi-n runs (n = $(intr.nlow):$(intr.nhigh)); falling back to qhigh / psihigh truncation."
     elseif ctrl.truncate_at_rational_offset
         @info "Setting psilim via rational_offset_fraction: initial qlim = $(@sprintf("%.3f", intr.qlim)), rational_offset_fraction = $(@sprintf("%.3f", ctrl.rational_offset_fraction))"
         # Normalize rational_offset_fraction ∈ [0,1)
@@ -166,7 +150,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         end
     end
 
-    # If truncate_at_rational_offset decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
+    # qlim below qmax: Newton-solve q(psilim) = qlim
     if intr.qlim < equil.params.qmax
         # Seed from the edge inward at the outermost node with q ≤ qlim, so a reversed-shear profile, which crosses
         # qlim on both legs of its minimum, gets the outer crossing.
@@ -239,8 +223,7 @@ end
     fbar_block_conditions(psi, kin, equil, intr; hint=Ref(1)) -> Vector{Float64}
 
 Condition number of each toroidal-mode block of the kinetic F̄ matrix at ψ, one entry per n in
-`intr.nlow:intr.nhigh`. Mirrors the intent of Fortran `sing_get_f_det` (`sing.f:1298-1481`), which
-computes det(F̄) for a single n.
+`intr.nlow:intr.nhigh`.
 
 F̄(i,j) = q₁·f0(i,j)·q₂ - q₁·P(i,j) - conj(P†(j,i))·q₂ + R1(i,j)
 
@@ -248,7 +231,7 @@ where q₁ = m₁ - n·q(ψ), q₂ = m₂ - n·q(ψ) are the direct singularity 
 block-diagonal in n, so each block is conditioned on its own; the condition number of the whole
 matrix would mix the scales of different n.
 """
-function fbar_block_conditions(psi::Float64, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
+function fbar_block_conditions(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
     np = intr.numpert_total
     mpert = intr.mpert
 
@@ -267,7 +250,7 @@ function fbar_block_conditions(psi::Float64, kin::KineticMatrices, equil::Equili
     paat = reshape(pa_vec, np, np)
     r1mat = reshape(r1_vec, np, np)
 
-    # Assemble each n-block of F̄ [Fortran sing.f lines 1412-1423, sing_get_f_det with fkg_kmats_flag=true]
+    # Assemble each n-block of F̄
     conds = zeros(Float64, intr.npert)
     fbar = zeros(ComplexF64, mpert, mpert)
     for in_idx in 1:intr.npert
@@ -291,7 +274,7 @@ end
 Largest per-n-block condition number of the kinetic F̄ matrix at ψ (see `fbar_block_conditions`),
 a scale-invariant measure of how close any toroidal mode is to a kinetic singularity.
 """
-evaluate_fbar_condition(psi::Float64, kin::KineticMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1)) =
+evaluate_fbar_condition(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1)) =
     maximum(fbar_block_conditions(psi, kin, equil, intr; hint=hint))
 
 # Kinetic F̄ counts as singular above this condition number; structure within
@@ -302,13 +285,9 @@ const KINETIC_RELAXED_FRAC = 0.01
 """
     find_kinetic_singular_surfaces!(mats, equil, intr; ngrid=2000, cond_threshold=1e8)
 
-Find kinetically-displaced singular surfaces — locations where cond(F̄) peaks,
-indicating near-singularity of the kinetic F̄ matrix in the ODE RHS. Populates
-`intr.kinsing` and `intr.kmsing`.
-
-Mirrors the intent of Fortran `ksing_find` (`sing.f:1486-1616`) which finds zeros of
-det(F̄) via adaptive bisection. Here we use condition number peaks instead of
-determinant zeros for better numerical robustness and scale invariance.
+Find kinetically displaced singular surfaces, where cond(F̄) of the kinetic F̄ matrix peaks, and populate
+`intr.kinsing`, `intr.kmsing` and the `intr.kinsing_scan_*` diagnostics. Condition-number peaks are used
+instead of det(F̄) zeros for scale invariance.
 
 Each toroidal-mode block of F̄ is scanned on a dense ψ grid on its own; its local maxima are refined
 by golden-section minimization of -cond and filtered by threshold and the resonance condition. Each
@@ -341,8 +320,7 @@ function find_kinetic_singular_surfaces!(
     end
     cond_vals = vec(maximum(block_conds; dims=2))
 
-    # Persist the scan so callers/HDF5 output can plot cond(F̄) vs ψ and show why peaks
-    # were (or weren't) accepted as kinetic singular surfaces.
+    # Keep the scan for output, to show why peaks were or were not accepted
     intr.kinsing_scan_psi = psi_grid
     intr.kinsing_scan_cond = cond_vals
     intr.kinsing_scan_threshold = cond_threshold

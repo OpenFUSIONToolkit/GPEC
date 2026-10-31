@@ -23,28 +23,20 @@
 """
     SingularQuadratureData
 
-Precomputed polar singular-correction quadrature. `P2G` maps polar samples to
-the Cartesian patch (`grid = P2G * polar`, `polar = P2G' * patch`). `Gpou`/`Ppou`
-are the Cartesian and polar partitions of unity; `Gpou = -χ`.
+Precomputed polar singular-correction quadrature (Malhotra JCP 397 (2019) 108791, Sec. 3.2).
 
 ## Fields
 
-    - `qx::Vector{Float64}`: Radial quadrature points in [0,1]
-    - `qw::Vector{Float64}`: Radial quadrature weights
-    - `Gpou::Matrix{Float64}`: Partition of unity on Cartesian grid (PATCH_DIM × PATCH_DIM)
-    - `Ppou::Matrix{Float64}`: Partition of unity on polar grid (RAD_DIM × ANG_DIM)
-    - `P2G::SparseMatrixCSC{Float64,Int}`: Sparse interpolation matrix (Ngrid × Npolar) mapping polar quadrature points to Cartesian grid
-        - Forward (patch→polar): `polar = P2G' * patch`
-        - Backward (polar→grid): `grid = P2G * polar`.
-    - `PATCH_DIM::Int`: Patch dimension (odd integer)
-    - `PATCH_RAD::Int`: Patch radius (number of points adjacent to source point treated as singular)
-    - `ANG_DIM::Int`: Number of angular quadrature points
-    - `RAD_DIM::Int`: Number of radial quadrature points
-    - `INTERP_ORDER::Int`: Lagrange interpolation order
+  - `Gpou::Matrix{Float64}`: Partition of unity on the Cartesian patch, `Gpou = -χ` (PATCH_DIM × PATCH_DIM)
+  - `Ppou::Matrix{Float64}`: Partition of unity times polar quadrature weights (RAD_DIM × ANG_DIM)
+  - `P2G::SparseMatrixCSC{Float64,Int}`: Lagrange interpolation matrix (Ngrid × Npolar): `polar = P2G' * patch`, `grid = P2G * polar`
+  - `PATCH_DIM::Int`: Patch width `2 * PATCH_RAD + 1`
+  - `PATCH_RAD::Int`: Number of points on each side of the source point treated as singular
+  - `ANG_DIM::Int`: Number of angular quadrature points
+  - `RAD_DIM::Int`: Number of radial quadrature points
+  - `INTERP_ORDER::Int`: Lagrange interpolation order
 """
 struct SingularQuadratureData
-    qx::Vector{Float64}
-    qw::Vector{Float64}
     Gpou::Matrix{Float64}
     Ppou::Matrix{Float64}
     P2G::SparseMatrixCSC{Float64,Int}
@@ -166,7 +158,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
     # Assemble sparse interpolation matrix
     P2G = sparse(I_coo, J_coo, V_coo, Ngrid, Npolar)
 
-    return SingularQuadratureData(qx, qw, Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, INTERP_ORDER)
+    return SingularQuadratureData(Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, INTERP_ORDER)
 end
 
 # Cached singular quadrature; rebuilt if PATCH_RAD / RAD_DIM / INTERP_ORDER change
@@ -329,7 +321,7 @@ function compute_3D_kernel_matrices!(
     observers = sym_basis === nothing ? (1:num_points_per_fp) : sym_basis.pair_reps
     sym_basis === nothing || @assert isodd(INTERP_ORDER) "stellarator symmetry needs an odd INTERP_ORDER; an even stencil is not π-rotation equivariant"
 
-    # This allows the code to run at lower resolution without erroring out, but will warn the user.
+    # Clamp the patch on coarse grids, with a warning.
     # Bound once into a new name: reassigning PATCH_RAD inside the branch would box it in the threaded closure below.
     patch_rad = min(PATCH_RAD, (min(source.mtheta, source.nzeta) - 1) ÷ 2)
     if patch_rad < PATCH_RAD
@@ -365,10 +357,7 @@ function compute_3D_kernel_matrices!(
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
         r_obs = @view observer.r[idx_obs, :]
 
-        # ============================================================
-        # FAR FIELD: Trapezoidal rule for nonsingular source points
-        # Note: kernels return zero for r_src = r_obs
-        # ============================================================
+        # Far field: trapezoidal rule over all sources (the kernels return zero at r_src = r_obs)
         @inbounds for idx_src in 1:num_points
             # Evaluate kernels at grid points
             r_src = @view source.r[idx_src, :]
@@ -381,10 +370,7 @@ function compute_3D_kernel_matrices!(
             row_double[idx_col] += phases[d] * (far_double * dθdζ)
         end
 
-        # ============================================================
-        # NEAR FIELD: Polar quadrature with singular correction
-        # ============================================================
-        # Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
+        # Near field: polar quadrature with singular correction. Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
         extract_patch!(r_patch, source.r, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
         extract_patch!(dr_dθ_patch, source.dr_dθ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
         extract_patch!(dr_dζ_patch, source.dr_dζ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
@@ -399,18 +385,15 @@ function compute_3D_kernel_matrices!(
 
         # Evaluate kernels and apply quadrature weights: area element × POU, where POU contains rdrdθ already
         @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-            # Evaluate kernels using recomputed normal (use @view to avoid allocation)
             r_src = @view r_polar[ir, ia, :]
             n_src = @view n_polar[ir, ia, :]
             near_single, near_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], r_src[1], r_src[2], r_src[3], n_src[1], n_src[2], n_src[3])
 
-            # Apply quadrature weights: area element × POU, where POU contains rdrdθ already
             M_polar_single[ir, ia] = near_single * Ppou[ir, ia] * dθdζ
             M_polar_double[ir, ia] = near_double * Ppou[ir, ia] * dθdζ
         end
 
-        # Distribute polar singular corrections back to Cartesian grid using sparse matrix
-        # grid = P2G * polar (maps Npolar → Ngrid)
+        # Scatter the polar corrections back to the Cartesian patch: grid = P2G * polar
         mul!(M_grid_double_flat, P2G, vec(M_polar_double))
         M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
         if populate_greenfunction

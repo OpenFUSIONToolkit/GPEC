@@ -98,8 +98,8 @@ end
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-            GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
-            GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+            GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
         mpert = 2
         intr = F.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
@@ -322,15 +322,15 @@ end
         @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
         # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
         c = FFS.ForceFreeStatesControl()
-        @test c.renorm_threshold == 1e3
-        @test c.save_interval == 1
+        @test c.algorithm.renorm_threshold == 1e3
+        @test c.algorithm.save_interval == 1
     end
 
     @testset "compute_solution_norms!" begin
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; renorm_threshold=10.0)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; renorm_threshold=10.0))
 
         # Case 1: Basic norm computation
         odet.u = zeros(ComplexF64, 2, 2, 2)
@@ -381,7 +381,7 @@ end
         u0[:, 3, 1] .= [0.2, 2.0, 1.5]
         u0[:, :, 2] .= 1.0
         intr = FFS.ForceFreeStatesInternal(; numpert_total=3)
-        ctrl = FFS.ForceFreeStatesControl(; renorm_threshold=1e3)
+        ctrl = FFS.ForceFreeStatesControl(; algorithm=Forward(; renorm_threshold=1e3))
         fresh(u) = (odet = FFS.OdeState(3, 10, 10, 1); odet.u .= u; odet)
 
         odet = fresh(u0)
@@ -448,14 +448,15 @@ end
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
         function axis_state(psilow; kwargs...)
             eq_inputs = copy(inputs["Equilibrium"])
             eq_inputs["psilow"] = psilow
-            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(eq_inputs, ex)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
-            ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])..., kwargs...)
-            intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
+            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => eq_inputs)), ex)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+            deck = deepcopy(inputs)
+            merge!(deck["ForceFreeStates"], Dict{String,Any}(String(k) => v for (k, v) in kwargs))
+            ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(deck, ex)
+            intr = FFS.ForceFreeStatesInternal()
             intr.nlow = ctrl.nn_low
             intr.nhigh = ctrl.nn_high
             intr.npert = 1
@@ -466,7 +467,7 @@ end
             intr.mpert = intr.mhigh - intr.mlow + 1
             intr.numpert_total = intr.mpert * intr.npert
             mats = FFS.build_matrix_splines(equil, intr, FFS.make_metric(equil, intr.mpert))
-            odet = FFS.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+            odet = FFS.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
             return odet, ctrl, mats, equil, intr
         end
         # The default threshold is 0: near the axis the fixed start is used, with no warning.
@@ -491,14 +492,14 @@ end
 
     @testset "chunk_el_integration_bounds tests" begin
         # Helper to build a minimal control and internal structs
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-4)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-4)
 
         # Case 1: No singular surfaces -> single chunk to edge
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         intr.msing = 0
         intr.psilim = 1.0
 
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         odet.psifac = 0.0
 
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
@@ -518,7 +519,7 @@ end
         intr.mlow = 1
         intr.mhigh = 1
 
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         odet.psifac = 0.0
 
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
@@ -537,9 +538,9 @@ end
         intr.psilim = 1.0
         intr.mlow = 1
         intr.mhigh = 1
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-6)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-6)
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 3
         @test all(c.needs_crossing == true for c in chunks[1:2])
@@ -550,9 +551,9 @@ end
         intr.sing = [GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=0.4, n=[1], m=[1], q1=2.0)]
         intr.msing = 1
         intr.psilim = 1.0
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         odet.psifac = 0.0
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=0.0)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=0.0)
         chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
@@ -560,7 +561,7 @@ end
         # Case 5: both crossings of q = 2 on q = (2 - ε) + a(ψ - ψ0)², at ψ0 ∓ √(ε/a) with q' = ∓2√(aε).
         # With n = 1 their standoffs singfac_min/|q'| overlap exactly when 2ε ≤ singfac_min.
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
-        ctrl = FFS.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-4)
+        ctrl = FFS.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-4)
         function reverse_shear_pair(ε; a=3.0, psi0=0.4)
             intr = FFS.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
             dpsi, q1 = sqrt(ε / a), 2 * sqrt(a * ε)
@@ -569,7 +570,7 @@ end
             intr.psilim = 1.0
             intr.mlow = 1
             intr.mhigh = 3
-            odet = FFS.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+            odet = FFS.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
             odet.psifac = 0.0
             return odet, intr
         end
@@ -587,12 +588,12 @@ end
         intr.psilim = 1.0
         intr.mlow = 1
         intr.mhigh = 3
-        odet = FFS.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = FFS.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
         odet.psifac = 0.0
         @test_throws ErrorException FFS.chunk_el_integration_bounds(odet, ctrl, intr)
 
         # Case 7: the kinetic path skips the second of two overlapping crossings, with a warning naming it.
-        ctrl_kin = FFS.ForceFreeStatesControl(; numsteps_init=10, numunorms_init=5, singfac_min=1e-4, kinetic_factor=1.0)
+        ctrl_kin = FFS.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-4, kinetic=FFS.TestKineticMatrices(; scale=1.0))
         odet, intr = reverse_shear_pair(1e-5)
         intr.kinsing, intr.kmsing = intr.sing, intr.msing
         chunks = @test_logs (:warn, r"Skipping kinetic singular surface m/n=2/1") match_mode = :any FFS.chunk_el_integration_bounds(odet, ctrl_kin, intr)
@@ -633,15 +634,12 @@ end
     function setup_solovev_run()
         example_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
         inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
-        inputs["ForceFreeStates"]["integrator"] = "forward"
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-        intr = FFS.ForceFreeStatesInternal(; dir_path=example_dir)
-        ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
-        sol_cfg = haskey(inputs, "SOL_INPUT") ? GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]) : nothing
+        intr = FFS.ForceFreeStatesInternal()
+        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, example_dir)
+        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, example_dir)
+        sol_cfg = GeneralizedPerturbedEquilibrium.analytic_config(inputs)
         equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, sol_cfg)
-        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
         FFS.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low
         intr.nhigh = ctrl.nn_high
