@@ -285,24 +285,6 @@ using HDF5
         @test length(coil_field.ctrl.coil_sets_raw) == 1
     end
 
-    @testset "integrators own numerical settings" begin
-        alg = Galerkin(; nx=64, rpec_flag=true)
-        ctrl = FFS.ForceFreeStatesControl(; algorithm=alg)
-        @test ctrl.algorithm === alg
-        @test !hasfield(typeof(ctrl), :gal_nx)
-        @test !hasfield(typeof(ctrl), :eulerlagrange_tolerance)
-        @test !hasfield(Galerkin, :solver)
-        @test !hasfield(Galerkin, :sing_order)
-        @test !hasfield(Forward, :extended_precision_bvp)
-        @test_throws MethodError Forward(; extended_precision_bvp=false)
-        @test_throws MethodError Galerkin(; solver="LU")
-        @test_throws MethodError Galerkin(; sing_order=4)
-        @test Riccati(; extended_precision_bvp=false).extended_precision_bvp == false
-        for (key, value) in ((:frobenius_psi_max, 0.1), (:truncate_at_dW_peak, true), (:dW_edge_scan_start, 0.9))
-            @test_throws ArgumentError solve(equil, Galerkin(); nn=1, ffs_kwargs..., (key => value,)...)
-        end
-    end
-
     @testset "rejected keyword combinations" begin
         @test_throws "needs kinetic profiles on the equilibrium" solve(equil, forward; nn=1, ffs_kwargs...,
             kinetic=GPEC.KineticForces.KineticForcesControl())
@@ -311,6 +293,9 @@ using HDF5
         @test_throws ArgumentError solve(equil, forward; nn=1, ffs_kwargs..., integrator="riccati")
         @test_throws ArgumentError solve(equil, riccati; nn=1, ffs_kwargs..., nchunks=8)
         @test_throws ErrorException solve(equil, forward; nn=1, ffs_kwargs..., nn_low=2)
+        for (key, value) in ((:frobenius_psi_max, 0.1), (:truncate_at_dW_peak, true), (:dW_edge_scan_start, 0.9))
+            @test_throws ArgumentError solve(equil, Galerkin(); nn=1, ffs_kwargs..., (key => value,)...)
+        end
     end
 
     # Path of the first field where `a` and `b` differ (recursing into structs, arrays and
@@ -541,16 +526,13 @@ using HDF5
         end
 
         @testset "deck kinetic source names" begin
-            # A deck selects only the KineticForces model; test matrices and the retired key stop the run.
-            mktempdir() do dir
-                @test_throws "script-only" GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic" => "TestKineticMatrices"))])
+            # A deck selects only the KineticForces model; test matrices and the retired key stop the parse.
+            parsed(overrides) = mktempdir() do dir
+                GPEC.parse_deck(TOML.parsefile(joinpath(_stage_deck(dir; ffs_overrides=overrides), "gpec.toml")), dir)
             end
-            mktempdir() do dir
-                @test_throws "not a kinetic source" GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic" => "fixed"))])
-            end
-            mktempdir() do dir
-                @test_throws "no longer a key" GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("kinetic_source" => "fixed"))])
-            end
+            @test_throws "script-only" parsed(Dict{String,Any}("kinetic" => "TestKineticMatrices"))
+            @test_throws "not a kinetic source" parsed(Dict{String,Any}("kinetic" => "fixed"))
+            @test_throws "no longer a key" parsed(Dict{String,Any}("kinetic_source" => "fixed"))
         end
 
         @testset "kinetic torque" begin

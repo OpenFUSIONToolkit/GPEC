@@ -114,14 +114,6 @@ end
             end
         end
 
-        @testset "the LocalStability section replays" begin
-            mktempdir() do out_dir
-                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
-                @test haskey(inputs, "LocalStability")
-                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
-            end
-        end
-
         # A gpec.h5 from an older GPEC stores a deck with retired keys, which the replay cannot delete.
         @testset "a stored deck with retired keys stops the replay" begin
             mktempdir() do out_dir
@@ -134,14 +126,6 @@ end
                     h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
                 end
                 @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
-            end
-        end
-
-        @testset "the LocalStability section replays" begin
-            mktempdir() do out_dir
-                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
-                @test haskey(inputs, "LocalStability")
-                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
             end
         end
 

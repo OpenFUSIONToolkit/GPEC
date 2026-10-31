@@ -66,6 +66,15 @@ end
         script_h5 = joinpath(dir, "script.h5")
         foreach(r -> save_to_hdf5(script_h5, r), (ffs, ls, pe))
         @test deck_same(stages(recorded(script_h5), dir), stages(recorded(deck_h5), dir))
+        energies(path) = h5open(f -> read(f["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"]), path)
+        @test energies(script_h5) == energies(deck_h5)
+        # Saving into a group of an open file leaves the caller's other contents in place.
+        h5open(joinpath(dir, "group.h5"), "w") do file
+            file["unrelated"] = 42
+            save_to_hdf5(create_group(file, "run"), ffs)
+            @test read(file["unrelated"]) == 42
+            @test haskey(file, "run/Input/gpec_toml_raw")
+        end
 
         # The script run replays from its gpec.h5 alone.
         replay = GPEC.main([script_h5, "--output-dir", joinpath(dir, "replay")])

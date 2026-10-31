@@ -17,7 +17,7 @@ pe   = perturbed_equilibrium(resp, rmp)
 
 `solve(eq, alg; kwargs...)` is sugar for the canonical problem form: a
 [`ForceBalanceProblem`](@ref) names WHAT is being solved (the perturbed-plasma
-Euler-Lagrange system posed on this equilibrium, with this mode range, wall and closure)
+force-balance equation posed on this equilibrium, with this mode range, wall and closure)
 and the integrator names HOW. A `PlasmaEquilibrium` hosts many possible problems; the
 problem type keeps `solve` unambiguous as other problem classes appear.
 

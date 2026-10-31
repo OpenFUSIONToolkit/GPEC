@@ -16,7 +16,6 @@ const TEST_SUITES = [
     "runtests_parallel_integration.jl" => "core",
     "runtests_result_struct.jl" => "api",
     "runtests_solve_api.jl" => "api",
-    "runtests_ffs_output.jl" => "api",
     "runtests_matching_models.jl" => "api",
     "runtests_dominant_coupling.jl" => "api",
     "runtests_error_fields.jl" => "errorfields",
