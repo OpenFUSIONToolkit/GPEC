@@ -82,7 +82,7 @@ using .PerturbedEquilibrium: plasma_response, perturbed_equilibrium, PlasmaRespo
 using .KineticForces: kinetic_torque, KineticForcesControl, KineticForcesResult
 using .ErrorFields: error_fields, ErrorFieldsResult
 
-include("ForceBalance.jl")
+using .ForceFreeStates: ForceBalanceProblem, kinetic_matrices, _prepare_solve, maybe_reform_equilibrium, ForceFreeStatesControl, kinetic_source
 include("Deck.jl")
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)

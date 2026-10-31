@@ -40,7 +40,7 @@ singfac_min = 1e-6             # Fractional distance from rational q at which id
 integrator = "Forward" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = true # Truncate at (last_rational_q + rational_offset_fraction)/n — TRUE for diverted equilibria (q → ∞ at separatrix)
 rational_offset_fraction  = 0.2    # Truncate integration at (last_rational_q + rational_offset_fraction)/n (used when truncate_at_rational_offset = true)
-psilim_from_layer_overlap = true   # Cap psilim where adjacent resistive layers overlap (the scan is recorded either way)
+psilim_from_layer_overlap = true   # Cap psilim where adjacent resistive layers overlap (the scan is recorded only when capping)
 
 # Numerical settings of the forward integrator
 [Forward]

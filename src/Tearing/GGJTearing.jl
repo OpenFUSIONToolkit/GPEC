@@ -27,7 +27,7 @@ function _ggj_per_surface(value, name, count)
 end
 
 # η and ρ at each surface: the problem's values where given, else from the equilibrium's kinetic data,
-# η by the resistivity closure the SLAYER layer uses and ρ = m_i·n_i of the main ion.
+# η by the resistivity closure the SLAYER layer uses and ρ = μ·m_p·n_e as the SLAYER layer takes it.
 function _ggj_layer_inputs(prob::TearingProblem)
     ffs = prob.ffs
     surfaces = ffs.surfaces
@@ -74,11 +74,22 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
     count = length(surfaces)
     eta, rho = _ggj_layer_inputs(prob)
     params = [ggj_parameters(s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k) for (k, s) in enumerate(surfaces)]
+    labels = ["$(only(s.m))/$(only(s.n))" for s in surfaces]
+    # The layer needs D_I < 0 at every surface; check them all before any scan runs.
+    unstable = [labels[k] for (k, p) in enumerate(params) if InnerLayer.GGJ.mercier_di(p) >= 0]
+    isempty(unstable) ||
+        throw(ArgumentError("GGJ tearing: the layer needs Mercier-stable surfaces (D_I < 0); $(join(unstable, ", ")) have D_I ≥ 0"))
     coupled = prob.coupling_mode === :coupled
     Ω_E = _ggj_omega_E(prob)
     # A surface with no known rotation applies no shift.
     Ω_shift = [isnan(Ω) ? 0.0 : Ω for Ω in Ω_E]
     n = ffs.nlow
+    # A coupled root near a surface's own frame sits near ω = n·Ω_E,k; outside the box it would read as no root.
+    if coupled
+        outside = [labels[k] for k in 1:count if !(config.omega_range[1] <= n * Ω_shift[k] <= config.omega_range[2])]
+        isempty(outside) || @warn "GGJ tearing: the E×B frames of $(join(outside, ", ")) (ω = n·Ω_E) lie outside omega_range = " *
+                                  "$(config.omega_range); a root near those frequencies would be missed."
+    end
 
     # Coupled: each layer sees the lab-frame growth rate in its own E×B frame, s_k = s + i·n·Ω_E,k, so differential
     # rotation enters the determinant. Uncoupled: each surface with its own 2×2 block of Δ′, solved in its own frame.

@@ -518,10 +518,10 @@ using HDF5
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
             end
 
-            # A forward solve has no Δ′ to match against, so the deck errors instead of ignoring the section.
+            # A forward solve has no Δ′ to match against, so the deck stops at parse time instead of after the solve.
             mktempdir() do dir
-                @test_throws ErrorException GPEC.main([_stage_deck(dir;
-                    extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("ideal" => true)))])
+                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("ideal" => true)))
+                @test_throws "[Match] needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
         end
 

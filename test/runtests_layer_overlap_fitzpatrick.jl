@@ -230,9 +230,10 @@ end
     for over in ((; impurity_charge=10), (; resistivity_model=:spitzer), (; lnLambda_form=:sauter))
         @test all(.!isapprox.(widths(; over...), w_ref; rtol=1e-3))
     end
-    # Ion mass cancels between the Lundquist number and the ion sound radius in Eq. (100), so the
-    # criterion width does not depend on it; zeff_default is only a fallback, inert while the file carries n_i.
-    for over in ((; ion_species=[IonSpecies(; z=1, m=1, fraction=1.0)]), (; zeff_default=3.0))
+    # Ion mass cancels between the Lundquist number and the ion sound radius in Eq. (100) when the main ions and the
+    # impurity scale together, so halving both leaves the width unchanged; zeff_default is only a fallback, inert while
+    # the file carries n_i.
+    for over in ((; ion_species=[IonSpecies(; z=1, m=1, fraction=1.0)], impurity_mass=6), (; zeff_default=3.0))
         @test all(isapprox.(widths(; over...), w_ref; rtol=1e-10))
     end
 

@@ -23,7 +23,7 @@ its resistivity closure, the one the SLAYER layer uses.
 """
 function layer_eta(equil, surfaces)
     data = _layer_kinetic_data(equil, "resistivity η")
-    loaded = SLAYER._slayer_profiles(data, SLAYERModel())
+    loaded = SLAYER._slayer_profiles(data, nothing)
     return SLAYER.layer_resistivity(equil, surfaces, loaded.profiles; zeff=SLAYER._layer_zeff(loaded, data),
         resistivity_model=SLAYER._build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
 end
@@ -31,14 +31,16 @@ end
 """
     layer_rho(equil, surfaces) -> Vector{Float64}
 
-Mass density ρ = m_i·n_i in kg/m³ of the main ion at each rational surface of `surfaces`, from the equilibrium's
-kinetic data.
+Ion mass density ρ = μ·m_p·n_e in kg/m³ at each rational surface of `surfaces`, from the equilibrium's kinetic data:
+μ is the mean ion mass per electron of the main ions and the impurity at the layer Z_eff, the density the SLAYER
+layer uses.
 """
 function layer_rho(equil, surfaces)
     data = _layer_kinetic_data(equil, "mass density ρ")
-    data.n_i === nothing && throw(ArgumentError("the layer mass density ρ = m_i·n_i needs an n_i profile in the kinetic data"))
-    n_i = cubic_interp(collect(Float64, data.psi), data.n_i)
-    return SLAYER._layer_ion_mass(data) * Utilities.M_P .* Float64[n_i(s.psifac) for s in surfaces]
+    loaded = SLAYER._slayer_profiles(data, nothing)
+    mu = SLAYER._layer_mass_per_electron(data, SLAYER._layer_zeff(loaded, data))
+    _at(x, ψ) = x isa Real ? x : x(ψ)
+    return Float64[_at(mu, s.psifac) * Utilities.M_P * loaded.profiles.n_e(s.psifac) for s in surfaces]
 end
 
 """
@@ -50,6 +52,6 @@ NaN when the equilibrium carries no kinetic data or the data no `omega_E`.
 function layer_omega_E(equil, surfaces)
     data = equil.kinetic
     (data === nothing || data.omega_E === nothing) && return fill(NaN, length(surfaces))
-    spline = SLAYER._slayer_profiles(data, SLAYERModel()).profiles.omega_E
+    spline = SLAYER._slayer_profiles(data, nothing).profiles.omega_E
     return Float64[spline(s.psifac) for s in surfaces]
 end

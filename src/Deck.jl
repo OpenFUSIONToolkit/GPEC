@@ -20,7 +20,7 @@ const _RUN_SECTION_KEYS = ("verbose", "HDF5_filename", "output_filename", "write
 const _RUN_KEY_SECTIONS = ("Equilibrium", "LocalStability", "ForceFreeStates", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
 
 # Keys that moved to another section, each with where it lives now.
-const _ODE_DECK_KEYS = ("eulerlagrange_tolerance", "renorm_threshold", "numsteps_init", "numunorms_init", "save_interval", "nchunks")
+const _ODE_DECK_KEYS = ("eulerlagrange_tolerance", "renorm_threshold", "numsteps_init", "numunorms_init", "save_interval")
 const _SEARCH_DECK_KEYS = ("scan_mode", "Q_re_range", "Q_im_range", "nre", "nim", "amr_passes", "amr_max_cells", "boxes",
     "multi_box_prescreen_n", "pole_threshold", "pole_threshold_adaptive", "filter_above_poles", "filter_outside_re",
     "gamma_gap_threshold", "polish_roots", "validity_rtol", "root_classification", "store_scan")
@@ -30,6 +30,7 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "nn_low" => "set nn = n, or nn = [n1, n2, ...] for consecutive toroidal modes",
         "nn_high" => "set nn = n, or nn = [n1, n2, ...] for consecutive toroidal modes",
         "extended_precision_bvp" => "moved to [Riccati]",
+        "nchunks" => "moved to [Riccati]",
         "gal_match_flag" => "add a [Match] section to match the inner layer",
         "gal_ideal_flag" => "moved to [Match] as ideal",
         "gal_inner_solver" => "moved to [GGJ] as solver",
@@ -452,6 +453,13 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     (haskey(inputs, "KineticForces") || kinetic_source) && isempty(get(get(inputs, "Equilibrium", Dict{String,Any}()), "kinetic_file", "")) &&
         error("this run needs kinetic profiles ([KineticForces], or kinetic = \"KineticForces\"): set kinetic_file in [Equilibrium]")
     match = match_from_deck(inputs)
+    # The MatchProblem guards, checked before the force-free-states solve rather than after it.
+    if match !== nothing
+        (; keywords, algorithm) = force_balance
+        first(keywords[:nn]) == last(keywords[:nn]) || error("[Match] is single-n: set [ForceFreeStates] nn to one toroidal mode number")
+        (algorithm isa Galerkin && algorithm.rpec_flag) || (algorithm isa Riccati && get(keywords, :vac_flag, false)) ||
+            error("[Match] needs Δ′: use integrator = \"Galerkin\" with [Galerkin] rpec_flag = true, or \"Riccati\" with vac_flag = true")
+    end
     tearing = tearing_from_deck(inputs)
     perturbed_equilibrium = perturbed_equilibrium_from_deck(inputs)
     forcing = forcing_terms_control(inputs, path)

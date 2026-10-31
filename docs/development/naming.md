@@ -59,7 +59,6 @@ Modules, with the abbreviation to use in prose:
 | `Deck` | — | `src/Deck.jl` |
 | `Equilibrium` | EQUIL | `src/Equilibrium/` |
 | `ErrorFields` | EF | `src/ErrorFields/` |
-| `ForceBalance` | — | `src/ForceBalance.jl` |
 | `ForceFreeStates` | FFS | `src/ForceFreeStates/` |
 | `ForcingTerms` | FT | `src/ForcingTerms/` |
 | `HDF5Schema` | — | `src/Utilities/HDF5Schema.jl` |

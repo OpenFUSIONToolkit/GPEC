@@ -25,11 +25,12 @@ function _slayer_profiles(data::KineticProfileData, control)
         minimum(v) > 0 || error("Inner layer: $source has $name with minimum $(minimum(v)) ≤ 0; diffusivities must be positive")
         return cubic_interp(psi_xs, collect(Float64, v))
     end
-    model = control.P_perp_model
-    uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+    # `control === nothing` reads no diffusivity, for callers that need only the densities, temperatures and Z_eff.
+    model = control === nothing ? nothing : control.P_perp_model
+    uses_e = model in (:chi_perp_e, :D_perp) || (control !== nothing && control.D_c_type !== :none)
     chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
     chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
-    chi_tor = model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
+    chi_tor = model !== nothing && model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
     # Z_eff(ψ): the file's profile wins; else quasi-neutrality with one impurity of charge `impurity_charge` and a
     # charge-1 main ion, Z_eff = impurity_charge − (n_i/n_e)(impurity_charge − 1).
     _usable(v) = v !== nothing && !all(iszero, v)
@@ -60,11 +61,24 @@ function _build_resistivity_model(name::Symbol)
     throw(ArgumentError("_build_resistivity_model: unknown model $name"))
 end
 
-# The layer models take one main ion: its mass in proton masses.
+# The layers' main-ion mass in proton masses: the fraction-weighted mean over the main-ion species.
 function _layer_ion_mass(data::KineticProfileData)
-    length(data.ion_species) == 1 ||
-        throw(ArgumentError("The tearing layers take one main-ion species; the kinetic data list $(length(data.ion_species))"))
-    return Float64(only(data.ion_species).m)
+    total = sum(s.fraction for s in data.ion_species)
+    total > 0 || throw(ArgumentError("the layer ion mass needs main-ion species with positive fractions"))
+    return sum(s.fraction * s.m for s in data.ion_species) / total
+end
+
+# Mean ion mass per electron μ in proton masses, so ρ = μ·m_p·n_e: charge-1 main ions of mass μ_i and one impurity
+# of charge Z and mass μ_Z, split by quasi-neutrality and Z_eff, μ = μ_i(Z − Z_eff)/(Z − 1) + μ_Z(Z_eff − 1)/(Z(Z − 1)).
+# `zeff` is a number or a ψ-callable; the result is the same kind.
+function _layer_mass_per_electron(data::KineticProfileData, zeff)
+    mu_i, Z, mu_Z = _layer_ion_mass(data), Float64(data.impurity_charge), Float64(data.impurity_mass)
+    function mu(z)
+        1 - 1e-8 <= z <= Z + 1e-8 ||
+            throw(ArgumentError("Z_eff = $z lies outside [1, $Z]: no split between the main ions and the charge-$Z impurity gives it"))
+        return mu_i * (Z - z) / (Z - 1) + mu_Z * (z - 1) / (Z * (Z - 1))
+    end
+    return zeff isa Real ? mu(Float64(zeff)) : (ψ -> mu(Float64(zeff(ψ))))
 end
 
 # Z_eff(ψ) for the layers, reporting where it came from: the file's profile, the n_i/n_e closure, or the default.

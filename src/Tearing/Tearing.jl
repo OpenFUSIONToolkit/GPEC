@@ -26,13 +26,15 @@ using ..Utilities
 using ..Utilities: KineticProfiles
 using ..Equilibrium: KineticProfileData
 using ..ForceFreeStates: ForceFreeStatesResult, ggj_parameters
+# The force-balance solve's layer-overlap cap calls this scan, so Tearing adds its method.
+import ..ForceFreeStates: layer_overlap_scan
 
 import ..InnerLayer as InnerLayer
 using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner, layer_response,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
     GGJModel, GGJParameters,
     LayerWidths, slayer_layer_thickness
-using .InnerLayer.SLAYER: _slayer_profiles, _layer_zeff, _layer_ion_mass, _build_resistivity_model
+using .InnerLayer.SLAYER: _slayer_profiles, _layer_zeff, _layer_ion_mass, _layer_mass_per_electron, _build_resistivity_model
 
 include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")

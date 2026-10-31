@@ -124,7 +124,7 @@ comparison only.
   - `theta` -- poloidal angle for the minor-radius chord, used only by `rs_method=:midplane` (default `0.0`)
   - `rs_method` -- radial label of the widths and their ψ Jacobian (default `:flux`, the label
     Fitzpatrick Eq. (100) is anchored to; see `radial_label`)
-  - `bt`, `mu_i`, `zeff`, `chi_perp_e`, `chi_perp_i`, `chi_tor`, `tau_E`, `P_perp_model`, `resistivity_model`, `lnLambda_form`
+  - `bt`, `mu_i`, `mu_rho`, `zeff`, `chi_perp_e`, `chi_perp_i`, `chi_tor`, `tau_E`, `P_perp_model`, `resistivity_model`, `lnLambda_form`
     -- passed through to `build_slayer_inputs`. The defaults are placeholders: pass the run's own values
 
 Surface `k` overlaps its inner neighbour when `ψ_k − w_k/2 < ψ_{k-1} + w_{k-1}/2`. Both surfaces are
@@ -141,6 +141,7 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
     rs_method::Symbol=:flux,
     bt=nothing,
     mu_i::Real=2.0,
+    mu_rho=mu_i,
     zeff=1.0,
     chi_perp_e=1.0,
     chi_perp_i=nothing,
@@ -275,7 +276,7 @@ function resistive_layer_overlap(equil, profiles::KineticProfiles;
         # One surface at a time, so a degenerate surface (e.g. ω_*e == ω_*i) is skipped, not fatal.
         params = try
             build_slayer_inputs(equil, [sing], profiles; rs_method=rs_method, q_beyond=q_beyond,
-                bt=bt, mu_i=mu_i, zeff=zeff, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor,
+                bt=bt, mu_i=mu_i, mu_rho=mu_rho, zeff=zeff, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor,
                 tau_E=tau_E, P_perp_model=P_perp_model,
                 dr_val=0.0, dc_type=:none, theta=theta,
                 resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
@@ -407,7 +408,8 @@ function layer_overlap_scan(equil, model::SLAYERModel, ns)
     zeff = loaded.zeff === nothing ? data.zeff_default : loaded.zeff
     scans = [
         resistive_layer_overlap(equil, loaded.profiles; n_tor=n, rs_method=:flux, chi..., tau_E=data.tau_E,
-            P_perp_model=model.P_perp_model, mu_i=_layer_ion_mass(data), zeff=zeff, theta=model.theta_sample,
+            P_perp_model=model.P_perp_model, mu_i=_layer_ion_mass(data), mu_rho=_layer_mass_per_electron(data, zeff), zeff=zeff,
+            theta=model.theta_sample,
             resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
         for n in ns
     ]

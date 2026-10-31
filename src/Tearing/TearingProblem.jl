@@ -22,7 +22,7 @@ Both models report lab-frame roots from each surface's E×B rotation.
   - `critical_resonant_field` - The SLAYER penetration-threshold calculation, a `CriticalResonantFieldControl`; `nothing` (default) skips it.
   - `eta`, `rho` - GGJ resistivity in Ω·m and mass density in kg/m³, a scalar or one value per surface
     (core to edge), as in [`MatchProblem`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.MatchProblem). `nothing` (default) derives them from the kinetic data:
-    η from its resistivity closure, the one SLAYER uses, and ρ = m_i·n_i of its main ion. Unused by `SLAYERModel`.
+    η from its resistivity closure, the one SLAYER uses, and ρ = μ·m_p·n_e as SLAYER takes it. Unused by `SLAYERModel`.
   - `gamma` - GGJ ratio of specific heats.
 """
 @kwdef struct TearingProblem{R,E,D}
@@ -43,10 +43,12 @@ function _tearing_params(model::SLAYERModel, equil, surfaces, loaded)
     data = equil.kinetic
     # χ⊥,e/χ⊥,i/χ_φ from the kinetic file when present, else the kinetic data's defaults.
     chi = _slayer_chi_inputs(loaded, model, data)
+    zeff = _layer_zeff(loaded, data)
     # B_T = F(ψ)/(2π·R₀) per surface comes from the equilibrium's F-spline (bt=nothing).
     return build_slayer_inputs(equil, surfaces, loaded.profiles;
         mu_i=_layer_ion_mass(data),
-        zeff=_layer_zeff(loaded, data),
+        mu_rho=_layer_mass_per_electron(data, zeff),
+        zeff=zeff,
         chi_perp_e=chi.chi_perp_e,
         chi_perp_i=chi.chi_perp_i,
         chi_perp_Dc=model.chi_perp_Dc,
@@ -66,6 +68,18 @@ end
 
 Tearing growth rates per surface with the inner layer of `model`.
 """
+# Past the resistive-layer overlap point adjacent layers overlap and the matched-asymptotic treatment is not defined; flag
+# a domain reaching beyond it. A capped domain already stops there.
+function _warn_past_layer_overlap(ffs, model::SLAYERModel)
+    ffs.layer_overlap === nothing || return nothing
+    overlap = layer_overlap_scan(ffs.equil, model, ffs.nlow:ffs.nhigh)
+    (overlap.psihigh === nothing || ffs.psilim <= overlap.psihigh) && return nothing
+    @warn "Integration domain extends past the resistive-layer overlap point: psilim = $(round(ffs.psilim; digits=6)) > " *
+          "$(round(overlap.psihigh; digits=6)). Adjacent resistive layers overlap there, so the matched-asymptotic treatment " *
+          "is not defined. Set psilim_from_layer_overlap = true to cap the domain at that point."
+    return nothing
+end
+
 function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::TearingConfig=TearingConfig())
     config.gamma_range === nothing && config.omega_range === nothing || throw(ArgumentError("SLAYER uses Q_re_range and Q_im_range."))
     prob.eta === nothing && prob.rho === nothing && prob.gamma == 5/3 ||
@@ -80,6 +94,7 @@ function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::Tea
     equil.kinetic === nothing &&
         error("TearingProblem: the equilibrium carries no kinetic profiles; set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
     loaded = _slayer_profiles(equil.kinetic, model)
+    _warn_past_layer_overlap(ffs, model)
 
     params = _tearing_params(model, equil, surfaces, loaded)
 

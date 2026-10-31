@@ -178,7 +178,7 @@ save_to_hdf5("gpec.h5", tear)
 ```
 
 GGJ needs the raw Δ′ matrix and validates the surface ordering. Its η and ρ default from the
-kinetic data: η by the resistivity closure SLAYER uses, ρ = m_i·n_i of the main ion; pass `eta`
+kinetic data: η by the resistivity closure SLAYER uses, ρ = μ·m_p·n_e as SLAYER takes it; pass `eta`
 and `rho` to `TearingProblem` to override them. Both models report lab-frame frequencies with
 per-surface E×B shifts: a coupled solve evaluates each layer in its own E×B frame (GGJ's s_k = s + i·n·Ω_E,
 Johnson & Greene 1967 Appendix B), and an uncoupled root is moved from its layer's frame by n·Ω_E. Ω_E comes

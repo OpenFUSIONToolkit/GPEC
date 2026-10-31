@@ -234,7 +234,8 @@ Keywords documented as scalar-or-callable are evaluated per surface at ψ.
   - `rs_method` -- radial label of the whole layer stack: `:flux` (default), `:midplane`, `:halfwidth`, `:fsa` or `:volume`;
     see [`radial_label`](@ref). Programmatic only, not exposed via TOML
   - `q_beyond` -- callable q(ψ) the `:flux` label uses beyond the ψ grid (default `nothing`)
-  - `mu_i` -- ion mass in proton masses (default `2.0`, D)
+  - `mu_i` -- main-ion mass in proton masses (default `2.0`, D)
+  - `mu_rho` -- mean ion mass per electron in proton masses for the mass density, scalar or callable (default `mu_i`)
   - `zeff` -- effective charge, scalar or callable (default `1.0`)
   - `z_i` -- main-ion charge entering ω_*i (default `1.0`)
   - `chi_perp_e` -- electron perpendicular heat diffusivity in m²/s, scalar or callable (default `1.0`)
@@ -262,6 +263,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     rs_method::Symbol=:flux,
     q_beyond=nothing,
     mu_i::Real=2.0,
+    mu_rho=mu_i,
     zeff=1.0,
     z_i::Real=1.0,
     chi_perp_e=1.0,
@@ -403,7 +405,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             n_e=prof.n_e, t_e=prof.T_e, t_i=prof.T_i,
             omega_e=ω_e_use, omega_i=ω_i_use,
             qval=q, sval_r=sval_r, bt=_bt_at(psi),
-            rs=rs, R0=R0_use, mu_i=mu_i, zeff=_eval(zeff, psi),
+            rs=rs, R0=R0_use, mu_i=mu_i, mu_rho=_eval(mu_rho, psi), zeff=_eval(zeff, psi),
             chi_perp_e=_eval(chi_perp_e, psi),
             chi_tor=_eval(chi_tor, psi),
             chi_perp_i=_eval(chi_perp_i, psi),

@@ -35,7 +35,7 @@ patched there, so one shared example can serve several cases (e.g. a collisionle
 `"KineticForces.nutype" => "zero"`). The copy sits beside the original so relative file
 references in the deck (e.g. `Equilibrium.kinetic_file = "../<other_example>/..."`) still resolve.
 Override keys are dotted paths into the TOML; missing intermediate tables are created. Each
-top-level section named in `remove_sections` is dropped, so a run can stop before that stage.
+section named in `remove_sections` is dropped (a dotted name drops a sub-table), so a run can stop before that stage.
 Returns `(rundir, is_temp)`; the caller removes `rundir` when `is_temp`.
 """
 function _materialize_rundir(example_path::String, overrides::Dict{String,Any}, remove_sections::Vector{String}=String[])
@@ -53,7 +53,11 @@ function _materialize_rundir(example_path::String, overrides::Dict{String,Any}, 
         end
         d[ks[end]] = val
     end
-    foreach(section -> delete!(cfg, section), remove_sections)
+    for dotted in remove_sections
+        ks = split(dotted, ".")
+        parent = foldl((t, k) -> get(t, k, Dict{String,Any}()), ks[1:(end-1)]; init=cfg)
+        delete!(parent, ks[end])
+    end
     open(joinpath(rundir, "gpec.toml"), "w") do io
         TOML.print(io, cfg)
     end

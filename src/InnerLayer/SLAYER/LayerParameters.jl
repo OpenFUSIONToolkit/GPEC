@@ -205,7 +205,7 @@ end
 
 """
     slayer_parameters(; n_e, t_e, t_i, omega_e, omega_i, qval, sval_r, bt, rs, R0, mu_i, zeff, chi_perp_e, chi_tor, m, n,
-                        chi_perp_i=nothing, tau_E=nothing, a_minor=nothing, dlnn=nothing, dlnTe=nothing, dlnTi=nothing,
+                        mu_rho=mu_i, chi_perp_i=nothing, tau_E=nothing, a_minor=nothing, dlnn=nothing, dlnTe=nothing, dlnTi=nothing,
                         P_perp_model=:D_perp, chi_perp_Dc=nothing, dr_val=0.0, dgeo_val=0.0, kpar_val=nothing,
                         dc_type=:none, ising=0, resistivity_model=SauterNeoModel(), f_trap=nothing, nu_e_star=nothing,
                         R_major_eff=nothing, lnLambda_form=:nrl, k_ref=1.0, alpha_mercier=0.5) -> SLAYERParameters
@@ -224,7 +224,8 @@ model does not use may be left `nothing`; one it uses must be given, positive an
   - `sval_r` -- **r-based** magnetic shear r·(dq/dr)/q (Fitzpatrick); convert a ψ-based shear with `r_based_shear`
   - `bt` -- toroidal field in T
   - `rs`, `R0` -- minor radius at the surface and major radius, in m
-  - `mu_i` -- ion mass in proton masses (2.0 for D)
+  - `mu_i` -- main-ion mass in proton masses (2.0 for D), for the ion sound radius and skin depth
+  - `mu_rho` -- mean ion mass per electron in proton masses, for the mass density ρ = mu_rho·m_p·n_e (default `mu_i`)
   - `zeff` -- effective charge
   - `chi_perp_e`, `chi_tor` -- electron perpendicular heat and toroidal momentum diffusivities in m²/s
   - `m`, `n` -- poloidal and toroidal mode numbers
@@ -262,6 +263,7 @@ function slayer_parameters(;
     rs::Real, R0::Real, mu_i::Real, zeff::Real,
     chi_perp_e::Real, chi_tor::Real,
     m::Integer, n::Integer,
+    mu_rho::Real=mu_i,
     chi_perp_i::Union{Real,Nothing}=nothing, tau_E::Union{Real,Nothing}=nothing, a_minor::Union{Real,Nothing}=nothing,
     dlnn::Union{Real,Nothing}=nothing, dlnTe::Union{Real,Nothing}=nothing, dlnTi::Union{Real,Nothing}=nothing,
     P_perp_model::Symbol=:D_perp, chi_perp_Dc::Union{Real,Nothing}=nothing,
@@ -285,7 +287,7 @@ function slayer_parameters(;
 
     # Basic plasma quantities
     tau = t_i / t_e
-    rho = mu_i * M_P * n_e
+    rho = mu_rho * M_P * n_e
 
     # Electron-electron collision time, used by the χ_∥-matching critical Δ whatever the resistivity model.
     tau_ee = tau_ee_spitzer_harm(n_e, t_e; lnLamb=lnLamb)

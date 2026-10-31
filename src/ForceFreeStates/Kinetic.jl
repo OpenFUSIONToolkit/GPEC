@@ -71,7 +71,7 @@ end
 """
     KineticMatrices
 
-The kinetic energy and torque matrices of one perturbed-plasma problem, from [`kinetic_matrices`](@ref GeneralizedPerturbedEquilibrium.kinetic_matrices) or computed
+The kinetic energy and torque matrices of one perturbed-plasma problem, from [`kinetic_matrices`](@ref) or computed
 inside `solve`. Pass them back as `ForceBalanceProblem(eq; kinetic=km)` to solve again without evaluating the kinetic
 model, for example in a `kinetic_factor` scan; `solve` rejects matrices made for another ψ grid or mode range. The
 matrices are stored unscaled and `solve` applies its own `kinetic_factor`, but the knots the build added where F̄ is

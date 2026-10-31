@@ -1,13 +1,31 @@
-# ForceBalance.jl: the force-balance problem and its solve. The solve prepares the equilibrium with the Tearing
-# layer-overlap cap and the KineticForces model, so it lives with the top module rather than in ForceFreeStates.
-#
-# Included directly into the GeneralizedPerturbedEquilibrium module.
+# ForceBalance.jl: the force-balance problem and its solve.
 
-using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, ForceFreeStatesResult
-using .ForceFreeStates: sing_lim!, sing_min!, sing_find!, remove_singular_surfs!
-using .ForceFreeStates: make_metric, build_matrix_splines, build_kinetic_matrix_splines, find_kinetic_singular_surfaces!
-using .ForceFreeStates: KineticMatrices, evaluate_kinetic_matrices, check_kinetic_matrices, kinetic_source
-using .ForceFreeStates: resolve_mode_space!, run_force_free_states, _mode_range_label
+# The solve's layer-overlap cap and kinetic model come from Tearing and KineticForces, which load after
+# ForceFreeStates, so they reach it through these functions: Tearing adds the `layer_overlap_scan` method for a
+# `SLAYERModel`, and KineticForces the kinetic-model methods.
+"""
+    layer_overlap_scan(equil, model, ns)
+
+The binding resistive-layer overlap scan over the toroidal mode numbers `ns`, with `model`'s layer closures; its
+`psihigh` caps the domain. Methods live in `Tearing`.
+"""
+function layer_overlap_scan end
+
+"""
+    kinetic_grid_inputs(source, ctrl, equil, intr; rationals) -> (kinetic_profiles, pinned)
+
+The kinetic profiles the two-pass ψ grid refines on and the kinetic-resonance surfaces it pins, for the kinetic
+`source` of the solve (any source, or `nothing`). The method lives in `KineticForces`.
+"""
+function kinetic_grid_inputs end
+
+"""
+    kinetic_model_source(model, equil, intr) -> (calculated_source, axis_validity_psi_c)
+
+The callback that evaluates a kinetic model's matrices for [`evaluate_kinetic_matrices`](@ref), and the model's
+axis-validity boundary. The method for `KineticForcesControl` lives in `KineticForces`.
+"""
+function kinetic_model_source end
 
 """
     ForceBalanceProblem(equil; nn, wall=nothing, kwargs...)
@@ -74,11 +92,11 @@ ffs = solve(prob, Riccati())
 ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
-function solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrator; verbose::Bool=false)
+function CommonSolve.solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false)
     total_start = time()
     ctrl, intr, equil, metric, mats, layer_overlap = _prepare_solve(prob, alg; verbose)
-    result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa ForceFreeStates.Galerkin && alg.cut_solution)
-    result = ForceFreeStates._with(result; problem=prob, algorithm=alg, layer_overlap=layer_overlap)
+    result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa Galerkin && alg.cut_solution)
+    result = _with(result; problem=prob, algorithm=alg, layer_overlap=layer_overlap)
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - total_start)) s"
 
@@ -97,7 +115,7 @@ km = kinetic_matrices(ForceBalanceProblem(eq; nn=1, kinetic=KineticForcesControl
 scan = [solve(ForceBalanceProblem(eq; nn=1, kinetic=km, kinetic_factor=f), Forward()) for f in (0.5, 1.0, 2.0)]
 ```
 """
-function kinetic_matrices(prob::ForceBalanceProblem, alg::ForceFreeStates.Forward=ForceFreeStates.Forward(); verbose::Bool=false)
+function kinetic_matrices(prob::ForceBalanceProblem, alg::Forward=Forward(); verbose::Bool=false)
     get(prob.ctrl_kwargs, :kinetic, nothing) === nothing &&
         error("kinetic_matrices: the problem has no kinetic source; pass kinetic=KineticForcesControl(...) or TestKineticMatrices(; scale)")
     return last(_prepare_solve(prob, alg; verbose))
@@ -105,21 +123,24 @@ end
 
 # Everything solve does before the integration: the control, the mode space, the (re-formed) equilibrium, the metric,
 # the matrices, the layer-overlap scan and the kinetic matrices.
-function _prepare_solve(prob::ForceBalanceProblem, alg::ForceFreeStates.AbstractIntegrator; verbose::Bool=false)
+function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false)
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
     ctrl = ForceFreeStatesControl(; algorithm=alg, ctrl_kwargs...)
-    ForceFreeStates.validate_algorithm(ctrl)
+    validate_algorithm(ctrl)
 
-    source = kinetic_source(ctrl.kinetic)
-    ctrl.kinetic isa KineticForces.KineticForcesControl && equil.kinetic === nothing &&
+    ctrl.kinetic === nothing && ctrl.kinetic_factor != 1 &&
+        error("kinetic_factor scales the kinetic matrices, but no kinetic source is set: pass kinetic=... " *
+              "([ForceFreeStates] kinetic = \"KineticForces\")")
+    # A kinetic model (not supplied or synthetic matrices) is evaluated on the equilibrium's kinetic profiles.
+    ctrl.kinetic === nothing || ctrl.kinetic isa Union{KineticMatrices,TestKineticMatrices} || equil.kinetic !== nothing ||
         error("the KineticForces kinetic source needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
-    ctrl.kinetic !== nothing && !(alg isa ForceFreeStates.Forward) &&
+    ctrl.kinetic !== nothing && !(alg isa Forward) &&
         error("$(nameof(typeof(alg)))() does not support kinetic runs; use Forward().")
 
     # GPEC differentiates the spline of F, so single-precision FPOL rounding becomes noise in Δ′.
     eq_config = equil.config
-    if eq_config.eq_type in Equilibrium.EFIT_KINDS && alg isa Union{ForceFreeStates.Riccati,ForceFreeStates.Galerkin} &&
+    if eq_config.eq_type in Equilibrium.EFIT_KINDS && alg isa Union{Riccati,Galerkin} &&
        isfile(eq_config.eq_filename) && Equilibrium.gfile_fpol_single_precision(eq_config.eq_filename)
         @warn "The g-file's FPOL is single precision. Its rounding puts noise of order ±2–3 on Δ′ at 257 radial " *
               "nodes; regenerate the file in double precision for converged Δ′." file = eq_config.eq_filename
@@ -130,10 +151,7 @@ function _prepare_solve(prob::ForceBalanceProblem, alg::ForceFreeStates.Abstract
 
     resolve_mode_space!(intr, ctrl)
 
-    # The kinetic model's control, when there is one, sets the views of the attached kinetic profiles.
-    kf_ctrl = source isa KineticForces.KineticForcesControl ? source : KineticForces.KineticForcesControl()
-
-    equil = maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl)
+    equil = maybe_reform_equilibrium(equil, intr, ctrl)
 
     metric, mats, layer_overlap, km = prepare_force_free_states!(intr, ctrl, equil)
     return ctrl, intr, equil, metric, mats, layer_overlap, km
@@ -145,32 +163,29 @@ end
 Convenience form of [`solve`](@ref): builds the [`ForceBalanceProblem`](@ref) from the
 equilibrium and the problem keywords, then solves it with `alg`.
 """
-solve(equil::Equilibrium.PlasmaEquilibrium, alg::ForceFreeStates.AbstractIntegrator; verbose::Bool=false, kwargs...) =
-    solve(ForceBalanceProblem(equil; kwargs...), alg; verbose)
+CommonSolve.solve(equil::Equilibrium.PlasmaEquilibrium, alg::AbstractIntegrator; verbose::Bool=false, kwargs...) =
+    CommonSolve.solve(ForceBalanceProblem(equil; kwargs...), alg; verbose)
 
 """
-    maybe_reform_equilibrium(equil, intr, ctrl; kf_ctrl=KineticForcesControl()) -> equil
+    maybe_reform_equilibrium(equil, intr, ctrl) -> equil
 
-Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, and the NTV
-view of its attached kinetic profiles), pin knots on rational surfaces, and re-form on the refined
+Two-pass auto grid: measure the pass-1 equilibrium's curvature (profiles, geometry, and the kinetic
+model's view of its attached kinetic profiles), pin knots on rational surfaces, and re-form on the refined
 grid with `Equilibrium.reform` from the source the equilibrium remembers. Returns `equil` untouched
 when its configuration wants a single pass.
 """
 function maybe_reform_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal,
-    ctrl::ForceFreeStatesControl;
-    kf_ctrl::KineticForces.KineticForcesControl=KineticForces.KineticForcesControl()
+    ctrl::ForceFreeStatesControl
 )
     eq_config = equil.config
     Equilibrium.wants_two_pass(eq_config) || return equil
-    kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, equil)
 
-    mandatory = ForceFreeStates.rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
+    mandatory = rational_psi_nodes(equil; nlow=intr.nlow, nhigh=intr.nhigh)
     # Kinetic-resonance nodes are located here rather than at the call site so the validity
     # boundary that filters them is cleared against this pass's rationals (intr.sing is empty yet).
-    pinned = KineticForces.resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, KineticForces.ntv_species(kf_ctrl, equil), equil, intr;
-        rationals=mandatory)
+    kinetic_profiles, pinned = kinetic_grid_inputs(kinetic_source(ctrl.kinetic), ctrl, equil, intr; rationals=mandatory)
     # Smallest |n| in the run sets the widest matching half-stencil dpsi = singfac_min/(n_min·|q′|),
     # so the rational-surface brackets clear a zone large enough for every mode.
     n_min = minimum(abs(n) for n in intr.nlow:intr.nhigh if n != 0)
@@ -204,7 +219,7 @@ function prepare_force_free_states!(
 )
     # Resistive-layer overlap: where adjacent rational surfaces' layers run into each other bounds the domain, when asked.
     cap = ctrl.psilim_from_layer_overlap
-    overlap = cap === false ? nothing : Tearing.layer_overlap_scan(equil, cap === true ? SLAYERModel() : cap, intr.nlow:intr.nhigh)
+    overlap = cap === false ? nothing : layer_overlap_scan(equil, cap === true ? InnerLayer.SLAYERModel() : cap, intr.nlow:intr.nhigh)
 
     # psilim and qlim, the integration limits
     sing_lim!(intr, ctrl, equil; psilim_cap=overlap === nothing ? nothing : overlap.psihigh)
@@ -218,7 +233,7 @@ function prepare_force_free_states!(
 
     # GGJ geometric coefficients (E, F, G, H, K, M) of each surviving singular surface; `ggj_parameters` adds τ_A / τ_R.
     if intr.msing > 0
-        ForceFreeStates.resist_eval_all!(intr, equil)
+        resist_eval_all!(intr, equil)
     end
 
     # Poloidal mode range; delta_mhigh is doubled to match Fortran.
@@ -252,25 +267,12 @@ function prepare_force_free_states!(
     if ctrl.kinetic isa KineticMatrices
         check_kinetic_matrices(ctrl.kinetic, intr, metric)
         km = ctrl.kinetic
-    elseif ctrl.kinetic isa ForceFreeStates.TestKineticMatrices
+    elseif ctrl.kinetic isa TestKineticMatrices
         intr.verbose && @info "Computing kinetic matrices (synthetic test matrices, scale $(ctrl.kinetic.scale))"
         km = evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric)
     elseif ctrl.kinetic !== nothing
         intr.verbose && @info "Computing kinetic matrices (KineticForces model)"
-        # Pass KineticForces in as a callback: ForceFreeStates loads first and cannot import it.
-        kf_ctrl = ctrl.kinetic
-        kinetic_profiles = KineticForces.ntv_profiles(kf_ctrl, equil)
-        species = KineticForces.ntv_species(kf_ctrl, equil)
-        # One boundary for the whole run: the widest-orbit species, moved clear of any rational
-        # surface whose window the transition band would otherwise cut through.
-        axis_psi_c = KineticForces.axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil,
-            Float64[sng.psifac for sng in intr.sing])
-        calculated_cb =
-            (c, e, i, m, f; psis::Vector{Float64}=Float64[]) ->
-                KineticForces.compute_calculated_kinetic_matrices(
-                    c, e, i, m, f;
-                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles, species=species, psis=psis,
-                    axis_psi_c=axis_psi_c)
+        calculated_cb, axis_psi_c = kinetic_model_source(ctrl.kinetic, equil, intr)
         km = evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric; calculated_source=calculated_cb, axis_validity_psi_c=axis_psi_c)
     end
     km === nothing || (mats = build_kinetic_matrix_splines(mats, equil, intr, metric, km, ctrl.kinetic_factor))

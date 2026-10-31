@@ -168,3 +168,24 @@ function compute_calculated_kinetic_matrices(
 
     return kw_flat, kt_flat
 end
+
+# The force-balance solve's two-pass grid inputs: the kinetic profiles as the KineticForces model views them (its
+# control when the source is one, else the default control) and the kinetic-resonance surfaces to pin.
+function ForceFreeStates.kinetic_grid_inputs(source, ctrl, equil, intr; rationals)
+    kf_ctrl = source isa KineticForcesControl ? source : KineticForcesControl()
+    kinetic_profiles = ntv_profiles(kf_ctrl, equil)
+    pinned = resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, ntv_species(kf_ctrl, equil), equil, intr; rationals)
+    return kinetic_profiles, pinned
+end
+
+# The force-balance solve's kinetic matrices from the KineticForces model: the evaluation callback and the axis-validity
+# boundary, one for the whole run (the widest-orbit species, moved clear of any rational surface whose window the
+# transition band would otherwise cut through).
+function ForceFreeStates.kinetic_model_source(kf_ctrl::KineticForcesControl, equil, intr)
+    kinetic_profiles = ntv_profiles(kf_ctrl, equil)
+    species = ntv_species(kf_ctrl, equil)
+    axis_psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, Float64[sng.psifac for sng in intr.sing])
+    calculated_source = (c, e, i, m, f; psis::Vector{Float64}=Float64[]) ->
+        compute_calculated_kinetic_matrices(c, e, i, m, f; kf_ctrl, kinetic_profiles, species, psis, axis_psi_c)
+    return calculated_source, axis_psi_c
+end
