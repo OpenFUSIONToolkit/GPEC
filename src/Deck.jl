@@ -445,6 +445,8 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     end
     force_balance = has_ffs ? (; keywords=force_balance_keywords(inputs, path), algorithm=force_balance_algorithm(inputs)) : nothing
     kinetic_source = has_ffs && get(inputs["ForceFreeStates"], "kinetic", nothing) == "KineticForces"
+    haskey(inputs, "PerturbedEquilibrium") && haskey(inputs, "Wall") &&
+        error("[PerturbedEquilibrium] needs a run without a wall (its surface inductance is free-space): remove the [Wall] section")
     haskey(inputs, "ForcingTerms") && !haskey(inputs, "PerturbedEquilibrium") &&
         error("[ForcingTerms] is set but there is no [PerturbedEquilibrium] section to apply it")
     haskey(inputs, "KineticForces") && !haskey(inputs, "PerturbedEquilibrium") && !kinetic_source &&
