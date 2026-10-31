@@ -244,19 +244,19 @@ Compute the 5 kinetic geometric matrices (s, t, x, y, z) needed by
 These encode the coupling between magnetic perturbation modes and
 the equilibrium geometry.
 
-Ports Fortran `dcon_interface.f` lines 895-1013 (`idcon_action_matrices`).
+Ports Fortran `dcon_interface.f` lines 895-1013 (`idcon_action_matrices`), which is single-n,
+extended to every toroidal mode n in `intr.nlow:intr.nhigh`. Only Y (through m - nq) and Z
+(through n) depend on n; S, T and X are repeated in each block so all five share one layout.
 
-# Steps
-
- 1. Compute 8 `fmodb` quantities on the (ψ,θ) grid from equilibrium geometry
- 2. Fourier decompose via `Utilities.FourierCoefficients`
- 3. Assemble mpert×mpert matrices from Fourier bands at each ψ
- 4. Create `CubicSeriesInterpolant`s over ψ
+Computes 8 `fmodb` quantities on the (ψ,θ) grid from the equilibrium geometry, Fourier
+decomposes them, assembles the mpert×mpert matrices of each n from the Fourier bands at each ψ,
+and splines them over ψ.
 
 # Returns
 
-NamedTuple `(smats, tmats, xmats, ymats, zmats)` of `CubicSeriesInterpolant`s,
-each mapping ψ → flattened mpert² complex vector.
+NamedTuple `(smats, tmats, xmats, ymats, zmats)` of `CubicSeriesInterpolant`s, each mapping
+ψ → a complex vector of `npert` stacked mpert×mpert blocks (column-major, length mpert²·npert);
+block k holds n = nlow + k - 1. Use `kinetic_metric_block` to extract one block.
 
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
@@ -351,11 +351,12 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
     fmodb_fc = Utilities.FourierCoefficients(metric.xs, metric.ys, fmodb_fs, mpert - 1)
 
     # Allocate flat storage for mpert×mpert matrices at each ψ
-    smats_flat = zeros(ComplexF64, mpsi, mpert^2)
-    tmats_flat = zeros(ComplexF64, mpsi, mpert^2)
-    xmats_flat = zeros(ComplexF64, mpsi, mpert^2)
-    ymats_flat = zeros(ComplexF64, mpsi, mpert^2)
-    zmats_flat = zeros(ComplexF64, mpsi, mpert^2)
+    npert = nhigh - nlow + 1
+    smats_flat = zeros(ComplexF64, mpsi, mpert^2 * npert)
+    tmats_flat = zeros(ComplexF64, mpsi, mpert^2 * npert)
+    xmats_flat = zeros(ComplexF64, mpsi, mpert^2 * npert)
+    ymats_flat = zeros(ComplexF64, mpsi, mpert^2 * npert)
+    zmats_flat = zeros(ComplexF64, mpsi, mpert^2 * npert)
 
     # Fourier band storage
     sband = Vector{ComplexF64}(undef, 2 * mpert - 1)
@@ -392,25 +393,25 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
             zband3[k+mpert] = conj(zband3[mpert-k])
         end
 
-        # Assemble mpert×mpert matrices (Fortran dcon_interface.f:981-997)
-        # Single-n: use nlow as the toroidal mode number
-        n = nlow
-        for m1 in mlow:mhigh
-            ipert = m1 - mlow + 1
-            nq = n * q
-            for dm in (1-ipert):(mpert-ipert)
-                m2 = m1 + dm
-                singfac2 = m2 - nq
-                jpert = ipert + dm
-                dmidx = dm + mpert
-                iflat = ipert + (jpert - 1) * mpert
+        # Assemble the mpert×mpert block of each n (Fortran dcon_interface.f:981-997)
+        for n in nlow:nhigh
+            block_offset = (n - nlow) * mpert^2
+            for m1 in mlow:mhigh
+                ipert = m1 - mlow + 1
+                nq = n * q
+                for dm in (1-ipert):(mpert-ipert)
+                    m2 = m1 + dm
+                    singfac2 = m2 - nq
+                    jpert = ipert + dm
+                    dmidx = dm + mpert
+                    iflat = block_offset + ipert + (jpert - 1) * mpert
 
-                smats_flat[ipsi, iflat] = sband[dmidx]
-                tmats_flat[ipsi, iflat] = tband[dmidx]
-                xmats_flat[ipsi, iflat] = xband[dmidx]
-                ymats_flat[ipsi, iflat] = yband1[dmidx] + im * singfac2 * yband2[dmidx]
-                zmats_flat[ipsi, iflat] = zband1[dmidx] +
-                                          im * (m2 * zband2[dmidx] + n * zband3[dmidx])
+                    smats_flat[ipsi, iflat] = sband[dmidx]
+                    tmats_flat[ipsi, iflat] = tband[dmidx]
+                    xmats_flat[ipsi, iflat] = xband[dmidx]
+                    ymats_flat[ipsi, iflat] = yband1[dmidx] + im * singfac2 * yband2[dmidx]
+                    zmats_flat[ipsi, iflat] = zband1[dmidx] + im * (m2 * zband2[dmidx] + n * zband3[dmidx])
+                end
             end
         end
     end
@@ -424,6 +425,17 @@ function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
     zmats = cubic_interp(metric.xs, Series(zmats_flat); itp_opts...)
 
     return (; smats, tmats, xmats, ymats, zmats)
+end
+
+"""
+    kinetic_metric_block(itp, psi, mpert, k) → Matrix{ComplexF64}
+
+The mpert×mpert block `k` (toroidal mode n = nlow + k - 1) at ψ of a geometric-matrix
+interpolant from `build_kinetic_metric_matrices`.
+"""
+function kinetic_metric_block(itp, psi::Real, mpert::Int, k::Int)
+    v = itp(psi)
+    return reshape(v[((k-1)*mpert^2+1):(k*mpert^2)], mpert, mpert)
 end
 
 
