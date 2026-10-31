@@ -131,9 +131,11 @@
             Q_e=-1.0, Q_i=0.5, iota_e=2.0 / 3.0,
             tauk=1e-4, tau_r=10.0, delta_n=400.0,
             rs=0.5, R0=1.7, bt=2.0, sval_r=1.0,
-            eta=2.5e-8, d_beta=4e-3
+            eta=2.5e-8, d_beta=4e-3, n=2
         )
         @test p.tau == 1.0
+        # Without a derived value K∥ falls back to the cylindrical n·|s|/R₀, as slayer_parameters stores it.
+        @test p.kpar_val ≈ 2 * 1.0 / 1.7 rtol = 1e-14
         @test p.dc_tmp == 0.0
         @test p.dc_type === :none
         @test p.dr_val == 0.0
@@ -146,6 +148,46 @@
         @test_throws ArgumentError slayer_parameters(; P_perp_model=:chi_perp_e, _drifts(-1.0e4, -1.0e4)...)   # degenerate: iota_e singular
         @test_throws ArgumentError slayer_parameters(; P_perp_model=:chi_perp_e, _drifts(-1.0e4, -2.0e4)...)   # same sign, |ω_*i| > |ω_*e|: iota_e = -1
         @test_throws ArgumentError slayer_parameters(; P_perp_model=:chi_perp_e, _drifts(0.0, 5.0e3)...)       # no electron drift: iota_e = 0
+    end
+
+    @testset "Test 1e: toroidal χ∥ closure algebra" begin
+        # The :toroidal W_d balance takes its field-line geometry from (g_w, K∥) = (dgeo_val, kpar_val):
+        # W_d = √8·(χ⊥/χ∥)^¼/g_w and the free-streaming χ∥ = 2v_te/(√π·K∥·W_d).
+        using GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER: _solve_dc_tmp
+        common = (; dr_val=0.01, chi_perp_e=1.0, t_e=1000.0, zeff=1.0, rs=0.5, R0=1.7, sval_r=1.0, n_tor=1)
+        vte = sqrt(2.0 * common.t_e * E_CHG / M_E)
+        g_cyl = sqrt(common.rs / common.R0 * common.sval_r * common.n_tor)
+        k_cyl = common.n_tor * common.sval_r / common.R0
+        dc(dc_type, g, k; tau_ee=1e-6) = _solve_dc_tmp(; common..., dc_type=dc_type, dgeo_val=g, kpar_val=k, tau_ee=tau_ee)
+
+        # Cylindrical geometry reproduces :lar (which is per metre, hence the r_s) and :fitzpatrick.
+        @test dc(:toroidal, g_cyl, k_cyl) ≈ common.rs * dc(:lar, 0.0, nothing) rtol = 1e-12
+        @test dc(:toroidal, g_cyl, k_cyl) ≈ dc(:fitzpatrick, 0.0, nothing) rtol = 1e-8
+        # kpar_val = nothing falls back to the cylindrical K∥.
+        @test dc(:toroidal, g_cyl, nothing) == dc(:toroidal, g_cyl, k_cyl)
+        # Invalid factors are rejected before the W_d iteration; dgeo_val = 0 still disables the offset.
+        for (g, k) in ((NaN, k_cyl), (-0.3, k_cyl), (g_cyl, 0.0), (g_cyl, Inf))
+            @test_throws "positive, finite geometric factor" dc(:toroidal, g, k)
+        end
+        @test dc(:toroidal, 0.0, k_cyl) == 0.0
+
+        # Collisional limit: χ∥ is the Spitzer-Härm value, so K∥ drops out.
+        tau_c = 1e-20
+        chi_smfp = 1.581 * tau_c * vte^2 / (1.0 + 0.2535 * common.zeff)
+        for (g, k) in ((0.3, 0.4), (0.3, 4.0), (0.6, 0.4))
+            @test dc(:toroidal, g, k; tau_ee=tau_c) ≈ 0.5 * π^1.5 * (-common.dr_val) * (chi_smfp / common.chi_perp_e)^0.25 * g rtol = 1e-8
+        end
+
+        # Free-streaming limit: the fixed point solves in closed form,
+        # χ∥^(3/4) = 2·v_te·g_w / (√(8π)·K∥·χ⊥^(1/4)), so Δ_crit ∝ g_w^(4/3)·K∥^(-1/3).
+        tau_f = 1e20
+        for (g, k) in ((0.3, 0.4), (0.3, 4.0), (0.6, 0.4))
+            chi_fs = (2.0 * vte * g / (sqrt(8π) * k * common.chi_perp_e^0.25))^(4 / 3)
+            @test dc(:toroidal, g, k; tau_ee=tau_f) ≈ 0.5 * π^1.5 * (-common.dr_val) * (chi_fs / common.chi_perp_e)^0.25 * g rtol = 1e-8
+        end
+
+        # dgeo_val = 0 keeps its meaning of no toroidal offset.
+        @test dc(:toroidal, 0.0, k_cyl) == 0.0
     end
 
     @testset "Test 2: r-based shear conversion" begin
@@ -191,7 +233,7 @@
         # Every normalized layer quantity is bit-identical: abs(-1.0) === 1.0,
         # so the whole downstream chain reproduces exactly.
         for f in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor, :Q_e, :Q_i,
-                  :iota_e, :tauk, :tau_r, :delta_n, :eta, :d_beta, :dc_tmp)
+            :iota_e, :tauk, :tau_r, :delta_n, :eta, :d_beta, :dc_tmp)
             @test getfield(neg, f) == getfield(pos, f)
         end
 
@@ -239,5 +281,24 @@
         cb = slayer_parameters(; merge(base, (dr_val=-1.0, dc_type=:lar))..., P_perp_model=:c_beta)
         @test cb.dc_tmp == slayer_parameters(; P_perp_model=:chi_perp_e, merge(base, (dr_val=-1.0, dc_type=:lar))...).dc_tmp
         @test cb.P_tor == ref.P_tor
+    end
+
+    @testset "Test 4b: chi_perp_Dc sets only the critical Δ" begin
+        grads = (dlnn=-1.0, dlnTe=-2.0, dlnTi=-3.0)
+        for dc in (:lar, :fitzpatrick, :toroidal)
+            base = merge(_ref_kwargs(; dr_val=0.01, dc_type=dc), grads, (chi_perp_i=2.0, P_perp_model=:D_perp))
+            a = slayer_parameters(; base...)
+            b = slayer_parameters(; base..., chi_perp_Dc=3.0)
+            # the critical Δ of b is the one chi_perp_e = 3 would give ...
+            @test b.dc_tmp == slayer_parameters(; merge(base, (chi_perp_e=3.0,))...).dc_tmp
+            @test b.dc_tmp != a.dc_tmp
+            # ... and every other layer quantity, P_perp included, is a's
+            for f in (:tau, :lu, :c_beta, :D_norm, :P_perp, :P_tor, :Q_e, :Q_i, :iota_e, :tauk, :tau_r, :delta_n, :eta, :d_beta)
+                @test getfield(b, f) == getfield(a, f)
+            end
+        end
+        base = merge(_ref_kwargs(; dr_val=0.01, dc_type=:fitzpatrick), (P_perp_model=:chi_perp_e,))
+        @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=0.0)
+        @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=Inf)
     end
 end

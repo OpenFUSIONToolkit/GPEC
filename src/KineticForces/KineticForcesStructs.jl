@@ -171,9 +171,6 @@ builds a second control for its differing tolerance).
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
 
-    # Input files (relative to dir_path)
-    kinetic_file::String = "kinetic.dat"
-
     # Debugging
     verbose::Bool = false
 end
@@ -265,7 +262,7 @@ this struct.
 
     # Raw geometric matrices for kinetic W vector construction
     # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
-    smats::Union{Nothing,GeomInterp} = nothing   # CubicSeriesInterpolant, mpert² series over ψ
+    smats::Union{Nothing,GeomInterp} = nothing   # CubicSeriesInterpolant over ψ, one mpert² block per n
     tmats::Union{Nothing,GeomInterp} = nothing
     xmats::Union{Nothing,GeomInterp} = nothing
     ymats::Union{Nothing,GeomInterp} = nothing

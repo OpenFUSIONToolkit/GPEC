@@ -22,8 +22,8 @@ the normalized poloidal flux ψ ∈ [0, 1].
 | `omega_E` | E×B rotation Ω_E, per unit n | rad/s |
 
 Construct via the keyword constructor `KineticProfiles(; psi, n_e, T_e, T_i, omega_E)` with
-matched-length vectors. The SLAYER runner builds this object from a standardized
-kinetic-profile file via `Equilibrium.read_kinetic_file`. Diamagnetic frequencies are not
+matched-length vectors. The SLAYER runner builds this object from the equilibrium's
+kinetic profiles (`equil.kinetic`). Diamagnetic frequencies are not
 carried here: `build_slayer_inputs` derives ω_*e and ω_*i per surface from the density and
 temperature splines.
 

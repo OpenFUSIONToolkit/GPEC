@@ -60,9 +60,11 @@ constructor ends here.
 `override_psi_nodes` bypasses the config-driven radial grid (`grid_type`/`mpsi`) and forms
 the equilibrium on the given strictly increasing ψ_N node vector, whose endpoints must match
 `psilow`/`psihigh`. Used by the two-pass auto-grid refinement through [`reform`](@ref); standalone
-callers with `mpsi=0` get the coarse first-pass grid unless they refine and re-form.
+callers with `mpsi=0` get the coarse first-pass grid unless they refine and re-form. The kinetic
+profiles named by `kinetic_file` are read and attached, unless `kinetic` passes already-read ones.
 """
-function PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
+function PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing,
+    kinetic::Union{Nothing,KineticProfileData}=nothing)
     eq_input = run_input(eq_config, source)
 
     plasma_equilibrium = if eq_config.eq_type == "efit_by_inversion"
@@ -77,6 +79,7 @@ function PlasmaEquilibrium(eq_config::EquilibriumConfig, source=nothing; overrid
     plasma_equilibrium.ingest = eq_input.ingest
     # Analytic configs are still mutable; copy so later edits by the caller cannot change a re-form.
     source isa AnalyticEquilibriumConfig && (plasma_equilibrium.analytic = deepcopy(source))
+    plasma_equilibrium.kinetic = kinetic === nothing ? configured_kinetic_profiles(eq_config) : kinetic
 
     equilibrium_global_parameters!(plasma_equilibrium)
     equilibrium_qfind!(plasma_equilibrium)
@@ -89,7 +92,7 @@ end
     reform(equil::PlasmaEquilibrium, psi_nodes::Vector{Float64}) -> PlasmaEquilibrium
 
 Re-form `equil` on the ψ_N nodes `psi_nodes` from the source it remembers: the stored
-`analytic` config, else its raw `ingest`, so no file is re-read. Only an equilibrium carrying
+`analytic` config, else its raw `ingest`, so no file is re-read. Its kinetic profiles carry over. Only an equilibrium carrying
 neither (one built with the positional constructor, or by a reader that captures no ingest)
 falls back to re-reading `config.eq_filename`. The node endpoints must match `psilow`/`psihigh`.
 """
@@ -103,7 +106,7 @@ function reform(equil::PlasmaEquilibrium, psi_nodes::Vector{Float64})
     else
         nothing
     end
-    return PlasmaEquilibrium(equil.config, source; override_psi_nodes=psi_nodes)
+    return PlasmaEquilibrium(equil.config, source; override_psi_nodes=psi_nodes, kinetic=equil.kinetic)
 end
 
 """

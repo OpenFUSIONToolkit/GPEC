@@ -95,14 +95,24 @@ constructor.
     χ⊥,i), `:chi_perp_e`, `:chi_perp_i`, `:P_phi`, `:c_beta` or `:tau_E`; see
     `InnerLayer.SLAYER.slayer_parameters`. `:tau_E` sets both P_perp and P_tor from τ̄_E, so it
     ignores `chi_phi`/`chi_tor`. `chi_perp_e` still sets the critical-Δ width in every mode
+    unless `chi_perp_Dc` is set
+  - `chi_perp_Dc` -- electron perpendicular heat diffusivity [m²/s] used only by the critical Δ
+    (default `nothing`: the critical Δ uses the same χ⊥,e as P_perp, from the kinetic file's
+    `chi_e` or `chi_perp_e`). When set, this scalar replaces χ⊥,e in the critical Δ only;
+    P_perp keeps the file's profiles or the `chi_perp_e`/`chi_perp_i` fallbacks. Must be positive
   - `D_R`, `D_geo`  -- critical-Δ formula inputs. `nothing` (default)
     auto-derives them from the equilibrium: `D_R` from the resistive
     interchange index `D_R = E + F + H²` at each surface, `D_geo` from the
-    toroidal geometric factor (required only by `D_c_type=:toroidal`). Supply a
-    scalar only to override the auto-derivation; an explicit `0.0` disables the
-    critical-Δ offset (Δ_crit ≡ 0)
-  - `theta_sample` -- poloidal angle at which to sample minor radius
-    (default 0.0, outboard midplane)
+    Connor et al. 2015 Eq. 59 toroidal geometric factor in the `r_s` reference
+    (consumed only by `D_c_type=:toroidal`). Supply a scalar only to override
+    the auto-derivation. An explicit `D_R = 0.0` disables the critical-Δ
+    offset (Δ_crit ≡ 0) for every `D_c_type`; `D_geo = 0.0` does so only for
+    `:toroidal`. `:toroidal` also takes the χ∥ closure's parallel wavenumber
+    from the equilibrium (`toroidal_kpar`), which has no override
+  - `theta_sample` -- poloidal angle of the minor-radius chord of the
+    `:midplane` radial label, used only by API callers that pass
+    `rs_method = :midplane`; the default toroidal-flux label does not depend
+    on angle, so a nonzero value warns (default 0.0)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
     (default, neoclassical F_33), `:redl`, `:spitzer` (Sauter 18a, no
     trapped correction), or `:spitzer_harm` (legacy Fitzpatrick σ_∥)
@@ -140,17 +150,12 @@ constructor.
 
 # Kinetic-profile source
 
-SLAYER reads kinetic profiles through the shared `Equilibrium.read_kinetic_file`
-reader (the same standardized object used by the kinetic/NTV physics), so
-there is one consistent interface for resistive and kinetic profiles.
-
-  - `profile_file`   -- path to a kinetic-profile file (relative to the run
-    dir), required when SLAYER is enabled. HDF5 (`.h5`) files use the GPEC
-    kinetic schema and may carry `chi_e` (χ⊥,e), `chi_i` (χ⊥,i) and `chi_phi` (χ_φ); ASCII
-    tables are also accepted but carry no χ. When a χ dataset is absent or
-    all-zero, the scalar `chi_perp_e`/`chi_perp_i`/`chi_tor` fallbacks below are used (so a
-    file can keep the χ keys set to 0 to defer to the scalars).
-  - `profile_group`  -- group within the HDF5 file (default `"/"`)
+SLAYER takes its kinetic profiles from the equilibrium (`[Equilibrium] kinetic_file`,
+read once into `equil.kinetic`), the same object the kinetic/NTV physics reads.
+They need `n_e`, `T_e`, `T_i` and `omega_E`. HDF5 files may also carry `chi_e` (χ⊥,e),
+`chi_i` (χ⊥,i) and `chi_phi` (χ_φ); ASCII tables carry no χ. When a χ dataset is absent or
+all-zero, the scalar `chi_perp_e`/`chi_perp_i`/`chi_tor` fallbacks below are used (so a
+file can keep the χ keys set to 0 to defer to the scalars).
 
 # Output control
 
@@ -178,6 +183,7 @@ there is one consistent interface for resistive and kinetic profiles.
     impurity_charge::Float64 = 6.0
     chi_perp_e::Float64 = 1.0
     chi_perp_i::Union{Float64,Nothing} = nothing
+    chi_perp_Dc::Union{Float64,Nothing} = nothing
     chi_tor::Float64 = 1.0
     tau_E::Union{Float64,Nothing} = nothing
     P_perp_model::Symbol = :D_perp
@@ -228,9 +234,6 @@ there is one consistent interface for resistive and kinetic profiles.
 
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
 
-    profile_file::String = ""
-    profile_group::String = "/"
-
     store_scan::Bool = false
 
     critical_resonant_field::CriticalResonantFieldControl = CriticalResonantFieldControl()
@@ -247,13 +250,19 @@ const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 const _VALID_ROOT_CLASSIFICATIONS = (:threshold, :winding)
 
 function validate(ctrl::SLAYERControl)
+    iszero(ctrl.theta_sample) || @warn "SLAYERControl: theta_sample = $(ctrl.theta_sample) has no effect: the layer quantities " *
+          "use the toroidal-flux radial label, which does not depend on poloidal angle." maxlog = 1
     ctrl.inner_model in _VALID_INNER_MODELS || ctrl.inner_model in _UNSUPPORTED_INNER_MODELS ||
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) " *
                             "not in $(_VALID_INNER_MODELS)"))
     # A disabled section is never solved, so it may keep a GGJ model while serving only its profiles.
     !ctrl.enabled || ctrl.inner_model in _VALID_INNER_MODELS ||
-        throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
-                            "growth rates are not implemented; use inner_model=slayer_fitzpatrick"))
+        throw(
+            ArgumentError(
+                "SLAYERControl: inner_model=$(ctrl.inner_model) is not currently supported because GGJ tearing " *
+                "growth rates are not implemented; use inner_model=slayer_fitzpatrick"
+            )
+        )
     ctrl.scan_mode in _VALID_SCAN_MODES ||
         throw(ArgumentError("SLAYERControl: scan_mode=$(ctrl.scan_mode) " *
                             "not in $(_VALID_SCAN_MODES)"))
@@ -266,7 +275,8 @@ function validate(ctrl::SLAYERControl)
     ctrl.P_perp_model in _VALID_P_PERP_MODELS ||
         throw(ArgumentError("SLAYERControl: P_perp_model=$(ctrl.P_perp_model) " *
                             "not in $(_VALID_P_PERP_MODELS)"))
-    for (name, v) in (("chi_perp_e", ctrl.chi_perp_e), ("chi_perp_i", ctrl.chi_perp_i), ("chi_tor", ctrl.chi_tor))
+    for (name, v) in (("chi_perp_e", ctrl.chi_perp_e), ("chi_perp_i", ctrl.chi_perp_i), ("chi_perp_Dc", ctrl.chi_perp_Dc),
+        ("chi_tor", ctrl.chi_tor))
         v === nothing || (isfinite(v) && v > 0) ||
             throw(ArgumentError("SLAYERControl: $name must be positive and finite [m²/s]; got $v"))
     end
@@ -355,7 +365,7 @@ function slayer_control_from_toml(section::AbstractDict)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
-        elseif sym in (:bt, :D_R, :D_geo, :tau_E, :chi_perp_i)
+        elseif sym in (:bt, :D_R, :D_geo, :tau_E, :chi_perp_i, :chi_perp_Dc)
             # Allow explicit nothing (auto-derive) or a number (override)
             kwargs[sym] = v === nothing ? nothing : Float64(v)
         elseif sym === :omega_E_kHz

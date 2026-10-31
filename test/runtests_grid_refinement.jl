@@ -108,6 +108,23 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         for c in (0.3, 0.7)
             @test !any(g -> abs(g - c) < 1e-12, b)
         end
+
+        # Close centers (e.g. two reverse-shear crossings near q_min) get brackets capped at half their gap, so each
+        # still sits alone in its own interval; the cut below the stencil floor warns.
+        b = @test_logs (:warn, r"capped") match_mode = :any GridRef.bracket_mandatory_nodes(grid, [0.5, 0.51], [0.01, 0.01], 1e-4)
+        @test all(diff(b) .> 0)
+        for c in (0.5, 0.51)
+            k = searchsortedlast(b, c)
+            @test b[k] < c < b[k+1] && isapprox(c - b[k], b[k+1] - c; rtol=1e-6)
+        end
+        @test searchsortedlast(b, 0.5) != searchsortedlast(b, 0.51)
+        # A near-tangent surface (huge or infinite stencil) is capped by the domain edges instead of clearing the grid.
+        for hw in (1e6, Inf)
+            b = @test_logs (:warn, r"capped") match_mode = :any GridRef.bracket_mandatory_nodes(grid, [0.3], [hw], 1e-4)
+            @test count(<(0.3), b) >= 3 && count(>(0.3), b) >= 3
+        end
+        # Centers within collapse_atol still share one bracket instead of erroring.
+        @test all(diff(GridRef.bracket_mandatory_nodes(grid, [0.5, 0.5 + 1e-9], [0.01, 0.01], 1e-4)) .> 0)
     end
 
     @testset "_validate_psi_nodes" begin
