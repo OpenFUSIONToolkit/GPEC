@@ -2,12 +2,12 @@ using TOML
 using HDF5
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
-# same pipeline the TOML driver does. Every assertion is anchored on the coarse Solovev fixture
+# same pipeline the TOML driver does. Every assertion is anchored on the coarse TJ fixture
 # deck (mpsi=16, mtheta_vacuum=64, delta_m=0), so an API run is compared against `main` on the same deck.
 @testset "solve API" begin
     GPEC = GeneralizedPerturbedEquilibrium
     FFS = GPEC.ForceFreeStates
-    template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
@@ -192,7 +192,7 @@ using HDF5
     end
 
     @testset "perturbed_equilibrium round-trips a forward result" begin
-        forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+        forcing = joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat")
         pe_section = Dict{String,Any}(
             "compute_singular_coupling" => true)
         pe_kw = (; verbose=false)
@@ -448,7 +448,7 @@ using HDF5
             pe_kwargs = (; compute_singular_coupling=true)
             mktempdir() do dir
                 modes = GPEC.ForcingTerms.ForcingMode[]
-                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), "ascii", false)
+                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"), "ascii", false)
                 h5open(f -> GPEC.ForcingTerms.save_forcing_to_h5(modes, f), joinpath(dir, "forcing.h5"), "w")
                 _stage_deck(dir;
                     extra_sections=Dict{String,Any}(
@@ -537,7 +537,7 @@ using HDF5
 
         @testset "kinetic torque" begin
             # The deck's [KineticForces] stage is kinetic_torque on its perturbed equilibrium, saved by its save method.
-            ntv_dir = joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example")
+            ntv_dir = joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example")
             mktempdir() do dir
                 for name in readdir(ntv_dir)
                     cp(joinpath(ntv_dir, name), joinpath(dir, name))

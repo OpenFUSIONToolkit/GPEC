@@ -45,7 +45,7 @@ using TOML
         h5open(test_kinetic_run(dir, "regression_solovev_ideal_example"), "r") do h5
             # Smoke test: this nerfed deck (mpsi=16, delta_m=0) is for "does it run / no NaN",
             # not numeric regression — the mode-converged physical value is pinned in the
-            # regression harness (examples/Solovev_kinetic_calculated_example). Assert only
+            # regression harness (examples/TJ_kinetic_calculated_example). Assert only
             # nerfed-grid-robust facts: finite and positive (Solovev is stable).
             et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
@@ -84,7 +84,7 @@ using TOML
             # KF→FFS kinetic-MHD path end-to-end. NO numeric value is pinned here — the prior
             # imag(et[1]) ≈ -0.711 rtol=0.08 pin was platform-fragile (failed on macOS aarch64
             # at -0.856; issue #273). Physical regression is tracked in the harness on the
-            # mode-converged deck (examples/Solovev_kinetic_calculated_example, mpert=32).
+            # mode-converged deck (examples/TJ_kinetic_calculated_example, mpert=32).
             # Assert only nerfed-grid-robust physics: finite, positive total energy,
             # negative kinetic damping (imag sign is robust across configs; only its
             # magnitude is FP-sensitive).

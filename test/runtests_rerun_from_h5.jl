@@ -2,7 +2,7 @@ using HDF5
 using TOML
 
 # Tests for the gpec.h5 snapshot + replay feature, kept deliberately light: one full-pipeline
-# source run + replay (the analytic Solovev path), plus pipeline-free ingest round-trip checks
+# source run + replay (the analytic TJ path), plus pipeline-free ingest round-trip checks
 # for the direct (EFIT) and inverse (CHEASE) equilibrium kinds and the override flags.
 
 # Collect every leaf dataset path under an open HDF5 file, skipping the groups/paths that
@@ -50,19 +50,19 @@ function _rerun_dataset_mismatches(source_h5, rerun_h5)
     return n_compared, n_mismatched
 end
 
-# Analytic (Solovev) equilibrium with ASCII file forcing: the single end-to-end source + replay.
+# Analytic (TJ) equilibrium with ASCII file forcing: the single end-to-end source + replay.
 # The forcing file is deleted before replay and the replay runs from a temp directory, proving
 # the snapshot is self-contained (no g-file or forcing data needed), and reproduces the source
 # bit-for-bit across every output dataset, the normalized perturbed equilibrium included.
-@testset "Rerun from gpec.h5 (analytic Solovev)" begin
-    template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+@testset "Rerun from gpec.h5 (analytic TJ)" begin
+    template_dir = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
 
     mktempdir() do snapshot_dir
         for name in readdir(template_dir)
             cp(joinpath(template_dir, name), joinpath(snapshot_dir, name))
         end
         forcing_dat = joinpath(snapshot_dir, "forcing.dat")
-        cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), forcing_dat)
+        cp(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"), forcing_dat)
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
         inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
@@ -136,7 +136,7 @@ end
         end
 
         @testset "--coil-source coils errors when source has no coil snapshot" begin
-            # This Solovev source run used ASCII forcing, so there is no
+            # This source run used ASCII forcing, so there is no
             # Input/RawInputs/Coils group to replay from.
             mktempdir() do replay_dir
                 @test_throws ErrorException GeneralizedPerturbedEquilibrium.main([
@@ -153,7 +153,7 @@ end
 # the source run and the replay: the default (recompute-from-TOML) path then
 # fails, while `--coil-source coils` succeeds from the stored geometry.
 @testset "Rerun from gpec.h5: coil geometry snapshot" begin
-    template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    template_dir = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
     src_dat = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries", "d3d_il.dat")
 
     read_resfield(path) =
