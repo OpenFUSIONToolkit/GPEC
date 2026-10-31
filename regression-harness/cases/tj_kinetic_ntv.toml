@@ -1,12 +1,12 @@
-# Regression case: Solovev n=1 ideal stability + perturbed equilibrium + post-PE NTV torque.
+# Regression case: TJ-analytic n=1 ideal stability + perturbed equilibrium + post-PE NTV torque.
 # The only case exercising the KineticForces outer ψ torque quadrature (fgar method):
 # rational-surface paneling, maxevals_psi cap, and the atol_psi/rtol_psi defaults.
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
 # noise floor below which a difference is treated as zero.
 [case]
-name = "solovev_kinetic_ntv"
-description = "Solovev analytical equilibrium, n=1, ideal + PE + NTV torque quadrature"
-example_dir = "examples/Solovev_kinetic_NTV_example"
+name = "tj_kinetic_ntv"
+description = "TJ-analytic equilibrium, n=1, no wall, ideal + PE + NTV torque quadrature"
+example_dir = "examples/TJ_kinetic_NTV_example"
 
 # NTV torque — the primary tracked quantity of this case. [Re, Im] pair; the ψ quadrature
 # converges to rtol_psi=1e-2, but the result is deterministic for fixed code + inputs, so
