@@ -41,23 +41,25 @@ Names of the seven density terms, in the order of the third axis of `density` an
 """
 const TERMS = (:b_eff_sq, :K1, :K2, :K3, :b_sq, :j_b_xi, :divxi_gradp)
 
-# ψ_N gap below which an equilibrium knot counts as an end of the solution domain.
-const EDGE_KNOT_TOL = 1e-10
+# ψ_N gap below which a saved ODE step or the ODE start counts as the same radial node as a knot.
+const SAME_NODE_TOL = 1e-10
 
 """
     radial_nodes(ffs) -> Vector{Float64}
 
-The equilibrium ψ knots inside the ξ solution domain, plus each end of the domain (the ODE start,
-e.g. a `qlow` crossing, and the solution edge) that falls between knots. On the knots the metric,
-the Euler-Lagrange matrices and the geometry are exact.
+The start and every saved step of the forward ODE sweep (e.g. from a `qlow` crossing to the edge),
+plus the equilibrium ψ knots inside that domain. The saved steps follow ξ into the rational surfaces,
+where the densities vary too fast for the knots alone; on the knots the metric, the Euler-Lagrange
+matrices and the geometry are exact.
 """
 function radial_nodes(ffs::FFS.ForceFreeStatesResult)
     sol = ffs.solution
+    steps = sol.psi_store[1:sol.step]
     # The sweep starts at max(psilow, first profile knot), as initialize_el_at_axis! does, but saves its first state one step later.
-    lo, hi = max(ffs.psilow, ffs.equil.profiles.xs[1]), sol.psi_store[sol.step]
-    psi = [x for x in ffs.equil.rzphi_xs if lo <= x <= hi]
-    (isempty(psi) || psi[1] > lo + EDGE_KNOT_TOL) && pushfirst!(psi, lo)
-    psi[end] < hi - EDGE_KNOT_TOL && push!(psi, hi)
+    lo = max(ffs.psilow, ffs.equil.profiles.xs[1])
+    knots = [x for x in ffs.equil.rzphi_xs if lo <= x <= steps[end]]
+    psi = sort!([knots; [p for p in steps if all(x -> abs(p - x) > SAME_NODE_TOL, knots)]])
+    psi[1] > lo + SAME_NODE_TOL && pushfirst!(psi, lo)
     return psi
 end
 
@@ -252,9 +254,10 @@ with the vacuum response (`vac_flag = true`). Fields of the result:
 These last two are the success checks of the decomposition, and both are warned. On the knots
 (∇×b_eff)·∇ψ vanishes identically, so a curl residual above `CURL_RESIDUAL_TOL` flags b_eff inconsistent
 with the metric and the equilibrium current; near the axis of a reconstructed equilibrium the radial grid
-and the coordinates can raise it too. A mismatch against `ep[k]` above `ENERGY_MISMATCH_TOL` means the
-radial grid is too coarse for the ψ quadrature (it converges with `mpsi`); it is not a check of the
-algebra, since an error that moves a total by a few percent stays below it.
+and the coordinates can raise it too. A standard-form mismatch against `ep[k]` above `ENERGY_MISMATCH_TOL`
+means the knots are too coarse for the metric splined between them (it converges with `mpsi`); the
+effective-field total can also differ by a grid-independent amount on some equilibria. The mismatch is
+not a check of the algebra, since an error that moves a total by a few percent stays below it.
 """
 function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::AbstractVector{<:Integer}=[1])
     ffs.integrator === :forward && ffs.solution !== nothing || throw(ArgumentError("energy decomposition needs a forward-integrator solve"))
@@ -265,7 +268,7 @@ function decompose_plasma_energy(ffs::FFS.ForceFreeStatesResult; eigenmodes::Abs
     all(k -> 1 <= k <= nwt, eigenmodes) || throw(ArgumentError("eigenmodes must lie in 1:$nwt"))
 
     equil = ffs.equil
-    # Deviation from Fortran gpout_recon: the radial integral runs over the equilibrium knots, not the ODE psifac grid.
+    # Deviation from Fortran gpout_recon: the radial integral adds the equilibrium knots to the ODE psifac grid.
     psi = radial_nodes(ffs)
     mtheta = length(equil.rzphi_ys) - 1
     geo = surface_geometry(ffs, psi)

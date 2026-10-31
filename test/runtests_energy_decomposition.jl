@@ -1,9 +1,9 @@
 using TOML
 using Plots
 
-# Analysis.EnergyDecomposition on the coarse Solovev fixture (mpsi = 16, forward integrator, vac_flag = true) in Boozer
-# coordinates, which unlike the deck's PEST coordinates have nonzero g_θζ and g_ψζ: one solve and one decomposition,
-# shared by every testset but the last two.
+# Analysis.EnergyDecomposition on the Solovev fixture (forward integrator, vac_flag = true) at mpsi = 32, since its own 16 knots
+# leave the metric between them too coarse, and in Boozer coordinates, which unlike the deck's PEST coordinates have nonzero
+# g_θζ and g_ψζ: one solve and one decomposition, shared by every testset but the last two.
 @testset "Analysis.EnergyDecomposition" begin
     ENV["GKSwstype"] = "100"
     GPEC = GeneralizedPerturbedEquilibrium
@@ -26,7 +26,7 @@ using Plots
     # (knot, eigenmode) matrices over the knots among the radial nodes.
     function standard_and_lagrangian(ffs, ed)
         knots = findall(in(ffs.equil.rzphi_xs), ed.psi)
-        u1, du1, _ = ED.node_states(ffs, ed.psi)
+        u1, du1, _ = ED.node_states(ffs, ed.psi[knots])
         N = ffs.numpert_total
         F, F_lower, K, G = (zeros(ComplexF64, N, N) for _ in 1:4)
         standard = [real(ed.profile[i, 5, m] - ed.profile[i, 6, m] + ed.profile[i, 7, m]) for i in knots, m in eachindex(ed.eigenmodes)]
@@ -40,7 +40,7 @@ using Plots
                 ffs.mats.ideal.K_spline(vec(K), ed.psi[i])
                 K .*= m_nq
                 ffs.mats.ideal.G_spline(vec(G), ed.psi[i])
-                xi, dxi = u1[:, :, i] * alpha, du1[:, :, i] * alpha
+                xi, dxi = u1[:, :, j] * alpha, du1[:, :, j] * alpha
                 lagrangian[j, m] = 2 / ffs.equil.psio^2 * real(dot(dxi, F, dxi) + 2 * dot(dxi, K, xi) + dot(xi, G, xi))
             end
         end
@@ -48,8 +48,8 @@ using Plots
     end
 
     template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-    boozer = Dict{String,Any}("jac_type" => "boozer")
-    ffs = forward_solve(template; eq_overrides=boozer)
+    overrides = Dict{String,Any}("jac_type" => "boozer", "mpsi" => 32)
+    ffs = forward_solve(template; eq_overrides=overrides)
     equil = ffs.equil
     ed = ED.decompose_plasma_energy(ffs; eigenmodes=[1, 2])
     psi = ed.psi
@@ -64,12 +64,12 @@ using Plots
     end
 
     @testset "success checks: δW_p against ep and the curl residual" begin
-        # ψ-quadrature error of the mpsi = 16 knot grid (measured 1.4 % and 1.9 %); it converges with mpsi.
-        @test all(abs.(ed.relative_error_effective) .< 0.025)
-        @test all(abs.(ed.relative_error_standard) .< 0.025)
-        # The forms agree only after integration, so they differ by the knot-grid quadrature (measured 1.3e-5 and 8.2e-5).
+        # Measured at most 4e-5 (effective) and 7e-5 (standard); at mpsi = 16 the metric splined between the knots raises it to 3 %.
+        @test all(abs.(ed.relative_error_effective) .< 5e-4)
+        @test all(abs.(ed.relative_error_standard) .< 5e-4)
+        # The forms agree only after integration, so they differ by the ψ quadrature (measured 6e-6 and 3e-5).
         @test ed.dW_effective ≈ ed.dW_standard rtol = 2e-4
-        # (∇×b_eff)·∇ψ is an algebraic identity on the knots (measured 4e-14), a check of the b_eff assembly.
+        # (∇×b_eff)·∇ψ is an algebraic identity on the knots (measured 7e-14), a check of the b_eff assembly.
         @test all(ed.curl_residual .< 1e-10)
     end
 
@@ -80,14 +80,14 @@ using Plots
     end
 
     @testset "metric between the knots" begin
-        # Off the knots the metric is splined in ψ; it must match the rzphi bicubic to interpolation accuracy (measured 1.2e-5).
+        # Off the knots the metric is splined in ψ; it must match the rzphi bicubic to interpolation accuracy (measured 1.5e-7).
         xs = equil.rzphi_xs
         off = [(xs[end÷2] + xs[end÷2+1]) / 2, psi[end]]
         g = ED.surface_geometry(ffs, off)
         ref = [GPEC.Equilibrium.flux_surface_metric(equil, p, t) for p in off, t in ed.theta]
-        @test maximum(abs, g.jac ./ getfield.(ref, :jac) .- 1) < 1e-4
-        @test maximum(abs, sqrt.(g.delpsi2) ./ getfield.(ref, :delpsi) .- 1) < 1e-4
-        @test maximum(abs, g.R ./ getfield.(ref, :r) .- 1) < 1e-4
+        @test maximum(abs, g.jac ./ getfield.(ref, :jac) .- 1) < 1e-6
+        @test maximum(abs, sqrt.(g.delpsi2) ./ getfield.(ref, :delpsi) .- 1) < 1e-6
+        @test maximum(abs, g.R ./ getfield.(ref, :r) .- 1) < 1e-6
     end
 
     @testset "solution state between saved steps" begin
@@ -110,10 +110,10 @@ using Plots
 
     @testset "ψ integrals start at the ODE start" begin
         # A qlow start falls between knots, and the sweep saves its first state one ODE step after it.
-        qffs = forward_solve(template; eq_overrides=boozer, ffs_overrides=Dict{Symbol,Any}(:qlow => 2.5))
+        qffs = forward_solve(template; eq_overrides=overrides, ffs_overrides=Dict{Symbol,Any}(:qlow => 2.5))
         qed = ED.decompose_plasma_energy(qffs; eigenmodes=[1, 2])
         @test qed.psi[1] == qffs.psilow < qffs.solution.psi_store[1]
-        @test all(abs.(qed.relative_error_standard) .< 0.025)
+        @test all(abs.(qed.relative_error_standard) .< 5e-4)  # measured 2e-5
     end
 
     @testset "F′ ≠ 0: the DIII-D-like reconstruction" begin
@@ -124,5 +124,7 @@ using Plots
         # Judged against the largest density (measured 7e-11), since single knots where the mode is weak agree less closely.
         @test maximum(abs, standard .- lagrangian) < 1e-8 * maximum(abs, lagrangian)
         @test all(ded.curl_residual .< 1e-10)  # measured 4e-12
+        # The knots alone miss the structure at the pedestal rational surfaces (0.5 % here); with the saved steps it is 1e-5.
+        @test all(abs.(ded.relative_error_standard) .< 1e-4)
     end
 end
