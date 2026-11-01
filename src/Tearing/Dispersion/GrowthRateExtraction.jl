@@ -1,85 +1,45 @@
 # GrowthRateExtraction.jl
 #
-# Extracts tearing-mode growth rates by contour intersection (Re=0 ∩ Im=0) on a
-# complex Q-plane scan: finds intersections of the Re(Δ)=0 and Im(Δ)=0 contours,
-# classifies each intersection as a root or pole, and applies the "outside Re=0
-# contour, above pole" filter for spurious upper-branch roots.
-#
-# This PR (5/9) handles the regular-grid path via Contour.jl. PR 6 will add
-# a scattered-data path (triangulation) for AMR scans.
-#
-# Algorithm summary:
-#   1. Extract Re(Δ) = re_target and Im(Δ) = im_target contour polylines.
-#   2. Find all segment-segment intersections of the two contour families.
-#   3. For each intersection, find the closest Im=0 contour and classify as
-#      a pole if `max(|Re(Δ)|)` along the local arc exceeds `pole_threshold`.
-#   4. For each non-pole intersection, find the closest Re=0 contour. If
-#      that contour is approximately closed, take a small +γ step along the
-#      Im=0 contour and test whether the step lands inside the Re=0 loop.
-#      Roots whose +γ step exits the loop AND that lie above the highest
-#      pole are filtered out (spurious upper branches).
-#   5. Return the highest-γ surviving root in physical units.
-#
-# With `classification = :winding`, step 3 is replaced by the argument
-# principle: each intersection is a root, a pole or neither according to the
-# winding number of the residual on a small circle around it (see
-# `_winding_classify`); the rest of the analysis is shared.
+# Tearing growth rates from a complex Q-plane scan: intersect the Re(Δ) and Im(Δ) target contours, classify each
+# intersection as a root or pole (pole threshold or winding number), filter spurious upper-branch roots, and return
+# the highest-γ root. Regular grids use Contour.jl; AMR scans use Delaunay triangulation and marching triangles.
 
 using Contour
 using DelaunayTriangulation
 using Random: Xoshiro
 
-# ---------------------------------------------------------------------
-# Public result struct + main entry point.
-# ---------------------------------------------------------------------
+# ---------- Public result struct and entry points ----------
 
 """
     GrowthRateResult
 
 Output of `find_growth_rates`.
 
-| field                    | meaning                                               |
-|:------------------------ |:----------------------------------------------------- |
-| `Q_root`                 | Best (highest-γ surviving) root, normalized           |
-| `omega_Hz`               | `Re(Q_root) / tauk` — physical rotation frequency     |
-| `gamma_Hz`               | `Im(Q_root) / tauk` — physical growth rate            |
-| `Q_root_secondary`       | Second-most-unstable root flagged for ambiguity, or   |
-|                          | `NaN+NaNim` if the primary root was unambiguous.      |
-| `omega_Hz_secondary`     | physical ω of the secondary root, or 0 if none        |
-| `gamma_Hz_secondary`     | physical γ of the secondary root, or 0 if none        |
-| `warning_flags`          | `Vector{Symbol}` of warnings raised on `Q_root`:      |
-|                          | `:geom`, `:gap` (root accepted with caveat);          |
-|                          | `:spurious` when ≥1 contour near-miss was dropped by  |
-|                          | the validity gate (parked in `filtered_roots`); or    |
-|                          | `:no_root` when NO usable root was found (`Q_root` is |
-|                          | `NaN`; `omega_Hz`/`gamma_Hz` fall back to 0 — check   |
-|                          | this flag to tell that apart from a true γ≈0 result). |
-|                          | Empty if root is clean.                               |
-| `valid_roots`            | Intersections classified as roots (threshold: not a   |
-|                          | pole and passed the validity gate; winding: a zero    |
-|                          | count of the sign of `zero_winding`)                  |
-| `poles`                  | Intersections classified as poles                     |
-| `filtered_roots`         | Gate-rejected near-misses and roots rejected by the   |
-|                          | above-pole/outside-Re filter (threshold), or          |
-|                          | intersections with a zero or unresolved count         |
-|                          | (winding)                                             |
-| `re_contours`            | Extracted Re(Δ)=`re_target` polylines                 |
-| `im_contours`            | Extracted Im(Δ)=`im_target` polylines                 |
-| `pole_threshold`         | Threshold used for pole classification                |
-|                          | (`:threshold` mode only)                              |
-| `classification`         | `:threshold` or `:winding` — how intersections were   |
-|                          | classified (see `find_growth_rates`)                  |
-| `valid_roots_winding`    | winding number of each entry of `valid_roots`,        |
-| `poles_winding`          | `poles` and `filtered_roots` (`NaN` where the circle  |
-| `filtered_roots_winding` | was unresolved); empty in `:threshold` mode           |
+## Fields
+
+  - `Q_root` - selected (highest-γ surviving) root, normalized; `NaN` when `:no_root`
+  - `omega`, `gamma` - `Re(Q_root)/tauk` and `Im(Q_root)/tauk` in physical units; 0 when `:no_root`
+  - `Q_root_secondary` - next root down, set when `warning_flags` is non-empty; else `NaN + NaN*im`
+  - `omega_secondary`, `gamma_secondary` - physical ω and γ of the secondary root, 0 if none
+  - `warning_flags` - `:geom`/`:gap` (root kept with a caveat), `:spurious` (a candidate was filtered), `:winding_unresolved`,
+    or `:no_root` (no usable root; check it to tell a failed extraction from γ ≈ 0); empty if clean
+  - `valid_roots` - intersections classified as roots (`:threshold`: also those the above-pole filter rejected)
+  - `poles` - intersections classified as poles
+  - `filtered_roots` - rejected candidates: validity-gate and above-pole/outside-Re rejections (`:threshold`), or zero
+    and unresolved winding counts (`:winding`)
+  - `re_contours`, `im_contours` - Re(Δ)=`re_target` and Im(Δ)=`im_target` polylines
+  - `pole_threshold` - pole threshold used (`:threshold` mode only)
+  - `classification` - `:threshold` or `:winding`
+  - `valid_roots_winding`, `poles_winding`, `filtered_roots_winding` - winding number of each entry of `valid_roots`,
+    `poles` and `filtered_roots` (`NaN` where unresolved); empty in `:threshold` mode
 """
 struct GrowthRateResult
     Q_root::ComplexF64
-    omega_Hz::Float64
-    gamma_Hz::Float64
+    omega::Float64
+    gamma::Float64
     Q_root_secondary::ComplexF64
-    omega_Hz_secondary::Float64
-    gamma_Hz_secondary::Float64
+    omega_secondary::Float64
+    gamma_secondary::Float64
     warning_flags::Vector{Symbol}
     valid_roots::Vector{ComplexF64}
     poles::Vector{ComplexF64}
@@ -93,139 +53,69 @@ struct GrowthRateResult
     filtered_roots_winding::Vector{Float64}
 end
 
-# Threshold-mode constructor (no winding numbers), the form used before
-# winding classification existed.
-GrowthRateResult(Q_root, omega_Hz, gamma_Hz, Q_root_secondary, omega_Hz_secondary,
-    gamma_Hz_secondary, warning_flags, valid_roots, poles, filtered_roots,
+# Threshold-mode constructor (no winding numbers).
+GrowthRateResult(Q_root, omega, gamma, Q_root_secondary, omega_secondary,
+    gamma_secondary, warning_flags, valid_roots, poles, filtered_roots,
     re_contours, im_contours, pole_threshold) =
-    GrowthRateResult(Q_root, omega_Hz, gamma_Hz, Q_root_secondary, omega_Hz_secondary,
-        gamma_Hz_secondary, warning_flags, valid_roots, poles, filtered_roots,
+    GrowthRateResult(Q_root, omega, gamma, Q_root_secondary, omega_secondary,
+        gamma_secondary, warning_flags, valid_roots, poles, filtered_roots,
         re_contours, im_contours, pole_threshold, :threshold,
         Float64[], Float64[], Float64[])
 
 """
-    find_growth_rates(scan::ScanResult, tauk::Real;
-                       re_target=0.0, im_target=0.0,
-                       pole_threshold=10.0,
-                       filter_above_poles=true,
-                       filter_outside_re=true,
-                       gap_kHz_threshold=1.0) -> GrowthRateResult
+    find_growth_rates(scan::ScanResult, tauk::Real; re_target=0.0, im_target=0.0, pole_threshold=10.0,
+                      filter_above_poles=true, filter_outside_re=true, gamma_gap_threshold=1e3, residual=nothing,
+                      polish_maxit=20, validity_rtol=1e-3, polish=true, classification=:threshold,
+                      winding_rfrac=0.5) -> GrowthRateResult
 
-Extract tearing growth-rate eigenvalues from a brute-force `ScanResult` by
-contour-intersection analysis. `tauk` is the per-surface time normalization
-used to convert `Q` back to physical (Hz) units (`SurfaceCoupling.tauk` for
-single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
+Extract tearing eigenvalues from a brute-force `ScanResult` by intersecting the Re(Δ) and Im(Δ) contours. `tauk`
+converts `Q` to physical units (`SurfaceCoupling.tauk` for one surface; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
 
 # Keyword arguments
 
-  - `re_target`, `im_target` -- contour levels (zero for vanilla dispersion
-    root-finding; nonzero values let the caller probe iso-residual contours)
-  - `pole_threshold`   -- intersection is classified as a pole when
-    `max(|Re(Δ)|)` along the local arc of the nearest Im=0 contour exceeds
-    this value
-  - `filter_above_poles` -- discard roots whose γ exceeds the highest pole γ
-  - `filter_outside_re`  -- restrict the above-pole rejection to roots whose
-    +γ step along the Im=0 contour exits the Re=0 contour loop. When `true`,
-    roots that are above a pole but geometrically inside the Re=0 contour
-    survive (matches the Python default). Note this gate fails when the
-    Re=0 contour is OPEN (e.g., exits the Q box edge), letting spurious
-    upper-branch roots through; the `:geom` and `:gap` flags below cover
-    that case.
-  - `gap_kHz_threshold` -- if the highest-γ root is unstable (γ > 0) AND its
-    γ exceeds the next root by more than this many kHz, it is flagged as
-    a `:gap` warning. Default 1.0 kHz.
-  - `residual` -- optional dispersion-residual callable `f(Q::Complex)`. When
-    supplied, each contour-intersection root is POLISHED to the true zero of
-    `f` by a bounded, neighbour-aware local solve (see `_polish_root`), making
-    the extracted root resolution- and thread-independent. `nothing` (default)
-    reports the raw marching-squares estimate, which is sensitive to grid and
-    floating-point rounding.
-  - `polish_maxit` -- max polish iterations per root (default 20). Each costs a
-    handful of `f` evaluations (two for the real 2×2 Jacobian, one trial step,
-    at most three backtracks); failures fall back to the unpolished point. The
-    polish does not assume `f` is holomorphic, so it also converges on the SLAYER
-    residual, which is a function of conj(Q).
-  - `validity_rtol` -- with `residual` supplied, a polished root is kept only if
-    `|residual| < validity_rtol · median(|Δ|)` (default 1e-3). Intersections
-    that don't polish to a true zero (contour near-misses, or surfaces whose
-    Δ' BVP failed → `|Δ'|` huge and uncancellable) are dropped from
-    `valid_roots`, parked in `filtered_roots`, and flagged `:spurious`. If every
-    candidate is spurious, the result carries `:no_root`.
-  - `polish` -- polish roots when a `residual` is supplied (default `true`).
-    `false` keeps the raw contour estimate, e.g. to classify by winding number
-    without polishing.
-  - `classification` -- `:threshold` (default) or `:winding`; see below.
-  - `zero_winding` -- `:winding` mode only: the winding number of an isolated
-    zero of `residual`, `+1` for a function holomorphic in Q and `-1` for one
-    that is anti-holomorphic (a function of conj(Q)), such as the SLAYER
-    residual. Default `-1`.
-  - `winding_rfrac` -- `:winding` mode only: radius of the classifying circle
-    in units of the local contour-segment length at the intersection (default
-    0.5), capped at 0.45 × the distance to the nearest other intersection.
+  - `re_target`, `im_target` - contour levels (zero for root finding; nonzero probes iso-residual contours)
+  - `pole_threshold` - an intersection is a pole when `max(|Re(Δ)|)` on the nearby Im=0 contour exceeds this
+  - `filter_above_poles` - reject roots whose γ exceeds the highest pole's
+  - `filter_outside_re` - restrict that rejection to roots whose +γ step along Im=0 leaves a closed Re=0 loop;
+    an open Re=0 contour lets spurious roots through, which `:geom`/`:gap` then flag
+  - `gamma_gap_threshold` - `:gap` warning when the top root is unstable and its γ exceeds the next by more than this, in 1/s
+  - `residual` - optional callable `f(Q)`; when given, each root is polished to a true zero of `f` within a
+    neighbour-aware trust region, making it resolution- and thread-independent
+  - `polish_maxit` - max polish iterations per root; a failed polish keeps the contour point
+  - `validity_rtol` - with `residual`, keep a polished root only if `|f| < validity_rtol · median(|Δ|)`; the rest go to
+    `filtered_roots` with `:spurious`
+  - `polish` - polish roots when `residual` is given
+  - `classification` - `:threshold` (default) or `:winding`
+  - `winding_rfrac` - `:winding` circle radius in units of the local contour-segment length, capped at 0.45 × the
+    distance to the nearest other intersection
 
-# Winding classification (`classification = :winding`)
+# Root selection
 
-Each distinct contour intersection is classified by the argument principle
-instead of the pole-threshold heuristics. The counter-clockwise winding number
-of `residual` on a small circle around the intersection counts the zeros minus
-the poles inside it (for a holomorphic function; the sign is reversed for an
-anti-holomorphic one, hence `zero_winding`). The circle is resampled until no
-sampled phase step exceeds π/2. This numerical criterion can miss rapid phase
-turns between samples and does not certify the count. Additional midpoint and
-count-convergence checks are possible defensive extensions. An intersection is
-classified as a root when the estimated count has the sign of
-`zero_winding`, a pole when it has the opposite sign, and is moved to
-`filtered_roots` (flag `:spurious`) when the count is zero, e.g. a contour
-near-miss or an unresolved pole-zero pair. A zero count is checked once more on
-a circle eight times wider, reaching up to 0.9 of the distance to the nearest
-other intersection, because the contour estimate of a pole can lie outside the
-small circle. A non-finite
-circle (the residual failed on it) is retried at half and a quarter of the
-radius; a circle that stays unresolved is filtered too and flags
-`:winding_unresolved`. The argument principle requires a residual that is
-single-valued and meromorphic on and inside the circle:
-a branch cut crossing it, or a jump in the residual, can change the count.
-The classification replaces the pole threshold, the validity gate and the
-above-pole/outside-Re filter, so `pole_threshold`, `validity_rtol`,
-`filter_above_poles` and `filter_outside_re` decide nothing in this mode; the
-selection of `Q_root`, the `:geom`/`:gap` warnings and the secondary root are
-the same as in `:threshold` mode. With `polish = true` a root is polished inside
-its classifying circle. `residual` is required.
-Each intersection costs between 64 and a few thousand residual evaluations
-(one or two circles of 64–4096 samples). Only zeros that the scan resolves
-as contour crossings are found, as in `:threshold` mode.
+Surviving roots are sorted by descending γ and the highest is taken. It is flagged `:geom` when the Re=0 contour is a
+downward-concave hill there and `:gap` per `gamma_gap_threshold`; flags warn but never discard, and any warning exposes
+the next root as `Q_root_secondary`.
 
-# Spurious-root recursion
+# Winding classification
 
-After the per-intersection pole / above-pole filters, the remaining roots
-are sorted by descending γ. The selection loop walks down this list and at
-each candidate evaluates two flags:
-
-  - `:geom` — Re(Δ)=0 contour is locally a downward-concave "hill" at the
-    candidate (clean polyline-following quadratic fit).
-  - `:gap`  — candidate is unstable AND its γ exceeds the next root's by
-    more than `gap_kHz_threshold` kHz.
-
-If BOTH fire, the candidate is discarded as spurious and the next-most-
-unstable root is tried. If exactly ONE fires, the candidate is accepted as
-primary with that warning recorded, and the next root is exposed as
-`Q_root_secondary` so downstream tools can plot or reanalyse it. If
-neither fires, the candidate is accepted cleanly.
+With `classification = :winding` (requires `residual`), each intersection is classified by the counter-clockwise winding
+number of `residual` on a small circle around it: positive is a root, negative a pole, and zero or unresolved goes to
+`filtered_roots`. This needs `residual` single-valued and meromorphic inside the circle, and the sampled count is not
+certified (fast phase turns between samples can be missed). `pole_threshold`, `validity_rtol`, `filter_above_poles` and
+`filter_outside_re` have no effect in this mode. Each intersection costs 64 to a few thousand residual evaluations.
 """
 function find_growth_rates(scan::ScanResult, tauk::Real;
     re_target::Real=0.0, im_target::Real=0.0,
     pole_threshold::Real=10.0,
     filter_above_poles::Bool=true,
     filter_outside_re::Bool=true,
-    gap_kHz_threshold::Real=1.0,
+    gamma_gap_threshold::Real=1e3,
     residual=nothing,
     polish_maxit::Integer=20,
     validity_rtol::Real=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Integer=-1,
     winding_rfrac::Real=0.5)
-    _check_classification(classification, residual, zero_winding)
+    _check_classification(classification, residual)
     return _extract_growth_rates(scan.re_axis, scan.im_axis, scan.Δ,
         Float64(tauk);
         re_target=Float64(re_target),
@@ -233,66 +123,52 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
         pole_threshold=Float64(pole_threshold),
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=Float64(gap_kHz_threshold),
+        gamma_gap_threshold=Float64(gamma_gap_threshold),
         residual=residual,
         polish_maxit=Int(polish_maxit),
         validity_scale=_residual_scale(scan.Δ),
         validity_rtol=Float64(validity_rtol),
         polish=polish,
         classification=classification,
-        zero_winding=Int(zero_winding),
         winding_rfrac=Float64(winding_rfrac))
 end
 
 """
-    find_growth_rates(amr::AMRResult, tauk::Real;
-                       re_target=0.0, im_target=0.0,
-                       pole_threshold=10.0,
-                       filter_above_poles=true,
-                       filter_outside_re=true) -> GrowthRateResult
+    find_growth_rates(amr::AMRResult, tauk::Real; kwargs...) -> GrowthRateResult
 
-Extract tearing growth-rate eigenvalues from an AMR `AMRResult` via Delaunay
-triangulation + marching triangles on the scattered evaluation points. The
-pipeline after contour extraction (segment intersection, pole classification,
-outside-Re filter, physical-Hz conversion) is identical to the brute-force
-grid path — only the contour extractor changes. Hanging-node issues from the
-quadtree's mixed refinement levels are resolved by the triangulation
-respecting every evaluated point uniformly.
+Same as the `ScanResult` method, with contours extracted by Delaunay triangulation and marching triangles on the
+scattered AMR points, so hanging nodes from mixed refinement levels are ordinary vertices.
 """
 function find_growth_rates(amr::AMRResult, tauk::Real;
     re_target::Real=0.0, im_target::Real=0.0,
     pole_threshold::Real=10.0,
     filter_above_poles::Bool=true,
     filter_outside_re::Bool=true,
-    gap_kHz_threshold::Real=1.0,
+    gamma_gap_threshold::Real=1e3,
     residual=nothing,
     polish_maxit::Integer=20,
     validity_rtol::Real=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Integer=-1,
     winding_rfrac::Real=0.5)
-    _check_classification(classification, residual, zero_winding)
+    _check_classification(classification, residual)
     return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
         re_target=Float64(re_target),
         im_target=Float64(im_target),
         pole_threshold=Float64(pole_threshold),
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=Float64(gap_kHz_threshold),
+        gamma_gap_threshold=Float64(gamma_gap_threshold),
         residual=residual,
         polish_maxit=Int(polish_maxit),
         validity_scale=_residual_scale(amr.Δ),
         validity_rtol=Float64(validity_rtol),
         polish=polish,
         classification=classification,
-        zero_winding=Int(zero_winding),
         winding_rfrac=Float64(winding_rfrac))
 end
 
-# ---------------------------------------------------------------------
-# Implementation.
-# ---------------------------------------------------------------------
+# ---------- Implementation ----------
 
 # Bilinear interpolation of `values` on the regular grid `(re_axis, im_axis)`
 # at point (qr, qi). Out-of-grid points are clamped to the boundary.
@@ -323,9 +199,7 @@ function _extract_contours(re_axis::Vector{Float64}, im_axis::Vector{Float64},
     return polylines
 end
 
-# Segment-segment intersection on the complex plane. Returns the
-# intersection point if segments [a,b] and [c,d] cross strictly (parameters
-# in (0,1)), else nothing. Endpoint touches return the touch point.
+# Intersection point of segments [a,b] and [c,d] (endpoints included), or `nothing`.
 function _segment_intersection(a::ComplexF64, b::ComplexF64,
     c::ComplexF64, d::ComplexF64)
     d1r, d1i = real(b - a), imag(b - a)
@@ -341,8 +215,7 @@ function _segment_intersection(a::ComplexF64, b::ComplexF64,
     return nothing
 end
 
-# Find all intersections between two families of polylines. Returns
-# Vector{ComplexF64}.
+# All intersections between two families of polylines.
 function _all_intersections(re_paths::Vector{Vector{ComplexF64}},
     im_paths::Vector{Vector{ComplexF64}})
     out = ComplexF64[]
@@ -412,36 +285,12 @@ function _point_in_polygon(pt::ComplexF64, polygon::Vector{ComplexF64})
     return inside
 end
 
-# ---------------------------------------------------------------------
-# Shared analysis: intersections + pole classification + outside-Re filter.
-# Both the regular-grid path (_extract_growth_rates) and the AMR
-# triangulation path (_extract_growth_rates_amr) funnel through this.
-# ---------------------------------------------------------------------
-# Geometric "spurious upper-branch" detector — flags candidates where the
-# Re(Δ)=0 contour is locally a downward-concave "hill" or "hump" (⌒) at the
-# candidate location. Legitimate tearing roots sit at the bottom of upward-
-# concave "wells" (∪); spurious upper-branch roots sit at the top of hills.
-#
-# Algorithm:
-#  1. Find the closest Re=0 polyline + closest vertex on it.
-#  2. Walk outward along that polyline, collecting consecutive vertices
-#     within `max_walk` Q-distance of the candidate. Walking the polyline
-#     (rather than averaging over a radius) avoids polluting the fit with
-#     vertices from disconnected nearby Re=0 fragments — important on
-#     AMR-triangulated meshes where the contour is fragmented.
-#  3. Fit γ = a + b·Δω + c·(Δω)² to the collected vertices via least squares.
-#     Sign of `c` is the local concavity:
-#        c < 0  → contour is concave-DOWN (hill, ⌒) ← SPURIOUS pattern
-#        c > 0  → contour is concave-UP (well, ∪)   ← legitimate pattern
-#  4. Gate on fit quality: only flag when RMS_residual / γ_spread is below
-#     `quality_threshold`. Noisy fits (e.g. multiple overlapping contour
-#     fragments) leave the candidate unflagged — letting the gap criterion
-#     and downstream review handle ambiguous cases.
-#
-# Returns `true` when the candidate is on a CLEAN concave-down arc; else
-# `false`. The orientation-invariance of the previous 3-point stencil
-# version is preserved because we fit γ = f(ω) which has a sign-stable
-# second derivative regardless of traversal direction.
+# ---------- Shared analysis (grid and AMR paths) ----------
+
+# `:geom` flag: true when the Re(Δ)=0 contour is a clean downward-concave hill (⌒) at `pt`; genuine tearing roots sit in
+# upward-concave wells (∪). Fits γ = a + b·Δω + c·Δω² to the vertices within `max_walk` along the nearest Re=0 polyline
+# (walking it avoids disconnected AMR fragments) and flags when c < -curvature_threshold and the normalized RMS residual
+# is below `quality_threshold`.
 function _is_geom_spurious(pt::ComplexF64,
     re_paths::Vector{Vector{ComplexF64}};
     max_walk::Float64=0.5,
@@ -453,9 +302,7 @@ function _is_geom_spurious(pt::ComplexF64,
     n_path = length(re_path)
     n_path < 5 && return false
 
-    # Walk outward from re_v_idx along the polyline, collecting vertices
-    # within max_walk Q-distance of pt. Stop in each direction at the first
-    # vertex that exceeds the walk radius.
+    # Walk both ways from the nearest vertex, stopping at the first vertex beyond max_walk.
     collected_idx = Int[re_v_idx]
     @inbounds for k in (re_v_idx+1):n_path
         if abs(re_path[k] - pt) < max_walk
@@ -485,9 +332,7 @@ function _is_geom_spurious(pt::ComplexF64,
     γ_sp = maximum(γs) - minimum(γs)
     (ω_sp < 1e-6 || γ_sp < 1e-12) && return false
 
-    # Quadratic least-squares fit γ = a + b·ω + c·ω² via the normal equations
-    # MᵀM·coeffs = Mᵀγ, where M = [1 ω ω²]. Hand-rolled to avoid an allocation
-    # for the n×3 design matrix (we just need the 3×3 normal-equation matrix).
+    # Quadratic least-squares fit via the 3×3 normal equations, avoiding the n×3 design matrix.
     sx = 0.0
     sx2 = 0.0
     sx3 = 0.0
@@ -529,32 +374,19 @@ end
 
 # γ-gap separation: the candidate at `idx` (in γ-descending order) is unstable
 # AND clearly separated above the next-most-unstable candidate by more than
-# `gap_kHz_threshold` kHz. Flags an outlier "lone peak" root.
+# `gamma_gap_threshold` in 1/s. Flags an outlier "lone peak" root.
 function _is_gap_spurious(sorted_roots::Vector{ComplexF64}, idx::Int,
-    tauk::Float64, gap_kHz_threshold::Float64)
-    γ_idx = imag(sorted_roots[idx]) / tauk * 1e-3   # kHz
+    tauk::Float64, gamma_gap_threshold::Float64)
+    γ_idx = imag(sorted_roots[idx]) / tauk
     γ_idx > 0.0 || return false                       # only suspicious if unstable
     idx >= length(sorted_roots) && return false       # nothing below to compare
-    γ_next = imag(sorted_roots[idx+1]) / tauk * 1e-3
-    return (γ_idx - γ_next) > gap_kHz_threshold
+    γ_next = imag(sorted_roots[idx+1]) / tauk
+    return (γ_idx - γ_next) > gamma_gap_threshold
 end
 
-# ---------------------------------------------------------------------
-# Root polishing (isolate-then-polish).
-#
-# The contour scan only *locates* roots to the grid/cell resolution: the
-# marching-squares intersection is a linear estimate of where Re(f)=0 and
-# Im(f)=0 cross, so the residual there is small only relative to the scan's
-# huge dynamic range, not zero. Its exact position is sensitive to ULP-level
-# jitter in the sampled `f` values (BLAS/thread reduction order), which can
-# shift the reported γ between near-degenerate estimates of the SAME root.
-#
-# `_polish_root` refines one contour intersection to the actual zero of `f`
-# by bounded minimization of `|f(Q)|`, so the reported root becomes
-# resolution- and thread-independent. It is a no-op-or-better layer: any
-# failure (non-finite, no decrease, pole approach) falls back to the
-# unpolished contour point.
-# ---------------------------------------------------------------------
+# ---------- Root polishing ----------
+# A contour intersection is only a grid-resolution estimate and is sensitive to rounding in the sampled `f`
+# (BLAS/thread order); `_polish_root` refines it to the zero of `f`, falling back to the contour point on any failure.
 
 # Median contour-segment length — a robust proxy for the local grid/cell
 # resolution, used to cap how far a polish may move a root.
@@ -591,17 +423,12 @@ function _polish_trust_radius(pts::Vector{ComplexF64}, idx::Int, h_grid::Real;
     return r > 0 ? r : r_cell
 end
 
-# Bounded Gauss-Newton minimization of |f(Q)| within a disk of radius `R`
-# around `Q0`. Returns (Q_best, n_evals, improved). `improved == false` ⇒
-# Q0 is returned unchanged (hard fallback). Trust-region projection +
-# |f|-decrease backtracking keep it strictly "improve-or-no-op": it cannot
-# diverge, jump to another root, or be pulled into a pole.
-#
-# The local model is the real 2×2 forward-difference Jacobian of (Re f, Im f), exact for holomorphic
-# and anti-holomorphic f alike; SLAYER's residual is a function of conj(Q) (see Riccati.jl).
 # Radius of a disk contained in the residual's supported domain; unrestricted by default.
 _residual_domain_radius(f, Q::ComplexF64) = Inf
 
+# Bounded Gauss-Newton minimization of |f(Q)| in the disk of radius `R` around `Q0`, using the real 2×2
+# forward-difference Jacobian (f need not be holomorphic). Returns (Q_best, n_evals, improved); it never leaves the
+# disk or increases |f|, and returns `Q0` unchanged when it cannot improve.
 function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
     tol_step::Float64=1e-12, tol_f::Float64=1e-8)
     R = min(R, _residual_domain_radius(f, Q0))
@@ -676,14 +503,13 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     pole_threshold::Float64,
     filter_above_poles::Bool,
     filter_outside_re::Bool,
-    gap_kHz_threshold::Float64=1.0,
+    gamma_gap_threshold::Float64=1e3,
     residual=nothing,
     polish_maxit::Int=20,
     validity_scale::Float64=0.0,
     validity_rtol::Float64=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Int=-1,
     winding_rfrac::Float64=0.5)
     winding = classification === :winding
     raw_intersections = _all_intersections(re_paths, im_paths)
@@ -694,30 +520,24 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     w_valid, w_poles, w_filtered = Float64[], Float64[], Float64[]
     warning_flags = Symbol[]
 
-    # Isolate-then-polish: when a residual callable is supplied, refine each
-    # (non-pole) contour intersection to the true zero of `f`. Trust radii are
-    # capped by the spacing to neighbouring intersections so closely-spaced
-    # coupled roots stay coherently bound to their own contour crossing.
+    # Polish each non-pole intersection to the zero of `f`, with trust radii capped by the neighbour spacing.
     do_polish = polish && residual !== nothing
     h_grid = (do_polish || winding) ? _median_segment_length(re_paths, im_paths) : 0.0
     # Contours crossing at a shared vertex are reported once per adjacent segment pair; a winding count needs each once.
     winding && (raw_intersections = _dedupe_points(raw_intersections, 1e-9 * max(h_grid, eps())))
-    # Validity gate: a genuine root drives |residual| ≈ 0; a spurious contour
-    # near-miss (e.g. a surface whose Δ' BVP failed → |Δ'| huge and
-    # uncancellable by the inner layer) leaves |residual| stuck near the typical
-    # scan magnitude. Only active when polishing AND a scale is supplied.
-    # Winding classification uses the sampled count instead of this residual-magnitude gate.
+    # Validity gate: a true root polishes to |f| ≈ 0, a contour near-miss (e.g. a failed Δ' BVP) stays near the
+    # scan's typical |Δ|. Not used in :winding mode.
     do_gate = do_polish && validity_scale > 0 && !winding
     polish_evals = 0
 
     for (i_pt, pt) in enumerate(raw_intersections)
         best_im_path_idx, best_im_vert_idx, _ =
             _closest_polyline_vertex(im_paths, pt)
-        # --- 1. classify as root or pole: by winding number, or by the local Re-magnitude on the Im contour
+        # Classify as root or pole: by winding number, or by the local |Re(Δ)| on the Im contour.
         R_root = 0.0   # trust radius for the polish; the classifying circle in :winding mode
         if winding
             kind, W, r = _winding_classify(residual, raw_intersections, i_pt, re_paths, im_paths, h_grid;
-                zero_winding=zero_winding, rfrac=winding_rfrac)
+                rfrac=winding_rfrac)
             if kind === :pole
                 push!(poles, pt)
                 push!(w_poles, W)
@@ -749,15 +569,12 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             continue
         end
 
-        # --- 1b. polish this (non-pole) intersection to the true zero of `f`,
-        # bounded to a neighbour-aware trust region (no-op on failure).
+        # Polish within a neighbour-aware trust region (no-op on failure).
         if do_polish
             R = winding ? R_root : _polish_trust_radius(raw_intersections, i_pt, h_grid)
             pt, nev, _ = _polish_root(residual, pt, R; maxit=polish_maxit)
             polish_evals += nev
-            # --- 1c. validity gate: drop intersections that don't polish to a
-            # true zero (|residual| stays ≫ 0 relative to the scan scale). These
-            # are contour near-misses / failed-BVP surfaces, not real roots.
+            # Drop intersections that do not polish to a true zero.
             if do_gate
                 rmag = abs(ComplexF64(residual(pt)))
                 polish_evals += 1
@@ -768,7 +585,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             end
         end
 
-        # --- 2. "+γ step inside Re contour" flag for spurious-upper-branch filter
+        # Flag roots whose +γ step along the Im=0 contour leaves a closed Re=0 loop (for the above-pole filter).
         on_top_half_re = false
         best_re_path_idx, _, _ = _closest_polyline_vertex(re_paths, pt)
         if best_im_path_idx > 0 && best_re_path_idx > 0
@@ -811,7 +628,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         push!(candidates, (pt, on_top_half_re))
     end
 
-    # --- 3. pole + closed-loop filter (legacy), then geom + gap recursion (new)
+    # Above-pole/outside-Re filter (threshold mode), then :geom/:gap warnings on the highest surviving root.
     valid_roots = ComplexF64[c[1] for c in candidates]
     filtered_roots = copy(spurious_roots)     # gate-rejected near-misses kept here
     Q_root = ComplexF64(NaN, NaN)
@@ -836,25 +653,10 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                 push!(filtered_roots, cand)
                 continue
             end
-            # New checks: 2 spurious-root flags — :geom and :gap.
-            #   :geom — Re=0 contour is locally a downward-concave "hill"
-            #           at the candidate (clean polyline-following fit)
-            #   :gap  — candidate is unstable AND >1 kHz above next root
-            #           (isolated γ peak — spurious outlier signature)
-            #
-            # Policy: WARN, DO NOT DISCARD. The both-flags-fire criterion
-            # is too aggressive in the kink-approach regime where valid
-            # roots become sparse — a few-kHz γ separation between the
-            # dominant unstable root and the next-stable root can be
-            # genuine dispersion structure rather than a "lone peak"
-            # artifact, yet :gap fires regardless. So every candidate is
-            # accepted with whatever warnings apply, and downstream tools
-            # see the same valid_roots regardless of flag combination.
-            # filtered_roots is preserved for the legacy above-pole +
-            # outside-Re reject branch only.
+            # Flag :geom and :gap but never discard: near kink onset a large γ gap can be genuine dispersion structure.
             geom_flag = _is_geom_spurious(cand, re_paths)
             gap_flag = _is_gap_spurious(sorted_pts, k, tauk,
-                gap_kHz_threshold)
+                gamma_gap_threshold)
             chosen_idx = k
             geom_flag && push!(warning_flags, :geom)
             gap_flag && push!(warning_flags, :gap)
@@ -863,58 +665,41 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
 
         if chosen_idx > 0
             Q_root = sorted_pts[chosen_idx]
-            # When a warning fired, expose the next-down root as secondary so
-            # downstream tools can plot/reanalyse. (Indices > chosen_idx in
-            # sorted_pts are the next-most-unstable.)
+            # Any warning exposes the next root down as secondary for downstream inspection.
             if !isempty(warning_flags) && chosen_idx < length(sorted_pts)
                 Q_root_2nd = sorted_pts[chosen_idx+1]
             end
         end
     end
 
-    # No usable root: either the scan produced no zero-crossing intersections
-    # (`valid_roots` empty) or every candidate was rejected by the legacy
-    # above-pole filter (`chosen_idx == 0`). Flag this explicitly so callers
-    # can distinguish a genuine marginally-stable result (γ ≈ 0) from a failed
-    # extraction — both otherwise surface as `gamma_Hz == 0.0` below.
+    # Flag a failed extraction (no intersections, or all rejected) so it is not mistaken for γ ≈ 0.
     isnan(real(Q_root)) && push!(warning_flags, :no_root)
 
-    omega_Hz = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
-    gamma_Hz = isnan(imag(Q_root)) ? 0.0 : imag(Q_root) / tauk
-    omega_Hz_2nd = isnan(real(Q_root_2nd)) ? 0.0 : real(Q_root_2nd) / tauk
-    gamma_Hz_2nd = isnan(imag(Q_root_2nd)) ? 0.0 : imag(Q_root_2nd) / tauk
+    omega = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
+    gamma = isnan(imag(Q_root)) ? 0.0 : imag(Q_root) / tauk
+    omega_2nd = isnan(real(Q_root_2nd)) ? 0.0 : real(Q_root_2nd) / tauk
+    gamma_2nd = isnan(imag(Q_root_2nd)) ? 0.0 : imag(Q_root_2nd) / tauk
 
-    return GrowthRateResult(Q_root, omega_Hz, gamma_Hz,
-        Q_root_2nd, omega_Hz_2nd, gamma_Hz_2nd,
+    return GrowthRateResult(Q_root, omega, gamma,
+        Q_root_2nd, omega_2nd, gamma_2nd,
         warning_flags,
         valid_roots, poles, filtered_roots,
         re_paths, im_paths, pole_threshold,
         classification, w_valid, w_poles, w_filtered)
 end
 
-# ---------------------------------------------------------------------
-# Winding-number classification (`classification = :winding`).
-#
-# The pole-threshold path above decides root vs pole from the local size of
-# Re(Δ) along the Im=0 contour, then prunes with geometric heuristics. Both
-# can misjudge a root that sits close to a pole, and none of them is a proof.
-# The argument principle is: the winding number of f on a closed curve counts
-# zeros minus poles inside it (holomorphic f; the sign flips for a function of
-# conj(Q)). Finite sampling can miss phase turns between points and is not a proof of the count.
-# ---------------------------------------------------------------------
+# ---------- Winding-number classification (`classification = :winding`) ----------
+# Argument principle: the winding number of f on a closed curve counts zeros minus poles inside it.
 
 const _VALID_CLASSIFICATIONS = (:threshold, :winding)
 
-function _check_classification(classification::Symbol, residual, zero_winding::Integer)
+function _check_classification(classification::Symbol, residual)
     classification in _VALID_CLASSIFICATIONS ||
         throw(ArgumentError("find_growth_rates: classification=$(classification) " *
                             "not in $(_VALID_CLASSIFICATIONS)"))
     classification === :winding || return nothing
     residual === nothing &&
         throw(ArgumentError("find_growth_rates: classification=:winding needs a residual callable"))
-    abs(zero_winding) == 1 ||
-        throw(ArgumentError("find_growth_rates: zero_winding must be +1 (holomorphic residual) " *
-                            "or -1 (anti-holomorphic), got $(zero_winding)"))
     return nothing
 end
 
@@ -970,14 +755,12 @@ function _local_segment_length(re_paths::Vector{Vector{ComplexF64}}, im_paths::V
     return h > 0 ? h : fallback
 end
 
-# Classify intersection `i` of `pts` by the winding number of `residual` on a circle around it: `(kind, W, r)` with kind
-# `:root`, `:pole`, `:none` (zero count) or `:unresolved`, the count W and the circle radius r. The circle is a fraction
-# `rfrac` of the local contour resolution and under half the distance to every other intersection; a non-finite circle is
-# retried at r/2 and r/4, and a zero count is checked once on a circle eight times wider, because the contour estimate of a
-# pole can lie outside the small one; that circle only has to exclude the other intersections, so it may reach 0.9 of the
-# distance to the nearest.
+# Classify intersection `i` by the winding number of `residual` on a circle around it; returns `(kind, W, r)` with kind
+# `:root`, `:pole`, `:none` (zero count) or `:unresolved`. A non-finite circle is retried at r/2 and r/4; a zero count is
+# rechecked once on a circle eight times wider (up to 0.9 of the nearest-neighbour distance), since a pole's contour
+# estimate can lie outside the small circle.
 function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, im_paths, h_grid::Float64;
-    zero_winding::Int, rfrac::Float64)
+    rfrac::Float64)
     pt = pts[i]
     h_loc = _local_segment_length(re_paths, im_paths, pt, h_grid)
     domain_radius = _residual_domain_radius(residual, pt)
@@ -1000,8 +783,8 @@ function _winding_classify(residual, pts::Vector{ComplexF64}, i::Int, re_paths, 
             end
         end
     end
-    n * zero_winding >= 1 && return (:root, W, r)
-    n * zero_winding <= -1 && return (:pole, W, r)
+    n >= 1 && return (:root, W, r)
+    n <= -1 && return (:pole, W, r)
     return (:none, W, r)
 end
 
@@ -1016,14 +799,13 @@ function _extract_growth_rates(re_axis::Vector{Float64},
     pole_threshold::Float64,
     filter_above_poles::Bool,
     filter_outside_re::Bool,
-    gap_kHz_threshold::Float64=1.0,
+    gamma_gap_threshold::Float64=1e3,
     residual=nothing,
     polish_maxit::Int=20,
     validity_scale::Float64=0.0,
     validity_rtol::Float64=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Int=-1,
     winding_rfrac::Float64=0.5)
     re_field = real.(Δ_grid)
     im_field = imag.(Δ_grid)
@@ -1040,22 +822,17 @@ function _extract_growth_rates(re_axis::Vector{Float64},
         pole_threshold=pole_threshold,
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=gap_kHz_threshold,
+        gamma_gap_threshold=gamma_gap_threshold,
         residual=residual,
         polish_maxit=polish_maxit,
         validity_scale=validity_scale,
         validity_rtol=validity_rtol,
         polish=polish,
         classification=classification,
-        zero_winding=zero_winding,
         winding_rfrac=winding_rfrac)
 end
 
-# ---------------------------------------------------------------------
-# AMR path: Delaunay triangulation + marching triangles. Hanging nodes
-# from the quadtree's mixed refinement levels become first-class vertices
-# in the triangulation, so contour segments piece together without gaps.
-# ---------------------------------------------------------------------
+# ---------- AMR path: Delaunay triangulation + marching triangles ----------
 
 # Emit a Re=0 and Im=0 segment (if any) from a single triangle. Returns
 # `(re_seg, im_seg)` where each may be `nothing`. A segment is a
@@ -1199,14 +976,13 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
     pole_threshold::Float64,
     filter_above_poles::Bool,
     filter_outside_re::Bool,
-    gap_kHz_threshold::Float64=1.0,
+    gamma_gap_threshold::Float64=1e3,
     residual=nothing,
     polish_maxit::Int=20,
     validity_scale::Float64=0.0,
     validity_rtol::Float64=1e-3,
     polish::Bool=true,
     classification::Symbol=:threshold,
-    zero_winding::Int=-1,
     winding_rfrac::Float64=0.5)
     length(Q) == length(Δ) ||
         throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
@@ -1245,13 +1021,12 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
         pole_threshold=pole_threshold,
         filter_above_poles=filter_above_poles,
         filter_outside_re=filter_outside_re,
-        gap_kHz_threshold=gap_kHz_threshold,
+        gamma_gap_threshold=gamma_gap_threshold,
         residual=residual,
         polish_maxit=polish_maxit,
         validity_scale=validity_scale,
         validity_rtol=validity_rtol,
         polish=polish,
         classification=classification,
-        zero_winding=zero_winding,
         winding_rfrac=winding_rfrac)
 end

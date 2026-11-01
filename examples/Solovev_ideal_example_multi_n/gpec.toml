@@ -1,10 +1,12 @@
 # Solovev analytical equilibrium — multi-n ideal stability (n = 1 and 2 in one run).
 # Same near-marginal Solovev plasma as Solovev_ideal_example, swept over a toroidal
 # mode-number range. The single_n_1/ and single_n_2/ subdirectories run each n alone
-# for cross-checking. Equilibrium is generated from the embedded [SOL_INPUT] section.
+# for cross-checking. Equilibrium is generated from the embedded [Solovev] section.
+
+[Run]
+verbose = true                 # Log each stage's progress
 
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized poloidal flux
@@ -13,29 +15,25 @@ mpsi = 128                              # Number of radial grid intervals (0 = t
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 flux_surface_rtol = 1e-7                # Relative tolerance of the ODE solves that trace each flux surface
-force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
 # See examples/Solovev_ideal_example/gpec.toml for the rationale behind the close conformal wall.
-shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-standoff_fraction = 0.2415              # Wall standoff in plasma minor radii (conformal, dee)
-half_thickness = 0.05                   # Half-thickness parameter for Dee-shaped walls
-elongation = 1.5                        # Elongation parameter for wall shapes
-center_offset = 0                       # Offset of wall center from major radius
-triangularity = 0.5                     # Triangularity parameter for wall shapes
-corner_sharpness = 0.05                 # Sharpness of wall corners (try 0.05 as initial value)
+shape = "conformal"                     # Wall shape (conformal, elliptical, dee, mod_dee, file)
+standoff_fraction = 0.2415              # Wall standoff in plasma minor radii
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
-# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
-ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = true                # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
@@ -43,27 +41,27 @@ vac_flag = true               # Compute plasma, vacuum, and total energies for f
 dW_edge_scan_start = 0.99     # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
-sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                    # Smallest toroidal mode number to include
-nn_high = 2                   # Largest toroidal mode number to include
+nn = [1, 2]                    # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960           # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
-kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
-kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details).
 # The multi-n Δ' matrix has open issues and is skipped with a warning; the energies stay valid.
-integrator            = "riccati" # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
+integrator = "Riccati" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = false # FALSE for multi-n — rational_offset_fraction truncation is ambiguous when n varies (sing_lim! skips anyway)
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction)/n (used when truncate_at_rational_offset = true)
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+
+# Numerical settings of the Riccati integrator
+[Riccati]
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
+
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

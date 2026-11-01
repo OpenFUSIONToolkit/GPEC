@@ -11,12 +11,8 @@ A struct representing a region of integration in the Euler-Lagrange solver.
   - `psi_end::Float64` - Ending ψ coordinate for this integration region
   - `needs_crossing::Bool` - Whether a rational surface crossing is needed after this chunk
   - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
-  - `direction::Int` - Integration direction: +1 forward (axis→edge), -1 backward (edge→axis).
-    For `direction=-1` chunks, `psi_start` < `psi_end` but integration proceeds from `psi_end`
-    toward `psi_start`. The resulting propagator maps state at `psi_end` → state at `psi_start`.
-    Used in bidirectional parallel FM to produce well-conditioned crossing-chunk propagators:
-    solutions that grow exponentially forward (toward a singularity) decay when integrated
-    backward, so the backward propagator is well-conditioned.
+  - `direction::Int` - +1 forward, -1 backward. A backward chunk still has `psi_start < psi_end` but
+    its propagator maps the state at `psi_end` to `psi_start`; used for well-conditioned crossing chunks.
 """
 @kwdef struct IntegrationChunk
     psi_start::Float64
@@ -41,9 +37,7 @@ Applying the propagator to the current state `u_prev`:
 u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
 u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
 
-Since each chunk starts from a bounded identity IC (rather than the accumulated state),
-exponential growth within a chunk does not affect the conditioning of the overall
-assembly. This enables `Threads.@threads` parallel integration across all chunks.
+Each chunk starts from an identity IC rather than the accumulated state, so chunks integrate in parallel.
 """
 struct ChunkPropagator
     block_upper_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (I, 0)

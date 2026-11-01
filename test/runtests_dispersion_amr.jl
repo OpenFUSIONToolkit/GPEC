@@ -1,7 +1,7 @@
 @testset "Dispersion AMR scan + triangulation extraction" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using StaticArrays
 
     @testset "amr_scan: basic structure and hash-caching" begin
@@ -106,13 +106,13 @@
             nre0=8, nim0=8, passes=4)
         tauk = 5e-5
         result = find_growth_rates(amr, tauk)
-        @test result.omega_Hz ≈ real(result.Q_root) / tauk
-        @test result.gamma_Hz ≈ imag(result.Q_root) / tauk
+        @test result.omega ≈ real(result.Q_root) / tauk
+        @test result.gamma ≈ imag(result.Q_root) / tauk
     end
 
     @testset "find_growth_rates(AMR): argument validation" begin
         # Too few points to triangulate
-        GRE = GeneralizedPerturbedEquilibrium.Dispersion
+        GRE = GeneralizedPerturbedEquilibrium.Tearing.Dispersion
         @test_throws ArgumentError GRE._extract_growth_rates_amr(
             ComplexF64[0.0+0im, 1.0+0im], ComplexF64[1.0+0im, 2.0+0im], 1.0;
             re_target=0.0, im_target=0.0, pole_threshold=10.0,
@@ -176,7 +176,7 @@
     # =========================================================================
     # multi_box_amr_scan
     # =========================================================================
-    using GeneralizedPerturbedEquilibrium.Dispersion: BoxActivity, NoActivity,
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion: BoxActivity, NoActivity,
         ReZeroCrossing, ImZeroCrossing, PoleMagnitude, MultiBoxAMRResult,
         multi_box_amr_scan, as_amr_result
 

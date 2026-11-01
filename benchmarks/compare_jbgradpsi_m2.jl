@@ -1,7 +1,7 @@
 # Compare the area-normalized b^ψ (PerturbedEquilibrium/Response/psi_area = b^ψ/⟨J·|∇ψ|⟩_θ) for one
 # poloidal harmonic between two GPEC runs that are identical except for which ξ feeds PerturbedEquilibrium:
-#   (1) IDEAL galerkin matched ξ   (gal_match_flag=true, gal_ideal_flag=true)
-#   (2) FORWARD ξ                  (gal_match_flag=false)
+#   (1) IDEAL galerkin matched ξ   (integrator = "Galerkin" with [Match] ideal = true)
+#   (2) FORWARD ξ                  (integrator = "Forward", no [Match])
 #
 # PE writes no ψ grid, so it's reconstructed: gal-ideal → ForceFreeStates/Solutions/GalerkinIntegration/psi (already excludes on-surface points);
 # forward → ForceFreeStates/Solutions/ForwardIntegration/psi.

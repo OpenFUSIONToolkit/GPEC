@@ -219,8 +219,8 @@ end
     @test isdir(equil_dir)
 
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
-    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir)
-    equil = Equilibrium.PlasmaEquilibrium(eq_config, Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+    eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, equil_dir)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
     mtheta = 48
     nzeta = 16
@@ -402,7 +402,7 @@ end
     @test isdir(equil_dir)
 
     inputs2 = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
-    eq_config2 = Equilibrium.EquilibriumConfig(inputs2["Equilibrium"], equil_dir)
+    eq_config2 = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs2, equil_dir)
     equil = Equilibrium.PlasmaEquilibrium(eq_config2)
 
     # Build coil sets manually (standard I-coil currents for RMP studies)
@@ -556,8 +556,8 @@ end
 @testset "Analytic coils: window_pane standoff" begin
     equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
-    equil = Equilibrium.PlasmaEquilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir),
-        Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
+    equil = Equilibrium.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, equil_dir),
+        GeneralizedPerturbedEquilibrium.analytic_config(inputs))
 
     # surface_point_and_normal: outboard midplane (poloidal_angle = 0)
     R0, Z0, nR0, nZ0 = ForcingTerms.surface_point_and_normal(equil, 0.0)

@@ -135,14 +135,9 @@ end
 """
     resample_contour_to_theta_grid!(R_out, Z_out, curve, ro, zo, theta_grid)
 
-Resample a Contour.jl curve onto a uniform geometric-angle grid, writing results
-directly into the pre-allocated `R_out` and `Z_out` vectors (views into R_table/Z_table).
-
-Uses a polar representation: fits a cubic spline on log ρ(η) where
-ρ_i = sqrt((R_i − ro)² + (Z_i − zo)²) and η_i = atan2(Z_i − zo, R_i − ro).
-This guarantees exp(logρ_spl) > 0 everywhere — a self-intersecting contour is
-impossible by construction — making it robust near x-points where R(η) and Z(η)
-splines tend to overshoot between widely-spaced knots.
+Resample a Contour.jl curve onto the geometric-angle grid `theta_grid` (in turns), writing into `R_out` and `Z_out`.
+Fits a periodic cubic spline to log ρ(η) about the axis (ro, zo), so the resampled radius stays positive and the
+curve cannot self-intersect, which keeps it robust near x-points where R(η), Z(η) splines overshoot.
 """
 function resample_contour_to_theta_grid!(
     R_out::AbstractVector{Float64}, Z_out::AbstractVector{Float64},
@@ -255,10 +250,8 @@ sub-interval uses:
   - symmetric (double-ended) sinh when both endpoints are concentration points
   - one-sided sinh fine at the concentration-point end otherwise
 
-Domain boundaries (`lo`, `hi`) are treated as concentration points only if they appear in
-`centers`. This produces a grid that is simultaneously fine near the magnetic axis (an
-interior concentration point) and near x-points (which lie at domain boundaries for
-the clipped plasma bounding box). Returns a uniform grid if `β ≤ 0`.
+Domain boundaries (`lo`, `hi`) are concentration points only if they appear in `centers`, as x-points do on the
+clipped plasma bounding box. Returns a uniform grid if `β ≤ 0`.
 """
 function make_multi_stretched_grid(lo::Float64, hi::Float64,
     centers::Vector{Float64}, n::Int, β::Float64)
@@ -388,9 +381,7 @@ function adaptive_grid_params(
         end
     end
 
-    # Axis constraint: global grid cell ≤ 0.2 × a_low (minimum semi-axis of innermost surface).
-    # Using min(a_R, a_Z) for both directions matches the old scale_r/scale_z target_cell_frac
-    # logic and ensures the constraint is the same in both directions.
+    # Axis constraint: cell ≤ 0.2 × a_low, the smaller semi-axis of the innermost surface, in both directions.
     ψ_RR_ax = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(2, 0)))
     ψ_ZZ_ax = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(0, 2)))
     a_low_ax = min(sqrt(2 * psilow * psio / ψ_RR_ax), sqrt(2 * psilow * psio / ψ_ZZ_ax))
@@ -415,8 +406,7 @@ function adaptive_grid_params(
 end
 
 """
-    equilibrium_solver_by_inversion(raw_profile; resolution_factor=1.0,
-                                    refine=nothing, β_r=nothing, β_z=nothing)
+    equilibrium_solver_by_inversion(raw_profile; resolution_factor=4.0, override_psi_nodes=nothing) -> PlasmaEquilibrium
 
 Driver for contour-tracing equilibrium reconstruction.
 
@@ -424,17 +414,11 @@ Grid parameters (n and β in each direction) are computed adaptively from the bi
 interpolation error bound along the LCFS and an axis constraint. `resolution_factor`
 scales both n values uniformly (higher → more points, same β).
 
-Legacy keyword arguments `refine`, `β_r`, `β_z` override the adaptive values when
-provided (for benchmark sweeps and backward compatibility).
-
 Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 function equilibrium_solver_by_inversion(
     raw_profile::DirectRunInput;
     resolution_factor::Float64=4.0,
-    refine::Union{Nothing,Int}=nothing,
-    β_r::Union{Nothing,Float64}=nothing,
-    β_z::Union{Nothing,Float64}=nothing,
     override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing
 )
     equil_params = raw_profile.config
@@ -455,12 +439,7 @@ function equilibrium_solver_by_inversion(
     topology = classify_topology(raw_profile, psio)
     @info "efit_by_inversion: topology = $topology"
 
-    # Clip fine grid to separatrix bounding box.
-    # The EFIT nodal ψ values are free (already stored in the spline); a single coarse
-    # Contour.jl call at ψ ≈ psihigh gives the plasma bounding box with no extra spline work.
-    # A 5% margin on each side ensures small arc curvature outside the box is covered.
-    nw = length(raw_profile.psi_in_xs)
-    nh = length(raw_profile.psi_in_ys)
+    # Clip the fine grid to the plasma bounding box, from one coarse contour of the nodal ψ near psihigh, plus a margin.
     ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
     ψ_bbox_target = psio * max(1.0 - psihigh, 1e-3)   # outermost needed surface, ≥ 0.001·psio
     cl_bbox = Ctr.contour(raw_profile.psi_in_xs, raw_profile.psi_in_ys, ψ_coarse, ψ_bbox_target)
@@ -489,19 +468,12 @@ function equilibrium_solver_by_inversion(
     # Compute physics-based (n, β) from LCFS curvature sampling and axis constraint.
     # resolution_factor scales n; β is determined by h_max/h_min curvature ratio alone.
     Δψ = psio * (psihigh - psilow) / mpsi
-    nr_adp, nz_adp, β_r_adp, β_z_adp = adaptive_grid_params(
+    nr_adp, nz_adp, β_r, β_z = adaptive_grid_params(
         raw_profile, ro, zo, r_lo, r_hi, z_lo, z_hi, psilow, Δψ, bbox_curve)
-    β_r_use = β_r !== nothing ? β_r : β_r_adp
-    β_z_use = β_z !== nothing ? β_z : β_z_adp
-    if refine !== nothing
-        nr_fine = max(4, round(Int, refine * nw * (r_hi - r_lo) / (raw_profile.rmax - raw_profile.rmin)))
-        nz_fine = max(4, round(Int, refine * nh * (z_hi - z_lo) / (raw_profile.zmax - raw_profile.zmin)))
-    else
-        nr_fine = max(4, round(Int, nr_adp * resolution_factor))
-        nz_fine = max(4, round(Int, nz_adp * resolution_factor))
-    end
-    r_fine = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r_use)
-    z_grid = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z_use)
+    nr_fine = max(4, round(Int, nr_adp * resolution_factor))
+    nz_fine = max(4, round(Int, nz_adp * resolution_factor))
+    r_fine = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r)
+    z_grid = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z)
 
     iro = clamp(searchsortedfirst(r_fine, ro), 2, length(r_fine))
     izo = clamp(searchsortedfirst(z_grid, zo), 2, length(z_grid))
@@ -514,13 +486,9 @@ function equilibrium_solver_by_inversion(
     n_min_cells = 10
     near_axis_threshold = (n_min_cells * d_max)^2 * max(ψ_RR_abs, ψ_ZZ_abs) / (2 * psio)
 
-    @info "efit_by_inversion: a_low=$(@sprintf("%.1f", a_low*1000)) mm; grid=$(nr_fine)×$(nz_fine) β_r=$(@sprintf("%.2f", β_r_use)) β_z=$(@sprintf("%.2f", β_z_use)) (dR=$(@sprintf("%.2f", dR_axis*1000)) mm dZ=$(@sprintf("%.2f", dZ_axis*1000)) mm); zoom threshold ψ<$(@sprintf("%.4f", near_axis_threshold))"
+    @info "efit_by_inversion: a_low=$(@sprintf("%.1f", a_low*1000)) mm; grid=$(nr_fine)×$(nz_fine) β_r=$(@sprintf("%.2f", β_r)) β_z=$(@sprintf("%.2f", β_z)) (dR=$(@sprintf("%.2f", dR_axis*1000)) mm dZ=$(@sprintf("%.2f", dZ_axis*1000)) mm); zoom threshold ψ<$(@sprintf("%.4f", near_axis_threshold))"
 
-    # Parallel grid evaluation: each column (fixed z) is independent.
-    # One hint pair per thread (allocated once), reset at the start of each column.
-    # Resetting R-hint is required (R starts over at rmin each column); resetting Z-hint
-    # lets it settle on the first lookup (Z is fixed per column, so O(log n) once then O(1)).
-    # Z-hint cannot be shared across threads for a non-uniform z_grid — each thread resets it.
+    # Evaluate ψ on the fine grid column by column in parallel; one hint pair per thread, reset at each column.
     ψ_fine = Matrix{Float64}(undef, nr_fine, nz_fine)
     thread_hints = [(Ref(1), Ref(1)) for _ in 1:Threads.maxthreadid()]
     Threads.@threads for j in 1:nz_fine
@@ -540,9 +508,8 @@ function equilibrium_solver_by_inversion(
     R_table = Matrix{Float64}(undef, mpsi + 1, mtheta + 1)
     Z_table = Matrix{Float64}(undef, mpsi + 1, mtheta + 1)
 
-    # Parallel contour tracing: each surface is independent.
-    # Ctr.contour has no global state (confirmed from source inspection) → thread-safe.
-    # surface_status: 0=global Contour.jl success, 1=below threshold (zoomed pass), -1=error.
+    # Trace surfaces in parallel (Ctr.contour has no global state).
+    # surface_status: 0 = traced on the global grid, 1 = deferred to the zoomed pass, -1 = failed.
     surface_status = Vector{Int8}(undef, mpsi + 1)
 
     Threads.@threads for ipsi in 1:(mpsi+1)
@@ -570,7 +537,7 @@ function equilibrium_solver_by_inversion(
         surface_status[ipsi] = 0
     end
 
-    # Serial error check and summary (after all threads complete)
+    # Report failures after the threaded pass
     for ipsi in 1:(mpsi+1)
         if surface_status[ipsi] == -1
             psifac = psi_nodes[ipsi]
@@ -654,17 +621,14 @@ function equilibrium_solver_by_inversion(
         @info "efit_by_inversion: $n_contour_success surfaces traced by global grid"
     end
 
-    # Column-wise ρ monotonicity check: for each geometric angle θ_k, ρ = sqrt((R-ro)²+(Z-zo)²)
-    # must increase with ipsi (star-shaped nesting). Detects localized crossings that a global
-    # area check misses. Accumulates all violations and prints one consolidated warning.
+    # ρ must increase with ipsi at each angle (nested surfaces); warn once with the first and worst violation.
     n_violations = 0
     first_ipsi = 0
     first_k = 0
     worst_Δρ = 0.0
     worst_ipsi = 0
     worst_k = 0
-    # Iterate only 1:mtheta — column mtheta+1 is the periodic wrap of column 1 (θ=0≡θ=1)
-    # and would double-count any violation there.
+    # Skip column mtheta+1, the periodic copy of column 1.
     @inbounds for k in 1:mtheta
         ρ_prev = sqrt((R_table[1, k] - ro)^2 + (Z_table[1, k] - zo)^2)
         for ipsi in 2:(mpsi+1)

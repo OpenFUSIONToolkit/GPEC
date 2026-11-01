@@ -6,8 +6,7 @@ Computes bounce-averaged frequencies (ωb, ωd) and perturbation action (|δJ|²
 as functions of pitch angle λ. For kinetic matrix methods, also computes
 bounce-averaged W_μ, W_E vectors and their outer products.
 
-Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
-Ports Fortran torque.F90 lines 530-816.
+Reference: Logan et al., Phys. Plasmas 20, 122507 (2013). Follows the GAR bounce loop of Fortran torque.F90.
 """
 
 # Guard against a non-terminating spline cell walk; θ grids are O(10²) cells.
@@ -28,19 +27,25 @@ const ROOT_COUNT_TOL = 64 * eps(Float64)
 """
     BounceData
 
-Bounce-averaged quantities as functions of pitch angle λ.
-Produced by `compute_bounce_data()`, consumed by pitch integration.
+Bounce-averaged quantities as functions of pitch angle λ, produced by `bounce_harmonic` and
+consumed by the pitch integration.
+
+## Fields
+
+  - `nlmda`, `lambda`: number of pitch-angle points and the λ grid
+  - `sigma`: 0 trapped, 1 passing, per λ
+  - `wb`, `wd`: bounce frequency ωb(λ) and precession drift ωd(λ), in rad/s
+  - `dJdJ`: ωb|δJ|²/ro² per λ (real; scalar torque path)
+  - `wmats_vs_lambda`: packed W outer products, `(nlmda, nqty_matrix(mpert))`, in the 3-Hermitian-triangle +
+    3-full-block layout of `nqty_matrix` (Logan 2015 Eqs 7.30–7.35); `nothing` on the scalar path
 """
 struct BounceData
     nlmda::Int
-    lambda::Vector{Float64}           # pitch angle grid points
-    sigma::Vector{Int}                # 0=trapped, 1=passing
-    wb::Vector{Float64}               # bounce frequency ωb(λ) [rad/s]
-    wd::Vector{Float64}               # precession drift ωd(λ) [rad/s]
-    dJdJ::Vector{Float64}             # ωb|δJ|²/ro² at each λ (real, for scalar torque)
-    # For matrix path (nothing if scalar-only): packed layout (nlmda, nqty_matrix(mpert)).
-    # Consumer fills into fbnce_data[:, 3:end] by direct copy. See `nqty_matrix` for
-    # the 3-Hermitian-triangle + 3-full-block packing (Logan 2015 Eqs 7.30–7.35).
+    lambda::Vector{Float64}
+    sigma::Vector{Int}
+    wb::Vector{Float64}
+    wd::Vector{Float64}
+    dJdJ::Vector{Float64}
     wmats_vs_lambda::Union{Nothing,Matrix{ComplexF64}}
 end
 
@@ -54,7 +59,7 @@ sub-grid samples that every ℓ reuses. Produced by `compute_bounce_geometry`, c
 ## Fields
 
   - `nlmda`, `lambda`, `sigma`: the λ grid, as in `BounceData`
-  - `wb`, `wd`: bounce and precession frequencies [rad/s]
+  - `wb`, `wd`: bounce and precession frequencies, in rad/s
   - `wbbar::Vector{Float64}`: normalized bounce frequency per λ (`wb = wbbar·bhat`)
   - `total_wb::Vector{Float64}`: full bounce-action integral per λ, the phase normalization
   - `fsi_wb::Matrix{Float64}`: `ntheta × nlmda` cumulative bounce action along the orbit
@@ -204,13 +209,9 @@ end
                         smat=nothing, tmat=nothing, xmat=nothing,
                         ymat=nothing, zmat=nothing) → BounceData
 
-Compute bounce-averaged quantities as functions of pitch angle λ.
-This is the core function that sets up all λ-dependent quantities
-needed by the pitch-angle quadrature. It is `compute_bounce_geometry` (everything
-independent of the bounce harmonic) followed by `bounce_harmonic` for `l`; a caller
-looping over harmonics builds the geometry once and calls `bounce_harmonic` per ℓ.
-
-Ports Fortran torque.F90 lines 530-816 (GAR branch).
+Compute bounce-averaged quantities as functions of pitch angle λ for bounce harmonic `l`:
+`compute_bounce_geometry` followed by `bounce_harmonic`. A caller looping over harmonics should build the
+geometry once and call `bounce_harmonic` per ℓ.
 
 # Arguments
 
@@ -223,8 +224,7 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
   - `theta_bmax`: θ location of Bmax (nodal knot; the passing-transit start)
   - `tspl`: Periodic poloidal interpolant: tspl(θ) → [B, dB/dψ, dB/dθ, J, dJ/dψ]
   - `B_vpar`: Periodic cubic of B(θ) used for v_par and the bounce-point roots
-    (the Fortran `vspl` equivalent)
-  - `mfac`: Poloidal mode numbers [mlow:mhigh]
+  - `mfac`: Poloidal mode numbers `mlow:mhigh`
   - `chi1`: 2π·ψ₀ flux normalization
   - `ro`: Major radius [m]
   - `dbob_m_f`: δB/B Fourier modes at this ψ (ComplexF64 vector, length mpert)
@@ -237,7 +237,7 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 
 # Keyword Arguments
 
-  - `nlmda`: Number of pitch angle grid points (default 128, matching Fortran pentrc nlmda)
+  - `nlmda`: Number of pitch angle grid points (default 128)
   - `ntheta`: Number of poloidal grid points per bounce (default 128)
   - `smat, tmat, xmat, ymat, zmat`: Geometric matrices (mpert×mpert) for kinetic matrix path
   - `surface_field`: Prebuilt `_surface_b_field(B_vpar)`, shared across the harmonics of a surface
@@ -306,7 +306,7 @@ function compute_bounce_geometry(
     lmdatpb = bo / bmax
     lmdamax = bo / bmin
 
-    # Build λ grid based on method variant (Fortran lines 569-585)
+    # λ grid from the method variant
     method_char = method[1]
     lambda = _build_lambda_grid(method_char, lmdatpb, lmdamax, nlmda)
 
@@ -328,7 +328,7 @@ function compute_bounce_geometry(
     for ilmda in 1:nlmda
         lmda = lambda[ilmda]
 
-        # Determine trapped/passing (Fortran line 591-595)
+        # Trapped/passing
         sigma = lmda > (bo / bmax) ? 0 : 1
         sigma_arr[ilmda] = sigma
 
@@ -336,7 +336,7 @@ function compute_bounce_geometry(
         _, _, tdt_pts, tdt_wts = _find_bounce_points_and_grid(
             lmda, bo, sigma, B_vpar, theta_bmax, psi, ntheta, bf, bpts_buf, hints)
 
-        # Bounce integrands sampled along the orbit (Fortran lines 674-735)
+        # Bounce integrands sampled along the orbit
         total_wb, total_wd = _bounce_samples!(
             view(fsi_wb, :, ilmda), view(jvtheta, :, ilmda),
             do_matrices ? view(wmu_mt, :, :, ilmda) : nothing,
@@ -350,16 +350,13 @@ function compute_bounce_geometry(
         valid[ilmda] = true
         total_wb_arr[ilmda] = total_wb
 
-        # Bounce-averaged frequencies. wbbar already carries one factor of ro that its own
-        # normalization bhat = sqrt(2T/m)/ro cancels; reusing it inside wdbar imports that ro
-        # a third time while dhat = (T/q)/(bo·ro²) removes only the two written explicitly, so
-        # the drift prefactor takes ro, not ro². (Otherwise ω_D = wdbar·dhat carries a surplus
-        # length: 4π·(I₂/I₁)·(T/q) is already V/Wb = 1/s, so the extra ro leaves m/s.)
+        # Units: wbbar already carries one ro and dhat removes only two, so the drift prefactor takes ro,
+        # not ro²; with ro² ω_D = wdbar·dhat would come out in m/s instead of 1/s.
         wbbar = ro * twopi / ((2 - sigma) * total_wb)
         wdbar = ro * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
         wbbar_arr[ilmda] = wbbar
 
-        # Physical frequencies (Fortran lines 744-745)
+        # Physical frequencies
         wb_arr[ilmda] = wbbar * bhat
         wd_arr[ilmda] = wdbar * dhat
     end
@@ -418,8 +415,8 @@ end
 """
     BounceScratch(ntheta, mpert)
 
-Per-surface scratch for the bounce-averaging inner loops, allocated once in
-`compute_bounce_data` and reused across every λ. Sizes are fixed for a flux surface
+Per-surface scratch for the bounce-averaging inner loops, allocated once per surface in
+`compute_bounce_geometry` and `bounce_harmonic` and reused across every λ. Sizes are fixed for a flux surface
 (`ntheta` sub-grid points, `mpert` Fourier modes). Buffers the loops populate only
 partially are `fill!`-reset per λ.
 
@@ -774,14 +771,8 @@ end
 
 """
 Cell holding the `B = btarget` crossing on a monotone span running from cell `ia` to
-cell `ib`.
-
-λ advances monotonically through `compute_bounce_data`, so `btarget = bo/λ` falls
-monotonically and each interval's crossing walks steadily along the cells in one
-direction. Resuming from the previous λ's cell therefore costs a step or two, the same
-hint idiom FastInterpolations uses for its own searches. Bisection stays as the fallback
-for the first λ of a surface and for the sweep near a stationary point, where B is flat
-and the crossing can cross many cells between consecutive λ.
+cell `ib`. λ ascends, so resuming from the previous λ's cell (`hint`) usually costs a step
+or two; bisection is the fallback when the hint is more than `HINT_STEP_BUDGET` cells off.
 """
 function _locate_cell(
     bf::SurfaceBField, ia::Int, ib::Int, ba::Float64, bb::Float64,
@@ -840,10 +831,8 @@ end
 """
 Bounce points of `v_par(θ) = 1 − (λ/bo)·B(θ)` for a trapped particle. `B = bo/λ` at a
 bounce point, so a monotone interval between stationary points of B contains one iff
-`bo/λ` lies strictly between its endpoint B values — a scalar test against cached
-values. The crossing is then solved directly from the cell's cubic coefficients: no
-iteration, no spline evaluation, and no blind search, since `hints` carries each
-interval's cell over from the previous λ.
+`bo/λ` lies strictly between its endpoint B values; the crossing is then solved from the
+cell's cubic, with `hints` carrying each interval's cell over from the previous λ.
 
 Returns roots sorted descending, the order the deepest-well and marginally-trapped logic
 downstream assumes; fewer than two roots signals a degenerate λ and sends the caller to
@@ -896,16 +885,12 @@ function _find_bounce_points_and_grid(
     ntheta::Int, bf::SurfaceBField, bpts_buf::Vector{Float64}, hints::Vector{Int}
 )
     if sigma == 0  # trapped
-        # Bounce points: all roots of v_par(θ) = 1 − (λ/bo)·B_vpar(θ) in (0,1),
-        # sorted descending — the same order as Fortran spline_roots, which the
-        # marginally-trapped and deepest-well wrap logic below assume.
+        # Bounce points: roots of v_par(θ) in (0,1), sorted descending as the well logic below assumes.
         bpts = _bounce_points_at_lambda!(bpts_buf, hints, bf, lmda, bo)
 
         if length(bpts) < 2
-            # Degenerate λ: v_par is tangent to zero at an extremum of B (so no
-            # interval brackets strictly), or B has fewer than two stationary
-            # points. Rare — the λ grid excludes both trapped-passing endpoints —
-            # so fall back to the adaptive whole-interval scan and keep its behaviour.
+            # Degenerate λ (v_par tangent to zero at an extremum, or < 2 stationary points of B): rare,
+            # so fall back to an adaptive whole-interval root scan.
             vpar_fn = θ -> _vpar_from_spline(B_vpar, lmda, bo, θ)
             bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
         end
@@ -980,7 +965,7 @@ end
 Sample the bounce integrands of one orbit on its θ sub-grid and integrate them: writes the cumulative
 bounce action into `fsi_wb`, the action integrand into `jvtheta` and, on the matrix path, the W_μ/W_E
 samples into `wmu_mt`/`wen_mt`; returns the total bounce-action and drift integrals. Nothing here depends
-on the bounce harmonic. Ports Fortran torque.F90 lines 674-745.
+on the bounce harmonic.
 """
 function _bounce_samples!(
     fsi_wb::AbstractVector{Float64}, jvtheta::AbstractVector{ComplexF64}, wmu_mt, wen_mt,
@@ -1021,7 +1006,6 @@ function _bounce_samples!(
         tspl(tspl_f, θmod)
         B_val = tspl_f[1]
         dBdpsi = tspl_f[2]
-        # dBdtheta = tspl_f[3]  # not needed here
         jac = tspl_f[4]
         djdpsi = tspl_f[5]
 
@@ -1092,11 +1076,8 @@ function _bounce_samples!(
         end
     end
 
-    # Total bounce integrals: the samples live on the fixed unit x-grid (the tdt weights
-    # carry dθ/dx), so the exact integral of the endpoint-fit cubic is a fixed linear
-    # combination of them (precomputed weights, see `_quadrature_weights`). With the
-    # 1/√v_par endpoint singularities the quadrature scheme is a leading-order effect, so
-    # this reproduces exact-cubic integration (not a trapezoid sum).
+    # Total bounce integrals by exact-cubic quadrature on the unit x-grid (see `_quadrature_weights`);
+    # with the 1/√v_par endpoint singularities the scheme matters at leading order, so not a trapezoid sum.
     cum_wb = scr.cum_wb_arr  # per-surface scratch; fully overwritten
     mul!(cum_wb, scr.cumint_W, g_wb)
     copyto!(fsi_wb, cum_wb)
@@ -1111,7 +1092,7 @@ end
 
 The bounce-harmonic-dependent end of the bounce integral for one λ: the phase factor
 `exp(−2πi·lnq·fsi_wb/((2−σ)·total_wb))`, the action bounce integral |δJ|² and, on the matrix path,
-the bounce-averaged W vectors and their packed outer products. Ports Fortran torque.F90 lines 746-793.
+the bounce-averaged W vectors and their packed outer products.
 """
 function _bounce_harmonic_tail(
     fsi_wb::AbstractVector{Float64}, jvtheta::AbstractVector{ComplexF64}, wmu_mt, wen_mt,
@@ -1158,11 +1139,11 @@ function _bounce_harmonic_tail(
             wen_ba[mi] = conj(dot(scr.int_w, wsamp))
         end
 
-        # Reshape as 1×mpert for matrix multiply (Fortran lines 771-772)
+        # Reshape as 1×mpert for matrix multiply
         wmmt = reshape(wmu_ba, 1, mpert)
         wemt = reshape(wen_ba, 1, mpert)
 
-        # Build W_X, W_Y, W_Z via geometric matrices (Fortran lines 773-775)
+        # Build W_X, W_Y, W_Z via geometric matrices
         wxmt = wmmt * xmat
         wymt = wmmt * (3 * smat + ymat) - 2.0 * wemt * smat
         wzmt = wmmt * (3 * tmat + zmat) - 2.0 * wemt * tmat
@@ -1172,7 +1153,7 @@ function _bounce_harmonic_tail(
         wy = vec(wymt)
         wz = vec(wzmt)
 
-        # Scale by wbbar/ro² (Fortran line 789)
+        # Scale by wbbar/ro²
         scale = wbbar / ro^2
         Mu = (mpert * (mpert + 1)) ÷ 2
         wmats_lmda = scr.wmats_lmda

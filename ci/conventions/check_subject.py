@@ -48,6 +48,7 @@ NON_MODULE_AREAS = (
     "CI",
     "Docs",
     "Examples",
+    "HDF5Schema",
     "Regression",
     "Repo",
     "Test",
@@ -137,7 +138,7 @@ def module_areas(root: Path) -> list[str]:
             if any(sub.glob("*.jl")):
                 areas.append(f"{module.name}.{sub.name}")
 
-    # Top-level sources such as Rerun.jl and HDF5Schema.jl are components in
+    # Top-level sources such as Rerun.jl are components in
     # their own right and are committed against directly.
     for source in sorted(src.glob("*.jl")):
         if source.name != PACKAGE_ENTRY:

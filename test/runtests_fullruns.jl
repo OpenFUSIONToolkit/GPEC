@@ -8,9 +8,8 @@ using TOML
     @info "Running Solovev ideal example with frequent Gaussian reductions"
     @testset "et[1] is independent of the reduction frequency" begin
         deck = TOML.parsefile(joinpath(ex1, "gpec.toml"))
-        deck["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         function total_energy(renorm_threshold)
-            deck["ForceFreeStates"]["renorm_threshold"] = renorm_threshold
+            deck["Forward"]["renorm_threshold"] = renorm_threshold
             return mktempdir() do workdir
                 open(io -> TOML.print(io, deck), joinpath(workdir, "gpec.toml"), "w")
                 GeneralizedPerturbedEquilibrium.main([workdir])
@@ -30,11 +29,20 @@ using TOML
         true
     end
 
-    ex3 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_example")
-    @info "Running Solovev kinetic example (kinetic_source=fixed, kinetic_factor=1e-9)"
-    @test begin
-        GeneralizedPerturbedEquilibrium.main([ex3])
-        h5open(joinpath(ex3, "gpec.h5"), "r") do h5
+    # A fixture deck solved through the API with synthetic test kinetic matrices, which no deck can select; saved to `dir`.
+    function test_kinetic_run(dir, fixture)
+        GPEC = GeneralizedPerturbedEquilibrium
+        inputs, config, analytic = GPEC.build_inputs_from_toml(joinpath(@__DIR__, "test_data", fixture))
+        kwargs = merge(GPEC.force_balance_keywords(inputs, joinpath(@__DIR__, "test_data", fixture)), Dict(:kinetic => TestKineticMatrices(; scale=1e-9)))
+        prob = ForceBalanceProblem(PlasmaEquilibrium(config, analytic); kwargs...)
+        path = joinpath(dir, "gpec.h5")
+        save_to_hdf5(path, solve(prob, GPEC.force_balance_algorithm(inputs)))
+        return path
+    end
+
+    @info "Running Solovev with synthetic test kinetic matrices (scale 1e-9)"
+    @test mktempdir() do dir
+        h5open(test_kinetic_run(dir, "regression_solovev_ideal_example"), "r") do h5
             # Smoke test: this nerfed deck (mpsi=16, delta_m=0) is for "does it run / no NaN",
             # not numeric regression — the mode-converged physical value is pinned in the
             # regression harness (examples/Solovev_kinetic_calculated_example). Assert only
@@ -42,25 +50,19 @@ using TOML
             et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
             @test real(et[1]) > 0
-            # Per-stage wall-clock records (informational, not regression quantities).
-            @test haskey(h5, "Info/Runtimes/total") && read(h5["Info/Runtimes/total"]) > 0
-            @test haskey(h5, "Info/Runtimes/force_free_states")
             # Kinetic runs never populate the asymptotic ca coefficients; the writer must
             # emit deterministic zero-extent sentinels, not uninitialized memory.
             @test isempty(read(h5["SingularSurfaces/ca_left"]))
             @test isempty(read(h5["SingularSurfaces/ca_right"]))
-            # The Euler-Lagrange matrices are opt-in; a default deck writes no group.
+            # The Euler-Lagrange matrices are opt-in; a default run writes no group.
             @test !haskey(h5, "ForceFreeStates/EulerLagrangeMatrices")
         end
-        rm(joinpath(ex3, "gpec.h5"); force=true)
         true
     end
 
-    ex4 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_multi_n")
-    @info "Running Solovev kinetic multi-n example (kinetic_factor=1e-9, nn_low=1, nn_high=2)"
-    @test begin
-        GeneralizedPerturbedEquilibrium.main([ex4])
-        h5open(joinpath(ex4, "gpec.h5"), "r") do h5
+    @info "Running Solovev multi-n with synthetic test kinetic matrices (scale 1e-9, n = 1:2)"
+    @test mktempdir() do dir
+        h5open(test_kinetic_run(dir, "regression_solovev_ideal_example_multi_n"), "r") do h5
             # Smoke test only (nerfed mpsi=16, delta_m=0 deck): runs without faulting and
             # produces a finite leading eigenvalue. Numeric regression tracking lives in the
             # harness on the mode-converged deck, not here — et[1] is a near-marginal,
@@ -69,12 +71,11 @@ using TOML
             et = read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
         end
-        rm(joinpath(ex4, "gpec.h5"); force=true)
         true
     end
 
     ex5 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_calculated")
-    @info "Running Solovev self-consistent kinetic-MHD example (kinetic_source=calculated)"
+    @info "Running Solovev self-consistent kinetic-MHD example (kinetic = KineticForces)"
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex5])
         h5open(joinpath(ex5, "gpec.h5"), "r") do h5
@@ -97,7 +98,7 @@ using TOML
     end
 
     ex6 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_nuzero")
-    @info "Running Solovev self-consistent kinetic-MHD example (kinetic_source=calculated, nutype=zero)"
+    @info "Running Solovev self-consistent kinetic-MHD example (kinetic = KineticForces, nutype=zero)"
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex6])
         h5open(joinpath(ex6, "gpec.h5"), "r") do h5

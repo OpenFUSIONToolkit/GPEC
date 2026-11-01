@@ -1,7 +1,7 @@
 """
     SolovevConfig(...)
 
-A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium model.
+A struct holding parameters for the Solov'ev (SOL) plasma equilibrium model.
 
 ## Fields:
 
@@ -16,7 +16,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
   - `b0fac`: scale toroidal field at constant beta (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
   - `f0fac`: scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 """
-@kwdef mutable struct SolovevConfig <: AnalyticEquilibriumConfig
+@kwdef struct SolovevConfig <: AnalyticEquilibriumConfig
     mr::Int = 128      # number of radial grid zones
     mz::Int = 128      # number of axial grid zones
     ma::Int = 128      # number of flux grid zones
@@ -30,33 +30,10 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
 end
 
 """
-Build a `SolovevConfig` from a parsed `[SOL_INPUT]` TOML table.
-"""
-function SolovevConfig(input_dict::Dict{String,Any})
-    return SolovevConfig(; symbolize_keys(input_dict)...)
-end
+    sol_run(equil_inputs, sol_inputs) -> DirectRunInput
 
-"""
-This function handles the Solovev analytical equilibrium model, transforming the input parameters
-into the necessary splines and scalar values for equilibrium construction. This is a Julia version
-of the Fortran code in sol.f, with no major differences except for arrays going from 0:n to 1:n+1.
-
-## Arguments:
-
-  - `mr`: Number of radial grid zones
-  - `mz`: Number of axial grid zones
-  - `ma`: Number of flux grid zones
-  - `e`: Elongation
-  - `a`: Minor radius
-  - `r0`: Major radius
-  - `q0`: Safety factor at the o-point
-  - `p0fac`: Scales on axis pressure (s*P. beta changes. Phi,q constant)
-  - `b0fac`: Scales on toroidal field (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
-  - `f0fac`: Scales on toroidal field (s*f. bt,q changes. Phi,p,bp constant)
-
-## Returns:
-
-  - `DirectRunInput` object
+Build the Solov'ev analytic ψ(R, Z) and 1D profiles from `sol_inputs` as direct-solver input.
+Port of Fortran `sol.f`.
 """
 function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
 
@@ -113,6 +90,6 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     @info "Generating Solovev equilibrium: mr=$mr, mz=$mz, ma=$ma, e=$(@sprintf("%.3f", e)), a=$(@sprintf("%.3f", a)), r0=$(@sprintf("%.3f", r0)), q0=$(@sprintf("%.3f", q0))"
 
     # 1 is bt_sign=+1: Solovev has positive Bt by construction (f0 = r0 * b0fac > 0).
-    # Analytic equilibria carry positive field and current; ingest=nothing — replay regenerates from the [SOL_INPUT] TOML section.
+    # Analytic equilibria carry positive field and current; ingest=nothing — replay regenerates from the [Solovev] deck section.
     return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, 1, 1, nothing)
 end

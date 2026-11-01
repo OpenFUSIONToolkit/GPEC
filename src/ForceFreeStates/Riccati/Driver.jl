@@ -1,143 +1,42 @@
 """
     Riccati/ - Dual Riccati reformulation of the Euler-Lagrange ODE
 
-Implements the dual Riccati matrix S = U₁ · U₂⁻¹ = P⁻¹, which satisfies a bounded
-ODE even near singular surfaces where U₁, U₂ grow exponentially. This reduced stiffness
-leads to fewer ODE integration steps and faster wall-clock time.
+Tracks the dual Riccati matrix S = U₁·U₂⁻¹ = P⁻¹ (P = U₂·U₁⁻¹ the plasma response matrix), which stays
+bounded near singular surfaces where U₁ and U₂ grow exponentially. Reference: Glasser (2018) Phys. Plasmas
+25, 032507 — Eq. 19 (dual form), dS/dψ = w†·F̄⁻¹·w − S·Ḡ·S with w = Q − K̄·S.
 
-Reference: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (adapted for dual form S = P⁻¹)
-where P = U₂ · U₁⁻¹ is the forward plasma response matrix.
+The explicit Riccati ODE is not integrated directly: its quadratic term defeats relative error control when
+|S| is large. Instead the linear EL ODE (`sing_der!`) is integrated in (U₁, U₂), and the exact change of
+variables `renormalize_riccati_inplace!` resets the state to (S, I) whenever max(|U₁|) or max(|U₂|) exceeds
+`renorm_threshold`, the Riccati analogue of Gaussian reduction.
 
-## Dual Riccati ODE
+## Storage convention
 
-Starting from the Euler-Lagrange system [Glasser 2016 eq. 24]:
-  dU₁/dψ = A·U₁ + B·U₂        A = -Q·F̄⁻¹·K̄,  B = Q·F̄⁻¹·Q
-  dU₂/dψ = C·U₁ + D·U₂        C = Ḡ - K̄†·F̄⁻¹·K̄,  D = K̄†·F̄⁻¹·Q
+  - During a chunk: u[:,:,1] = U₁ (starts as S), u[:,:,2] = U₂ (starts as I).
+  - After renormalization: u[:,:,1] = S, u[:,:,2] = I, so downstream U₁/U₂ ratios (wp in Free.jl, the
+    fixed-boundary criterion) read S directly.
+  - Axis: S(ψ₀) = 0 (U₁ = 0, U₂ = I), unless a positive `ctrl.frobenius_psi_max` at or above the start
+    opts into the diagonal Frobenius init (U₂ = I, per-mode U₁).
 
-with S = U₁·U₂⁻¹, differentiating gives the Riccati ODE:
-  dS/dψ = B + A·S - S·D - S·C·S
-
-Setting w = Q - K̄·S (shape N×N) and v = F̄⁻¹·w (Cholesky solve), this simplifies to:
-  dS/dψ = w†·v - S·Ḡ·S     [Glasser 2018 eq. 19, dual form]
-
-## Integration Strategy
-
-### Why not integrate the Riccati ODE directly?
-
-`riccati_der!` evaluates the explicit Riccati RHS `dS/dψ = w†F̄⁻¹w − S·Ḡ·S` correctly,
-but this ODE is **quadratic** in S. Near a rational surface, S grows large, so the quadratic
-term `-SGS` dominates and the RHS grows as |S|². Explicit adaptive solvers (Vern9) use
-*relative* error control: they accept a step when |Δu|/|u| < reltol. When |S| is large,
-the absolute error |ΔS| can be enormous while the relative error stays within tolerance.
-The solver takes large steps through what is effectively a near-blowup — no amount of
-step-size adaptation saves it because the problem is the error *metric*, not the step size.
-An implicit solver could handle this stiffness, but is deferred.
-
-### Actual implementation: EL ODE + renormalization
-
-Instead we integrate the standard EL ODE (`sing_der!`) in the (U₁, U₂) variables and
-recover S = U₁·U₂⁻¹ by renormalization. This achieves the same Riccati trajectory with
-**no accuracy loss**:
-
-- `sing_der!` evaluates the exact EL RHS — no approximation.
-- Vern9 integrates (U₁, U₂) to **9th-order accuracy** with the adaptive step-size
-  controller enforcing the configured reltol at every accepted step.
-- Renormalization `S = U₁·U₂⁻¹` is **exact** (a change of variables, not an approximation).
-- The global error is the same as the standard EL path — controlled by the ODE solver
-  reltol, not by the renormalization frequency.
-
-This works because the EL ODE is **linear** in (U₁, U₂): the RHS does not grow with |S|,
-so relative error control is faithful even when S is large. Renormalization triggered by
-`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > renorm_threshold) keeps
-both matrices bounded, preventing overflow and maintaining a well-conditioned state for the
-solver — exactly analogous to Gaussian reduction in the standard ODE.
-
-### Consistency with the Riccati ODE (local analysis)
-
-To verify the method is consistent with the Riccati ODE, consider a single step from (S, I):
-
-  After one step: U₁_new = S + (A·S + B)·Δψ + O(Δψ²),  U₂_new = I + (C·S + D)·Δψ + O(Δψ²)
-  Renorm:         S_new = U₁_new · U₂_new⁻¹ = S + (B + A·S − S·D − S·C·S)·Δψ + O(Δψ²) ✓
-
-The leading term matches the Riccati ODE exactly. This is a local consistency check only —
-it does not imply the integration is first-order. In practice Vern9 captures all higher-order
-terms through its internal stages, achieving 9th-order global accuracy at the configured reltol.
-
-## Storage Convention
-
-During chunk integration (with sing_der! as ODE RHS):
-  u[:,:,1] = U₁  (starts as S_prev, evolves toward new S)
-  u[:,:,2] = U₂  (starts as I, evolves with EL dynamics)
-
-After renormalization (at crossing or when norms exceed renorm_threshold):
-  u[:,:,1] = S = U₁ · U₂⁻¹
-  u[:,:,2] = I
-
-This is compatible with downstream code (which uses U₁/U₂ ratio):
-  - Free.jl:     wp = u[:,:,2] / u[:,:,1] = I · S⁻¹ = P  ✓  (post-renorm)
-  - FixedBoundaryStability.jl: crit = min_eigval(u[:,:,1] / u[:,:,2]) = min_eigval(S)  ✓
-  - Axis init:   determined by `ctrl.frobenius_psi_max`. The default 0, and any start above a positive threshold,
-    uses U₁=0, U₂=I → S(ψ₀)=0 (Fortran DCON's fixed-axis BC). A positive threshold at or above the start
-    opts into the diagonal Frobenius init, which sets U₂=I and a per-mode U₁, so S(ψ₀) is nonzero.
-    Riccati S-evolution remains well-defined either way.
-
-## Key Differences from Standard Integration
-
-1. `sing_der!` is used as the ODE RHS (same as standard, NOT `riccati_der!`)
-2. `riccati_integrator_callback!` replaces `integrator_callback!`: uses
-   `renormalize_riccati_inplace!` instead of Gaussian reduction
-3. `riccati_cross_ideal_singular_surf!` replaces `cross_ideal_singular_surf!`: skips Gaussian
-   reduction and uses ipert_res directly for column zeroing, then renormalizes to (S_new, I)
-4. `transform_u!` is skipped — S is already the true solution
+Unlike the forward path, `riccati_integrator_callback!` renormalizes instead of Gaussian reduction,
+`riccati_cross_ideal_singular_surf!` crosses without Gaussian reduction, and `transform_u!` is a no-op.
 """
 
 """
     riccati_eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, propagators, chunks, S_left)
 
-The Riccati/STRIDE integrator: a chunked fundamental matrix (propagator) driver for the EL
-integration. The trailing three return values feed the Δ' BVP in `compute_delta_prime_matrix!`;
-this is the only branch that produces them.
+The Riccati/STRIDE integrator: solves the same system as [`forward_eulerlagrange_integration`](@ref)
+by integrating chunk fundamental matrices (propagators) concurrently with `Threads.@threads`,
+assembling them serially with Riccati crossings (no Gaussian reduction), and re-integrating the
+outer plasma with `riccati_integrate_chunk!` for dense, bounded checkpoints. Crossing chunks are
+integrated backward and inverted by LU, which keeps them well-conditioned at large N (STRIDE,
+Glasser 2018 Phys. Plasmas 25, 032501). The trailing three return values feed the Δ' BVP in
+`compute_delta_prime_matrix!`; this is the only branch that produces them.
 
-Solves the same system as [`forward_eulerlagrange_integration`](@ref), but integrates all bulk
-chunks concurrently using `Threads.@threads`, then re-integrates the outer plasma serially:
-
- 1. **Chunk generation**: calls `chunk_el_integration_bounds`, then `balance_integration_chunks`
-    to sub-divide chunks for load balancing. The chunk count depends only on `intr.msing` and
-    `ctrl.nchunks`, never on the thread count, so results are thread-independent.
- 2. **Propagator phase**: `integrate_propagator_chunk!` integrates each chunk independently
-    from identity initial conditions (no accumulated state, normalization or storage).
-    Each thread uses a private `OdeState` proxy for `sing_der!` side effects.
- 3. **Serial assembly**: propagators are applied sequentially with `apply_propagator!`.
-    Rational surface crossings use `riccati_cross_ideal_singular_surf!` (no Gaussian
-    reduction).
- 4. **Outer plasma re-integration**: after the last rational surface crossing, the outer
-    plasma (from last ψ_s to psilim) is re-integrated using `riccati_integrate_chunk!`.
-    FM propagation in this region is prone to precision loss for high N (exponential growth
-    without renormalization); Riccati integration keeps matrices bounded and provides dense
-    checkpoints for `findmax_dW_edge!`.
-
-Select via `integrator = "riccati"` in `[ForceFreeStates]` of gpec.toml. Requires
-`singfac_min != 0`. Uses whatever threads `julia -t` provides; `ctrl.nchunks` is the only
-tunable.
-
-**Key differences from the forward integrator:**
-
-  - No Gaussian reduction in the propagator BVP phase (crossings use the
-    Riccati-style algorithm, `odet.ifix` stays 0)
-  - `transform_u!` is called on the odet but is a no-op (ifix=0)
-  - Outer plasma uses serial Riccati integration for numerical stability
-  - `odet.u_store` holds chunk-endpoint Riccati states, not dense Euler-Lagrange ξ, and
-    `odet.u_store_el_basis` stays `false`: this integrator never claims the EL basis, so
-    PerturbedEquilibrium and the HDF5 forward-integration ξ datasets require the forward path.
-
-**Bidirectional integration for large-N accuracy:**
-The crossing chunk (nearest to each rational surface singL[j]) is integrated *backward*
-(`direction=-1`, `tspan` reversed). Backward integration of a region where solutions grow
-exponentially forward causes them to *decay*, so the resulting backward FM Φ_bwd is
-well-conditioned. The accurate forward propagation is recovered as Φ_bwd⁻¹ via a stable
-LU solve in `apply_propagator_inverse!`. This follows the same principle as STRIDE
-(Glasser 2018 Phys. Plasmas 25, 032501). The all-forward path had ~10% energy error for
-the DIIID-like example (N=26, n=1); bidirectional reduces this to within 2%.
+Select with `Riccati()`, or `integrator = "Riccati"` in a deck's `[ForceFreeStates]`. Requires
+`singfac_min != 0`. Results do not depend on the thread count; `ctrl.algorithm.nchunks` is the only
+tunable. `odet.u_store` holds chunk-endpoint Riccati states, not the EL basis
+(`odet.u_store_el_basis == false`), so PerturbedEquilibrium and the HDF5 ξ datasets require `Forward()`.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -145,12 +44,11 @@ function riccati_eulerlagrange_integration(
 )
     odet = _initialize_parallel_odet(ctrl, equil, mats, intr)
     chunks, propagators, odet_proxies = _setup_parallel_chunks_and_proxies(odet, ctrl, intr)
-    _log_parallel_start(ctrl, odet, equil, chunks)
+    intr.verbose && _log_parallel_start(odet, equil, chunks)
 
     _run_parallel_bvp_phase!(propagators, chunks, ctrl, equil, mats, intr, odet_proxies)
 
-    # Harvest solver-step counts accumulated thread-locally in each proxy during the BVP phase.
-    # The outer re-integration below uses riccati_integrate_chunk!, which counts via its callback.
+    # Harvest thread-local solver-step counts; the outer re-integration counts via its own callback.
     odet.total_steps += sum(p.total_steps for p in odet_proxies)
 
     S_at_surface_left, last_crossing_step =
@@ -161,9 +59,8 @@ function riccati_eulerlagrange_integration(
     chunks, propagators = _handle_edge_dW_scan!(odet, chunks, propagators, ctrl, equil, mats, intr)
     resize!(S_at_surface_left, intr.msing)  # one per surviving surface, as the Δ' BVP requires
 
-    # compute_delta_prime_matrix! runs later in the pipeline (after free_run), once the vacuum
-    # response wv for the edge BC is available.
-    if ctrl.verbose
+    # compute_delta_prime_matrix! runs later, after free_run supplies the vacuum edge response wv.
+    if intr.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
@@ -177,29 +74,19 @@ function _initialize_parallel_odet(ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal)
-    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-    if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
-    elseif ctrl.sing_start <= intr.msing
-        error("sing_start > 0 not implemented yet!")
-    else
-        error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
-    end
-    # Prime odet.new = false (consistent with riccati path — no Gaussian reduction used).
+    odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+    initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+    # No Gaussian reduction on the Riccati path.
     odet.new = false
     fill!(odet.unorm0, 1.0)
     return odet
 end
 
-# Build the (bidirectional) chunk list, allocate per-chunk propagators, and allocate
-# per-thread proxy OdeStates sized by maxthreadid() (Julia 1.9+ may report threadid
-# values above nthreads() due to the interactive thread pool).
+# Build the bidirectional chunk list, per-chunk propagators, and per-thread proxy OdeStates
+# (sized by maxthreadid(), since threadid() can exceed nthreads() with an interactive pool).
 function _setup_parallel_chunks_and_proxies(odet::OdeState, ctrl::ForceFreeStatesControl,
     intr::ForceFreeStatesInternal)
-    # Bidirectional chunks: crossing chunks are assigned direction=-1 so they are
-    # integrated backward. The resulting Φ_bwd is well-conditioned because growing EL
-    # solutions decay backward; forward propagation is recovered via LU solve in
-    # apply_propagator_inverse! during serial assembly.
+    # Crossing chunks get direction=-1: growing EL solutions decay backward, so Φ_bwd is well-conditioned.
     base_chunks = chunk_el_integration_bounds(odet, ctrl, intr; bidirectional=true)
     chunks = balance_integration_chunks(base_chunks, ctrl, intr)
     N = intr.numpert_total
@@ -208,18 +95,13 @@ function _setup_parallel_chunks_and_proxies(odet::OdeState, ctrl::ForceFreeState
     return chunks, propagators, odet_proxies
 end
 
-function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
-    equil::Equilibrium.PlasmaEquilibrium,
-    chunks::Vector{IntegrationChunk})
-    ctrl.verbose || return
+function _log_parallel_start(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium, chunks::Vector{IntegrationChunk})
     @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     @info "   Riccati FM: $(length(chunks)) chunks over $(Threads.nthreads()) thread$(Threads.nthreads() == 1 ? "" : "s")"
 end
 
-# Integrate each chunk's FM propagator from identity IC across whatever threads `julia -t`
-# provides. The :static scheduler makes Threads.threadid() a stable index into odet_proxies.
-# Each chunk is independent (identity IC, no accumulated state), so the result does not
-# depend on how chunks are distributed across threads.
+# Integrate each chunk's propagator from identity IC in parallel; chunks are independent, so the
+# result does not depend on the thread layout. :static makes threadid() a stable proxy index.
 function _run_parallel_bvp_phase!(propagators::Vector{ChunkPropagator},
     chunks::Vector{IntegrationChunk},
     ctrl::ForceFreeStatesControl,
@@ -232,13 +114,10 @@ function _run_parallel_bvp_phase!(propagators::Vector{ChunkPropagator},
     end
 end
 
-# Apply per-chunk propagators serially to odet, renormalizing to (S, I) after each.
-# This is the Julia equivalent of STRIDE's ode_fixup: products of K chunk FMs can have
-# cond ~ (cond_per_chunk)^K causing catastrophic cancellation for large N (≥20); periodic
-# renorm keeps each step at O(cond_per_chunk). Backward (direction=-1) crossing chunks are
-# applied via apply_propagator_inverse! (Φ_bwd⁻¹ from LU solve). S_at_surface_left records
-# the well-conditioned Riccati S at each surface's left boundary for use as the Δ' BVP
-# axis BC. Returns (S_at_surface_left, last_crossing_step).
+# Apply chunk propagators serially, renormalizing to (S, I) after each (STRIDE's ode_fixup role:
+# keeps conditioning at O(cond_per_chunk) instead of its K-th power). Backward chunks are applied
+# via apply_propagator_inverse!. S_at_surface_left is the Riccati S at each surface's left boundary,
+# the Δ' BVP axis BC. Returns (S_at_surface_left, last_crossing_step).
 function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{ChunkPropagator},
     chunks::Vector{IntegrationChunk},
     ctrl::ForceFreeStatesControl,
@@ -257,19 +136,18 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
         odet.psifac = chunk.psi_end
         odet.q = equil.profiles.q_spline(odet.psifac)
 
-        if ctrl.verbose
+        if intr.verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)"
         end
 
         if chunk.needs_crossing
-            ctrl.kinetic_factor > 0 && error("integrator = \"riccati\" does not support kinetic runs (kinetic_factor > 0); use integrator = \"forward\".")
+            ctrl.kinetic !== nothing && error("Riccati() does not support kinetic runs; use Forward().")
             # State is (S, I) from the renorm above — well-conditioned at the surface's left boundary.
             push!(S_at_surface_left, copy(odet.u[:, :, 1]))
             riccati_cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             last_crossing_step = odet.step - 1
         else
-            # Save non-crossing end-of-chunk state. These columns are FM/Riccati chunk
-            # endpoints, not the Euler-Lagrange state, so the odet never claims the EL basis.
+            # Store the chunk-endpoint state; these are Riccati states, not the EL basis.
             odet.u_store_el_basis = false
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
@@ -283,12 +161,8 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
     return S_at_surface_left, last_crossing_step
 end
 
-# Re-integrate the outer plasma (last rational surface → psilim) with Riccati for numerical
-# stability and dense checkpoint storage. FM propagation here is prone to precision loss at
-# high N because the solution grows exponentially without renormalization; Riccati keeps
-# matrices bounded. Dense checkpoints are also needed by findmax_dW_edge!. The u_store
-# entry at last_crossing_step holds (U₁_new, U₂_new) from riccati_cross_ideal_singular_surf!
-# before renormalization; we renorm here to (S_new, I) as the Riccati starting state.
+# Re-integrate last rational surface → psilim with Riccati: FM propagation loses precision there at
+# high N, and findmax_dW_edge! needs dense checkpoints. Starts from the pre-renorm crossing state.
 function _reintegrate_outer_plasma!(odet::OdeState, last_crossing_step::Int,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,

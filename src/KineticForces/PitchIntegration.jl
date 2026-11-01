@@ -18,9 +18,7 @@ For trapped particles (λ > B₀/Bmax): single bounce contribution
 """
     PitchGARParams
 
-Parameters for the GAR pitch-angle integrand.
-Uses a unified fbnce interpolant that returns [ωb, ωd, f₁, f₂, ...] at each λ,
-matching Fortran `lambdaintgrl_lsode`.
+Parameters for the GAR pitch-angle integrand; `fbnce(λ)` returns [ωb, ωd, f₁, f₂, ...].
 """
 struct PitchGARParams{F}
     wn::Float64        # density gradient diamagnetic drift frequency
@@ -44,7 +42,6 @@ struct PitchGARParams{F}
     imx::Float64       # imaginary part multiplier for resonance operator
     nqty::Int          # number of flux quantities to integrate
     fbnce::F           # CubicSeriesInterpolant: fbnce(λ) → [wb, wd, f₁, ...] (typed for stability)
-    fbnce_norm::Vector{Float64}  # normalization factors (1/median)
     fbnce_hint::Base.RefValue{Int}  # sticky bracket-search hint for fbnce(λ)
     fvals::Vector{ComplexF64}    # reusable buffer for the in-place fbnce(fvals, λ) evaluation; must be complex — the wt-path fbnce carries complex op_wmats data
     esegbuf::Vector{QuadGK.Segment{Float64,ComplexF64,Float64}}  # reusable energy-integral QuadGK segment buffer
@@ -87,7 +84,7 @@ function integrate_pitch_gar_quadgk(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
         nutype, f0type, nufac, qt,
         energy_atol, energy_rtol,
-        rex, imx, nqty, fbnce, fbnce_norm, Ref(1),
+        rex, imx, nqty, fbnce, Ref(1),
         Vector{ComplexF64}(undef, 2 + nqty),
         QuadGK.alloc_segbuf(Float64, ComplexF64, Float64))
 
@@ -157,16 +154,10 @@ end
     integrate_pitch_gar_quadgk_wt(wn, wt, we, nuk, bobmax, epsr, q, fbnce, fbnce_norm,
                                    nqty, ell, n, psi, method; ...) → Vector{ComplexF64}
 
-Dual-output variant for the kinetic-matrix path. Emits both the wmm half
-(rex=0, imx=1 → Fortran kwmat) and the tmm half (rex=1, imx=0 → Fortran ktmat)
-in a single pitch integration, sharing one energy integration per (λ, E).
+Dual-output variant for the kinetic-matrix path: one pitch integration, sharing each energy integral, yields
+both the wmm half (rex=0, imx=1; Fortran kwmat) and the tmm half (rex=1, imx=0; Fortran ktmat).
 
-Returns a length-`2*nqty` packed buffer: `[wmm | tmm]`. The two halves each
-reproduce Fortran's independent-pass result at Fortran's element-by-element
-convention (verified via matrix-dump comparison vs Fortran `dcon/fourfit.F`
-`kwmat_l`/`ktmat_l`). Downstream `kwmat ± ktmat` combinations in
-`ForceFreeStates/Kinetic.jl` then reproduce `sing.f:967-1075` exactly for the
-non-Hermitian B_k, C_k, E_k diagonals.
+Returns a length-`2*nqty` packed buffer `[wmm | tmm]`.
 """
 function integrate_pitch_gar_quadgk_wt(
     wn::Float64, wt::Float64, we::Float64, nuk::Float64,
@@ -184,7 +175,7 @@ function integrate_pitch_gar_quadgk_wt(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
         nutype, f0type, nufac, qt,
         energy_atol, energy_rtol,
-        1.0, 1.0, nqty, fbnce, fbnce_norm, Ref(1),
+        1.0, 1.0, nqty, fbnce, Ref(1),
         Vector{ComplexF64}(undef, 2 + nqty),
         QuadGK.alloc_segbuf(Float64, ComplexF64, Float64))
 

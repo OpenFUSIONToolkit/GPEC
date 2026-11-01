@@ -1,50 +1,11 @@
 # GalerkinGrid.jl
 #
 # Grid construction and local→global DOF mapping for the outer-region Galerkin solver.
-# Ports gal_pack (gal.f), gal_make_grid (gal.f), and gal_make_map (gal.f).
+# Ports gal_make_grid (gal.f) and gal_make_map (gal.f); gal_pack is Utilities.HermiteFEM.pack_grid.
 #
 # Node arrays use Fortran 0-based `x(0:nx)` mapped to Julia `xn[i+1]` (so Fortran `x(i)` is `xn[i+1]`).
 # Cells are 1-based in both. Intervals `0:msing` (Fortran) are `ws.intvl[ising+1]` in Julia.
 # The optional `gal_xmin_flag`/`sing1_xmin` adaptive-width branch is intentionally not ported.
-
-"""
-    gal_pack(nx::Int, pfac::Float64, side::String) -> Vector{Float64}
-
-Packed logical grid on `[-1, 1]`. Port of Fortran `gal_pack` (gal.f). For `side="both"`
-returns `2*nx+1` nodes (Fortran `-nx:nx`) clustered toward both ends when `pfac < 1` (strong packing
-near the bracketing singular surfaces). `pfac > 1` packs toward the centre; `pfac == 1` is uniform.
-"""
-function gal_pack(nx::Int, pfac::Float64, side::String)
-    if side == "left"
-        xi = collect(-2nx:0) ./ (2nx)
-    elseif side == "right"
-        xi = collect(0:2nx) ./ (2nx)
-    elseif side == "both"
-        xi = collect(-nx:nx) ./ nx
-    else
-        error("gal_pack: unrecognized side = $side")
-    end
-
-    if pfac > 1
-        λ = sqrt(1 - 1 / pfac)
-        x = @. log((1 + λ * xi) / (1 - λ * xi)) / log((1 + λ) / (1 - λ))
-    elseif pfac == 1
-        x = copy(xi)
-    elseif pfac > 0
-        λ = sqrt(1 - pfac)
-        a = log((1 + λ) / (1 - λ))
-        x = @. (exp(a * xi) - 1) / (exp(a * xi) + 1) / λ
-    else
-        x = @. xi^(-pfac)
-    end
-
-    if side == "left"
-        @. x = 2x + 1
-    elseif side == "right"
-        @. x = 2x - 1
-    end
-    return x
-end
 
 """
     gal_resonant_surfaces(intr, equil) -> (sings, psilow, psihigh)
@@ -76,12 +37,12 @@ upper-surface scale uses `|q1|` without `nn` (gal.f). Identical for `nn = 1`.
 function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vector{SingType},
     nn::Int, psilow::Float64, psihigh::Float64, ctrl::ForceFreeStatesControl)
 
-    nx = ctrl.gal_nx
-    dx0 = ctrl.gal_dx0
-    dx1 = ctrl.gal_dx1
-    dx2 = ctrl.gal_dx2
-    pfac = ctrl.gal_pfac
-    cutoff = ctrl.gal_cutoff
+    nx = ctrl.algorithm.nx
+    dx0 = ctrl.algorithm.dx0
+    dx1 = ctrl.algorithm.dx1
+    dx2 = ctrl.algorithm.dx2
+    pfac = ctrl.algorithm.pfac
+    cutoff = ctrl.algorithm.cutoff
     xn = intvl.x
     cells = intvl.cells
 
@@ -101,7 +62,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
         nq1 = abs(nn * sings[ising].q1)
         xn[0+1] = x0
         cells[1].x_lsode = x0 + dx0 / nq1
-        if ctrl.gal_dx1dx2_flag
+        if ctrl.algorithm.dx1dx2_flag
             xn[1+1] = x0 + dx1 / nq1
             xn[2+1] = x0 + (dx1 + dx2) / nq1
             ixmin = 2
@@ -133,7 +94,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
         nq1 = abs(nn * sings[ising+1].q1)
         xn[nx+1] = x1
         cells[nx].x_lsode = x1 - dx0 / nq1
-        if ctrl.gal_dx1dx2_flag
+        if ctrl.algorithm.dx1dx2_flag
             xn[(nx-1)+1] = x1 - dx1 / nq1
             xn[(nx-2)+1] = x1 - (dx1 + dx2) / nq1
             ixmax = nx - 2
@@ -165,14 +126,14 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
     # intervals pack only toward their single rational end, leaving the regular boundary (psilow at
     # interval 0, psihigh at interval msing) at coarse spacing — removes the gratuitous fine edge cell.
     side = "both"
-    if ctrl.gal_edge_onesided && msing > 0
+    if ctrl.algorithm.edge_onesided && msing > 0
         if ising == 0
             side = "right"   # rational sits at the upper (ixmax) end
         elseif ising == msing
             side = "left"    # rational sits at the lower (ixmin) end
         end
     end
-    packed = gal_pack(mx, pfac, side)          # length 2*mx+1 = (ixmax-ixmin)+1
+    packed = pack_grid(mx, pfac, side)          # length 2*mx+1 = (ixmax-ixmin)+1
     for k in 0:(ixmax-ixmin)
         xn[ixmin+1+k] = xm + dxh * packed[k+1]
     end

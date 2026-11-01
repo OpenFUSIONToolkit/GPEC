@@ -2,7 +2,7 @@
 """
     benchmark_solovev_kinetic_stability.jl
 
-Benchmark the self-consistent kinetic-DCON path (`kinetic_source="calculated"`)
+Benchmark the self-consistent kinetic-DCON path (`kinetic = "KineticForces"`)
 for the analytic **Solovev** equilibrium against Fortran GPEC's kinetic DCON.
 
 Unlike the DIIID benchmark (which reads a pre-existing `dcon_output_n1.nc`),
@@ -103,7 +103,7 @@ function build_matched_fortran_deck(workdir::String)
 
     # dcon.in — kinetic flags already match; align mode band, edge truncation, n.
     dconin = joinpath(workdir, "dcon.in")
-    replace_namelist_value!(dconin, "nn",          string(ffs["nn_low"]))
+    replace_namelist_value!(dconin, "nn",          string(first(ffs["nn"])))
     replace_namelist_value!(dconin, "delta_mlow",  string(get(ffs, "delta_mlow", 0)))
     replace_namelist_value!(dconin, "delta_mhigh", string(get(ffs, "delta_mhigh", 0)))
     replace_namelist_value!(dconin, "qlow",        string(ffs["qlow"]))
@@ -171,7 +171,7 @@ function run_benchmark()
     fort_re, fort_im = run_fortran_reference(workdir)
     _p(@sprintf("  Fortran W_t[1]: Re = %.6f  Im = %.6f", fort_re, fort_im))
 
-    _p("\n--- Running GPE.main with kinetic_source=\"calculated\" ---")
+    _p("\n--- Running GPE.main with kinetic = \"KineticForces\" ---")
     jul_re, jul_im, wall = run_julia_reference()
     _p(@sprintf("  GPE.main completed in %.1f s", wall))
 

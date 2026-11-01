@@ -1,14 +1,10 @@
 """
     build_response_operators!(resp; verbose=false)
 
-Build the control-surface response operators of `resp.ffs` onto `resp`, following Fortran gpresp's
-resp_index=0 energy method:
-
-  - Build flux matrix from eigenmodes
-  - Calculate plasma inductance Lambda (wt0-based, resp_induct_flag=TRUE)
-  - Calculate surface inductance L from Green's function
-  - Compute permeability P = Lambda * L^{-1} and reluctance
-  - Conform them to the root-area-weighted field space for output
+Build the control-surface response operators of `resp.ffs` onto `resp` (Fortran gpresp, resp_index=0
+energy method): the eigenmode flux matrix, the wt0-based plasma inductance Λ, the vacuum surface
+inductance L, the permeability P = Λ·L⁻¹ and the reluctance, kept in flux space and conformed to the
+root-area-weighted field space for output [Park et al., Phys. Plasmas 14, 052110 (2007)].
 """
 function build_response_operators!(resp::PlasmaResponse; verbose::Bool=false)
     ffs = resp.ffs
@@ -25,8 +21,7 @@ function build_response_operators!(resp::PlasmaResponse; verbose::Bool=false)
     surface_inductance = calc_surface_inductance(equil, ffs.psilim, ffs.control.mtheta_vacuum, ffs.mlow:ffs.mhigh, ffs.nlow:ffs.nhigh)
     permeability = calc_permeability(plasma_inductance, surface_inductance)
 
-    # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct: diff_indmats = CONJG(TRANSPOSE(plas_indmats)) − surf_indmats).
-    # Λ (plasma inductance) is not Hermitian — its anti-Hermitian part is the dissipative/torque response — so the adjoint matters.
+    # Reluctance ϱ = L⁻¹·(Λ† − L)·L⁻¹ (Fortran gpresp_reluct); Λ is not Hermitian (its anti-Hermitian part is the torque response).
     L_inv = inv(surface_inductance)
     reluctance = L_inv * (plasma_inductance' - surface_inductance) * L_inv
 
@@ -36,10 +31,7 @@ function build_response_operators!(resp::PlasmaResponse; verbose::Bool=false)
     resp.surface_inductance_flux = surface_inductance
     resp.permeability_flux = permeability
 
-    # Conform the control-surface matrices to the coordinate-invariant root-area-weighted
-    # field (b̃) space for output (Pharr 2026). Store the b̃→b̄ operator S = Σ/√A
-    # and the scalar surface area A so users can recover the area-weighted field (b̄ = S·b̃) or
-    # flux (Φ = A·b̄) — see Utils.jl output docs.
+    # Conform to the root-area-weighted field (b̃) space for output (Pharr 2026); S = Σ/√A and A recover b̄ = S·b̃ and Φ = A·b̄.
     rootarea_to_area_weight, surface_area = build_control_surface_rootarea_to_area_weight(equil, ffs)
     field_mats = field_space_response_matrices(plasma_inductance, surface_inductance, permeability, reluctance, rootarea_to_area_weight, surface_area)
     resp.plasma_inductance = field_mats.plasma_inductance
@@ -88,10 +80,8 @@ function apply_response!(state::PerturbedEquilibriumState; verbose::Bool=false)
     state.forcing_b_area = rootarea_to_area_weight * forcing_b_rootarea
     state.response_b_area = rootarea_to_area_weight * response_b_rootarea
 
-    # Scalar energies and torque (Joules), ported from Fortran gpout. These are congruence-invariant
-    # (energy = Φ†·G⁻¹·Φ = b̃†·G̃⁻¹·b̃), so they are evaluated from the brief internal flux vectors with
-    # the well-conditioned flux-space inductances — the b̃ form routes through inv(R⁻¹LR⁻†) and is
-    # needlessly ill-conditioned. The result is a physical scalar, not a stored flux quantity.
+    # Energies and torque (Joules, Fortran gpout) are congruence-invariant, so evaluate them in flux space,
+    # where the inductances are well conditioned; the b̃ form inverts the ill-conditioned R⁻¹·L·R⁻†.
     L_surf_inv = inv(surface_inductance)
     vy = dot(forcing_flux, L_surf_inv * forcing_flux) / 4
     sy = dot(response_flux, L_surf_inv * response_flux) / 4

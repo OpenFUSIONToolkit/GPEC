@@ -2,13 +2,15 @@
 # Exercises the real KineticForces (NTV) physics path at full strength, with the main ion
 # declared as a 50/50 D-T mix so the self-consistent kinetic matrices are accumulated over
 # the multi-ion species loop (pure plasma, n_i = n_e, so no impurity species arises). The
-# equilibrium is generated analytically from the embedded [SOL_INPUT] section, with n·T tied
+# equilibrium is generated analytically from the embedded [Solovev] section, with n·T tied
 # to the Solovev P₀≈4.27e4 Pa via the local kinetic.dat.
 # Also the only deck that runs [PerturbedEquilibrium] on a kinetic solve, so it builds the
 # ψ-resolved torque response matrices (T_xe on the applied field, T_source for the forcing file).
 
+[Run]
+verbose = true                 # Log each stage's progress
+
 [Equilibrium]
-eq_type = "sol"                         # Type of the input 2D equilibrium file
 kinetic_file = "kinetic.dat"            # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
 grid_type = "core_edge_packed"          # Radial grid packing type
@@ -18,16 +20,20 @@ mpsi = 16                               # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
 flux_surface_rtol = 1e-7                # Relative tolerance of the ODE solves that trace each flux surface
-force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
+
+[[Equilibrium.ion_species]]
+z = 1                         # Species charge (fundamental units)
+m = 2                         # Species mass (proton masses) — Deuterium
+fraction = 0.5                # This species' share of the total main-ion density n_i
+
+[[Equilibrium.ion_species]]
+z = 1                         # Species charge (fundamental units)
+m = 3                         # Species mass (proton masses) — Tritium
+fraction = 0.5                # This species' share of the total main-ion density n_i
 
 [Wall]
-shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-standoff_fraction = 0.2415              # Wall standoff in plasma minor radii (conformal, dee)
-half_thickness = 0.05                   # Half-thickness parameter for Dee-shaped walls
-elongation = 1.5                        # Elongation parameter for wall shapes
-center_offset = 0                       # Offset of wall center from major radius
-triangularity = 0.5                     # Triangularity parameter for wall shapes
-corner_sharpness = 0.05                 # Sharpness of wall corners (try 0.05 as initial value)
+shape = "conformal"                     # Wall shape (conformal, elliptical, dee, mod_dee, file)
+standoff_fraction = 0.2415              # Wall standoff in plasma minor radii
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
 [ForcingTerms]
@@ -37,19 +43,19 @@ forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Bi
 [PerturbedEquilibrium]
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 compute_torque_response = true          # Build the ψ-resolved torque response matrices T_xe and T_source
-verbose = false                         # Enable verbose logging
-write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 
-# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the Ballooning keywords
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
 [LocalStability]
 theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
-ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
 n_scan = 24                   # Resolution of the α scan for the first boundary
 max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
 alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
 psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
-verbose = false               # Print progress and per-surface α-scan failures
 
 [ForceFreeStates]
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
@@ -57,37 +63,25 @@ vac_flag = true               # Compute plasma, vacuum, and total energies for f
 dW_edge_scan_start = 0.99     # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
-sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                    # Smallest toroidal mode number to include
-nn_high = 1                   # Largest toroidal mode number to include
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 64            # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 
-kinetic_source = "calculated" # Kinetic matrix source — exercises KineticForces.compute_calculated_kinetic_matrices callback with real physics
-kinetic_factor = 1.0          # Full-strength kinetic matrices (the "calculated" path is the real physics; no perturbation scaling)
-integrator = "forward"        # Integration formalism: "forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "galerkin" (RDCON outer-region singular Galerkin Δ′, with the optional RPEC inner-layer match)
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+kinetic = "KineticForces"     # Kinetic source: the drift-kinetic matrices of the [KineticForces] model (omit for an ideal run)
+integrator = "Forward" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 singfac_min = 1e-6            # Fractional distance from rational q at which ideal jump enforced
+
+# Numerical settings of the forward integrator
+[Forward]
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
-write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
-verbose = false               # Enable verbose logging
 
 [KineticForces]
 
-[[KineticForces.ion_species]]
-z = 1                         # Species charge (fundamental units)
-m = 2                         # Species mass (proton masses) — Deuterium
-fraction = 0.5                # This species' share of the total main-ion density n_i
-
-[[KineticForces.ion_species]]
-z = 1                         # Species charge (fundamental units)
-m = 3                         # Species mass (proton masses) — Tritium
-fraction = 0.5                # This species' share of the total main-ion density n_i
-
-# Solovev analytic equilibrium parameters (eq_type = "sol"); see SolovevConfig in src/Equilibrium.
-[SOL_INPUT]
+# Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
+[Solovev]
 mr = 128       # Number of radial grid zones
 mz = 128       # Number of axial grid zones
 ma = 128       # Number of flux grid zones

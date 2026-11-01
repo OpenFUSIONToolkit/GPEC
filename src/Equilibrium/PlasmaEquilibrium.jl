@@ -2,7 +2,6 @@
     ProfileSplines
 
 Named 1D cubic spline interpolants for equilibrium profiles.
-Each profile is stored as a separate spline for code clarity.
 
 # Fields
 
@@ -128,11 +127,13 @@ end
 """
     KineticProfileData
 
-Raw kinetic-profile columns read from a kinetic file (HDF5 or ASCII), before
-resampling and spline construction. `psi` (normalized poloidal flux) is always
-present; every profile field is `nothing` when the source omits it, so each
-consumer validates only the fields it needs. Units: densities m⁻³,
-temperatures eV, frequencies rad/s, diffusivities m²/s.
+The kinetic description of the plasma: the raw profile columns read from a kinetic file (HDF5 or
+ASCII), before resampling and spline construction, plus the plasma's species composition, the
+values that stand in for profiles the file omits, and the resistivity closure. `psi` (normalized
+poloidal flux) is always present; every profile field is `nothing` when the source omits it, so
+each consumer validates only the fields it needs. Units: densities m⁻³, temperatures eV,
+frequencies rad/s, diffusivities m²/s. Every consumer (KineticForces, the tearing layers, the
+layer-overlap scan) reads the composition and closure from here, so they all see one plasma.
 
 | field               | meaning                                                                                                           |
 |:------------------- |:----------------------------------------------------------------------------------------------------------------- |
@@ -147,6 +148,19 @@ temperatures eV, frequencies rad/s, diffusivities m²/s.
 | `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
 | `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
 | `provenance`        | short string recording the source file/format                                                                     |
+| `ion_species`       | main-ion species, a `Vector{IonSpecies}`; default one deuterium ion carrying all of `n_i`                         |
+| `impurity_charge`   | charge of the single impurity species that closes quasi-neutrality (default 6, carbon)                            |
+| `impurity_mass`     | impurity mass in proton masses (default 12)                                                                       |
+| `zeff_default`      | Z_eff used where neither a `zeff` profile nor `n_i`/`n_e` gives one (default 1)                                   |
+| `chi_e_default`     | χ⊥,e used where the file has no usable `chi_e` (default 1)                                                        |
+| `chi_i_default`     | χ⊥,i used where the file has no usable `chi_i`; `nothing` (default) makes a model that needs it fail              |
+| `chi_phi_default`   | χ_φ used where the file has no usable `chi_phi` (default 1)                                                       |
+| `tau_E`             | whole-plasma energy confinement time in s; `nothing` (default) when unknown                                       |
+| `resistivity_model` | parallel-resistivity closure: `:sauter` (default), `:redl`, `:spitzer`, `:spitzer_harm`                           |
+| `lnLambda_form`     | Coulomb-logarithm form of the closure: `:nrl` (default), `:sauter`, `:wesson`                                     |
+
+A profile dataset that is absent or all-zero counts as not provided, so its `*_default` applies.
+Build a copy with different settings with `KineticProfileData(data; ion_species=..., ...)`.
 """
 struct KineticProfileData
     psi::Vector{Float64}
@@ -162,24 +176,55 @@ struct KineticProfileData
     zeff::Union{Nothing,Vector{Float64}}
     species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
     provenance::String
+    ion_species::Vector{IonSpecies}
+    impurity_charge::Int
+    impurity_mass::Int
+    zeff_default::Float64
+    chi_e_default::Union{Nothing,Float64}
+    chi_i_default::Union{Nothing,Float64}
+    chi_phi_default::Union{Nothing,Float64}
+    tau_E::Union{Nothing,Float64}
+    resistivity_model::Symbol
+    lnLambda_form::Symbol
 end
+
+const _RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
+const _LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
 function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
     omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_i=nothing, chi_phi=nothing, zeff=nothing,
-    species_densities=nothing, provenance="")
+    species_densities=nothing, provenance="",
+    ion_species=[IonSpecies(; z=1, m=2, fraction=1.0)], impurity_charge=6, impurity_mass=12,
+    zeff_default=1.0, chi_e_default=1.0, chi_i_default=nothing, chi_phi_default=1.0, tau_E=nothing,
+    resistivity_model=:sauter, lnLambda_form=:nrl)
     _v(x) = x === nothing ? nothing : Float64.(collect(x))
+    _s(x) = x === nothing ? nothing : Float64(x)
+    species = convert(Vector{IonSpecies}, ion_species)
+    isempty(species) && throw(ArgumentError("KineticProfileData: ion_species needs at least one main ion"))
+    impurity_charge > 1 || throw(ArgumentError("KineticProfileData: impurity_charge = $impurity_charge must exceed the main-ion charge 1"))
+    for (name, v) in (("chi_e_default", chi_e_default), ("chi_i_default", chi_i_default), ("chi_phi_default", chi_phi_default),
+        ("tau_E", tau_E))
+        v === nothing || (isfinite(v) && v > 0) || throw(ArgumentError("KineticProfileData: $name must be positive and finite; got $v"))
+    end
+    model, form = Symbol(resistivity_model), Symbol(lnLambda_form)
+    model in _RESISTIVITY_MODELS || throw(ArgumentError("KineticProfileData: resistivity_model = $model not in $_RESISTIVITY_MODELS"))
+    form in _LNLAMBDA_FORMS || throw(ArgumentError("KineticProfileData: lnLambda_form = $form not in $_LNLAMBDA_FORMS"))
     return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
-        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_i), _v(chi_phi), _v(zeff), species_densities, String(provenance))
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_i), _v(chi_phi), _v(zeff), species_densities, String(provenance),
+        species, Int(impurity_charge), Int(impurity_mass), Float64(zeff_default), _s(chi_e_default), _s(chi_i_default),
+        _s(chi_phi_default), _s(tau_E), model, form)
 end
+
+# A copy of `data` with some fields replaced, e.g. the composition a deck or script sets on loaded profiles.
+KineticProfileData(data::KineticProfileData; kwargs...) =
+    KineticProfileData(; (f => getfield(data, f) for f in fieldnames(KineticProfileData))..., kwargs...)
 
 """
     KineticProfileSplines
 
-Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures,
-ExB rotation, collisional diagnostics) loaded from an external `kinetic.dat`
-file. Mirrors the `ProfileSplines` pattern: each quantity is its own named
-spline plus a paired derivative view for the species the NTV kernel needs
-(densities and temperatures, used by `wdian`/`wdiat` in `KineticForces/Torque.jl`).
+Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures, ExB rotation,
+collisional diagnostics) on the regular kinetic ψ grid, with derivative views of the densities and
+temperatures for the diamagnetic frequencies of the NTV kernel.
 
 # Fields
 
@@ -254,8 +299,7 @@ end
 """
     PlasmaEquilibrium(...)
 
-The final, self-contained result of the equilibrium reconstruction.
-This object provides a complete representation of the processed plasma equilibrium in flux coordinates.
+The final, self-contained result of the equilibrium reconstruction, in flux coordinates.
 
 # Fields
 
@@ -297,11 +341,10 @@ This object provides a complete representation of the processed plasma equilibri
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
   - `ingest::EquilibriumIngest`: raw arrays forwarded from the equilibrium input for the
     `gpec.h5` rerun snapshot — a [`DirectIngest`](@ref)/[`InverseIngest`](@ref) for file-based
-    equilibria, or `nothing` for analytic ones (regenerated from their TOML section on replay)
+    equilibria, or `nothing` for analytic ones (regenerated from their deck section on replay)
   - `analytic::Union{Nothing,AnalyticEquilibriumConfig}`: the parameters an analytic kind
-    (`sol`, `lar`, `tj_analytic`, `tj_analytic_direct`) was solved from, so [`reform`](@ref) can
-    re-solve it on a new grid; `nothing` for file-based and IMAS equilibria. A defensive copy, so
-    later edits to the caller's config do not reach it.
+    (`sol`, `lar`, `tj_analytic`) was solved from, so [`reform`](@ref) can re-solve it on a new
+    grid; `nothing` for file-based and IMAS equilibria.
   - `kinetic::Union{Nothing,KineticProfileData}`: the raw kinetic profiles of `config.kinetic_file` (or of
     [`attach_kinetic_profiles!`](@ref)), on the file's own ψ grid; `nothing` when none are attached
 """

@@ -1,13 +1,9 @@
-# ======================================================================
-#   Main Driver for Ballooning Stability Analysis
-#   Computes ballooning stability criterion over all flux surfaces
-# ======================================================================
+# Ballooning stability driver
 
 const BALLOONING_THETA_MAX_CAP = 16.5
 const BALLOONING_THETA_SCALE_MULTIPLIER = 10.0
 const MATCHING_POINT = 1e-3
-# Default ψ_N window for the α-boundary scan drivers: ballooning boundaries matter in the
-# mid-radius and pedestal; the packed axis and far-edge surfaces only add scan cost.
+# Default ψ_N window of the α-boundary scans: mid-radius and pedestal, skipping the costly packed axis and far edge.
 const BALLOONING_SCAN_PSI_WINDOW = (0.1, 0.99)
 
 # Effective window [lo, min(hi, ψ_edge)]; the grid never extends past psihigh/psi_edge.
@@ -15,26 +11,15 @@ _in_ballooning_scan_window(psi::Float64, psi_edge::Float64, window=BALLOONING_SC
     window[1] <= psi <= min(window[2], psi_edge)
 
 """
-    compute_ballooning_stability!(locstab_fs, plasma_eq)
+    compute_ballooning_stability!(locstab_fs, plasma_eq; theta_k=0.0, compute_delta_prime=true, ode_tol=1e-8, verbose=false)
 
-Main driver routine for local high-n stability analysis. Iterates over all
-magnetic flux surfaces, prepares ballooning coefficients, stores `det(d0bar)`
-as the local `Di` diagnostic, and optionally integrates the ballooning equation
-to compute Delta Prime.
-
-## Arguments
-
-  - `locstab_fs::Matrix{Float64}`: Local stability matrix to store results (modified in place).
-  - `plasma_eq::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data.
-  - `ode_tol::Float64`: Relative and absolute tolerance of the ballooning ODE integration.
-  - `verbose::Bool`: Print progress messages.
-
-This function modifies `locstab_fs` in place with:
+Local high-n stability on every flux surface, threaded over surfaces. Fills `locstab_fs` in place:
 
   - Column 1: `det(d0bar) * ψ` (Mercier interchange `D_I`)
-  - Column 2: resistive interchange `D_R * ψ`, using `det(d0bar)` for `D_I`
-    and the surface-average route for `H` (see [`resistive_interchange_h`](@ref))
-  - Column 4: Delta Prime (Δ')
+  - Column 2: `D_R * ψ`, resistive interchange with `H` from [`resistive_interchange_h`](@ref)
+  - Column 4: ballooning Δ' (only for ψ ≤ 1 and `compute_delta_prime=true`)
+
+`ode_tol` is the relative and absolute tolerance of the ballooning ODE integration.
 """
 function compute_ballooning_stability!(
     locstab_fs::Matrix{Float64},
@@ -51,16 +36,14 @@ function compute_ballooning_stability!(
 
     num_psi = length(plasma_eq.profiles.xs)
 
-    # Parallelism is governed by the Julia thread count (`julia -t N`); with one thread this runs serially.
-    # All data is thread-local, so no locks are needed. The `:greedy` scheduling strategy
-    # outperforms `:static` and `:dynamic` for this workload in testing.
+    # All data is thread-local; `:greedy` scheduling measured fastest for this workload.
     Threads.@threads :greedy for flux_surface_index in 1:num_psi
 
         psi = plasma_eq.profiles.xs[flux_surface_index]
         coeff_data = prepare_ballooning_coefficients(flux_surface_index, plasma_eq; theta_k=theta_k)
         h = resistive_interchange_h(flux_surface_index, plasma_eq)
         locstab_fs[flux_surface_index, 1] = coeff_data.di * psi
-        # Keep D_R tied to the reported D_I. The surface-average route provides H.
+        # D_R uses the reported D_I; only H comes from surface averages.
         locstab_fs[flux_surface_index, 2] = (coeff_data.di + (h - 0.5)^2) * psi
 
         if compute_delta_prime && plasma_eq.profiles.xs[flux_surface_index] <= 1.0
@@ -82,15 +65,9 @@ end
 """
     resistive_interchange_h(flux_surface_index, plasma_eq)
 
-Resistive interchange helper for `D_R = D_I + (H - 1/2)²` at a single
-flux surface [Glasser-Greene-Johnson; Glasser Phys. Plasmas 23, 112506
-(2016)]. The intermediate `H` is formed from flux-surface averages of the
-field and metric quantities.
-
-The main local-stability scan takes `D_I` from the `det(d0bar)` calculation
-reported as `LocalStability/D_I`, then combines it with this surface-average `H` to
-form `LocalStability/D_R`. This avoids recomputing a separate surface-average `D_I`
-inside the `D_R` path.
+The `H` of the resistive interchange criterion `D_R = D_I + (H - 1/2)²` at one flux surface,
+from flux-surface averages of field and metric quantities [Glasser-Greene-Johnson; Glasser
+Phys. Plasmas 23, 112506 (2016)].
 """
 function resistive_interchange_h(flux_surface_index::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
     profiles = plasma_eq.profiles
@@ -511,9 +488,7 @@ function prepare_ballooning_coefficients(
     kappaw_periodic .+= -kappas .* i_per_perturbed .+ (theta_k_reference .* q_derivative .+ i_per0_thetak_shift) .* kappas
     kappaw_secular = q_derivative .* kappas
 
-    # Only the 7 coefficients the ballooning ODE RHS reads are interpolated. bsq and sigma are kept as
-    # locals (used below for n0_fs/d0bar) but deliberately NOT added to the spline, since the RHS never
-    # uses them — interpolating 9 columns when 7 suffice wastes ~22% of every per-step spline evaluation.
+    # Spline only the 7 coefficients the ODE RHS reads; bsq and sigma feed d0bar only.
     bf_fs = zeros(mtheta + 1, 7)
     bf_fs[:, 1] = nabla_beta_sq_b_sq_periodic
     bf_fs[:, 2] = nabla_beta_sq_b_sq_peculiar_1st
@@ -619,10 +594,9 @@ end
 """
     ballooning_delta_prime(psi_idx, plasma_eq; corr_qprime=0.0, corr_pprime=0.0, theta_k=0.0)
 
-Evaluate one corrected local ballooning point. Corrections use the same
-normalized units as `prepare_ballooning_coefficients`: add `corr_qprime` to
-`dq/dpsi_norm` and `corr_pprime` to `d(mu0*p)/dpsi_norm`. `di` is the
-`det(d0bar)` diagnostic assembled from the same corrected coefficients.
+Ballooning Δ' and `di = det(d0bar)` at one flux surface with corrected profile gradients:
+`corr_qprime` is added to `dq/dpsi_norm` and `corr_pprime` to `d(mu0*p)/dpsi_norm`.
+Returns `(delta_prime, di)`.
 """
 function ballooning_delta_prime(
     psi_idx::Int,
@@ -649,10 +623,8 @@ end
 """
     scan_delta_prime_map(psi_idx, plasma_eq; s_scales, alpha_scales, ...)
 
-Run a local s-alpha style scan at one flux surface using the `Ballooning.jl`
-makefromZero ballooning path. The scan perturbs physical `dq/dpsi` and
-`dp/dpsi`, converts them to the normalized units expected by the local
-ballooning evaluator, and returns delta-prime and `det(d0bar)` `Di` maps.
+s-α scan at one flux surface: scales `dq/dpsi` by `s_scales` and `dp/dpsi` by `alpha_scales`
+and returns the Δ' and `det(d0bar)` maps over the `[s, α]` grid, `NaN` where a point fails.
 """
 function scan_delta_prime_map(
     psi_idx::Int,
@@ -717,7 +689,7 @@ function scan_delta_prime_map(
 end
 
 """
-    ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3)
+    ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3, max_crossings=0)
 
 Locate the marginal-stability crossings of the ballooning Δ' along the pressure-gradient
 scaling `α/α_exp ∈ [0, max_alpha_scale]` at fixed magnetic shear. Marching up from the
@@ -727,9 +699,8 @@ crossings (not marginal points) and are skipped. The first crossing is the first
 stability boundary, the second the second-stability boundary, and so on.
 
 Returns `(scales, alphas, reference)` with `alphas = alpha_ref * scales`, ordered in
-increasing α. Surfaces that never cross return empty vectors. With `max_crossings > 0`
-the scan stops after that many crossings (e.g. `1` for a first-boundary-only search,
-which avoids scanning the full α range above the boundary).
+increasing α; empty vectors if Δ' never crosses. With `max_crossings > 0` the scan stops
+after that many crossings.
 """
 function ballooning_alpha_crossings(
     psi_idx::Int,
@@ -742,9 +713,7 @@ function ballooning_alpha_crossings(
 )
     ref = salpha_reference(psi_idx, plasma_eq)
 
-    # Δ' as a function of the α scaling at fixed magnetic shear. Failed evaluations
-    # (extreme corrections can break the coefficient assembly) count as non-stable
-    # samples and are rejected by the crossing classification, like in scan_delta_prime_map.
+    # Δ' vs α scaling at fixed shear; a failed evaluation (extreme corrections) returns NaN and is not a crossing.
     delta_at(scale) = try
         ballooning_delta_prime(
             psi_idx,
@@ -763,14 +732,9 @@ function ballooning_alpha_crossings(
     return (scales=scales, alphas=ref.alpha_ref .* scales, reference=ref)
 end
 
-# March along `samples` (monotone, either direction) from the stable anchor (first finite,
-# nonzero sample), returning every sign change of `delta_at` between finite samples,
-# bisected to `tol`. Sign changes whose endpoint magnitudes exceed pole_cap*|Δ'_anchor|
-# are Δ' pole crossings (not marginal points) and are skipped; on an adequately fine
-# scan all remaining crossings are genuine marginal zeros, ordered from the anchor.
-#
-# Samples are evaluated lazily; with `max_crossings > 0` the march stops once that many
-# crossings are found, so a first-boundary-only search costs only the samples up to it.
+# Bisect every sign change of `delta_at` along monotone `samples`, marching from the first finite nonzero
+# (stable anchor) sample; changes with endpoint |Δ'| above pole_cap*|Δ'_anchor| are poles and skipped.
+# Samples are evaluated lazily, so `max_crossings > 0` stops the march early.
 function _ballooning_marginal_crossings(delta_at, samples, tol; pole_cap=3.0, max_crossings=0)
     n = length(samples)
     k0 = 0
@@ -832,23 +796,15 @@ end
     ballooning_alpha_boundary(plasma_eq; theta_k=0.0, n_scan=24, max_alpha_scale=8.0, tol=1e-3,
                               psi_window=BALLOONING_SCAN_PSI_WINDOW, verbose=false)
 
-Profile driver for the BALOO-style ballooning stability diagram. Loops over flux
-surfaces returning the experimental pressure gradient `alpha` (from
-[`salpha_reference`](@ref)) and the first stability boundary `alpha_critical` (from
-[`critical_ballooning_alpha`](@ref)) versus normalized flux `psi`. Surfaces whose
-experimental `alpha` exceeds `alpha_critical` are ballooning-unstable.
+Profile driver for the BALOO-style ballooning stability diagram: the experimental pressure
+gradient `alpha` (from [`salpha_reference`](@ref)) and the first stability boundary
+`alpha_critical` (from [`critical_ballooning_alpha`](@ref)) versus normalized flux `psi`.
+Surfaces with `alpha > alpha_critical` are ballooning-unstable.
 
-This is the fast first-boundary-only driver: `critical_ballooning_alpha` stops at the
-first crossing, so cost scales with the boundary location rather than the full α range.
-Use this (not [`ballooning_alpha_boundaries`](@ref)) when only the 1st boundary is
-needed, e.g. a pedestal-stability constraint. `n_scan` sets the scan resolution; raise
-it (e.g. 64) on edge surfaces where Δ' poles can shift a coarse first crossing.
-`max_alpha_scale` and `tol` bound and resolve the search, as in [`critical_ballooning_alpha`](@ref).
-
-The scan is evaluated only inside `psi_window` (default `BALLOONING_SCAN_PSI_WINDOW`) — ballooning boundaries
-are physically relevant in the mid-radius and pedestal, and the tightly packed axis and
-far-edge surfaces dominate the scan cost. Per-surface failures, skipped surfaces, and
-surfaces with no boundary within range are returned as `NaN`.
+Faster than [`ballooning_alpha_boundaries`](@ref) when only the first boundary is needed, since
+each surface stops at its first crossing. Raise `n_scan` (e.g. 64) on edge surfaces where Δ'
+poles can shift a coarse first crossing. Only surfaces inside `psi_window` are scanned;
+skipped surfaces, failures, and surfaces with no boundary in range are `NaN`.
 """
 function ballooning_alpha_boundary(
     plasma_eq::Equilibrium.PlasmaEquilibrium;
@@ -912,10 +868,9 @@ boundary `alpha_critical1` (lowest Δ' zero), and the second stability boundary
 [`ballooning_alpha_crossings`](@ref) at each surface. Arrays contain `NaN` where no
 boundary exists.
 
-`n_scan` sets the scan resolution of the crossing search; crossings closer together
-than the scan step can be missed, which shows up as isolated outliers on otherwise
-smooth boundary curves. Surfaces outside `BALLOONING_SCAN_PSI_WINDOW` are skipped
-(returned as `NaN`), like per-surface failures.
+Crossings closer together than the `n_scan` step can be missed, showing up as isolated
+outliers on the boundary curves. Surfaces outside `BALLOONING_SCAN_PSI_WINDOW` and failed
+surfaces are `NaN`.
 """
 function ballooning_alpha_boundaries(
     plasma_eq::Equilibrium.PlasmaEquilibrium;
@@ -974,9 +929,7 @@ function ballooning_qprime_crossings(
 )
     ref = salpha_reference(psi_idx, plasma_eq)
 
-    # Δ' as a function of the q' scaling at the experimental pressure gradient. Failed
-    # evaluations (reversed-shear corrections can break the coefficient assembly) count
-    # as non-stable samples and are rejected by the crossing classification.
+    # Δ' vs q' scaling at the experimental pressure gradient; a failed evaluation returns NaN and is not a crossing.
     delta_at(scale) = try
         ballooning_delta_prime(
             psi_idx,
@@ -1131,19 +1084,13 @@ function ballooning_qprime_delta_prime_map(
     return (psi=psi, qprime_scales=qprime_scales, qprime_ref=qprime_ref, delta_prime=delta_prime)
 end
 
-# ======================================================================
-#   ODE Integration
-#   Integrates the ideal marginal ballooning equations
-# ======================================================================
+# Ideal marginal ballooning ODE
 """
     integrate_ballooning_ode(ode_coefficient_spline; theta_k=0.0, tol=1e-8)
 
-Integrates the ballooning ODE from `-Infinity` to `-1e-3` and `+Infinity` to `+1e-3`.
-Computes Delta' = (y'/y)_right - (y'/y)_left. `tol` is the relative and absolute ODE tolerance.
-
-## Returns
-
-  - `delta_prime`: The stability index Δ'.
+Integrates the ballooning ODE inward from `∓theta_max` to `∓MATCHING_POINT` and returns
+`(value=Δ',)` with `Δ' = (y'/y)_right - (y'/y)_left`, or `(value=NaN,)` if either solve fails.
+`tol` is the relative and absolute ODE tolerance.
 """
 function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0, tol::Float64=1e-8)
     MINIMUM_STEP = 1e-10
@@ -1157,8 +1104,7 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0, 
     initial_condition_left = SVector(0.0, 1.0)
     initial_condition_right = SVector(0.0, -1.0)
 
-    # Reusable RHS parameters: precompute the periodic-wrap constants once (were recomputed every RHS call)
-    # and carry a scratch buffer + search hint so the spline is evaluated in place (no per-step allocation).
+    # Periodic-wrap constants plus a scratch buffer and search hint for allocation-free in-place spline evaluation.
     itp = ode_coefficient_spline.itp
     theta_min = first(ode_coefficient_spline.xs)
     theta_period = last(ode_coefficient_spline.xs) - theta_min
@@ -1215,35 +1161,23 @@ end
 
 
 
-# ======================================================================
-#   ODE System Definition
-#   Differential equations for marginal ballooning stability
-# ======================================================================
 """
     compute_ballooning_ode(solution, parameters, poloidal_angle) -> SVector{2,Float64}
 
-Defines the RHS of the first-order ODE system for ideal marginal ballooning modes.
-Used by the DifferentialEquations.jl ODE solver.
-
-The second-order equation `d/dθ(f·dy/dθ) + g·y = 0` is rewritten as a 2x1 system:
-
-  - `dy₁/dθ = y₂ / f`
-  - `dy₂/dθ = -g · y₁`
-
-where y₁ is the solution and y₂ = f·dy/dθ.
+Out-of-place RHS of the ideal marginal ballooning equation `d/dθ(f·dy/dθ) = g·y`, written as
+`dy₁/dθ = y₂/f`, `dy₂/dθ = g·y₁` with `y₁ = y` and `y₂ = f·dy/dθ`.
 
 ## Arguments
 
-  - `solution`: Current state vector `[y₁, y₂]` (an `SVector{2}`). Returns the derivative `[dy₁/dθ, dy₂/dθ]` as an `SVector{2}`.
-  - `parameters::Tuple`: (ode_coefficient_spline, reference_angle).
-  - `poloidal_angle::Float64`: Current poloidal angle θ (independent variable).
+  - `solution`: State `[y₁, y₂]` as an `SVector{2}`.
+  - `parameters`: NamedTuple `(itp, coeffs, theta_min, theta_period, hint)` built by `integrate_ballooning_ode`.
+  - `poloidal_angle`: Extended poloidal angle θ.
 """
 function compute_ballooning_ode(solution, parameters, poloidal_angle)
     itp = parameters.itp
     coeffs = parameters.coeffs
     theta_wrapped = mod(Float64(poloidal_angle) - parameters.theta_min, parameters.theta_period) + parameters.theta_min
-    # In-place spline evaluation into the reusable buffer; the plain `coeffs = itp(θ)` form allocated a
-    # fresh length-9 Vector on every RHS call — the dominant cost of the ballooning scan.
+    # In-place evaluation into the reusable buffer; allocating here dominated the scan cost.
     itp(coeffs, theta_wrapped; hint=parameters.hint)
 
     periodic = coeffs[1]
@@ -1258,7 +1192,6 @@ function compute_ballooning_ode(solution, parameters, poloidal_angle)
     kappaw = kappaw_periodic - poloidal_angle * kappaw_secular
     g = -2.0 * jac_chiprime * pprime_chiprime * kappaw
 
-    # Out-of-place RHS returning an SVector: DP5 runs the 2-component system on stack-allocated static
-    # vectors (no heap, SIMD), removing the per-step Vector overhead of the integration.
+    # SVector return keeps the DP5 state on the stack.
     return SVector(solution[2] / f, g * solution[1])
 end

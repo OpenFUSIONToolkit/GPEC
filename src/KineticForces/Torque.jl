@@ -1,13 +1,13 @@
 """
     tpsi!(tpsi_var, psi, n, l, zi, mi, wdfac, divxfac, electron, method, equil, intr,
-          kinetic_profiles; op_wmats=nothing)
+          kinetic_profiles; op_wmats=nothing, surface=nothing, kwargs...) -> nothing
 
-Toroidal torque resulting from nonambipolar transport in perturbed equilibrium.
-Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
+Toroidal torque from nonambipolar transport at one ψ and bounce harmonic `l`, written to
+`tpsi_var[]`. The imaginary part carries the kinetic energy, Im(T) = 2n·δW_k. Zero for ψ > 1.
 
 # Arguments
 
-  - `tpsi_var`: Output complex torque value
+  - `tpsi_var::Ref{ComplexF64}`: Output torque
   - `psi::Float64`: Normalized poloidal flux
   - `n::Int`: Toroidal mode number
   - `l::Int`: Bounce harmonic number
@@ -29,9 +29,6 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
   - `surface`: Per-surface bundle from `_torque_surface`, shared across the bounce harmonics of
     one ψ; built here when not given
 
-# Returns
-
-  - `ComplexF64`: Toroidal torque due to nonambipolar transport
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
@@ -128,7 +125,7 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
 
     mthsurf_local = intr.mthsurf
 
-    # Create spline for poloidal integrands
+    # Poloidal integrands sampled on the θ grid
     cglspl = zeros(2, mthsurf_local + 1)
     theta_vals = range(0, 1; length=mthsurf_local + 1)
 
@@ -175,9 +172,8 @@ end
     calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec, wdhat, wbhat,
                    nueff, dVdpsi, n_s, T_s, dbob_m_f, bo, bmin)::ComplexF64
 
-Calculate RLAR (Reduced Large Aspect Ratio) torque.
-Uses energy space integration with pitch angle averaging.
-Valid for low aspect ratio tokamaks (ε << 1).
+RLAR (Reduced Large Aspect Ratio) torque: energy-space integration with a pitch-averaged
+bounce response. Valid for large aspect ratio (ε ≪ 1); the κ bounce average is a placeholder estimate.
 
 Reference: [Logan et al., Phys. Plasmas, 2013]
 """
@@ -192,8 +188,7 @@ function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
     # Maximum pitch angle parameter (use safe estimate)
     lmdamax = min(1.0 / (1 - epsr), bo / bmin)
 
-    # Energy-space quadrature
-    # This computes ∫ K(x) dx where K is the resonance operator
+    # Energy-space quadrature ∫ K(x) dx of the resonance operator K
     xint = integrate_energy(wdian, wdiat, welec, wdhat, wbhat, nueff,
         l, lnq, n, psi, lmdamax, "rlar")
 
@@ -207,7 +202,7 @@ function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
     # Normalization: √(ε/(2π³)) * n² * n_s * T_s
     norm = sqrt(epsr / (2.0 * π^3)) * Float64(n)^2 * n_s * T_s
 
-    # Result: dT/dpsi = -(dψ/dpsi) * κ_int * x_int * norm
+    # dT/dψ = -0.5 · dV/dψ · κ_int · x_int · norm
     result = psi_factor * kappaint_val * 0.5 * (-xint) * norm
 
     return result
@@ -219,11 +214,7 @@ end
                    bmax, bmin, n_s, T_s, mass, chrg, tspl, dbob_m_f, divx_m_f,
                    divxfac, wdfac)::ComplexF64
 
-Calculate CLAR (Circular Large Aspect Ratio) torque.
-Uses pitch-angle resolved calculations for trapped and passing particles.
-Includes bounce-averaged integrals over lambda (pitch angle).
-
-Status: Partially implemented (stub for full calculation)
+CLAR (Circular Large Aspect Ratio) torque. Not implemented: warns once and returns zero.
 """
 function calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
@@ -239,22 +230,12 @@ end
                   bmin, n_s, T_s, mass, chrg, tspl, dbob_m_f, divx_m_f,
                   divxfac, wdfac, method, op_wmats; kwargs...)::ComplexF64
 
-Calculate GAR (General Aspect Ratio) torque.
-Fully general method without aspect ratio expansion.
-Handles variants: FGAR (full), TGAR (trapped), PGAR (passing).
-Can compute torque (*TMM), energy (*WMM), or matrix elements (*KMM/*RMM).
+GAR (General Aspect Ratio) torque, with no aspect-ratio expansion: bounce averages over λ, then
+an adaptive pitch/energy integration and the Eq. 19 normalization of Logan et al. 2013. Variants
+FGAR/TGAR/PGAR (full/trapped/passing); the `*tmm`/`*wmm`/`*kmm`/`*rmm` methods also fill
+`op_wmats` with the six kinetic matrices (A, B, C, D, E, H).
 
-Ports Fortran torque.F90 GAR branch (lines 529-932).
-
-# Steps
-
- 1. Compute bounce-averaged quantities via `compute_bounce_data()`
- 2. Build fbnce interpolant over λ, normalize for numerical stability
- 3. Integrate over pitch angle via `integrate_pitch_gar_quadgk()`
- 4. Apply torque normalization (Eq. 19, Logan et al. 2013)
- 5. If matrix path: assemble and normalize kinetic matrices
-
-# Keyword Arguments (rex/imx override)
+# Keyword Arguments
 
   - `rex_override::Union{Nothing,Float64}`: Override real-part multiplier for resonance
     operator. When both overrides are provided, bypasses method-string derivation.
@@ -309,9 +290,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     fbnce_data[:, 3] .= bounce.dJdJ
 
     if do_matrices
-        # Packed matrix block lives at columns 4:(3+nqty_mat). The real() wrap
-        # keeps the historical OLD-path behavior (torque pipeline uses only the
-        # real part of the outer products).
+        # Packed matrix block at columns 4:(3+nqty_mat); this torque path keeps only its real part.
         @inbounds for q in 1:nqty_mat, ilmda in 1:bounce.nlmda
             fbnce_data[ilmda, 3+q] = real(bounce.wmats_vs_lambda[ilmda, q])
         end
@@ -430,9 +409,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
             tpsi_val = complex(rex + imx * im) * sqrt(abs(tpsi_val))
 
         elseif method_suffix in ["wmm", "tmm", "pmm"]
-            # Mode-coupled dW contraction with displacement vectors
-            # TODO: Requires xs_m displacement interpolants from PerturbedEquilibriumState
-            # For now, store matrices and return scalar torque
+            # No ξ contraction of the matrices: they are stored and the scalar torque is returned.
         end
     end
 
@@ -637,26 +614,12 @@ end
     kinetic_energy_matrices_for_euler_lagrange!(kwmat, ktmat, state, psi, n, l, wdfac, intr;
                                                 kwargs...) → nothing
 
-Compute the six kinetic Euler-Lagrange coefficient matrices of Logan 2015
-Eqs 7.30–7.35 (A_k, B_k, C_k, D_k, E_k, H_k) at a single (ψ, n, ℓ) and write
-them into pre-allocated `kwmat[mpert, mpert, 6]` (fwmm half, Fortran
-rex=0, imx=1) and `ktmat[mpert, mpert, 6]` (ftmm half, rex=1, imx=0).
-
-Matrix-only path (no scalar torque slot in the pitch-angle buffer), so
-`nqty = mpert²·6` instead of `1 + mpert²·6`.
-
-Uses `integrate_pitch_gar_quadgk_wt` to emit both halves from a single
-energy integration per (λ, E), reproducing Fortran's two-pass semantics
-(`torque.F90:842-847`). Per-surface matrix dumps confirm element-by-element
-match against Fortran `fourfit.F:1080-1082` (`kwmat_l`, `ktmat_l`).
-
-For the Hermitian-outer-product blocks A/D/H stored as upper-triangles,
-the mirror rule differs between halves:
-kwmat[j,i] =  conj(kwmat[i,j])   — Hermitian (S_w pure imaginary)
-ktmat[j,i] = -conj(ktmat[i,j])   — anti-Hermitian (S_t pure real)
-Derivation: `conj(S_w) = -S_w` vs `conj(S_t) = S_t`, combined with
-`conj(factor) = -factor` (factor = -i/(2n)). These mirrors recover
-Fortran's independent-slot computation at the mirrored (j,i) positions.
+Compute the six kinetic Euler-Lagrange coefficient matrices (A, B, C, D, E, H) of Logan 2015
+Eqs 7.30–7.35 at one (ψ, n, ℓ) into pre-allocated `kwmat[mpert, mpert, 6]` (fwmm half, Fortran
+rex=0, imx=1) and `ktmat[mpert, mpert, 6]` (ftmm half, rex=1, imx=0). One energy integration per
+(λ, E) via `integrate_pitch_gar_quadgk_wt` yields both halves. The upper-triangle-stored A/D/H
+blocks mirror as Hermitian in `kwmat` (`kwmat[j,i] = conj(kwmat[i,j])`) and anti-Hermitian in
+`ktmat` (`ktmat[j,i] = -conj(ktmat[i,j])`).
 """
 function kinetic_energy_matrices_for_euler_lagrange!(
     kwmat::Array{ComplexF64,3},
@@ -706,16 +669,12 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         return nothing
     end
 
-    # Pack wb, wd, and the matrix block into fbnce (no scalar slot). fbnce is COMPLEX
-    # here to carry the op_wmats phase: the off-Hermitian blocks (op_B = W_Z†W_X,
-    # op_C = W_Z†W_Y, op_E = W_X†W_Y) carry genuine phase that dropping imag would zero.
-    # Packed as 3 Hermitian upper-triangles + 3 full blocks; see `nqty_matrix`.
+    # Pack wb, wd and the matrix block (no scalar slot); complex because B/C/E carry genuine phase.
     nqty = nqty_matrix(mpert)
     fbnce_data = zeros(ComplexF64, bounce.nlmda, 2 + nqty)
     fbnce_data[:, 1] .= bounce.wb
     fbnce_data[:, 2] .= bounce.wd
-    # bounce.wmats_vs_lambda is already (nlmda, nqty) in the packed layout,
-    # so the matrix block is a direct copy.
+    # wmats_vs_lambda is already (nlmda, nqty) in the packed layout.
     fbnce_data[:, 3:end] .= bounce.wmats_vs_lambda
 
     # Column-wise median normalization for numerical stability.
@@ -732,8 +691,7 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     # CubicFit endpoint BC matches the extrap fit.
     fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=CubicFit())
 
-    # Dual-output pitch integration: one energy sweep per (λ, E) produces both
-    # halves. Packed return is [wmm | tmm], each length nqty.
+    # One energy sweep per (λ, E) gives both halves, packed as [wmm | tmm], each length nqty.
     lxint = integrate_pitch_gar_quadgk_wt(
         state.wdian, state.wdiat, state.welec, state.nuk,
         bo / state.bmax, state.epsr, state.q,
@@ -747,14 +705,10 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     energy_factor = tnorm * (1 / (2 * im * n))
 
     Mu = (mpert * (mpert + 1)) ÷ 2
-    # Fetch normalized element at pitch-integral slot q, from either half.
-    # half_offset = 0 for wmm (→kwmat), = nqty for tmm (→ktmat).
+    # Normalized element at slot q; half_offset = 0 for wmm (kwmat), nqty for tmm (ktmat).
     @inline elem(q, half_offset) = complex(lxint[half_offset+q] / fbnce_norm[q]) * energy_factor
 
-    # For A/D/H Hermitian-outer-product blocks stored as upper-triangles, the
-    # lower-triangle reconstruction uses different mirrors per half:
-    #   kwmat[j,i] =  conj(kwmat[i,j])  (Hermitian; S_w pure imaginary)
-    #   ktmat[j,i] = -conj(ktmat[i,j])  (anti-Hermitian; S_t pure real)
+    # A/D/H lower triangles: Hermitian mirror for kwmat (S_w imaginary), anti-Hermitian for ktmat (S_t real).
     @inline function _assemble_hermitian!(dest, k, off, half, mirror_sign)
         @inbounds for j in 1:mpert, i in 1:j
             v = elem(off + _tri_idx(i, j), half)
@@ -801,37 +755,22 @@ end
     compute_kinetic_matrices_at_psi!(kwmat, ktmat, psi, n, l, zi, mi,
         wdfac, electron, equil, intr, kinetic_profiles)
 
-Compute the six kinetic Euler-Lagrange coefficient matrices at a single
-flux surface and split them into `kwmat` and `ktmat` in the convention
-used by the DCON matrix-assembly path (Logan 2015 Eqs 7.30–7.35).
-
-Rather than running two integrations like the reference Fortran PENTRC
-(one with `rex=0, imx=1` for `kwmat` and another with `rex=1, imx=0` for
-`ktmat`), this path integrates once with `rex=imx=1` to get the full
-complex response, then decomposes by real/imag parts — equivalent math
-at half the work. After the `-i/(2n)` normalization inside
-`kinetic_energy_matrices_for_euler_lagrange!`, the full complex response
-splits cleanly:
-
-  - `kwmat` ← fwmm half (Fortran rex=0, imx=1 pass)
-  - `ktmat` ← ftmm half (Fortran rex=1, imx=0 pass)
-
-Each half is complex (not pure real / pure imag), matching Fortran's two
-independent integration passes at `torque.F90:842-847`. Per-surface matrix
-dumps confirm element-by-element agreement with Fortran `fourfit.F:1080-1082`
-(`kwmat_l`, `ktmat_l`). This is the Fortran convention required by the
-adjoint combinations `kwmat ± ktmat` in `ForceFreeStates/Kinetic.jl` /
-Fortran `dcon/sing.f:967-1075` for non-Hermitian B_k, C_k, E_k.
+Compute the six kinetic Euler-Lagrange coefficient matrices (Logan 2015 Eqs 7.30–7.35) at one flux
+surface, split into `kwmat` (fwmm half, Fortran rex=0, imx=1) and `ktmat` (ftmm half, rex=1, imx=0)
+as the ForceFreeStates kinetic assembly expects for its `kwmat ± ktmat` combinations. Both halves
+are complex and come from a single integration. Zero for ψ > 1.
 
 # Arguments
 
-  - `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), fwmm half, zeroed on entry
-  - `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), ftmm half, zeroed on entry
+  - `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), fwmm half, overwritten
+  - `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), ftmm half, overwritten
   - `psi, n, l, zi, mi, wdfac, electron`: Same as `tpsi!`
   - `equil`: PlasmaEquilibrium
   - `intr::KineticForcesInternal`: Internal state with mode indexing, geometric
     matrices (smats/tmats/xmats/ymats/zmats), and per-surface θ-grid buffers
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
+  - `state`, `geometry` (keywords): precomputed `_setup_surface_state` bundle and bounce geometry
+    to share across harmonics; built here when `nothing`
 
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """

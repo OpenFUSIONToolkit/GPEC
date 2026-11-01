@@ -1,19 +1,10 @@
 """
     EnergyIntegration
 
-Energy-space integration for the kinetic resonance operator.
-Implements the energy integrand from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
-
-The integral over normalized energy x = E/T is evaluated in real x-space over
-`[0, X_ENERGY_MAX]`. The integrand and every resonance pole decay as `x^p·exp(-x)`,
-so the upper limit is set where that tail falls far below any quadrature tolerance
-(see `X_ENERGY_MAX`). Resonance poles (where the denominator i·Ω(x) - ν vanishes,
-shifted off the real axis to x_pole = x_res - i·ν/Ω′ by collisions) are removed
-analytically by a Sokhotski-Plemelj decomposition, so the remaining integrand
-is smooth and integrated by QuadGK adaptive Gauss-Kronrod quadrature in the
-variable u = √x, where the half-integer powers of x and the quadratic Ω are
-analytic. One path serves all collisionalities; the collisionless case is the
-exact ν→0 limit.
+Energy-space integration for the kinetic resonance operator; the integrand is
+[Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8). The integral over x = E/T runs over
+`[0, X_ENERGY_MAX]`: resonance poles are removed analytically (Sokhotski-Plemelj) and the smooth
+remainder is integrated with QuadGK in u = √x. The collisionless case is the exact ν→0 limit.
 """
 
 """
@@ -248,26 +239,7 @@ Writing `h(x) = N(x)·exp(-x)`, the limit is
     return exp(-xr) * ((dn - nn) - nn * opp / (2.0 * op)) / (im * op)
 end
 
-"""
-    _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol) → ComplexF64
-
-Energy integral over real `x ∈ [0, X_ENERGY_MAX]`, matching Fortran PENTRC's real-space
-integration (energy.f90). One path for any collisionality: each resonance contributes a pole
-`x_pole = x_res − i·ν/Ω′`, removed analytically by principal-value + residue
-(Sokhotski-Plemelj), leaving a smooth integrand. The collisionless case (ν ≡ 0, real-axis
-pole) is the exact ν→0⁺ limit of this single formula; its causal branch is carried by the
-signed zero of `−pole_offset` (see the add-back below), and its on-axis `0/0` window by the
-analytic regular-part limit.
-
-The quadrature runs in `u = √x` (`dx = 2u du`): the integrand's half-integer powers of x and
-the resonance condition Ω (a quadratic in √x) are analytic in u, and the pole-free
-integrand needs a third fewer Gauss-Kronrod evaluations than in x. Each pole's real part is a
-breakpoint; a pole narrower than `NARROW_POLE_FRACTION` of its position also gets breakpoints
-at ±2 and ±10 widths, so the first pass already resolves the width scale instead of bisecting
-down to it.
-"""
-# Real x-space resonant integrand with pole subtractions
-# Explicit function keeps memory allocation out of the QuadGK inner loop.
+# Real x-space integrand minus the pole parts; a named function keeps allocation out of the QuadGK loop.
 @inline function _resonant_integrand(x::Float64, p::EnergyParams,
     residues::Vector{ComplexF64}, x_poles::Vector{ComplexF64}, npole::Int,
     leff::Float64, wb::Float64, n::Int, wd::Float64)::ComplexF64
@@ -291,6 +263,15 @@ down to it.
     return val
 end
 
+"""
+    _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol, segbuf=nothing) → ComplexF64
+
+Energy integral over real `x ∈ [0, X_ENERGY_MAX]`, as in Fortran PENTRC (energy.f90). Each resonance pole
+`x_pole = x_res − i·ν/Ω′` is removed by principal value + residue (Sokhotski-Plemelj) and the smooth remainder is
+integrated in `u = √x`. The collisionless case is the exact ν→0⁺ limit: the signed zero of `−pole_offset` carries its
+causal branch and the analytic regular-part limit its on-axis `0/0`. Poles narrower than `NARROW_POLE_FRACTION` of
+their position get extra breakpoints at ±2 and ±10 widths.
+"""
 function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
     n::Int, we::Float64, wd::Float64,
     atol::Float64, rtol::Float64, segbuf=nothing)::ComplexF64
@@ -358,24 +339,11 @@ end
                      nutype="harmonic", f0type="maxwellian", nufac=1.0,
                      qt=false, atol=1e-7, rtol=1e-5) → ComplexF64
 
-Integrate the kinetic resonance operator over normalized energy x = E/T.
-
-The integral ∫₀^∞ N(x)·exp(-x)/denom(x) dx is evaluated in real x-space over
-`[0, X_ENERGY_MAX]` (the integrand and its poles decay as `x^p·exp(-x)`, so the
-tail there is far below any tolerance) via `_integrate_energy_resonant`. Each
-resonance pole (root of
-Ω(x) = leff·wb·√x + n·(we + wd·x), shifted off the real axis by collisions to
-x_pole = x_res - i·ν/Ω′) is removed by subtracting its singular part R/(x - x_pole)
-and adding back the analytic principal-value + residue. A single formula handles
-all collisionalities: the collisionless case (ν ≡ 0) is the exact ν→0 limit, with
-its real-axis pole resolved analytically (see `_integrate_energy_resonant`).
+Integrate the kinetic resonance operator ∫₀^∞ N(x)·exp(-x)/denom(x) dx over normalized energy x = E/T,
+with resonance poles handled by `_integrate_energy_resonant`; CGL has no pole and is integrated directly.
 
 Collision operator types (`nutype`): `"zero"`, `"small"`, `"krook"`, `"harmonic"`.
 Distribution function types (`f0type`): `"maxwellian"`, `"park"`, `"cgl"`.
-
-# Returns
-
-  - `ComplexF64`: energy integral value
 """
 function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
     wb::Float64, nuk::Float64, ell::Int, leff::Float64,
@@ -394,8 +362,7 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
         return val
     end
 
-    # Single resonant path for any collisionality: real x-space PV+residue with a
-    # pole x_pole = x_res - i·ν/Ω′ (off-axis for ν>0, real for ν≡0).
+    # One resonant path for any collisionality: pole x_pole = x_res - i·ν/Ω′ (real for ν≡0).
     return _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol, segbuf)
 end
 
@@ -404,10 +371,7 @@ end
                                nutype="harmonic", f0type="maxwellian",
                                nufac=1.0, qt=false) → Vector{ComplexF64}
 
-Diagnostic convenience: evaluate the physical x-space energy integrand
-N(x)·exp(-x)/denom(x) at specified x = E/T values. Returns the integrand value
-(not the integral) at each point in `x_grid`. Useful for plotting the energy
-integrand shape and verifying kinetic resonance resolution.
+Diagnostic: evaluate the energy integrand N(x)·exp(-x)/denom(x) (not the integral) at each x = E/T in `x_grid`.
 
 # Example
 
