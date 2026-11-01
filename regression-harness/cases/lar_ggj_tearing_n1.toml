@@ -12,6 +12,7 @@ example_dir = "examples/LAR_ideal_match_test"
 remove_sections = ["Match", "LocalStability", "Ballooning"]
 
 [overrides]
+"Run.output_file" = "gpec.h5"
 "Tearing.inner_model" = "GGJ"
 "Tearing.eta" = 1.0e-7
 "Tearing.rho" = 1.0e-7
