@@ -196,6 +196,12 @@ end
         @test i.qlim <= qh
     end
 
+    # No rational surface far enough below the bound leaves nothing to truncate at: a clear error, not a failed root find.
+    qmin = equil.params.qmin
+    c_none = ForceFreeStatesControl(; truncate_at_rational_offset=true, rational_offset_fraction=0.2,
+        qhigh=min(floor(qmin) + 1 - 0.05, qmin + 0.05))
+    @test_throws r"no rational surface" sing_lim!(_fresh(), c_none, equil)
+
     # A cap placed exactly on a rational must exclude it on either side of the float knife-edge.
     q_of = equil.profiles.q_spline
     lo, hi = equil.profiles.xs[1], equil.params.psihigh_resolved

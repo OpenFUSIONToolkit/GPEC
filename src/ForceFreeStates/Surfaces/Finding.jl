@@ -148,6 +148,10 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         while intr.qlim > qlim_bound
             intr.qlim -= 1.0 / intr.nlow
         end
+        intr.qlim >= equil.params.qmin ||
+            error("sing_lim!: no rational surface of n = $(intr.nlow) lies far enough below qlim = $(@sprintf("%.3f", qlim_bound)) " *
+                  "(q_min = $(@sprintf("%.3f", equil.params.qmin))) to truncate at rational_offset_fraction past it. " *
+                  "Raise qhigh or set truncate_at_rational_offset = false.")
     end
 
     # qlim below qmax: Newton-solve q(psilim) = qlim
