@@ -16,7 +16,7 @@ Toroidal torque from nonambipolar transport at one ψ and bounce harmonic `l`, w
   - `wdfac::Float64`: Drift factor
   - `divxfac::Float64`: Divergence factor
   - `electron::Bool`: Calculate quantities for electrons (zi,mi ignored)
-  - `method::String`: Integration method (RLAR, CLAR, *GAR, *TMM, *WMM, *KMM)
+  - `method::String`: Integration method (FCGL, *GAR, *TMM, *WMM, *KMM)
     where * = F,T,P for full,trapped,passing
   - `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
   - `intr::KineticForcesInternal`: Internal state with mode indexing and perturbation splines
@@ -59,26 +59,13 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
            _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles;
         need_matrices=(!isnothing(op_wmats)), n, wdfac, divxfac) :
            surface
-    (; chrg, mass, tspl, bmax, bmin, q, n_s, T_s, welec, wdian, wdiat, wtran, wgyro, nuk, epsr, dVdpsi, dbob_m_f, divx_m_f) = surf
-    wbhat = (π / 4) * sqrt(epsr / 2) * wtran
-    wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
-    nueff = nuk / (2 * epsr)
+    (; chrg, mass, tspl, bmax, bmin, q, n_s, T_s, welec, wdian, wdiat, nuk, epsr, dbob_m_f, divx_m_f) = surf
 
     # Method selection — route on the registry dispatch tag (errors on unknown method)
     kind = method_kind(method)
     if kind == :fcgl
         tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac,
             n_s, T_s, equil, intr)
-
-    elseif kind == :rlar
-        tpsi_var[] = calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
-            wdhat, wbhat, nueff, dVdpsi, n_s, T_s,
-            dbob_m_f, intr.bo, bmin)
-
-    elseif kind == :clar
-        tpsi_var[] = calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec,
-            nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
-            tspl, dbob_m_f, divx_m_f, divxfac, wdfac)
 
     else  # :gar — fgar/tgar/pgar + all *mm matrix methods
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
@@ -165,63 +152,6 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
               0.5 * (1.0 / 3.0) * integral_2)
 
     return result
-end
-
-
-"""
-    calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec, wdhat, wbhat,
-                   nueff, dVdpsi, n_s, T_s, dbob_m_f, bo, bmin)::ComplexF64
-
-RLAR (Reduced Large Aspect Ratio) torque: energy-space integration with a pitch-averaged
-bounce response. Valid for large aspect ratio (ε ≪ 1); the κ bounce average is a placeholder estimate.
-
-Reference: [Logan et al., Phys. Plasmas, 2013]
-"""
-function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
-    wdhat, wbhat, nueff, dVdpsi::Float64,
-    n_s::Float64, T_s::Float64,
-    dbob_m_f, bo, bmin=0.5)::ComplexF64
-
-    # Setup parameters for energy integration
-    lnq = Float64(l)  # Resonant mode for trapped particles
-
-    # Maximum pitch angle parameter (use safe estimate)
-    lmdamax = min(1.0 / (1 - epsr), bo / bmin)
-
-    # Energy-space quadrature ∫ K(x) dx of the resonance operator K
-    xint = integrate_energy(wdian, wdiat, welec, wdhat, wbhat, nueff,
-        l, lnq, n, psi, lmdamax, "rlar")
-
-    # Kappa/bounce averaging (effect of field perturbations)
-    # Placeholder: simplified estimate
-    kappaint_val = sqrt(mean(abs.(dbob_m_f) .^ 2))
-
-    # dV/dpsi gradient term from Clebsch coordinate Jacobian
-    psi_factor = dVdpsi
-
-    # Normalization: √(ε/(2π³)) * n² * n_s * T_s
-    norm = sqrt(epsr / (2.0 * π^3)) * Float64(n)^2 * n_s * T_s
-
-    # dT/dψ = -0.5 · dV/dψ · κ_int · x_int · norm
-    result = psi_factor * kappaint_val * 0.5 * (-xint) * norm
-
-    return result
-end
-
-
-"""
-    calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
-                   bmax, bmin, n_s, T_s, mass, chrg, tspl, dbob_m_f, divx_m_f,
-                   divxfac, wdfac)::ComplexF64
-
-CLAR (Circular Large Aspect Ratio) torque. Not implemented: warns once and returns zero.
-"""
-function calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
-    bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
-    dbob_m_f, divx_m_f, divxfac, wdfac)::ComplexF64
-
-    @warn "CLAR method not yet fully implemented, returning zero" maxlog = 1
-    return ComplexF64(0.0, 0.0)
 end
 
 
@@ -522,8 +452,6 @@ function _setup_surface_state(
 
     wdian = -twopi * T_s * dn_s_dpsi / (chrg * intr.chi1 * n_s)
     wdiat = -twopi * dT_s_dpsi / (chrg * intr.chi1)
-    wtran = sqrt(2 * T_s / mass) / (q * intr.ro)
-    wgyro = chrg * intr.bo / mass
     nuk = nu_s
 
     rsquared_bmin = equil.rzphi_rsquared((psi, theta_bmin))
@@ -533,7 +461,6 @@ function _setup_surface_state(
     avg_r = equil.geometry.avg_r_spline(psi)
     avg_R = equil.geometry.avg_R_spline(psi)
     epsr = avg_r / avg_R
-    dVdpsi = equil.profiles.dVdpsi_spline(psi)
 
     # Cells and stationary points of B(θ), reused by every λ of every harmonic.
     bf = _surface_b_field(B_vpar)
@@ -542,8 +469,8 @@ function _setup_surface_state(
         chrg, mass,
         tspl, B_vpar, bf, bmax, bmin, theta_bmax,
         q, n_s, T_s, welec,
-        wdian, wdiat, wtran, wgyro, nuk,
-        epsr, dVdpsi
+        wdian, wdiat, nuk,
+        epsr
     )
 end
 

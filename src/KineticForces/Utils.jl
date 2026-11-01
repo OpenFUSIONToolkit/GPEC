@@ -56,7 +56,7 @@ density peaks (Logan & Park, Phys. Plasmas 20, 122507 (2013), §IV–V). `xeval`
 peak of the Maxwellian-weighted drive `x^2.5·e^−x`. The ℓ = 0 node is the ω_d-shifted ExB
 (superbanana-plateau) resonance.
 
-The frequencies are the cheap large-aspect-ratio closed forms of the `rlar` method,
+The frequencies are the cheap large-aspect-ratio closed forms
 `ω_b = (π/4)·√(ε/2)·wtran` and `ω_d = q·T_s/(2·ε·R₀²·Z·e·B₀)·wdfac`, with ε = ⟨r⟩/⟨R⟩ clamped
 away from the axis; no bounce averaging, which is enough for panel placement.
 """
