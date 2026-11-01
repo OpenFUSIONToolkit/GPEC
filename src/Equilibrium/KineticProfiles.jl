@@ -20,15 +20,19 @@ const _KEV_J = 1.602e-16         # 1 keV in J (temperature normalization in the 
 const _NU_PREFAC = 3.5e17        # Krook collision-frequency prefactor
 const _MP = 1.672_614e-27        # proton mass [kg]
 const _ME = 9.109_1e-31          # electron mass [kg]
+const _T_FLOOR_KEV = 1.0e-6      # collision-model temperature floor (1 meV), as Fortran PENTRC
 
-# NRL-formulary Coulomb logarithm (natural log); n_e in m⁻³, T_e in J.
-_coulomb_log(ne, Te) = 17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(Te / _KEV_J)
+# Temperature in keV for the collision model, floored so a cold edge node keeps a finite, positive ν.
+_collision_tkev(T) = max(T / _KEV_J, _T_FLOOR_KEV)
+
+# NRL-formulary Coulomb logarithm (natural log) at the floored temperature, floored at 1; n_e in m⁻³, T_e in J.
+_coulomb_log(ne, Te) = ne > 0 ? max(17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(_collision_tkev(Te)), 1.0) : 1.0
 
 # Names kinetic profiles in error messages by their provenance, when they carry one.
 _describe(data) = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
 
-# Hard stop on an unphysical negative density (bad input or a cubic-resample overshoot).
-function _assert_nonneg_density(source, label, arr, psi_reg)
+# Hard stop on an unphysical negative density or temperature (bad input or a resample overshoot).
+function _assert_nonneg_profile(source, label, arr, psi_reg)
     i = findfirst(<(0), arr)
     i === nothing ||
         error("$source: negative $label = $(arr[i]) at ψ_n = $(psi_reg[i]) — unphysical")
@@ -232,6 +236,8 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     Te_in = _need(data.T_e, "T_e")
     omE_in = _need(data.omega_E, "omega_E")
     ni_in = data.n_i === nothing ? copy(ne_in) : data.n_i   # TOTAL main-ion density
+    _assert_nonneg_profile(source, "T_i", Ti_in, psi_in)
+    _assert_nonneg_profile(source, "T_e", Te_in, psi_in)
 
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
@@ -240,8 +246,8 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     Ti = _cubic_resample(psi_in, Ti_in, psi_reg) .* _EV_J
     Te = _cubic_resample(psi_in, Te_in, psi_reg) .* _EV_J
     omegaE = _cubic_resample(psi_in, omE_in, psi_reg)
-    _assert_nonneg_density(source, "n_e", ne, psi_reg)
-    _assert_nonneg_density(source, "n_i (total)", ni_total, psi_reg)
+    _assert_nonneg_profile(source, "n_e", ne, psi_reg)
+    _assert_nonneg_profile(source, "n_i (total)", ni_total, psi_reg)
 
     # Fractions are shares of the total n_i: never above 1, and exactly 1 when every species is fraction-specified.
     fracs = [s.fraction for s in ion_species if !isnan(s.fraction)]
@@ -279,7 +285,7 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
         else
             ns[si] = s.fraction .* ni_total
         end
-        _assert_nonneg_density(source, "ion_species[$si] density", ns[si], psi_reg)
+        _assert_nonneg_profile(source, "ion_species[$si] density", ns[si], psi_reg)
     end
 
     # Shared composition + collisionality (natural-log Coulomb log), per grid point.
@@ -296,18 +302,18 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
         zpitch[i] = zp
         n_main[i] = nm
         n_imp[i] = nimp
-        loglam[i] = (ne[i] > 0 && Te[i] > 0) ? _coulomb_log(ne[i], Te[i]) : 0.0
-        nue[i] = Te[i] > 0 ? (zp / _NU_PREFAC) * ne[i] * loglam[i] / (sqrt(_ME / _MP) * (Te[i] / _KEV_J)^1.5) : 0.0
+        loglam[i] = _coulomb_log(ne[i], Te[i])
+        nue[i] = (zp / _NU_PREFAC) * ne[i] * loglam[i] / (sqrt(_ME / _MP) * _collision_tkev(Te[i])^1.5)
     end
     # A negative impurity density means the main ions over-neutralize (Σ z_s n_s > n_e) — unphysical.
-    _assert_nonneg_density(source, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
+    _assert_nonneg_profile(source, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
     # Approaching the zpitch pole at Zeff = zimp signals a dilute main-ion mix taken up by impurity.
     maximum(zeff) > 0.9 * zimp &&
         @warn "max(Zeff) = $(maximum(zeff)) is within 10% of zimp = $zimp — zpitch closure near its pole; check ion_species densities/fractions"
 
     # Per-species Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z_s²; `zpitch` is a main-ion closure,
     # applied approximately to the impurity/electron test species.
-    _nu(zsp, msp) = [Ti[i] > 0 ? (zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * (Ti[i] / _KEV_J)^1.5) : 0.0 for i in 1:npts]
+    _nu(zsp, msp) = [(zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * _collision_tkev(Ti[i])^1.5) for i in 1:npts]
     _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
 
     # Full NTV species set: main ions, the neutrality-closing impurity, and (optionally) electrons.
@@ -383,6 +389,8 @@ function kinetic_profile_splines(data::KineticProfileData;
     Te_input_eV = _need(data.T_e, "T_e")
     omegaE_input = _need(data.omega_E, "omega_E")
     ni_input = data.n_i === nothing ? copy(ne_input) : data.n_i
+    _assert_nonneg_profile(_describe(data), "T_i", Ti_input_eV, psi_input)
+    _assert_nonneg_profile(_describe(data), "T_e", Te_input_eV, psi_input)
 
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
@@ -453,10 +461,8 @@ function kinetic_profile_splines(data::KineticProfileData;
         loglam[i] = ll
 
         # Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z²; the single-species limit of resolve_ntv_species.
-        nui[i] = T_i > 0 ?
-                 (zpitch / _NU_PREFAC) * zi^2 * n_i * ll / (sqrt(1.0 * mi) * (T_i / _KEV_J)^1.5) : 0.0
-        nue[i] = T_e > 0 ?
-                 (zpitch / _NU_PREFAC) * n_e * ll / (sqrt(_ME / _MP) * (T_e / _KEV_J)^1.5) : 0.0
+        nui[i] = (zpitch / _NU_PREFAC) * zi^2 * n_i * ll / (sqrt(1.0 * mi) * _collision_tkev(T_i)^1.5)
+        nue[i] = (zpitch / _NU_PREFAC) * n_e * ll / (sqrt(_ME / _MP) * _collision_tkev(T_e)^1.5)
         zeff[i] = z
     end
 

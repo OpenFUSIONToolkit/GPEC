@@ -177,6 +177,24 @@ using HDF5
         rm(h5)
     end
 
+    @testset "cold edge keeps the collision model finite and monotone" begin
+        psi = collect(0.0:0.05:1.0)
+        cold(a) = @. a * (1 - psi)^2
+        data = EQ.KineticProfileData(; psi=psi, n_i=fill(1.0e19, length(psi)), n_e=fill(1.1e19, length(psi)),
+            T_i=cold(2000.0), T_e=cold(2500.0), omega_E=fill(1.0e4, length(psi)))
+        fine = 0.0:0.001:1.0
+        for kp in (EQ.kinetic_profile_splines(data; zi=1, zimp=6, mi=2, mimp=12),
+            only(s.profiles for s in EQ.resolve_ntv_species(data, [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; zimp=6, mimp=12) if s.z == 1))
+            @test all(>=(1.0), kp.loglam_spline.(fine))
+            for nu in (kp.nui_spline, kp.nue_spline)
+                @test all(v -> isfinite(v) && v > 0, nu.(fine))
+                # The ν rise toward the cold edge stays monotone between grid nodes
+                @test issorted(nu.(0.5:0.001:1.0))
+            end
+        end
+        @test_throws ErrorException EQ.kinetic_profile_splines(EQ.KineticProfileData(data; T_e=cold(2500.0) .- 1.0))
+    end
+
     @testset "combine_species_states" begin
         # Combined profile = Σ species dT/dψ interpolated onto the union grid; total = Σ total.
         mk(psi, dt) = (
