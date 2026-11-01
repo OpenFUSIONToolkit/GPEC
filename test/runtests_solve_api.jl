@@ -132,6 +132,8 @@ using HDF5
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-10
             @test api.diagnostics.nzero == reference.diagnostics.nzero
             @test api.kinetic.kmsing == reference.kinetic.kmsing
+            # This fixture solves with a wall, and the free-space surface inductance cannot pair with its Λ.
+            @test_throws "without a wall" plasma_response(api)
 
             # The KineticForces matrices evaluated once solve identically when reused, and only on the problem they were made for.
             alg = GPEC.force_balance_algorithm(kdeck)
@@ -522,6 +524,14 @@ using HDF5
             mktempdir() do dir
                 deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("ideal" => true)))
                 @test_throws "[Match] needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+
+            # A perturbed equilibrium with a wall stops at parse time.
+            mktempdir() do dir
+                walled = Dict{String,Any}("Wall" => Dict{String,Any}("shape" => "conformal", "standoff_fraction" => 0.2),
+                    "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
+                deck_dir = _stage_deck(dir; extra_sections=walled)
+                @test_throws "without a wall" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
         end
 
