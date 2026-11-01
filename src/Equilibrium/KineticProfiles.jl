@@ -241,11 +241,11 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
 
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
-    ne = _cubic_resample(psi_in, ne_in, psi_reg)
-    ni_total = _cubic_resample(psi_in, ni_in, psi_reg)
-    Ti = _cubic_resample(psi_in, Ti_in, psi_reg) .* _EV_J
-    Te = _cubic_resample(psi_in, Te_in, psi_reg) .* _EV_J
-    omegaE = _cubic_resample(psi_in, omE_in, psi_reg)
+    ne = _pchip_resample(psi_in, ne_in, psi_reg)
+    ni_total = _pchip_resample(psi_in, ni_in, psi_reg)
+    Ti = _pchip_resample(psi_in, Ti_in, psi_reg) .* _EV_J
+    Te = _pchip_resample(psi_in, Te_in, psi_reg) .* _EV_J
+    omegaE = _pchip_resample(psi_in, omE_in, psi_reg)
     _assert_nonneg_profile(source, "n_e", ne, psi_reg)
     _assert_nonneg_profile(source, "n_i (total)", ni_total, psi_reg)
 
@@ -281,7 +281,7 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
                     "ion_species[$si]: density profile `$(s.density)` not found in the kinetic profiles " *
                     "(available: $(data.species_densities === nothing ? "none — ASCII files carry only n_i" : join(keys(data.species_densities), ", ")))"
                 )
-            ns[si] = _cubic_resample(psi_in, data.species_densities[s.density], psi_reg)
+            ns[si] = _pchip_resample(psi_in, data.species_densities[s.density], psi_reg)
         else
             ns[si] = s.fraction .* ni_total
         end
@@ -395,12 +395,12 @@ function kinetic_profile_splines(data::KineticProfileData;
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
 
-    # Cubic-spline resample as in Fortran PENTRC; linear interpolation misplaces ω_E zero crossings and so the resonance.
-    ni = _cubic_resample(psi_input, ni_input, psi_reg)
-    ne = _cubic_resample(psi_input, ne_input, psi_reg)
-    Ti = _cubic_resample(psi_input, Ti_input_eV, psi_reg) .* _EV_J
-    Te = _cubic_resample(psi_input, Te_input_eV, psi_reg) .* _EV_J
-    omegaE = _cubic_resample(psi_input, omegaE_input, psi_reg)
+    # Monotone resample as in Fortran PENTRC; linear interpolation misplaces ω_E zero crossings and so the resonance.
+    ni = _pchip_resample(psi_input, ni_input, psi_reg)
+    ne = _pchip_resample(psi_input, ne_input, psi_reg)
+    Ti = _pchip_resample(psi_input, Ti_input_eV, psi_reg) .* _EV_J
+    Te = _pchip_resample(psi_input, Te_input_eV, psi_reg) .* _EV_J
+    omegaE = _pchip_resample(psi_input, omegaE_input, psi_reg)
 
     needs_rotation_reform = density_factor != 1.0 || temperature_factor != 1.0 || toroidal_rotation_factor != 1.0
     any_scaling = needs_rotation_reform || ExB_rotation_factor != 1.0
@@ -494,11 +494,11 @@ function _read_kinetic_table(kinetic_file::AbstractString)
 end
 
 """
-Cubic spline of `y(x)` on the irregular input grid, evaluated at `x_new` with smooth cubic
-extrapolation, as Fortran PENTRC `spline_fit(..., "extrap")`.
+Monotone (pchip) fit of `y(x)` on the irregular input grid, evaluated at `x_new` with
+extrapolation, as Fortran PENTRC `spline_fit_pchip`: no overshoot between table points.
 """
-function _cubic_resample(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
-    spl = cubic_interp(collect(Float64, x), collect(Float64, y); extrap=ExtendExtrap())
+function _pchip_resample(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
+    spl = pchip_interp(collect(Float64, x), collect(Float64, y); extrap=ExtendExtrap())
     return [spl(xv) for xv in x_new]
 end
 
