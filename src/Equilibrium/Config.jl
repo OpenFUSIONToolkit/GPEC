@@ -53,7 +53,7 @@ specified in the input.
     two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Float64` - Target on-axis safety factor q(0); the q and F profiles are rescaled to
-    meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
+    meet it (0 = use input value); q is positive, so negative values are rejected
   - `flux_surface_rtol::Float64` - Relative tolerance of the ODE solves that trace each flux surface; their absolute tolerance
     is `equil_abstol(flux_surface_rtol)`, i.e. `flux_surface_rtol` capped at `EQUIL_ABSTOL_MAX`
   - `imas_cocos::Int` - Expected COCOS convention of an IMAS `dd.equilibrium` input (11 = IMAS standard, 2 = GPEC internal)
@@ -174,6 +174,7 @@ specified in the input.
             error("Cannot recognize jac_type = $(jac_type)")
         end
         (isfinite(flux_surface_rtol) && flux_surface_rtol > 0) || error("flux_surface_rtol = $flux_surface_rtol must be a positive, finite relative tolerance")
+        newq0 >= 0 || error("newq0 = $newq0 is not supported: q must be positive. Use newq0 = 0 (keep the input q) or newq0 > 0.")
         if psihigh > 1.0
             @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
         end

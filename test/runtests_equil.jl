@@ -116,7 +116,7 @@ using TOML
 
     @testset "newq0 q-profile revision" begin
         # newq0 is a target q(0), not an index: non-integer requests must survive the config,
-        # and neither the -1 sentinel nor an explicit target may write back to the frozen config.
+        # and q is positive, so a negative target is rejected.
         newq0_config(newq0) = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
@@ -128,15 +128,7 @@ using TOML
             newq0=newq0
         )
 
-        base_config = newq0_config(0)
-        eq_base = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(base_config)
-
-        # -1 means "flip the sign of the axis extrapolation": f0fac vanishes, so ffac is
-        # exactly -1 and the revised q-profile is the negated baseline.
-        flip_config = newq0_config(-1)
-        eq_flip = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(flip_config)
-        @test flip_config.newq0 == -1.0
-        @test eq_flip.profiles.q_spline.y == -eq_base.profiles.q_spline.y
+        @test_throws ErrorException newq0_config(-1)
 
         # A non-integer target used to throw InexactError at construction (newq0 was ::Int)
         target_config = newq0_config(1.05)
