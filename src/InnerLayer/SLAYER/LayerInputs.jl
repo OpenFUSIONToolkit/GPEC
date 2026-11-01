@@ -6,7 +6,7 @@
 using ..Utilities: KineticProfiles
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
     coulomb_log_e, nu_star_e
-using FastInterpolations: DerivOp, integrate, cubic_interp, cumulative_integrate, ExtendExtrap
+using FastInterpolations: DerivOp, integrate, cubic_interp, pchip_interp, cumulative_integrate, ExtendExtrap
 
 """
     surface_minor_radius(equil, psi; theta=0.0) -> Float64
@@ -256,6 +256,7 @@ Keywords documented as scalar-or-callable are evaluated per surface at ψ.
   - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`, `SpitzerModel()` or `SpitzerHarmModel()`; the
     neoclassical `f_trap` and ν*_e come from `sing.restype` when populated, else the ε-only forms
   - `lnLambda_form` -- Coulomb-log form (default `:nrl`; `:wesson` with `SpitzerHarmModel()` reproduces the legacy SLAYER)
+  - `lnLambda` -- supplied Coulomb logarithm, a scalar or a callable of ψ; when given it replaces the `lnLambda_form` one
 """
 function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     bt=nothing,
@@ -277,7 +278,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
     dc_type::Symbol=:none,
     theta::Real=0.0,
     resistivity_model::NeoResistivityModel=SauterNeoModel(),
-    lnLambda_form::Symbol=:nrl)
+    lnLambda_form::Symbol=:nrl,
+    lnLambda=nothing)
     R0_use = R0 === nothing ? equil.ro : Float64(R0)
     _eval(x, ψ) = x === nothing ? nothing : x isa Real ? Float64(x) : Float64(x(ψ))
 
@@ -328,8 +330,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
 
         # Trapped-fraction inputs from ResistGeometry when populated; else slayer_parameters uses the ε-only forms.
         rg = sing.restype
+        lnL = _eval(lnLambda, psi)
         (; f_trap, nu_e_star, R_major_eff) = _resistivity_geometry(rg, prof.n_e, prof.T_e, q, _eval(zeff, psi);
-            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
+            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form, lnLamb=lnL)
 
         # Resistive interchange index D_R = E + F + H² (Glasser-Greene-Johnson 1975), the (−D_R) of Connor et al. 2015 Eq. 59;
         # not the Mercier index D_I = E + F + H − 1/4.
@@ -423,6 +426,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             nu_e_star=nu_e_star,
             R_major_eff=R_major_eff,
             lnLambda_form=lnLambda_form,
+            lnLamb=lnL,
             k_ref=k_ref_k,
             alpha_mercier=alpha_k
         )
@@ -433,12 +437,12 @@ end
 # Trapped fraction, electron collisionality and effective major radius of the neoclassical resistivity
 # closure at one surface, from its `ResistGeometry` when populated; `nothing` lets `surface_resistivity`
 # fall back to the ε = r_s/R form.
-function _resistivity_geometry(rg, n_e, T_e, q, zeff; resistivity_model::NeoResistivityModel, lnLambda_form::Symbol)
+function _resistivity_geometry(rg, n_e, T_e, q, zeff; resistivity_model::NeoResistivityModel, lnLambda_form::Symbol, lnLamb=nothing)
     rg === nothing && return (f_trap=nothing, nu_e_star=nothing, R_major_eff=nothing)
     nu_e_star = if resistivity_model isa Union{SpitzerModel,SpitzerHarmModel}
         nothing
     else
-        lnL = coulomb_log_e(n_e, T_e; form=lnLambda_form)
+        lnL = lnLamb === nothing ? coulomb_log_e(n_e, T_e; form=lnLambda_form) : lnLamb
         nu_star_e(n_e, T_e, rg.R_major, rg.eps_local, q, zeff; lnLamb=lnL)
     end
     return (f_trap=rg.f_trap, nu_e_star=nu_e_star, R_major_eff=rg.R_major)
@@ -446,24 +450,26 @@ end
 
 """
     layer_resistivity(equil, sings, profiles::KineticProfiles; zeff=1.0, R0=nothing, rs_method=:midplane,
-                      theta=0.0, q_beyond=nothing, resistivity_model=SauterNeoModel(), lnLambda_form=:nrl) -> Vector{Float64}
+                      theta=0.0, q_beyond=nothing, resistivity_model=SauterNeoModel(), lnLambda_form=:nrl,
+                      lnLambda=nothing) -> Vector{Float64}
 
 Parallel resistivity η in Ω·m at each surface of `sings`, with the same closure and per-surface inputs
 `build_slayer_inputs` gives the SLAYER layer, so every resistive inner layer of a run sees one η.
-`zeff` is a scalar or a callable of ψ.
+`zeff` and a supplied Coulomb logarithm `lnLambda` are scalars or callables of ψ.
 """
 function layer_resistivity(equil, sings, profiles::KineticProfiles;
     zeff=1.0, R0=nothing, rs_method::Symbol=:midplane, theta::Real=0.0, q_beyond=nothing,
-    resistivity_model::NeoResistivityModel=SauterNeoModel(), lnLambda_form::Symbol=:nrl)
+    resistivity_model::NeoResistivityModel=SauterNeoModel(), lnLambda_form::Symbol=:nrl, lnLambda=nothing)
     R0_use = R0 === nothing ? equil.ro : Float64(R0)
     rs_at, _ = radial_label(equil; rs_method=rs_method, theta=theta, q_beyond=q_beyond)
     return map(sings) do sing
         psi = sing.psifac
         prof = profiles(psi)
         z = zeff isa Real ? Float64(zeff) : Float64(zeff(psi))
+        lnL = lnLambda === nothing ? nothing : lnLambda isa Real ? Float64(lnLambda) : Float64(lnLambda(psi))
         geometry = _resistivity_geometry(sing.restype, prof.n_e, prof.T_e, sing.q, z;
-            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form)
+            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form, lnLamb=lnL)
         surface_resistivity(; n_e=prof.n_e, t_e=prof.T_e, zeff=z, qval=sing.q, rs=rs_at(psi), R0=R0_use,
-            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form, geometry...)
+            resistivity_model=resistivity_model, lnLambda_form=lnLambda_form, lnLamb=lnL, geometry...)
     end
 end

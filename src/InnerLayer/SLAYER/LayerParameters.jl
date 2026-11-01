@@ -253,6 +253,7 @@ model does not use may be left `nothing`; one it uses must be given, positive an
     and Sauter 1999 Eq. 18b with ε = `rs / R_major_eff`
   - `R_major_eff` -- ⟨R⟩ at the surface for the ν*_e formula (default `R0`)
   - `lnLambda_form` -- Coulomb-log form: `:nrl` (default), `:sauter` or `:wesson`
+  - `lnLamb` -- supplied Coulomb logarithm; when given it replaces the `lnLambda_form` one
   - `k_ref` -- K = r_s·(dψ_N/dr), converting the ψ_N-referenced outer Δ' to the r_s reference (default 1, no conversion)
   - `alpha_mercier` -- Mercier exponent α = √(−D_I) of the same conversion (default 0.5, the slab value)
 """
@@ -275,11 +276,12 @@ function slayer_parameters(;
     nu_e_star::Union{Real,Nothing}=nothing,
     R_major_eff::Union{Real,Nothing}=nothing,
     lnLambda_form::Symbol=:nrl,
+    lnLamb::Union{Real,Nothing}=nothing,
     k_ref::Real=1.0,
     alpha_mercier::Real=0.5)
 
-    # Coulomb logarithm shared by the resistivity closure and τ_ee.
-    lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
+    # Coulomb logarithm shared by the resistivity closure and τ_ee: the supplied one, else `lnLambda_form`'s.
+    lnLamb = lnLamb === nothing ? coulomb_log_e(n_e, t_e; form=lnLambda_form) : Float64(lnLamb)
 
     eta = surface_resistivity(; n_e=n_e, t_e=t_e, zeff=zeff, qval=qval, rs=rs, R0=R0,
         resistivity_model=resistivity_model, lnLambda_form=lnLambda_form, f_trap=f_trap, nu_e_star=nu_e_star,

@@ -25,7 +25,8 @@ function layer_eta(equil, surfaces)
     data = _layer_kinetic_data(equil, "resistivity η")
     loaded = SLAYER._slayer_profiles(data, nothing)
     return SLAYER.layer_resistivity(equil, surfaces, loaded.profiles; zeff=SLAYER._layer_zeff(loaded, data),
-        resistivity_model=SLAYER._build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
+        resistivity_model=SLAYER._build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form,
+        lnLambda=loaded.lnLambda)
 end
 
 """

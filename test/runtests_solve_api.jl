@@ -365,6 +365,11 @@ using HDF5
         @test prob.eta == GPEC.InnerLayer.layer_eta(kgal.equil, kgal.surfaces) && all(>(0), prob.eta)
         @test prob.rho ≈ fill(2 * GPEC.Utilities.M_P * 5e19, n)
         @test prob.rotation ≈ fill(1e3, n)
+        # A supplied Coulomb logarithm replaces the closure's in η: the Spitzer η is linear in lnΛ.
+        keq = deepcopy(kgal.equil)
+        spitzer_eta(lnL) = (attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3),
+            T_i=flat(1e3), omega_E=flat(2π * 1e3), resistivity_model=:spitzer, lnLambda=flat(lnL))); GPEC.InnerLayer.layer_eta(keq, kgal.surfaces))
+        @test spitzer_eta(30.0) ≈ 2 .* spitzer_eta(15.0) rtol = 1e-12
         # Explicit values override each default on its own.
         given = MatchProblem(kgal; eta=1e-7, rotation=fill(3.0, n))
         @test given.eta == fill(1e-7, n) && given.rho == prob.rho && given.rotation == fill(3.0, n)

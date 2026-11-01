@@ -40,6 +40,10 @@ end
 # Names kinetic profiles in error messages by their provenance, when they carry one.
 _describe(data) = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
 
+# A supplied rate profile on the kinetic grid: pchip in log space, as Fortran PENTRC `rates-v1`, so it interpolates
+# geometrically across decades.
+_supplied_rate(psi_in, v, psi_reg) = v === nothing ? nothing : exp.(_pchip_resample(psi_in, log.(v), psi_reg))
+
 # Hard stop on an unphysical negative density or temperature (bad input or an extrapolation past the table).
 function _assert_nonneg_profile(source, label, arr, psi_reg)
     i = findfirst(<(0), arr)
@@ -77,15 +81,17 @@ const _KINETIC_H5_EXTS = (".h5", ".hdf5", ".he5")
 # The optional profile datasets of the HDF5 kinetic schema and their units, one row per `KineticProfileData`
 # field of the same name; the reader and writer both iterate it, so a new profile is a row here plus its field.
 const _KINETIC_H5_PROFILES = ("n_i" => "m^-3", "n_e" => "m^-3", "T_i" => "eV", "T_e" => "eV", "omega_E" => "rad/s",
-    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_i" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless")
+    "omega_tor" => "rad/s", "chi_e" => "m^2/s", "chi_i" => "m^2/s", "chi_phi" => "m^2/s", "zeff" => "dimensionless",
+    "lnLambda" => "dimensionless", "nu_i" => "1/s", "nu_e" => "1/s")
 
 """
     read_kinetic_file(path; group="/") -> KineticProfileData
 
 Read a kinetic-profile file, dispatching on extension: HDF5 (`.h5`/`.hdf5`) via
 the GPEC kinetic schema, otherwise a 6-column ASCII table (`.gpeckf`/`.kin`/`.dat`:
-`psi_n n_i n_e T_i[eV] T_e[eV] omega_E`). Returns the raw columns; downstream
-consumers validate the fields they require.
+`psi_n n_i n_e T_i[eV] T_e[eV] omega_E`), or a 9-column one that appends `lnLambda nu_i[1/s] nu_e[1/s]`
+as Fortran PENTRC `kinetic_format = "rates-v1"`. Returns the raw columns; downstream consumers
+validate the fields they require.
 """
 function read_kinetic_file(path::AbstractString; group::AbstractString="/")
     isfile(path) || error("Kinetic profile file not found: $path")
@@ -94,12 +100,13 @@ function read_kinetic_file(path::AbstractString; group::AbstractString="/")
 end
 
 """
-Read a legacy 6-column ASCII kinetic table into a `KineticProfileData`.
+Read a 6-column ASCII kinetic table, or a 9-column one with supplied collision rates, into a `KineticProfileData`.
 """
 function _read_kinetic_ascii(path::AbstractString)
-    psi, ni, ne, Ti, Te, omegaE = _read_kinetic_table(path)
-    return KineticProfileData(; psi=psi, n_i=ni, n_e=ne, T_i=Ti, T_e=Te, omega_E=omegaE,
-        provenance="ASCII 6-column: $(basename(path))")
+    cols = _read_kinetic_table(path)
+    rates = length(cols) == 9 ? (; lnLambda=cols[7], nu_i=cols[8], nu_e=cols[9]) : (;)
+    return KineticProfileData(; psi=cols[1], n_i=cols[2], n_e=cols[3], T_i=cols[4], T_e=cols[5], omega_E=cols[6], rates...,
+        provenance="ASCII $(length(cols))-column: $(basename(path))")
 end
 
 """
@@ -313,15 +320,17 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     n_main = zeros(npts)
     n_imp = zeros(npts)
     nue = zeros(npts)
+    lnL_sup, nui_sup, nue_sup = (_supplied_rate(psi_in, getfield(data, f), psi_reg) for f in (:lnLambda, :nu_i, :nu_e))
     for i in 1:npts
         z, zp, nm, nimp = multi_ion_composition(zs, [ns[si][i] for si in eachindex(ion_species)], ne[i]; zimp=zimp, mimp=mimp)
         zeff[i] = z
         zpitch[i] = zp
         n_main[i] = nm
         n_imp[i] = nimp
-        loglam[i] = _coulomb_log(ne[i], Te[i])
+        loglam[i] = lnL_sup === nothing ? _coulomb_log(ne[i], Te[i]) : lnL_sup[i]
         nue[i] = (zp / _NU_PREFAC) * ne[i] * loglam[i] / (sqrt(_ME / _MP) * _collision_tkev(Te[i])^1.5)
     end
+    nue_sup === nothing || (nue .= nue_sup)
     # A negative impurity density means the main ions over-neutralize (Σ z_s n_s > n_e) — unphysical.
     _assert_nonneg_profile(source, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
     # Approaching the zpitch pole at Zeff = zimp signals a dilute main-ion mix taken up by impurity.
@@ -330,7 +339,12 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
 
     # Per-species Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z_s²; `zpitch` is a main-ion closure,
     # applied approximately to the impurity/electron test species.
-    _nu(zsp, msp) = [(zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * _collision_tkev(Ti[i])^1.5) for i in 1:npts]
+    # A supplied ν_i is the first main ion's rate; the others keep the model's (z_s/z₁)²·√(m₁/m_s) ratio to it.
+    z1, m1 = ion_species[1].z, ion_species[1].m
+    _nu(zsp, msp) =
+        nui_sup === nothing ?
+        [(zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * _collision_tkev(Ti[i])^1.5) for i in 1:npts] :
+        nui_sup .* ((zsp / z1)^2 * sqrt(m1 / msp))
     _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
 
     # Full NTV species set: main ions, the neutrality-closing impurity, and (optionally) electrons.
@@ -467,6 +481,7 @@ function kinetic_profile_splines(data::KineticProfileData;
     nui = zeros(Float64, nkin + 1)
     nue = zeros(Float64, nkin + 1)
     zeff = zeros(Float64, nkin + 1)
+    lnL_sup, nui_sup, nue_sup = (_supplied_rate(psi_input, getfield(data, f), psi_reg) for f in (:lnLambda, :nu_i, :nu_e))
 
     for i in 1:(nkin+1)
         n_i = ni[i]
@@ -477,7 +492,7 @@ function kinetic_profile_splines(data::KineticProfileData;
         z = zimp - (n_i / n_e) * zi * (zimp - zi)
         zpitch = 1.0 + (1.0 + mimp) / (2.0 * mimp) * zimp * (z - 1.0) / (zimp - z)
 
-        ll = _coulomb_log(n_e, T_e)
+        ll = lnL_sup === nothing ? _coulomb_log(n_e, T_e) : lnL_sup[i]
         loglam[i] = ll
 
         # Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z²; the single-species limit of resolve_ntv_species.
@@ -485,13 +500,16 @@ function kinetic_profile_splines(data::KineticProfileData;
         nue[i] = (zpitch / _NU_PREFAC) * n_e * ll / (sqrt(_ME / _MP) * _collision_tkev(T_e)^1.5)
         zeff[i] = z
     end
+    # Supplied rates replace the model's, as Fortran PENTRC `rates-v1`; the profile scaling factors do not rescale them.
+    nui_sup === nothing || (nui .= nui_sup)
+    nue_sup === nothing || (nue .= nue_sup)
 
     return KineticProfileSplines(psi_reg, ni, ne, Ti, Te, omegaE, loglam, nui, nue, zeff)
 end
 
 """
-Parse a 6-column kinetic profile table, dropping `#` comments and non-numeric header rows.
-Returns the six columns.
+Parse a 6- or 9-column kinetic profile table, dropping `#` comments and non-numeric header rows.
+Returns the columns.
 """
 function _read_kinetic_table(kinetic_file::AbstractString)
     table = DelimitedFiles.readdlm(kinetic_file; comments=true)
@@ -501,16 +519,11 @@ function _read_kinetic_table(kinetic_file::AbstractString)
     if isempty(numeric_rows)
         error("No numeric data rows found in kinetic file: $kinetic_file")
     end
-    table = reduce(vcat, (reshape(Float64.(r), 1, 6) for r in numeric_rows))
-
-    psi_input = collect(table[:, 1])
-    n_i_input = collect(table[:, 2])
-    n_e_input = collect(table[:, 3])
-    T_i_input = collect(table[:, 4])
-    T_e_input = collect(table[:, 5])
-    omega_e_input = collect(table[:, 6])
-
-    return psi_input, n_i_input, n_e_input, T_i_input, T_e_input, omega_e_input
+    ncol = length(numeric_rows[1])
+    (ncol in (6, 9) && all(r -> length(r) == ncol, numeric_rows)) ||
+        error("kinetic file $kinetic_file: every data row needs 6 columns, or 9 with lnLambda nu_i nu_e")
+    table = reduce(vcat, (reshape(Float64.(r), 1, ncol) for r in numeric_rows))
+    return [collect(table[:, j]) for j in 1:ncol]
 end
 
 """

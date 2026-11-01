@@ -146,6 +146,8 @@ layer-overlap scan) reads the composition and closure from here, so they all see
 | `chi_i`             | ion perpendicular heat diffusivity χ⊥,i                                                                           |
 | `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
 | `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
+| `lnLambda`          | Coulomb logarithm supplied directly (optional); replaces the internal one in the collision model and resistivity  |
+| `nu_i`/`nu_e`       | main-ion / electron collision rates in 1/s supplied directly (optional); replace the internal collision model     |
 | `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
 | `provenance`        | short string recording the source file/format                                                                     |
 | `ion_species`       | main-ion species, a `Vector{IonSpecies}`; default one deuterium ion carrying all of `n_i`                         |
@@ -174,6 +176,9 @@ struct KineticProfileData
     chi_i::Union{Nothing,Vector{Float64}}
     chi_phi::Union{Nothing,Vector{Float64}}
     zeff::Union{Nothing,Vector{Float64}}
+    lnLambda::Union{Nothing,Vector{Float64}}
+    nu_i::Union{Nothing,Vector{Float64}}
+    nu_e::Union{Nothing,Vector{Float64}}
     species_densities::Union{Nothing,Dict{String,Vector{Float64}}}
     provenance::String
     ion_species::Vector{IonSpecies}
@@ -193,7 +198,7 @@ const _LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
 function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=nothing,
     omega_E=nothing, omega_tor=nothing, chi_e=nothing, chi_i=nothing, chi_phi=nothing, zeff=nothing,
-    species_densities=nothing, provenance="",
+    lnLambda=nothing, nu_i=nothing, nu_e=nothing, species_densities=nothing, provenance="",
     ion_species=[IonSpecies(; z=1, m=2, fraction=1.0)], impurity_charge=6, impurity_mass=12,
     zeff_default=1.0, chi_e_default=1.0, chi_i_default=nothing, chi_phi_default=1.0, tau_E=nothing,
     resistivity_model=:sauter, lnLambda_form=:nrl)
@@ -209,8 +214,16 @@ function KineticProfileData(; psi, n_i=nothing, n_e=nothing, T_i=nothing, T_e=no
     model, form = Symbol(resistivity_model), Symbol(lnLambda_form)
     model in _RESISTIVITY_MODELS || throw(ArgumentError("KineticProfileData: resistivity_model = $model not in $_RESISTIVITY_MODELS"))
     form in _LNLAMBDA_FORMS || throw(ArgumentError("KineticProfileData: lnLambda_form = $form not in $_LNLAMBDA_FORMS"))
+    # An all-zero rate dataset counts as not supplied, like the other optional profiles.
+    _rate(x) = x === nothing || all(iszero, x) ? nothing : x
+    lnLambda, nu_i, nu_e = _rate(lnLambda), _rate(nu_i), _rate(nu_e)
+    for (name, v) in (("lnLambda", lnLambda), ("nu_i", nu_i), ("nu_e", nu_e))
+        v === nothing || all(x -> isfinite(x) && x > 0, v) ||
+            throw(ArgumentError("KineticProfileData: supplied $name must be positive and finite everywhere"))
+    end
     return KineticProfileData(Float64.(collect(psi)), _v(n_i), _v(n_e), _v(T_i), _v(T_e),
-        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_i), _v(chi_phi), _v(zeff), species_densities, String(provenance),
+        _v(omega_E), _v(omega_tor), _v(chi_e), _v(chi_i), _v(chi_phi), _v(zeff), _v(lnLambda), _v(nu_i), _v(nu_e),
+        species_densities, String(provenance),
         species, Int(impurity_charge), Int(impurity_mass), Float64(zeff_default), _s(chi_e_default), _s(chi_i_default),
         _s(chi_phi_default), _s(tau_E), model, form)
 end

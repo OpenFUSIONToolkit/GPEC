@@ -198,6 +198,54 @@ using HDF5
         @test_throws r"densities must be positive" EQ.kinetic_profile_splines(EQ.KineticProfileData(data; n_e=[fill(1.1e19, length(psi) - 1); 0.0]))
     end
 
+    @testset "supplied collision rates replace the internal model" begin
+        psi = collect(0.0:0.05:1.0)
+        prof(a) = @. a * (1 - 0.6psi)
+        data = EQ.KineticProfileData(; psi=psi, n_i=prof(1.0e20), n_e=prof(1.1e20), T_i=prof(2000.0), T_e=prof(2500.0),
+            omega_E=prof(1.0e4))
+        model = EQ.kinetic_profile_splines(data)
+        xs = model.xs
+        # The model's own rates, supplied at the table points, come back to interpolation accuracy.
+        own = EQ.KineticProfileData(data; lnLambda=model.loglam_spline.(psi), nu_i=model.nui_spline.(psi), nu_e=model.nue_spline.(psi))
+        sup = EQ.kinetic_profile_splines(own)
+        for f in (:loglam_spline, :nui_spline, :nue_spline)
+            @test getfield(sup, f).(xs) ≈ getfield(model, f).(xs) rtol = 1e-3
+        end
+        # Interpolation is in log space, so scaling the supplied rates scales the profiles exactly.
+        double = EQ.kinetic_profile_splines(EQ.KineticProfileData(own; nu_i=2 .* own.nu_i, nu_e=2 .* own.nu_e))
+        @test double.nui_spline.(xs) ≈ 2 .* sup.nui_spline.(xs) rtol = 1e-12
+        @test double.nue_spline.(xs) ≈ 2 .* sup.nue_spline.(xs) rtol = 1e-12
+        # A supplied lnΛ alone feeds the model's ν, which is linear in it.
+        lnl = EQ.kinetic_profile_splines(EQ.KineticProfileData(data; lnLambda=fill(15.0, length(psi))))
+        @test all(≈(15.0), lnl.loglam_spline.(xs))
+        @test lnl.nui_spline.(xs) ≈ model.nui_spline.(xs) .* 15.0 ./ model.loglam_spline.(xs) rtol = 1e-12
+        # Multi-ion: the first main ion takes the supplied ν_i; the others keep the model's (z_s/z₁)²·√(m₁/m_s) ratio.
+        sp = EQ.resolve_ntv_species(own, [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, fraction=0.5)]; zimp=6, mimp=12)
+        nu(z, m) = only(s for s in sp if s.z == z && s.m == m).profiles.nui_spline.(xs)
+        @test nu(1, 2) ≈ sup.nui_spline.(xs) rtol = 1e-12
+        @test nu(1, 3) ≈ sqrt(2 / 3) .* nu(1, 2) rtol = 1e-12
+        @test nu(6, 12) ≈ 36 * sqrt(2 / 12) .* nu(1, 2) rtol = 1e-12
+        # Rates must be positive; an all-zero dataset counts as absent.
+        @test_throws ArgumentError EQ.KineticProfileData(data; nu_i=-own.nu_i)
+        @test EQ.KineticProfileData(data; nu_e=zeros(length(psi))).nu_e === nothing
+        # Both file formats carry the rates: HDF5 round-trips them and a 9-column ASCII table reads them.
+        h5 = tempname() * ".h5"
+        EQ.write_kinetic_h5(h5, own)
+        back = EQ.read_kinetic_file(h5)
+        @test back.lnLambda ≈ own.lnLambda && back.nu_i ≈ own.nu_i && back.nu_e ≈ own.nu_e
+        rm(h5)
+        ascii = tempname() * ".kin"
+        open(ascii, "w") do io
+            println(io, "# psi n_i n_e T_i T_e omega_E lnLambda nu_i nu_e")
+            for k in eachindex(psi)
+                println(io, join((psi[k], own.n_i[k], own.n_e[k], own.T_i[k], own.T_e[k], own.omega_E[k], own.lnLambda[k], own.nu_i[k], own.nu_e[k]), " "))
+            end
+        end
+        table = EQ.read_kinetic_file(ascii)
+        @test table.nu_i ≈ own.nu_i && table.lnLambda ≈ own.lnLambda
+        rm(ascii)
+    end
+
     @testset "combine_species_states" begin
         # Combined profile = Σ species dT/dψ interpolated onto the union grid; total = Σ total.
         mk(psi, dt) = (
