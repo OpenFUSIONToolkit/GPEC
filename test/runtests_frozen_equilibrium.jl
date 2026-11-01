@@ -117,7 +117,7 @@ using GeneralizedPerturbedEquilibrium
         @test analytic_snapshot.profiles.q_spline.y == profile_values[4]
         # The stored deck's kinetic_file resolves against the h5's directory and is re-read; a missing file warns and leaves none.
         kinetic_path = joinpath(dir, "kinetic.dat")
-        cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), kinetic_path)
+        cp(joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example", "kinetic.dat"), kinetic_path)
         analytic_inputs["Equilibrium"]["kinetic_file"] = "kinetic.dat"
         h5open(path, "r+") do f
             delete_object(f, "Input/gpec_toml_raw")

@@ -29,7 +29,7 @@ include("h5_metadata_check.jl")
             merge!(inputs["Equilibrium"], Dict("mpsi" => 32, "mtheta" => 64))
             merge!(inputs["TJAnalytic"], Dict("ma" => 32, "mtheta" => 32))
             merge!(inputs["ForceFreeStates"], Dict("delta_mlow" => 2, "delta_mhigh" => 2, "mtheta_vacuum" => 64))
-            inputs["Galerkin"]["nx"] = 32
+            haskey(inputs, "Galerkin") && (inputs["Galerkin"]["nx"] = 32)
         end
         open(io -> TOML.print(io, inputs), toml_path, "w")
         return dir
@@ -127,7 +127,7 @@ include("h5_metadata_check.jl")
 
     @testset "PerturbedEquilibrium warn-skips on a riccati result" begin
         mktempdir() do dir
-            _stage_deck(dir, template;
+            _stage_deck(dir, joinpath(@__DIR__, "test_data", "regression_tj_ideal_example");
                 ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
                 extra_sections=Dict{String,Any}(
                     "ForcingTerms" => Dict{String,Any}(
@@ -135,7 +135,7 @@ include("h5_metadata_check.jl")
                         "forcing_data_format" => "ascii"),
                     "PerturbedEquilibrium" => Dict{String,Any}(
                         "compute_singular_coupling" => true)))
-            cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"),
+            cp(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"),
                 joinpath(dir, "forcing.dat"))
 
             local ret

@@ -60,8 +60,8 @@ include("h5_metadata_check.jl")
         @test lower.locking_probability_percent > straddling.locking_probability_percent
     end
 
-    @testset "coil-forced Solovev run: identities, output, and post-hoc entry point" begin
-        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    @testset "coil-forced TJ run: identities, output, and post-hoc entry point" begin
+        template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
 
         mktempdir() do dir
             for name in readdir(template)
@@ -69,22 +69,22 @@ include("h5_metadata_check.jl")
             end
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
-            # Three PF hoops outside the plasma (Solovev R ≈ 0.67–1.33 m): one tilted so the run has
+            # Three PF hoops outside the plasma (R ≈ 9–11 m): one tilted so the run has
             # a nominal n=1 forcing, one axisymmetric so its rigid-motion response is known exactly,
             # and one tilted the other way as the correction array, which is swept but is not an
             # error-field source.
             inputs["ForcingTerms"] = Dict{String,Any}(
                 "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                 "coil_set" => [
-                    Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0]),
-                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 1.5, "height" => -0.4, "currents" => [2.0e3]),
-                    Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
+                    Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 12.0, "height" => 1.2, "currents" => [2.0e3], "tiltx" => [3.0]),
+                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 12.0, "height" => -1.2, "currents" => [2.0e3]),
+                    Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 12.0, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
                 "compute_singular_coupling" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
-            # Kinetic profiles consistent with this Solovev pressure, for the NTV torque couplings.
-            cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), joinpath(dir, "kinetic.dat"))
+            # Kinetic profiles consistent with this pressure, for the NTV torque couplings.
+            cp(joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example", "kinetic.dat"), joinpath(dir, "kinetic.dat"))
             inputs["Equilibrium"]["kinetic_file"] = "kinetic.dat"
             # Exercise the kinetic pipeline at smoke-test precision, retaining all bounce harmonics.
             inputs["KineticForces"] = Dict{String,Any}(
@@ -163,7 +163,7 @@ include("h5_metadata_check.jl")
             @test_throws ArgumentError EF.sensitivity_table(sens, shifted)
             # The bare-matrix construction carries no basis, so it stays permitted.
             @test EF.sensitivity_table(sens, PE.dominant_coupling(rc.C, rc.rational_psi)) isa EF.SensitivityTable
-            windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[end]))
+            windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[1]))
             @test length(windowed.delta_as_designed) == 3
             # The correction array is swept with the others but is not an error-field source: the run
             # excludes the NTV efc_coils from the error field, and the table helper drops them.
@@ -204,7 +204,7 @@ include("h5_metadata_check.jl")
             @test mc_file.abs_delta_pdf == mc.abs_delta_pdf && mc_file.abs_delta_bin_edges == mc.abs_delta_bin_edges && mc_file.nsample == 512
             rerun = EF.run_monte_carlo(h5path; nsample=512, nbatch=2, seed=5, nbins=16)
             @test rerun.abs_delta_pdf == mc.abs_delta_pdf
-            windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[end], nsample=256, nbatch=1, seed=5, nbins=16)
+            windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[1], nsample=256, nbatch=1, seed=5, nbins=16)
             @test windowed_mc.abs_delta_total_as_designed ≈ abs(sum(EF.without_coils(windowed, ["hoop_efc"]).delta_as_designed))
 
             # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
@@ -640,7 +640,7 @@ include("h5_metadata_check.jl")
     end
 
     @testset "[Run] output_file holds every stage and the runtimes" begin
-        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
         mktempdir() do dir
             for name in readdir(template)
                 cp(joinpath(template, name), joinpath(dir, name))
