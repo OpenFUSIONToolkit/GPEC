@@ -182,7 +182,8 @@
         loaded = (; profiles, chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing, zeff=nothing, zeff_source=:scalar)
         model(; c...) = SLAYERModel(; P_perp_model=:chi_perp_e, D_R=0.01, D_c_type=:fitzpatrick, c...)
         attached = equil.kinetic
-        equil.kinetic = Equilibrium.KineticProfileData(; psi=psi_pts, n_e=profiles.n_e, T_e=profiles.T_e, T_i=profiles.T_i,
+        equil.kinetic = Equilibrium.KineticProfileData(; psi=psi_pts, n_e=fill(5.0e19, length(psi_pts)),
+            T_e=1000.0 .* (1.0 .- 0.7 .* psi_pts), T_i=1000.0 .* (1.0 .- 0.6 .* psi_pts),
             chi_e_default=2.0, chi_phi_default=1.5)
         params(m) = Tearing._tearing_params(m, equil, sings, loaded)[1]
         without, with = params(model()), params(model(; chi_perp_Dc=6.0))
