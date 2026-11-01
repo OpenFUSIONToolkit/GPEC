@@ -6,7 +6,7 @@
 # and the noise floor below which a difference is treated as zero.
 [case]
 name = "solovev_kinetic_nuzero"
-description = "Solovev, n=1, kinetic_source=calculated, nutype=zero (collisionless energy integral), 50/50 D-T multi-ion kinetic matrices, mode-converged band (delta_m=8, mpert=32). Reuses the calculated example deck via override; pressure-consistent kinetic.dat."
+description = "Solovev, n=1, kinetic = 'KineticForces', nutype=zero (collisionless energy integral), 50/50 D-T multi-ion kinetic matrices, mode-converged band (delta_m=8, mpert=32). Reuses the calculated example deck via override; pressure-consistent kinetic.dat."
 example_dir = "examples/Solovev_kinetic_calculated_example"
 
 # Run the shared calculated deck collisionless (no separate nuzero example directory).

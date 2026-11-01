@@ -1,11 +1,8 @@
 """
 Arc-length parameterized field-line integration for the direct (EFIT) equilibrium path.
 
-Provides `arclength_fieldline_int` as a drop-in replacement for `direct_fieldline_int`.
-Pass it to `equilibrium_solver` via `eq_type = "efit_arclength"` in `gpec.toml`, which
-routes to `equilibrium_solver(raw_profile, arclength_fieldline_int)`.
-
-The arc-length ODE integrates along the tangent to ψ = const, avoiding the
+Provides `arclength_fieldline_int`, a drop-in replacement for `direct_fieldline_int` selected by
+`eq_type = "efit_arclength"` in `gpec.toml`. Integrating along the tangent to ψ = const avoids the
 denominator singularity of the geometric-angle ODE near x-points.
 """
 
@@ -15,7 +12,7 @@ denominator singularity of the geometric-angle ODE near x-points.
 RHS for the arc-length-parameterized level-set ODE.
 
 State `y = [R, Z, ∫dl/Bp, ∫dl/(R²Bp), ∫jac·dl/Bp]`.
-The independent variable `s` is arc length [m].
+The independent variable `s` is arc length, in m.
 
 The tangent direction `(dR/ds, dZ/ds) = (∂ψ/∂Z, −∂ψ/∂R) / |∇ψ|` follows the
 ψ = const level set counterclockwise, staying on the flux surface without correction.
@@ -45,7 +42,6 @@ so the solver never restricts step size for them.
     # Bp = |∇ψ| / R (poloidal field [T])
     Bp = grad_norm / R
 
-    # dy[3] and dy[4] use abstol=1e20 so the solver never restricts steps for them.
     Bp_eff = max(Bp, eps(Float64))  # absolute guard against exact Bp=0 only
     dy[3] = 1.0 / Bp_eff           # d/ds [∫dl/Bp]
     dy[4] = 1.0 / (R^2 * Bp_eff)  # d/ds [∫dl/(R²Bp)]

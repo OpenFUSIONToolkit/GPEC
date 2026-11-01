@@ -7,4 +7,4 @@ base = "diiid_slayer_n1"   # Inherit example_dir, [quantities.*] and [overrides]
 description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis with root_classification = winding"
 
 [overrides]
-"SLAYER.root_classification" = "winding"   # Classify contour intersections by the argument principle
+"Tearing.search.root_classification" = "winding"   # Classify contour intersections by the argument principle

@@ -16,7 +16,49 @@ module HDF5Annotations
 using HDF5
 using Dates
 
+export ensure_group, replace_group!, write_fields!, write_ragged!
 export annotate!, make_scale!, attach_scale!, write_root_attrs!
+
+"""
+    ensure_group(parent, name)
+
+Open an existing group or create it under `parent`.
+"""
+ensure_group(parent, name) = haskey(parent, name) ? parent[name] : create_group(parent, name)
+
+"""
+    replace_group!(parent, name)
+
+Replace a result group, discarding datasets from an earlier save of that result.
+"""
+function replace_group!(parent, name)
+    haskey(parent, name) && delete_object(parent, name)
+    return create_group(parent, name)
+end
+
+"""
+    write_fields!(parent, result, fields)
+
+Write the selected fields using their field names as dataset names.
+"""
+function write_fields!(parent, result, fields)
+    for name in fields
+        parent[String(name)] = getproperty(result, name)
+    end
+    return parent
+end
+
+"""
+    write_ragged!(parent, name, rows)
+
+Write a group containing flattened rows and zero-based offsets delimiting each row.
+"""
+function write_ragged!(parent, name, rows::AbstractVector{<:AbstractVector})
+    group = replace_group!(parent, name)
+    group["flat"] = reduce(vcat, rows; init=eltype(eltype(rows))[])
+    group["offsets"] = cumsum(vcat(0, length.(rows)))
+    return group
+end
 
 """
     annotate!(parent, table)
@@ -109,7 +151,7 @@ Stamp the file-level contract: `schema_version`, `Conventions`, `references`,
 `title` (run description), `date_created` (ISO 8601 UTC). The code version lives in
 `Info/git_version`.
 """
-function write_root_attrs!(file::HDF5.File; title::AbstractString)
+function write_root_attrs!(file::Union{HDF5.File,HDF5.Group}; title::AbstractString)
     a = attrs(file)
     a["schema_version"] = "2.0"
     a["Conventions"] = "GPEC-HDF5-2.0"

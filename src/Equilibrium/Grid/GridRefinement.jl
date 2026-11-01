@@ -7,42 +7,24 @@ kinetic profiles) and equidistributes it, pinning mandatory knots (e.g. rational
 via `merge_mandatory_nodes`. Pass 2 re-forms the equilibrium on the refined grid through
 the `override_psi_nodes` keyword of `PlasmaEquilibrium`.
 
-There is ONE sizing rule everywhere — the cubic *derivative* interpolation error model
-err(f′) ≈ h³|f''''|/24 ≤ τ·f_scale — applied to three sources of curvature |f''''|:
+Knot spacing follows the cubic spline *derivative* error model err(f′) ≈ h³|f''''|/24 ≤ τ·f_scale
+(the stability physics consumes spline derivatives), so knot counts scale as psi_accuracy^(-1/3).
+The curvature |f''''| comes from three sources:
 
- 1. *Measured* (mid-radius and edge): 5-point divided differences of the pass-1 nodal
-    values. Nodal values come from independent field-line integrations, so the estimate
-    is immune to inter-knot spline ringing. This source dominates wherever pass-1 data
-    supports it — including the edge, where the pass-1 layout is already log-packed
-    (on the DIII-D example the measured density supplies ~3× what the edge model demands).
- 2. *Separatrix model* (edge floor, ψ ≥ 0.9): q ≈ −A·ln(1−ψ) fed through the same rule
-    gives geometric packing with uniform relative q′ error, independent of A. Normally
-    inactive; insurance against a pass-1 that under-sampled the divergence.
- 3. *Axis model* (core, ψ ≤ 0.03): the equilibrium is a power law in ψ (smooth in
-    ρ = √ψ) near the axis, and the same rule on that form gives geometric-in-log(ψ)
-    packing. Here the model *replaces* measurement rather than flooring it — nodal data
-    from the smallest flux surfaces is dominated by integration and axis-extrapolation
-    error, which refinement amplifies rather than resolves.
+ 1. *Measured* (mid-radius and edge): 5-point divided differences of the pass-1 nodal values.
+ 2. *Separatrix model* (edge floor, ψ ≥ 0.9): q ≈ −A·ln(1−ψ) gives geometric packing in log(1−ψ),
+    independent of A; applied only when `edge_q_law` finds a diverging edge.
+ 3. *Axis model* (core, ψ ≤ 0.03): a power law in ψ gives geometric packing in log(ψ). It replaces
+    the measurement there, since the smallest surfaces' nodal data is dominated by integration noise.
 
-The stability physics consumes spline derivatives (q′ at rational surfaces, p′ and V′ in
-the Euler-Lagrange and ballooning coefficients), whose error at a given spacing is far
-larger than the value error — hence the derivative model. Every region's knot count
-scales as psi_accuracy^(-1/3), so tightening the tolerance refines edge, pedestal, and
-mid proportionally.
-
-Measured curvature is taken with respect to ρ = √ψ_N, in which the equilibrium is regular
-at the magnetic axis (R−R₀ ~ √ψ_N makes the geometry channels behave as ψ_N^(k/2) there,
-so their ψ-derivatives diverge under refinement but their ρ-derivatives do not); the
-resulting ρ-spacing maps back to the ψ density through dψ/dρ = 2√ψ_N, giving natural √ψ
-core packing outside the modeled core region as well.
+Measured curvature is taken against ρ = √ψ_N, in which the equilibrium is regular at the axis, and
+mapped back to a ψ density through dψ/dρ = 2√ψ_N.
 """
 
 # Cubic spline derivative interpolation error constant: err(f′) ≈ h³|f''''|/24
 const CUBIC_DERIV_ERR_CONST = 24.0
-# |f''''|/f_scale below this is treated as integrator noise, not curvature. The absolute
-# floor covers well-spaced grids; a relative-noise term ε/h⁴ dominates where the sample
-# grid is tightly packed, since divided differences amplify per-node noise as h⁻⁴ there
-# (a-priori floors carry those regions instead).
+# |f''''|/f_scale below this is treated as integrator noise, not curvature; on tightly packed sample
+# grids the floor grows as NODE_NOISE_REL/h⁴, since divided differences amplify nodal noise as h⁻⁴.
 const D4_NOISE_FLOOR = 1e3
 const NODE_NOISE_REL = 1e-8
 # Floor on a channel's value-scale, so an all-zero profile/geometry channel cannot divide by zero
@@ -50,25 +32,19 @@ const F_SCALE_FLOOR = 1e-12
 # Per-quantity target spacing clamp (ψ_N units)
 const H_TARGET_MIN = 1e-4
 const H_TARGET_MAX = 0.2
-# Model-region splits (ψ_N): below CORE the analytic axis power-law model *replaces* measured
-# curvature (smallest-surface nodal data is integration/extrapolation noise); above EDGE the
-# separatrix log model *floors* it. Values also referenced in the module and _knot_density docstrings.
+# Model-region splits (ψ_N): below CORE the axis model replaces measured curvature; above EDGE the
+# separatrix model floors it.
 const CORE_MODEL_PSI_MAX = 0.03
 const EDGE_MODEL_PSI_MIN = 0.9
 # θ-lines subsample stride for the 2D geometry channels
 const THETA_STRIDE = 8
-# --- edge q-law gate ----------------------------------------------------------------------------
+# Edge q-law gate.
 # Minimum knots in the edge band before a fit is attempted.
 const EDGE_FIT_MIN_KNOTS = 4
-# Weak absolute backstop against a fit that describes nothing at all. It is deliberately not a
-# discriminator: no absolute r2 separates diverted from limited edges (real reconstructions fit the
-# log law at 0.929-0.977, the limited a10 deck at 0.972), so the discrimination is the relative
-# r2_log > r2_linear comparison, and the pathology guard is the shear consistency below.
+# Weak backstop against a fit that describes nothing; no absolute r2 separates diverted from limited
+# edges, so that discrimination is the r2_log > r2_linear comparison.
 const EDGE_FIT_MIN_R2 = 0.5
-# `A` in q = q_bar + A*(ln(1-psi) - u_bar) is the local logarithmic shear, so the fit must satisfy
-# A = -(1-psi)*q'(psi) on the knots it was fitted to. Accept a factor of this much disagreement
-# between the fitted slope and the measured one; a fit driven by edge noise, or one describing an
-# edge that does not actually diverge, misses by far more.
+# Accepted factor between the fitted `A` and the measured local log shear -(1-psi)*q'(psi).
 const EDGE_FIT_SHEAR_RATIO = 2.0
 
 # Least-squares slope and coefficient of determination for y = a + b*x.
@@ -90,25 +66,16 @@ end
         -> nothing | (; A, q_bar, u_bar, n_knots, r2_log, r2_linear)
 
 Least-squares fit of the separatrix edge law `q = q̄ + A·(ln(1−ψ) − ū)` over the equilibrium's
-outer knots. It gates the grid-refinement edge density floor, which needs only to know whether q
-diverges at the edge; it does not locate anything. Placing surfaces beyond the grid is
-[`separatrix_q_law`](@ref), which takes the divergence from the X-point(s) instead of assuming
-it sits at ψ = 1.
+outer knots. It only gates the grid-refinement edge density floor; placing surfaces beyond the grid
+is [`separatrix_q_law`](@ref), and geometric X-point detection is [`classify_topology`](@ref).
 
-Returns `nothing` when the diverging model does **not** describe this equilibrium's edge, so a
-plasma with finite edge q is never extrapolated as if q blew up:
+Returns `nothing` when the diverging model does not describe the edge:
 
   - fewer than `min_knots` knots in the band;
   - `A ≥ 0`, i.e. q not rising toward ψ = 1;
-  - `r2_log < min_r2` — a weak backstop; the log law describes nothing at all;
-  - `r2_log ≤ r2_linear` — a plain linear-in-ψ fit explains the edge q at least as well, which is
-    what a **limited** plasma looks like. This comparison carries no scale and is what separates
-    the shipped limited decks (Solovev 0.760 vs 0.9996 linear; LAR 0.904 vs 0.998) from the
-    diverted ones (DIII-D 0.996 vs 0.865, 0.999 vs 0.594).
-
-This is a test of the **model**, not a topology classification: it asks whether q diverges
-logarithmically here, not whether an x-point exists. Geometric x-point detection is
-[`classify_topology`](@ref), which is a separate concern.
+  - `r2_log < min_r2`;
+  - `r2_log ≤ r2_linear` (a linear-in-ψ fit does at least as well, as for a limited plasma);
+  - the fitted `A` and the measured `-(1−ψ)·q′` differ by more than `shear_ratio`.
 """
 function edge_q_law(equil::PlasmaEquilibrium;
     psi_max::Real=Float64(equil.profiles.xs[end]),
@@ -134,8 +101,7 @@ function edge_q_law(equil::PlasmaEquilibrium;
     (isfinite(r2_log) && r2_log >= min_r2) || return nothing
     (isfinite(r2_linear) && r2_log > r2_linear) || return nothing
 
-    # Shear consistency: the fitted slope is the local logarithmic shear, so it must match the
-    # profile's own -(1-psi)*q' over the same knots.
+    # The fitted slope is the local logarithmic shear; it must match the profile's -(1-psi)*q'.
     hint = Ref(1)
     A_meas = median([-(1.0 - xs[i]) * Float64(equil.profiles.q_deriv(xs[i]; hint=hint)) for i in band])
     isfinite(A_meas) && A_meas < 0 || return nothing
@@ -146,58 +112,36 @@ function edge_q_law(equil::PlasmaEquilibrium;
 end
 
 
-# Rational-surface bracketing (Δ′ robustness). The ideal-MHD Δ′ asymptotic matching samples the
-# cubic equilibrium splines' 2nd/3rd derivatives across each rational ψ_s over the matching stencil
-# [ψ_s − dpsi, ψ_s + dpsi], dpsi = singfac_min/|n·q′|. A cubic 3rd derivative is piecewise constant
-# and jumps at every knot, so a knot inside that stencil makes q‴ inconsistent across the crossing
-# and Δ′ non-convergent. We keep the stencil inside ONE clean spline interval by bracketing each
-# surface with knots at ψ_s ± w (w = BRACKET_COEF·dpsi) and clearing the zone between them — knots
-# stay near the surface (kinetic-layer resolution) but never on it. BRACKET_COEF > 1 leaves margin
-# for the pass-1→pass-2 shift of ψ_s.
+# Rational-surface bracket half-width in units of the Δ′ matching stencil dpsi = singfac_min/|n·q′|.
+# A knot inside the stencil makes the cubic 3rd derivative jump mid-stencil and Δ′ non-convergent;
+# > 1 leaves margin for the pass-1 → pass-2 shift of ψ_s.
 const BRACKET_COEF = 4.0
-# Global minimum knot spacing. No grid — auto refinement, the near-surface bracket, or a fixed
-# core_edge_packed/pow1 grid packing its edge at high mpsi — may place nodes closer than this. Below it, cubic
-# high derivatives are dominated by field-line integration noise rather than curvature (e.g. an
-# core_edge_packed grid at mpsi=2048 packs the edge to ~6e-7, deep in noise). Chosen well under the spacing of a
-# converged uniform reference (~5e-4 at mpsi=2048) so it clips only pathological clustering.
+# Global minimum knot spacing for every grid; below it cubic high derivatives are integration noise.
 const MIN_KNOT_SPACING = 1.0e-4
-# Near-rational resolution patch. The Δ′ extraction samples the equilibrium splines' 3rd
-# derivatives at each rational surface, which the smooth-q measured-curvature density starves at
-# mid-radius (q looks smooth there, so few knots are placed, yet Δ′ still needs fine local
-# resolution). Within RATIONAL_RES_RADIUS of each rational we floor the density at 1/RATIONAL_RES_SPACING
-# so equidistribution lays a locally-uniform fine patch there — the resolution Δ′ needs — which
-# `bracket_mandatory_nodes` then centers the surface within. The spacing is **fixed** (τ-independent):
-# Δ′ is a property of the rational surface, so its accuracy must not depend on the global accuracy
-# target τ (that only sizes the pedestal/edge grid) — a τ-dependent patch would leave Δ′ far from
-# converged at the default τ. RATIONAL_RES_SPACING is set where the q‴ estimate converges (the core_edge_packed
-# mpsi ladder converges the q=2 Δ′ by h ≈ 5e-4).
+# Fixed (τ-independent) knot spacing within RATIONAL_RES_RADIUS of each rational surface, so Δ′ gets the
+# local resolution it needs at any accuracy target.
 const RATIONAL_RES_SPACING = 5.0e-4
 const RATIONAL_RES_RADIUS = 5.0e-3
 # Cap on the refined pass-2 interval count (density integral is clamped to this).
 const REFINED_N_CAP = 1024
-# Pass-1 interval count for the two-pass auto grid: the layout on which the formed equilibrium's
-# curvature is measured to provision the refined pass-2 grid. Pass 1 is equilibrium-only (cheap;
-# the ODE integration that dominates runtime is on pass 2). Sized to measure the gradient structure
-# (pedestal, edge) accurately. NOTE: because the curvature estimate is currently grid-dependent
-# (it grows with the measurement grid — see the dynamic-grid issue), a larger pass 1 measures more
-# curvature and enlarges pass 2; revisit once the density is made grid-invariant.
+# Pass-1 interval count for the two-pass auto grid. The curvature estimate grows with this grid, so a
+# larger pass 1 also enlarges pass 2.
 const PASS1_INTERVALS = 1024
 
 """
     wants_two_pass(config::EquilibriumConfig) -> Bool
 
-True when the config requests the automatic two-pass grid: `grid_type = "auto"` (or its
-legacy alias `"log_asymptotic"`) with `mpsi = 0` and a positive `psi_accuracy`.
+True when the config requests the automatic two-pass grid: `grid_type = "auto"` with `mpsi = 0`
+and a positive `psi_accuracy`.
 """
 wants_two_pass(config::EquilibriumConfig) =
-    config.grid_type in ("auto", "log_asymptotic") && config.mpsi == 0 && config.psi_accuracy > 0
+    config.grid_type == "auto" && config.mpsi == 0 && config.psi_accuracy > 0
 
 """
     _validate_psi_nodes(psi_nodes, psilow, psihigh) -> Vector{Float64}
 
 Check that an externally supplied ψ node vector is strictly increasing and spans exactly
-[`psilow`, `psihigh`]. Errors loudly on violation (e.g. a psihigh separatrix re-clamp
-between grid construction and equilibrium formation).
+`psilow` to `psihigh`; errors otherwise.
 """
 function _validate_psi_nodes(psi_nodes::Vector{Float64}, psilow::Real, psihigh::Real)
     length(psi_nodes) >= 2 || error("override_psi_nodes must contain at least 2 nodes")
@@ -263,31 +207,15 @@ end
 """
     _knot_density(equil::PlasmaEquilibrium; tau, kin=nothing) -> Vector{Float64}
 
-Knot density ρ(ψ) (knots per unit ψ_N) at the pass-1 nodes `equil.profiles.xs`, combining
-by max:
-
-  - measured h³-derivative-model curvature of the 1D profiles F, P, dV/dψ, q;
-  - curvature of the four rzphi geometry channels along every `THETA_STRIDE`-th θ-line
-    (max over θ) — the bicubic ψ-axis shares these knots, so geometry sharpness must
-    attract knots just like the 1D profiles;
-  - curvature of the kinetic profiles n_i, n_e, T_i, T_e, ω_E when `kin` is given
-    (their own grid, rebroadcast by linear interpolation) — steep pedestal gradients in
-    the kinetic data pull knots into the pedestal;
-  - the model-curvature regions (same h³ rule on analytic |f''''| — see the module
-    docstring): the edge floor for ψ ≥ 0.9, geometric-in-log(1−ψ) with dlog = (4τ)^(1/3)
-    from uniform relative q′ error on q ≈ −A·ln(1−ψ), independent of A and normally
-    inactive; and the core for ψ ≤ 0.03, geometric-in-log(ψ) from the power-law axis
-    form, which replaces the (noise-dominated) measurement there. A global minimum
-    density applies everywhere.
-
-Rational surfaces are handled by `bracket_mandatory_nodes` after equidistribution, not by
-elevating the density here. A running max over ±1 node smooths single-stencil dropouts.
+Knot density ρ(ψ) (knots per unit ψ_N) at the pass-1 nodes `equil.profiles.xs`: the max of the
+measured curvature density of the 1D profiles (F, P, dV/dψ, q), the four rzphi geometry channels
+(every `THETA_STRIDE`-th θ-line), and the kinetic profiles when `kin` is given, smoothed by a running
+max over ±1 node, then the core and edge model regions and a global minimum density.
 """
 function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing)
     xs = equil.profiles.xs
     n = length(xs)
-    # Curvature is measured against ρ = √ψ (regular at the axis); the ρ-space density
-    # rho_r converts to the ψ density at the end via dρ/dψ = 1/(2√ψ).
+    # Curvature is measured against ρ = √ψ (regular at the axis) and converted to a ψ density at the end.
     rs = sqrt.(xs)
     rho_r = zeros(Float64, n)
 
@@ -333,14 +261,9 @@ function _knot_density(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothin
         i < n && (rho_s[i] = max(rho_s[i], rho[i+1]))
     end
 
-    # A-priori regions: geometric edge floor, and a pure a-priori geometric core — the
-    # nodal data of the smallest flux surfaces is dominated by integration and axis
-    # extrapolation error, so measured curvature is not trusted below the core split.
+    # Model regions: geometric core (replaces measurement) and geometric edge floor.
     dlog = (4.0 * tau)^(1 / 3)
-    # The edge floor encodes the DIVERGING edge law q ≈ -A·ln(1-ψ), so it is applied only where
-    # that model actually describes the equilibrium. A limited plasma has finite edge q and must
-    # not be packed as if q blew up. The density itself stays A-independent (that is the point of
-    # the form: uniform relative q′ error regardless of A) -- the fit supplies validity, not slope.
+    # The edge floor assumes a diverging edge q, so it applies only when the edge law fits.
     edge_diverges = edge_q_law(equil) !== nothing
     @inbounds for i in 1:n
         if xs[i] <= CORE_MODEL_PSI_MAX
@@ -357,10 +280,8 @@ end
 """
     _equidistribute(xs, rho, N) -> Vector{Float64}
 
-Place N+1 nodes over [xs[1], xs[end]] by equidistributing the density integral
-M(ψ) = ∫ρ dψ (trapezoid on the sample nodes, piecewise-linear inversion). Endpoints are
-exactly xs[1] and xs[end]; interior nodes are strictly increasing since ρ > 0, which is
-a required precondition (a zero density would make M non-invertible).
+Place N+1 nodes from `xs[1]` to `xs[end]` by equidistributing the density integral M(ψ) = ∫ρ dψ
+(trapezoid, piecewise-linear inversion). Requires ρ > 0 everywhere.
 """
 function _equidistribute(xs::Vector{Float64}, rho::Vector{Float64}, N::Int)
     all(>(0), rho) || error("_equidistribute requires strictly positive density")
@@ -387,19 +308,10 @@ end
 """
     merge_mandatory_nodes(grid, mandatory; delta_frac=0.25, collapse_atol=1e-7) -> Vector{Float64}
 
-Insert mandatory knots (e.g. rational surfaces) into a base grid with a minimum-spacing
-guard: for each mandatory node, δ_min = `delta_frac` × (containing base-grid interval), and
-any pre-existing non-mandatory node within δ_min is dropped (snap — the mandatory node is
-never moved). Endpoints always win: mandatory nodes outside the open span or within δ_min of
-an endpoint are discarded. Mandatory nodes within `collapse_atol` of an earlier mandatory
-node are collapsed onto it — the same physical surface can be found through several (m, n)
-pairs differing only by root-finder noise, and a near-zero interval would ring the
-reconstructed splines. Collapse uses an absolute tolerance, not δ_min, so genuinely close but
-distinct mandatory nodes (e.g. a kinetic-resonance surface near a rational) survive while
-true duplicates still merge.
-
-The function is agnostic to node provenance, so future mandatory sources (e.g. kinetic
-resonance surfaces) plug in without change.
+Insert mandatory knots into a base grid without moving them: non-mandatory nodes within
+δ_min = `delta_frac` × (containing base-grid interval) of a mandatory node are dropped. Endpoints
+always win, so mandatory nodes outside the open span or within δ_min of an endpoint are discarded.
+Mandatory nodes within `collapse_atol` of an earlier one are treated as duplicates and collapsed.
 """
 function merge_mandatory_nodes(grid::Vector{Float64}, mandatory::Vector{Float64}; delta_frac::Float64=0.25, collapse_atol::Float64=1e-7)
     isempty(mandatory) && return copy(grid)
@@ -437,11 +349,8 @@ end
 """
     enforce_min_spacing(grid, hmin) -> Vector{Float64}
 
-Drop interior nodes so no two kept nodes are closer than `hmin`, preserving both endpoints.
-Guards against noise-level packing from any generator — the auto-grid near-surface bracket, or a
-fixed `core_edge_packed`/`pow1` grid whose edge spacing collapses (`~(π/2·mpsi)⁻²` for `core_edge_packed`) at high mpsi,
-below which cubic high derivatives are integration noise, not curvature. A no-op when the grid is
-already coarser than `hmin` everywhere (e.g. a converged uniform reference).
+Drop interior nodes so no two kept nodes are closer than `hmin`, preserving both endpoints. Guards
+against noise-level packing, e.g. the edge of a `core_edge_packed`/`pow1` grid at high mpsi.
 """
 function enforce_min_spacing(grid::Vector{Float64}, hmin::Float64)
     n = length(grid)
@@ -460,20 +369,12 @@ end
     bracket_mandatory_nodes(grid, centers, min_half_widths, min_spacing; collapse_atol=1e-7) -> Vector{Float64}
 
 Center each rational `centers[i]` inside a single clean spline interval by replacing the knots
-straddling it with a symmetric pair at `centers[i] ± w`. The half-width `w` is the larger of
-`min_half_widths[i]` (the Δ′-stencil floor `BRACKET_COEF·dpsi`) and **half the local grid
-spacing**, so the bracket blends into the surrounding grid rather than punching a narrow interval
-into it: the region stays locally uniform with the center at its midpoint. That local uniformity
-is what keeps the cubic 3rd derivative the Δ′ extraction samples both *consistent across* the
-surface (no knot-on-surface jump) and *stable across* grid refinement — a narrow bracket amid
-wide neighbors would be consistent but noisy. Non-bracket knots within `w` of the center, or
-within `min_spacing` of either new bracket knot, are dropped; endpoints always win; bracket knots
-outside the open domain are dropped, and knots closer than `collapse_atol` are collapsed to keep
-the grid strictly increasing. Each half-width is capped at half the distance to the neighboring
-centers, so adjacent brackets never interleave and every center keeps its own interval, and the
-stencil part of it also at half the distance to the nearer domain edge, so a near-tangent surface
-(q′ → 0, a huge stencil) cannot clear the grid. A cap that cuts a bracket below its stencil floor
-warns, since Δ′ there is sampled on a narrower stencil than intended.
+straddling it with a symmetric pair at `centers[i] ± w`, so the cubic 3rd derivative the Δ′
+extraction samples does not jump mid-stencil. `w` is the larger of `min_half_widths[i]` (the
+Δ′-stencil floor) and half the local grid spacing, capped at half the distance to neighboring centers
+(and, for the stencil part, to the nearer domain edge). Knots within `w` of the center or within
+`min_spacing` of a new bracket knot are dropped; endpoints always win. Warns when a cap cuts a bracket
+below its stencil floor, since Δ′ there is less accurate.
 """
 function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}, min_half_widths::Vector{Float64}, min_spacing::Float64; collapse_atol::Float64=1e-7)
     isempty(centers) && return copy(grid)
@@ -519,20 +420,21 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
 end
 
 """
-    refined_psi_grid(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[],
+    refined_psi_grid(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[], pinned=Float64[],
                      singfac_min=1e-4, n_min=1, bracket_coef=BRACKET_COEF,
-                     min_spacing=MIN_KNOT_SPACING, N_cap=1024) -> Vector{Float64}
+                     min_spacing=MIN_KNOT_SPACING, N_cap=REFINED_N_CAP) -> Vector{Float64}
 
-Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: measured-curvature knot
-density (`_knot_density`), equidistribution, a global minimum-spacing floor
-(`enforce_min_spacing`), and rational-surface bracketing (`bracket_mandatory_nodes`). `tau` is
-the target interpolation accuracy (`psi_accuracy`); `kin` optionally supplies kinetic profiles
-whose pedestal gradients attract knots; `mandatory` lists rational-surface ψ values to bracket;
-`pinned` lists ψ values inserted as plain knots without a cleared zone (kinetic-resonance surfaces);
-`singfac_min` and `n_min` (smallest |n| in the run) set each surface's matching half-stencil
-`dpsi = singfac_min/(n_min·|q′|)`, and the bracket half-width is `bracket_coef·dpsi` (floored at
-`min_spacing`). Rational surfaces are bracketed, not pinned: a knot on the surface would make the
-Δ′ extraction's cubic 3rd derivative jump mid-stencil (see `BRACKET_COEF`).
+Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: knot density, equidistribution,
+`enforce_min_spacing`, then `bracket_mandatory_nodes` around rational surfaces.
+
+## Arguments
+
+  - `tau` - target interpolation accuracy (`psi_accuracy`)
+  - `kin` - optional kinetic profiles whose gradients attract knots
+  - `mandatory` - rational-surface ψ values to bracket (never knotted on)
+  - `pinned` - ψ values inserted as plain knots without a cleared zone
+  - `singfac_min`, `n_min` - set each surface's half-stencil `dpsi = singfac_min/(n_min·|q′|)`; the
+    bracket half-width is `bracket_coef·dpsi`, floored at `min_spacing`
 """
 function refined_psi_grid(equil::PlasmaEquilibrium;
     tau::Float64,
@@ -546,9 +448,7 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     N_cap::Int=REFINED_N_CAP)
     xs = equil.profiles.xs
     rho = _knot_density(equil; tau, kin)
-    # Floor the density to a fixed (τ-independent) locally-uniform fine patch around each rational
-    # so Δ′ has the resolution to sample 3rd derivatives there at any accuracy target (see
-    # RATIONAL_RES_SPACING).
+    # Fixed fine patch around each rational surface (see RATIONAL_RES_SPACING).
     if !isempty(mandatory)
         h_rat = max(RATIONAL_RES_SPACING, min_spacing)
         @inbounds for m in mandatory, i in eachindex(xs)
@@ -560,8 +460,7 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     N == N_cap && M_total > N_cap &&
         @warn "refined_psi_grid: knot count capped at $N_cap (density integral wants $(ceil(Int, M_total))); psi_accuracy=$tau may not be attainable"
     grid = enforce_min_spacing(_equidistribute(xs, rho, N), min_spacing)
-    # Pinned knots use knot-at-node semantics (no cleared zone); inserted before rational bracketing
-    # so a rational's bracket still wins locally where the two overlap.
+    # Pinned knots go in before bracketing so a rational's bracket wins where the two overlap.
     grid = isempty(pinned) ? grid : merge_mandatory_nodes(grid, pinned)
     isempty(mandatory) && return grid
     min_half_widths = [max(bracket_coef * singfac_min / (n_min * abs(equil.profiles.q_deriv(m))), min_spacing) for m in mandatory]
@@ -571,9 +470,8 @@ end
 """
     implied_knot_count(equil::PlasmaEquilibrium; tau, kin=nothing) -> Int
 
-Knot count the measured-curvature density model implies for a formed equilibrium. Used as
-a post-refinement consistency diagnostic: if this differs substantially from the actual
-grid size, the pass-1 grid under- or over-sampled a feature.
+Knot count the density model implies for a formed equilibrium; a post-refinement diagnostic that
+flags a pass-1 grid that under- or over-sampled a feature.
 """
 function implied_knot_count(equil::PlasmaEquilibrium; tau::Float64, kin::Union{Nothing,KineticProfileSplines}=nothing)
     xs = equil.profiles.xs

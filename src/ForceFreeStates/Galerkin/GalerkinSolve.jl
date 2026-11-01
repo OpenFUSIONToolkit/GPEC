@@ -26,7 +26,7 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
             swap_edge = (ising == msing && ix == ws.nx)
             gal_gauss_quad!(cell, mats, profiles, intr, nodes, weights, swap_edge)
             if cell.etype == GCT_RES
-                gal_resonant!(cell, ising, mats, profiles, intr, asymps, sings, nn, ctrl.gal_tol, ctrl.gal_gnstep, ctrl.verbose)
+                gal_resonant!(cell, ising, mats, profiles, intr, asymps, sings, nn, ctrl.algorithm.tol, ctrl.algorithm.gnstep, intr.verbose)
             elseif cell.etype == GCT_EXT || cell.etype == GCT_EXT1 || cell.etype == GCT_EXT2
                 gal_extension!(cell, ising, mats, profiles, intr, asymps, sings, nn, nodes, weights)
             end
@@ -63,8 +63,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     intr::ForceFreeStatesInternal; wv=nothing, cut_solution::Bool=false)
 
     intr.npert == 1 || error("galerkin_solve: only single-n (npert == 1) is supported")
-    ctrl.gal_solver in ("auto", "LU", "cholesky") ||
-        error("galerkin_solve: gal_solver must be \"auto\", \"LU\" or \"cholesky\"")
+    validate_algorithm(ctrl)
     nn = intr.nlow
     mpert = intr.numpert_total
     np = GAL_NP
@@ -72,21 +71,21 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     sings, psilow, psihigh = gal_resonant_surfaces(intr, equil)
     msing = length(sings)
     if msing == 0
-        ctrl.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
+        intr.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
         return empty_galerkin_result(), nothing
     end
 
-    ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
+    intr.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, automatic factorization)"
 
     # Per-surface two-sided asymptotic series (sig = ±1). Each side uses its own resonant block.
     asymps = GalSingAsymp[]
     for s in sings
-        sing_order = ctrl.gal_sing_order
+        sing_order = ctrl.frobenius_order
         ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
-        if ctrl.gal_sing_order_ceiling
+        if ctrl.algorithm.frobenius_order_ceiling
             # The order is raised for high-Mercier-index surfaces
-            order = ctrl.gal_sing_order + ceil(Int, 2 * real(ar.alpha[1]))
-            if order > ctrl.gal_sing_order
+            order = ctrl.frobenius_order + ceil(Int, 2 * real(ar.alpha[1]))
+            if order > ctrl.frobenius_order
                 sing_order = order
                 ar = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=1.0, sing_order=sing_order)
             end
@@ -96,17 +95,17 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     end
 
     # --- allocate workspace ---
-    nx = ctrl.gal_nx
+    nx = ctrl.algorithm.nx
     kl = mpert * (np + 1)
     ku = kl
     ldab = 2kl + ku + 1
     # rpec_flag (RDCON, gal.f): append mpert coil-response columns. Each is a unit source at
     # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
-    ncoil = ctrl.gal_rpec_flag ? mpert : 0
+    ncoil = ctrl.algorithm.rpec_flag ? mpert : 0
     nsol = 2 * msing + ncoil
     intvl = [GalInterval(zeros(Float64, nx + 1), zeros(Float64, nx + 1), [GalCell(mpert) for _ in 1:nx])
              for _ in 0:msing]
-    ws = GalWorkspace(ctrl.gal_solver, nx, ctrl.gal_nq, np, 0, kl, ku, ldab, nsol,
+    ws = GalWorkspace("auto", nx, ctrl.algorithm.nq, np, 0, kl, ku, ldab, nsol,
         intvl, Matrix{ComplexF64}(undef, 0, 0), Matrix{ComplexF64}(undef, 0, 0), Matrix{ComplexF64}(undef, 0, 0))
 
     for ising in 0:msing
@@ -128,7 +127,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
 
-    if ctrl.verbose
+    if intr.verbose
         offdbg = ws.kl + ws.ku + 1
         @info "Galerkin assembly: ndim=$(ws.ndim) nsol=$nsol kl=$(ws.kl) ldab=$(ws.ldab) |rhs|=$(norm(ws.rhs))"
         for ising in 0:msing
@@ -142,8 +141,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     # --- banded solve (gal.f) ---
     ws.sol .= ws.rhs
-    ws.solver = gal_banded_solve!(ws.mat, ws.sol, ws.kl, ws.ku, ctrl.gal_solver)
-    ctrl.verbose && @info "Galerkin banded solve: $(ws.solver)"
+    ws.solver = gal_banded_solve!(ws.mat, ws.sol, ws.kl, ws.ku, "auto")
+    intr.verbose && @info "Galerkin banded solve: $(ws.solver)"
 
     # --- extract Δ′ from the small resonant coefficients (gal.f) ---
     delta = zeros(ComplexF64, nsol, 2 * msing)
@@ -172,7 +171,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
 
     # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution); the cut
     # solution only when a later match needs the composite inner profiles.
-    ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
+    intr.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
         delta=(cut_solution ? delta : nothing))
 
@@ -232,15 +231,10 @@ end
 """
     write_galerkin!(out_h5, result::GalerkinResult; basis_output=false)
 
-Write the Galerkin solver outputs into the open HDF5 file, under
-`ForceFreeStates/Solutions/GalerkinIntegration/`: the surface list
-the solve ran over (a subset of `SingularSurfaces/` when the domain or the m-band excludes
-rationals). The Δ′/PEST-3 matrices and the closed ξ profiles are NOT written here — both go to
-formalism-independent homes from the driver writer (`SingularSurfaces/` off `result.delta_prime`;
-the shared `Solutions/` profile layout off `result.solution`). With `basis_output` the raw
-outer-region basis functions (per-interval, unconstrained at the rationals — solver internals)
-are dumped under `Basis/` in the shared axis order. Replaces the Fortran
-`delta_gw`/`pest3_data` ASCII/binary outputs.
+Write the Galerkin surface list (a subset of `SingularSurfaces/` when the domain or the m-band excludes
+rationals) under `ForceFreeStates/Solutions/GalerkinIntegration/`. The Δ′/PEST-3 matrices and closed ξ
+profiles are written by the driver writer, not here. With `basis_output`, the raw per-interval
+outer-region basis functions (solver internals) are written under `Basis/`.
 """
 function write_galerkin!(out_h5, result::GalerkinResult; basis_output::Bool=false)
     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
@@ -339,12 +333,12 @@ non-positive-definite real-diagonal system. `"cholesky"` errors instead of falli
 function gal_banded_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{ComplexF64}, kl::Int, ku::Int, solver::String)
     if solver != "LU"
         if kl != ku
-            solver == "cholesky" && throw(ArgumentError("gal_solver=\"cholesky\" requires equal lower and upper bandwidths (kl=$kl, ku=$ku)"))
+            solver == "cholesky" && throw(ArgumentError("solver=\"cholesky\" requires equal lower and upper bandwidths (kl=$kl, ku=$ku)"))
             @info "Galerkin Cholesky requires equal lower and upper bandwidths; solving by LU" kl ku
         else
             gal_cholesky_solve!(mat, sol, kl, ku) && return "cholesky"
             solver == "cholesky" &&
-                error("gal_solver=\"cholesky\": off-diagonal entries are not Hermitian or the real-diagonal system is not positive definite; use \"auto\" or \"LU\"")
+                error("solver=\"cholesky\": off-diagonal entries are not Hermitian or the real-diagonal system is not positive definite; use \"auto\" or \"LU\"")
             @info "Galerkin off-diagonal entries are not Hermitian or the real-diagonal system is not positive definite; solving by LU"
         end
     end

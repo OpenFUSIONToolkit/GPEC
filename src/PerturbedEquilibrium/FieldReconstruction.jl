@@ -12,17 +12,11 @@ Displacement components from ODE integration (u_store/du_store/xi_s_store):
   (xi_s_store; Glasser 2016 Phys. Plasmas 23, 072505, eqs. 9 and 18)
 
 Contravariant perturbed field from ideal MHD (matches Fortran gpeq_sol):
-    b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
+    J·b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
     b^θ = -(χ₁·dξ_ψ/dψ + 2πi·n·ξ_s)
     b^ζ = -(χ₁·(q'·ξ_ψ + q·dξ_ψ/dψ) + 2πi·m·ξ_s)
 
 where χ₁ = 2π·Ψ₀ [Park Phys. Plasmas 14, 052110 (2007) eq. 8-10].
-
-Clebsch displacement components for PENTRC (matches Fortran gpout_xclebsch):
-    ξ^ψ         = xsp_mn    (unregularized)
-    ∂ξ^ψ/∂ψ    = xmp1_mn   (regularized: xsp1 * singfac²/(singfac² + reg_spot²))
-                           unregularized at the default regularization_width = 0
-    ξ^α         = xms_mn    (regularized: -A⁻¹(B·xmp1 + C·xsp) ideal, ξ_s·singfac factor kinetic; divided by χ₁ in output)
 
 Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contra):
     ξ^ψ·J(m) = Σ_dm jmat(dm) · xsp(m+dm)
@@ -30,11 +24,6 @@ Contravariant displacement from Jacobian convolution (matches Fortran gpeq_contr
                 + 2πi·n/χ₁·jmat(dm)·xms(m+dm)] / (2πi·(m - n·q))
     ξ^ζ(m)   = -Σ_dm [q·jmat(dm)·xsp1(m+dm) + q·jmat1(dm)·xsp(m+dm)
                 + 2πi·m/χ₁·jmat(dm)·xms(m+dm)] / (2πi·(m - n·q))
-
-Covariant components from metric tensor contraction (matches Fortran gpeq_cova):
-    ξ_ψ(m) = Σ_dm g¹¹J(dm)·ξ^ψJ(m+dm) + g¹²J(dm)·ξ^θ_m(m+dm) + g³¹J(dm)·ξ^ζ_m(m+dm)
-    ξ_θ(m) = Σ_dm g¹²J(dm)·ξ^ψJ(m+dm) + g²²J(dm)·ξ^θ_m(m+dm) + g²³J(dm)·ξ^ζ_m(m+dm)
-    ξ_ζ(m) = Σ_dm g³¹J(dm)·ξ^ψJ(m+dm) + g²³J(dm)·ξ^θ_m(m+dm) + g³³J(dm)·ξ^ζ_m(m+dm)
 
 Mode-space arrays are [npsi, numpert_total] in the ForceFreeStates ordering (m fastest, one
 block of mpert columns per n). The equilibrium is axisymmetric, so every poloidal convolution
@@ -50,10 +39,8 @@ _mode_mn(ffs::ForceFreeStatesResult, j::Int) = (ffs.mlow + (j - 1) % ffs.mpert, 
         equil, ffs, metric, mats, regularization_width
     ) -> (xi_modes, b_modes)
 
-Reconstruct displacement and perturbed magnetic field from eigenmode response.
-
-Implements the full Fortran gpeq pipeline: gpeq_sol → gpeq_contra → gpeq_cova.
-All fields returned in mode space [npsi, numpert_total].
+Reconstruct the displacement and perturbed magnetic field of the control-surface response
+`response_vector` (Φ_tot) in mode space `[npsi, numpert_total]`, following Fortran gpeq_sol → gpeq_contra → gpeq_cova.
 
 # Returns
 
@@ -69,12 +56,13 @@ Tuple of (xi_modes, b_modes) NamedTuples:
   - `xi_modes.theta_reg`: ξ^θ regularized (= xmt, from gpeq_contra with reg_spot smoothing)
   - `xi_modes.zeta_reg`: ξ^ζ regularized (= xmz, from gpeq_contra with reg_spot smoothing)
   - `xi_modes.cova_psi/theta/zeta`: covariant displacement (from gpeq_cova)
-  - `b_modes.psi`: b^ψ [npsi, numpert_total]
-  - `b_modes.b_psi_area_weighted`: b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
+  - `b_modes.psi`: J·b^ψ [npsi, numpert_total]; b^ψ itself would need the jmat convolution
+  - `b_modes.b_psi_area_weighted`: J·b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
   - `b_modes.theta`: b^θ [npsi, numpert_total]
   - `b_modes.zeta`: b^ζ [npsi, numpert_total]
   - `b_modes.theta_reg/zeta_reg`: regularized b^θ, b^ζ (from gpeq_sol with reg_spot smoothing)
   - `b_modes.cova_psi/theta/zeta`: covariant field (from gpeq_cova)
+  - `xi_modes.R/Z/phi`, `b_modes.R/Z/phi`: cylindrical components (from gpeq_rzphi)
 """
 function reconstruct_physical_fields(
     response_vector::Vector{ComplexF64},
@@ -89,11 +77,8 @@ function reconstruct_physical_fields(
     npsi = size(solution.u_store, 4)
     psi_grid = solution.psi_store[1:npsi]
 
-    # Pin BLAS to a single thread for the per-surface reconstruction below. Each threaded
-    # loop over ψ calls only small BLAS kernels (per-surface mpert×mpert solves and mode
-    # DFTs), so leaving BLAS multi-threaded oversubscribes the cores against the Julia
-    # `@threads` over ψ and destroys thread scaling. Restored in a `finally` so an exception
-    # in any of the threaded loops cannot leak the pinned count into the rest of the session.
+    # Pin BLAS to one thread: the ψ loops are already threaded and call only small BLAS kernels,
+    # so a threaded BLAS oversubscribes the cores. Restored in `finally`.
     _blas_nthreads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
@@ -138,8 +123,7 @@ function reconstruct_physical_fields(
             psi_grid, ffs, metric
         )
 
-        # Compute b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path
-        # area = <J·|∇ψ|>_θ (Hamada: J is const over θ)
+        # J·b^ψ / area for HDF5 output — matches Fortran gpout_xbnormal fast path; area = <J·|∇ψ|>_θ
         mthsurf = length(equil.rzphi_ys) - 1
         Jb_psi_modes = similar(b_psi_modes)
         # Surfaces are independent; :static keeps threadid() stable for any per-thread state.
@@ -147,11 +131,8 @@ function reconstruct_physical_fields(
             Jb_psi_modes[ipsi, :] = b_psi_modes[ipsi, :] ./ Equilibrium.flux_surface_area(equil, psi_grid[ipsi], mthsurf)
         end
 
-        # R,Z,φ cylindrical components (Fortran gpeq_rzphi)
-        # ξ: uses J-weighted psi (xwp from gpeq_contra) and regularized theta (xmt)
-        # b: uses raw psi (bwp from gpeq_sol, no Jacobian convolution) and regularized theta (bmt)
-        # Build the (ψ,θ) flux→cylindrical geometry once and reuse it for both ξ and b: the
-        # transform matrices depend only on equilibrium geometry, not on the perturbed field.
+        # R,Z,φ cylindrical components (Fortran gpeq_rzphi): ξ uses J·ξ^ψ (xwp) and regularized ξ^θ (xmt),
+        # b uses J·b^ψ (bwp, no Jacobian convolution) and regularized b^θ (bmt). The geometry is shared by both.
         mlow = ffs.mlow
         mpert_rz = ffs.mpert
         mtheta_rz = max(2 * (abs(mlow) + mpert_rz), 512)
@@ -176,8 +157,8 @@ function reconstruct_physical_fields(
             R=xi_R, Z=xi_Z, phi=xi_phi
         )
         b_modes = (
-            psi=b_psi_modes,      # b^ψ (no Jacobian) — used for b_n normal projection
-            b_psi_area_weighted=Jb_psi_modes,     # b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
+            psi=b_psi_modes,      # J·b^ψ — used for b_n normal projection
+            b_psi_area_weighted=Jb_psi_modes,     # J·b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
             theta=b_theta_modes,    # b^θ unregularized
             zeta=b_zeta_modes,     # b^ζ unregularized
             theta_reg=b_theta_reg,      # b^θ regularized (from gpeq_sol with reg_spot)
@@ -199,16 +180,9 @@ end
         response_vector, flux_matrix, solution, ffs
     ) -> (xi_psi_modes, xi_psi1_modes, xi_s_modes)
 
-Sum eigenmode contributions weighted by response coefficients.
-
-`response_vector` (= P * Phi_x) is in mode (m,n) basis. To reconstruct physical
-fields from eigenmode solutions in u_store/du_store/xi_s_store, first project to eigenmode amplitudes:
-alpha = flux_matrix \\ response_vector
-
-Then sum eigenmode contributions at each radial point (matches Fortran gpeq_sol):
-xi_psi[ipsi, :]  = u_store[:, :, 1, ipsi]  * alpha   # Ξ_ψ
-xi_psi1[ipsi, :] = du_store[:, :, ipsi] * alpha   # dΞ_ψ/dψ
-xi_s[ipsi, :]    = xi_s_store[:, :, ipsi] * alpha    # Ξ_s (surface displacement, Glasser 2016 eqs. 9, 18)
+Project the mode-basis response `response_vector` (Φ_tot = P·Φ_x) onto eigenmode amplitudes
+`α = flux_matrix \\ response_vector` and sum the stored eigenmode profiles `u_store`, `du_store` and
+`xi_s_store` weighted by α on every surface (Fortran gpeq_sol).
 
 # Returns
 
@@ -261,7 +235,7 @@ Compute contravariant perturbed B-field from displacement using ideal MHD relati
 
 Matches Fortran `gpeq_sol` bwp/bwt/bwz (unregularized) [Park 2007 eq. 8-10]:
 
-    b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
+    J·b^ψ =  χ₁·(m - n·q)·2πi·ξ_ψ
     b^θ = -(χ₁·∂ξ_ψ/∂ψ + 2πi·n·ξ_s)
     b^ζ = -(χ₁·(q'·ξ_ψ + q·∂ξ_ψ/∂ψ) + 2πi·m·ξ_s)
 """
@@ -400,7 +374,6 @@ function compute_clebsch_displacements(
         mats.ideal.B_spline(view(bmat, :), psi_norm; hint=hint)
         mats.ideal.C_spline(view(cmat_buf, :), psi_norm; hint=hint)
 
-        # xms = -(A\B)*xmp1 - (A\C)*xsp
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0 + 0.0im, 1.0 + 0.0im)  # xms += C*xsp
@@ -467,17 +440,9 @@ end
         psi_grid, equil, ffs, metric, regularization_width
     ) -> (xwp_modes, xwt_modes, xwz_modes, xmt_modes, xmz_modes)
 
-Compute contravariant displacement via Jacobian mode coupling convolution.
-
-Matches Fortran `gpeq_contra`:
-ξ^ψ·J(m) = Σ_dm jmat(dm) · xsp(m+dm)
-ξ^θ(m)   = -Σ_dm [...] / (2πi·singfac)
-ξ^ζ(m)   = -Σ_dm [...] / (2πi·singfac)
-
-Uses regularized xmp1 and xms for the theta/zeta components, then optionally applies
-additional regularization to get xmt/xmz.
-
-Returns both unregularized (xwt, xwz) and regularized (xmt, xmz) versions.
+Contravariant displacement by Jacobian poloidal-mode convolution (Fortran `gpeq_contra`; formulas in
+the file header), using the regularized xmp1 and xms. Returns J·ξ^ψ (xwp), ξ^θ and ξ^ζ (xwt, xwz),
+and their `regularization_width`-regularized forms (xmt, xmz).
 """
 function compute_contra_displacements(
     xi_psi_modes::Matrix{ComplexF64},
@@ -604,7 +569,7 @@ end
 Compute covariant displacement and B-field via metric tensor contraction.
 
 Matches Fortran `gpeq_cova`: contracts contravariant components with metric tensor
-Fourier coefficients (g^ij·J, quantities 1-6 in metric.fourier_coeffs) via poloidal
+Fourier coefficients (g_ij/J, quantities 1-6 in metric.fourier_coeffs) via poloidal
 mode coupling convolution.
 
 Uses regularized (modified) xmt/xmz and bmt/bmz for the theta/zeta contravariant inputs.
@@ -742,22 +707,10 @@ end
         xwp_modes, b_psi_modes, solution, equil, ffs
     ) -> (b_n_modes, xi_n_modes)
 
-Compute physical normal field b_n and displacement xi_n in mode space.
-
-Matches Fortran `gpeq_normal`:
-
-  - IDFT: reconstruct theta-space functions from mode amplitudes
-  - Divide by J·|∇ψ|(θ) at each theta point to get physical normal components
-  - Forward DFT back to mode space
-
-`xwp_modes` = J·ξ^ψ (Jacobian-weighted from gpeq_contra convolution).
-`b_psi_modes` = b^ψ (raw, not J-weighted).
-Both are divided by J·|∇ψ| in theta space, matching Fortran gpeq_normal.
-For xi_n: IDFT(J·ξ^ψ) / (J·|∇ψ|) = ξ^ψ/|∇ψ| = ξ_n.
-For b_n:  IDFT(b^ψ) / (J·|∇ψ|) [Park Phys. Plasmas 14, 052110 (2007)].
-
-DFT resolution: `mthsurf = mtheta = length(equil.rzphi_ys) - 1`. This is sufficient since
-Nyquist (mtheta/2) >> 2·max|m|, so no aliasing from the 1/(J·|∇ψ|) division.
+Physical normal field b_n and displacement ξ_n in mode space (Fortran `gpeq_normal`): the
+Jacobian-weighted `xwp_modes` (J·ξ^ψ) and `b_psi_modes` (J·b^ψ) are taken to θ space, divided by
+J·|∇ψ|, and transformed back, so ξ_n = ξ^ψ/|∇ψ| and b_n = b^ψ/|∇ψ| [Park Phys. Plasmas 14, 052110 (2007)].
+The θ grid is `mthsurf = length(equil.rzphi_ys) - 1` points.
 
 # Returns
 
@@ -802,7 +755,7 @@ function compute_b_n_xi_n_modes(
         for in in 1:npert
             blk = ((in-1)*mpert+1):(in*mpert)
             # IDFT: mode space → theta space
-            bwp_fun = phase_fwd * b_psi_modes[ipsi, blk]   # [mthsurf] — b^ψ (not J-weighted)
+            bwp_fun = phase_fwd * b_psi_modes[ipsi, blk]   # [mthsurf] — J·b^ψ
             xwp_fun = phase_fwd * xwp_modes[ipsi, blk]     # [mthsurf] — J·ξ^ψ (J-weighted from gpeq_contra)
 
             # Divide by J·|∇ψ| → physical normal components in theta space (matches Fortran gpeq_normal)
@@ -824,22 +777,11 @@ end
 
 Build the (ψ,θ) flux→cylindrical transformation geometry on the DFT θ grid: the
 transformation matrix entries t11/t12/t21/t22/t33 and the Jacobian J_theta, as
-`[mtheta, npsi]` arrays (one column per flux surface).
+`[mtheta, npsi]` arrays (one column per flux surface), shared by the ξ and b reconstructions.
 
-These depend only on equilibrium geometry, not on the perturbed field, so they are computed
-once and reused for both the ξ and b reconstructions (Fortran gpeq.f:458-475).
-
-The terms are smooth in ψ, so rather than evaluating the (expensive, 2-D) `rzphi` bicubic at
-every fine u_store ψ (npsi ≈ 1158), the *smooth* rzphi primitives (r², η-offset, J and their
-θ-derivatives) are sampled at the coarse equilibrium ψ-knots (`equil.rzphi_xs`, ≈ mpsi+1) and
-cubic-resampled onto the fine grid — replacing ~6×-redundant 2-D bicubic evaluations with
-cheap 1-D cubic evaluations. θ stays at the DFT resolution.
-
-The ψ-derivatives (dr²/dψ, dη/dψ) are obtained by differentiating the ψ-resample spline, NOT
-by resampling the bicubic's ψ-derivatives directly: the latter are only C¹ in ψ and a cubic
-fit through their knot samples rings badly near the axis/edge. The resampled function values
-reproduce the bicubic exactly on its native knots, so the spline derivative recovers the true
-ψ-derivative to machine precision. The trig / t-matrix assembly is done at the fine grid.
+The smooth rzphi primitives are sampled at the equilibrium ψ-knots and cubic-resampled onto
+`psi_grid`. Their ψ-derivatives come from differentiating that resample spline, not from
+resampling the bicubic's own ψ-derivatives, which are only C¹ and ring near the axis and edge.
 """
 function _build_rzphi_geometry(
     equil::Equilibrium.PlasmaEquilibrium,

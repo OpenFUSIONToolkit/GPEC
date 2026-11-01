@@ -19,13 +19,9 @@ const PANEL_MERGE_ATOL = 1e-8
     psi_panel_points(interior, x0, xout) → Vector{Float64}
 
 Build the ψ-quadrature node list `[x0, interior points strictly inside (x0, xout), xout]`.
-`interior` is the raw union of resonant-surface locations (rational surfaces ∪ kinetic
-resonances); this function owns the ordering: sort, drop near-duplicates (closer than
-`PANEL_MERGE_ATOL`, e.g. a kinetic resonance coinciding with a rational), and drop points
-within `PANEL_MERGE_ATOL` of a bound to avoid degenerate panels. Paneling the integral at
-these surfaces puts the resonant torque-density peaks (regularization_width/collisionally broadened, but
-narrow in ψ) on Gauss-Kronrod interval endpoints, which the rule handles natively instead of
-hunting them by adaptive bisection.
+`interior` is the unsorted union of resonant-surface locations; points closer than `PANEL_MERGE_ATOL`
+to each other or to a bound are dropped to avoid degenerate panels. Paneling at these surfaces puts
+the narrow resonant torque-density peaks on Gauss-Kronrod interval endpoints.
 """
 function psi_panel_points(interior::Vector{Float64}, x0::Float64, xout::Float64)
     pts = sort(filter(p -> x0 + PANEL_MERGE_ATOL < p < xout - PANEL_MERGE_ATOL, interior))
@@ -55,26 +51,24 @@ end
 
 """
     integrate_psi_quadgk(n, nl, zi, mi, wdfac, divxfac, electron, method,
-                          equil, intr, ctrl, kinetic_profiles; psi_min, psi_max) → NamedTuple
+                          equil, intr, ctrl, kinetic_profiles; psi_min, psi_max, axis_psi_c) → NamedTuple
 
 Integrate torque over ψ using adaptive Gauss-Kronrod quadrature with
-`QuadGK.BatchIntegrand`. Every integrand evaluation is logged, giving a
-diagnostic T(ψ) profile at no extra cost (the values are computed anyway
-— we just keep them).
+`QuadGK.BatchIntegrand`. Every integrand evaluation is logged as a diagnostic T(ψ) profile.
 
 # Returns
 
 NamedTuple with:
 
   - `total::ComplexF64`: Total integrated torque
-  - `torque_profile`: NamedTuple of (psi, dtdpsi, t_cumulative) from evaluation points
+  - `torque_profile`: NamedTuple `(psi, dtdpsi, t_cumulative, dtdpsi_ell, ell)` from the evaluation points
   - `matrix_integrated`: Trapezoidal-integrated mpert×mpert×6 matrix (if matrix method)
   - `psi_nsteps::Int`: Number of integrand evaluations
   - `psi_quad_error::Float64`: Quadrature error estimate for the total torque
   - `panel_psis::Vector{Float64}`: Quadrature panel boundaries actually used (bounds + interior resonant surfaces)
   - `resonance_psis::Vector{Float64}`: Located kinetic-resonance ψ surfaces (Ω_ℓ(x=1)=0), for diagnostics/plotting
 
-The integral is paneled at the rational-surface ψ locations (`intr.sing_psis`) and capped
+The integral is paneled at the rational surfaces (`intr.sing_psis`) and kinetic resonances, and capped
 at `ctrl.maxevals_psi` evaluations; a warning is emitted if the quadrature fails to reach
 `ctrl.rtol_psi`/`ctrl.atol_psi` or if a nonzero `atol_psi` dominates termination.
 """
@@ -88,10 +82,8 @@ function integrate_psi_quadgk(
     is_matrix_method = occursin("mm", method)
     mpert = intr.mpert
 
-    # Equilibrium splines are unreliable near the magnetic axis (epsr→0, J→0);
-    # start at psilow to avoid degenerate bounce/drift frequencies.
-    # Cap at intr.psilim (DCON's integration limit): perturbation interpolants only
-    # have data below this, and extrapolation near q=qlim blows up.
+    # Start at psilow (degenerate bounce/drift frequencies at the axis); stop at intr.psilim, where the
+    # perturbation data ends.
     x0 = max(psi_min, equil.config.psilow)
     xout = min(psi_max, intr.psilim, 1.0 - 1e-6)
 
@@ -111,13 +103,9 @@ function integrate_psi_quadgk(
     end
     psi_c > 0 && @info "Kinetic axis-validity suppression in ψ torque quadrature: domain starts at psi_c=$(round(psi_c; sigdigits=3))"
 
-    # QuadGK hands the batch callback every node of a refinement pass at once (the whole first
-    # pass is one batch), so the work is threaded over (ψ node × bounce harmonic) items: the
-    # ψ-only setup of each node (θ sampling, fits, field decomposition, harmonic-free bounce
-    # geometry) is built in a first threaded pass, then every (node, ℓ) pitch quadrature runs
-    # in a second. Nodes are taken `chunk` at a time to bound the geometry held in memory.
-    # Per-harmonic results are stored by index and reduced in fixed ℓ order, so the sum is
-    # independent of thread count. `:static` keeps the threadid()-indexed slots sound; never nest it.
+    # Each batch is threaded in two passes, `chunk` nodes at a time: per-node surface setup, then every
+    # (node, ℓ) pitch quadrature. Harmonics are reduced in fixed ℓ order, so the sum is independent of
+    # thread count. `:static` keeps the threadid()-indexed slots sound; never nest it.
     nharm = 1 + 2 * nl
     rtol_pitch = torque_pitch_rtol(ctrl)
     nth = Threads.maxthreadid()
@@ -274,15 +262,10 @@ end
     combine_species_states(states) -> KineticForcesState
 
 Sum per-species [`KineticForcesState`](@ref) results into a single total (τ = Σ_s τ_s). Per
-method: the scalar `total_torque`/`total_energy` are summed exactly; the dT/dψ profile is summed
-by linearly interpolating each species' own `(psi_grid, dtdpsi)` arrays onto the sorted union of
-the species ψ grids (zero outside a species' range), and the cumulative T(ψ) is re-integrated
-(trapezoid) from that summed profile. All species share the same ψ-integration range
-(`ctrl.psilims`), so the grids differ only in adaptive nodes. The interpolated/trapezoid
-`t_cumulative` is a diagnostic profile — its endpoint need not equal the exactly-summed
-Gauss-Kronrod `total_torque`, especially near sharp resonances. The combined `MethodResult`
-carries only the summed scalars and profile; per-species diagnostics (`torque_profile`, `records`,
-`panel_psis`, `resonance_psis`) are not aggregated and are left at their defaults.
+method the scalar `total_torque`/`total_energy` are summed exactly; dT/dψ is summed by linear
+interpolation onto the union of the species ψ grids and `t_cumulative` re-integrated by trapezoid, so
+its endpoint need not equal the summed `total_torque`. Per-species diagnostics (`torque_profile`,
+`records`, `panel_psis`, `resonance_psis`) are not aggregated and are left at their defaults.
 """
 function combine_species_states(states::AbstractVector{KineticForcesState})
     combined = KineticForcesState()
@@ -292,9 +275,7 @@ function combine_species_states(states::AbstractVector{KineticForcesState})
         results = [s.method_results[mname] for s in states if haskey(s.method_results, mname)]
         isempty(results) && continue
         grid = sort(unique(reduce(vcat, (r.psi_grid for r in results); init=Float64[])))
-        # Sum each species' dT/dψ onto the union grid by linear interpolation of its own
-        # (psi_grid, dtdpsi) arrays (torque_profile interpolants are not populated here); zero
-        # outside a species' ψ range.
+        # Sum each species' dT/dψ onto the union grid; zero outside a species' ψ range.
         dtdpsi = zeros(ComplexF64, length(grid))
         for r in results
             length(r.psi_grid) >= 2 || continue
@@ -340,13 +321,11 @@ end
 
 """
     compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
-                                ctrl::KineticForcesControl, equil, kinetic_profiles)
+                                ctrl::KineticForcesControl, equil, kinetic_profiles;
+                                axis_psi_c=0.0, z, m, electron)
 
-Calculate torque/energy for all enabled methods.
-For each method, integrates over flux surfaces using adaptive QuadGK
-quadrature via `integrate_psi_quadgk`.
-For multi-n calculations, loops over toroidal mode numbers and assembles
-block-diagonal kinetic matrices.
+Calculate torque/energy for all enabled methods by ψ quadrature (`integrate_psi_quadgk`), summing over
+toroidal mode numbers and assembling block-diagonal kinetic matrices for the matrix methods.
 
 # Arguments
 
@@ -357,11 +336,13 @@ block-diagonal kinetic matrices.
   - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
   - `axis_psi_c`: the run's near-axis validity boundary, suppressing the torque density below it
     (`KineticForces.axis_validity_boundary`); 0 disables the suppression
+  - `z`, `m`, `electron`: the species whose torque this is; default the equilibrium's main ion, with
+    `ctrl.electron`. The species sum calls this once per resolved species.
 """
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
     ctrl::KineticForcesControl, equil,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
-    axis_psi_c::Float64=0.0)
+    axis_psi_c::Float64=0.0, z::Int=main_ion(equil)[1], m::Int=main_ion(equil)[2], electron::Bool=ctrl.electron)
 
     for entry in METHOD_REGISTRY
         getfield(ctrl, entry.flag) || continue
@@ -370,7 +351,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         intr.method = method
         is_matrix_method = occursin("mm", method)
 
-        if ctrl.verbose
+        if intr.verbose
             println("---------------------------------------------")
             println("$method - $(entry.doc)")
         end
@@ -397,14 +378,11 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
 
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
-            if n == 0
-                n = ctrl.nn  # fallback to control parameter for single-n
-            end
 
-            # Adaptive QuadGK integration over ψ (serial BatchIntegrand)
+            # Adaptive QuadGK integration over ψ
             result = integrate_psi_quadgk(
-                n, ctrl.bounce_harmonic_max, ctrl.ion_charge, ctrl.ion_mass,
-                ctrl.magnetic_drift_factor, ctrl.divxi_factor, ctrl.electron,
+                n, ctrl.bounce_harmonic_max, z, m,
+                ctrl.magnetic_drift_factor, ctrl.divxi_factor, electron,
                 method, equil, intr, ctrl, kinetic_profiles;
                 psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2], axis_psi_c=axis_psi_c)
 
@@ -435,11 +413,11 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         end
 
         # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k. δW_k is real.
-        total_energy = imag(total_torque) / (2 * ctrl.nn)
+        total_energy = imag(total_torque) / (2 * intr.nlow)
 
         result_entry = MethodResult(;
             method=method,
-            nn=ctrl.nn,
+            nn=intr.nlow,
             total_torque=total_torque,
             total_energy=total_energy,
             psi_grid=psi_grid_out,
@@ -457,9 +435,9 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             state.kinetic_matrices[method] = op_wmats_full
         end
 
-        if ctrl.verbose
+        if intr.verbose
             @printf("%-24s%11.3e\n", "Total torque = ", real(total_torque))
-            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(total_torque) / (2 * ctrl.nn))
+            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(total_torque) / (2 * intr.nlow))
             if imag(total_torque) != 0.0
                 @printf("%-24s%11.3e\n", "alpha/s  = ", real(total_torque) / (-1 * imag(total_torque)))
             end
@@ -467,4 +445,41 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             println("---------------------------------------------")
         end
     end
+end
+
+"""
+    kinetic_torque(pe, ctrl::KineticForcesControl; verbose=false) -> KineticForcesResult
+
+The kinetic (NTV) torque of the perturbed equilibrium `pe`, evaluated with the model settings `ctrl` on the
+kinetic profiles attached to its equilibrium. A multi-species plasma adds each species' contribution.
+Call `save_to_hdf5(target, kf)` to save the result.
+
+```julia
+pe = perturbed_equilibrium(plasma_response(ffs), RMPField("forcing.dat"))
+kf = kinetic_torque(pe, KineticForcesControl())
+```
+"""
+function kinetic_torque(pe::PerturbedEquilibrium.PerturbedEquilibriumState, ctrl::KineticForcesControl; verbose::Bool=false)
+    ffs = pe.response.ffs
+    equil = ffs.equil
+    equil.kinetic === nothing && error("kinetic_torque needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
+    kinetic_profiles = ntv_profiles(ctrl, equil)
+    species = ntv_species(ctrl, equil)
+    # One boundary for the whole run, shared with the EL kinetic matrices and the Validity output.
+    axis_psi_c = axis_validity_boundary(ctrl, species, kinetic_profiles, equil, Float64[sng.psifac for sng in ffs.surfaces])
+
+    kf_intr = KineticForcesInternal(equil; verbose)
+    set_perturbation_data!(kf_intr, pe, ffs, equil, ffs.metric)
+    if species === nothing
+        total = KineticForcesState()
+        compute_torque_all_methods!(total, kf_intr, ctrl, equil, kinetic_profiles; axis_psi_c)
+        return KineticForcesResult(total, Pair{String,KineticForcesState}[], axis_psi_c, pe, ctrl)
+    end
+    per_species = Pair{String,KineticForcesState}[]
+    for sp in species
+        state = KineticForcesState()
+        compute_torque_all_methods!(state, kf_intr, ctrl, equil, sp.profiles; axis_psi_c, z=sp.z, m=sp.m, electron=sp.electron)
+        push!(per_species, String(sp.label) => state)
+    end
+    return KineticForcesResult(combine_species_states(last.(per_species)), per_species, axis_psi_c, pe, ctrl)
 end

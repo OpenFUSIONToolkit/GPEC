@@ -1,7 +1,7 @@
 @testset "Dispersion 4m×4m full Pletzer-Dewar coupled determinant (CoupledFullMatch)" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, InnerLayerResponse, solve_inner
-    using GeneralizedPerturbedEquilibrium.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using LinearAlgebra
 
     # Synthetic inner-layer model with explicit (tearing, interchange)

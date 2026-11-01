@@ -26,8 +26,7 @@ end
 """
     FieldLineDerivParams
 
-A struct to hold constant parameters for the ODE integration, making them
-easily accessible within the derivative function `direct_fieldline_der!`.
+Constant parameters of the field-line ODE, read by `direct_fieldline_der!` and `arclength_fieldline_der!`.
 """
 struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastInterpolations.CubicSeriesInterpolant,D}
     ro::Float64
@@ -46,21 +45,15 @@ end
 """
     direct_get_bfield!(bf_out, r, z, psi_in, sq_in, sq_in_deriv, psio; derivs=0)
 
-Calculates the magnetic field and its derivatives at a given (R,Z) point.
-The results are stored in-place in the `bf_out` object. This is equivalent
-to the `direct_get_bfield` subroutine in the Fortran code, adapted for
-the Julia spline implementation.
+Evaluates ψ, the profiles F and P, and the poloidal field with its derivatives at (R, Z), in place in `bf_out`.
+Port of Fortran `direct_get_bfield`.
 
-## Arguments:
+## Arguments
 
-  - `bf_out`: A mutable `DirectBField` struct to store the results
-  - `r`: R-coordinate to evaluate at
-  - `z`: Z-coordinate to evaluate at
-  - `psi_in`: 2D cubic interpolant for poloidal flux `ψ(R,Z)`
-  - `sq_in`: 1D cubic spline for profiles `F(ψ_norm)` and `P(ψ_norm)`
-  - `sq_in_deriv`: Pre-computed derivative view of sq_in
-  - `psio`: total toroidal flux
-  - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
+  - `psi_in`: 2D cubic interpolant of the poloidal flux `ψ(R,Z)`
+  - `sq_in`, `sq_in_deriv`: profile series `F(ψ_norm)`, `P(ψ_norm)` and its derivative
+  - `psio`: ψ at the magnetic axis; ψ_norm = 1 - ψ/psio
+  - `derivs`: number of ψ derivatives to evaluate (0, 1, or 2)
 """
 @with_pool pool function direct_get_bfield!(
     bf_out::DirectBField,
@@ -249,7 +242,7 @@ end
     _find_magnetic_axis(rp, bfield, sq_in_deriv, r0, z0, march_step) -> (r, z)
 
 The magnetic axis, by the first attempt whose Newton result passes `_axis_failure`: plain Newton from the midplane guess
-`(r0, z0)`, accepted on the step test alone so that smooth files keep the historical arithmetic, then Newton restarted from
+`(r0, z0)`, accepted on the step test alone, then Newton restarted from
 a bisection seed with steps capped at one march step and the residual bound added. A restart warns with the field at the
 axis; two failures error.
 """
@@ -306,21 +299,14 @@ end
 """
     direct_position!(raw_profile)
 
-Finds the magnetic axis (O-point) and the inboard and outboard separatrix crossings on its midplane, and replaces the
-`ψ(R, Z)` spline in `raw_profile` by one renormalized so that ψ at the axis equals ψ₀. The axis is a root of `∇ψ = 0`
-that passes the Newton step test `|δR|, |δZ| ≤ 1e-12 R` and the checks of `_axis_failure`, found by plain Newton from a
-midplane guess or, when that fails, by a restart from a bisection seed with capped steps (see `_find_magnetic_axis`).
-The restart warns and a second failure errors. A g-file whose header signs disagree with its ψ grid errors here, where
-the Fortran would have flipped the sign through the renormalization.
+Finds the magnetic axis (O-point, see `_find_magnetic_axis`) and the inboard and outboard separatrix crossings on its
+midplane, and replaces the `ψ(R, Z)` spline in `raw_profile` by one renormalized so that ψ at the axis equals ψ₀.
+A g-file whose header signs disagree with its ψ grid errors here.
 
-## Arguments:
+## Returns
 
-  - `raw_profile`: A `DirectRunInput` object containing splines and parameters; its `psi_in` spline is replaced.
-
-## Returns:
-
-  - `ro`, `zo`: R and Z coordinates of the magnetic axis [m].
-  - `rs1`, `rs2`: R-coordinates of the inboard and outboard separatrix crossings [m].
+  - `ro`, `zo`: magnetic axis coordinates, in m
+  - `rs1`, `rs2`: R of the inboard and outboard separatrix crossings, in m
 """
 function direct_position!(raw_profile::DirectRunInput)
     bfield = DirectBField()
@@ -334,9 +320,8 @@ function direct_position!(raw_profile::DirectRunInput)
     direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
     x_coords = raw_profile.psi_in_xs
     y_coords = raw_profile.psi_in_ys
-    # Access nodal values from psi_in interpolant: partials[1,:,:] = function values
+    # partials[1, :, :] holds the nodal ψ values
     new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
-    # Because DirectRunInput is a mutable struct, we can update the spline here
     raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; extrap=ExtendExtrap())
 
     rs1 = _separatrix_crossing(raw_profile, bfield, sq_in_deriv, ro, zo, raw_profile.rmin, "inboard")
@@ -392,29 +377,20 @@ end
 """
     direct_fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)
 
-Performs the field-line integration for a single flux surface. This is a Julia adaptation
-of the Fortran `direct_fl_int` subroutine. Note that the array `y_out` is now indexed
-from 1:5 rather than 0:4 as in Fortran.
+Traces the flux surface `psifac` (ψ_norm) in the geometric angle η from the outboard midplane, refining onto the
+surface after every step.
 
-## Arguments:
+## Arguments
 
-  - `psifac`: normalized psi value for the surface (ψ_norm).
-  - `raw_profile`: `DirectRunInput` object containing splines and parameters.
-  - `ro`, `zo`: Coordinates of the magnetic axis [m].
-  - `rs2`: R-coordinate of the outboard separatrix [m].
-  - `theta_nodes`: straight-fieldline angles (0 to 1) at which to sample the surface.
+  - `ro`, `zo`: magnetic axis coordinates, in m
+  - `rs2`: R of the outboard separatrix crossing, in m
+  - `theta_nodes`: straight-fieldline angles (0 to 1) at which to sample the surface
 
-## Returns:
+## Returns
 
-    - `y_out`: A matrix containing the integrated quantities at each of `theta_nodes`
-      (see `sample_trace_at_sfl_angles`).
-        - `y_out[:, 1]`: η (geometric poloidal angle)
-        - `y_out[:, 2]`: ∫(dl/Bp)
-        - `y_out[:, 3]`: rfac (radial distance from magnetic axis)
-        - `y_out[:, 4]`: ∫(dl/(R²Bp))
-        - `y_out[:, 5]`: ∫(jac*dl/Bp)
-
-  - `bfield`: A `DirectBField` object with values at the integration start point.
+  - `y_out`: rows at `theta_nodes` (see `sample_trace_at_sfl_angles`), columns η, ∫dl/Bp, rfac (distance from the axis),
+    ∫dl/(R²Bp), ∫jac·dl/Bp
+  - `bfield`: the `DirectBField` at the start point
 """
 function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64,
     theta_nodes)::Tuple{Matrix{Float64},DirectBField}
@@ -437,8 +413,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
     psi0 = bfield.psi
 
-    # Set up and solve the ODE for fieldline following
-    # Initial condition
+    # Initial state [∫dl/Bp, rfac, ∫dl/(R²Bp), ∫jac·dl/Bp]
     u0 = zeros(Float64, 4)
     u0[2] = sqrt((r - ro)^2 + (z - zo)^2)
 
@@ -453,7 +428,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
         integrator.u[2] = direct_refine(integrator.u[2], integrator.t, psi0, params)
     end
 
-    # We save the solution at each step before refinement (before=true, after=false) to match Fortran
+    # Save each step before refinement, as the Fortran does
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
@@ -488,16 +463,8 @@ end
 """
     direct_fieldline_der!(dy, y, params, eta)
 
-The derivative function for the field-line integration ODE. This is passed to
-the `DifferentialEquations.jl` solver. This is a Julia adaptation of the Fortran
-`direct_fl_der` subroutine, with an added safeguard against division by zero.
-
-## Arguments:
-
-  - `dy`: The derivative vector (output, modified in-place).
-  - `y`: The state vector `[∫(dl/Bp), rfac, ∫(dl/(R²Bp)), ∫(jac*dl/Bp)]`.
-  - `params`: A `FieldLineDerivParams` struct with all necessary parameters.
-  - `eta`: The independent variable (geometric angle `η`).
+Right-hand side of the geometric-angle field-line ODE, with state `y = [∫dl/Bp, rfac, ∫dl/(R²Bp), ∫jac·dl/Bp]` and
+independent variable the geometric angle `eta`. Port of Fortran `direct_fl_der`, guarded against a vanishing denominator.
 """
 function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
 
@@ -520,7 +487,6 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
         return
     end
 
-    # Compute derivatives
     # d/dη [∫(dl/Bp)] = 1/|B_P| dl/d(eta) = rfac/denominator
     dy[1] = y[2] / denominator
     # d(rfac)/d(eta) = rfac/denom *( Br cos(eta) + Bz sin(eta) )
@@ -532,21 +498,9 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
 end
 
 """
-    direct_refine(rfac, eta, psi0, params)
+    direct_refine(rfac, eta, psi0, params) -> Float64
 
-Refines the radial distance `rfac` at a given angle `eta` to ensure the
-point lies exactly on the target flux surface `psi0`.
-
-## Arguments:
-
-  - `rfac`: The current guess for the radial distance from the magnetic axis.
-  - `eta`: The geometric poloidal angle.
-  - `psi0`: The target `ψ` value for the flux surface.
-  - `params`: A `FieldLineDerivParams` struct.
-
-## Returns:
-
-  - The refined `rfac` value.
+Newton-refines the distance `rfac` from the axis at geometric angle `eta` so the point lies on the surface ψ = `psi0`.
 """
 function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::FieldLineDerivParams)::Float64
     cos_eta, sin_eta = cos(eta), sin(eta)
@@ -572,26 +526,16 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
 end
 
 """
-    equilibrium_solver(raw_profile)
+    equilibrium_solver(raw_profile, fieldline_int=direct_fieldline_int; override_psi_nodes=nothing) -> PlasmaEquilibrium
 
-The main driver for the direct equilibrium reconstruction. It orchestrates the entire
-process from finding the magnetic axis to integrating along field lines and
-constructing the final coordinate and physics quantity splines. This performs the same
-overall function as the Fortran `direct_run` subroutine, with better checks for numerical
-robustness.
+Direct equilibrium driver: locates the axis, traces each flux surface with `fieldline_int`, and builds the profile,
+`rzphi` coordinate and `eqfun` splines in straight-fieldline coordinates.
 
-## Arguments:
+## Arguments
 
-  - `raw_profile`: A `DirectRunInput` object containing the initial splines (`psi_in`, `sq_in`)
-    and run parameters (`equil_input`).
-  - `fieldline_int`: the flux-surface tracer, called as `fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)` with `y_out` already sampled at `theta_nodes` through
-    `sample_trace_at_sfl_angles`.
-
-## Returns:
-
-  - A `PlasmaEquilibrium` object containing the final, processed equilibrium data,
-    including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
-    the physics quantity spline (`eqfun`).
+  - `fieldline_int`: flux-surface tracer, called as `fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)`
+    with `y_out` sampled at `theta_nodes` through `sample_trace_at_sfl_angles`
+  - `override_psi_nodes`: explicit ψ grid used instead of the configured one
 """
 @with_pool pool function equilibrium_solver(raw_profile::DirectRunInput, fieldline_int=direct_fieldline_int;
     override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
@@ -665,8 +609,7 @@ robustness.
     if q0 <= 0.0
         @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
     end
-    # The -1 sentinel means "flip the extrapolated q0"; resolve it into a local so the
-    # config stays the user's request (matches equilibrium_solver(::InverseRunInput)).
+    # newq0 = -1 flips the extrapolated q0; resolved locally so the config keeps the user's request.
     newq0 = equil_params.newq0
     if newq0 == -1
         newq0 = -q0
@@ -735,7 +678,6 @@ function _eqfun_from_geometry(profiles, rzphi_rsquared, rzphi_offset, rzphi_nu, 
         f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            # Access nodal derivatives from the interpolants (grid points)
             # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
             f = (
                 rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],

@@ -17,7 +17,6 @@ using TOML
         end
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         merge!(inputs, sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
         GPEC.main([dir])
@@ -32,8 +31,7 @@ using TOML
                 "ForcingTerms" => Dict{String,Any}("forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                     "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4,
                         "currents" => [2.0e3], "tiltx" => [3.0])]),
-                "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true,
-                    "verbose" => false, "write_outputs_to_HDF5" => true)))
+                "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true)))
 
             for f in (A.Equilibrium.plot_qprofile, A.Equilibrium.plot_pressure_profile, A.Equilibrium.plot_f_profile,
                 A.Equilibrium.plot_flux_surfaces, A.Equilibrium.plot_equilibrium_summary)
@@ -71,8 +69,14 @@ using TOML
     end
 
     @testset "kinetic run draws the F̄ condition-number scan" begin
+        # Synthetic test kinetic matrices are script-only, so this run goes through the API and saves its result.
         mktempdir() do dir
-            h5 = _run_fixture(dir, "regression_solovev_kinetic_example")
+            inputs, config, analytic = GPEC.build_inputs_from_toml(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example"))
+            fixture = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            kwargs = merge(GPEC.force_balance_keywords(inputs, fixture), Dict(:kinetic => TestKineticMatrices(; scale=1e-9)))
+            prob = ForceBalanceProblem(PlasmaEquilibrium(config, analytic); kwargs...)
+            h5 = joinpath(dir, "gpec.h5")
+            save_to_hdf5(h5, solve(prob, GPEC.force_balance_algorithm(inputs)))
             @test _drew(A.ForceFreeStates.plot_cond_fbar(h5))
         end
     end

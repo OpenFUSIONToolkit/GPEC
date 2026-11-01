@@ -218,7 +218,7 @@ using HDF5
     @testset "HDF5 round trip with a scan" begin
         tmp = tempname() * ".h5"
         h5open(tmp, "w") do f
-            EF.write_to_hdf5!(f, [scanned, c])
+            EF.save_to_hdf5(f, [scanned, c])
         end
         back = EF.read_efc_couplings(tmp)
         @test back[1].rotation_shift == Δ && back[1].torque_residual_scan == Tlin.(Δ) && back[1].omega_reference == ω_ref
