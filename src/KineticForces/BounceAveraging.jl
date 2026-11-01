@@ -1023,10 +1023,8 @@ function _bounce_samples!(
                 continue
             else
                 # After midpoint: hold the previous sample to the end of the grid.
-                # The wd slot is deliberately held from the wb integrand (g_wb),
-                # reproducing the Fortran behavior for parity.
                 fill!(view(g_wb, i:ntheta), g_wb[i-1])
-                fill!(view(g_wd, i:ntheta), g_wb[i-1])
+                fill!(view(g_wd, i:ntheta), g_wd[i-1])
                 fill!(view(jvtheta, i:ntheta), jvtheta[i-1])
                 break
             end
