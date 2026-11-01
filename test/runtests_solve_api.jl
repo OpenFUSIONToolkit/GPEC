@@ -166,6 +166,22 @@ using HDF5
         ideal = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
         pass1.kinetic = kinetic
         @test refined.rzphi_xs != ideal.rzphi_xs
+        # Profiles without omega_E (read for SLAYER, say) cannot form the NTV view: the grid follows the
+        # equilibrium alone, unless the run computes calculated kinetic matrices, which need it.
+        no_omega = GPEC.Equilibrium.KineticProfileData(; psi=kinetic.psi, n_i=kinetic.n_i, n_e=kinetic.n_e,
+            T_i=kinetic.T_i, T_e=kinetic.T_e, chi_e=kinetic.chi_e, chi_i=kinetic.chi_i, chi_phi=kinetic.chi_phi)
+        @test GPEC.Equilibrium.has_ntv_fields(kinetic)
+        @test !GPEC.Equilibrium.has_ntv_fields(no_omega)
+        pass1.kinetic = no_omega
+        no_omega_grid = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
+        @test no_omega_grid.kinetic === no_omega
+        @test no_omega_grid.rzphi_xs == ideal.rzphi_xs
+        calc_deck = merge(sl_deck, Dict("ForceFreeStates" => merge(sl_deck["ForceFreeStates"], Dict("kinetic" => "KineticForces"))))
+        calc_ctrl = GPEC.force_balance_control(calc_deck, sl_dir)
+        @test_throws "missing required 'omega_E'" GPEC.maybe_reform_equilibrium(pass1, sl_intr, calc_ctrl)
+        # The KineticForces source stops up front, before any solve.
+        @test_throws "omega_E" solve(pass1, FFS.Forward(); nn=1, kinetic=GPEC.KineticForcesControl())
+        pass1.kinetic = kinetic
     end
 
     @testset "galerkin solve returns a gal result with a unified delta_prime" begin

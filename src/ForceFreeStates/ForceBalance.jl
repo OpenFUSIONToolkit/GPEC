@@ -135,6 +135,8 @@ function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verb
     # A kinetic model (not supplied or synthetic matrices) is evaluated on the equilibrium's kinetic profiles.
     ctrl.kinetic === nothing || ctrl.kinetic isa Union{KineticMatrices,TestKineticMatrices} || equil.kinetic !== nothing ||
         error("the KineticForces kinetic source needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
+    ctrl.kinetic isa Union{Nothing,KineticMatrices,TestKineticMatrices} || Equilibrium.has_ntv_fields(equil.kinetic) ||
+        error("the KineticForces kinetic source needs n_e, T_i, T_e and omega_E in the kinetic profiles; the kinetic file lacks at least one")
     ctrl.kinetic !== nothing && !(alg isa Forward) &&
         error("$(nameof(typeof(alg)))() does not support kinetic runs; use Forward().")
 
