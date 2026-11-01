@@ -777,15 +777,15 @@ end
     compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
 Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
-growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, or when `sing_flag` is set.
-The first call after a reduction only records reference norms. Errors if any norm is zero.
-Port of Fortran `ode_unorm`.
+growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, or always when `sing_flag` is set.
+The first call after a reduction records reference norms; if `sing_flag` forces a reduction there, it keeps
+the previous reduction's pivot order. Errors if any norm is zero. Port of Fortran `ode_unorm`.
 
 ### Arguments
 
   - `u` - Solution array, updated in place (the integrator state, to avoid copies)
   - `sing_flag` - Whether this call is at a singular surface
-  - `resonant_rows` - Resonant rows at an ideal crossing; when given, the reduction always runs and pivots on them
+  - `resonant_rows` - Resonant rows at an ideal crossing, pivoted on first
 """
 function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool;
     resonant_rows=Int[])
@@ -796,21 +796,21 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
     end
 
-    # The first call after a reduction records the reference norms; an ideal crossing reduces regardless
-    at_ideal_crossing = !isempty(resonant_rows)
-    if odet.new && !at_ideal_crossing
+    # A singular surface always reduces; otherwise reduce when the growth since the last reduction is too uneven
+    fix_required = sing_flag
+    if odet.new
         odet.new = false
         odet.unorm0 .= odet.unorm
-        return
-    end
-
-    # Growth since the last reduction (raw norms if a crossing comes right after one)
-    if !odet.new
+        # A forced reduction right after another keeps that reduction's pivot order
+        if sing_flag && odet.ifix > 0
+            odet.unorm[odet.index[:, odet.ifix]] .= (intr.numpert_total-1):-1:0
+        end
+    else
         odet.unorm ./= odet.unorm0
+        fix_required |= maximum(odet.unorm) / minimum(odet.unorm) > ctrl.algorithm.renorm_threshold
     end
-    uratio = maximum(odet.unorm) / minimum(odet.unorm)
 
-    if uratio > ctrl.algorithm.renorm_threshold || sing_flag
+    if fix_required
         if odet.ifix < ctrl.algorithm.numunorms_init
             odet.ifix += 1
         else
