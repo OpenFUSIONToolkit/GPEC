@@ -712,6 +712,8 @@ using TOML
         # Nonzero atol_psi dominating a small torque: the silent-garbage scenario
         ctrl_atol = KF.KineticForcesControl(; atol_psi=1e-2)
         @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl_atol, "fgar")
+        # A NaN torque fails every tolerance comparison, so it must error instead of passing silently
+        @test_throws ErrorException KF.check_psi_quadrature_convergence(complex(NaN), NaN, ctrl, "fgar")
     end
 
     @testset "METHOD_REGISTRY" begin
