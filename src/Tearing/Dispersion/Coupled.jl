@@ -1,24 +1,5 @@
-# Coupled.jl
-#
-# Multi-surface coupled tearing dispersion residual `det(M(Q))` (the
-# coupled, tearing-only reduction of the full Pletzer-Dewar matching in
-# `CoupledFullMatch.jl`). Shares the per-surface `SurfaceCoupling`
-# Q-callable interface so a brute-force or AMR scan can evaluate either
-# residual identically.
-#
-# Construction:
-#
-#   mc = multi_surface_coupling(surfaces, dp_matrix; ref_idx=1, msing_max=...)
-#
-# Evaluation:
-#
-#   det = mc(Q::ComplexF64)
-#
-# At each evaluation, for k = 1 .. msing_max, the inner-layer Δ is computed
-# at a Q rescaled by `tauk_k / tauk_ref` and offset by that surface's
-# Doppler shift `q_shift`, then subtracted (with the dc offset) from the
-# diagonal of an `msing_max × msing_max` upper-left submatrix of `dp_matrix`.
-# The off-diagonal Δ' couplings are passed through unchanged.
+# Multi-surface coupled tearing dispersion residual `det(M(Q))`: the tearing-only reduction of the
+# full Pletzer-Dewar matching in `CoupledFullMatch.jl`, callable on Q like `SurfaceCoupling`.
 
 """
     MultiSurfaceCoupling{V<:AbstractVector{<:SurfaceCoupling}}
@@ -61,14 +42,9 @@ length `length(surfaces)` (it is the same matrix returned by
 
 # Keyword arguments
 
-  - `ref_idx`   -- index of the reference surface whose `tauk` defines the
-    Q normalization. Defaults to `1`.
-  - `msing_max` -- number of surfaces from the front of `surfaces` to
-    include in the determinant. Defaults to `min(3, length(surfaces))`:
-    Δ' off-diagonal couplings beyond the third surface tend to be erratic
-    in practice, so the determinant is conservatively truncated to the
-    upper-left `msing_max × msing_max` submatrix of `dp_matrix`. Set
-    explicitly (up to `length(surfaces)`) to override.
+  - `ref_idx`   -- reference surface whose `tauk` defines the Q normalization.
+  - `msing_max` -- number of leading surfaces in the determinant; off-diagonal Δ' couplings beyond
+    the third surface tend to be erratic, hence the default of at most 3.
 """
 function multi_surface_coupling(surfaces::AbstractVector{<:SurfaceCoupling},
     dp_matrix::AbstractMatrix;
@@ -98,17 +74,9 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
     @inbounds for k in 1:n
         sc = mc.surfaces[k]
         Q_k = layer_argument(sc, Qc * (sc.tauk / ref_tauk))
-        # m×m scalar coupling: use only the tearing channel. The
-        # interchange (Glasser-stabilization) channel is carried in the
-        # full 4m×4m dispersion in `CoupledFullMatch.jl`; this reduced
-        # form is equivalent for pressureless SLAYER surfaces
-        # (Δ_interchange=0) and approximate for GGJ surfaces (drops
-        # Glasser stabilization).
-        Δ_k = solve_inner(sc.model, sc.params, Q_k).tearing * sc.scale
-        # The inner-layer solver returns NaN when the Riccati integration fails
-        # (clustered near poles). Propagate it as the residual so the scan flags
-        # this Q-cell via its isfinite checks, rather than feeding NaN into the
-        # LU factorization where it silently contaminates the whole determinant.
+        # Tearing channel only: exact for pressureless SLAYER surfaces, drops Glasser stabilization for GGJ.
+        Δ_k = layer_response(sc.model, sc.params, Q_k).tearing * sc.scale
+        # Propagate a NaN layer failure so the scan flags this cell instead of a contaminated det.
         isfinite(Δ_k) || return ComplexF64(NaN, NaN)
         M[k, k] -= Δ_k + sc.dc
     end

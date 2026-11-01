@@ -38,7 +38,7 @@ function make_config(path::String, eq_type::String; psihigh=nothing)
     raw["Equilibrium"]["eq_type"] = eq_type
     psihigh !== nothing && (raw["Equilibrium"]["psihigh"] = psihigh)
     base = dirname(path)
-    return Equilibrium.EquilibriumConfig(raw["Equilibrium"], base)
+    return GeneralizedPerturbedEquilibrium.equilibrium_config(raw, base)
 end
 
 # ─── Run each method (3 warm runs, report average of last 2) ─────────────────

@@ -52,7 +52,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 
 **Purpose**: Compute the magnetostatic vacuum response matrices that couple the plasma boundary to external fields. These matrices are used by ForceFreeStates and PerturbedEquilibrium to apply boundary conditions and decompose fields in poloidal mode space.
 
-**Configuration**: `[Wall]` section of `gpec.toml`
+**Configuration**: optional `[Wall]` section of `gpec.toml`; omit it for no wall
 
 **Inputs**:
 - `PlasmaEquilibrium` from Stage 1 (plasma boundary coordinates, toroidal mode number n)
@@ -142,28 +142,33 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 All stages are controlled by a single TOML file. A minimal example structure:
 
 ```toml
+[Run]
+output_file = "gpec.h5"
+verbose = true
+
 [Equilibrium]
 eq_type = "efit"
 eq_filename = "g-file.txt"
 
 [Wall]
 shape = "conformal"
-a = 0.3
+standoff_fraction = 0.3
 
 [ForceFreeStates]
-mlow = -3
-mpert = 7
-n = 1
-force_termination = false
+nn = 1
+integrator = "Forward"
+vac_flag = true
 
 [PerturbedEquilibrium]
-output_file = "gpec.h5"
+compute_singular_coupling = true
 
 [ForcingTerms]
-forcing_filename = "coil_fields.h5"
+forcing_data_file = "forcing.dat"
+forcing_data_format = "ascii"
 ```
 
-Setting `force_termination = true` in any section stops the pipeline after that stage (useful for equilibrium-only or stability-only runs).
+A stage runs when its section is present, so omitting the later sections stops the pipeline early
+(an equilibrium-only deck has no `[ForceFreeStates]`). Every stage saves into the `[Run] output_file`.
 
 Example configuration files are provided in:
 - `examples/Solov'ev_ideal_example/gpec.toml`
@@ -179,7 +184,7 @@ All results are written to a single HDF5 file (default: `gpec.h5`). The top-leve
 | Group | Contents |
 |---|---|
 | `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
-| `Input/` | Self-contained rerun snapshot: merged TOML blob, raw equilibrium/forcing/coil inputs |
+| `Input/` | Self-contained rerun snapshot: the recorded deck, raw equilibrium/forcing/coil inputs |
 | `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/` (opt-in: `write_el_matrices = true`), `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |

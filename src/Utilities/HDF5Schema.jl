@@ -1,5 +1,5 @@
-# Metadata tables for the datasets written by write_outputs_to_HDF5 (the main gpec.h5
-# writer), applied post-write by Utilities.HDF5Annotations.annotate!. Sub-writers
+# Metadata tables for the datasets written by save_to_hdf5 (the main gpec.h5
+# writer), applied post-write by HDF5Annotations.annotate!. Sub-writers
 # (Galerkin, PerturbedEquilibrium, KineticForces, Tearing) keep their tables next to
 # their own writers. Paths absent from a given run are skipped automatically.
 #
@@ -8,9 +8,7 @@
 # energies are power-normalized (per unit surface-averaged |ξ|², not joules); `dims`
 # lists axis names in Julia (column-major) order, axis 1 first.
 
-# Equilibrium scalars are written by iterating EquilibriumParameters' fields. The struct keeps
-# its legacy field spellings; these tables give the HDF5 datasets their literature names and
-# drop fields that duplicate another dataset or echo a control flag (inputs live only under Input/).
+# HDF5 names for the EquilibriumParameters fields, and fields not written (duplicates or control flags).
 const EQUIL_H5_NAMES = Dict(
     :ro => "R_axis",
     :zo => "Z_axis",
@@ -47,7 +45,7 @@ const EQUIL_H5_NAMES = Dict(
     :ip_sign => "I_p_sign",
     :psio => "psi_total"
 )
-const EQUIL_H5_SKIP = Set([:psi0, :psi_axis, :psi_axis_norm, :zsep, :verbose, :diagnose_src, :diagnose_maxima])
+const EQUIL_H5_SKIP = Set([:psi0, :psi_axis, :zsep, :verbose, :diagnose_src, :diagnose_maxima])
 
 const MAIN_H5_ANNOTATIONS = [
     # --- Info/ ---
@@ -283,6 +281,7 @@ const RUNTIME_H5_ANNOTATIONS = [
     "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
     "Info/Runtimes/local_stability" => (; long_name="wall-clock time of the LocalStability stage (Mercier, resistive interchange and ballooning scans)", units="s"),
     "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
+    "Info/Runtimes/match" => (; long_name="wall-clock time of the [Match] inner-layer matching stage", units="s"),
     "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
     "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
     "Info/Runtimes/kinetic_forces" => (; long_name="wall-clock time of the KineticForces (NTV) stage", units="s"),
@@ -326,15 +325,15 @@ const ELM_H5_ANNOTATIONS = vcat(
 )
 
 """
-    apply_main_h5_metadata!(out_h5, intr)
+    apply_main_h5_metadata!(out_h5)
 
 Apply the self-describing metadata contract to the datasets written by
-`write_outputs_to_HDF5`: `long_name`/`units`/`dims` attributes plus HDF5 Dimension
+`save_to_hdf5`: `long_name`/`units`/`dims` attributes plus HDF5 Dimension
 Scales for the shared coordinate datasets (ψ_N grids, rational-surface ψ).
 """
-function apply_main_h5_metadata!(out_h5, intr)
+function apply_main_h5_metadata!(out_h5)
     # Scales and attachments are declared in-table via the scale/attach entry fields.
-    Utilities.HDF5Annotations.annotate!(out_h5, MAIN_H5_ANNOTATIONS)
-    Utilities.HDF5Annotations.annotate!(out_h5, ELM_H5_ANNOTATIONS)
+    HDF5Annotations.annotate!(out_h5, MAIN_H5_ANNOTATIONS)
+    HDF5Annotations.annotate!(out_h5, ELM_H5_ANNOTATIONS)
     return out_h5
 end

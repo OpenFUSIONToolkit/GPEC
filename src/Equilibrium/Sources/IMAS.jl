@@ -1,5 +1,5 @@
 """
-    read_imas(config::EquilibriumConfig, dd)
+    read_imas(config::EquilibriumConfig, dd) -> DirectRunInput
 
 Load an equilibrium from an IMAS data dictionary and return a `DirectRunInput`.
 
@@ -25,10 +25,7 @@ function read_imas(config::EquilibriumConfig, dd)
 
     eqt = dd.equilibrium.time_slice[]
 
-    # COCOS conversion: IMAS standard is COCOS 11 (ψ_IMAS = 2π × ψ_internal)
-    # config.imas_cocos controls the expected convention:
-    #   11 (default) → divide psi by 2π to get internal (COCOS 2) values
-    #    2           → data is already in internal convention, no conversion needed
+    # COCOS 11 (IMAS standard) stores ψ_IMAS = 2π × ψ_internal
     if config.imas_cocos == 11
         cocos_factor = 1.0 / (2π)
         @info "Converting IMAS data from COCOS 11 to internal (COCOS 2)"
@@ -49,17 +46,15 @@ function read_imas(config::EquilibriumConfig, dd)
               "Check that dd.equilibrium is properly populated.")
     end
 
-    # Extract 1D profiles, converting psi from COCOS 11 to internal
     psi_1d = eqt.profiles_1d.psi .* cocos_factor
     f_1d = eqt.profiles_1d.f          # F(ψ) = R·Bt [T·m], COCOS-independent
     p_1d = eqt.profiles_1d.pressure   # plasma pressure P(ψ) [Pa], COCOS-independent
     q_1d = eqt.profiles_1d.q          # safety factor, COCOS-independent
 
-    # Capture toroidal-field sign from the boundary F value before abs() below.
+    # Toroidal-field sign from the boundary F, before abs() below
     bt_sign = isempty(f_1d) ? 1 : Int(sign(f_1d[end]))
     bt_sign == 0 && (bt_sign = 1)
-    # Plasma-current sign from the IMAS global quantity (missing or zero → +1).
-    # The current is optional in IMAS, and reading an absent one throws rather than returning missing.
+    # Plasma-current sign (missing or zero → +1); getproperty with a default because reading an absent ip throws
     ip_imas = getproperty(eqt.global_quantities, :ip, 0.0)
     ip_sign = ip_imas == 0 ? 1 : Int(sign(ip_imas))
 
@@ -68,9 +63,7 @@ function read_imas(config::EquilibriumConfig, dd)
     @assert all(diff(psi_norm_grid) .> 0) "read_imas: profiles_1d.psi must increase strictly from psi_axis to psi_boundary"
     @assert 0 <= psi_norm_grid[1] && psi_norm_grid[end] <= 1 "read_imas: profiles_1d.psi must lie between psi_axis and psi_boundary"
 
-    # Build equilibrium source terms for spline interpolation
-    # abs(f_1d): F(ψ) can be negative depending on toroidal field direction convention;
-    #            take absolute value since GPEC uses magnitude F = R·|Bt|
+    # GPEC uses |F| = R·|Bt|; the sign is kept in bt_sign
     sq_fs_nodes = hcat(
         abs.(f_1d),
         max.(p_1d .* mu0, 0.0),
@@ -112,7 +105,7 @@ function read_imas(config::EquilibriumConfig, dd)
           "\n    R ∈ [$(round(rmin; sigdigits=4)), $(round(rmax; sigdigits=4))] m" *
           "\n    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m"
 
-    # Capture the raw arrays so an IMAS run can be replayed from gpec.h5 without the dd source.
+    # Raw arrays so an IMAS run can be replayed from gpec.h5 without the dd
     ingest = DirectIngest(sq_xs, sq_fs_nodes, psi_in_xs, psi_in_ys, Matrix(psi_proc), rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign)
 
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest)

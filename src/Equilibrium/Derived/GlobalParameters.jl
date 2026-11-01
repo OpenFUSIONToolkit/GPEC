@@ -1,16 +1,14 @@
 """
     equilibrium_global_parameters!(pe::PlasmaEquilibrium)
 
-Computes and populates global equilibrium parameters in the `PlasmaEquilibrium`
-struct, such as rmean, amean, kappa, bt0, crnt, betat, betan, li1, etc. Performs
-the same function as equil_out_global in the Fortran code.
+Compute the global equilibrium parameters (rmean, amean, kappa, bt0, crnt, betas, li, ...) and store
+them in `pe.params`. Port of Fortran `equil_out_global`.
 """
 function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     profiles = pe.profiles
     mpsi = length(pe.rzphi_xs) - 1
     mtheta = length(pe.rzphi_ys) - 1
 
-    # Use separatrix geometry
     rsep, zsep, rext, _ = equilibrium_separatrix_find!(pe)
 
     rmean = (rsep[1] + rsep[2]) / 2
@@ -35,13 +33,11 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     gs1 = zeros(Float64, mtheta + 1)
     gs2 = zeros(Float64, mtheta + 1)
 
-    # Direct array access at edge flux surface grid points using nodal_derivs
+    # Edge-surface integrals for the plasma current, from the nodal values and θ-derivatives
     for itheta in 0:mtheta
-        # Function values (partials[1,:,:])
         r2 = pe.rzphi_rsquared.nodal_derivs.partials[1, end, itheta+1]
         offset = pe.rzphi_offset.nodal_derivs.partials[1, end, itheta+1]
         jac = pe.rzphi_jac.nodal_derivs.partials[1, end, itheta+1]
-        # Theta derivatives (partials[3,:,:] = ∂f/∂y)
         r2_y = pe.rzphi_rsquared.nodal_derivs.partials[3, end, itheta+1]
         offset_y = pe.rzphi_offset.nodal_derivs.partials[3, end, itheta+1]
 
@@ -67,7 +63,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.crnt = crnt
     pe.params.bwall = bwall
 
-    # Flux-surface integrals over the full normalized flux [0, 1]; ExtendExtrap carries the integral past the first/last grid points (integrands are smooth/vanishing at the axis).
+    # Integrals over ψ_N from 0 to 1; ExtendExtrap carries them past the first/last grid points.
     xs = profiles.xs
     fsi(y) = FastInterpolations.integrate(cubic_interp(xs, y; extrap=ExtendExtrap()), 0.0, 1.0)
     P_vals = profiles.P_spline.y
@@ -76,12 +72,9 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     fsi_pdv = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
     fsi_dv = fsi(dVdpsi_vals)                   # ∫ dV/dψ
     fsi_p2dv = fsi(P_vals .^ 2 .* dVdpsi_vals)    # ∫ p² dV/dψ
-    volume = fsi_dv                             # same integrand as hs col 2 in Fortran
+    volume = fsi_dv
 
-    # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J).
-    # This is Fortran equil_out.f's hs%fs(:,3) and is the correct integrand for
-    # the internal inductance li1/li2/li3 (distinct from the p²·dV integrand
-    # that drives betaj).
+    # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J), the integrand for li1/li2/li3.
     hs_bp2 = zeros(Float64, mpsi + 1)
     for ipsi in 0:mpsi
         acc = 0.0
@@ -102,9 +95,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
             dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
             acc += dvsq / (r^2) / jac
         end
-        # Periodic trapezoidal rule on uniform θ grid reduces to a plain mean
-        # because the first and last grid points coincide — matches the int1/int2
-        # pattern used for the edge-surface integrals above.
+        # Plain mean over the θ nodes, as for int1/int2 above.
         hs_bp2[ipsi+1] = (acc / (mtheta + 1)) * psio^2
     end
     fsi_bp2 = fsi(hs_bp2)
@@ -124,7 +115,6 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.psi_axis = pe.psio
     pe.params.psi_boundary = 1.0
     pe.params.psi_boundary_norm = 1.0
-    pe.params.psi_axis_norm = 0.0
     pe.params.psi_norm = 0.0
     pe.params.psi_axis_offset = 0.0
     pe.params.psi_boundary_offset = 0.0
@@ -150,9 +140,8 @@ end
 """
     equilibrium_qfind!(equil::PlasmaEquilibrium)
 
-Finds the extrema of the safety factor profile q(ψ) in the plasma equilibrium
-and computes derived q-values such as q0, qmin, qmax, qa, and q95. Performs
-the same function as equil_out_qfind in the Fortran code.
+Find the extrema of q(ψ) and store them with q0, qmin, qmax, qa and q95 in `equil.params`.
+Port of Fortran `equil_out_qfind`.
 """
 function equilibrium_qfind!(equil::PlasmaEquilibrium)
 
@@ -162,7 +151,6 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     psiexl = Float64[]
     qexl = Float64[]
 
-    # Create derivative views for q-spline
     q_spline = profiles.q_spline
     q_d1 = deriv1(q_spline)
     q_d2 = deriv2(q_spline)
@@ -207,7 +195,6 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     equil.params.qextrema_psi = psiexl
     equil.params.qextrema_q = qexl
     equil.params.mextrema = length(psiexl)
-    # Compute derived q-values
     q0 = q_spline.y[1] - profiles.q_deriv(xs[1]; hint=Ref(1)) * xs[1]
     qmax_edge = q_spline.y[end]
     qmin = min(minimum(qexl), q0)
@@ -216,7 +203,6 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
 
     q95 = q_spline(0.95)
 
-    # Store derived values
     equil.params.q0 = q0
     equil.params.qmin = qmin
     equil.params.qmax = qmax

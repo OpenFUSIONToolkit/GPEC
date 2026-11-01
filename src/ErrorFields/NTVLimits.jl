@@ -7,13 +7,9 @@ correction coil array cancels the dominant-mode overlap at `C_c` per kilo-ampere
 non-resonant remainder of its field drives an NTV torque that does not go away when the
 resonant part is cancelled.
 
-The torque of a field is a quadratic form of its spectrum, so per kilo-ampere-turn it is one
-plasma-response evaluation followed by kinetic torque evaluations: `T_full` for the coil's
-whole field and `T_residual` for its field with the dominant mode projected out, the torque that
-survives a perfect correction. Each is tabulated against a rigid shift `Δω` of the E×B rotation
-(the diamagnetic frequencies held fixed) on a grid that refines itself where the torque changes
-fastest, spanning both senses of rotation past the neoclassical offset, so the table carries the
-sign changes and the resonances a single evaluation at the nominal rotation cannot.
+Per kilo-ampere-turn, the torque `T_full` of the coil's whole field and `T_residual` of its field with
+the dominant mode projected out are tabulated against a rigid shift `Δω` of the E×B rotation (diamagnetic
+frequencies held fixed) on an adaptive grid spanning both senses of rotation past the neoclassical offset.
 
 The correction current then follows from a zero-dimensional torque balance: with the torque
 budget `T_0` the torque that would bring the reference rotation `ω_ref` to rest, the rotation
@@ -24,20 +20,12 @@ balance loses its root the rotation has bifurcated away and the overlap is not c
 constant braking torque with `α = 1` reduces this to the closed-form quadratic
 `δ_EF − C_c·I = s·δ_thresh·(1 − T·I²/T_0)` of the original analysis, kept as the `:linear` model.
 
-In either model the condition is on the *magnitude* of the residual error field,
-`|δ_EF − C_c·I| = s·δ_thresh·f(I)` with `f` the model's threshold factor: the residual never falls
-below zero, and over-correcting by a given amount is exactly as bad as under-correcting by it — the
-phase of the miss does not matter, only its size. The correctable currents are therefore a window
-between two roots, not a half-line: [`correction_current`](@ref) returns the lower edge, the least
-current that does the job, and [`correction_current_upper`](@ref) the upper edge, past which the
-over-correction is itself above threshold (`efc_current_curve` carries both as `current_ntv` and
-`current_ntv_upper`).
+The condition is on the magnitude of the residual, `|δ_EF − C_c·I| = s·δ_thresh·f(I)`, so the correctable
+currents are a window: [`correction_current`](@ref) returns its lower edge and
+[`correction_current_upper`](@ref) its upper edge, past which the over-correction is itself above threshold.
 
-The `:linear` model holds only while the plasma still rotates, `T·I² < T_0`, so its current is
-capped at `I_max = √(T_0/T)`, where the threshold has fallen to zero and any remaining overlap
-locks; it assumes a relatively large positive rotation and so ignores the neoclassical offset the
-NTV actually drives the rotation towards, of order the ion diamagnetic rotation. The tabulated
-torque balance spans past that offset and is the default whenever the run carries a rotation
+The `:linear` model holds only while `T·I² < T_0` (current capped at `I_max = √(T_0/T)`) and ignores the
+neoclassical offset; the tabulated torque balance is the default whenever the run carries a rotation
 scan. The linear model is that of Logan et al., Nucl. Fusion (2026), doi:10.1088/1741-4326/ae6086,
 Eqs. (5)–(7), and of Leuthold et al., J. Plasma Phys. 92, E49 (2026), doi:10.1017/S0022377826101421,
 Eq. (A2).
@@ -52,13 +40,12 @@ Settings of the correction-coil NTV evaluation, the `[ErrorFields.NTV]` TOML tab
 
   - `efc_coils`: coil set names of the correction arrays to evaluate (empty: stage off)
   - `method`: KineticForces torque method to use (`"fgar"` by default; it must be enabled in `[KineticForces]`)
-  - `rotation_scan`: tabulate the torques against a rigid E×B rotation shift (`true`); `false` evaluates only the nominal rotation, which limits the analysis to the `:linear` model
+  - `rotation_scan`: tabulate the torques against a rigid E×B rotation shift (`true`); `false` evaluates only the nominal rotation (`:linear` model only)
   - `rotation_scan_points`: points of the initial symmetric shift grid (made odd so that the unshifted point is one of them)
   - `rotation_scan_max_points`: cap on the number of kinetic evaluations per spectrum after adaptive refinement
   - `rotation_scan_tolerance`: refinement stops when every interval's midpoint prediction error is below this fraction of the torque range
   - `rotation_span_factor`: the scan covers `±span_factor × max(|ω_E|, offset_factor·|ω_*T|)` evaluated at the innermost kinetic surface
-  - `rotation_offset_factor`: rough neoclassical offset as a multiple of the ion temperature-gradient diamagnetic frequency `ω_*T` (about 2 after Park, Boozer and Menard 2009), used only to size the scan
-  - `verbose`: log per-array couplings and every scan point
+  - `rotation_offset_factor`: neoclassical offset in units of the ion temperature-gradient diamagnetic frequency `ω_*T` (about 2, Park, Boozer and Menard 2009), sizes the scan
 """
 Base.@kwdef struct NTVControl
     efc_coils::Vector{String} = String[]
@@ -69,17 +56,12 @@ Base.@kwdef struct NTVControl
     rotation_scan_tolerance::Float64 = 0.05
     rotation_span_factor::Float64 = 1.0
     rotation_offset_factor::Float64 = 2.0
-    verbose::Bool = false
 end
 
 """
-Sign relating the kinetic torque to the rotation it acts on: `−1` means a positive `T_φ`
-lowers the E×B rotation shift `Δω`, i.e. the kernel reports a braking torque as positive for
-the co-rotating profiles of the kinetic file. Fixed empirically on the DIII-D error-field
-example, whose tabulated torque is positive at the nominal rotation and rises through zero at a
-negative shift, so the balance is restoring only with this sign. It is a property of the kinetic
-kernel's sign convention, not of a run: a tabulated torque cannot tell a wrong sign from a torque
-that grows as the rotation brakes, which is a physical regime, so no check of it is made.
+Sign relating the kinetic torque to the rotation it acts on: `−1` means a positive `T_φ` lowers
+the E×B rotation shift `Δω` (the kernel reports braking as positive). A property of the kinetic
+kernel's sign convention, fixed empirically on the DIII-D error-field example; no run checks it.
 """
 const TORQUE_ROTATION_SIGN = -1.0
 
@@ -480,4 +462,148 @@ function efc_current_curve(c::EFCCoupling; delta_threshold::Real, torque_budget:
         limits_pessimistic=max_correctable_overlap(c; kw(pessimistic)...),
         limits_optimistic=max_correctable_overlap(c; kw(optimistic)...),
         max_correctable_overlap(c; kw(torque_budget)...)...)
+end
+
+"""
+    efc_couplings(resp, coil_sets, rc, dom, cfg, kf_ctrl; mode=1, method="fgar", rotation_scan=true, scan_points=9,
+                  scan_max_points=21, scan_tolerance=0.05, span_factor=1.0, offset_factor=2.0,
+                  regularization_width=0.0, verbose=false) -> Vector{EFCCoupling}
+
+The couplings of each correction coil array in `coil_sets` per kilo-ampere-turn: its
+dominant-mode overlap and resonant fraction from its spectrum on the control surface, and its
+NTV torque (kinetic method `method`, with sign) for the whole field and for the field with mode `mode`
+of `dom` projected out, tabulated against the rotation shift when `rotation_scan`. `cfg` is the run's
+`[ForcingTerms]` coil configuration and `rc` must be the coupling of `resp`; the torque uses the kinetic
+profiles attached to `resp.ffs.equil`. The spectrum is normalized by `|nw| × max|I|`, keeping the
+array's winding sense and current pattern as the phase reference.
+"""
+function efc_couplings(
+    resp::PerturbedEquilibrium.PlasmaResponse,
+    coil_sets::Vector{CoilSet},
+    rc::ResonantCoupling,
+    dom::DominantCoupling,
+    cfg::CoilConfig,
+    kf_ctrl::KineticForces.KineticForcesControl;
+    mode::Int=1,
+    method::AbstractString="fgar",
+    rotation_scan::Bool=true,
+    scan_points::Int=9,
+    scan_max_points::Int=21,
+    scan_tolerance::Real=0.05,
+    span_factor::Real=1.0,
+    offset_factor::Real=2.0,
+    regularization_width::Real=0.0,
+    verbose::Bool=false
+)
+    ffs = resp.ffs
+    ffs.equil.kinetic === nothing && error("efc_couplings needs kinetic profiles: set kinetic_file in [Equilibrium]")
+    getfield(kf_ctrl, Symbol(method * "_flag")) || error("efc_couplings: KineticForces method \"$method\" is not enabled in the control")
+    equil = ffs.equil
+    grids = [(n, CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)) for n in sort(unique(rc.n_modes))]
+    m_low, m_high = extrema(rc.m_modes)
+    v = dom.right_singular_vectors[:, mode]
+
+    # Reference rotation and scan span from the kinetic profiles, with the torque kernel's own
+    # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
+    kp = KineticForces.ntv_profiles(kf_ctrl, equil)
+    chi1 = 2π * equil.psio
+    chrg = KineticForces.main_ion(equil)[1] * Utilities.E_CHG
+    ψk = kp.xs
+    ω_E = [kp.omegaE_spline(ψ) for ψ in ψk]
+    ω_star_T = [-2π * kp.Ti_deriv(ψ) / (chrg * chi1) for ψ in ψk]
+    ω_star_n = [
+        (n = kp.ni_spline(ψ); n > 0 ? -2π * kp.Ti_spline(ψ) * kp.ni_deriv(ψ) / (chrg * chi1 * n) : 0.0) for ψ in ψk
+    ]
+    ω_φ = ω_E .+ ω_star_n .+ ω_star_T
+    # Momentum weight n_i·dV/dψ with ⟨R²⟩ taken as R₀², inside the plasma only.
+    w = [ψ <= ffs.psilim ? max(kp.ni_spline(ψ), 0.0) * equil.profiles.dVdpsi_spline(clamp(ψ, equil.profiles.xs[1], equil.profiles.xs[end])) : 0.0 for ψ in ψk]
+    ω_ref = sum(w .* ω_φ) / sum(w)
+    span, ω_offset = rotation_scan_span(ω_E[1], ω_star_T[1]; span_factor, offset_factor)
+    npts = isodd(scan_points) ? scan_points : scan_points + 1
+    grid0 = rotation_scan ? collect(range(-span, span; length=max(npts, 3))) : [0.0]
+    verbose && @info "NTV couplings: ω_ref = $(@sprintf("%.3e", ω_ref)) rad/s, rough offset $(@sprintf("%.3e", ω_offset)) rad/s, " *
+          "scan ±$(@sprintf("%.3e", span)) rad/s on $(length(grid0)) initial points (max $(scan_max_points))"
+
+    function response_of(modes::Vector{ForcingMode})
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(resp, ForcingTerms.RMPField(modes); regularization_width, verbose)
+        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=verbose)
+        KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
+        return kf_intr
+    end
+    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.
+    function torque_of(kf_intr, profiles)
+        kf_state = KineticForces.KineticForcesState()
+        logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
+        Base.CoreLogging.with_logger(logger) do
+            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, profiles)
+        end
+        r = kf_state.method_results[String(method)]
+        T = real(r.total_torque)
+        prof = zeros(Float64, length(ψk))
+        if length(r.psi_grid) >= 2
+            # Cubic spline of the cumulative torque on the quadrature's own ψ points (deduplicated), zero
+            # inside the first point and the total beyond the last.
+            keep = [i == 1 || r.psi_grid[i] > r.psi_grid[i-1] for i in eachindex(r.psi_grid)]
+            pg, tc = r.psi_grid[keep], real.(r.t_cumulative[keep])
+            spl = length(pg) >= 4 ? cubic_interp(pg, tc) : nothing
+            for (k, ψ) in enumerate(ψk)
+                prof[k] = ψ <= pg[1] ? 0.0 : ψ >= pg[end] ? tc[end] : spl === nothing ? tc[searchsortedlast(pg, ψ)] : spl(ψ)
+            end
+        end
+        return T, prof
+    end
+
+    out = EFCCoupling[]
+    for cs in coil_sets
+        kat = abs(cs.nw) * maximum(abs, cs.currents) / 1e3
+        kat > 0 || error("efc_couplings: coil set \"$(cs.name)\" carries no current")
+        # Unit-current spectrum: per kilo-ampere-turn of the array's current pattern.
+        modes = ForcingMode[]
+        for (n, grid) in grids
+            append!(modes, coil_forcing_modes(cs, grid, n, m_low, m_high))
+        end
+        modes = [ForcingMode(; n=m.n, m=m.m, amplitude=m.amplitude / kat) for m in modes]
+        b̃ = rootarea_field(rc, modes)
+        δ = dot(v, b̃) / equil.params.bt0
+        overlap = 100 * abs(dot(v, b̃)) / norm(b̃)
+        # The residual field as forcing modes: back through the conform operator to Φ_x.
+        Φ_res = rc.flux_conform * residual_spectrum(dom, b̃; mode)
+        residual_modes = [ForcingMode(; n=rc.n_modes[k], m=rc.m_modes[k], amplitude=Φ_res[k]) for k in eachindex(Φ_res)]
+        t_start = time()
+        kf_full = response_of(modes)
+        kf_res = response_of(residual_modes)
+        profiles_full = Dict{Float64,Vector{Float64}}()
+        profiles_res = Dict{Float64,Vector{Float64}}()
+        function torques(Δ)
+            profiles = Δ == 0 ? kp : Equilibrium.shift_exb_rotation(kp, Δ)
+            T_f, p_f = torque_of(kf_full, profiles)
+            T_r, p_r = torque_of(kf_res, profiles)
+            profiles_full[Δ] = p_f
+            profiles_res[Δ] = p_r
+            verbose && @info "    $(cs.name) Δω = $(@sprintf("%+.3e", Δ)) rad/s: torque $(@sprintf("%.3e", T_f)) N·m per kAt² (residual $(@sprintf("%.3e", T_r)))"
+            return [T_f, T_r]
+        end
+        if rotation_scan
+            Δs, Ts = Utilities.adaptive_sample(torques, grid0; max_points=scan_max_points, rtol=scan_tolerance)
+        else
+            Δs = [0.0]
+            Ts = permutedims(torques(0.0))
+        end
+        i0 = findfirst(==(0.0), Δs)
+        T_full, T_res = Ts[i0, 1], Ts[i0, 2]
+        c = EFCCoupling(cs.name, abs(δ), overlap, T_full, T_res, Δs, Ts[:, 1], Ts[:, 2],
+            rotation_scan ? ω_ref : NaN, rotation_scan ? ω_offset : NaN, rotation_scan ? collect(ψk) : Float64[],
+            rotation_scan ? reduce(hcat, profiles_full[Δ] for Δ in Δs) : zeros(0, 1),
+            rotation_scan ? reduce(hcat, profiles_res[Δ] for Δ in Δs) : zeros(0, 1))
+        if rotation_scan
+            crossings = torque_zero_crossings(c)
+            isempty(crossings) && @warn "NTV couplings: the residual torque of $(cs.name) does not change sign within ±$(@sprintf("%.3e", span)) rad/s; " *
+                  "raise rotation_span_factor to reach the neoclassical offset"
+        end
+        verbose && @info "  $(cs.name): |δ| = $(@sprintf("%.3e", abs(δ))) per kAt, resonant fraction $(@sprintf("%.1f", overlap)) %, " *
+              "torque $(@sprintf("%.3e", T_full)) N·m per kAt² (residual $(@sprintf("%.3e", T_res))) at the nominal rotation, " *
+              "$(length(Δs)) scan points in $(@sprintf("%.1f", time() - t_start)) s"
+        push!(out, c)
+    end
+    return out
 end

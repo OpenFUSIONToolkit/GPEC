@@ -30,8 +30,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
    - Supports multiple equilibrium types:
      - `efit` - EFIT g-file format
      - `chease`, `chease2` - CHEASE equilibrium code formats
-     - `lar` - Large Aspect Ratio analytical model
-     - `sol` - Solovev analytical equilibrium
+     - analytic models, selected by their deck section rather than `eq_type`: `[Solovev]`,
+       `[LargeAspectRatio]`, `[TJAnalytic]`
    - Key files, by pipeline stage:
      - `Config.jl` - `EquilibriumConfig`, `EquilibriumParameters`
      - `PlasmaEquilibrium.jl` - The result type and its profile and geometry splines
@@ -116,7 +116,8 @@ Splines are provided by the external `FastInterpolations` package rather than by
 
 9. **Tearing** (`src/Tearing/`) - Tearing mode dispersion and drivers
    - `Dispersion/` - Dispersion relation solvers
-   - `Runner/` - Orchestration across surfaces and toroidal mode numbers
+   - `TearingProblem.jl`, `GGJTearing.jl`, `SLAYERTearing.jl` - The tearing problem and its solve with each inner-layer model
+   - `CriticalResonantField/` - Critical resonant field (field penetration threshold)
    - Re-binds `InnerLayer` and exposes it alongside its own submodules
 
 10. **KineticForces** (`src/KineticForces/`) - Kinetic contributions to the force balance
@@ -146,9 +147,9 @@ All GPEC modules are configured via a single TOML file with the following sectio
 - `[PerturbedEquilibrium]` - Perturbed equilibrium settings
 - `[ForcingTerms]` - External field specification
 
-Key parameters:
-- `force_termination` - Set to `true` to exit after equilibrium/stability (skip perturbed equilibrium)
-- `output_file` - Output filename (default: `gpec.h5`)
+The `[Run]` section holds the run-wide settings: `output_file` (default `gpec.h5`), the one file every
+stage saves into, and `verbose`. A stage runs when its section is present, so a deck stops early by
+omitting the later sections.
 
 Example configuration files are provided in:
 - `examples/Solovev_ideal_example/gpec.toml`
@@ -204,7 +205,7 @@ The complete GPEC analysis pipeline:
 
 ### Vacuum
 - `VacuumInput` - Input parameters for vacuum calculations
-- `WallShapeSettings` - Wall geometry configuration
+- `WallSettings` - Wall geometry configuration
 
 ### Stability
 - `SingType` - Singular surface data including:

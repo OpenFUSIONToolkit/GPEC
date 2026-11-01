@@ -1,14 +1,4 @@
-# BruteForceScan.jl
-#
-# Brute-force evaluation of a complex-Q-callable residual (`SurfaceCoupling`,
-# `MultiSurfaceCoupling`, or any user-supplied function) on a regular 2D
-# Q-plane grid. The output `ScanResult` is then consumed by
-# `find_growth_rates` (`GrowthRateExtraction.jl`) to extract growth-rate
-# eigenvalues from the Re(Δ)=0 ∩ Im(Δ)=0 contour intersections.
-#
-# Resolution and box are entirely user-controlled. Threading is enabled by
-# default; pass `threaded=false` for deterministic single-threaded
-# evaluation (e.g. when the residual is itself non-thread-safe).
+# Regular-grid Q-plane scan of a complex residual; `find_growth_rates` extracts roots from the result.
 
 """
     ScanResult
@@ -65,10 +55,8 @@ function brute_force_scan(f, Q_re_range::NTuple{2,<:Real},
     Q = ComplexF64[(qr + qi*im) for qr in re_axis, qi in im_axis]
     Δ = Matrix{ComplexF64}(undef, nre, nim)
     if threaded
-        # Pin BLAS to one thread for the parallel region — `f(Q)` calls `det()`,
-        # and concurrent multithreaded-BLAS calls give non-reproducible
-        # reductions that can flip the extracted root run-to-run. The residual
-        # matrices are tiny, so single-threaded BLAS costs nothing here.
+        # Pin BLAS to one thread: concurrent multithreaded `det()` reductions are not reproducible
+        # and can flip the extracted root run-to-run.
         _blas0 = BLAS.get_num_threads()
         BLAS.set_num_threads(1)
         try

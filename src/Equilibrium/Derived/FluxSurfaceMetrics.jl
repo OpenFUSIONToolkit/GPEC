@@ -2,10 +2,8 @@
     rzphi_primitives(equil, psi, theta; hint=(Ref(1), Ref(1))) -> (; r2, deta, jac, r2_y, deta_y)
 
 Evaluate the smooth `rzphi` primitives at `(psi, theta)`: `r²`, the `η`-offset, the Jacobian and the
-θ-derivatives of `r²` and the offset. Every consumer that derives flux-surface geometry from `rzphi`
-(the metric and area helpers here, the perturbed-field reconstruction transform) samples this one
-function, and `metric_from_primitives` turns them into the gpout.f metric. ψ-derivatives are
-deliberately not provided: the bicubic is only C¹ in ψ, so callers differentiate a ψ-resample instead.
+θ-derivatives of `r²` and the offset; `metric_from_primitives` turns them into the metric.
+ψ-derivatives are not provided because the bicubic is only C¹ in ψ; differentiate a ψ-resample instead.
 """
 function rzphi_primitives(equil::PlasmaEquilibrium, psi::Float64, theta::Float64; hint=(Ref(1), Ref(1)))
     pt = (psi, theta)
@@ -22,8 +20,7 @@ end
 
 The gpout.f flux-surface metric at one point from the `rzphi` primitives `p` (the fields of
 `rzphi_primitives`): minor radius `rfac = √r²`, major radius `r`, Jacobian `jac` and
-`delpsi = |∇ψ|`. Every `|∇ψ|` derived from `rzphi` goes through this one formula, whether the
-primitives come from evaluating the bicubic or from its nodal values.
+`delpsi = |∇ψ|`. The primitives may come from evaluating the bicubic or from its nodal values.
 """
 function metric_from_primitives(ro::Float64, theta::Float64, p)
     rfac = sqrt(abs(p.r2))

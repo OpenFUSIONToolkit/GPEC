@@ -11,8 +11,8 @@
     # This exercise gets run once for all LayerInputs tests.
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
     inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-    eq_cfg = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path)
-    sol_cfg = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
+    eq_cfg = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dir_path)
+    sol_cfg = GeneralizedPerturbedEquilibrium.analytic_config(inputs)
     equil = Equilibrium.PlasmaEquilibrium(eq_cfg, sol_cfg)
 
     # Synthetic profiles (simple linear-in-ψ temperature decrease)
@@ -177,12 +177,16 @@
         @test scalar.dc_tmp != plain.dc_tmp
         @test scalar.P_perp == plain.P_perp
 
-        # The deck key, through the same assembly TearingProblem uses.
-        Runner = GeneralizedPerturbedEquilibrium.Runner
+        # The model key, through the same assembly TearingProblem uses.
+        Tearing = GeneralizedPerturbedEquilibrium.Tearing
         loaded = (; profiles, chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing, zeff=nothing, zeff_source=:scalar)
-        control(; c...) = Runner.SLAYERControl(; P_perp_model=:chi_perp_e, bt=2.0, chi_perp_e=2.0, chi_tor=1.5, D_R=0.01, D_c_type=:fitzpatrick, c...)
-        params(c) = Runner._tearing_params(SLAYERModel(), equil, sings, loaded, c)[1]
-        without, with = params(control()), params(control(; chi_perp_Dc=6.0))
+        model(; c...) = SLAYERModel(; P_perp_model=:chi_perp_e, D_R=0.01, D_c_type=:fitzpatrick, c...)
+        attached = equil.kinetic
+        equil.kinetic = Equilibrium.KineticProfileData(; psi=psi_pts, n_e=profiles.n_e, T_e=profiles.T_e, T_i=profiles.T_i,
+            chi_e_default=2.0, chi_phi_default=1.5)
+        params(m) = Tearing._tearing_params(m, equil, sings, loaded)[1]
+        without, with = params(model()), params(model(; chi_perp_Dc=6.0))
+        equil.kinetic = attached
         @test with.dc_tmp != without.dc_tmp
         @test with.P_perp == without.P_perp
     end

@@ -4,12 +4,11 @@ The `Tearing` module groups the resistive tearing-mode analysis stack:
 `InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
 SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
 contour-intersection root extraction), `CriticalResonantField` (torque-balance
-error-field penetration threshold), and `Runner` (user-facing TOML
-configuration, profile loading, and HDF5 output).
+error-field penetration threshold), and the tearing solve itself,
+`solve(TearingProblem(ffs; ...), model; config=TearingConfig(...))`, with its
+`TearingResult` and HDF5 output.
 
-## Layer Inputs
-
-Equilibrium/ForceFreeStates glue that assembles per-surface inner-layer inputs.
+## Tearing solve and layer inputs
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing]
@@ -204,7 +203,7 @@ res.Δ, res.breaks, res.bc_cond      # res.Δ = (Δ₊, Δ₋) = (interchange, t
 
 ## Critical resonant field
 
-With `[SLAYER.CriticalResonantField] enabled = true`, each SLAYER surface also gets the
+With a `[Tearing.CriticalResonantField]` section (`TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl())`), each SLAYER surface also gets the
 critical resonant field for error-field penetration, from the steady-state torque balance of
 Cole and Fitzpatrick, Phys. Plasmas **13**, 032503 (2006). The electromagnetic torque on the
 layer balances the viscous restoring torque when (Cole Eq. 61)
@@ -235,8 +234,8 @@ and balance is lost above (Cole Eq. 62)
   modes (Fortran fixes α = 10⁻²). Cole and Fitzpatrick have no Δ_crit; including it treats the
   curvature offset as independent of frequency. It is zero unless `D_c_type` is set. Cole's
   threshold needs a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
-- **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; `solve_inner`
-  mirrors the real axis, so the scan uses conj(Δ(−Q)).
+- **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; it runs opposite to the dispersion
+  scans' Re Q, so the scan uses the layer response at −Q.
 - **Threshold.** Penetration is associated with a saddle-node bifurcation (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
   as the field grows, Q moves from Q0 toward the electron fluid at Q_e, where the torque
   vanishes, and the threshold is the first resolved saddle-node bifurcation on that path, above
@@ -300,17 +299,11 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
 ## Dispersion
 
 ```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.Dispersion]
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.Dispersion]
 ```
 
 ## CriticalResonantField
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
-```
-
-## Runner
-
-```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.Runner]
 ```
