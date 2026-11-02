@@ -20,18 +20,38 @@ const _KEV_J = 1.602e-16         # 1 keV in J (temperature normalization in the 
 const _NU_PREFAC = 3.5e17        # Krook collision-frequency prefactor
 const _MP = 1.672_614e-27        # proton mass [kg]
 const _ME = 9.109_1e-31          # electron mass [kg]
+const _T_FLOOR_KEV = 1.0e-6      # collision-model temperature floor (1 meV), as Fortran PENTRC
 
-# NRL-formulary Coulomb logarithm (natural log); n_e in m⁻³, T_e in J.
-_coulomb_log(ne, Te) = 17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(Te / _KEV_J)
+# Temperature in keV for the collision model, floored so a cold edge node keeps a finite, positive ν.
+_collision_tkev(T) = max(T / _KEV_J, _T_FLOOR_KEV)
+
+# NRL-formulary Coulomb logarithm (natural log) at the floored temperature, floored at 1; n_e in m⁻³, T_e in J.
+_coulomb_log(ne, Te) = max(17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(_collision_tkev(Te)), 1.0)
+
+# Warn once per kinetic source, as Fortran PENTRC, when a cold node engages the temperature or Coulomb-logarithm floor.
+function _warn_collision_floors(source, ne, Te, Ti)
+    any(T -> T / _KEV_J < _T_FLOOR_KEV, Te) | any(T -> T / _KEV_J < _T_FLOOR_KEV, Ti) &&
+        @warn "$source: flooring T at 1 meV in the collision frequencies" maxlog = 1 _id = Symbol("T_floor ", source)
+    any(i -> 17.3 - 0.5 * log(ne[i] / 1.0e20) + 1.5 * log(_collision_tkev(Te[i])) < 1, eachindex(ne)) &&
+        @warn "$source: flooring the Coulomb logarithm at 1 in the collision frequencies" maxlog = 1 _id = Symbol("lnLambda_floor ", source)
+    return nothing
+end
 
 # Names kinetic profiles in error messages by their provenance, when they carry one.
 _describe(data) = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
 
-# Hard stop on an unphysical negative density (bad input or a cubic-resample overshoot).
-function _assert_nonneg_density(source, label, arr, psi_reg)
+# Hard stop on an unphysical negative density or temperature (bad input or an extrapolation past the table).
+function _assert_nonneg_profile(source, label, arr, psi_reg)
     i = findfirst(<(0), arr)
     i === nothing ||
         error("$source: negative $label = $(arr[i]) at ψ_n = $(psi_reg[i]) — unphysical")
+end
+
+# Hard stop on a non-positive electron or main-ion density, which the collision model divides by.
+function _assert_positive_density(source, label, arr, psi_reg)
+    i = findfirst(<=(0), arr)
+    i === nothing ||
+        error("$source: $label = $(arr[i]) at ψ_n = $(psi_reg[i]) — densities must be positive")
 end
 
 """
@@ -235,13 +255,16 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
 
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
-    ne = _cubic_resample(psi_in, ne_in, psi_reg)
-    ni_total = _cubic_resample(psi_in, ni_in, psi_reg)
-    Ti = _cubic_resample(psi_in, Ti_in, psi_reg) .* _EV_J
-    Te = _cubic_resample(psi_in, Te_in, psi_reg) .* _EV_J
-    omegaE = _cubic_resample(psi_in, omE_in, psi_reg)
-    _assert_nonneg_density(source, "n_e", ne, psi_reg)
-    _assert_nonneg_density(source, "n_i (total)", ni_total, psi_reg)
+    ne = _pchip_resample(psi_in, ne_in, psi_reg)
+    ni_total = _pchip_resample(psi_in, ni_in, psi_reg)
+    Ti = _pchip_resample(psi_in, Ti_in, psi_reg) .* _EV_J
+    Te = _pchip_resample(psi_in, Te_in, psi_reg) .* _EV_J
+    omegaE = _pchip_resample(psi_in, omE_in, psi_reg)
+    _assert_positive_density(source, "n_e", ne, psi_reg)
+    _assert_positive_density(source, "n_i (total)", ni_total, psi_reg)
+    _assert_nonneg_profile(source, "T_i", Ti, psi_reg)
+    _assert_nonneg_profile(source, "T_e", Te, psi_reg)
+    _warn_collision_floors(source, ne, Te, Ti)
 
     # Fractions are shares of the total n_i: never above 1, and exactly 1 when every species is fraction-specified.
     fracs = [s.fraction for s in ion_species if !isnan(s.fraction)]
@@ -275,11 +298,11 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
                     "ion_species[$si]: density profile `$(s.density)` not found in the kinetic profiles " *
                     "(available: $(data.species_densities === nothing ? "none — ASCII files carry only n_i" : join(keys(data.species_densities), ", ")))"
                 )
-            ns[si] = _cubic_resample(psi_in, data.species_densities[s.density], psi_reg)
+            ns[si] = _pchip_resample(psi_in, data.species_densities[s.density], psi_reg)
         else
             ns[si] = s.fraction .* ni_total
         end
-        _assert_nonneg_density(source, "ion_species[$si] density", ns[si], psi_reg)
+        _assert_nonneg_profile(source, "ion_species[$si] density", ns[si], psi_reg)
     end
 
     # Shared composition + collisionality (natural-log Coulomb log), per grid point.
@@ -296,18 +319,18 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
         zpitch[i] = zp
         n_main[i] = nm
         n_imp[i] = nimp
-        loglam[i] = (ne[i] > 0 && Te[i] > 0) ? _coulomb_log(ne[i], Te[i]) : 0.0
-        nue[i] = Te[i] > 0 ? (zp / _NU_PREFAC) * ne[i] * loglam[i] / (sqrt(_ME / _MP) * (Te[i] / _KEV_J)^1.5) : 0.0
+        loglam[i] = _coulomb_log(ne[i], Te[i])
+        nue[i] = (zp / _NU_PREFAC) * ne[i] * loglam[i] / (sqrt(_ME / _MP) * _collision_tkev(Te[i])^1.5)
     end
     # A negative impurity density means the main ions over-neutralize (Σ z_s n_s > n_e) — unphysical.
-    _assert_nonneg_density(source, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
+    _assert_nonneg_profile(source, "impurity density (n_e < Σ z_s n_s)", n_imp, psi_reg)
     # Approaching the zpitch pole at Zeff = zimp signals a dilute main-ion mix taken up by impurity.
     maximum(zeff) > 0.9 * zimp &&
         @warn "max(Zeff) = $(maximum(zeff)) is within 10% of zimp = $zimp — zpitch closure near its pole; check ion_species densities/fractions"
 
     # Per-species Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z_s²; `zpitch` is a main-ion closure,
     # applied approximately to the impurity/electron test species.
-    _nu(zsp, msp) = [Ti[i] > 0 ? (zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * (Ti[i] / _KEV_J)^1.5) : 0.0 for i in 1:npts]
+    _nu(zsp, msp) = [(zpitch[i] / _NU_PREFAC) * zsp^2 * n_main[i] * loglam[i] / (sqrt(Float64(msp)) * _collision_tkev(Ti[i])^1.5) for i in 1:npts]
     _view(dens, nu) = KineticProfileSplines(psi_reg, dens, ne, Ti, Te, omegaE, loglam, nu, nue, zeff)
 
     # Full NTV species set: main ions, the neutrality-closing impurity, and (optionally) electrons.
@@ -342,6 +365,16 @@ Whether `data` carries the profiles the NTV view needs (`n_e`, `T_i`, `T_e` and 
 has_ntv_fields(data::KineticProfileData) = all(!isnothing, (data.n_e, data.T_i, data.T_e, data.omega_E))
 
 """
+    ntv_profiles_usable(data::KineticProfileData) -> Bool
+
+Whether `data` has the NTV fields with positive densities and non-negative temperatures at its table points,
+the inputs `kinetic_profile_splines` accepts.
+"""
+ntv_profiles_usable(data::KineticProfileData) =
+    has_ntv_fields(data) && all(>(0), data.n_e) && (data.n_i === nothing || all(>(0), data.n_i)) &&
+    all(>=(0), data.T_i) && all(>=(0), data.T_e)
+
+"""
     kinetic_profile_splines(data::KineticProfileData;
                             zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
                             density_factor::Float64=1.0, temperature_factor::Float64=1.0,
@@ -351,7 +384,7 @@ has_ntv_fields(data::KineticProfileData) = all(!isnothing, (data.n_e, data.T_i, 
 
 The NTV view of raw kinetic profiles (e.g. `equil.kinetic`): interpolate onto a regular
 101-point ψ grid, optionally apply profile scaling knobs, derive collisional / Z_eff
-diagnostics, and return a `KineticProfileSplines` with independent named cubic splines.
+diagnostics, and return a `KineticProfileSplines` of named splines (pchip for lnΛ and ν, cubic otherwise).
 
 Needs `n_e`, `T_i`, `T_e` and `omega_E`; `n_i` defaults to `n_e`. See
 [`read_kinetic_file`](@ref) for the file formats.
@@ -383,6 +416,8 @@ function kinetic_profile_splines(data::KineticProfileData;
     ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
     chi1::Union{Nothing,Float64}=nothing)
 
+    density_factor > 0 && temperature_factor > 0 ||
+        throw(ArgumentError("density_factor = $density_factor and temperature_factor = $temperature_factor must be positive"))
     # n_i defaults to n_e (quasineutrality); omega_tor and the diffusivities are unused here.
     _need(field, name) = field === nothing ? error("$(_describe(data)) missing required '$name'") : field
     psi_input = data.psi
@@ -395,12 +430,16 @@ function kinetic_profile_splines(data::KineticProfileData;
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
 
-    # Cubic-spline resample as in Fortran PENTRC; linear interpolation misplaces ω_E zero crossings and so the resonance.
-    ni = _cubic_resample(psi_input, ni_input, psi_reg)
-    ne = _cubic_resample(psi_input, ne_input, psi_reg)
-    Ti = _cubic_resample(psi_input, Ti_input_eV, psi_reg) .* _EV_J
-    Te = _cubic_resample(psi_input, Te_input_eV, psi_reg) .* _EV_J
-    omegaE = _cubic_resample(psi_input, omegaE_input, psi_reg)
+    # Monotone resample as in Fortran PENTRC; linear interpolation misplaces ω_E zero crossings and so the resonance.
+    ni = _pchip_resample(psi_input, ni_input, psi_reg)
+    ne = _pchip_resample(psi_input, ne_input, psi_reg)
+    Ti = _pchip_resample(psi_input, Ti_input_eV, psi_reg) .* _EV_J
+    Te = _pchip_resample(psi_input, Te_input_eV, psi_reg) .* _EV_J
+    omegaE = _pchip_resample(psi_input, omegaE_input, psi_reg)
+    _assert_positive_density(_describe(data), "n_e", ne, psi_reg)
+    _assert_positive_density(_describe(data), "n_i", ni, psi_reg)
+    _assert_nonneg_profile(_describe(data), "T_i", Ti, psi_reg)
+    _assert_nonneg_profile(_describe(data), "T_e", Te, psi_reg)
 
     needs_rotation_reform = density_factor != 1.0 || temperature_factor != 1.0 || toroidal_rotation_factor != 1.0
     any_scaling = needs_rotation_reform || ExB_rotation_factor != 1.0
@@ -442,6 +481,8 @@ function kinetic_profile_splines(data::KineticProfileData;
     if ExB_rotation_factor != 1.0
         omegaE .*= ExB_rotation_factor
     end
+    # After scaling, so a small temperature_factor that engages the floor is reported.
+    _warn_collision_floors(_describe(data), ne, Te, Ti)
 
     loglam = zeros(Float64, nkin + 1)
     nui = zeros(Float64, nkin + 1)
@@ -454,17 +495,15 @@ function kinetic_profile_splines(data::KineticProfileData;
         T_i = Ti[i]
         T_e = Te[i]
 
-        z = n_e > 0 ? zimp - (n_i / n_e) * zi * (zimp - zi) : Float64(zimp)
+        z = zimp - (n_i / n_e) * zi * (zimp - zi)
         zpitch = 1.0 + (1.0 + mimp) / (2.0 * mimp) * zimp * (z - 1.0) / (zimp - z)
 
         ll = _coulomb_log(n_e, T_e)
         loglam[i] = ll
 
         # Krook ν (Logan & Park 2013 Eq. 6) with a test-particle z²; the single-species limit of resolve_ntv_species.
-        nui[i] = T_i > 0 ?
-                 (zpitch / _NU_PREFAC) * zi^2 * n_i * ll / (sqrt(1.0 * mi) * (T_i / _KEV_J)^1.5) : 0.0
-        nue[i] = T_e > 0 ?
-                 (zpitch / _NU_PREFAC) * n_e * ll / (sqrt(_ME / _MP) * (T_e / _KEV_J)^1.5) : 0.0
+        nui[i] = (zpitch / _NU_PREFAC) * zi^2 * n_i * ll / (sqrt(1.0 * mi) * _collision_tkev(T_i)^1.5)
+        nue[i] = (zpitch / _NU_PREFAC) * n_e * ll / (sqrt(_ME / _MP) * _collision_tkev(T_e)^1.5)
         zeff[i] = z
     end
 
@@ -496,11 +535,11 @@ function _read_kinetic_table(kinetic_file::AbstractString)
 end
 
 """
-Cubic spline of `y(x)` on the irregular input grid, evaluated at `x_new` with smooth cubic
-extrapolation, as Fortran PENTRC `spline_fit(..., "extrap")`.
+Monotone (pchip) fit of `y(x)` on the irregular input grid, evaluated at `x_new` with
+extrapolation, as Fortran PENTRC `spline_fit_pchip`: no overshoot between table points.
 """
-function _cubic_resample(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
-    spl = cubic_interp(collect(Float64, x), collect(Float64, y); extrap=ExtendExtrap())
+function _pchip_resample(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
+    spl = pchip_interp(collect(Float64, x), collect(Float64, y); extrap=ExtendExtrap())
     return [spl(xv) for xv in x_new]
 end
 

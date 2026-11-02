@@ -379,7 +379,7 @@ Here:
 
 - ``\omega_b`` and ``\omega_D`` are the bounce and magnetic-precession frequency **coefficients at
   thermal energy** (``x = 1``): ``\omega_b \propto v_\mathrm{th}`` and
-  ``\omega_D \propto v_\mathrm{th}^2`` (`wbhat`, `wdhat` in `Torque.jl`). Their velocity-space
+  ``\omega_D \propto v_\mathrm{th}^2`` (`wbbar`, `wdbar` times `bhat`, `dhat` in `BounceAveraging.jl`). Their velocity-space
   dependence enters explicitly as ``\sqrt{x}`` (bounce ``\propto v``) and ``x`` (precession
   ``\propto E``).
 - ``\ell_\mathrm{eff}`` is the effective bounce harmonic (`PitchIntegration.jl`):

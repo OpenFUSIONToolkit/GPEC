@@ -49,6 +49,8 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "impurity_charge" => "moved to [Equilibrium]",
         "impurity_mass" => "moved to [Equilibrium]",
         "nn" => "removed; KineticForces takes the toroidal mode number from the run",
+        "rlar_flag" => "removed; the large-aspect-ratio methods are not ported, use fgar_flag or tgar_flag",
+        "clar_flag" => "removed; the large-aspect-ratio methods are not ported, use fgar_flag or tgar_flag",
         "kinetic_file" => _KINETIC_FILE_HOME),
     "SLAYER" => Dict{String,String}(
         "enabled" => "a [Tearing] section with inner_model = \"SLAYER\" runs the tearing analysis",

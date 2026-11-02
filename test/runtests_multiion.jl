@@ -178,6 +178,42 @@ using HDF5
         rm(h5)
     end
 
+    @testset "cold edge keeps the collision model finite and monotone" begin
+        psi = collect(0.0:0.05:1.0)
+        cold(a) = @. a * (1 - psi)^2
+        data = EQ.KineticProfileData(; psi=psi, n_i=fill(1.0e19, length(psi)), n_e=fill(1.1e19, length(psi)),
+            T_i=cold(2000.0), T_e=cold(2500.0), omega_E=fill(1.0e4, length(psi)))
+        fine = 0.0:0.001:1.0
+        for kp in (EQ.kinetic_profile_splines(data; zi=1, zimp=6, mi=2, mimp=12),
+            only(s.profiles for s in EQ.resolve_ntv_species(data, [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; zimp=6, mimp=12) if s.z == 1))
+            @test all(>=(1.0), kp.loglam_spline.(fine))
+            for nu in (kp.nui_spline, kp.nue_spline)
+                @test all(v -> isfinite(v) && v > 0, nu.(fine))
+                # The ν rise toward the cold edge stays monotone between grid nodes
+                @test issorted(nu.(0.5:0.001:1.0))
+            end
+        end
+        @test_throws ErrorException EQ.kinetic_profile_splines(EQ.KineticProfileData(data; T_e=cold(2500.0) .- 1.0))
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.KineticProfileData(data; T_i=cold(2000.0) .- 1.0), [KF.IonSpecies(; z=1, m=2, fraction=1.0)])
+        # The collision model divides by the densities, so a zero density stops the run as in Fortran PENTRC.
+        @test_throws r"densities must be positive" EQ.kinetic_profile_splines(EQ.KineticProfileData(data; n_e=[fill(1.1e19, length(psi) - 1); 0.0]))
+        # ...but only for the NTV view: the two-pass grid leaves such a file out instead of stopping a deck that does not use NTV.
+        @test EQ.ntv_profiles_usable(data)
+        @test !EQ.ntv_profiles_usable(EQ.KineticProfileData(data; n_e=[fill(1.1e19, length(psi) - 1); 0.0]))
+        # Scaling factors must keep the profiles physical.
+        @test_throws ArgumentError EQ.kinetic_profile_splines(data; temperature_factor=-1.0, chi1=1.0)
+        @test_throws ArgumentError EQ.kinetic_profile_splines(data; density_factor=0.0, chi1=1.0)
+
+        # A pedestal table: the cubic resample overshoots the top, the monotone one stays within the table's range.
+        ped_psi = [0.0, 0.3, 0.6, 0.85, 0.9, 0.95, 1.0]
+        ped_T = [2000.0, 1900.0, 1700.0, 1500.0, 400.0, 100.0, 50.0]
+        reg = collect(0:100) ./ 100
+        @test maximum(EQ.cubic_interp(ped_psi, ped_T; extrap=EQ.ExtendExtrap()).(reg)) > maximum(ped_T) ||
+              minimum(EQ.cubic_interp(ped_psi, ped_T; extrap=EQ.ExtendExtrap()).(reg)) < minimum(ped_T)
+        resampled = EQ._pchip_resample(ped_psi, ped_T, reg)
+        @test minimum(ped_T) <= minimum(resampled) && maximum(resampled) <= maximum(ped_T)
+    end
+
     @testset "combine_species_states" begin
         # Combined profile = Σ species dT/dψ interpolated onto the union grid; total = Σ total.
         mk(psi, dt) = (

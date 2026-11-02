@@ -34,10 +34,12 @@ end
 
 Warn when the ψ torque quadrature terminated without satisfying the requested tolerances
 (hit `maxevals_psi`), or when a nonzero user-set `atol_psi` dominated termination — the
-silent-garbage scenario for weak applied fields, since NTV scales as δB².
+silent-garbage scenario for weak applied fields, since NTV scales as δB². Error when the
+torque or its error estimate is not finite, which the tolerance comparisons cannot catch.
 """
 function check_psi_quadrature_convergence(total::ComplexF64, quad_err::Float64,
     ctrl::KineticForcesControl, method::String)
+    isfinite(total) && isfinite(quad_err) || error("ψ torque quadrature ($method) returned a non-finite torque $total (error estimate $quad_err).")
     if quad_err > max(ctrl.atol_psi, ctrl.rtol_psi * abs(total))
         @warn "ψ torque quadrature ($method) did not converge within maxevals_psi=$(ctrl.maxevals_psi): " *
               "error estimate $quad_err vs |T|=$(abs(total)) N·m. Raise maxevals_psi or loosen rtol_psi."
