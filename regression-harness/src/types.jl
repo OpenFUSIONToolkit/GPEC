@@ -74,5 +74,7 @@ struct CLIOptions
     no_pin_manifest::Bool
     allow_env_mismatch::Bool
     fail_on_change::Bool
+    jobs::Int
+    isolate::Bool
     help::Bool
 end

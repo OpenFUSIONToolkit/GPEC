@@ -30,6 +30,10 @@ regress --cases diiid_n1 --refs develop,feature/kinetic-damping
 **Build mode.** Every case runs with GPEC's PrecompileTools workload disabled (the harness sets the `precompile_workload` preference per subprocess), so results compare code compiled on first use. `diiid_n1_riccati_precompiled` sets `precompile_workload = true` in its `[case]` table to track the precompiled build users get by default; the two builds can differ at the percent level in Δ′, so compare that case only against itself. That case is a variant: its file sets `base = "diiid_n1_riccati"` and supplies only `name`, `description` and `precompile_workload`, inheriting the base's `example_dir`, `[quantities.*]` and `[overrides]`. Any `[case]` key, `[quantities.*]` block or `[overrides]` entry a variant sets replaces the base's same-named one. The base is read from the sibling `<base>.toml`; a missing base, or a base that itself has a base, is a load error. To check a variant, `regress --list-cases` should show it with the same quantity count as its base. Each run records the build mode it actually ran (`aot` or `jit`) in its environment fingerprint; the report flags two compared runs whose modes differ, and a run whose mode differs from its case's (e.g. the precompiled case at a commit that predates the workload) logs a warning.
 
 All cases requested in a single invocation share one git worktree (and one `Pkg.instantiate`/precompile) per commit, so `--cases a,b,c` in one command is substantially faster than three separate runs.
+
+**Warm workers.** By default each ref's cases run in one long-lived `julia` worker per build mode, which loads GPEC once and runs every case in a fresh module. Compiling GPEC's code paths on first use costs a few minutes, so a fresh process per case used to spend most of a full run compiling; a warm worker pays that once per ref. Tracked quantities are the same either way, but `Runtime (s)` now excludes compilation for every case after the first in a worker, so it depends on case order and is not comparable with isolated runs (each run's fingerprint records `warm` or `isolated`, and the report flags a mismatch). `--isolate` restores one fresh subprocess per case, to rule out state carried from one case to the next. A worker that dies mid-case fails that case only; the next case starts a new worker.
+
+**Parallel lanes.** `--jobs N` runs N cases at a time, each lane with its own warm worker of `GPEC_REGRESS_THREADS` threads, so `N × GPEC_REGRESS_THREADS` should match the CPUs you hold. Cases are dealt longest-first by their last recorded runtime, and each runs in a private copy of its deck so lanes sharing an example cannot overwrite each other's output. Much of a run is serial (compilation, ODE integration), so several narrow lanes keep CPUs busier than one wide one.
 ```
 ================================================================
 Case: diiid_n1 — DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
@@ -103,10 +107,12 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--no-pin-manifest` — let each ref resolve its own package set (see below)
 - `--allow-env-mismatch` — reuse cached results produced in a different environment
 - `--fail-on-change` — exit non-zero when any tracked quantity changed
+- `--jobs N` — run N cases at a time (see *Parallel lanes* above)
+- `--isolate` — run each case in its own fresh subprocess instead of a warm worker
 
-GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, and the count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines). Thread count is deliberately not part of the cache key, so `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
+GPEC workers run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, and the count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines). Thread count is deliberately not part of the cache key, so `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
 
-On a machine you share with other people or with your own parallel sessions, `-t auto` is antisocial: set `GPEC_REGRESS_THREADS` to a bounded count, and `JULIA_NUM_PRECOMPILE_TASKS` alongside it, since `Pkg.instantiate()` otherwise fans out to `Sys.CPU_THREADS + 1` precompile workers at the start of every ref. If the machine has a batch scheduler, submit the run through it and pin both variables to the allocation.
+On a machine you share with other people or with your own parallel sessions, `-t auto` is antisocial: set `GPEC_REGRESS_THREADS` to a bounded count, and `JULIA_NUM_PRECOMPILE_TASKS` alongside it, since `Pkg.instantiate()` otherwise fans out to `Sys.CPU_THREADS + 1` precompile workers at the start of every ref. If the machine has a batch scheduler, submit the run through it and pin both variables to the allocation, with `--jobs` × `GPEC_REGRESS_THREADS` equal to the CPUs requested.
 
 ## Three things named "regression"
 
@@ -125,9 +131,11 @@ They share the word and nothing else, which is a reliable source of confusion:
 
 Every git ref in a comparison is checked out into its own detached worktree, so a harness run is
 insulated from whatever you do to the working tree while it runs. The `local` ref is the exception:
-it runs GPEC in the live checkout, as a **fresh `julia` subprocess per case** that loads `src/` from
-disk when it starts. An edit landing between two cases of a `--refs develop,local` run yields a
-single report whose rows were produced by different code — with nothing in the output to say so.
+it runs GPEC in the live checkout, in a warm worker that loads `src/` from disk when it starts. An
+edit made after that is not seen, so the report can describe code that is no longer on disk. With
+`--isolate` each case loads `src/` afresh, and an edit landing between two cases of a
+`--refs develop,local` run yields a single report whose rows were produced by different code — with
+nothing in the output to say so.
 
 For anything you intend to cite — a pull-request report, a bisect, a number you will act on —
 commit the work to the feature branch and compare branch refs:

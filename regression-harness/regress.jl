@@ -13,6 +13,7 @@ include("src/config.jl")
 include("src/database.jl")
 include("src/utils.jl")
 include("src/extractor.jl")
+include("src/worker.jl")
 include("src/runner.jl")
 include("src/reporter.jl")
 
@@ -30,6 +31,8 @@ function parse_args(args)
     no_pin_manifest = false
     allow_env_mismatch = false
     fail_on_change = false
+    jobs = 1
+    isolate = false
     help = false
 
     i = 1
@@ -59,6 +62,13 @@ function parse_args(args)
         elseif arg == "--fail-on-change"
             fail_on_change = true
             i += 1
+        elseif arg == "--isolate"
+            isolate = true
+            i += 1
+        elseif arg == "--jobs" && i < length(args)
+            jobs = parse(Int, args[i+1])
+            jobs >= 1 || error("--jobs must be at least 1")
+            i += 2
         elseif arg == "--cases" && i < length(args)
             cases = split(args[i+1], ",") |> collect .|> strip
             i += 2
@@ -83,7 +93,7 @@ function parse_args(args)
     end
 
     return CLIOptions(cases, refs, ref_range, force, list_cases, show_qty, show_case, db_path, verbose,
-        no_instantiate, no_pin_manifest, allow_env_mismatch, fail_on_change, help)
+        no_instantiate, no_pin_manifest, allow_env_mismatch, fail_on_change, jobs, isolate, help)
 end
 
 const HELP_TEXT = """
@@ -92,8 +102,9 @@ GPEC Regression Harness
 Runs GPEC test cases across multiple git commits and compares numerical outputs
 to detect unintended changes. Results are cached in a local SQLite database.
 All cases in a single invocation share one git worktree (and one instantiate/
-precompile) per commit, so batching cases into one command is substantially
-faster than running them in separate invocations.
+precompile) per commit, and by default one warm Julia worker that loads GPEC
+once and runs them in sequence, so batching cases into one command is
+substantially faster than running them in separate invocations.
 
 Usage:
     julia --project=regression-harness regression-harness/regress.jl [OPTIONS]
@@ -117,10 +128,14 @@ Options:
                            re-running them
     --fail-on-change       Exit non-zero if any tracked quantity changed (for CI use; a failed
                            run always exits non-zero regardless)
+    --jobs N               Run N cases at a time, each lane with GPEC_REGRESS_THREADS threads
+                           (default 1); size N × threads to the CPUs you hold
+    --isolate              Run every case in its own fresh julia subprocess instead of a warm
+                           worker (slower; for ruling out state carried between cases)
     --help                 Print this help message
 
 Environment:
-    GPEC_REGRESS_THREADS   Threads for GPEC subprocesses (default "auto" = all cores);
+    GPEC_REGRESS_THREADS   Threads for each GPEC worker or subprocess (default "auto" = all cores);
                            the actual count is recorded in each run's env fingerprint
 
 Exit status:
@@ -227,7 +242,8 @@ function main(args=ARGS)
             run_cases_at_ref(db, ref, case_specs, REPO_ROOT;
                 force=opts.force, verbose=opts.verbose,
                 no_instantiate=opts.no_instantiate,
-                pin_manifest=pin_manifest, expected_key=expected_key)
+                pin_manifest=pin_manifest, expected_key=expected_key,
+                jobs=opts.jobs, isolate=opts.isolate)
         end
 
         # Report, grouped by case as before
