@@ -108,9 +108,15 @@ function _run_parallel_bvp_phase!(propagators::Vector{ChunkPropagator},
     equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
     odet_proxies::Vector{OdeState})
-    Threads.@threads :static for i in eachindex(chunks)
-        integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, mats, intr,
-            odet_proxies[Threads.threadid()])
+    nblas = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    try
+        Threads.@threads :static for i in eachindex(chunks)
+            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, mats, intr,
+                odet_proxies[Threads.threadid()])
+        end
+    finally
+        BLAS.set_num_threads(nblas)
     end
 end
 
