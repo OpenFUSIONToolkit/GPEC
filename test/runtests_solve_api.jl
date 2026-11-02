@@ -386,19 +386,11 @@ using HDF5
         @test prob.eta == GPEC.InnerLayer.layer_eta(kgal.equil, kgal.surfaces) && all(>(0), prob.eta)
         @test prob.rho ≈ fill(2 * GPEC.Utilities.M_P * 5e19, n)
         @test prob.rotation ≈ fill(1e3, n)
-        # A supplied Coulomb logarithm replaces the closure's in η: the Spitzer η is linear in lnΛ.
+        # A supplied Coulomb logarithm feeds only the NTV collision model; η keeps its own closure.
         keq = deepcopy(kgal.equil)
-        function layer_eta_with(lnL; kwargs...)
-            attach_kinetic_profiles!(
-                keq,
-                KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3), T_i=flat(1e3),
-                    omega_E=flat(2π * 1e3), lnLambda=flat(lnL), kwargs...)
-            )
-            return GPEC.InnerLayer.layer_eta(keq, kgal.surfaces)
-        end
-        @test layer_eta_with(30.0; resistivity_model=:spitzer) ≈ 2 .* layer_eta_with(15.0; resistivity_model=:spitzer) rtol = 1e-12
-        # The neoclassical closure takes it too, through the Spitzer factor and ν*_e: η rises with lnΛ.
-        @test all(layer_eta_with(30.0) .> layer_eta_with(15.0))
+        attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3), T_i=flat(1e3),
+            omega_E=flat(2π * 1e3), lnLambda=flat(30.0)))
+        @test GPEC.InnerLayer.layer_eta(keq, kgal.surfaces) == prob.eta
         # Explicit values override each default on its own.
         given = MatchProblem(kgal; eta=1e-7, rotation=fill(3.0, n))
         @test given.eta == fill(1e-7, n) && given.rho == prob.rho && given.rotation == fill(3.0, n)
@@ -564,6 +556,23 @@ using HDF5
                     "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
                 deck_dir = _stage_deck(dir; extra_sections=walled)
                 @test_throws "without a wall" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+        end
+
+        @testset "kinetic_format" begin
+            # A rates-v1 kinetic file read through the deck's [Equilibrium] keys and through the API keyword.
+            mktempdir() do dir
+                psi = range(0.0, 1.0; length=11)
+                open(joinpath(dir, "rates.kin"), "w") do io
+                    for x in psi
+                        println(io, join((x, 5e19, 5e19, 1e3, 1e3, 1e3, 16.0 + x, 1e3 * exp(x), 1e5 * exp(-x)), " "))
+                    end
+                end
+                eq_overrides = Dict{String,Any}("kinetic_file" => "rates.kin", "kinetic_format" => "rates-v1")
+                deck_dir = _stage_deck(dir; eq_overrides=eq_overrides)
+                from_deck = GPEC.Equilibrium.configured_kinetic_profiles(GPEC.equilibrium_config(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir))
+                from_api = attach_kinetic_profiles!(deepcopy(equil), joinpath(dir, "rates.kin"); format="rates-v1").kinetic
+                @test from_deck.nu_i == from_api.nu_i && from_deck.lnLambda == from_api.lnLambda && from_deck.nu_e == from_api.nu_e
             end
         end
 
