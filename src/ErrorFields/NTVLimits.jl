@@ -289,7 +289,7 @@ function correction_current(δ_ef::Real, c::EFCCoupling; delta_threshold::Real, 
         a == 0 && return excess / c.delta_per_kat
         disc = c.delta_per_kat^2 - 4a * excess
         disc < 0 && return NaN
-        I = (c.delta_per_kat - sqrt(disc)) / (2a)
+        I = 2excess / (c.delta_per_kat + sqrt(disc))
         # The budget must not be exhausted at the root: a negative threshold is no correction (OMFIT masked these).
         return abs(c.torque_residual_per_kat2) * I^2 < torque_budget ? I : NaN
     end
@@ -416,7 +416,7 @@ function correction_current_upper(δ_ef::Real, c::EFCCoupling; delta_threshold::
         # Over-correction side: C·I − δ_ef = target·(1 − t_res·I²/T_0), i.e. a·I² + C·I − (δ_ef + target) = 0
         # with the same a as the under-correction quadratic; its positive root is the upper edge.
         a = target * t_res / torque_budget
-        upper = (-c.delta_per_kat + sqrt(c.delta_per_kat^2 + 4a * (δ_ef + target))) / (2a)
+        upper = 2(δ_ef + target) / (c.delta_per_kat + sqrt(c.delta_per_kat^2 + 4a * (δ_ef + target)))
         return min(upper, sqrt(torque_budget / t_res))
     end
     g(I) = c.delta_per_kat * I - δ_ef - target * threshold_factor(c, I; torque_budget, rotation_exponent, omega_reference, model)

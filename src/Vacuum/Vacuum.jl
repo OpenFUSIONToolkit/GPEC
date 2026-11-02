@@ -58,6 +58,8 @@ end
 
     mpert = length(inputs.m_modes)
     mlow = inputs.m_modes[1]
+    inputs.m_modes == mlow:(mlow+mpert-1) ||
+        throw(ArgumentError("2D vacuum response needs contiguous ascending poloidal modes, got $(inputs.m_modes)"))
     num_points_surf = inputs.mtheta
 
     fill!(vac_data.wv, 0)
