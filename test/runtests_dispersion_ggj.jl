@@ -36,7 +36,7 @@ GeneralizedPerturbedEquilibrium.Tearing.Dispersion._residual_domain_radius(f::GG
         D = GeneralizedPerturbedEquilibrium.Tearing.Dispersion
         g = GGJDispersion(mc)
         center = 0.01im
-        re_paths = [ComplexF64[-1 + center, 1 + center]]
+        re_paths = [ComplexF64[-1+center, 1+center]]
         im_paths = [ComplexF64[0.001im, 0.02im]]
         # A coarse contour estimate must not pull a stable root into a positive-growth search.
         f = GGJDomainTestResidual(g, Q -> Q + 0.1im, ComplexF64[])

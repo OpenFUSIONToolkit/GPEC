@@ -538,8 +538,8 @@ function compare_phix(
 
     grid = ForcingTerms.sample_boundary_grid(equil, p.mtheta_coil, p.nzeta_coil; psi=psilim)
     nobs = p.mtheta_coil * p.nzeta_coil
-    obs_R = zeros(nobs);
-    obs_phi = zeros(nobs);
+    obs_R = zeros(nobs)
+    obs_phi = zeros(nobs)
     obs_Z = zeros(nobs)
     for j in 1:p.nzeta_coil, i in 1:p.mtheta_coil
         idx = i + (j - 1) * p.mtheta_coil
@@ -547,8 +547,8 @@ function compare_phix(
         obs_phi[idx] = grid.phi_grid[j] + grid.phi_offset[i]
         obs_Z[idx] = grid.Z[i]
     end
-    B_R = zeros(nobs);
-    B_phi = zeros(nobs);
+    B_R = zeros(nobs)
+    B_phi = zeros(nobs)
     B_Z = zeros(nobs)
     ForcingTerms.compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
     bn = zeros(p.mtheta_coil, p.nzeta_coil)
@@ -584,9 +584,9 @@ end
 
 function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
     lines = String[]
-    push!(lines, "=" ^ 72)
+    push!(lines, "="^72)
     push!(lines, "GPEC FORTRAN vs JULIA COMPARISON")
-    push!(lines, "=" ^ 72)
+    push!(lines, "="^72)
     push!(lines, "Fortran : $fortran_dir")
     push!(lines, "Julia   : $(joinpath(bench_dir, "gpec.h5"))")
     push!(lines, "Date    : $(Dates.format(Dates.now(), "yyyy-mm-dd HH:MM"))")
@@ -629,9 +629,9 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
     push!(lines, "")
 
     push!(lines, "--- Mercier Criterion ---")
-    fdi = fort["di"];
+    fdi = fort["di"]
     fdr = fort["dr"]
-    jdi = julia["di"];
+    jdi = julia["di"]
     jdr = julia["dr"]
     if !isempty(jdi) && !isempty(fdi)
         jdi_on_fg = [_interp1(jq_psi, jdi, p) for p in fq_psi]
@@ -705,7 +705,7 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
             m = i <= length(m_ctrl) ? m_ctrl[i] : i
             fl = abs(f_L[i, i])
             jl = abs(j_L[i, i])
-            ratio = fl > 0 ? jl/fl : NaN
+            ratio = fl > 0 ? jl / fl : NaN
             push!(lines, @sprintf("%-5d  %14.4e  %14.4e  %-6s  %10.3f", m, fl, jl, rel_pct(fl, jl), ratio))
         end
     else
@@ -724,7 +724,7 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
             m = i <= length(m_ctrl) ? m_ctrl[i] : i
             fl = abs(f_LS[i, i])
             jl = abs(j_LS[i, i])
-            ratio = fl > 0 ? jl/fl : NaN
+            ratio = fl > 0 ? jl / fl : NaN
             push!(lines, @sprintf("%-5d  %14.4e  %14.4e  %-6s  %10.3f", m, fl, jl, rel_pct(fl, jl), ratio))
         end
     else
@@ -753,7 +753,7 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
 
         jp_r = (row > 0 && !isempty(julia["rational_psi"])) ? julia["rational_psi"][row] : NaN
         j_phi = (row > 0 && !isempty(julia["resonant_area_weighted_field"])) ? abs(julia["resonant_area_weighted_field"][row]) : NaN
-        j_wisl = (row > 0 && !isempty(julia["island_half_width"])) ? 2*julia["island_half_width"][row] : NaN
+        j_wisl = (row > 0 && !isempty(julia["island_half_width"])) ? 2 * julia["island_half_width"][row] : NaN
         j_kch = (row > 0 && !isempty(julia["chirikov_parameter"])) ? julia["chirikov_parameter"][row] : NaN
 
         push!(
@@ -842,16 +842,16 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
         )
     end
 
-    push!(lines, "=" ^ 72)
+    push!(lines, "="^72)
     return lines
 end
 
 function _interp1(x::AbstractVector, y::AbstractVector, xi::Real)
-    n = length(x);
+    n = length(x)
     n < 2 && return y[1]
     xi <= x[1] && return y[1]
     xi >= x[end] && return y[end]
-    i = clamp(searchsortedlast(x, xi), 1, n-1)
+    i = clamp(searchsortedlast(x, xi), 1, n - 1)
     t = (xi - x[i]) / (x[i+1] - x[i])
     return y[i] + t * (y[i+1] - y[i])
 end
@@ -924,12 +924,12 @@ function generate_plots(fort, julia, bench_dir, nn)
     p6 = plot(; xlabel="m", ylabel="|b̄| [T]", title="Phi_x & Phi_tot spectrum (n=$nn)",
         legend=:topright)
     if !isempty(j_fvec) && !isempty(f_phi_x)
-        jfx_amps = [abs(get(Dict(zip(j_mmodes, j_fvec)), m, NaN+0im)) for m in m_ctrl]
-        jft_amps = [abs(get(Dict(zip(j_mmodes, j_rvec)), m, NaN+0im)) for m in m_ctrl]
+        jfx_amps = [abs(get(Dict(zip(j_mmodes, j_fvec)), m, NaN + 0im)) for m in m_ctrl]
+        jft_amps = [abs(get(Dict(zip(j_mmodes, j_rvec)), m, NaN + 0im)) for m in m_ctrl]
         ffx_amps = abs.(f_phi_x)
         fft_amps = abs.(f_phi_tot)
-        me, jfe = step_series(m_ctrl, replace(jfx_amps, NaN=>0.0))
-        _, jte = step_series(m_ctrl, replace(jft_amps, NaN=>0.0))
+        me, jfe = step_series(m_ctrl, replace(jfx_amps, NaN => 0.0))
+        _, jte = step_series(m_ctrl, replace(jft_amps, NaN => 0.0))
         _, ffe = step_series(m_ctrl, ffx_amps)
         _, fte = step_series(m_ctrl, fft_amps)
         plot!(p6, me, ffe; seriestype=:steppre, lw=2, color=:steelblue, label="Φ_x Fortran")
@@ -1200,7 +1200,7 @@ function generate_plots(fort, julia, bench_dir, nn)
                 j_theta_data, _, _ = PerturbedEquilibriumModes.modes_to_theta(h5_path, h5_var; keep_sfl_phi=false)
                 j_fun = j_theta_data[:, :, 1]  # (npsi, ntheta) for n=1
             catch e
-                @warn "modes_to_theta failed for $h5_var" exception=e
+                @warn "modes_to_theta failed for $h5_var" exception = e
             end
         end
 
@@ -1349,11 +1349,11 @@ function main(argv=ARGS)
     coil_dat_dir = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries")
 
     forcing_mode = use_file_forcing ? "file (Fortran Phi_coil)" : "coil (Julia Biot-Savart)"
-    println("=" ^ 72)
+    println("="^72)
     println("GPEC Fortran vs Julia Benchmark")
     println("  Fortran dir  : $fortran_dir")
     println("  Forcing mode : $forcing_mode")
-    println("=" ^ 72)
+    println("="^72)
 
     println("\n[1/5] Parsing Fortran inputs ...")
     p = parse_fortran_run(fortran_dir)
@@ -1441,15 +1441,15 @@ function main(argv=ARGS)
     println()
     table_lines = build_comparison_table(fort, julia, fortran_dir, bench_dir, p.nn)
     for line in table_lines
-        ;
-        println(line);
+
+        println(line)
     end
 
     table_path = joinpath(bench_dir, "comparison_table.txt")
     open(table_path, "w") do io
         for line in table_lines
-            ;
-            println(io, line);
+
+            println(io, line)
         end
     end
     println("\nComparison table saved to: ", abspath(table_path))

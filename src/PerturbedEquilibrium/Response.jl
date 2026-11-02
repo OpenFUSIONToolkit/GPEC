@@ -92,7 +92,7 @@ function apply_response!(state::PerturbedEquilibriumState; verbose::Bool=false)
     py = zero(ComplexF64)
     state.toroidal_torque = 0.0
     for (in, nn) in enumerate(ffs.nlow:ffs.nhigh)
-        blk = ((in - 1) * ffs.mpert + 1):(in * ffs.mpert)
+        blk = ((in-1)*ffs.mpert+1):(in*ffs.mpert)
         Φ_n = response_flux[blk]
         py_n = dot(Φ_n, inv(plasma_inductance[blk, blk]) * Φ_n) / 4
         py += py_n

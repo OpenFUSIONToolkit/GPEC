@@ -29,7 +29,7 @@ Both models report lab-frame roots from each surface's E×B rotation.
     ffs::R
     eta::E = nothing
     rho::D = nothing
-    gamma::Float64 = 5/3
+    gamma::Float64 = 5 / 3
     coupling_mode::Symbol = :uncoupled
     msing_max::Int = 3
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
@@ -82,7 +82,7 @@ end
 
 function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::TearingConfig=TearingConfig())
     config.gamma_range === nothing && config.omega_range === nothing || throw(ArgumentError("SLAYER uses Q_re_range and Q_im_range."))
-    prob.eta === nothing && prob.rho === nothing && prob.gamma == 5/3 ||
+    prob.eta === nothing && prob.rho === nothing && prob.gamma == 5 / 3 ||
         throw(ArgumentError("SLAYER derives its layer inputs from transport profiles; eta, rho, and gamma overrides are GGJ settings."))
     ffs = prob.ffs
     equil = ffs.equil

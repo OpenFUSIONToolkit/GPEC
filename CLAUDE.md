@@ -138,7 +138,7 @@ These rules apply to **every** Agent tool invocation, not just performance work.
 
 ### Code Formatting
 
-Pre-commit hooks enforce formatting via JuliaFormatter and general file hygiene. The hook runs the developer's globally installed JuliaFormatter (the version is not currently pinned), so previously untouched files may normalize wholesale on first edit; this churn is expected and should not be reverted. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
+Pre-commit hooks enforce formatting via JuliaFormatter and general file hygiene, and the same hooks run as the `pre-commit` CI check on every pull request. The hook runs the JuliaFormatter in the default Julia environment; CI pins **1.0.62** (`.pre-commit-config.yaml`, `.github/workflows/format.yaml`), so install exactly that version or the formatting will differ. The repository is clean under the hooks, so a file that changes when you run them changed because of your edit. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
 
 The project's `.JuliaFormatter.toml` settings:
 - **Line width**: 180 characters max (`margin = 180`)

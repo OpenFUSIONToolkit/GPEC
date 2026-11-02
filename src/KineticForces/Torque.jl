@@ -28,7 +28,6 @@ Toroidal torque from nonambipolar transport at one ψ and bounce harmonic `l`, w
   - `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
   - `surface`: Per-surface bundle from `_torque_surface`, shared across the bounce harmonics of
     one ψ; built here when not given
-
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,

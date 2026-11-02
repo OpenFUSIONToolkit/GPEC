@@ -107,7 +107,7 @@ function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::I
 
     # Follow the first resolved interior maximum without joining samples across excluded intervals.
     path = [i for i in sort(eachindex(Qs); by=i -> abs(Qs[i] - Qa))
-                  if min(Qa, Qb) < Qs[i] < max(Qa, Qb) && isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha]
+            if min(Qa, Qb) < Qs[i] < max(Qa, Qb) && isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha]
     idx = 0
     valley = peak = previous = 0
     for i in path

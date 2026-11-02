@@ -126,9 +126,13 @@ no basis, which is the bare-matrix construction.
 function check_mode_basis(dom::DominantCoupling, m_modes::AbstractVector{Int}, n_modes::AbstractVector{Int}, what::AbstractString)
     isempty(dom.m_modes) && return nothing
     (dom.m_modes == m_modes && dom.n_modes == n_modes) && return nothing
-    throw(ArgumentError("$what: the decomposition is on a different (m, n) basis than the spectrum — " *
-                        "m $(extrema(dom.m_modes)) vs $(extrema(m_modes)), n $(extrema(dom.n_modes)) vs $(extrema(n_modes)). " *
-                        "Decompose the same ResonantCoupling the spectrum was built from."))
+    throw(
+        ArgumentError(
+            "$what: the decomposition is on a different (m, n) basis than the spectrum — " *
+            "m $(extrema(dom.m_modes)) vs $(extrema(m_modes)), n $(extrema(dom.n_modes)) vs $(extrema(n_modes)). " *
+            "Decompose the same ResonantCoupling the spectrum was built from."
+        )
+    )
 end
 
 """

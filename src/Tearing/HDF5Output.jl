@@ -164,7 +164,8 @@ const TEARING_H5_ANNOTATIONS = [
         (; long_name="critical normalized resonant field b_r/B_φ for error-field penetration (Cole-Fitzpatrick 2006 Eq. 62; NaN = no maximum or surface skipped)",
             units="1", dims=("surface",)),
     "CriticalResonantField/br_crit_tesla" =>
-        (; long_name="critical resonant field br_crit·|B0| with the layer's B0, approximately comparable to SingularCoupling/resonant_area_weighted_field (NaN = no maximum or surface skipped)",
+        (;
+            long_name="critical resonant field br_crit·|B0| with the layer's B0, approximately comparable to SingularCoupling/resonant_area_weighted_field (NaN = no maximum or surface skipped)",
             units="T", dims=("surface",)),
     "CriticalResonantField/Q0" =>
         (; long_name="normalized natural E×B rotation Q0 = τ_k·n·Ω_E of the m/n mode (NaN where Ω_E is unknown)", units="1", dims=("surface",))

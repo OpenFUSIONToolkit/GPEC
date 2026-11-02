@@ -21,13 +21,13 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
-config_path  = joinpath(example_path, "gpec.toml")
+config_path = joinpath(example_path, "gpec.toml")
 psihigh_override = length(ARGS) > 1 ? parse(Float64, ARGS[2]) : nothing
 
-println("=" ^ 65)
+println("="^65)
 println("Equilibrium Method Comparison")
 println("Example: $example_path")
-println("=" ^ 65)
+println("="^65)
 
 methods = ["efit", "efit_arclength", "efit_by_inversion"]
 results = Dict{String,Any}()
@@ -58,18 +58,18 @@ for method in methods
         success = false
     end
     results[method] = Dict(
-        "success"  => success,
-        "pe"       => pe,
-        "runtime"  => (t1 + t2) / 2.0,
-        "config"   => cfg
+        "success" => success,
+        "pe" => pe,
+        "runtime" => (t1 + t2) / 2.0,
+        "config" => cfg
     )
     success && @printf("  Runtime (avg 2 warm): %.3f s\n", (t1 + t2) / 2.0)
 end
 
 # ─── Profile comparison ───────────────────────────────────────────────────────
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("q(ψ) cross-method comparison")
-println("=" ^ 65)
+println("="^65)
 
 # Reference from the first successful method at shared psi_nodes
 ref_method = first(m for m in methods if results[m]["success"])
@@ -105,13 +105,13 @@ for method in methods
     results[method]["success"] || continue
     Δq = abs.([q_vals[method][i] - efit_q_interp(psi_nodes[i]) for i in 1:length(psi_nodes)])
     @printf("  |q_%s - q_efit| (ψ<0.95): max=%.2e  rms=%.2e\n",
-        method, maximum(Δq[mask_mid]), sqrt(mean(Δq[mask_mid].^2)))
+        method, maximum(Δq[mask_mid]), sqrt(mean(Δq[mask_mid] .^ 2)))
 end
 
 # ─── Roundtrip error ─────────────────────────────────────────────────────────
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("Roundtrip error: (ψ,θ)→(R,Z)→ψ_spline(R,Z)−ψ_target")
-println("=" ^ 65)
+println("="^65)
 
 for method in methods
     results[method]["success"] || continue
@@ -123,7 +123,7 @@ for method in methods
     psio = pe.psio
     psi_xs = pe.rzphi_xs
     psi_ys = pe.rzphi_ys
-    mpsi   = length(psi_xs) - 1
+    mpsi = length(psi_xs) - 1
     mtheta = length(psi_ys) - 1
 
     errors = Float64[]
@@ -131,7 +131,7 @@ for method in methods
         ψ_target = psi_xs[ipsi]
         for itheta in 1:8:mtheta+1
             θ = psi_ys[itheta]
-            r2  = pe.rzphi_rsquared((ψ_target, θ))
+            r2 = pe.rzphi_rsquared((ψ_target, θ))
             off = pe.rzphi_offset((ψ_target, θ))
             rfac = sqrt(max(r2, 0.0))
             η = 2π * (θ + off)
@@ -148,10 +148,10 @@ for method in methods
 end
 
 # ─── GSE residual summary ─────────────────────────────────────────────────────
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("Grad-Shafranov residual (from equilibrium_gse! output — see gsec.h5 if diagnose_src=true)")
 println("(Showing q-monotonicity near edge as proxy since GSE requires diagnose_src=true)")
-println("=" ^ 65)
+println("="^65)
 
 for method in methods
     results[method]["success"] || continue
@@ -167,9 +167,9 @@ for method in methods
 end
 
 # ─── Runtime summary ─────────────────────────────────────────────────────────
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("Runtime summary")
-println("=" ^ 65)
+println("="^65)
 for method in methods
     if results[method]["success"]
         @printf("  %-22s  %.3f s\n", method, results[method]["runtime"])

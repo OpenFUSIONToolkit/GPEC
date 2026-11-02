@@ -35,7 +35,9 @@ const KF = GPE.KineticForces
 const Eq = GPE.Equilibrium
 const PE = GPE.PerturbedEquilibrium
 
-"Fortran GPEC DIII-D ideal example run directory, from the environment (no on-disk default)."
+"""
+Fortran GPEC DIII-D ideal example run directory, from the environment (no on-disk default).
+"""
 default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID, or pass the Fortran run directory as the first argument"),
     ENV, "GPEC_FORTRAN_DIIID")
 
@@ -214,10 +216,10 @@ _p(args...) = (println(stderr, args...); flush(stderr))
 _pf(fmt, args...) = (print(stderr, Printf.format(Printf.Format(fmt), args...)); flush(stderr))
 
 function run_benchmark(fortran_dir::String=default_fortran_dir())
-    _p("=" ^ 70)
+    _p("="^70)
     _p("  DIIID Kinetic Benchmark: Julia KineticForces vs Fortran PENTRC")
     _p("  Fortran example: $fortran_dir")
-    _p("=" ^ 70)
+    _p("="^70)
 
     inputs = discover_inputs(fortran_dir)
     ref = read_pentrc_reference(inputs.pentrc_nc)
@@ -318,9 +320,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     end
 
     # Compare results
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     _p("  Results Comparison")
-    _p("=" ^ 70)
+    _p("="^70)
 
     results = Dict{String,NamedTuple}()
 
@@ -346,13 +348,13 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
         end
     end
 
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
 
     # Check pass/fail
     all_pass = true
     for (method_key, r) in results
         if r.T_err > 5.0 || r.dW_err > 5.0
-            @warn "$(uppercase(method_key)) exceeds 5% threshold" T_err=r.T_err dW_err=r.dW_err
+            @warn "$(uppercase(method_key)) exceeds 5% threshold" T_err = r.T_err dW_err = r.dW_err
             all_pass = false
         end
     end
@@ -366,9 +368,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     end
 
     # Plot dT/dψ and T(ψ) overlay vs Fortran PENTRC reference
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     _p("  Plotting dT/dψ and T(ψ) overlay vs Fortran")
-    _p("=" ^ 70)
+    _p("="^70)
 
     pentrc_nc = inputs.pentrc_nc
 
@@ -383,7 +385,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
             dt_var = "dTdpsi_$method_key"
             T_var = "T_$method_key"
             if !(haskey(ds, psi_var) && haskey(ds, dt_var) && haskey(ds, T_var))
-                @warn "Fortran NetCDF missing variables for method" method=method_key
+                @warn "Fortran NetCDF missing variables for method" method = method_key
                 continue
             end
             psi_f = Array(ds[psi_var][:])
@@ -445,7 +447,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
             savefig(p1, path1)
             _p("  Saved dT/dψ panel → $path1")
         catch err
-            @warn "dT/dψ panel savefig failed" method=mkey err
+            @warn "dT/dψ panel savefig failed" method = mkey err
         end
 
         # Cumulative T panel
@@ -461,7 +463,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
             savefig(p2, path2)
             _p("  Saved cumulative T panel → $path2")
         catch err
-            @warn "cumulative T panel savefig failed" method=mkey err
+            @warn "cumulative T panel savefig failed" method = mkey err
         end
     end
 
