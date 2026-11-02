@@ -242,11 +242,14 @@ using HDF5
                 println(io, join((psi[k], own.n_i[k], own.n_e[k], own.T_i[k], own.T_e[k], own.omega_E[k], own.lnLambda[k], own.nu_i[k], own.nu_e[k]), " "))
             end
         end
-        table = EQ.read_kinetic_file(ascii)
+        table = EQ.read_kinetic_file(ascii; format="rates-v1")
         @test table.nu_i ≈ own.nu_i && table.lnLambda ≈ own.lnLambda
+        # The layout comes from the format, not the column count: a 9-column table read as legacy is an error.
+        @test_throws r"needs 6" EQ.read_kinetic_file(ascii)
+        @test_throws ArgumentError EQ.read_kinetic_file(ascii; format="rates-v2")
         # A data row with fewer columns than the others is an error, not a silently dropped row.
         open(io -> println(io, join((1.0, own.n_i[end], own.n_e[end], own.T_i[end], own.T_e[end], own.omega_E[end]), " ")), ascii, "a")
-        @test_throws r"fewer columns" EQ.read_kinetic_file(ascii)
+        @test_throws r"fewer columns" EQ.read_kinetic_file(ascii; format="rates-v1")
         rm(ascii)
     end
 

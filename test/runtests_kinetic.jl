@@ -718,7 +718,7 @@ using TOML
     end
 
     @testset "check_inner_quadrature" begin
-        # QuadGK returns an error above tolerance only at its evaluation cap; that, or a NaN, must not pass silently
+        # An error estimate above tolerance (QuadGK stopped short) or a NaN must not pass silently
         @test_logs KF.check_inner_quadrature(1.0 + 0im, 1e-6, 0.0, 1e-5, "test converged")
         @test_logs (:warn, r"did not converge") KF.check_inner_quadrature(1.0 + 0im, 1e-3, 0.0, 1e-5, "test capped")
         @test_logs (:warn, r"did not converge") KF.check_inner_quadrature([1.0 + 0im, NaN], 0.0, 0.0, 1e-5, "test nan")

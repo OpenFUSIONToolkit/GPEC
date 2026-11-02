@@ -28,11 +28,13 @@ _collision_tkev(T) = max(T / _KEV_J, _T_FLOOR_KEV)
 # NRL-formulary Coulomb logarithm (natural log) at the floored temperature, floored at 1; n_e in m⁻³, T_e in J.
 _coulomb_log(ne, Te) = max(17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(_collision_tkev(Te)), 1.0)
 
-# Warn once, as Fortran PENTRC, when a cold node engages the temperature or Coulomb-logarithm floor.
-function _warn_collision_floors(source, ne, Te, Ti)
+# Warn once, as Fortran PENTRC, when a cold node engages the temperature or Coulomb-logarithm floor of a model rate
+# (supplied rates in `data` use neither).
+function _warn_collision_floors(source, data, ne, Te, Ti)
+    data.nu_i !== nothing && data.nu_e !== nothing && return nothing
     any(T -> T / _KEV_J < _T_FLOOR_KEV, Te) | any(T -> T / _KEV_J < _T_FLOOR_KEV, Ti) &&
         @warn "$source: flooring T at 1 meV in the collision frequencies" maxlog = 1
-    any(i -> 17.3 - 0.5 * log(ne[i] / 1.0e20) + 1.5 * log(_collision_tkev(Te[i])) < 1, eachindex(ne)) &&
+    data.lnLambda === nothing && any(i -> 17.3 - 0.5 * log(ne[i] / 1.0e20) + 1.5 * log(_collision_tkev(Te[i])) < 1, eachindex(ne)) &&
         @warn "$source: flooring the Coulomb logarithm at 1 in the collision frequencies" maxlog = 1
     return nothing
 end
@@ -84,26 +86,31 @@ const _KINETIC_H5_PROFILES = ("n_i" => "m^-3", "n_e" => "m^-3", "T_i" => "eV", "
     "lnLambda" => "dimensionless", "nu_i" => "1/s", "nu_e" => "1/s")
 
 """
-    read_kinetic_file(path; group="/") -> KineticProfileData
+    read_kinetic_file(path; group="/", format="legacy") -> KineticProfileData
 
 Read a kinetic-profile file, dispatching on extension: HDF5 (`.h5`/`.hdf5`) via
-the GPEC kinetic schema, otherwise a 6-column ASCII table (`.gpeckf`/`.kin`/`.dat`:
-`psi_n n_i n_e T_i[eV] T_e[eV] omega_E`), or a 9-column one that appends `lnLambda nu_i[1/s] nu_e[1/s]`
-(the Fortran PENTRC rates-v1 table). Returns the raw columns; downstream consumers
-validate the fields they require.
+the GPEC kinetic schema, otherwise an ASCII table (`.gpeckf`/`.kin`/`.dat`) whose layout `format` names:
+`"legacy"`, 6 columns `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`, or `"rates-v1"`, 9 columns that append
+`lnLambda nu_i[1/s] nu_e[1/s]` (the Fortran PENTRC rates-v1 table). Returns the raw columns; downstream
+consumers validate the fields they require.
 """
-function read_kinetic_file(path::AbstractString; group::AbstractString="/")
+function read_kinetic_file(path::AbstractString; group::AbstractString="/", format::AbstractString="legacy")
     isfile(path) || error("Kinetic profile file not found: $path")
+    format in KINETIC_FORMATS || throw(ArgumentError("kinetic format \"$format\" must be one of $KINETIC_FORMATS"))
     ext = lowercase(splitext(path)[2])
-    return ext in _KINETIC_H5_EXTS ? _read_kinetic_h5(path; group=group) : _read_kinetic_ascii(path)
+    return ext in _KINETIC_H5_EXTS ? _read_kinetic_h5(path; group=group) : _read_kinetic_ascii(path, format)
 end
 
 """
-Read a 6-column ASCII kinetic table, or a 9-column one with supplied collision rates, into a `KineticProfileData`.
+Read an ASCII kinetic table in the layout `format` names into a `KineticProfileData`.
 """
-function _read_kinetic_ascii(path::AbstractString)
+function _read_kinetic_ascii(path::AbstractString, format::AbstractString)
     cols = _read_kinetic_table(path)
-    rates = length(cols) == 9 ? (; lnLambda=cols[7], nu_i=cols[8], nu_e=cols[9]) : (;)
+    ncol = KINETIC_FORMAT_COLUMNS[format]
+    length(cols) == ncol ||
+        error("kinetic file $path has $(length(cols)) columns, but kinetic_format = \"$format\" needs $ncol " *
+              "(\"legacy\": 6; \"rates-v1\": 9, appending lnLambda nu_i nu_e)")
+    rates = format == "rates-v1" ? (; lnLambda=cols[7], nu_i=cols[8], nu_e=cols[9]) : (;)
     return KineticProfileData(; psi=cols[1], n_i=cols[2], n_e=cols[3], T_i=cols[4], T_e=cols[5], omega_E=cols[6], rates...,
         provenance="ASCII $(length(cols))-column: $(basename(path))")
 end
@@ -135,7 +142,7 @@ function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
 end
 
 """
-    attach_kinetic_profiles!(equil, path; group="/", kwargs...) -> equil
+    attach_kinetic_profiles!(equil, path; group="/", format="legacy", kwargs...) -> equil
     attach_kinetic_profiles!(equil, data::KineticProfileData) -> equil
 
 Attach kinetic profiles to `equil` as `equil.kinetic`. Every kinetic consumer (the NTV torque, the
@@ -150,13 +157,14 @@ function attach_kinetic_profiles!(equil::PlasmaEquilibrium, data::KineticProfile
     return equil
 end
 
-attach_kinetic_profiles!(equil::PlasmaEquilibrium, path::AbstractString; group::AbstractString="/", kwargs...) =
-    attach_kinetic_profiles!(equil, KineticProfileData(read_kinetic_file(path; group=group); kwargs...))
+attach_kinetic_profiles!(equil::PlasmaEquilibrium, path::AbstractString; group::AbstractString="/", format::AbstractString="legacy",
+    kwargs...) =
+    attach_kinetic_profiles!(equil, KineticProfileData(read_kinetic_file(path; group=group, format=format); kwargs...))
 
 # The kinetic profiles a config names with its composition applied, read once at construction; `nothing` when it names none.
 configured_kinetic_profiles(config::EquilibriumConfig) =
     isempty(config.kinetic_file) ? nothing :
-    KineticProfileData(read_kinetic_file(config.kinetic_file; group=config.kinetic_group); kinetic_composition(config)...)
+    KineticProfileData(read_kinetic_file(config.kinetic_file; group=config.kinetic_group, format=config.kinetic_format); kinetic_composition(config)...)
 
 """
     write_kinetic_h5(path, data; group="/", schema_version="1.0", provenance=data.provenance)
@@ -271,7 +279,7 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     _assert_positive_density(source, "n_i (total)", ni_total, psi_reg)
     _assert_nonneg_profile(source, "T_i", Ti, psi_reg)
     _assert_nonneg_profile(source, "T_e", Te, psi_reg)
-    all(f -> getfield(data, f) !== nothing, (:lnLambda, :nu_i, :nu_e)) || _warn_collision_floors(source, ne, Te, Ti)
+    _warn_collision_floors(source, data, ne, Te, Ti)
 
     # Fractions are shares of the total n_i: never above 1, and exactly 1 when every species is fraction-specified.
     fracs = [s.fraction for s in ion_species if !isnan(s.fraction)]
@@ -443,7 +451,7 @@ function kinetic_profile_splines(data::KineticProfileData;
     _assert_positive_density(_describe(data), "n_i", ni, psi_reg)
     _assert_nonneg_profile(_describe(data), "T_i", Ti, psi_reg)
     _assert_nonneg_profile(_describe(data), "T_e", Te, psi_reg)
-    all(f -> getfield(data, f) !== nothing, (:lnLambda, :nu_i, :nu_e)) || _warn_collision_floors(_describe(data), ne, Te, Ti)
+    _warn_collision_floors(_describe(data), data, ne, Te, Ti)
 
     needs_rotation_reform = density_factor != 1.0 || temperature_factor != 1.0 || toroidal_rotation_factor != 1.0
     any_scaling = needs_rotation_reform || ExB_rotation_factor != 1.0

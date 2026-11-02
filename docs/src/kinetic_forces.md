@@ -25,8 +25,9 @@ extension:
     `write_kinetic_h5` (which round-trips the per-species densities).
   - **ASCII (`.gpeckf`/`.kin`/`.dat`)** — legacy six-column whitespace table
     `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`, retained for backward
-    compatibility, or nine columns that append `lnLambda nu_i[1/s] nu_e[1/s]`
-    (the Fortran PENTRC `kinetic_format = "rates-v1"` table). Header rows are skipped.
+    compatibility, or, with `kinetic_format = "rates-v1"` in `[Equilibrium]`, nine columns that append
+    `lnLambda nu_i[1/s] nu_e[1/s]` (the Fortran PENTRC rates-v1 table). The column count must match
+    `kinetic_format`. Header rows are skipped.
 
 Supplied collision rates replace the internal Krook collision model of the NTV calculation
 (Logan & Park 2013 Eq. 6), which otherwise computes them from ``n`` and ``T``:
@@ -36,8 +37,7 @@ Supplied collision rates replace the internal Krook collision model of the NTV c
     space, so supply them over the whole ψ range.
   - A supplied `nu_i` is the first main ion's rate; the other ion species and the impurity keep the
     model's ``(Z_s/Z_1)^2\sqrt{m_1/m_s}`` ratio to it.
-  - A supplied `lnLambda` also replaces the `lnLambda_form` one in the tearing layers' resistivity. Their
-    ``\nu_{*e}`` is built from ``n_e``, ``T_e`` and that ``\ln\Lambda``, not from a supplied `nu_e`.
+  - They feed only the NTV calculation; the tearing layers' resistivity keeps its `lnLambda_form` closure.
   - The density and temperature scaling factors of `[KineticForces]` do not rescale supplied rates;
     `collisionality_factor` still multiplies them.
 

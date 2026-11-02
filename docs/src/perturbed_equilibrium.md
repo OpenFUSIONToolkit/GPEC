@@ -81,9 +81,9 @@ own forcing coefficients `Vᴴ·b̃_x`.
 
 ### Other coupling matrices and local windows
 
-The run writes five coupling matrices under `PerturbedEquilibrium/SingularCoupling/`. Each has one row per
+The run writes up to five coupling matrices under `PerturbedEquilibrium/SingularCoupling/`. Each has one row per
 rational surface (labelled by `rational_psi`, `rational_q`, `rational_m`, `rational_n`) and acts on the same
-applied b̃ columns:
+applied b̃ columns (`C_penetrated_area_weighted_field` only when the run computes penetrated fields):
 
 | Dataset | Maps b̃ to | Units |
 |:--- |:--- |:--- |
