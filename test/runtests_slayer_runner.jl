@@ -90,6 +90,13 @@
         @test GeneralizedPerturbedEquilibrium.slayer_model(Dict{String,Any}("SLAYER" => Dict{String,Any}("chi_perp_Dc" => 1.4))).chi_perp_Dc == 1.4
         @test SLAYERModel().chi_perp_Dc === nothing
         @test_throws "chi_perp_Dc must be positive" SLAYERModel(; chi_perp_Dc=-1.0)
+        # With it set, the critical Δ needs no χ⊥,e default; without a critical Δ, it does nothing and says so.
+        tau_E_model(; kw...) = SLAYERModel(; P_perp_model=:tau_E, D_c_type=:toroidal, kw...)
+        tau_data = data(; tau_E=0.1)
+        @test_logs (:warn, r"chi_e → chi_e_default") min_level = Base.CoreLogging.Warn Tearing._slayer_chi_inputs(no_chi, tau_E_model(), tau_data)
+        @test_logs min_level = Base.CoreLogging.Warn Tearing._slayer_chi_inputs(no_chi, tau_E_model(; chi_perp_Dc=1.4), tau_data)
+        @test_logs (:warn, r"chi_perp_Dc has no effect") min_level = Base.CoreLogging.Warn Tearing._slayer_chi_inputs(no_chi,
+            SLAYERModel(; P_perp_model=:tau_E, chi_perp_Dc=1.4), tau_data)
     end
 
     @testset "TearingProblem solve forwards surfaces and Δ'" begin
@@ -122,6 +129,11 @@
         @test bare_view.profiles.omega_E(data.psi[j]) == 0.0
         @test_throws "missing required dataset 'T_i'" Tearing._slayer_profiles(
             GeneralizedPerturbedEquilibrium.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_e=data.T_e), SLAYERModel())
+        # A non-positive chi_e stops the run only where it is used: chi_perp_Dc replaces it in the critical Δ.
+        bad_chi_e = GeneralizedPerturbedEquilibrium.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_e=data.T_e, T_i=data.T_i,
+            chi_e=fill(-1.0, length(data.psi)))
+        @test_throws "chi_e" Tearing._slayer_profiles(bad_chi_e, SLAYERModel(; P_perp_model=:tau_E, D_c_type=:toroidal))
+        @test Tearing._slayer_profiles(bad_chi_e, SLAYERModel(; P_perp_model=:tau_E, D_c_type=:toroidal, chi_perp_Dc=1.4)).chi_perp_e === nothing
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one

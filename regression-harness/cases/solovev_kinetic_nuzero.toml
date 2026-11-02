@@ -1,17 +1,20 @@
 # Regression case: Solovev n=1 collisionless kinetic run (nutype = "zero").
-# Reuses the Solovev_kinetic_calculated_example deck (50/50 D-T multi-ion) via
-# [overrides] at a mode-converged band; locks the collisionless real-x-space
-# energy-integral eigenvalue plus equilibrium and singular-surface anchors.
+# Reuses the nuzero test fixture via [overrides] at a mode-converged band with 50/50 D-T
+# multi-ion matrices; locks the collisionless real-x-space energy-integral eigenvalue
+# plus equilibrium and singular-surface anchors.
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
 # and the noise floor below which a difference is treated as zero.
 [case]
 name = "solovev_kinetic_nuzero"
-description = "Solovev, n=1, kinetic = 'KineticForces', nutype=zero (collisionless energy integral), 50/50 D-T multi-ion kinetic matrices, mode-converged band (delta_m=8, mpert=32). Reuses the calculated example deck via override; pressure-consistent kinetic.dat."
-example_dir = "examples/Solovev_kinetic_calculated_example"
+description = "Solovev, n=1, kinetic = 'KineticForces', nutype=zero (collisionless energy integral), 50/50 D-T multi-ion kinetic matrices, mode-converged band (delta_m=8, mpert=32). Reuses the nuzero test fixture via override; pressure-consistent kinetic.dat."
+example_dir = "test/test_data/regression_solovev_kinetic_nuzero"
 
-# Run the shared calculated deck collisionless (no separate nuzero example directory).
+# The fixture is coarse for test speed; widen it to the converged band and the D-T ion mix.
 [overrides]
-"KineticForces.nutype" = "zero"
+"Equilibrium.ion_species" = [{ z = 1, m = 2, fraction = 0.5 }, { z = 1, m = 3, fraction = 0.5 }]
+"ForceFreeStates.delta_mlow" = 8
+"ForceFreeStates.delta_mhigh" = 8
+"ForceFreeStates.singfac_min" = 1e-6
 
 # Energies — leading eigenvalues
 [quantities.et_real]
