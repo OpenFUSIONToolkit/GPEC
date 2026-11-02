@@ -239,3 +239,103 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 The full flag list, the environment-pinning behaviour that keeps source code the only variable in
 a comparison, and the exit-status contract are documented in
 [`docs/development/regression-harness.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/development/regression-harness.md).
+
+## Developer tips
+
+### Precompile workload
+
+Building the package runs a small Solovev case through the solver so that a fresh Julia process
+skips most first-call compilation, at the cost of a longer one-time build. Code compiled into the
+package image can round differently in the last bit from code compiled on first use, and
+near-marginal quantities such as Δ′ amplify that, so results are reproducible only within one
+build mode. The regression harness runs with the workload disabled. To disable it yourself (for a
+faster build, or to match harness numbers), set the preference by UUID from the project, without
+loading GPEC (which would first build it with the workload on). `Preferences` must be installed,
+e.g. in your global environment:
+
+```julia
+using Preferences, UUIDs
+set_preferences!(UUID("462872dd-e066-4d2e-b993-6468b5239634"), "precompile_workload" => false; force=true)
+```
+
+This writes `LocalPreferences.toml` next to the active `Project.toml` (the file is gitignored);
+delete the entry to re-enable. The regression harness overrides this file for its own runs.
+
+The workload runs only when Julia rebuilds the package image, not at the start of each run. That
+happens after any change under `src/` (a pull, a branch switch or a local edit) and after a change
+of dependency versions, Julia version or this preference. Repeated runs on an unchanged checkout
+reuse the cached image. Julia keeps a separate image per set of compile flags, so the first
+`Pkg.test()` after such a change (which checks array bounds) runs the workload once more. If you edit `src/` and restart Julia often, disabling the workload keeps
+each rebuild short; within one Revise session nothing is rebuilt.
+
+### Revise.jl
+
+When iterating on code, use [Revise.jl](https://timholy.github.io/Revise.jl/stable/) to avoid full recompilation on every change. It tracks source file modifications and recompiles only the affected code.
+
+Install Revise in your **global** Julia environment (not in this project's `Project.toml`):
+
+```julia
+# In the Julia REPL (no --project flag)
+using Pkg
+Pkg.add("Revise")
+```
+
+Then load it before `GeneralizedPerturbedEquilibrium` in any session:
+
+```julia
+using Revise
+using GeneralizedPerturbedEquilibrium
+```
+
+For it to load automatically, add `using Revise` to your [Julia startup file](https://timholy.github.io/Revise.jl/stable/config/#Using-Revise-by-default):
+
+```julia
+# ~/.julia/config/startup.jl
+try
+    using Revise
+catch e
+    @warn "Could not load Revise" exception=e
+end
+```
+
+### Pre-commit hooks
+
+The repository uses pre-commit hooks to maintain code quality. They run automatically on `git commit`, and
+the same hooks run in CI on every pull request (the `pre-commit` check), which fails if they would change a file.
+They:
+- Format Julia code according to `.JuliaFormatter.toml` settings
+- Remove trailing whitespace and fix line endings
+- Validate YAML/TOML syntax
+- Prevent accidentally committing large files (>5MB)
+- Check config-style TOML annotation conventions (header block, inline `# description`
+  comments, no deprecated keys — see `docs/development/toml-conventions.md`)
+
+**Installation:**
+
+```bash
+# Install pre-commit (requires Python/pip)
+pip install pre-commit
+
+# Install JuliaFormatter 1.0.62 in the default environment: the hook runs whatever version is there,
+# and CI pins this one, so another version formats differently and fails the check
+julia -e 'using Pkg; Pkg.add(PackageSpec(name="JuliaFormatter", version="1.0.62"))'
+
+# Install the git hooks in your local repository
+cd /path/to/GPEC
+pre-commit install
+```
+
+You can also run the hooks manually without committing:
+
+```bash
+pre-commit run --all-files   # run on all files
+pre-commit run               # run on staged files only
+```
+
+In rare cases where you need to bypass the hooks:
+
+```bash
+git commit --no-verify
+```
+
+This is discouraged as it may introduce formatting inconsistencies.

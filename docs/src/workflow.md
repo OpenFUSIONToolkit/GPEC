@@ -1,195 +1,220 @@
 # Workflow
 
-GPEC follows a five-stage analysis pipeline driven by a single `gpec.toml` configuration file. Each stage produces structured output consumed by the next.
+GPEC reads one deck, `gpec.toml`, runs every stage whose section the deck contains, and writes every result into one output file, `gpec.h5`.
+This page is the map: what each stage computes physically, which deck sections run it, and which datasets to read first.
+The module pages give the governing equations and the full key and output tables; the [Scripting API](api.md) page shows the same pipeline called from Julia.
 
 ```
-                              gpec.toml
-                  (user options for every module)
-                                 │
-        ┌────────────┬───────────┴───┬─────────────────────┐
-        ▼            ▼               ▼                     ▼
-   Equilibrium ──► Vacuum ──► ForceFreeStates ──► PerturbedEquilibrium ──► gpec.h5
-        ▲            │                                    ▲   ▲
-        │            └────────────────────────────────────┘   │
-        │                                                     │
-   equilibrium file                                      ForcingTerms
-   kinetic profiles (planned)                  (external perturbation file)
+ equilibrium file ──► Equilibrium ──► ForceFreeStates ──► PerturbedEquilibrium ──► KineticForces
+ kinetic profiles                       │   (Vacuum)        ▲         │              ErrorFields
+                                        ├──► LocalStability │         │
+                                        ├──► Match          │         └────────────► gpec.h5
+                                        └──► Tearing   ForcingTerms (coils or file)
 ```
 
-The single `gpec.toml` file supplies user-selected options to every module. The two primary input files — the equilibrium file and (planned) the kinetic profiles file — are read by the `Equilibrium` module, while the external perturbation specification enters at `PerturbedEquilibrium` via `ForcingTerms`. `Vacuum` feeds both `ForceFreeStates` and `PerturbedEquilibrium` directly: the response matrices it builds are consumed by both downstream stages.
+`Vacuum` runs inside `ForceFreeStates` whenever the solve is free-boundary, and `ForcingTerms` is read when `PerturbedEquilibrium` needs a drive, so neither is a stage of its own.
+Every stage after `Equilibrium` reads the force-free states, and `KineticForces` and `ErrorFields` read the plasma response, so a section runs only when the sections it depends on are present.
 
----
+## Which stage do I need
 
-## Stage 1: Equilibrium
+| Question | Deck sections | Read first |
+|---|---|---|
+| Is the equilibrium read and mapped correctly; what are q and β_N? | `[Equilibrium]` (+ `[ForceFreeStates]`, which triggers the write) | `Equilibrium/q_95`, `Equilibrium/beta_N`, `Equilibrium/Profiles/` |
+| Is the plasma ideal-kink stable, with or without a wall? | `[ForceFreeStates]` (+ `[Wall]`) | `ForceFreeStates/FreeBoundaryStability/W_freeboundary`, `…/eigenmode_energies` |
+| Is it Mercier, resistive-interchange or ballooning unstable? | `[LocalStability]` (+ `[Ballooning]`) | `LocalStability/D_I`, `LocalStability/D_R`, `LocalStability/ballooning_Delta_prime` |
+| What is the tearing stability index Δ′ at each rational surface? | `[ForceFreeStates] integrator = "Riccati"` or `"Galerkin"` (+ `[Riccati]` or `[Galerkin]`) | `SingularSurfaces/Delta_prime_matrix` |
+| How does the plasma respond to an RMP or error field; do islands overlap? | `[ForcingTerms]` + `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, `…/island_half_width`, `…/chirikov_parameter` |
+| What NTV torque does that field drive? | `[KineticForces]` (+ `[Equilibrium] kinetic_file`) | `KineticForces/<method>/total_torque` |
+| How tight must the coil tolerances be to avoid locking? | `[ErrorFields]` | `ErrorFields/Risk/locking_probability_percent` |
+| What are the tearing growth rate and critical resonant field? | `[Tearing]` + `[SLAYER]` or `[GGJ]` | `Tearing/Roots/gamma`, `Tearing/Roots/omega`, `Tearing/CriticalResonantField/` |
+| What does a resistive inner layer do to the response? | `[Match]` + `[GGJ]` | `SingularSurfaces/Match/` |
 
-**Module**: `Equilibrium`
+### Headline outputs
 
-**Purpose**: Reconstruct the axisymmetric MHD equilibrium. Solves the Grad-Shafranov equation on a poloidal flux grid, computes field-aligned coordinates, and builds bicubic splines for all field quantities used by downstream modules.
+- **Free-boundary energy** `ForceFreeStates/FreeBoundaryStability/W_freeboundary` is the power-normalized free-boundary energy matrix, the sum of `W_plasma` and `W_vacuum` for the wall of the deck (no wall when `[Wall]` is absent). `eigenmode_energies` lists its generalized eigenvalues, the ideal δW per unit displacement of each free-boundary eigenmode, sorted most unstable first, so a negative first entry means the plasma is ideal-kink unstable and a positive one is the stability margin.
+- **Tearing index** `SingularSurfaces/Delta_prime_matrix` is the Δ′ matching matrix in the PEST-3 convention, from which the outer-region tearing drive of each rational surface follows; a positive Δ′ means the outer region drives the tearing mode and the inner layer (`Tearing`) sets its growth rate.
+- **Resonant field** `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field` is the area-weighted resonant normal field b̄ʳ `[T]` at each rational surface after the plasma response, the quantity that drives islands and sets locking thresholds. `island_half_width` is the vacuum-superposition island each resonant flux would open, w_s ∝ √|δψ_s|, and `chirikov_parameter` is the ratio of adjacent half-widths to the surface separation, so σ > 1 means the islands overlap.
+- **Torque** `KineticForces/<method>/total_torque` is the neoclassical toroidal viscosity (NTV) torque T_φ `[N·m]` that the perturbed equilibrium exerts on the plasma, with the sign convention of the [Conventions](conventions.md) page.
 
-**Configuration**: `[Equilibrium]` section of `gpec.toml`
+## What each stage computes
 
-**Inputs**:
-- Equilibrium data file in one of the supported formats:
-  - `efit` — EFIT g-file from experimental reconstruction
-  - `chease` / `chease2` — CHEASE equilibrium code output
-  - `ifile` — inverse i-file (e.g. TokaMaker `save_ifile`)
-  - `lar` — Large aspect ratio analytical model
-  - `sol` — Solov'ev analytical equilibrium
-- Kinetic profiles file (planned) — temperature and density profiles for the kinetic analysis path
-- Grid resolution and solver settings
+### Equilibrium
 
-**Outputs** (`PlasmaEquilibrium`):
-- Bicubic splines for R(ψ,θ), Z(ψ,θ), and all field quantities
-- Safety factor profile q(ψ) and singular surface locations
-- Global parameters: magnetic axis (R₀, Z₀), β, q₀, q_a, plasma volume
-- Flux surface geometry and separatrix location
+Reads or constructs the axisymmetric equilibrium, maps it to straight-field-line coordinates (`[Equilibrium] jac_type`), builds the flux-surface splines every later stage evaluates, and locates the rational surfaces q = m/n.
+`[Equilibrium] eq_type` selects a file format: `efit`, `efit_arclength` and `efit_by_inversion` (EFIT g-files, three flux-surface tracing strategies), `chease` and `chease2` (CHEASE binary and ASCII), `ifile` (inverse i-file, as written by TokaMaker) and `imas` (an `IMASdd.dd` passed in from a script).
+An analytic equilibrium is selected by its own section instead: `[Solovev]`, `[LargeAspectRatio]` or `[TJAnalytic]`.
+The optional `[Equilibrium] kinetic_file` adds the density, temperature and rotation profiles that the kinetic solve, `KineticForces` and the `SLAYER` layer model need; `[[Equilibrium.ion_species]]` declares the ion composition.
+Outputs: `Equilibrium/` scalars (`beta_N`, `q_axis`, `q_95`, …), `Equilibrium/Profiles/` and `Equilibrium/Geometry/`.
+Page: [Equilibrium](equilibrium.md).
 
----
+### ForceFreeStates
 
-## Stage 2: Vacuum Response
+Determines ideal MHD stability by the Newcomb criterion of the Fortran DCON: the Euler–Lagrange equations of δW are integrated in ψ for all poloidal harmonics at once, crossing each rational surface with the prescribed small-solution jump, to give the force-free states ξ(ψ, θ) and the plasma energy matrix.
+With `vac_flag = true` the `Vacuum` module adds the vacuum energy for the wall of the `[Wall]` section (shapes `conformal`, `elliptical`, `dee`, `mod_dee` and `file`; no wall when the section is absent), and the free-boundary eigenvalue problem gives the kink stability.
+`[ForceFreeStates] integrator` selects the radial method and its section: `"Riccati"` (the default; `[Riccati]`) also produces the Δ′ matrix, `"Forward"` (`[Forward]`) is the plain ODE integration, and `"Galerkin"` (`[Galerkin]`) is the resistive outer-region solve on a finite-element basis.
+`kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs a kinetic file.
+Outputs: `ForceFreeStates/FreeBoundaryStability/`, `ForceFreeStates/Solutions/`, `ForceFreeStates/EdgeScan/`, `SingularSurfaces/` and `SurfaceGeometries/`.
+Key references: [Glasser (2016)](citations.md#ForceFreeStates-Module), [Glasser (2018)](citations.md#ForceFreeStates-Module), [Chance et al. (1997)](citations.md#Vacuum-Module).
+Pages: [Stability](stability.md), [Galerkin solver](galerkin.md), [Vacuum](vacuum.md).
 
-**Module**: `Vacuum`
+### LocalStability
 
-**Purpose**: Compute the magnetostatic vacuum response matrices that couple the plasma boundary to external fields. These matrices are used by ForceFreeStates and PerturbedEquilibrium to apply boundary conditions and decompose fields in poloidal mode space.
+Evaluates the Mercier criterion D_I, the resistive-interchange criterion D_R and the high-n ballooning Δ′ on every flux surface of the solve, and with `[LocalStability] alpha_boundary_scan` the critical normalized pressure gradient α_crit.
+Runs only with `[ForceFreeStates]`, on the same equilibrium grid; `[Ballooning]` sets the ballooning integration.
+Outputs: `LocalStability/`.
+Page: [Local stability](ballooning.md).
 
-**Configuration**: optional `[Wall]` section of `gpec.toml`; omit it for no wall
+### Match
 
-**Inputs**:
-- `PlasmaEquilibrium` from Stage 1 (plasma boundary coordinates, toroidal mode number n)
-- Wall geometry: shape (conformal, elliptical, dee-shaped, or custom) and dimensions
+Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, section `[GGJ]`) and rebuilds the force-free states with the resulting layer response, so that the later stages see a resistive rather than perfectly shielded plasma; `ideal = true` keeps the shielded limit for comparison.
+Outputs: `SingularSurfaces/Match/`.
+Page: [Tearing](inner_layer.md).
 
-**Outputs**:
-- `wv` — Vacuum response matrix (scaled by the singular factor (m - nq)(m' - nq), see Chance 1997)
-- `I_v` — Vacuum surface-current matrix Iᵛ when `compute_Iv=true` (otherwise zeros); PerturbedEquilibrium inverts this to surface inductance `L`
+### PerturbedEquilibrium
 
-**Key references**: [Chance et al. (1997)](citations.md#Vacuum-Module), [Chance et al. (2007)](citations.md#Vacuum-Module)
+Computes the plasma response to an external non-axisymmetric field: `plasma_response` builds the permeability, inductance and reluctance operators on the control surface from the force-free states and the vacuum matrices, and `perturbed_equilibrium` applies them to the drive that `ForcingTerms` supplies, either a normal-field spectrum from a file or the Biot–Savart field of `[[ForcingTerms.coil_set]]` coils.
+The resonant fields, island half-widths and Chirikov parameter at each rational surface follow from the singular coupling (`compute_singular_coupling`), and `regularization_width` controls the regularization of the ideal response there.
+Outputs: `PerturbedEquilibrium/ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`.
+Key references: [Park et al. (2007a)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2009)](citations.md#PerturbedEquilibrium-Module).
+Pages: [Forcing terms](forcing_terms.md), [Perturbed equilibrium](perturbed_equilibrium.md).
 
----
+### KineticForces
 
-## Stage 3: Ideal MHD Stability
+Integrates the NTV torque and kinetic energy of the perturbed equilibrium over ψ for each torque `method`, by species when the ion composition has more than one.
+Runs after `PerturbedEquilibrium` and needs n_e, T_i, T_e and ω_E in the kinetic file; without `[PerturbedEquilibrium]` the section only configures the kinetic solve of `ForceFreeStates`.
+Outputs: `KineticForces/<method>/` and `KineticForces/PerSpecies/`.
+Key references: [Park and Logan (2017)](citations.md#Kinetic-Forces), [Logan et al. (2013)](citations.md#Kinetic-Forces).
+Page: [Kinetic forces](kinetic_forces.md).
 
-**Module**: `ForceFreeStates`
+### ErrorFields
 
-**Purpose**: Determine ideal MHD stability via Newcomb's direct criterion. Integrates the Euler-Lagrange equations across the plasma volume, crossing singular surfaces (where q = m/n) with prescribed jump conditions. Computes the potential and kinetic energy matrices that define the eigenvalue problem for the free-boundary stability.
+Assesses error-field tolerances for a coil-driven response: the sensitivity of the resonant field to the shift and tilt of each coil set, a Monte Carlo sample of the tolerances of `[ErrorFields.MonteCarlo]`, the locking probability of `[ErrorFields.Risk]` against a threshold scenario, and the NTV coupling of the correction coils of `[ErrorFields.NTV]`.
+Needs `[PerturbedEquilibrium]` driven by `[[ForcingTerms.coil_set]]` coils.
+Outputs: `ErrorFields/CoilSensitivities/`, `MonteCarlo/`, `Risk/`, `NTV/`.
+Page: [Error fields](error_fields.md).
 
-**Configuration**: `[ForceFreeStates]` section of `gpec.toml`
+### Tearing
 
-**Inputs**:
-- `PlasmaEquilibrium` from Stage 1
-- Vacuum response matrices from Stage 2
-- Poloidal mode range (m_low, m_pert) and toroidal mode number n
+Solves the tearing dispersion relation of each rational surface by matching the outer-region Δ′ to an inner-layer model: the two-fluid slab `SLAYER` (`[SLAYER]`) or the toroidal resistive-MHD `GGJ` (`[GGJ]`), selected by `[Tearing] inner_model`.
+`[Tearing.search]` sets the root search in the complex frequency plane, and `[Tearing.CriticalResonantField]` adds the resonant field at which the layer's shielding is overcome.
+Needs a Δ′-producing integrator (`"Riccati"` or `"Galerkin"`) and, for `SLAYER`, a kinetic file.
+Outputs: `Tearing/PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/`.
+Key references: [Glasser, Wang and Park (2016)](citations.md#InnerLayer-Module), [Park (2022)](citations.md#InnerLayer-Module).
+Page: [Tearing](inner_layer.md).
 
-**Outputs**:
-- Force-free eigenfunctions ξ(ψ, θ) — the normal displacement field
-- Fixed boundary energy W_fixed (negative → unstable without wall)
-- Free boundary energy eigenvalues `et` (sign determines ideal stability with wall)
-- Mercier stability criterion as a function of ψ
-- Singular surface data at each rational surface q = m/n:
-  - Flux surface location ψ_s
-  - Tearing stability parameter Δ'
-  - Small solution coefficients (used by PerturbedEquilibrium)
+## The deck
 
-**Key references**: [Glasser (2016) Newcomb](citations.md#ForceFreeStates-Module), [Glasser (2018) Riccati](citations.md#ForceFreeStates-Module)
-
----
-
-## Stage 4: External Forcing
-
-**Module**: `ForcingTerms`
-
-**Purpose**: Load the external magnetic perturbation specification — the amplitude and phase of each (m, n) Fourier component of the applied field at the plasma boundary. This is typically computed externally (e.g. from a coil geometry code or measured from sensors).
-
-**Configuration**: `[ForcingTerms]` section of `gpec.toml`
-
-**Inputs**:
-- External perturbation data file (ASCII or HDF5 format)
-
-**Outputs** (array of `ForcingMode`):
-- For each (m, n) mode: poloidal mode number, toroidal mode number, complex amplitude (magnitude + phase)
-
----
-
-## Stage 5: Perturbed Equilibrium
-
-**Module**: `PerturbedEquilibrium`
-
-**Purpose**: Compute the self-consistent plasma response to the external perturbation specified in Stage 4, in two steps:
-- `plasma_response(ffs)` builds the source-independent operators once from the force-free eigenfunctions and vacuum matrices: the permeability, inductance and reluctance matrices on the control surface, and the singular coupling matrices at each rational surface (`PlasmaResponse`).
-- `perturbed_equilibrium(resp, rmp)` applies them to one forcing field: it projects the response into mode space and evaluates the singular coupling diagnostics for that field. One response serves any number of fields.
-
-**Configuration**: `[PerturbedEquilibrium]` section of `gpec.toml`
-
-**Inputs**:
-- ForceFreeStates results from Stage 3 (eigenfunctions, singular surface data), for `plasma_response`
-- Vacuum response matrices from Stage 2, for `plasma_response`
-- The forcing field from Stage 4, for `perturbed_equilibrium`
-
-**Outputs** (`PerturbedEquilibriumState`):
-- Mode-space normal displacement ξ(m, ψ) across the plasma
-- Mode-space magnetic perturbation b(m, ψ)
-- At each rational surface q = m_s/n:
-  - Resonant flux δψ_s
-  - Resonant current sheet amplitude
-  - Island half-width w_s (proportional to √|δψ_s|)
-  - Chirikov overlap parameter σ (ratio of adjacent island widths to their separation)
-
-**Key references**: [Park et al. (2007a)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2009)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2017)](citations.md#Kinetic-Forces)
-
----
-
-## Configuration File: `gpec.toml`
-
-All stages are controlled by a single TOML file. A minimal example structure:
+A stage runs when its section is present, so a deck with only `[Equilibrium]` and `[ForceFreeStates]` stops after the stability solve, and one without `[ForceFreeStates]` writes nothing.
+The abridged `examples/DIIID-like_ideal_example/gpec.toml` below runs the equilibrium, the ideal free-boundary solve with local stability, and the coil-driven perturbed equilibrium:
 
 ```toml
 [Run]
-output_file = "gpec.h5"
 verbose = true
 
 [Equilibrium]
 eq_type = "efit"
-eq_filename = "g-file.txt"
+eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk"
+kinetic_file = "TkMkr_D3Dlike_Hmode_kinetic.h5"
+jac_type = "hamada"
+psihigh = 0.995
 
-[Wall]
-shape = "conformal"
-standoff_fraction = 0.3
+[LocalStability]
+alpha_boundary_scan = true
 
 [ForceFreeStates]
 nn = 1
-integrator = "Forward"
 vac_flag = true
+integrator = "Forward"   # the default is "Riccati"
+
+[ForcingTerms]
+forcing_data_format = "coil"
+machine = "d3d"
+
+[[ForcingTerms.coil_set]]
+name = "c"
+currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]
 
 [PerturbedEquilibrium]
 compute_singular_coupling = true
-
-[ForcingTerms]
-forcing_data_file = "forcing.dat"
-forcing_data_format = "ascii"
+regularization_width = 0.05
 ```
 
-A stage runs when its section is present, so omitting the later sections stops the pipeline early
-(an equilibrium-only deck has no `[ForceFreeStates]`). Every stage saves into the `[Run] output_file`.
+Every key is documented on the module page of its section, and every example deck carries an inline comment per key.
 
-Example configuration files are provided in:
-- `examples/Solov'ev_ideal_example/gpec.toml`
-- `examples/DIIID-like_ideal_example/gpec.toml`
-- `examples/DIIID-like_error_field_example/gpec.toml` (coil-forced run with the `[ErrorFields]` sensitivity stage)
+### Deck section index
 
----
+| Section | Runs or configures | Page |
+|---|---|---|
+| `[Run]` | `output_file` (default `gpec.h5`, written next to the deck) and `verbose` | this page |
+| `[Equilibrium]` | the equilibrium stage: file, format, coordinates, grid, kinetic file | [Equilibrium](equilibrium.md) |
+| `[[Equilibrium.ion_species]]` | the ion composition of the kinetic profiles | [Equilibrium](equilibrium.md) |
+| `[Solovev]`, `[LargeAspectRatio]`, `[TJAnalytic]` | an analytic equilibrium in place of a file | [Equilibrium](equilibrium.md) |
+| `[Wall]` | the conducting wall of the vacuum response; omit for no wall | [Vacuum](vacuum.md) |
+| `[ForceFreeStates]` | the stability stage: `nn`, the mode window, `integrator`, `vac_flag`, `kinetic` | [Stability](stability.md) |
+| `[Forward]`, `[Riccati]` | the radial ODE integrators | [Stability](stability.md) |
+| `[Galerkin]` | the finite-element outer-region solver | [Galerkin solver](galerkin.md) |
+| `[LocalStability]`, `[Ballooning]` | the local stability stage and its ballooning integration | [Local stability](ballooning.md) |
+| `[Match]`, `[GGJ]` | the inner-layer matching stage and the GGJ layer model | [Tearing](inner_layer.md) |
+| `[ForcingTerms]`, `[[ForcingTerms.coil_set]]` | the external field: a file or coil sets | [Forcing terms](forcing_terms.md) |
+| `[PerturbedEquilibrium]` | the plasma response stage and its singular-coupling options | [Perturbed equilibrium](perturbed_equilibrium.md) |
+| `[KineticForces]` | the NTV torque stage and the kinetic solve of `ForceFreeStates` | [Kinetic forces](kinetic_forces.md) |
+| `[Tearing]`, `[Tearing.search]`, `[Tearing.CriticalResonantField]`, `[SLAYER]` | the tearing stage, its root search, the critical field and the SLAYER layer model | [Tearing](inner_layer.md) |
+| `[ErrorFields]`, `[ErrorFields.MonteCarlo]`, `[ErrorFields.scenario]`, `[ErrorFields.Risk]`, `[ErrorFields.NTV]` | the error-field tolerance stage | [Error fields](error_fields.md) |
 
-## Output File: `gpec.h5`
+## Running it
 
-All results are written to a single HDF5 file (default: `gpec.h5`). The top-level groups are organized by physics topic (see the schema conventions in `docs/development/hdf5-conventions.md`):
+From a shell, on a directory holding a `gpec.toml`:
+
+```bash
+./gpec examples/DIIID-like_ideal_example
+```
+
+From Julia, the same pipeline is `GeneralizedPerturbedEquilibrium.main(["examples/DIIID-like_ideal_example"])`, which returns the stage results as a named tuple; each stage is also a `solve` call on a problem type, so a script can run any subset. See the [Scripting API](api.md).
+`examples/*/run_example.jl` and `analyze_example.jl` show the scripted run and the [Analysis](analysis.md) plots of its output.
+
+### Examples
+
+| Directory | Exercises |
+|---|---|
+| `DIIID-like_ideal_example` | DIII-D-like H-mode, n = 1: free-boundary ideal stability, local stability, C-coil-driven perturbed equilibrium and NTV torque; the default benchmark case |
+| `DIIID-like_ideal_multi_n_example` | the same plasma with n = 1 and 2 solved together and driven by mixed-n coil currents |
+| `DIIID-like_ideal_example_IMAS` | the same equilibrium read from an `IMASdd.dd`, run from `run_imas_example.jl` |
+| `DIIID-like_riccati_deltaprime_example` | the Δ′ matrix on the `"Riccati"` integrator, no forcing |
+| `DIIID-like_gal_resistive_example` | the `"Galerkin"` outer-region Δ′ solve, no forcing |
+| `DIIID-like_gal_resistive_pe_example` | Galerkin Δ′ with `[Match]` inner-layer matching and coil forcing |
+| `DIIID-like_SLAYER_example` | tearing growth rates and critical resonant fields with the `SLAYER` layer model |
+| `DIIID-like_truncation_example` | the resistive-layer overlap cap on the edge of the integration domain |
+| `DIIID-like_error_field_example` | error-field sensitivities, Monte Carlo tolerances and locking risk for the DIII-D poloidal-field coils |
+| `Solovev_ideal_example` | analytic Solov'ev equilibrium from `[Solovev]`: a near-marginal n = 1 kink held by a conformal wall |
+| `Solovev_ideal_example_3D` | the same plasma with the vacuum response on a toroidal grid |
+| `Solovev_ideal_example_multi_n` | the same plasma swept over n = 1 and 2 in one run, with single-n cross-checks |
+| `LAR_reversed_shear_example` | a `[LargeAspectRatio]` equilibrium with reversed shear, q = 2 crossed twice |
+| `LAR_ideal_match_test` | a `[TJAnalytic]` equilibrium with `[Match] ideal = true`, the shielded reference for the resistive case |
+| `LAR_resistive_match_test` | the same equilibrium with resistive GGJ matching |
+| `LAR_beta_scan`, `LAR_epsilon_scan` | `run_scan.jl` sweeps of the `[TJAnalytic]` pressure factor and inverse aspect ratio |
+| `TJ_ideal_example` | a `[TJAnalytic]` equilibrium: n = 1 stability and a file-driven perturbed equilibrium |
+| `TJ_kinetic_NTV_example` | adds `[KineticForces]`: the NTV torque of the perturbed equilibrium |
+| `TJ_kinetic_calculated_example` | the drift-kinetic stability solve (`kinetic = "KineticForces"`) with a D–T main ion |
+| `TJ_kinetic_multiion_example` | NTV summed over D, T, the impurity and electrons |
+| `a10_kinetic_example` | drift-kinetic stability of a low-aspect-ratio circular tokamak |
+| `efit_fixedbdy_separatrix_example` | a fixed-boundary EFIT file whose box hugs the separatrix, for the separatrix search |
+
+## The output file
+
+All results are written to one HDF5 file (`[Run] output_file`, default `gpec.h5`, next to the deck), with top-level groups by physics topic; the schema conventions are in `docs/development/hdf5-conventions.md` of the repository.
 
 | Group | Contents |
 |---|---|
-| `Info/` | Run metadata: git version, mode-number ranges, ψ limit, `Runtimes/` (per-stage wall-clock seconds) |
-| `Input/` | Self-contained rerun snapshot: the recorded deck, raw equilibrium/forcing/coil inputs |
-| `Equilibrium/` | Equilibrium scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
-| `ForceFreeStates/` | Stability solve: `Solutions/{ForwardIntegration,GalerkinIntegration}`, `EulerLagrangeMatrices/` (opt-in: `write_el_matrices = true`), `FreeBoundaryStability/`, `EdgeScan/` |
-| `LocalStability/` | Mercier D_I, resistive interchange D_R, ballooning Δ' profiles |
-| `SingularSurfaces/` | Per-rational-surface data: ψ_s, q, m/n, GGJ coefficients, Δ'/PEST-3 matching matrices, kinetic surfaces (`Kinetic/`) |
-| `PerturbedEquilibrium/` | Plasma response: `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/` |
-| `KineticForces/` | NTV torque per method: energy integrals, kinetic matrices |
-| `Tearing/` | SLAYER/GGJ inner-layer growth rates: `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `Scan/` |
+| `Info/` | Run metadata: git version, mode-number ranges, `psilim`, `qlim`, `Runtimes/` (per-stage wall-clock seconds) |
+| `Input/` | Rerun snapshot: the recorded deck and the raw equilibrium, forcing and coil inputs |
+| `Equilibrium/` | Scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
+| `ForceFreeStates/` | `Solutions/`, `FreeBoundaryStability/`, `EdgeScan/`, and `EulerLagrangeMatrices/` when `write_el_matrices = true` |
+| `LocalStability/` | `D_I`, `D_R`, `ballooning_Delta_prime` on `psi`; the α boundary on `ballooning_psi` |
+| `SingularSurfaces/` | Per-rational-surface data: `rational_psi`, `rational_q`, GGJ coefficients, `Delta_prime_matrix` and the PEST-3 matrices, `Match/`, `Kinetic/` |
+| `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/` |
+| `KineticForces/` | `<method>/` torque and energy profiles; `PerSpecies/<species>/<method>/` for multi-ion runs |
+| `ErrorFields/` | `CoilSensitivities/`, `MonteCarlo/`, `Risk/`, `NTV/` |
+| `Tearing/` | `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/` |
 | `SurfaceGeometries/` | Plasma and wall surface point clouds for visualization |
+
+Rerunning `main(["gpec.h5"])` on an output file reproduces the run from its `Input/` snapshot; see the [Scripting API](api.md).
