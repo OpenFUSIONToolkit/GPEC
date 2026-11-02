@@ -36,8 +36,8 @@ Useful invocations:
   cases are added over time, so never assume the list. (At time of writing: `diiid_n1`,
   `diiid_n1_riccati`, `diiid_slayer_n1`, `efit_fixedbdy_separatrix`, `gal_resistive_diiid`,
   `gal_resistive_pe`, `ggj_ray_q500i`, `ggj_reference`, `solovev_n1`, `solovev_multi_n`,
-  `solovev_kinetic_calculated`, `solovev_kinetic_multiion`, `solovev_kinetic_ntv`,
-  `solovev_kinetic_nuzero`.)
+  `solovev_kinetic_nuzero`, `tj_n1`, `tj_kinetic_calculated`, `tj_kinetic_multiion`,
+  `tj_kinetic_ntv`.)
 - `--cases <case[,case]> --refs <refA,refB>` — compare two refs (branches/commits), e.g.
   `--refs develop,my-feature-branch`. `local` names the uncommitted working tree; prefer a branch
   ref (see "Which refs to compare" below).
@@ -49,7 +49,7 @@ Useful invocations:
 Pick the case(s) by the module touched:
 - Equilibrium / ideal stability / perturbed equilibrium → `diiid_n1` (broadest, ~31 quantities).
 - Analytical equilibrium + ideal stability → `solovev_n1`, `solovev_multi_n`.
-- KineticForces (NTV) changes → `solovev_kinetic_calculated`.
+- KineticForces (NTV) changes → `tj_kinetic_calculated`.
 - InnerLayer (GGJ resistive layer) changes → `ggj_reference`.
 
 When in doubt, run `diiid_n1` plus whichever case targets the module you changed.

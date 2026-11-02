@@ -43,7 +43,7 @@ end
     recorded(path) = h5open(f -> TOML.parse(read(f["Input/gpec_toml_raw"])), path)
     stages(deck, dir) = Base.structdiff(GPEC.parse_deck(deck, dir), (; run=nothing))
     mktempdir() do dir
-        example = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
+        example = joinpath(@__DIR__, "..", "examples", "TJ_ideal_example")
         foreach(name -> cp(joinpath(example, name), joinpath(dir, name)), readdir(example))
         inputs = TOML.parsefile(joinpath(dir, "gpec.toml"))
         inputs["Run"]["verbose"] = false

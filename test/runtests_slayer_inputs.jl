@@ -167,6 +167,31 @@
         @test sl_var[1].P_perp ≈ sl_s[1].P_perp * 6.0 / 2.0 rtol = 1e-10
     end
 
+    @testset "chi_perp_Dc reaches the critical Δ alone, as a callable and through TearingProblem" begin
+        sings = [_mk_sing(; psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
+        kw = (; P_perp_model=:chi_perp_e, bt=2.0, chi_perp_e=2.0, chi_tor=1.5, dr_val=0.01, dc_type=:fitzpatrick)
+        plain = build_slayer_inputs(equil, sings, profiles; kw...)[1]
+        scalar = build_slayer_inputs(equil, sings, profiles; kw..., chi_perp_Dc=6.0)[1]
+        varying = build_slayer_inputs(equil, sings, profiles; kw..., chi_perp_Dc=psi -> 1.0 + 10.0 * psi)[1]    # 6.0 at ψ = 0.5
+        @test varying.dc_tmp == scalar.dc_tmp
+        @test scalar.dc_tmp != plain.dc_tmp
+        @test scalar.P_perp == plain.P_perp
+
+        # The model key, through the same assembly TearingProblem uses.
+        Tearing = GeneralizedPerturbedEquilibrium.Tearing
+        loaded = (; profiles, chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing, zeff=nothing, zeff_source=:scalar)
+        model(; c...) = SLAYERModel(; P_perp_model=:chi_perp_e, D_R=0.01, D_c_type=:fitzpatrick, c...)
+        attached = equil.kinetic
+        equil.kinetic = Equilibrium.KineticProfileData(; psi=psi_pts, n_e=fill(5.0e19, length(psi_pts)),
+            T_e=1000.0 .* (1.0 .- 0.7 .* psi_pts), T_i=1000.0 .* (1.0 .- 0.6 .* psi_pts),
+            chi_e_default=2.0, chi_phi_default=1.5)
+        params(m) = Tearing._tearing_params(m, equil, sings, loaded)[1]
+        without, with = params(model()), params(model(; chi_perp_Dc=6.0))
+        equil.kinetic = attached
+        @test with.dc_tmp != without.dc_tmp
+        @test with.P_perp == without.P_perp
+    end
+
     @testset "build_slayer_inputs: P_perp_model forwards the profile gradients and minor radius" begin
         sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
         kw = (; bt=2.0, chi_perp_e=2.0, chi_perp_i=1.0, chi_tor=1.5, dr_val=0.0)

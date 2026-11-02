@@ -10,7 +10,7 @@ using TOML
     A = GPEC.Analysis
 
     # Copy a coarse fixture deck into `dir` with HDF5 output on and the given extra sections; return its gpec.h5.
-    function _run_fixture(dir, fixture; sections=Dict{String,Any}())
+    function _run_fixture(dir, fixture; sections=Dict{String,Any}(), ffs=Dict{String,Any}())
         template = joinpath(@__DIR__, "test_data", fixture)
         for name in readdir(template)
             cp(joinpath(template, name), joinpath(dir, name))
@@ -18,6 +18,7 @@ using TOML
         toml_path = joinpath(dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
         merge!(inputs, sections)
+        merge!(inputs["ForceFreeStates"], ffs)
         open(io -> TOML.print(io, inputs), toml_path, "w")
         GPEC.main([dir])
         return joinpath(dir, "gpec.h5")
@@ -27,9 +28,9 @@ using TOML
 
     @testset "ideal run with coil forcing and the perturbed-equilibrium response" begin
         mktempdir() do dir
-            h5 = _run_fixture(dir, "regression_solovev_ideal_example"; sections=Dict{String,Any}(
+            h5 = _run_fixture(dir, "regression_tj_ideal_example"; ffs=Dict{String,Any}("dW_edge_scan_start" => 0.95), sections=Dict{String,Any}(
                 "ForcingTerms" => Dict{String,Any}("forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
-                    "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4,
+                    "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 12.0, "height" => 1.2,
                         "currents" => [2.0e3], "tiltx" => [3.0])]),
                 "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true)))
 

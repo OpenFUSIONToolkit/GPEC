@@ -170,11 +170,18 @@ function compute_calculated_kinetic_matrices(
 end
 
 # The force-balance solve's two-pass grid inputs: the kinetic profiles as the KineticForces model views them (its
-# control when the source is one, else the default control) and the kinetic-resonance surfaces to pin.
+# control when the source is one, else the default control) and the kinetic-resonance surfaces to pin. The model
+# needs the NTV view, so a missing profile errors; otherwise profiles read for another consumer (e.g. SLAYER without
+# omega_E) are left out and the grid follows the equilibrium alone.
 function ForceFreeStates.kinetic_grid_inputs(source, ctrl, equil, intr; rationals)
     kf_ctrl = source isa KineticForcesControl ? source : KineticForcesControl()
-    kinetic_profiles = ntv_profiles(kf_ctrl, equil)
-    pinned = resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, ntv_species(kf_ctrl, equil), equil, intr; rationals)
+    data = equil.kinetic
+    ntv = source isa KineticForcesControl || (data !== nothing && Equilibrium.has_ntv_fields(data))
+    data !== nothing && !ntv &&
+        @info "Two-pass psi grid: the kinetic profiles lack an NTV field (n_e, T_i, T_e, omega_E), so the grid follows the equilibrium alone"
+    kinetic_profiles = ntv ? ntv_profiles(kf_ctrl, equil) : nothing
+    species = ntv ? ntv_species(kf_ctrl, equil) : nothing
+    pinned = resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, species, equil, intr; rationals)
     return kinetic_profiles, pinned
 end
 
