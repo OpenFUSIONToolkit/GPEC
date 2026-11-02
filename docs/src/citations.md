@@ -239,7 +239,7 @@ module computes (Eqs. 1–5).
 
 ---
 
-> N. C. Logan et al., "Error field correction limits set by neoclassical toroidal viscosity in SPARC,"
+> Logan et al., SPARC error-field correction with NTV limits,
 > *Nuclear Fusion* (2026).
 > DOI: [10.1088/1741-4326/ae6086](https://doi.org/10.1088/1741-4326/ae6086)
 
@@ -247,7 +247,7 @@ The NTV-limited error-field correction model of `ErrorFields.NTV`: the correctio
 
 ---
 
-> N. Leuthold et al., "Error field correction and neoclassical toroidal viscosity limits for ARC,"
+> Leuthold et al., ARC error-field correction with NTV limits,
 > *Journal of Plasma Physics* **92**, E49 (2026).
 > DOI: [10.1017/S0022377826101421](https://doi.org/10.1017/S0022377826101421)
 
