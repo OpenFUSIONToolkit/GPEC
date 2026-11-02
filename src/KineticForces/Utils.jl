@@ -6,6 +6,19 @@ kinetic-resonance surface locator built on it.
 """
 
 """
+    check_inner_quadrature(I, E, atol, rtol, what)
+
+Warn once per integral kind `what` and Julia session when the error estimate `E` exceeds `max(atol, rtol·‖I‖)`,
+i.e. QuadGK stopped short of its tolerance (evaluation cap or endpoint roundoff), or when `I` or `E` is not finite.
+"""
+function check_inner_quadrature(I, E, atol, rtol, what::String)
+    nI = norm(I)
+    (isfinite(nI) && isfinite(E) && E <= max(atol, rtol * nI)) ||
+        @warn "KineticForces $what integral did not converge: error estimate $E vs |I| = $nI" maxlog = 1 _id = Symbol(what)
+    return nothing
+end
+
+"""
     find_sign_change_roots(f, grid) → Vector{Float64}
 
 Locate the zeros of a callable `f` by scanning consecutive `grid` nodes for strict sign

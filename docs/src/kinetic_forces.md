@@ -14,8 +14,9 @@ extension:
     `T_e`, `omega_E` (and `n_i`, defaulting to `n_e` if omitted); optional
     `omega_tor`, `chi_e` and `chi_i` (electron and ion perpendicular heat diffusivities
     ``\chi_{\perp,e}``, ``\chi_{\perp,i}``), `chi_phi` (toroidal momentum diffusivity
-    ``\chi_\phi``), and `zeff`
-    (effective charge ``Z_\mathrm{eff}``, dimensionless). Each dataset
+    ``\chi_\phi``), `zeff`
+    (effective charge ``Z_\mathrm{eff}``, dimensionless), and the supplied collision
+    rates `lnLambda` (dimensionless), `nu_i` and `nu_e` (1/s). Each dataset
     carries a `units` attribute; the root carries `schema_version` and
     `provenance`. Densities are m⁻³, temperatures eV, frequencies rad/s,
     diffusivities m²/s. Additional datasets named `n_*` (e.g. `n_D`, `n_T`)
@@ -24,7 +25,21 @@ extension:
     `write_kinetic_h5` (which round-trips the per-species densities).
   - **ASCII (`.gpeckf`/`.kin`/`.dat`)** — legacy six-column whitespace table
     `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`, retained for backward
-    compatibility. Header rows are skipped.
+    compatibility, or, with `kinetic_format = "rates-v1"` in `[Equilibrium]`, nine columns that append
+    `lnLambda nu_i[1/s] nu_e[1/s]` (the Fortran PENTRC rates-v1 table). The column count must match
+    `kinetic_format`. Header rows are skipped.
+
+Supplied collision rates replace the internal Krook collision model of the NTV calculation
+(Logan & Park 2013 Eq. 6), which otherwise computes them from ``n`` and ``T``:
+
+  - Each of `lnLambda`, `nu_i` and `nu_e` is optional and must be positive.
+  - They are interpolated in log space. Outside the table's ψ range the end interval is extended in log
+    space, so supply them over the whole ψ range.
+  - A supplied `nu_i` is the first main ion's rate; the other ion species and the impurity keep the
+    model's ``(Z_s/Z_1)^2\sqrt{m_1/m_s}`` ratio to it.
+  - They feed only the NTV calculation; the tearing layers' resistivity keeps its `lnLambda_form` closure.
+  - The density and temperature scaling factors of `[KineticForces]` do not rescale supplied rates;
+    `collisionality_factor` still multiplies them.
 
 The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_i`/`chi_phi`/`zeff`,
 when present, are carried for the resistive-layer (SLAYER) analysis and ignored

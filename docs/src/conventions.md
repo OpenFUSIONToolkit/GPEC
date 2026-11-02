@@ -343,9 +343,13 @@ The `KineticForces` module (the Julia port of PENTRC) conventions below are used
 - ``\omega_E`` is the input E × B toroidal-rotation profile, evaluated as
   `welec = omegaE_spline(psi)` (`Torque.jl`). Positive ``\omega_E`` means rotation in the direction
   of the toroidal coordinate ``\zeta``.
-- The mapping to current direction follows from the ``\zeta``/``\phi`` convention fixed by helicity
-  ([Helicity and Handedness](@ref)); it is not re-derived inside the kinetic module, which only
-  reads the supplied profile.
+- In the laboratory frame, where ``\phi`` increases counter-clockwise viewed from above, the toroidal
+  coordinate maps as ``\phi = -h\,(2\pi\zeta + \nu)`` with ``h`` the helicity
+  ([Helicity and Handedness](@ref)), so positive ``\omega_E`` has counter-clockwise sign ``-h``.
+  Relative to the plasma current its sign is ``-h\,s_I = -s_B``, where ``s_I`` and ``s_B`` are the
+  signs of ``I_p`` and ``B_t`` (`ip_sign`, `bt_sign`): positive ``\omega_E`` is co-current exactly when
+  ``B_t`` is clockwise (``s_B = -1``), whatever the helicity. For ``s_I = s_B = +1`` it is clockwise and
+  counter-current.
 
 ### Diamagnetic Frequencies
 
