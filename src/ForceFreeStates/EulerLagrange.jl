@@ -777,7 +777,7 @@ end
     compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
 Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
-growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, or always when `sing_flag` is set.
+growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
 The first call after a reduction records reference norms; if `sing_flag` forces a reduction there, it keeps
 the previous reduction's pivot order. Errors if any norm is zero. Port of Fortran `ode_unorm`.
 
@@ -801,9 +801,9 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     if odet.new
         odet.new = false
         odet.unorm0 .= odet.unorm
-        # A forced reduction right after another keeps that reduction's pivot order
+        # A forced reduction right after another keeps that reduction's pivot order (none to keep before the first)
         if sing_flag && odet.ifix > 0
-            odet.unorm[odet.index[:, odet.ifix]] .= (intr.numpert_total-1):-1:0
+            @views odet.unorm[odet.index[:, odet.ifix]] .= (intr.numpert_total-1):-1:0
         end
     else
         odet.unorm ./= odet.unorm0

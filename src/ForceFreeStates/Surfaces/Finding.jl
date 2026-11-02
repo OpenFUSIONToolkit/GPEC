@@ -148,11 +148,13 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         while intr.qlim > qlim_bound
             intr.qlim -= 1.0 / intr.nlow
         end
-        intr.qlim >= equil.params.qmin ||
-            error("sing_lim!: no rational surface of n = $(intr.nlow) lies far enough below qlim = $(@sprintf("%.3f", qlim_bound)) " *
-                  "(q_min = $(@sprintf("%.3f", equil.params.qmin))) to truncate at rational_offset_fraction past it. " *
-                  "Raise qhigh or set truncate_at_rational_offset = false.")
     end
+
+    # A target below q_min has no psilim: say why instead of failing in the root find, as Fortran's "Can't find psilim"
+    intr.qlim >= equil.params.qmin ||
+        error("sing_lim!: the integration limit qlim = $(@sprintf("%.3f", intr.qlim)) lies below q_min = $(@sprintf("%.3f", equil.params.qmin)), " *
+              "so no flux surface reaches it. With truncate_at_rational_offset no rational surface of n = $(intr.nlow) is left to truncate at; " *
+              "widen the domain (qhigh, the layer-overlap cap) or set truncate_at_rational_offset = false.")
 
     # qlim below qmax: Newton-solve q(psilim) = qlim
     if intr.qlim < equil.params.qmax

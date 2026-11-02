@@ -380,7 +380,9 @@ end
         odet.index[:, 1] .= [3, 1, 2]
         odet.new = true
         FFS.compute_solution_norms!(odet.u, odet, ctrl, FFS.ForceFreeStatesInternal(; numpert_total=3), true)
-        @test odet.ifix == 2 && odet.new && odet.sing_flag[2]
+        @test odet.ifix == 2
+        @test odet.new
+        @test odet.sing_flag[2]
         @test odet.index[:, 2] == [3, 1, 2]
     end
 
