@@ -53,7 +53,6 @@ Data structure for a single forcing mode.
   - `n::Int` - Toroidal mode number
 
   - `m::Int` - Poloidal mode number
-
   - `amplitude::ComplexF64` - Complex amplitude in unit-norm convention (= Fortran Phi_x,
     T·m² per unit-norm cell) after loading. File inputs are tagged by their input convention:
 
@@ -367,7 +366,9 @@ end
 RMPField(modes::Vector{ForcingMode}; scale::Number=1.0) =
     RMPSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
 
-"Flattened weighted-leaf list of any [`RMPField`](@ref)."
+"""
+Flattened weighted-leaf list of any [`RMPField`](@ref).
+"""
 _rmp_terms(f::Union{RMPSource,RMPSpectrum}) = Union{RMPSource,RMPSpectrum}[f]
 _rmp_terms(f::RMPFieldSum) = f.terms
 

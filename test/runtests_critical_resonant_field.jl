@@ -191,8 +191,9 @@ InnerLayer.layer_response(::_VRiStub, p, Q::Number) = (; tearing=_vri(-real(Q), 
         @test_throws "needs the E×B rotation" run_slayer_from_inputs(model, params, dp, c, scan; rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5])
         # A surface the override leaves without a rotation is skipped; the others are still computed.
         c_part = TearingProblem(nothing; critical_resonant_field=ctrl, omega_E_kHz=Dict("2/1" => ω_E / (2π * 1e3)))
-        r_part = (@test_logs (:warn, r"2/2 surface skipped") match_mode = :any run_slayer_from_inputs(model, params, dp, c_part, scan;
-            rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5])).critical_resonant_field
+        r_part =
+            (@test_logs (:warn, r"2/2 surface skipped") match_mode = :any run_slayer_from_inputs(model, params, dp, c_part, scan;
+                rational_psi=[0.5, 0.7], rational_q=[2.0, 1.5])).critical_resonant_field
         @test r_part.Q0[1] ≈ r.Q0[1] && isnan(r_part.Q0[2])
         @test isequal(r_part.br_crit[1], r.br_crit[1]) && isnan(r_part.br_crit[2])
     end

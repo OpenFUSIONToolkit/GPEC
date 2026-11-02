@@ -194,12 +194,12 @@ Fused Laplace kernels: `single = 1/r`, `double = (Δx·n)/r³`. Shares `√(r²)
     dx = ox - sx
     dy = oy - sy
     dz = oz - sz
-    r2 = dx*dx + dy*dy + dz*dz
+    r2 = dx * dx + dy * dy + dz * dz
     r2 < 1e-30 && return (0.0, 0.0)
     rinv = inv(sqrt(r2))
     single = rinv
     r3inv = rinv * rinv * rinv
-    double = (dx*nx + dy*ny + dz*nz) * r3inv
+    double = (dx * nx + dy * ny + dz * nz) * r3inv
     return (single, double)
 end
 

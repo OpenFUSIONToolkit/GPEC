@@ -8,7 +8,7 @@ using LinearAlgebra
     @test FFS.empty_galerkin_result().solver == "none"
     n, kl, fixed = 24, 3, [1, 2, 24]
     H = zeros(ComplexF64, n, n)
-    for j in 1:n, i in max(1, j-kl):min(n, j+kl)
+    for j in 1:n, i in max(1, j - kl):min(n, j + kl)
         H[i, j] = i == j ? 4 + sin(j) : 0.3 * cis(0.3i + 0.7j)
     end
     H = (H + H') / 2  # diagonally dominant → positive definite
@@ -17,7 +17,7 @@ using LinearAlgebra
         A[fixed, :] .= 0
         A[fixed, fixed] = I(length(fixed))
         ab = zeros(ComplexF64, 3kl + 1, n)
-        for j in 1:n, i in max(1, j-kl):min(n, j+kl)
+        for j in 1:n, i in max(1, j - kl):min(n, j + kl)
             ab[2kl+1+i-j, j] = A[i, j]
         end
         return A, ab
@@ -91,7 +91,7 @@ using LinearAlgebra
         kl_rect, ku_rect = 2, 1
         A = ComplexF64[3 0.1 0; 0.2 3 0.1; 0.1 0.2 3]
         ab = zeros(ComplexF64, 2kl_rect + ku_rect + 1, 3)
-        for j in 1:3, i in max(1, j-ku_rect):min(3, j+kl_rect)
+        for j in 1:3, i in max(1, j - ku_rect):min(3, j + kl_rect)
             ab[kl_rect+ku_rect+1+i-j, j] = A[i, j]
         end
         b = ones(ComplexF64, 3, 1)
@@ -120,7 +120,7 @@ end
     intr = FFS.ForceFreeStatesInternal(; mlow=1, mhigh=2, nlow=1, nhigh=1, numpert_total=2)
     for x in (xs..., 0.42), q in (1.0, 1.4)
         L = reshape(lower(x), 2, 2)
-        Q = Diagonal([1-q, 2-q])
+        Q = Diagonal([1 - q, 2 - q])
         expected = Q * L * L' * Q
         F, K, G = FFS.gal_get_fkg(mats, intr, x, q)
         @test F ≈ expected

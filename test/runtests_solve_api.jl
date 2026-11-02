@@ -199,8 +199,11 @@ using HDF5
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
 
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"),
-                extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))]).ffs
+            reference =
+                GPEC.main([
+                    _stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"),
+                        extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))
+                ]).ffs
             @test reference.galerkin.msing == msing
             @test dp.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
             @test dp.raw ≈ reference.delta_prime.raw rtol = 1e-12
@@ -287,7 +290,7 @@ using HDF5
         @test d.terms[2].scale == 1.0 + 0.0im
         @test (im * a).scale == im
         @test (a * 3).scale == 3.0 + 0.0im
-        @test (a - b).terms[2].scale == -0.5 + 0.0im
+        @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
     end
 
@@ -553,9 +556,10 @@ using HDF5
 
         @testset "deck kinetic source names" begin
             # A deck selects only the KineticForces model; test matrices and the retired key stop the parse.
-            parsed(overrides) = mktempdir() do dir
-                GPEC.parse_deck(TOML.parsefile(joinpath(_stage_deck(dir; ffs_overrides=overrides), "gpec.toml")), dir)
-            end
+            parsed(overrides) =
+                mktempdir() do dir
+                    GPEC.parse_deck(TOML.parsefile(joinpath(_stage_deck(dir; ffs_overrides=overrides), "gpec.toml")), dir)
+                end
             @test_throws "script-only" parsed(Dict{String,Any}("kinetic" => "TestKineticMatrices"))
             @test_throws "not a kinetic source" parsed(Dict{String,Any}("kinetic" => "fixed"))
             @test_throws "no longer a key" parsed(Dict{String,Any}("kinetic_source" => "fixed"))
