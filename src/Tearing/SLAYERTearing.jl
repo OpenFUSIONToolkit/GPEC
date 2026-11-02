@@ -19,7 +19,7 @@ function _slayer_chi_inputs(loaded, control, data::KineticProfileData; warn::Boo
     model === :tau_E && data.tau_E === nothing &&
         throw(ArgumentError("SLAYER: P_perp_model = tau_E needs the confinement time tau_E on the kinetic data"))
     if warn
-        uses_e = model in (:chi_perp_e, :D_perp) || control.D_c_type !== :none
+        uses_e = model in (:chi_perp_e, :D_perp) || (control.D_c_type !== :none && control.chi_perp_Dc === nothing)
         uses_i = model in (:chi_perp_i, :D_perp)
         uses_tor = model !== :tau_E
         fallbacks = String[]
@@ -28,8 +28,13 @@ function _slayer_chi_inputs(loaded, control, data::KineticProfileData; warn::Boo
         uses_tor && loaded.chi_tor === nothing && push!(fallbacks, "chi_phi → chi_phi_default = $(data.chi_phi_default)")
         isempty(fallbacks) || @warn "SLAYER: no usable kinetic-file profile (dataset absent or all-zero) for " *
                                     "$(join(fallbacks, ", ")); using the default."
-        control.chi_perp_Dc !== nothing && control.D_c_type !== :none &&
-            @info "SLAYER: the critical Δ uses chi_perp_Dc = $(control.chi_perp_Dc) m²/s for χ⊥,e; P_perp keeps its own χ inputs."
+        if control.chi_perp_Dc !== nothing
+            if control.D_c_type === :none
+                @warn "SLAYER: chi_perp_Dc has no effect with D_c_type = \"none\"; there is no critical Δ to set."
+            else
+                @info "SLAYER: the critical Δ uses chi_perp_Dc = $(control.chi_perp_Dc) m²/s for χ⊥,e at every surface; P_perp keeps its own χ inputs."
+            end
+        end
         model === :tau_E && @info "SLAYER: P_perp_model = tau_E sets P_perp and P_tor from a uniform " *
               "χ_E = (3/16)a²/τ̄_E with τ̄_E = $(data.tau_E) s; the χ_φ profile is not used."
     end

@@ -27,7 +27,8 @@ function _slayer_profiles(data::KineticProfileData, control)
     end
     # `control === nothing` reads no diffusivity, for callers that need only the densities, temperatures and Z_eff.
     model = control === nothing ? nothing : control.P_perp_model
-    uses_e = model in (:chi_perp_e, :D_perp) || (control !== nothing && control.D_c_type !== :none)
+    # With chi_perp_Dc set, the critical Δ takes it in place of χ⊥,e, so only P_perp can need the file's chi_e.
+    uses_e = model in (:chi_perp_e, :D_perp) || (control !== nothing && control.D_c_type !== :none && control.chi_perp_Dc === nothing)
     chi_perp_e = uses_e ? _chi_spline("chi_e", data.chi_e) : nothing
     chi_perp_i = model in (:chi_perp_i, :D_perp) ? _chi_spline("chi_i", data.chi_i) : nothing
     chi_tor = model !== nothing && model !== :tau_E ? _chi_spline("chi_phi", data.chi_phi) : nothing
