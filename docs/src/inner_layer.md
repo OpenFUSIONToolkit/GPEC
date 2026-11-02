@@ -1,4 +1,4 @@
-# Tearing Module
+# Tearing
 
 The `Tearing` module groups the resistive tearing-mode analysis stack:
 `InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
@@ -7,6 +7,24 @@ contour-intersection root extraction), `CriticalResonantField` (torque-balance
 error-field penetration threshold), and the tearing solve itself,
 `solve(TearingProblem(ffs; ...), model; config=TearingConfig(...))`, with its
 `TearingResult` and HDF5 output.
+
+## SLAYER inputs: perpendicular diffusivities
+
+The layer widths and the critical island width of `SLAYER` take perpendicular diffusivities from the kinetic file (`chi_e`, `chi_i`, `chi_phi` profiles in m²/s).
+Two formulas want different quantities: the layer width goes through `P_perp`, the diffusion of the total pressure, while the critical island width ``W_d \propto (\chi_\perp/\chi_\parallel)^{1/4}`` is set by the electron heat transport that flattens the electron temperature across the island.
+`[SLAYER] P_perp_model` selects how `P_perp` is built: from the perpendicular particle diffusivity `D_⊥` that weights the electron and ion channels by their share of the pressure gradient (`"D_perp"`, the default), from `chi_e` alone (`"chi_perp_e"`, the single-χ convention of Fitzpatrick's TJ code), from `chi_i`, from the toroidal Prandtl number, from its ``c_\beta^2`` floor, or from a whole-plasma confinement time (`"tau_E"`, for a plasma without χ profiles).
+`[SLAYER] chi_perp_Dc` sets the electron diffusivity of the critical island width alone, one value for every surface, for a run in which one χ⊥,e cannot serve both formulas; where an interpretive power balance cannot separate the species, treat it as a modeling choice and scan it.
+Since the widths scale as ``\chi^{1/4}``, a factor-two change in χ moves them by about 19%, which can be enough to move the resistive-layer overlap cut of [Stability](stability.md) by one surface.
+
+The DIII-D-like kinetic file of the examples carries analytic profiles,
+
+```
+chi_e   = 2.75 + ψ + 3 exp(−25 (ψ − 0.85)²)
+chi_i   = 1/2 + (3/2) ψ²⁰ + (5/4) exp(−25 (ψ − 0.7)²)
+chi_phi = 3/2 − (5/4) (1 − ψ)⁴
+```
+
+which are of the order of power-balance values for DIII-D H-modes but are not fits to a measured discharge and do not resolve the pedestal transport barrier; `chi_e` is raised by a factor of two so that the default deck exercises the layer-overlap cut.
 
 ## Tearing solve and layer inputs
 

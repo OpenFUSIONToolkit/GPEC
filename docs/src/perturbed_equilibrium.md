@@ -1,9 +1,103 @@
 # Perturbed Equilibrium
 
-The `PerturbedEquilibrium` module computes the plasma response to external magnetic perturbations,
-in two stages: `plasma_response(ffs)` builds the source-independent response and singular-coupling
-operators of a force-free-states result once, and `perturbed_equilibrium(resp, rmp)` drives them with
-one external field. A scan over fields reuses one response.
+`PerturbedEquilibrium` computes the response of the plasma to an external non-axisymmetric field: the three-dimensional perturbed equilibrium that the force-free states and the applied field together form.
+It is the stage that turns a stability calculation into the quantities of error-field and RMP physics: the field that actually reaches each rational surface, the islands it would open, and the energy and torque the perturbation carries.
+
+## What it computes
+
+The force-free states of [Stability](stability.md) give the displacement inside the plasma for any boundary value, and the [Vacuum](vacuum.md) response gives the field outside it.
+On the control surface at `psilim` the two are joined by requiring continuity of the normal field, which fixes the plasma response to an applied spectrum uniquely ([Park et al. (2007a)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2009)](citations.md#PerturbedEquilibrium-Module)).
+`plasma_response(ffs)` builds the operators of that response once, with no reference to a drive; `perturbed_equilibrium(resp, rmp)` applies them to one external field from [Forcing Terms](forcing_terms.md), so a scan over fields reuses one response.
+`compute_perturbed_equilibrium` is the lower-level form of the same call.
+
+The resonant part of the response is reported at every rational surface as the singular coupling: the pitch-resonant field and current, the island half-width and the Chirikov overlap parameter.
+In an ideal solve the plasma shields every rational surface perfectly, so the stored resonant field is the effective one, the field the ideal response would deliver to the surface before shielding; a kinetic solve (`kinetic = "KineticForces"`) gives a finite penetrated field. See the [Conventions](conventions.md) page.
+
+## Governing equations
+
+The applied field is specified as its normal-flux spectrum ``\Phi_x`` on the control surface, one entry per (m, n).
+The plasma inductance ``\Lambda`` relates the total flux to the surface current the plasma response induces, and the surface inductance ``L`` is the vacuum inductance of the same surface; the plasma response is the permeability
+
+```math
+\Phi = P\,\Phi_x, \qquad P = \Lambda L^{-1},
+```
+
+
+oindent and the reluctance ``arrho = L^{-1}(\Lambda^\dagger - L)L^{-1}`` gives the surface current per unit applied flux.
+The perturbed plasma energy and the toroidal torque of the response are quadratic forms in the total flux,
+
+```math
+\delta W_\mathrm{plasma} = 	frac14\,\Phi^\dagger \Lambda^{-1}\Phi, \qquad
+T_\phi = -	frac{2n}{4}\,\operatorname{Im}\!\left(\Phi^\dagger \Lambda^{-1}\Phi
+ight),
+```
+
+
+oindent with the vacuum and surface energies written alongside them.
+The stored matrices act on the coordinate-invariant root-area-weighted field ``	ilde b``; the area-weighted field ``ar b`` and the flux follow from ``ar b = S	ilde b`` and ``\Phi = Aar b`` with the operator `S` and the control-surface area `A` stored next to them (see *Field amplitudes* on the [Conventions](conventions.md) page).
+
+At each rational surface q = m/n the singular coupling evaluates the resonant flux ``\Phi^r`` of the response and reports the area-weighted resonant field ``ar b^r = \Phi^r / A^r`` in tesla, the pitch-resonant current, and the island the resonant flux would open in vacuum superposition, with half-width
+
+```math
+w_s \propto \sqrt{|\delta\psi_s|}
+```
+
+
+oindent in normalized flux and the Chirikov parameter ``\sigma_s = w_s / d_s``, the half-width over the half-distance to the neighbouring rational surface, so ``\sigma > 1`` means the islands overlap.
+The coupling matrices `C_*` map the applied ``	ilde b`` to each of these quantities, and their singular-value decomposition ranks the applied spectra by resonant drive (see below).
+
+## Running it
+
+From `examples/DIIID-like_ideal_example/gpec.toml`, after the `[ForceFreeStates]` solve and a `[ForcingTerms]` drive:
+
+```toml
+[PerturbedEquilibrium]
+compute_singular_coupling = true   # resonant fields, islands and Chirikov parameter
+regularization_width = 0.05        # width of the regularization of the ideal response at each rational surface
+```
+
+`compute_torque_response = true` adds the torque response matrices of a kinetic forward solve (below).
+In a script the same two steps are
+
+```julia
+using GeneralizedPerturbedEquilibrium
+
+resp = plasma_response(ffs; compute_singular_coupling=true)
+pe   = perturbed_equilibrium(resp, rmp; regularization_width=0.05)   # rmp: an RMPField, see the Scripting API
+save_to_hdf5("gpec.h5", pe)
+```
+
+with the `RMPField` built from coils or a file as on the [Scripting API](api.md) page; computing the response does not write a file.
+
+## Outputs
+
+| Dataset | Meaning | Units |
+|---|---|---|
+| `PerturbedEquilibrium/mode_m`, `mode_n` | the (m, n) of each entry of the mode axis, m fastest, one block per n | |
+| `PerturbedEquilibrium/ForcingModes/m`, `n`, `amplitude` | the applied spectrum | T |
+| `PerturbedEquilibrium/forcing_b`, `forcing_b_root_area`, `forcing_b_area` | the applied control-surface spectrum as bare, root-area-weighted and area-weighted normal field | T |
+| `PerturbedEquilibrium/response_b`, `response_b_root_area`, `response_b_area` | the total (applied plus plasma) spectrum in the same three forms | T |
+| `PerturbedEquilibrium/ResponseMatrices/plasma_inductance`, `surface_inductance`, `permeability`, `reluctance` | ``	ilde\Lambda``, ``	ilde L``, ``	ilde P``, ``	ildearrho`` in root-area-weighted field space | |
+| `PerturbedEquilibrium/ResponseMatrices/rootarea_to_area_weight_operator`, `surface_area` | ``S`` and ``A`` of the control surface | m² (`surface_area`) |
+| `PerturbedEquilibrium/Response/psi` | the ψ_N grid of the profiles | |
+| `PerturbedEquilibrium/Response/xi_n`, `xi_R`, `xi_Z`, `xi_phi` | the displacement in mode space: normal and cylindrical components | m |
+| `PerturbedEquilibrium/Response/xi_psi`, `Jxi_*`, `xi_cov_*`, `xi_clebsch_*` | its contravariant, Jacobian-weighted, covariant and Clebsch components | |
+| `PerturbedEquilibrium/Response/b_n`, `b_R`, `b_Z`, `b_phi`, `b_psi_area_weighted` | the perturbed field in mode space: normal, cylindrical and area-weighted normal components | T |
+| `PerturbedEquilibrium/Response/Jb_*`, `b_cov_*` | its Jacobian-weighted and covariant components | |
+| `PerturbedEquilibrium/SingularCoupling/rational_psi`, `rational_q`, `rational_m`, `rational_n`, `rational_area` | the resonant (surface, n) rows and their surface areas | m² (`rational_area`) |
+| `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field` | ``ar b^r`` at each rational surface | T |
+| `PerturbedEquilibrium/SingularCoupling/penetrated_area_weighted_field` | the penetrated area-weighted field | T |
+| `PerturbedEquilibrium/SingularCoupling/resonant_current` | the pitch-resonant current | A |
+| `PerturbedEquilibrium/SingularCoupling/island_width_sq`, `island_half_width` | ``w_s^2`` and ``w_s`` in ψ_N | |
+| `PerturbedEquilibrium/SingularCoupling/chirikov_parameter` | ``\sigma_s`` | |
+| `PerturbedEquilibrium/SingularCoupling/Delta_prime` | the forcing-driven tearing Δ′ per surface (Riccati solves) | |
+| `PerturbedEquilibrium/SingularCoupling/C_*` | the coupling matrices from the applied ``	ilde b`` to each quantity above | |
+| `PerturbedEquilibrium/SingularCoupling/DominantMode/` | the core-window SVD of the resonant-field coupling (below) | |
+| `PerturbedEquilibrium/Energies/plasma_energy`, `vacuum_energy`, `surface_energy` | the perturbed energies | J |
+| `PerturbedEquilibrium/Energies/toroidal_torque` | the boundary-response torque ``T_\phi`` | N·m |
+| `PerturbedEquilibrium/TorqueResponse/` | the torque response matrices of a kinetic forward solve (below) | N·m/T² |
+
+The `Analysis` module plots these; see [Analysis](analysis.md).
 
 ## Types
 
@@ -18,8 +112,6 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibrium
 ```
-
-Save a computed state with [`save_to_hdf5`](@ref); computing the response does not write a file.
 
 ## Several toroidal modes
 

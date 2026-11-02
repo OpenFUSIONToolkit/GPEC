@@ -26,14 +26,14 @@ Every stage after `Equilibrium` reads the force-free states, and `KineticForces`
 | How does the plasma respond to an RMP or error field; do islands overlap? | `[ForcingTerms]` + `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, `…/island_half_width`, `…/chirikov_parameter` |
 | What NTV torque does that field drive? | `[KineticForces]` (+ `[Equilibrium] kinetic_file`) | `KineticForces/<method>/total_torque` |
 | How tight must the coil tolerances be to avoid locking? | `[ErrorFields]` | `ErrorFields/Risk/locking_probability_percent` |
-| What are the tearing growth rate and critical resonant field? | `[Tearing]` + `[SLAYER]` or `[GGJ]` | `Tearing/Roots/gamma`, `Tearing/Roots/omega`, `Tearing/CriticalResonantField/` |
-| What does a resistive inner layer do to the response? | `[Match]` + `[GGJ]` | `SingularSurfaces/Match/` |
+| What are the tearing growth rate and critical resonant field? | `[Tearing]` (+ `[SLAYER]` or `[GGJ]`) | `Tearing/Roots/gamma`, `Tearing/Roots/omega`, `Tearing/CriticalResonantField/` |
+| What does a resistive inner layer do to the response? | `[Match]` (+ `[GGJ]`) | `SingularSurfaces/Match/` |
 
 ### Headline outputs
 
 - **Free-boundary energy** `ForceFreeStates/FreeBoundaryStability/W_freeboundary` is the power-normalized free-boundary energy matrix, the sum of `W_plasma` and `W_vacuum` for the wall of the deck (no wall when `[Wall]` is absent). `eigenmode_energies` lists its generalized eigenvalues, the ideal δW per unit displacement of each free-boundary eigenmode, sorted most unstable first, so a negative first entry means the plasma is ideal-kink unstable and a positive one is the stability margin.
-- **Tearing index** `SingularSurfaces/Delta_prime_matrix` is the Δ′ matching matrix in the PEST-3 convention, from which the outer-region tearing drive of each rational surface follows; a positive Δ′ means the outer region drives the tearing mode and the inner layer (`Tearing`) sets its growth rate.
-- **Resonant field** `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field` is the area-weighted resonant normal field b̄ʳ `[T]` at each rational surface after the plasma response, the quantity that drives islands and sets locking thresholds. `island_half_width` is the vacuum-superposition island each resonant flux would open, w_s ∝ √|δψ_s|, and `chirikov_parameter` is the ratio of adjacent half-widths to the surface separation, so σ > 1 means the islands overlap.
+- **Tearing index** `SingularSurfaces/Delta_prime_matrix` is the Δ′ matching matrix in the PEST-3 convention, whose diagonal is the outer-region Δ′ of each rational surface; a positive Δ′ means the outer region drives the tearing mode and the inner layer (`Tearing`) sets its growth rate.
+- **Resonant field** `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field` is the area-weighted resonant normal field b̄ʳ `[T]` at each rational surface after the plasma response, the quantity that drives islands and sets locking thresholds. `island_half_width` is the vacuum-superposition island each resonant flux would open, w_s ∝ √|δψ_s|, and `chirikov_parameter` is that half-width over the half-distance to the neighbouring rational surface, so σ > 1 means the islands overlap.
 - **Torque** `KineticForces/<method>/total_torque` is the neoclassical toroidal viscosity (NTV) torque T_φ `[N·m]` that the perturbed equilibrium exerts on the plasma, with the sign convention of the [Conventions](conventions.md) page.
 
 ## What each stage computes
@@ -66,7 +66,7 @@ Page: [Local stability](ballooning.md).
 
 ### Match
 
-Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, section `[GGJ]`) and rebuilds the force-free states with the resulting layer response, so that the later stages see a resistive rather than perfectly shielded plasma; `ideal = true` keeps the shielded limit for comparison.
+Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, so that the later stages see a resistive rather than perfectly shielded plasma; `ideal = true` keeps the shielded limit for comparison.
 Outputs: `SingularSurfaces/Match/`.
 Page: [Tearing](inner_layer.md).
 
@@ -97,7 +97,7 @@ Page: [Error fields](error_fields.md).
 
 Solves the tearing dispersion relation of each rational surface by matching the outer-region Δ′ to an inner-layer model: the two-fluid slab `SLAYER` (`[SLAYER]`) or the toroidal resistive-MHD `GGJ` (`[GGJ]`), selected by `[Tearing] inner_model`.
 `[Tearing.search]` sets the root search in the complex frequency plane, and `[Tearing.CriticalResonantField]` adds the resonant field at which the layer's shielding is overcome.
-Needs a Δ′-producing integrator (`"Riccati"` or `"Galerkin"`) and, for `SLAYER`, a kinetic file.
+Needs the Δ′ matrix of `"Riccati"` with `vac_flag = true` or `"Galerkin"` with `[Galerkin] rpec_flag = true`, and the kinetic profiles of `[Equilibrium] kinetic_file` (`SLAYER` reads its densities, temperatures, rotation and diffusivities there).
 Outputs: `Tearing/PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/`.
 Key references: [Glasser, Wang and Park (2016)](citations.md#InnerLayer-Module), [Park (2022)](citations.md#InnerLayer-Module).
 Page: [Tearing](inner_layer.md).
@@ -154,7 +154,7 @@ Every key is documented on the module page of its section, and every example dec
 | `[Forward]`, `[Riccati]` | the radial ODE integrators | [Stability](stability.md) |
 | `[Galerkin]` | the finite-element outer-region solver | [Galerkin solver](galerkin.md) |
 | `[LocalStability]`, `[Ballooning]` | the local stability stage and its ballooning integration | [Local stability](ballooning.md) |
-| `[Match]`, `[GGJ]` | the inner-layer matching stage and the GGJ layer model | [Tearing](inner_layer.md) |
+| `[Match]`, `[GGJ]` | the inner-layer matching stage and the options of its GGJ layer model | [Tearing](inner_layer.md) |
 | `[ForcingTerms]`, `[[ForcingTerms.coil_set]]` | the external field: a file or coil sets | [Forcing terms](forcing_terms.md) |
 | `[PerturbedEquilibrium]` | the plasma response stage and its singular-coupling options | [Perturbed equilibrium](perturbed_equilibrium.md) |
 | `[KineticForces]` | the NTV torque stage and the kinetic solve of `ForceFreeStates` | [Kinetic forces](kinetic_forces.md) |

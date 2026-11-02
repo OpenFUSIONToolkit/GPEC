@@ -1,494 +1,153 @@
-# Ideal MHD Stability (ForceFreeStates)
+# Stability
 
-The `ForceFreeStates` module implements ideal MHD stability analysis for axisymmetric toroidal
-plasmas following the direct Newcomb criterion described in [Glasser 2016].  It solves the
-Euler-Lagrange (EL) system derived from the potential energy functional, identifies singular
-(rational) surfaces where resonant coupling occurs, and returns eigenmode energies, the
-tearing stability parameters Δ', and the full inter-surface Δ' matrix.
+`ForceFreeStates` determines the ideal MHD stability of the equilibrium and produces the force-free states, the displacement fields that every later stage builds on.
+It implements the direct Newcomb criterion of the Fortran DCON ([Glasser (2016)](citations.md#ForceFreeStates-Module)): rather than solving an eigenvalue problem for the growth rate, it integrates the Euler–Lagrange equations of the perturbed potential energy across the plasma and reads stability from the solutions themselves.
 
-## Physical background
+## What it computes
 
-Ideal MHD stability is determined by the sign of the perturbed potential energy
+For a toroidal mode number n, the perturbation is expanded in poloidal harmonics m over a window around the resonant range, and the displacement ``\xi(\psi)`` becomes a vector of harmonic amplitudes.
+The ideal MHD potential energy ``\delta W[\xi]`` is a quadratic functional of ``\xi``, and its extrema satisfy a linear system of ODEs in ``\psi`` whose coefficients are singular at every rational surface q = m/n, where the resonant harmonic decouples from the field-line bending.
+Integrating that system from the axis outward with the prescribed crossing of each rational surface gives the force-free states: the set of displacements that satisfy force balance everywhere inside the plasma for arbitrary boundary values.
+
+Three results follow from them:
+
+- **Fixed-boundary stability.** A zero of the determinant of the solution matrix between the axis and the edge means a displacement vanishing at the boundary with negative energy, so the plasma is unstable even with a perfectly conducting wall on its surface (the `crit` scan).
+- **Free-boundary stability.** With `vac_flag = true`, the [Vacuum](vacuum.md) module supplies the vacuum energy of the `[Wall]` section (no wall when the section is absent), and the total energy ``W = W_\mathrm{plasma} + W_\mathrm{vacuum}`` on the control surface is a Hermitian matrix in the boundary harmonics. Its generalized eigenvalues with respect to the power norm are the free-boundary eigenmode energies; a negative least eigenvalue means an ideal external kink.
+- **The tearing index Δ′.** Across each rational surface the solution has a large and a small asymptotic part. The Δ′ matrix of the outer region, assembled from the force-free states, gives the jump of the small solution driven by a unit tearing perturbation at each surface; it is the outer-region input of every resistive calculation ([Tearing](inner_layer.md), `[Match]`).
+
+## Governing equations
+
+Ideal stability is decided by the sign of the perturbed potential energy
 
 ```math
-\delta W[\xi] = \int_0^{\psi_\mathrm{lim}} \mathcal{F}(\xi, \xi') \, d\psi,
+\delta W[\xi] = \int_0^{\psi_\mathrm{lim}} \mathcal{F}(\xi, \xi')\, d\psi ,
 ```
 
-where ``\xi(\psi)`` is the poloidal displacement vector.  The extremum of ``\delta W`` over all
-admissible ``\xi`` satisfies the Euler-Lagrange system [Glasser 2016, Eq. 24]:
+whose extrema over all admissible ``\xi`` satisfy a first-order system in the harmonic amplitudes ``U_1 = \xi`` and their conjugate momenta ``U_2`` (Glasser 2016, Eq. 24):
 
 ```math
-\frac{d}{d\psi}
-\begin{pmatrix} U_1 \\ U_2 \end{pmatrix}
-=
-\begin{pmatrix} A & B \\ C & D \end{pmatrix}
-\begin{pmatrix} U_1 \\ U_2 \end{pmatrix},
-\quad
-A = -Q\bar{F}^{-1}\bar{K}, \;
-B = Q\bar{F}^{-1}Q, \;
-C = \bar{G} - \bar{K}^\dagger\bar{F}^{-1}\bar{K}, \;
-D = \bar{K}^\dagger\bar{F}^{-1}Q,
+\frac{d}{d\psi}\begin{pmatrix} U_1 \\ U_2 \end{pmatrix}
+= \mathbf{L}(\psi)\begin{pmatrix} U_1 \\ U_2 \end{pmatrix},
 ```
 
-where ``\bar{F}``, ``\bar{K}``, ``\bar{G}`` are the MHD metric matrices in Fourier-mode space
-and ``Q = \mathrm{diag}(1/(m - nq))`` is the singular factor.  The Newcomb criterion states
-that the plasma is stable if and only if this system admits a regular solution that remains
-finite across every rational surface.
+where ``\mathbf{L}`` is built from the Fourier-space metric matrices ``\bar{F}``, ``\bar{K}`` and ``\bar{G}`` of the equilibrium and the resonance factor ``Q = \mathrm{diag}(m - nq)``.
+The resonance factor vanishes at each rational surface, so the solutions there behave as ``|\psi - \psi_s|^{-1/2 \pm \sqrt{-D_I}}``, a large and a small solution governed by the Mercier index ``D_I``; GPEC assembles the right-hand side from reduced matrices that carry explicit ``(m - nq)`` factors rather than their inverses, the convention used on every page.
+The Newcomb criterion states that the plasma is fixed-boundary stable if and only if the solution that is regular at the axis remains nonsingular across every rational surface and up to the edge.
 
-**Key references**
+The Riccati integrator works with the matrix ``S = U_1 U_2^{-1}`` ([Glasser, Kolemen and Glasser (2018)](citations.md#ForceFreeStates-Module), Eq. 19), which obeys a quadratic matrix ODE and stays bounded where ``U_1`` and ``U_2`` grow exponentially, so that the rational surfaces can be crossed without the Gaussian reduction of the forward integration.
+Its global boundary-value problem over all surfaces gives the Δ′ matrix of [Glasser and Kolemen (2018)](citations.md#InnerLayer-Module), stored in the PEST-3 convention: the diagonal entry of each surface is its outer-region Δ′, positive when the outer region drives the tearing mode, and the off-diagonal entries couple the surfaces.
 
-| Paper | Content |
-|-------|---------|
-| [Glasser 2016] Phys. Plasmas **23**, 112506 | Newcomb criterion, EL system, standard DCON integration |
-| [Glasser 2018a] Phys. Plasmas **25**, 032507 | Riccati reformulation, reduced stiffness near singular surfaces |
-| [Glasser 2018b] Phys. Plasmas **25**, 032501 | STRIDE code: parallel FM integration, inter-surface Δ' matrix |
+## Integrators
 
-## Integration methods
+`[ForceFreeStates] integrator` selects the radial method; its numerical settings sit in a section of the same name.
 
-Three formalisms are available, selected by `integrator`. Forward and Riccati solve the same
-EL system and differ in numerical strategy and in what they leave behind for the rest of the
-pipeline: the forward driver returns dense displacement profiles, the Riccati driver returns
-the inter-surface ``\Delta'`` matrix. Galerkin solves the outer region variationally instead,
-and is documented in `docs/src/galerkin.md`.
+- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in the Riccati basis and assembles the Δ′ matrix. It stores the chunk endpoints only, so it yields no dense ``\xi`` profiles.
+- `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction at each rational surface. It returns dense displacement profiles, is the only integrator the perturbed equilibrium stage consumes for ``\xi``-resolved output, and the only one that supports the kinetic solve.
+- `"Galerkin"` (`[Galerkin]`) solves the outer region variationally on a finite-element basis, giving the resistive Δ′ matrix and the PEST-3 blocks but no free-boundary energies; see [Galerkin Solver](galerkin.md).
 
-### Forward integration
+`kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs `[Equilibrium] kinetic_file`; see [Kinetic Forces](kinetic_forces.md).
 
-`forward_eulerlagrange_integration` is the baseline driver — our implementation of the
-standard DCON radial integration [Glasser 2016].  It integrates the EL ODE directly
-in ``(U_1, U_2)`` using the adaptive 9th-order `Vern9` solver.  Near each rational surface the
-columns of ``U_2`` that correspond to resonant modes are zeroed via Gaussian reduction (GR),
-keeping the solution bounded; `transform_u!` undoes the reduction at the end, so `u_store`
-comes back dense in the axis (Euler-Lagrange) basis.  This is the reference path for
-correctness comparisons, the only path whose solution the perturbed-equilibrium stage can
-consume, and the only path that supports a kinetic source.
+## Running it
 
-Enable with:
+From `examples/DIIID-like_ideal_example/gpec.toml` (abridged), with the `[Riccati]` keys of `examples/DIIID-like_riccati_deltaprime_example`:
+
 ```toml
 [ForceFreeStates]
-integrator = "Forward"
-```
+nn = 1                   # toroidal mode number, or consecutive numbers as a list ([1, 2, 3])
+vac_flag = true          # free-boundary energies with the [Wall] vacuum response
+qlow = 1.02              # inner edge of the integration domain
+qhigh = 1e3              # outer bound of qlim (see Integration domain)
+delta_mlow = 8           # extra poloidal modes below the resonant range
+delta_mhigh = 8          # extra poloidal modes above it
+integrator = "Forward"   # "Riccati" is the default
+truncate_at_rational_offset = true
+rational_offset_fraction = 0.2
 
-### Riccati integration
-
-`riccati_eulerlagrange_integration` (the default) is our implementation of the STRIDE
-approach [Glasser 2018b], built on the dual Riccati reformulation [Glasser 2018a].  It
-decomposes the radial domain into independent chunks, integrates each chunk's
-fundamental-matrix (FM) propagator in parallel
-using `Threads.@threads`, then multiplies the propagators in order and applies each
-singular-surface crossing serially.  It is the only driver that produces the inter-surface
-``\Delta'`` matrix.  Because chunk endpoints are all it stores, `u_store` is sparse and stays
-in the Riccati basis — dense ``\xi`` profiles and the
-`ForceFreeStates/Solutions/ForwardIntegration/xi_*` datasets require the forward driver.
-
-Crossings and the outer-plasma re-integration use the dual Riccati matrix
-``S = U_1 \cdot U_2^{-1}`` [Glasser 2018a, Eq. 19]:
-
-```math
-\frac{dS}{d\psi} = w^\dagger \bar{F}^{-1} w - S\bar{G}S, \qquad
-w = Q - \bar{K}S.
-```
-
-``S`` remains bounded near rational surfaces (where ``U_1, U_2`` grow exponentially).  Rather
-than integrating the quadratic Riccati ODE directly (which blows up when ``|S|`` is large),
-the code integrates the linear EL system with `sing_der!` as the RHS and recovers
-``S = U_1 U_2^{-1}`` via periodic renormalization — an approach that is mathematically
-equivalent to O(Δψ) but uses `Vern9`'s full 9th-order accuracy.  Renormalization is
-triggered whenever ``\max(|U_1|)`` or ``\max(|U_2|)`` exceeds the threshold `renorm_threshold`, and is
-forced at the end of each chunk.  At singular surface crossings,
-`riccati_cross_ideal_singular_surf!` applies the small-asymptotic matching directly in column
-`ipert_res` — without Gaussian reduction — and renormalizes to ``(S, I)``.
-
-Enable with:
-```toml
-[ForceFreeStates]
-integrator = "Riccati"
+[Forward]
+eulerlagrange_tolerance = 1e-10
 
 [Riccati]
-nchunks    = 0         # 0 = auto: derived from the singular-surface count alone
+eulerlagrange_tolerance = 1e-10
+save_interval = 1
+renorm_threshold = 1e3   # renormalize the Riccati basis above this solution norm
 ```
 
-#### Chunking and thread independence
-
-`balance_integration_chunks` splits the base chunks until the count reaches a target derived
-from the number of singular surfaces, `max(2 m_s + 3, 8(m_s + 1) + m_s)`, where ``m_s`` is
-`msing`.  Setting `nchunks` overrides that target; a value below the ``2 m_s + 3`` floor is
-clamped up with a warning.  The target never consults `Threads.nthreads()`, and every chunk
-integrates independently from identity initial conditions, so the results do not depend on how
-many threads `julia -t` provides — threads change wall-clock only.
-
-#### Bidirectional integration for large N
-
-For large mode counts the FM propagator for a chunk ending near a rational surface is
-ill-conditioned: the EL solutions grow exponentially toward the rational surface, so the
-forward FM amplifies numerical errors.  GPEC follows the STRIDE approach [Glasser 2018b,
-Sec. III.A]: the crossing chunk (the last sub-chunk before each rational surface) is
-integrated *backward* — from the rational surface toward the interior — producing a
-well-conditioned backward FM ``\Phi_L``.  The forward propagation is recovered as
-``\Phi_L^{-1}`` via an LU solve in serial assembly, which is accurate precisely because
-``\Phi_L`` is well-conditioned.
-
-The implementation uses a `direction` field on `IntegrationChunk`:
-
-- `direction = +1`: standard forward integration, `tspan = (ψ_start, ψ_end)`.
-- `direction = -1`: backward integration, `tspan = (ψ_end, ψ_start)` (reversed).
-
-`chunk_el_integration_bounds(...; bidirectional=true)` assigns `direction = -1` to every
-crossing chunk.  `balance_integration_chunks` preserves this: the sub-chunk closest to the
-rational surface inherits `direction`, while the earlier sub-chunk always gets `direction=+1`.
-
-**Accuracy** (N=26, DIIID-like example): energy eigenvalue within 2% of the forward path.
-The residual ~2% gap comes from the different crossing convention (Riccati-style direct
-zeroing vs GR), not from ODE tolerance; it is present at every thread count.
-
-### Galerkin
-
-`integrator = "Galerkin"` solves the same EL system variationally instead of integrating it:
-the outer region is discretized on packed Hermite-cubic elements and solved as one global banded
-system, giving the RDCON resistive ``\Delta'`` matrix and the PEST-3 matching blocks.  It computes its own vacuum response and
-returns no free-boundary energies, no ODE trace, and no fixed-boundary `crit` scan.  With
-a `[Match]` section it also matches the inner layer, producing a driven ``\xi`` solution.
-Kinetic runs are not supported.  See
-`docs/src/galerkin.md` for the solver and its `[Galerkin]` settings.
-
-Enable with:
-```toml
-[ForceFreeStates]
-integrator = "Galerkin"
-```
-
-## Local stability: Mercier and ballooning (s–α)
-
-A `[LocalStability]` section in the deck runs a local high-``n`` stability scan over every
-flux surface, as its own stage before the global ideal analysis above. The section's keys are
-the problem settings (`theta_k`, `alpha_boundary_scan`); an optional `[Ballooning]` section holds the
-[`Ballooning`](@ref) numerical settings, and `[Run] verbose` the solve verbosity. A script runs the same stage with `solve(LocalStabilityProblem(eq), Ballooning(); verbose=false)`
-(see the [scripting API](api.md)).
-For the derivation and implementation details behind these diagnostics, see
-[Ballooning and Mercier Local Stability](ballooning.md).
-Three diagnostics are produced and stored under the `LocalStability/` HDF5 group, each a profile
-in normalized poloidal flux ``\psi``:
-
-- **Mercier criterion ``D_I``** (`LocalStability/D_I`) — the ideal interchange criterion. A surface
-  is Mercier-unstable where ``D_I > 0``. It is evaluated from the ``\det(\bar{d}_0)`` of the
-  integrated local-mode matrix.
-- **Resistive interchange ``D_R``** (`LocalStability/D_R`) — the Glasser–Greene–Johnson resistive
-  interchange criterion ``D_R = D_I + (H - 1/2)^2``. The ``D_I`` term is the same
-  ``\det(\bar{d}_0)`` value reported in `LocalStability/D_I`; ``H`` is computed from the legacy
-  Mercier/GGJ flux-surface averages of the field and metric quantities. ``D_R > 0``
-  indicates resistive interchange instability.
-- **Ballooning ``\Delta'``** (`LocalStability/ballooning_Delta_prime`) — the high-``n`` ballooning
-  stability index, obtained by integrating the ballooning equation along the field line and
-  taking the jump in the logarithmic derivative of the solution between the two asymptotic
-  ends.
-
-With `alpha_boundary_scan = true` the stage also writes the critical ballooning
-``\alpha`` boundary: `LocalStability/ballooning_psi`, `LocalStability/alpha` and
-`LocalStability/alpha_critical` (see the [scripting API](api.md)).
-
-!!! note "Two different Δ' quantities"
-    `LocalStability/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
-    distinct from the **resistive tearing** ``\Delta'`` described in the next section, which
-    is written under `SingularSurfaces/` and `PerturbedEquilibrium/SingularCoupling/Delta_prime`.
-    They measure different instabilities; do not confuse them.
-
-### s–α diagram
-
-The local criteria can be mapped over a two-parameter ``(p', q')`` scan at a single flux
-surface — the classic s–α (shear–pressure) stability diagram. For a chosen surface the
-pressure gradient ``p'`` and shear ``q'`` are scaled away from their equilibrium values, and
-``\Delta'`` and ``D_I`` are recomputed on the resulting grid. The ``\Delta' = 0`` and
-``D_I = 0`` contours bound the ballooning- and Mercier-stable regions, with the equilibrium
-operating point marked inside.
-
-The example script `examples/DIIID-like_ideal_example/analyze_example.jl` demonstrates the
-full workflow: it plots the ``s`` and ``\alpha`` profiles, the ``D_I`` and ballooning
-``\Delta'`` profiles, and the 2-D s–α maps with their zero contours, using
-`salpha_reference`, `compute_ballooning_stability!`, and `scan_delta_prime_map`.
-
-## Δ' tearing stability parameter
-
-### Per-surface Δ' (`delta_prime`)
-
-At each rational surface the asymptotic matching condition gives the tearing stability
-parameter [Glasser 2016]:
-
-```math
-\Delta'_s = \frac{c_{a,r}[i_s,i_s,2] - c_{a,l}[i_s,i_s,2]}{4\pi^2 \psi_0},
-```
-
-where ``c_{a,l}`` and ``c_{a,r}`` are the left and right asymptotic coefficients at surface
-``s``, and ``i_s`` is the column index of the resonant mode.  Positive ``\Delta' > 0``
-indicates a tearing-unstable surface.
-
-The Riccati and parallel FM paths populate `intr.sing[s].delta_prime` (a length-``n_\mathrm{res}``
-vector) inline during each crossing.  A companion vector `delta_prime_col` (length N) stores
-the coupling of all poloidal modes to the resonant mode at surface ``s``:
-
-```math
-(\Delta'_\mathrm{col})_{j,i} = \frac{c_{a,r}[j,i_s,2] - c_{a,l}[j,i_s,2]}{4\pi^2 \psi_0}.
-```
-
-The diagonal element ``(\Delta'_\mathrm{col})_{i_s,i}`` equals `delta_prime[i]` exactly by
-construction.
-
-### Inter-surface Δ' matrix (`delta_prime_matrix`)
-
-`compute_delta_prime_matrix!` assembles an ``m_\mathrm{sing} \times m_\mathrm{sing}``
-inter-surface tearing matrix following the STRIDE global BVP [Glasser 2018b, Sec. III.B].
-Internally, the solver builds a raw ``2 m_\mathrm{sing} \times 2 m_\mathrm{sing}`` matrix
-whose rows/columns index the *left* and *right* inner-layer boundaries of every rational
-surface; the stored PEST3-convention ``\Delta'`` is the four-term combination
-``\text{dp\_raw}[2i, 2j] - \text{dp\_raw}[2i, 2j{-}1] - \text{dp\_raw}[2i{-}1, 2j] + \text{dp\_raw}[2i{-}1, 2j{-}1]``
-that folds the raw block into a per-surface response.  The BVP unknowns are the plasma
-state at the left and right inner-layer boundaries of every rational surface; the driving
-terms are unit-amplitude asymptotic solutions at each boundary.  The resulting matrix
-encodes the full plasma response between all pairs of surfaces and is required for
-resistive stability analysis of multi-surface configurations.
-
-The BVP is well-conditioned because it is formulated using the split ``(\Phi_R, \Phi_L)``
-propagator blocks from bidirectional integration rather than the monolithic forward product
-``\Phi_L^{-1} \Phi_R`` (which is ill-conditioned for large N):
-
-```math
-\Phi_R[j] \cdot x_R[j-1] - \Phi_L[j] \cdot x_L[j] = 0
-\quad \text{(junction at } \psi_m[j]\text{)},
-```
-
-where ``\Phi_R[j]`` is the forward FM product from ``\psi_{R,j-1}`` to the junction, and
-``\Phi_L[j]`` is the backward crossing FM from ``\psi_{L,j}`` to the junction.
-
-The matrix is written to the HDF5 output under `SingularSurfaces/Delta_prime_matrix`.
-The Galerkin integrator computes the same quantity in the same PEST-3 convention and
-publishes it on the same path, so downstream consumers (SLAYER among them) never branch
-on which formalism ran.
-
-## Integration domain truncation
-
-The Euler–Lagrange integration runs from the axis out to `psilim`, which is set from the
-target safety factor `qlim`:
-
-- `qlim` starts at `min(qmax, qhigh)`, where `qmax` is q at the equilibrium's `psihigh`.
-- With `truncate_at_rational_offset = true` (the default, for diverted equilibria where q → ∞ at the
-  separatrix), `qlim` moves to `(last rational + rational_offset_fraction) / n`, so the integration ends a fixed
-  fraction of a rational spacing past the last surface instead of close to one. The offset is
-  then stepped back by `1/n` until it no longer exceeds the bound it started from, so `rational_offset_fraction`
-  never extends the domain past `qmax`, `qhigh`, or the layer-overlap cap below. A bound that
-  falls on a rational, or less than `rational_offset_fraction / n` above one, therefore excludes it: with
-  `rational_offset_fraction = 0.2`, both `qhigh = 4.0` and `qhigh = 4.1` give `qlim = 3.2`.
-- With `truncate_at_rational_offset = false` (limited or analytic equilibria with finite edge q),
-  `qhigh` and `psihigh` set the domain directly.
-
-### Resistive-layer overlap
-
-Near the separatrix the rational surfaces crowd together faster than their resistive layers
-narrow, so eventually adjacent layers overlap. Past that point no surface keeps a
-well-separated inner region and the matched-asymptotic treatment is not defined; Sect. 5.9 of
-Fitzpatrick (2025), listed under [InnerLayer Module](@ref) in the citations, restricts the
-response calculation to the region inside it.
-
-GPEC locates that point with a scan of the rational surfaces of each toroidal mode number in
-the run; for multi-`n` runs the innermost overlap point, over all `n`, is the one used. Each surface gets a layer solve from the kinetic profiles, and its
-diffusive-resistive width (Fitzpatrick 2025, Eq. 100) is converted to a normalized-flux width
-so it can be compared with the spacing between neighbouring surfaces. The cut is placed at the
-last surface before two adjacent layers first touch.
-
-Surfaces beyond the equilibrium grid are located on the logarithmic divergence of q at the
-separatrix, taken from the equilibrium's own poloidal flux rather than fitted. Each X-point on
-the last closed flux surface contributes one term,
-
-```math
-q(\psi) = q_K + \sum_i A_i \ln\frac{\psi_{X_i} - \psi_K}{\psi_{X_i} - \psi},
-\qquad A_i = \frac{F}{2\pi R_{X_i}\sqrt{-\det H_i}},
-```
-
-where ``\psi_{X_i}`` is the flux at the saddle, ``H_i`` the Hessian of the poloidal flux there,
-``F = R B_\phi``, and ``q_K`` the traced q on the outermost grid surface ``\psi_K``. One term
-describes a single null and two a double null, connected or not. The X-points are found by
-following each minimum of the poloidal field along the outermost surface to the saddle it leads
-to; on a single-null shape this usually also reaches the far secondary X-point, whose term is
-small. The law is used only if it reproduces the traced shear over the outer knots, and an
-equilibrium with no X-point nearby is not extrapolated. A limited plasma that has an X-point
-nearby is not told apart from a diverted one: one rational is placed past its boundary and the run
-warns that no overlap could be established there, leaving the domain unchanged. Divertors with a
-second null beside the primary one or on the leg (snowflake, x-point target) are not modelled.
-
-The X-point flux need not coincide with the equilibrium's boundary: a reconstruction that places
-its boundary slightly inside the separatrix has finite q at ``\psi = 1``, and rational surfaces
-between that boundary and the X-point lie in the real plasma but outside the equilibrium GPEC
-holds. The scan places only the first of them, to judge whether the outermost surface inside is
-clean, and scores it only when the kinetic profiles extend that far. `psihigh` remains the upper
-limit throughout: the overlap point can only narrow the domain, and when no overlap can be
-established the domain keeps its requested limit.
-
-TokaMaker's `save_eqdsk` writes such files when `lcfs_pad` (``p``) is set with the default
-`truncate_eq=True`: the equilibrium is cut at ``1 - p`` and renormalised, so the X-point sits at
-``\psi = 1/(1 - p)``. Writing with `truncate_eq=False` keeps the whole plasma; EFIT-written files
-place their boundary on the X-point flux.
-
-The scan runs only when the cap is switched on, and it needs kinetic profiles on the equilibrium.
-It reads the plasma from the equilibrium's kinetic data and the layer closures from a
-`SLAYERModel`, the same inputs the SLAYER tearing solve uses, so the layer widths cannot disagree
-between them. In a script, `psilim_from_layer_overlap = true` scans with the default closures and a
-model sets others:
+The same solve from a script takes the deck keys as keywords of the problem and the integrator:
 
 ```julia
-ffs = solve(eq, Riccati(); nn=1, psilim_from_layer_overlap=SLAYERModel(; P_perp_model=:chi_perp_e))
-ffs.layer_overlap.psihigh      # the overlap point
+using GeneralizedPerturbedEquilibrium
+
+eq  = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada")
+ffs = solve(eq, Riccati(; eulerlagrange_tolerance=1e-10); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true, qlow=1.02)
+
+real(ffs.free_boundary.et[1])                 # least free-boundary eigenmode energy: negative is unstable
+for (s, sing) in enumerate(ffs.surfaces)
+    println("q = $(sing.m[1])/$(sing.n[1]) at ψ_N = $(sing.psifac): Δ′ = $(real(ffs.delta_prime.matrix[s, s]))")
+end
 ```
 
-In a deck, `psilim_from_layer_overlap = true` takes its closures from the `[SLAYER]` section. The
-scan is carried on the result as `layer_overlap` and written to `ForceFreeStates/LayerOverlap/`. It
-caps `qlim` before the `rational_offset_fraction` step, so `rational_offset_fraction` still selects
-the final surface from inside the cap. A cap beyond `psihigh` has no effect.
+`main(["examples/DIIID-like_riccati_deltaprime_example"]).ffs` returns the same result from a deck.
+The number of Julia threads is set at startup (`-t N` or `JULIA_NUM_THREADS`); the chunking never depends on it, so threads change the wall-clock time only.
 
-The flag is off by default, so every shipped deck is unchanged by it. With the default
-`P_perp_model = "D_perp"` the layers on the shipped DIII-D-like profiles do not overlap inside
-ψ = 1. With the electron-channel `"chi_perp_e"` they are about 40% wider and the overlap point is
-ψ ≈ 0.9985: outside the ideal and Riccati decks' `psihigh = 0.995`, but inside the SLAYER deck's
-0.9995, where the cap would exclude the q = 7 surface. `examples/DIIID-like_truncation_example`
-pins `"chi_perp_e"` and raises `psihigh` to 0.9999 with the flag on: the cap excludes q = 7 and
-q = 8, and the resulting domain (`psilim ≈ 0.99498`, last surface q = 6) reproduces the hand-chosen
-`psihigh = 0.995` of the ideal deck.
+## Outputs
 
-**Which perpendicular diffusivity.** The two formulas that take a perpendicular diffusivity want
-different quantities. The layer width goes through `P_perp`, which multiplies the diffusion of the
-total pressure; under the closure `T_s = T_s(n)` it is set by the perpendicular particle diffusivity
-`D_⊥` of Fitzpatrick, Phys. Plasmas **29**, 032507 (2022), Eq. 16, which weights the electron and ion energy diffusivities by
-`n T_s′/p′`. The critical-Δ island width `W_d ∝ (χ_⊥/χ_∥)^{1/4}` is the
-width above which parallel transport, through an electron parallel conductivity, makes the electron
-temperature a flux function (Fitzpatrick, Phys. Plasmas **32**, 062509 (2025), Eqs. 230–234). That
-paper and the `"lar"` and `"toroidal"` forms of Connor et al., Plasma Phys. Control. Fusion **57**,
-065001 (2015), Eqs. 59 and 61, are single-fluid: they have one χ_⊥, which in Connor et al. diffuses
-the total pressure. GPEC reads it as the electron channel and uses `chi_e` for every `D_c_type`,
-since the width is set by electron heat transport; that reading is a modeling choice, not a result of
-those papers. `SLAYERModel`'s `chi_perp_Dc` (`[SLAYER] chi_perp_Dc`, optional) sets that electron diffusivity for the critical Δ
-alone, leaving `P_perp` on its own χ inputs. The deck key is one value for every surface, over
-any `chi_e` profile; `build_slayer_inputs` also takes a function of ψ. It moves the critical
-resonant field through the critical Δ. It is for a run where one χ⊥,e cannot serve
-both formulas. `D_⊥` needs only the total conducted heat, so a run can use a one-fluid χ_eff in both
-channels when an interpretive power balance cannot separate the species; where T_i ≈ T_e the
-electron-ion exchange term makes that split uncertain, and it can return χ⊥,i < 0. On the electron reading,
-the critical Δ still needs an electron diffusivity, which χ_eff is not, and `chi_perp_Dc` makes the choice
-explicit. Where the split is uncertain the electron χ is uncertain too, so treat the value as a
-modeling choice and scan it. The same split can often be reached without this key, by choosing
-`chi_e` and `chi_i` to keep the `D_⊥` total, but not when the wanted `chi_e` would leave `chi_i ≤ 0`.
-`SLAYERModel`'s `P_perp_model` (`[SLAYER] P_perp_model` in a deck) selects how `P_perp` is built: from `D_⊥` (`"D_perp"`,
-the default), from `chi_e` alone (the single-χ convention of Fitzpatrick's TJ code), from
-`chi_i`, from the toroidal Prandtl number, from its `c_β²` floor, or from a whole-plasma
-confinement time (`"tau_E"`); see `slayer_parameters`. `"tau_E"` is for a plasma with no χ
-profiles: its uniform χ_E sets both `P_perp` and the toroidal `P_tor`, so the file's `chi_phi`
-and the kinetic data's `chi_phi_default` are not used in that mode. On the DIII-D-like
-profiles `D_⊥` is 0.22–0.32 of `chi_e` at the outer rational surfaces, because the weights sum to
-less than one where density gradients carry part of `p′`. Since the widths scale as `χ^{1/4}`, a
-factor-2 change in χ moves them by about 19%, which can be enough to move the overlap cut by a
-surface.
+| Dataset | Meaning |
+|---|---|
+| `ForceFreeStates/FreeBoundaryStability/W_plasma`, `W_vacuum`, `W_freeboundary` | plasma, vacuum and total energy matrices on the control surface, power-normalized (per unit ⟨\|ξ\|²⟩) |
+| `ForceFreeStates/FreeBoundaryStability/eigenmode_energies` | generalized eigenvalues of ``W``, most unstable first; `eigenmode_plasma_energies` and `eigenmode_vacuum_energies` split each one |
+| `ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes` | the eigenvectors, unit power norm |
+| `ForceFreeStates/FreeBoundaryStability/vacuum_eigenvalue` | least eigenvalue of the vacuum energy matrix |
+| `ForceFreeStates/EdgeScan/` | `total_energy`, `plasma_energy`, `vacuum_energy` and `vacuum_eigenvalue` against `psi` and `q` as the control surface moves outward from `dW_edge_scan_start` |
+| `ForceFreeStates/Solutions/ForwardIntegration/` | the forward integrator's `psi`, `q`, `xi_psi`, `xi_s`, `dxi_psidpsi` profiles and the `crit` scan whose zero crossings mark fixed-boundary instability |
+| `ForceFreeStates/EulerLagrangeMatrices/` | the ``\bar{F}``, ``\bar{K}``, ``\bar{G}`` matrices on `psi`, written when `write_el_matrices = true` |
+| `ForceFreeStates/LayerOverlap/` | the resistive-layer overlap scan, when `psilim_from_layer_overlap` is set (table below) |
+| `SingularSurfaces/rational_psi`, `rational_q`, `rational_m`, `rational_n`, `dqdpsi` | the rational surfaces of the domain, core to edge |
+| `SingularSurfaces/D_I`, `E`, `F`, `G`, `H`, `K`, `M` | the Mercier index and the Glasser–Greene–Johnson layer coefficients at each surface |
+| `SingularSurfaces/ca_left`, `ca_right` | the asymptotic (large, small) coefficients on either side of each surface, from ideal crossings |
+| `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, from `"Riccati"` or `"Galerkin"`; `Delta_prime_raw` is the side-major (left, right) matrix it is folded from, `Delta_coil` the edge coil-response columns |
+| `SingularSurfaces/Kinetic/` | the surfaces of a kinetic solve |
 
-**The shipped diffusivities.** The DIII-D-like kinetic file carries analytic χ profiles in the
-normalized poloidal flux ψ, in m²/s:
+`Info/psilim` and `Info/qlim` record the outer edge of the integration domain.
 
-```
-chi_e   = 2.75 + ψ + 3 exp(−25 (ψ − 0.85)²)
-chi_i   = 1/2 + (3/2) ψ²⁰ + (5/4) exp(−25 (ψ − 0.7)²)
-chi_phi = 3/2 − (5/4) (1 − ψ)⁴
-```
+## Integration domain
 
-They are not fits to a measured discharge. Their magnitudes are of the same order as the TRANSP
-power-balance χ_e and χ_i reported for DIII-D H-modes by Hong *et al.*, Phys. Plasmas **30**,
-072512 (2023), Fig. 5; `chi_e` includes a factor-2 raise so that the default deck exercises the
-resistive-layer overlap cut. `chi_phi` is set to track `chi_i` (Prandtl number of order one, rising
-outward), as reported for DIII-D by Yoshida *et al.*, Nucl. Fusion **52**, 123005 (2012). The forms
-do not resolve the H-mode pedestal transport barrier, where power-balance χ falls to about
-0.1–0.3 m²/s (Callen *et al.*, Nucl. Fusion **50**, 064004 (2010)).
+The integration runs from the axis (`qlow` sets the inner edge) to `psilim`, the flux of the target safety factor `qlim`.
+`qlim` starts at `min(qmax, qhigh)`, with `qmax` the value of q at the equilibrium's `psihigh`.
+With `truncate_at_rational_offset = true` (the default, for diverted equilibria where q diverges at the separatrix), `qlim` moves to `(m_last + rational_offset_fraction)/n`, a fixed fraction of a rational spacing past the last surface, stepped back by `1/n` until it no longer exceeds the bound it started from; a bound that falls on a rational, or less than `rational_offset_fraction/n` above one, therefore excludes that surface.
+With `truncate_at_rational_offset = false` (limited or analytic equilibria with finite edge q), `qhigh` and `psihigh` set the domain directly.
+
+### Resistive-layer overlap cap
+
+Near the separatrix the rational surfaces crowd faster than their resistive layers narrow, and past the point where adjacent layers touch the matched-asymptotic treatment is not defined (Fitzpatrick (2025), listed under [InnerLayer Module](@ref)).
+`psilim_from_layer_overlap = true` locates that point: each rational surface of each n in the run, including surfaces beyond the equilibrium grid placed on the logarithmic divergence of q at the X-points, gets a layer width from the kinetic profiles with the closures of `[SLAYER]` (a `SLAYERModel` in a script), and the domain is cut at the last surface before two adjacent layers overlap.
+The cap needs kinetic profiles, acts before the `rational_offset_fraction` step, and can only narrow the domain; `examples/DIIID-like_truncation_example` exercises it.
+The scan is written to `ForceFreeStates/LayerOverlap/`:
 
 | Dataset | Contents |
 |---|---|
 | `psi`, `m`, `n`, `r_s` | scanned surfaces and their minor radius √(2ψ_t/B₀) |
 | `delta_s_abs`, `width_delta_s` | Riccati layer thickness, in metres and as a Δψ width |
-| `width_visco`, `width_dr` | visco-resistive and diffusive-resistive (Eq. 100) Δψ widths; `width_dr` sets the cut |
+| `width_visco`, `width_dr` | visco-resistive and diffusive-resistive Δψ widths; `width_dr` sets the cut |
 | `extrapolated` | 1 where the surface lies beyond the equilibrium grid |
 | `psilim_overlap`, `first_overlap_index` | the cut, and the first surface whose layer overlaps its neighbour |
-| `applied` | 1 when the cap was passed to the truncation (`rational_offset_fraction` / `qhigh` may still cut deeper) |
+| `applied` | 1 when the cap was passed to the truncation |
 
-## Configuration reference
+The perpendicular diffusivities that set the layer widths are described with the SLAYER inputs on the [Tearing](inner_layer.md) page.
 
-The `[ForceFreeStates]` section holds the [`ForceBalanceProblem`](@ref) keywords and names the
-integrator; the integrator's numerical settings sit in its own section, `[Forward]`, `[Riccati]` or
-`[Galerkin]`, with the fields of that type.
+## Numerical notes
 
-```toml
-[ForceFreeStates]
-integrator   = "Riccati"  # "Forward" for dense xi profiles and kinetic runs; "Galerkin" for the RDCON outer-region solve
+- The Riccati integrator splits the domain into chunks whose count is derived from the number of singular surfaces (`[Riccati] nchunks` overrides the target, `0` is automatic); every chunk integrates from identity initial conditions, so the result is independent of the thread count.
+- The chunk ending at each rational surface is integrated backward, from the surface inward, because the forward propagator is ill-conditioned there; the Δ′ boundary-value problem is assembled from the split forward and backward propagators for the same reason.
+- Both integrators use the adaptive ninth-order `Vern9` solver at `eulerlagrange_tolerance`; the Riccati basis is recovered by renormalizing whenever the solution exceeds `renorm_threshold`.
+- The two crossing conventions differ slightly, so Riccati and Forward free-boundary energies agree to within a few percent, not to machine precision.
 
-# Mode space
-nn           = 1       # toroidal mode number, or consecutive numbers as a list ([1, 2, 3])
-delta_mlow   = 0       # extra low poloidal modes (m < mlow)
-delta_mhigh  = 0       # extra high poloidal modes (m > mhigh)
+Local stability (Mercier, resistive interchange and ballooning) is a separate stage on the same equilibrium; see [Local Stability](ballooning.md).
 
-# Output
-write_el_matrices    = false  # also write ForceFreeStates/EulerLagrangeMatrices (mpert² × npsi per matrix)
+## API reference
 
-[Riccati]
-nchunks                 = 0      # chunk-count target (0 = auto, from msing alone)
-eulerlagrange_tolerance = 1e-8   # ODE relative tolerance
-```
-
-The number of Julia threads is controlled at startup via `-t N` or the `JULIA_NUM_THREADS`
-environment variable; it is not a runtime parameter.
-
-## API Reference
-
-The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separately in
-`docs/src/galerkin.md`.
+The Galerkin solver's functions are documented on the [Galerkin Solver](galerkin.md) page.
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
 Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedKineticMatrices.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
-
-## Example usage
-
-### Run stability analysis from a TOML configuration
-
-```julia
-using GeneralizedPerturbedEquilibrium
-
-ffs = main(["examples/DIIID-like_riccati_deltaprime_example"]).ffs
-println("Energy eigenvalue et[1] = ", real(ffs.free_boundary.et[1]))
-```
-
-The same solve from a script, with the deck's keys as keywords:
-
-```julia
-eq  = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada")
-ffs = solve(eq, Riccati(; eulerlagrange_tolerance=1e-10); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true, qlow=1.02)
-```
-
-### Inspect Δ' at singular surfaces
-
-```julia
-for (s, sing) in enumerate(ffs.surfaces)
-    println("Surface $s: ψ = $(sing.psifac), m/n = $(sing.m[1])/$(sing.n[1])")
-    println("  Δ' = $(real(ffs.delta_prime.matrix[s, s]))")
-end
-```
-
-## Notes
-
-- The standard path does not populate `delta_prime`; the canonical Δ' is the STRIDE BVP
-  `SingularSurfaces/Delta_prime_matrix` from the parallel FM path. `ca_l`/`ca_r` are filled
-  only by ideal surface crossings (kinetic and galerkin-matched runs emit zero-extent
-  `ca_left`/`ca_right` sentinels).
-- The Riccati and parallel FM paths compute Δ' inline at each crossing, using the
-  direct diagonal formula (no GR permutation).  The result in `delta_prime_col[ipert_res, i]`
-  equals `delta_prime[i]` to machine precision.
-- `delta_prime_matrix` contains raw BVP coefficients, not asymptotic-normalized values;
-  its diagonal elements do **not** in general equal `delta_prime`.
-- ODE step counts depend on the equilibrium profile and mode count; the `numsteps_init`
-  parameter sets the initial allocation but the solver adapts automatically.
-
-## See also
-
-- `docs/src/galerkin.md` — RDCON outer-region Galerkin Δ′ solver (part of this module)
-- `docs/src/equilibrium.md` — build the `PlasmaEquilibrium` object required by this module
-- `docs/src/vacuum.md` — vacuum response computed from the EL solution in `free_run`
-- `docs/src/perturbed_equilibrium.md` — downstream singular coupling analysis using Δ'

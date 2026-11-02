@@ -110,6 +110,22 @@ Establishes the area weightings that make flux-surface Fourier spectra of pertur
 
 ---
 
+## LocalStability Module
+
+> A. H. Glasser, J. M. Greene, and J. L. Johnson, "Resistive instabilities in general toroidal plasma configurations,"
+> *Physics of Fluids* **18**, 875 (1975).
+
+The resistive interchange criterion ``D_R`` and the layer coefficients E, F, G, H, K, M of each rational surface, evaluated by `LocalStability` and stored under `SingularSurfaces/`.
+
+---
+
+> J. W. Connor, R. J. Hastie, and J. B. Taylor, "Shear, periodicity, and plasma ballooning modes,"
+> *Physical Review Letters* **40**, 396 (1978).
+
+The ballooning representation on the covering space and the marginal ballooning equation that `LocalStability` integrates along the field line.
+
+---
+
 ## InnerLayer Module
 
 > A. H. Glasser, Z. R. Wang, and J.-K. Park, "Computation of resistive instabilities by matched asymptotic expansions,"
