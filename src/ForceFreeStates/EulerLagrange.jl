@@ -706,8 +706,10 @@ Errors when the solver stops short of the interval's end (e.g. the step size und
 function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
     sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
     SciMLBase.successful_retcode(sol) ||
-        error("Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
-              "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor.")
+        error(
+            "Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
+            "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor."
+        )
     return sol
 end
 
@@ -962,7 +964,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
+            mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
         # Drop the resonant solutions zeroed at an ideal crossing
@@ -976,7 +978,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # Region i lies between fixups i-1 and i; its transform is the product of all later reductions
     transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        mul!(view(transforms,:,:,ifix), view(gauss,:,:,ifix), view(transforms,:,:,(ifix+1)))
+        mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, (ifix + 1)))
     end
 
     jfix = 1

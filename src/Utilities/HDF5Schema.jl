@@ -152,9 +152,17 @@ const MAIN_H5_ANNOTATIONS = [
     "ForceFreeStates/LayerOverlap/width_visco" =>
         (; long_name="visco-resistive comparison scale as a normalized-flux width", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
     "ForceFreeStates/LayerOverlap/width_dr" =>
-        (; long_name="diffusive-resistive layer width (Fitzpatrick 2025 Eq. 100) as a normalized-flux width; the channel the criterion uses", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+        (;
+            long_name="diffusive-resistive layer width (Fitzpatrick 2025 Eq. 100) as a normalized-flux width; the channel the criterion uses",
+            dims=("surface_overlap",),
+            attach=(1 => "ForceFreeStates/LayerOverlap/psi",)
+        ),
     "ForceFreeStates/LayerOverlap/extrapolated" =>
-        (; long_name="1 where the surface was located beyond the equilibrium grid via the separatrix edge q-law", dims=("surface_overlap",), attach=(1 => "ForceFreeStates/LayerOverlap/psi",)),
+        (;
+            long_name="1 where the surface was located beyond the equilibrium grid via the separatrix edge q-law",
+            dims=("surface_overlap",),
+            attach=(1 => "ForceFreeStates/LayerOverlap/psi",)
+        ),
     "ForceFreeStates/LayerOverlap/psilim_overlap" =>
         (; long_name="domain limit implied by the first layer overlap, at the last surface with a well-separated inner region (NaN when no overlap was found in range)"),
     "ForceFreeStates/LayerOverlap/first_overlap_index" =>

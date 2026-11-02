@@ -807,7 +807,10 @@ using TOML
             deck = TOML.parsefile(joinpath(template, "gpec.toml"))
             sol = GeneralizedPerturbedEquilibrium.analytic_config(deck)
             # A relative kinetic_file resolves against the deck directory, like eq_filename.
-            config = GeneralizedPerturbedEquilibrium.equilibrium_config(merge(deck, Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))))), template)
+            config = GeneralizedPerturbedEquilibrium.equilibrium_config(
+                merge(deck, Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))))),
+                template
+            )
             @test config.kinetic_file == normpath(h5)
             raw = E.read_kinetic_file(h5)
             equil = E.PlasmaEquilibrium(config, sol)

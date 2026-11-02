@@ -131,9 +131,11 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 
     # Rational-offset cutoff needs the resolved single-n range on `intr`; multi-n falls back to qhigh / psihigh.
     if ctrl.truncate_at_rational_offset && intr.nlow <= 0
-        error("sing_lim!: truncate_at_rational_offset = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
-              "Assign intr.nlow / intr.nhigh (resolve_mode_space!) before calling sing_lim!, " *
-              "or set truncate_at_rational_offset = false to truncate via qhigh / psihigh instead.")
+        error(
+            "sing_lim!: truncate_at_rational_offset = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+            "Assign intr.nlow / intr.nhigh (resolve_mode_space!) before calling sing_lim!, " *
+            "or set truncate_at_rational_offset = false to truncate via qhigh / psihigh instead."
+        )
     elseif ctrl.truncate_at_rational_offset && intr.nlow != intr.nhigh
         @warn "truncate_at_rational_offset = true is ignored for multi-n runs (n = $(intr.nlow):$(intr.nhigh)); falling back to qhigh / psihigh truncation."
     elseif ctrl.truncate_at_rational_offset
@@ -152,9 +154,11 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 
     # A target below q_min has no psilim: say why instead of failing in the root find, as Fortran's "Can't find psilim"
     intr.qlim >= equil.params.qmin ||
-        error("sing_lim!: the integration limit qlim = $(@sprintf("%.3f", intr.qlim)) lies below q_min = $(@sprintf("%.3f", equil.params.qmin)), " *
-              "so no flux surface reaches it. With truncate_at_rational_offset no rational surface of n = $(intr.nlow) is left to truncate at; " *
-              "widen the domain (qhigh, the layer-overlap cap) or set truncate_at_rational_offset = false.")
+        error(
+            "sing_lim!: the integration limit qlim = $(@sprintf("%.3f", intr.qlim)) lies below q_min = $(@sprintf("%.3f", equil.params.qmin)), " *
+            "so no flux surface reaches it. With truncate_at_rational_offset no rational surface of n = $(intr.nlow) is left to truncate at; " *
+            "widen the domain (qhigh, the layer-overlap cap) or set truncate_at_rational_offset = false."
+        )
 
     # qlim below qmax: Newton-solve q(psilim) = qlim
     if intr.qlim < equil.params.qmax

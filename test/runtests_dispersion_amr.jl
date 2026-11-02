@@ -176,7 +176,8 @@
     # =========================================================================
     # multi_box_amr_scan
     # =========================================================================
-    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion: BoxActivity, NoActivity,
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion:
+        BoxActivity, NoActivity,
         ReZeroCrossing, ImZeroCrossing, PoleMagnitude, MultiBoxAMRResult,
         multi_box_amr_scan, as_amr_result
 

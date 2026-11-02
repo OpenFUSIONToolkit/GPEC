@@ -112,9 +112,9 @@ grad_greenfunction is not zeroed since it fills a different block of the
     populate_greenfunction && fill!(greenfunction, 0.0)
 
     # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
-    log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
-    log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
-    log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
+    log_correction_0 = 16.0 * dtheta * (log(2 * dtheta) - 68.0 / 15.0) / 15.0
+    log_correction_1 = 128.0 * dtheta * (log(2 * dtheta) - 8.0 / 15.0) / 45.0
+    log_correction_2 = 4.0 * dtheta * (7.0 * log(2 * dtheta) - 11.0 / 15.0) / 45.0
     log_correction_array = SVector(log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2)
 
     # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
@@ -272,14 +272,14 @@ function elliptic_integral_e(m1)
     (m1 < 0.0 || m1 > 1.0) && throw(DomainError(m1, "Input `x1` must be in the range (0, 1]."))
     log_x1 = log(m1)
 
-    ae1=0.44325141463
-    ae2=0.0626060122
-    ae3=0.04757383546
-    ae4=0.01736506451
-    be1=0.2499836831
-    be2=0.09200180037
-    be3=0.04069697526
-    be4=0.00526449639
+    ae1 = 0.44325141463
+    ae2 = 0.0626060122
+    ae3 = 0.04757383546
+    ae4 = 0.01736506451
+    be1 = 0.2499836831
+    be2 = 0.09200180037
+    be3 = 0.04069697526
+    be4 = 0.00526449639
 
     p = @evalpoly(m1, 1.0, ae1, ae2, ae3, ae4)
     q = @evalpoly(m1, 0.0, be1, be2, be3, be4)
@@ -300,7 +300,7 @@ end
 # The paper's eq. 50 has a typo: the exponent is -1/4, not +1/2
 function P0_plus_half(s)
     m1 = (s + sqrt(s^2 - 1))^(-2)
-    return 2 / π * m1^(-1/4) * elliptic_integral_e(m1) # This is correct
+    return 2 / π * m1^(-1 / 4) * elliptic_integral_e(m1) # This is correct
 end
 
 
@@ -450,8 +450,8 @@ function elliptic_integrals_bulirsch(m1::Float64; error::Float64=1e-8, maxit::In
     convergence = max(convergence, 1.0e-100)
 
     # Calculate final K and E values
-    K = π/2 * (bval1 + aval1 * emval) / (emval * (emval + pval))
-    E = π/2 * (bval2 + aval2 * emval) / (emval * (emval + pval))
+    K = π / 2 * (bval1 + aval1 * emval) / (emval * (emval + pval))
+    E = π / 2 * (bval2 + aval2 * emval) / (emval * (emval + pval))
 
     return K, E, convergence, kounter
 end

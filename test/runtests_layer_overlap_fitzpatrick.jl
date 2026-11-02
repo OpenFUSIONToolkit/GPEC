@@ -123,7 +123,7 @@
 
     psi1 = overlap_psi(1)
     @test psi1 !== nothing
-    psi1 === nothing || @info "Fitzpatrick 2025 overlap, n = 1" psi=psi1 paper=0.9985 deviation=abs(psi1 - 0.9985) atol=1e-4
+    psi1 === nothing || @info "Fitzpatrick 2025 overlap, n = 1" psi = psi1 paper = 0.9985 deviation = abs(psi1 - 0.9985) atol = 1e-4
     # Paper: Psi = 0.9985 (n = 1); measured deviation 1.1e-5. The bound covers the pedestal read
     # off Fig. 8 and the resistivity closure (Spitzer-Harm here against the paper's Eqs. 70-72),
     # and still leaves ~9x margin. Pure quadrature and root-finding, no BLAS, so platform spread
@@ -132,7 +132,7 @@
 
     psi4 = overlap_psi(4)
     @test psi4 !== nothing
-    psi4 === nothing || @info "Fitzpatrick 2025 overlap, n = 4" psi=psi4 paper=0.9952 deviation=abs(psi4 - 0.9952) atol=1e-3
+    psi4 === nothing || @info "Fitzpatrick 2025 overlap, n = 4" psi = psi4 paper = 0.9952 deviation = abs(psi4 - 0.9952) atol = 1e-3
     # Paper: Psi = 0.9952 (n = 4); measured deviation 2.3e-4. Looser than n = 1 because these
     # surfaces sit further in, where the digitised pedestal shape matters more.
     @test isapprox(psi4, 0.9952; atol=1e-3)
@@ -310,7 +310,8 @@ end
     trunc_dir = joinpath(dirname(@__DIR__), "examples", "DIIID-like_truncation_example")
     trunc_inputs = TOML.parsefile(joinpath(trunc_dir, "gpec.toml"))
     diiid(psihigh) = Equilibrium.PlasmaEquilibrium(
-        GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" => merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh))), trunc_dir), nothing)
+        GeneralizedPerturbedEquilibrium.equilibrium_config(Dict{String,Any}("Equilibrium" => merge(trunc_inputs["Equilibrium"], Dict("psihigh" => psihigh))), trunc_dir),
+        nothing)
     long, short = diiid(0.9999), diiid(0.995)
 
     # One lower X-point, 1e-4 outside this file's boundary; the law reproduces the traced shear.

@@ -67,8 +67,8 @@ end
 
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
 
-        @test odet.u[:, :, 1] ≈ u1_in rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_in rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_in rtol = 1e-12
+        @test odet.u[:, :, 2] ≈ u2_in rtol = 1e-12
     end
 
     @testset "apply_propagator! linearity" begin
@@ -104,8 +104,8 @@ end
         u1_expected = U1_upper * u1_in + U1_lower * u2_in
         u2_expected = U2_upper * u1_in + U2_lower * u2_in
 
-        @test odet.u[:, :, 1] ≈ u1_expected rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_expected rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_expected rtol = 1e-12
+        @test odet.u[:, :, 2] ≈ u2_expected rtol = 1e-12
     end
 
     @testset "apply_propagator_inverse! is inverse of apply_propagator!" begin
@@ -139,8 +139,8 @@ end
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator_inverse!(odet, prop)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
 
-        @test odet.u[:, :, 1] ≈ u1_in rtol=1e-12
-        @test odet.u[:, :, 2] ≈ u2_in rtol=1e-12
+        @test odet.u[:, :, 1] ≈ u1_in rtol = 1e-12
+        @test odet.u[:, :, 2] ≈ u2_in rtol = 1e-12
     end
 
     @testset "balance_integration_chunks produces target count" begin
@@ -176,7 +176,7 @@ end
         # gap of ≈2·singfac_min/|n·q1| between the pre-crossing and post-crossing intervals.
         for i in eachindex(balanced)[2:end]
             if !balanced[i-1].needs_crossing
-                @test balanced[i].psi_start ≈ balanced[i-1].psi_end rtol=1e-10
+                @test balanced[i].psi_start ≈ balanced[i-1].psi_end rtol = 1e-10
             else
                 # Inner-layer gap: post-crossing chunk starts AFTER the rational surface
                 @test balanced[i].psi_start > balanced[i-1].psi_end
@@ -204,7 +204,7 @@ end
         # An nchunks below the singular-surface floor is clamped up, with a warning.
         min_chunks = 2 * intr.msing + 3
         ctrl_few = first(_prepared_solovev("Riccati"; nchunks=1))
-        balanced_few = @test_logs (:warn,) match_mode=:any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
+        balanced_few = @test_logs (:warn,) match_mode = :any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
         @test length(balanced_few) == max(min_chunks, length(base_chunks))
     end
 

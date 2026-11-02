@@ -38,7 +38,7 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         ("gal_$k" => "moved to [Match] as $k" for k in ("eta", "rho", "rotation", "gamma"))...,
         ("gal_inner_$k" => "moved to [GGJ] as $k" for k in ("xfac", "nx", "nq", "cutoff", "kmax"))...,
         ("gal_$k" => "moved to [Galerkin] as $k" for k in ("nx", "nq", "pfac", "dx0", "dx1", "dx2", "cutoff", "tol", "gnstep",
-            "dx1dx2_flag", "rpec_flag", "edge_onesided"))...,
+                "dx1dx2_flag", "rpec_flag", "edge_onesided"))...,
         "gal_sing_order_ceiling" => "moved to [Galerkin] as frobenius_order_ceiling"),
     "LocalStability" => Dict{String,String}(
         k => "moved to [Ballooning]" for k in ("ode_tol", "n_scan", "max_alpha_scale", "alpha_tol", "psi_window")),
@@ -215,8 +215,10 @@ function equilibrium_config(inputs::AbstractDict, path::AbstractString)
     elseif eq_type === nothing
         error("Missing required key in [Equilibrium]: eq_type")
     elseif haskey(Equilibrium.ANALYTIC_EQ, eq_type)
-        error("[Equilibrium] eq_type = \"$eq_type\" is not a deck value: state the analytic equilibrium as a " *
-              "[$(Equilibrium.ANALYTIC_EQ[eq_type].section)] section and remove eq_type")
+        error(
+            "[Equilibrium] eq_type = \"$eq_type\" is not a deck value: state the analytic equilibrium as a " *
+            "[$(Equilibrium.ANALYTIC_EQ[eq_type].section)] section and remove eq_type"
+        )
     end
     fields = _struct_fields(Equilibrium.EquilibriumConfig, (:power_bp, :power_b, :power_r, :power_rc))
     kwargs = section_keywords(_deck_paths(table, path, ("eq_filename", "kinetic_file")), "Equilibrium", fields)
@@ -365,8 +367,10 @@ function tearing_from_deck(inputs::AbstractDict)
     inner_model = _selector(table, "Tearing", "inner_model", ("SLAYER", "GGJ"))
     delete!(problem, :inner_model)
     crf = get(table, "CriticalResonantField", nothing)
-    crf === nothing || (problem[:critical_resonant_field] = CriticalResonantFieldControl(;
-        section_keywords(crf, "Tearing.CriticalResonantField", _struct_fields(CriticalResonantFieldControl))...))
+    crf === nothing || (
+        problem[:critical_resonant_field] = CriticalResonantFieldControl(;
+            section_keywords(crf, "Tearing.CriticalResonantField", _struct_fields(CriticalResonantFieldControl))...)
+    )
     config = TearingConfig(; section_keywords(get(table, "search", Dict{String,Any}()), "Tearing.search", _struct_fields(TearingConfig))...)
     return (; problem, model=inner_model == "SLAYER" ? slayer_model(inputs) : ggj_model(inputs), config)
 end
@@ -413,8 +417,10 @@ function error_fields_from_deck(inputs::AbstractDict, path::AbstractString)
     haskey(inputs, "ErrorFields") || return nothing
     table = _deck_paths(inputs["ErrorFields"], path, ("tolerance_file",))
     sub(name, T) = T(; section_keywords(get(table, name, Dict{String,Any}()), "ErrorFields.$name", _struct_fields(T))...)
-    ctrl = ErrorFields.ErrorFieldsControl(; section_keywords(_without(table, "MonteCarlo", "Risk", "scenario", "NTV", "tolerance_file"),
-        "ErrorFields", _struct_fields(ErrorFields.ErrorFieldsControl))...)
+    ctrl = ErrorFields.ErrorFieldsControl(;
+        section_keywords(_without(table, "MonteCarlo", "Risk", "scenario", "NTV", "tolerance_file"),
+            "ErrorFields", _struct_fields(ErrorFields.ErrorFieldsControl))...
+    )
     file = get(table, "tolerance_file", "")
     isempty(file) || isfile(file) || error("[ErrorFields] tolerance_file not found: $file")
     scenario = haskey(table, "scenario") ? section_keywords(table["scenario"], "ErrorFields.scenario", _struct_fields(ErrorFields.ScenarioParameters)) : nothing
@@ -637,7 +643,8 @@ function deck_sections(pe::PerturbedEquilibrium.PerturbedEquilibriumState)
         "compute_torque_response" => resp.compute_torque_response, "regularization_width" => pe.regularization_width)
     sections = Dict{String,Any}("PerturbedEquilibrium" => table)
     forcing === nothing && return sections
-    sections["ForcingTerms"] = forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? _forcing_table(forcing.ctrl) :
-                               Dict{String,Any}("forcing_data_format" => "hdf5", "forcing_data_file" => _RECORDED_FORCING)
+    sections["ForcingTerms"] =
+        forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? _forcing_table(forcing.ctrl) :
+        Dict{String,Any}("forcing_data_format" => "hdf5", "forcing_data_file" => _RECORDED_FORCING)
     return sections
 end
