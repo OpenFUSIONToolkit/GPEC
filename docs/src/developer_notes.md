@@ -1,6 +1,6 @@
 # Developer Notes
 
-## Git Workflow
+## Git workflow
 
 This project uses [GitFlow](http://nvie.com/posts/a-successful-git-branching-model):
 
@@ -8,7 +8,7 @@ This project uses [GitFlow](http://nvie.com/posts/a-successful-git-branching-mod
 - `main` is updated only at release-ready stages
 - Feature branches should come off `develop` and merge back with `--no-ff`
 
-## Commit Message Format
+## Commit message format
 
 ```
 Area[.Submodule] - TAG[!] - Imperative summary
@@ -21,14 +21,15 @@ Both vocabularies are closed — do not invent new ones. Pull request titles use
 
 ## Documentation standard
 
-Module reference pages follow a shared *Journal of Computational Physics*-style
-structure (governing equations → numerical method → validation figures → API),
-and every documentation figure is committed together with the script that made
+Module reference pages follow one skeleton (*What it computes* → *Governing equations* →
+*Running it*, with a deck snippet from a shipped example and the matching script call → *Outputs*,
+a table of `gpec.h5` datasets with units → *Numerical notes*, including validation figures →
+*API reference*), and every documentation figure is committed together with the script that made
 it and a provenance stamp. The full policy — page template, figure
 organization under `docs/src/figures/<module>/`, provenance, and the
 regenerate-only-when-`depends`-change rule — is in
 [`docs/DOC_STANDARD.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/DOC_STANDARD.md).
-The `Local Stability` and `Tearing` pages are the reference exemplars.
+The `Stability` and `Local Stability` pages are the reference exemplars.
 
 ## Deck and API parity
 
@@ -40,7 +41,7 @@ from the same inputs through the API, and checks that the two results agree. A k
 between the paths is marked `@test_broken`, not dropped, so the change that fixes it shows up
 as an unexpected pass.
 
-## Regression Testing
+## Regression testing
 
 The regression harness **must be run on every pull request before merging into `develop`**. It is the project's primary safeguard for tracking how numerical results evolve across changes, so it is only useful if every PR exercises it. When you open a PR, paste the regression report into the PR thread so reviewers can see what moved (and what did not). If your change touches a quantity that is not yet tracked, add a new regression case — or extend an existing one — in the same PR.
 
@@ -49,7 +50,7 @@ The regression harness **must be run on every pull request before merging into `
 The Δ′ values pinned in the tests and tracked by the harness are single-grid snapshots, not converged values: the extraction is grid-sensitive, and on the DIII-D-like deck the q = 2 diagonal converges only on a fixed `core_edge_packed` grid, while the automatic grid leaves it moving by several percent between refinements.
 Treat a pinned diagonal as a sign and order-of-magnitude regression signal, expect to re-pin it when the equilibrium grid changes, and see `docs/development/regression-harness.md` for the convergence scans behind this.
 
-### Regression Harness: Quick usage guide
+### Regression harness: quick usage guide
 
 Set up an alias for convenience (optional):
 ```bash

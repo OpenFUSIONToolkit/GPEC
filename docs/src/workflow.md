@@ -29,12 +29,14 @@ Every stage after `Equilibrium` reads the force-free states, and `KineticForces`
 | What are the tearing growth rate and critical resonant field? | `[Tearing]` (+ `[SLAYER]` or `[GGJ]`) | `Tearing/Roots/gamma`, `Tearing/Roots/omega`, `Tearing/CriticalResonantField/` |
 | What does a resistive inner layer do to the response? | `[Match]` (+ `[GGJ]`) | `SingularSurfaces/Match/` |
 
+`[PerturbedEquilibrium]` and the stages built on it need a `[ForceFreeStates]` solve with `integrator = "Forward"` and no `[Wall]`, while the Δ′ matrix, `[Tearing]` and wall stability need `"Riccati"` or `"Galerkin"` or a `[Wall]`, so one deck cannot do both: run the response and the Δ′ or wall cases as separate decks (`DIIID-like_ideal_example` and `DIIID-like_riccati_deltaprime_example` are such a pair).
+
 ### Headline outputs
 
 - **Free-boundary energy** `ForceFreeStates/FreeBoundaryStability/W_freeboundary` is the power-normalized free-boundary energy matrix, the sum of `W_plasma` and `W_vacuum` for the wall of the deck (no wall when `[Wall]` is absent). `eigenmode_energies` lists its generalized eigenvalues, the ideal δW per unit displacement of each free-boundary eigenmode, sorted most unstable first, so a negative first entry means the plasma is ideal-kink unstable and a positive one is the stability margin.
 - **Tearing index** `SingularSurfaces/Delta_prime_matrix` is the Δ′ matching matrix in the PEST-3 convention, whose diagonal is the outer-region Δ′ of each rational surface; a positive Δ′ means the outer region drives the tearing mode and the inner layer (`Tearing`) sets its growth rate.
 - **Resonant field** `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field` is the area-weighted resonant normal field b̄ʳ `[T]` at each rational surface after the plasma response, the quantity that drives islands and sets locking thresholds. `island_half_width` is the vacuum-superposition island each resonant flux would open, w_s ∝ √|δψ_s|, and `chirikov_parameter` is that half-width over the half-distance to the neighbouring rational surface, so σ > 1 means the islands overlap.
-- **Torque** `KineticForces/<method>/total_torque` is the neoclassical toroidal viscosity (NTV) torque T_φ `[N·m]` that the perturbed equilibrium exerts on the plasma, with the sign convention of the [Conventions](conventions.md) page.
+- **Torque** `KineticForces/<method>/total_torque` is the neoclassical toroidal viscosity (NTV) torque T_φ `[N·m]` that the perturbed equilibrium exerts on the plasma, with the sign convention of the [Conventions Reference](conventions.md) page.
 
 ## What each stage computes
 
@@ -55,14 +57,14 @@ With `vac_flag = true` the `Vacuum` module adds the vacuum energy for the wall o
 `kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs a kinetic file.
 Outputs: `ForceFreeStates/FreeBoundaryStability/`, `ForceFreeStates/Solutions/`, `ForceFreeStates/EdgeScan/`, `SingularSurfaces/` and `SurfaceGeometries/`.
 Key references: [Glasser (2016)](citations.md#ForceFreeStates), [Glasser (2018)](citations.md#ForceFreeStates), [Chance (1997)](citations.md#Vacuum).
-Pages: [Stability](stability.md), [Galerkin solver](galerkin.md), [Vacuum](vacuum.md).
+Pages: [Stability](stability.md), [Galerkin Solver](galerkin.md), [Vacuum](vacuum.md).
 
 ### LocalStability
 
 Evaluates the Mercier criterion D_I, the resistive-interchange criterion D_R and the high-n ballooning Δ′ on every flux surface of the solve, and with `[LocalStability] alpha_boundary_scan` the critical normalized pressure gradient α_crit.
 Runs only with `[ForceFreeStates]`, on the same equilibrium grid; `[Ballooning]` sets the ballooning integration.
 Outputs: `LocalStability/`.
-Page: [Local stability](ballooning.md).
+Page: [Local Stability](ballooning.md).
 
 ### Match
 
@@ -74,9 +76,10 @@ Page: [Tearing](inner_layer.md).
 
 Computes the plasma response to an external non-axisymmetric field: `plasma_response` builds the permeability, inductance and reluctance operators on the control surface from the force-free states and the vacuum matrices, and `perturbed_equilibrium` applies them to the drive that `ForcingTerms` supplies, either a normal-field spectrum from a file or the Biot–Savart field of `[[ForcingTerms.coil_set]]` coils.
 The resonant fields, island half-widths and Chirikov parameter at each rational surface follow from the singular coupling (`compute_singular_coupling`), and `regularization_width` controls the regularization of the ideal response there.
+The response is built only from a `\"Forward\"` solve without a wall: a `\"Riccati\"` result (the default) makes `plasma_response` skip the operators with a warning, and a `\"Galerkin\"` or matched result or a wall is an error.
 Outputs: `PerturbedEquilibrium/ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`.
 Key references: [Park et al. (2007a)](citations.md#PerturbedEquilibrium), [Park et al. (2009)](citations.md#PerturbedEquilibrium).
-Pages: [Forcing terms](forcing_terms.md), [Perturbed equilibrium](perturbed_equilibrium.md).
+Pages: [Forcing Terms](forcing_terms.md), [Perturbed Equilibrium](perturbed_equilibrium.md).
 
 ### KineticForces
 
@@ -84,14 +87,14 @@ Integrates the NTV torque and kinetic energy of the perturbed equilibrium over �
 Runs after `PerturbedEquilibrium` and needs n_e, T_i, T_e and ω_E in the kinetic file; without `[PerturbedEquilibrium]` the section only configures the kinetic solve of `ForceFreeStates`.
 Outputs: `KineticForces/<method>/` and `KineticForces/PerSpecies/`.
 Key references: [Park and Logan (2017)](citations.md#KineticForces), [Logan et al. (2013)](citations.md#KineticForces).
-Page: [Kinetic forces](kinetic_forces.md).
+Page: [Kinetic Forces](kinetic_forces.md).
 
 ### ErrorFields
 
 Assesses error-field tolerances for a coil-driven response: the sensitivity of the resonant field to the shift and tilt of each coil set, a Monte Carlo sample of the tolerances of `[ErrorFields.MonteCarlo]`, the locking probability of `[ErrorFields.Risk]` against a threshold scenario, and the NTV coupling of the correction coils of `[ErrorFields.NTV]`.
 Needs `[PerturbedEquilibrium]` driven by `[[ForcingTerms.coil_set]]` coils.
 Outputs: `ErrorFields/CoilSensitivities/`, `MonteCarlo/`, `Risk/`, `NTV/`.
-Page: [Error fields](error_fields.md).
+Page: [Error Fields](error_fields.md).
 
 ### Tearing
 
@@ -124,7 +127,7 @@ alpha_boundary_scan = true
 [ForceFreeStates]
 nn = 1
 vac_flag = true
-integrator = "Forward"   # the default is "Riccati"
+integrator = "Forward"   # "Forward": [PerturbedEquilibrium] needs the dense ξ solution and no [Wall] ("Riccati" is the default)
 
 [ForcingTerms]
 forcing_data_format = "coil"
@@ -152,14 +155,14 @@ Every key is documented on the module page of its section, and every example dec
 | `[Wall]` | the conducting wall of the vacuum response; omit for no wall | [Vacuum](vacuum.md) |
 | `[ForceFreeStates]` | the stability stage: `nn`, the mode window, `integrator`, `vac_flag`, `kinetic` | [Stability](stability.md) |
 | `[Forward]`, `[Riccati]` | the radial ODE integrators | [Stability](stability.md) |
-| `[Galerkin]` | the finite-element outer-region solver | [Galerkin solver](galerkin.md) |
-| `[LocalStability]`, `[Ballooning]` | the local stability stage and its ballooning integration | [Local stability](ballooning.md) |
+| `[Galerkin]` | the finite-element outer-region solver | [Galerkin Solver](galerkin.md) |
+| `[LocalStability]`, `[Ballooning]` | the local stability stage and its ballooning integration | [Local Stability](ballooning.md) |
 | `[Match]`, `[GGJ]` | the inner-layer matching stage and the options of its GGJ layer model | [Tearing](inner_layer.md) |
-| `[ForcingTerms]`, `[[ForcingTerms.coil_set]]` | the external field: a file or coil sets | [Forcing terms](forcing_terms.md) |
-| `[PerturbedEquilibrium]` | the plasma response stage and its singular-coupling options | [Perturbed equilibrium](perturbed_equilibrium.md) |
-| `[KineticForces]` | the NTV torque stage and the kinetic solve of `ForceFreeStates` | [Kinetic forces](kinetic_forces.md) |
+| `[ForcingTerms]`, `[[ForcingTerms.coil_set]]` | the external field: a file or coil sets | [Forcing Terms](forcing_terms.md) |
+| `[PerturbedEquilibrium]` | the plasma response stage and its singular-coupling options | [Perturbed Equilibrium](perturbed_equilibrium.md) |
+| `[KineticForces]` | the NTV torque stage and the kinetic solve of `ForceFreeStates` | [Kinetic Forces](kinetic_forces.md) |
 | `[Tearing]`, `[Tearing.search]`, `[Tearing.CriticalResonantField]`, `[SLAYER]` | the tearing stage, its root search, the critical field and the SLAYER layer model | [Tearing](inner_layer.md) |
-| `[ErrorFields]`, `[ErrorFields.MonteCarlo]`, `[ErrorFields.scenario]`, `[ErrorFields.Risk]`, `[ErrorFields.NTV]` | the error-field tolerance stage | [Error fields](error_fields.md) |
+| `[ErrorFields]`, `[ErrorFields.MonteCarlo]`, `[ErrorFields.scenario]`, `[ErrorFields.Risk]`, `[ErrorFields.NTV]` | the error-field tolerance stage | [Error Fields](error_fields.md) |
 
 ## Running it
 

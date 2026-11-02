@@ -1,9 +1,9 @@
 # Conventions Reference
 
 The sign, coordinate and field-amplitude conventions used throughout GPEC, for reading its output and interfacing it with other codes.
-They are inherited from the Fortran GPEC suite and predate the COCOS standard (see [COCOS Compatibility](@ref)); each section names the source that establishes the convention.
+They are inherited from the Fortran GPEC suite and predate the COCOS standard (see [COCOS compatibility](@ref)); each section names the source that establishes the convention.
 
-## Quick Reference
+## Quick reference
 
 | Quantity | Convention | Forced? |
 |----------|-----------|---------|
@@ -18,7 +18,7 @@ They are inherited from the Fortran GPEC suite and predate the COCOS standard (s
 | ``\omega_E`` | Positive = direction of ``\zeta`` | No |
 | Field amplitudes | ``b``, ``\bar b``, ``\tilde b``, all in tesla | By area weighting |
 
-## Coordinate System
+## Coordinate system
 
 GPEC uses right-handed magnetic coordinates ``(\psi, \theta, \zeta)`` with the Fourier kernel
 
@@ -29,23 +29,23 @@ GPEC uses right-handed magnetic coordinates ``(\psi, \theta, \zeta)`` with the F
 matching the Fortran ``\exp(im\theta - in\phi)`` convention.
 The analysis transform that produces the mode coefficients ``f_m`` of a profile ``f(\theta)`` uses the conjugate kernel ``\exp(-im\theta)``, and the synthesis reconstructs with ``\exp(+im\theta)`` (`Utilities.FourierTransforms`).
 
-### Poloidal Flux ``\psi``
+### Poloidal flux ``\psi``
 
 - Normalized from 0 (magnetic axis) to 1 (plasma boundary); ``\psi_0 = |\psi_\mathrm{bry} - \psi_\mathrm{axis}|`` is forced positive on read, and an EQDSK with ``\psi_\mathrm{bry} < \psi_\mathrm{axis}`` has its flux array sign-flipped so that ``\psi`` increases outward (`Equilibrium.Sources.GFile`).
 - The internal ``\psi`` carries no factor of ``2\pi`` (poloidal flux per radian); IMAS inputs, which use the full flux, are divided by ``2\pi`` on read.
 - ``\rho = \sqrt{\psi}`` serves as a radius-like variable where one is needed.
 
-### Poloidal Angle ``\theta``
+### Poloidal angle ``\theta``
 
 - Upward outboard, always: ``\theta = 0`` on the outboard midplane, increasing upward.
 - Normalized to increase by 1, not ``2\pi``, over one poloidal circuit, whatever the helicity or working coordinate.
 
-### Toroidal Coordinate ``\zeta`` and ``\phi``
+### Toroidal coordinate ``\zeta`` and ``\phi``
 
 - The magnetic toroidal angle is ``\zeta = (\phi - \nu(\psi,\theta))/(2\pi)``, with ``\phi`` the internal toroidal angle and ``\nu`` the single-valued straight-field-line offset of the working coordinate (``\nu = 0`` in PEST coordinates).
-- The physical toroidal angle is ``\phi = -\,\mathrm{helicity}\,(2\pi\zeta + \nu)`` (`ForcingTerms`), so ``\phi`` runs counter-clockwise viewed from above for left-handed configurations and clockwise for right-handed ones.
+- The physical (laboratory) toroidal angle is ``\phi_\mathrm{lab} = -\,\mathrm{helicity}\,(2\pi\zeta + \nu)`` (`ForcingTerms`), a different angle from the internal ``\phi`` above, so ``\phi_\mathrm{lab}`` runs counter-clockwise viewed from above for left-handed configurations and clockwise for right-handed ones.
 
-### Working Coordinate Options
+### Working coordinate options
 
 `[Equilibrium] jac_type` selects the Jacobian ``J \propto B_p^{p_{bp}}\, B^{p_b}\, R^{-p_r}\, r_c^{-p_{rc}}``, with ``B_p`` the poloidal field, ``B`` the total field, ``R`` the major radius and ``r_c`` the distance from the magnetic axis:
 
@@ -59,16 +59,16 @@ The analysis transform that produces the mode coefficients ``f_m`` of a profile 
 
 `jac_type = "custom"` sets the four exponents by hand through `jac_custom_power_bp`, `jac_custom_power_b`, `jac_custom_power_r` and `jac_custom_power_rc`.
 
-## Helicity and Handedness
+## Helicity and handedness
 
 Helicity is the product of the toroidal-field and plasma-current directions, `helicity = bt_sign * sign(crnt)` (`ForcingTerms`): +1 is right-handed (``B_t`` and ``I_p`` parallel), ``-1`` left-handed (opposed).
-It sets the toroidal-grid direction ``\phi_j = -\mathrm{helicity}\times 2\pi j/n_\zeta`` and the output sign flips of [Spectrum Output Sign Conventions](@ref); for DIII-D (``B_t < 0``, ``I_p > 0``, helicity ``-1``) ``\phi`` increases with ``j``.
+It sets the direction of the laboratory toroidal grid, ``\phi_{\mathrm{lab},j} = -\mathrm{helicity}\times 2\pi j/n_\zeta``, and the output sign flips of [Spectrum output sign conventions](@ref); for DIII-D (``B_t < 0``, ``I_p > 0``, helicity ``-1``) ``\phi_\mathrm{lab}`` increases with ``j``.
 
 ## ``F = R B_\phi``
 
 The poloidal-current function is forced positive on read, ``F = |F|`` (`Equilibrium.Sources.GFile`); the sign of ``B_t`` is carried separately by `fpol_sign` and the helicity inputs.
 
-## Safety Factor ``q``
+## Safety factor ``q``
 
 The direct solver computes ``q`` by field-line integration and overwrites the file profile (`Equilibrium.Axisymmetric.Direct`),
 
@@ -79,15 +79,15 @@ q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p ,
 which is positive because ``J > 0`` and ``F = |F|``; a warning marks an on-axis extrapolation with ``q_0 \le 0`` as a spline artifact.
 Inverse equilibria use the ``q`` profile supplied with the input (`Equilibrium.Axisymmetric.Inverse`), the convention of the Fortran GPEC CHEASE reader.
 
-## Mode Numbers ``m`` and ``n``
+## Mode numbers ``m`` and ``n``
 
-### Toroidal Mode Number ``n``
+### Toroidal mode number ``n``
 
 `[ForceFreeStates] nn` is a positive integer or a list of consecutive integers.
 ``n < 1`` is not supported: a run whose modes are all below 1 is an error, and a lowest mode below 1 is clamped to 1 with a warning (`ForceFreeStates.Run`).
 Results for several ``n`` can be superposed.
 
-### Poloidal Mode Range
+### Poloidal mode range
 
 The poloidal spectrum spans `mlow` to `mhigh` (`ForceFreeStates.ForceBalance`):
 
@@ -98,12 +98,12 @@ m_\mathrm{high} = \lfloor n_\mathrm{high}\,q_\mathrm{max}\rfloor + 2\,\Delta m_\
 
 `delta_mlow` and `delta_mhigh` widen the range beyond the resonant modes; `delta_mhigh` is doubled before use, the Fortran DCON convention, so it adds twice as many modes on the high side as `delta_mlow` does on the low side.
 
-### Why Positive ``m`` Is Always Resonant
+### Why positive ``m`` is always resonant
 
 Resonant surfaces are the flux surfaces where ``m = n\,q(\psi)`` (`ForceFreeStates.Surfaces`).
 Since ``n > 0`` by convention and ``q > 0`` for a standard tokamak, the resonant ``m`` is always positive, ``m_\mathrm{res} = n\,q > 0``, and negative-``m`` modes are never resonant: the ``m = 2`` displacement resonates at ``q = 2``.
 
-## Spectrum Output Sign Conventions
+## Spectrum output sign conventions
 
 For the real-space representation GPEC takes the complex conjugate of the mode amplitudes for right-handed configurations (`Analysis.PerturbedEquilibriumModes`), after the straight-field-line offset has entered as ``\exp(i\,n\,\nu)``.
 For the full Fourier representation ``\exp(i(m\theta - n\zeta))`` the conjugation flips both the toroidal direction and the up/down sense.
@@ -124,10 +124,10 @@ so that for LH configurations only the sign of ``m`` is flipped and for RH the c
 The `Vacuum` module works in the same angles as the rest of GPEC, ``\theta`` upward-outboard and the basis ``\exp(-i(m\theta - 2\pi n\zeta))``, unlike the Fortran VACUUM code whose ``\theta`` and ``\phi`` both run the other way; a clockwise plasma contour is rejected and a clockwise wall file is reversed with a warning.
 The ``\nu`` passed to it is GPEC's ``\nu = \phi - 2\pi\zeta``, which Chance (1997, Eq. 97) writes as ``\zeta = \phi + \nu``.
 
-## Field Amplitudes and Units
+## Field amplitudes and units
 
 GPEC reports perturbed fields as Fourier spectra on flux surfaces.
-A raw spectrum depends on the working coordinate ([Park, Boozer and Menard (2008)](citations.md)), but the resonant component on a rational surface and the 2-norm of the spectrum on any surface become coordinate-invariant with the right area weighting in the Fourier integrand ([Pharr et al. (2026)](citations.md)).
+A raw spectrum depends on the working coordinate ([Park, Boozer and Menard (2008)](citations.md#PerturbedEquilibrium)), but the resonant component on a rational surface and the 2-norm of the spectrum on any surface become coordinate-invariant with the right area weighting in the Fourier integrand ([Pharr et al. (2026)](citations.md#PerturbedEquilibrium)).
 GPEC therefore works with three decompositions of the normal field, all in tesla, distinguished only by that weight:
 
 | Pharr symbol | Integrand weight | Name | HDF5 token |
@@ -158,7 +158,7 @@ With ``\Sigma`` the mode-space square-root-weight convolution (`sqrtamat`) and `
 where `rootarea_to_area_weight` ``= \Sigma/\sqrt{A}`` maps ``\tilde b \to \bar b``, `area_to_rootarea_weight` is its inverse, and ``R = \Sigma\sqrt{A}`` is the internal flux-conform operator.
 Flux ``\Phi`` is never stored: it appears only when a user supplies flux-valued forcing and is recovered on demand as ``\Phi = A\,\bar b``.
 
-### Field Representations in GPEC Output
+### Field representations in GPEC output
 
 - `PerturbedEquilibrium/forcing_b`, `forcing_b_root_area`, `forcing_b_area` and the `response_*` triplet: the control-surface spectra in the bare, root-area-weighted and area-weighted representations.
 - `PerturbedEquilibrium/Response/b_n` and `b_psi_area_weighted`: the bare normal field and the area-weighted radial field profiles.
@@ -170,11 +170,11 @@ Flux ``\Phi`` is never stored: it appears only when a user supplies flux-valued 
 
 The rotation profiles enter the `KineticForces` integrals as follows.
 
-### ``\omega_E`` (E × B Rotation)
+### ``\omega_E`` (E × B rotation)
 
-``\omega_E`` is the input E × B toroidal rotation profile, positive in the direction of the toroidal coordinate ``\zeta``; its relation to the current direction follows from the ``\zeta``/``\phi`` convention fixed by helicity ([Helicity and Handedness](@ref)) and is not re-derived by the kinetic module.
+``\omega_E`` is the input E × B toroidal rotation profile, positive in the direction of the toroidal coordinate ``\zeta``; its relation to the current direction follows from the ``\zeta``/``\phi`` convention fixed by helicity ([Helicity and handedness](@ref)) and is not re-derived by the kinetic module.
 
-### Diamagnetic Frequencies
+### Diamagnetic frequencies
 
 Computed at evaluation time from the kinetic-profile gradients (Logan et al. (2013), Eq. 7):
 
@@ -185,7 +185,7 @@ Computed at evaluation time from the kinetic-profile gradients (Logan et al. (20
 
 with ``\chi_1 = 2\pi\psi_0``, so that an outward-decreasing density or temperature gives a positive diamagnetic frequency; the total toroidal rotation is ``\omega_\phi = \omega_E + \omega_{*n} + \omega_{*T}``.
 
-### Energy Integral Resonance
+### Energy integral resonance
 
 The resonance denominator of the energy integral is ``i\,\Omega(x) - \nu`` with
 
@@ -198,7 +198,7 @@ The resonance denominator of the energy integral is ``i\,\Omega(x) - \nu`` with
 where ``x = E/T`` is the normalized energy, ``\nu`` the energy-dependent effective collisionality, and ``\omega_b``, ``\omega_D`` the bounce and precession frequencies at thermal energy (``\omega_b \propto v_\mathrm{th}``, ``\omega_D \propto v_\mathrm{th}^2``).
 The sign of ``\omega_E`` shifts the resonance in velocity space.
 
-## COCOS Compatibility
+## COCOS compatibility
 
 The conventions above are GPEC-native and predate the COCOS standard of [Sauter and Medvedev (2013)](https://doi.org/10.1016/j.cpc.2012.09.010): right-handed ``(\psi, \theta, \zeta)``, ``\psi`` without the ``2\pi`` and increasing outward, ``q > 0``, ``n > 0`` and ``F = |F|``.
 The code labels this internal convention COCOS 2 (`Equilibrium.Sources.IMAS`) and accepts IMAS input in two forms:

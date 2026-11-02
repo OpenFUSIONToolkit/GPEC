@@ -1,448 +1,173 @@
 # Error Fields
 
-The `ErrorFields` module quantifies how sensitive a perturbed equilibrium's resonant drive is
-to the placement of each coil set. It is the foundation of an error-field tolerance
-assessment: once one plasma solve exists, the question *"how much resonant field does a
-misaligned coil produce?"* is linear in the coil's motion, so the module linearizes it once
-and everything downstream (tolerance Monte Carlo, locking risk, allowable-tolerance scans)
-becomes linear algebra on a small table.
+`ErrorFields` turns a coil-driven perturbed equilibrium into an error-field tolerance assessment: how much resonant field each coil set drives when it is misaligned, how likely the assembled machine is to lock for given manufacturing tolerances, and how much correction current an error-field correction array may and must carry.
+Once one plasma solve exists the resonant drive is linear in each coil's motion, so the module linearizes it once and everything downstream is linear algebra on a small table.
 
-## The workflow
+## What it computes
 
 1. **Coil sensitivities** (`[ErrorFields]`, `ErrorFields/CoilSensitivities/`): the resonant spectrum of each coil set as built and its derivatives with respect to rigid shifts and tilts.
 2. **Tolerances** (`tolerance_file`): the manufacturing tolerances of each coil set, in their own TOML file.
 3. **Monte Carlo** (`[ErrorFields.MonteCarlo]`, `ErrorFields/MonteCarlo/`): the distribution of the dominant-mode overlap ``|\delta|`` over sampled misalignments, intrinsic and with error-field correction.
 4. **Locking risk** (`[ErrorFields.scenario]`, `[ErrorFields.Risk]`, `ErrorFields/Risk/`): the overlap distribution against the empirical penetration-threshold scaling, giving the locking probability and its scan against tolerance scale, from which the allowable tolerance follows.
-5. **Correction limits** (`[ErrorFields.NTV]`, `ErrorFields/NTV/`): how much correction current each array may carry before its non-resonant field's NTV torque spends the rotation budget, and how much it needs.
+5. **Correction limits** (`[ErrorFields.NTV]`, `ErrorFields/NTV/`): how much correction current each array may carry before the NTV torque of its non-resonant field spends the rotation budget, and how much it needs.
 
-## What is computed
-
-For every named coil set of a coil-forced run, the module evaluates the root-area-weighted
-control-surface spectrum ``\tilde{b}`` of the set as built and its central-difference
-derivatives with respect to the six rigid-body degrees of freedom: Cartesian shifts
-``(\Delta x, \Delta y, \Delta z)`` in metres and rotations ``(\theta_x, \theta_y, \theta_z)``
-about the machine axes in degrees. The spectra are placed on the run's ``(m, n)`` ordering and
-conformed with the control-surface operator, so they are exactly the vectors the resonant
-coupling matrix and its singular vectors act on
-(see [Dominant resonant-coupling mode](perturbed_equilibrium.md#Dominant-resonant-coupling-mode)).
+For every named coil set of a coil-forced run the stage evaluates the root-area-weighted control-surface spectrum ``\tilde b`` of the set as built and its central-difference derivatives with respect to the six rigid-body degrees of freedom, the shifts ``(\Delta x, \Delta y, \Delta z)`` in metres and the rotations ``(\theta_x, \theta_y, \theta_z)`` about the machine axes in degrees, placed on the run's (m, n) ordering so that they are exactly the vectors the resonant coupling matrix and its singular vectors act on (see [Dominant resonant-coupling mode](perturbed_equilibrium.md#Dominant-resonant-coupling-mode)).
+The stored primitive is the linearization of the spectrum, not a scalar, so the resonant surfaces retained, the singular mode and the normalization are post-hoc choices, and every later step can be re-evaluated from `gpec.h5` without a new plasma solve.
 In the snippets below `EF` is `GeneralizedPerturbedEquilibrium.ErrorFields` and `AEF` is `GeneralizedPerturbedEquilibrium.Analysis.ErrorFields`.
 
-The overlap of a coil set with singular mode ``k`` of the coupling matrix, normalized by the
-axis toroidal field, is the dimensionless
+## Governing equations
+
+The overlap of a coil set with singular mode ``k`` of the coupling matrix, normalized by the axis toroidal field, is the dimensionless
 
 ```math
 \delta = \frac{V_k^{\mathrm{H}}\,\tilde{b}}{B_{T0}},
 ```
 
-and because the projection is linear, the derivatives of ``\tilde{b}`` project to the
-derivatives of ``\delta``. A rigid shift ``(\Delta x, \Delta y)`` therefore moves the overlap
-by ``S_x \Delta x + S_y \Delta y`` with complex ``S_x = \partial\delta/\partial\Delta x`` and
-``S_y = \partial\delta/\partial\Delta y``, which is exact for any coil shape; for an
-axisymmetric coil ``S_y = \pm i S_x`` and the response reduces to a single magnitude with a
-free phase, the model the OMFIT tolerance tool used.
+and because the projection is linear, a rigid shift ``(\Delta x, \Delta y)`` moves it by ``S_x \Delta x + S_y \Delta y`` with the complex sensitivities ``S_x = \partial\delta/\partial\Delta x``, ``S_y = \partial\delta/\partial\Delta y``, exact for any coil shape; for an axisymmetric coil ``S_y = \pm i S_x`` and the response reduces to one magnitude with a free phase.
+Over sampled misalignments the overlap of the machine is the coherent sum over coil sets of ``S\,(\Delta + u) + T\,(\theta + v)`` for each coil's draw ``(\Delta, \theta)`` and placement uncertainty ``(u, v)``, plus one shared draw per coherent group and a random-direction unattributed budget; no field is recomputed, so a million samples take about a second.
 
-The stored primitive is the linearization of the spectrum, not a scalar, so the resonant
-surfaces retained, the singular mode, and the normalization are all post-hoc choices.
+An overlap distribution becomes a locking risk through the empirical ITPA penetration-threshold scalings of [Logan et al. (2020)](citations.md#ErrorFields) for n = 1 and n = 2 and [Bursch et al. (2026)](citations.md#ErrorFields) for n = 1,
+
+```math
+\delta_\mathrm{thresh} = 10^{\alpha_c}\, n_e^{\alpha_n}\, B_T^{\alpha_B}\, R_0^{\alpha_R}\, (\beta_N/l_i)^{\alpha_\beta}\, I_p^{\alpha_I},
+```
+
+with ``n_e`` in 10¹⁹ m⁻³, ``B_T`` in T, ``R_0`` in m and ``I_p`` in MA (the current term only in the 2026 fits).
+Sampling the fitted exponents within their standard errors turns the threshold into a distribution whose cumulative distribution is the probability ``P(\mathrm{lock}\,|\,\delta)`` that an overlap locks, and the locking probability of the assembled machine is ``100 \int \mathrm{pdf}(\delta)\, P(\mathrm{lock}\,|\,\delta)\, d\delta`` over the Monte Carlo bins, per batch.
+
+A correction array cancels the dominant-mode overlap at ``C_c`` per kilo-ampere-turn, but the non-resonant remainder of its field drives an NTV torque ``T I^2`` that a perfect correction does not remove.
+With a torque budget ``T_0`` and the threshold taken to fall in proportion to the torque spent, the current that corrects an intrinsic overlap ``\delta_\mathrm{EF}`` solves
+
+```math
+\delta_\mathrm{EF} - C_c I = s\,\delta_\mathrm{thresh}\left(1 - \frac{T_\mathrm{residual} I^2}{T_0}\right),
+```
+
+the model of [Logan et al. (2026)](citations.md#ErrorFields) for SPARC and [Leuthold et al. (2026)](citations.md#ErrorFields) for ARC.
+It holds only while the plasma still rotates, so the current is capped at ``I_\max = \sqrt{T_0/T_\mathrm{residual}}``, and the largest correctable overlap is the peak of the quadratic or the overlap cancelled at ``I_\max``, whichever comes first; the two zero-rotation limits ``C_c\sqrt{T_0/T_\mathrm{residual}}`` and ``C_c\sqrt{T_0/T_\mathrm{full}}`` are reported beside it.
 
 ## Running it
 
-Add an `[ErrorFields]` section to a deck whose `[ForcingTerms]` uses
-`forcing_data_format = "coil"` and whose `[PerturbedEquilibrium]` computes the singular
-coupling:
+The stage needs a `[PerturbedEquilibrium]` run with `forcing_data_format = "coil"` and the singular coupling computed; `examples/DIIID-like_error_field_example` is the complete case, with the DIII-D C-coil as the n = 1 source and the eighteen F coils as single-filament hoops whose error-field content is entirely their sensitivity to misalignment.
+From its deck:
 
 ```toml
 [ErrorFields]
-fd_step_shift_m = 1e-3          # Central-difference step for the rigid shifts [m]
-fd_step_tilt_deg = 0.1          # Central-difference step for the rigid tilts [degrees]
-rotation_center = "conductor"   # Tilt pivot: each conductor's own centre ("conductor") or the whole set's ("set")
-exclude_coils = []              # Coil sets that are not error-field sources (the NTV efc_coils are excluded automatically)
-```
-
-The stage runs after the perturbed equilibrium and writes `ErrorFields/CoilSensitivities/`:
-the spectra `field_as_designed`, `shift_sensitivity_per_m`, `tilt_sensitivity_per_deg`, a finite-difference
-curvature diagnostic per tap, the current pattern the spectra were evaluated at, and a
-`DominantMode/` summary projected onto the run's full-window dominant mode (`delta_as_designed`,
-its shift and tilt sensitivities, their direction-averaged in-plane magnitudes, and the in-plane
-shift and tilt that would cancel `delta_as_designed`).
-
-From a script, the same stage is one call on the plasma response and the coil sets of a coil-forced
-perturbed equilibrium; it returns an `ErrorFieldsResult`, and products not asked for are `nothing`:
-
-```julia
-resp = plasma_response(ffs)
-pe = perturbed_equilibrium(resp, RMPField(ft_ctrl))
-ef = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl);
-                  tolerances=ErrorFields.read_tolerance_toml("tolerances.toml"),
-                  scenario=ErrorFields.ScenarioParameters(ffs.equil; n_e=5.0))
-save_to_hdf5("gpec.h5", ef)
-```
-
-`examples/DIIID-like_error_field_example/` is a complete case: the DIII-D-like equilibrium with
-the C-coil as the nominal n = 1 source and the eighteen DIII-D F coils added as single-filament
-hoops at the centroids of their winding packs (from OpenFUSIONToolkit's TokaMaker
-`DIIID_geom.json`). An axisymmetric hoop drives no n = 1 field as built, so each F coil's
-error-field content is entirely its sensitivity to misalignment; `analyze_example.jl` ranks the
-coils by error field per millimetre of shift and per tenth of a degree of tilt, over all
-rational surfaces and over the edge only.
-
-The tilt pivot matters for multi-filament winding packs: `"conductor"` rotates each filament
-about its own arc-length centre, the convention of the Fortran GPEC coil loader inherited by the OMFIT
-tolerance tool, while `"set"` rotates the pack rigidly about its common centre, which is what
-an engineering axis-line tolerance constrains. Single-conductor sets give identical results
-either way.
-
-## Tolerance input
-
-Manufacturing tolerances are engineering data, reviewed and versioned independently of any
-run, so they live in their own TOML file named by `tolerance_file` in `[ErrorFields]` (a path
-relative to the deck directory). The run validates the file, echoes its text into
-`Input/RawInputs/ErrorFields/tolerance_toml_raw` for replay, and leaves the device numbers
-where they belong: outside the repository. The sampling and Monte Carlo stages below consume
-these tolerances.
-
-```toml
-# Fallbacks for keys a coil block leaves out (every key optional)
-[ErrorFields.defaults]
-shift_sigma_mm = 0.0             # Gaussian uncertainty added to the sampled shift [mm]
-tilt_sigma = 0.0                 # Gaussian uncertainty added to the sampled tilt, in tilt_units
-tilt_units = "deg"               # "deg", or "m" for a rim displacement converted through the nominal radius
-radial_shape = "hollow"          # Radial sampling density on the disk: flat, uniform_area, hollow, or ring
-tolerance_model = "additive"     # "additive" (independent shift and tilt) or "cylinder" (correlated axis line)
-cylinder_half_height_m = 0.0     # Cylinder half-height for the cylinder model [m]
-current_factor = 1.0             # Current as built relative to the run's; scales the coil's overlap and sensitivities
-
-# One block per coil set that moves on its own
-[[ErrorFields.coil]]
-name = "PF1U"                    # Coil set name; must match a [[ForcingTerms.coil_set]] of the run
-shift_tol_mm = 0.5               # Radius of the in-plane displacement disk the coil centre may lie in [mm]
-tilt_tol = 0.019                 # Tilt tolerance, in tilt_units
-tolerance_model = "cylinder"     # Axis line confined to a cylinder; shift and tilt drawn together
-cylinder_half_height_m = 1.5     # Cylinder half-height; sets the tilt reachable at the given radius [m]
-
-# Coil sets that move together: one shared draw per sample
-[[ErrorFields.coherent_group]]
-name = "upper_pf_brace"          # Label of the coherently moving group
-members = ["PF1U", "PF2U"]       # Coil sets sharing the draw
-shift_tol_mm = 2.0               # Coherent shift amplitude shared by the group [mm]
-tilt_tol = 0.0                   # Coherent tilt amplitude shared by the group, in tilt_units
-phase_group = "braces"           # Groups naming the same phase_group share the random direction
-rotation_center_z_m = 0.0        # Height of the pivot of the group's rigid rotation on the machine axis [m]
-tilt_lever_arm_m = 3.2           # Lever arm converting a tilt_tol in metres to the group's rotation angle [m] (optional)
-
-[ErrorFields.correctability]
-uncorrectable_coils = ["EFCC_U"] # Coil sets the error-field correction cannot reduce
-efc_factor = 2.0                 # Divisor applied to correctable contributions under error-field correction
-
-[ErrorFields.other_field]
-magnitude = 8.2e-6               # Overlap budget of sources not attributed to any coil
-sigma = 0.0                      # Gaussian uncertainty on that budget
-radial_shape = "ring"            # Radial sampling density of the budget magnitude
-```
-
-The shift tolerance is the radius of the disk the coil centre may sit in, with the direction sampled; a tilt is given in degrees or, as legacy tables do, as a rim displacement in metres converted through the coil set's arc-length-weighted major radius (`tilt_lever_arm_m` for a coherent group).
-A coherent group's tilt is a rigid rotation of its members about a pivot on the machine axis at `rotation_center_z_m`, so a member at height `z` also shifts by `(z − z_pivot)·θ`, and groups sharing a `phase_group` draw the same random direction.
-Coil sets without a tolerance block contribute their as-designed overlap only; a coil's `current_factor` scales its overlap and sensitivities together (`0` switches it off, a negative value reverses it), which is the knob for a risk against the current in an uncorrectable coil.
-
-Every key is checked against the schema, so a misspelled key is an error rather than a silent
-default. `read_tolerance_toml` parses a file into a `ToleranceSet`, `validate_tolerances`
-checks its names against a run's coil sets, and `update` copies a set, a coil, a group or the
-unattributed budget with named fields replaced, which is how a programmatic scan over a
-quantity the file fixes (a sigma, a budget, a current factor) is written:
-
-```julia
-ts = EF.read_tolerance_snapshot("gpec.h5")
-half = EF.update(ts; coils=[c.name == "F6A" ? EF.update(c; current_factor=0.5) : c for c in ts.coils])
-tight = EF.update(ts; other_field=EF.update(ts.other_field; magnitude=1e-5))
-```
-
-## Sampling a tolerance
-
-A tolerance is the radius of the disk the coil centre may lie in; the direction is random and the radial density is a `RadialDistribution` (`Flat`, `UniformArea`, `Hollow`, `Ring` or `PowerLaw(p)`), with a Gaussian placement uncertainty added on top.
-The `"additive"` model draws a shift and a tilt independently; the `"cylinder"` model confines the coil's axis line to a cylinder of the tolerance radius and the given half-height and derives the correlated midplane shift and lean from its two endpoints.
-Coherent groups share one random direction and draw their own radii.
-
-## Tolerance Monte Carlo
-
-With a `tolerance_file` named, the run samples every coil set's misalignment within its
-tolerance and histograms the dominant-mode overlap `|δ|`: per sample and coil set the overlap
-moves by `S·(Δ + u) + T·(θ + v)` for the coil's own draw (`Δ`, `θ`) and Gaussian placement
-uncertainties (`u`, `v`); coherent groups add one shared draw per group, with the lateral shift
-a rigid rotation about the group pivot gives each member; the unattributed budget adds a random
-direction. Because the overlap is linear in the misalignments, a million samples take about a
-second and no field is recomputed. Two histograms are written to `ErrorFields/MonteCarlo/`: the
-intrinsic `|δ|` and the corrected one, in which every correctable term (coil sets and groups not
-listed as uncorrectable, and the unattributed budget) is divided by `efc_factor`. Batches are
-seeded individually, so results are bit-identical for any thread count, and their spread is the
-statistical error bar of anything derived from them.
-
-A coil set the run energizes but that is not an error-field source — a correction array named
-in `[ErrorFields.NTV] efc_coils`, or anything listed in `[ErrorFields] exclude_coils` — is swept
-like the others, so its sensitivities and couplings are tabulated, but it is left out of the
-as-designed error field, the Monte Carlo, the worst-case bound and the scans, in the run and in
-every post-hoc entry point that rebuilds the table from the file. A tolerance that names it is an
-error. `without_coils(table, names)` is the same operation on a table in memory, and
-`excluded_coil_names("gpec.h5")` says which sets a run left out.
-
-```toml
-[ErrorFields]
-tolerance_file = "tolerances.toml"      # Manufacturing-tolerance TOML, relative to the deck directory
+fd_step_shift_m = 1e-3          # central-difference step of the rigid shifts [m]
+fd_step_tilt_deg = 0.1          # central-difference step of the rigid tilts [degrees]
+rotation_center = "conductor"   # tilt pivot: each conductor's own centre, or "set" for the whole set's
+exclude_coils = []              # coil sets that are not error-field sources (the NTV efc_coils are excluded automatically)
+tolerance_file = "tolerances.toml"   # manufacturing tolerances, relative to the deck directory
 
 [ErrorFields.MonteCarlo]
-nsample = 1000000               # Samples per batch
-nbatch = 10                     # Independent batches; their spread is the statistical error bar
-seed = 1                        # Base seed; batch b uses Xoshiro(hash((seed, b)))
-nbins = 300                     # Histogram bins, linear on [0, delta_max]
-delta_max = 0.0                 # Upper histogram edge; 0 = 1.5 × the worst-case alignment bound
-tolerance_scale = 1.0           # Multiplies every shift and tilt tolerance (for tolerance scans)
-coil_subset = []                # Coil sets whose tolerances are sampled; empty = all
-scale_subset = []               # Coil sets and groups that tolerance_scale applies to; the rest hold their tolerance (empty = all)
-scale_map = {}                  # Extra multiplier per coil set or group name, e.g. {F6A = 2.0}
-```
+nsample = 1000000               # samples per batch
+nbatch = 10                     # independent batches; their spread is the statistical error bar
+seed = 1
+nbins = 300                     # histogram bins on [0, delta_max]; delta_max = 0 is 1.5 × the worst-case bound
+tolerance_scale = 1.0           # multiplies every tolerance (for scans); scale_subset / scale_map restrict it
+coil_subset = []                # coil sets sampled; empty = all (the others get zero tolerance)
 
-`coil_subset` samples only the named coils and gives every other coil zero tolerance, which isolates one coil's contribution; `scale_subset` applies `tolerance_scale` to the named coils and groups and leaves the rest at their own tolerance, the design-review question of how far one class of coils can be relaxed while the rest of the machine holds.
-Neither changes which random numbers are drawn.
-
-The run's histogram is the full-window, dominant-mode summary. Any other window or mode, a
-tolerance scale, or a coil subset is a post-hoc re-run of the same kernel:
-
-```julia
-mc = EF.run_monte_carlo("gpec.h5"; psi_low=0.5, tolerance_scale=2.0, coil_subset=["PF1U", "PF2U"])
-mc.abs_delta_pdf, mc.abs_delta_bin_edges           # intrinsic |δ| density
-mc.abs_delta_efc_pdf                     # corrected
-mc.abs_delta_sampled_mean, mc.abs_delta_total_as_designed
-```
-
-## Locking risk and allowable tolerance
-
-An overlap distribution becomes a locking risk through the empirical ITPA penetration-threshold
-scalings ([citations](citations.md#ErrorFields)): the n = 1 fits of Logan et al.,
-*Plasma Phys. Control. Fusion* **62**, 084001 (2020) and of Bursch et al., *Plasma Phys. Control.
-Fusion* (2026), [doi:10.1088/1361-6587/aea7d6](https://doi.org/10.1088/1361-6587/aea7d6), and the n = 2 fits of Logan et al.,
-*Nucl. Fusion* **60**, 086010 (2020):
-`δ_thresh = 10^α_c · n_e^α_n · B_T^α_B · R_0^α_R · (β_N/l_i)^α_β · I_p^α_I`, with `n_e` in
-10¹⁹ m⁻³, `B_T` in T, `R_0` in m and `I_p` in MA. Each fit is chosen by `year`, `dataset` and `fit`; only the 2026 fits carry the current term:
-
-| Fit (`year`, `dataset`, `fit`) | α_c | α_n | α_B | α_R | α_β | α_I |
-|---|---|---|---|---|---|---|
-| `2026`, `"O,L"`, `"OLS"` (Eq. 7) | −4.31 ± 0.09 | 0.77 ± 0.08 | 0.19 ± 0.09 | 1.88 ± 0.16 | 0.25 ± 0.08 | −0.97 ± 0.08 |
-| `2026`, `"O,L"`, `"WLS"` (Eq. 8) | −4.26 ± 0.09 | 0.56 ± 0.08 | 0.30 ± 0.10 | 1.57 ± 0.15 | 0.13 ± 0.06 | −1.01 ± 0.07 |
-
-The 2026 fits use only ohmic and L-mode discharges of conventional tokamaks (C-Mod, DIII-D,
-EAST, JET, J-TEXT and KSTAR; no NSTX or COMPASS), so they suit conventional-aspect-ratio designs
-in linear ohmic confinement or L-mode. Sampling the fitted exponents
-within their standard errors turns the threshold into a distribution; its cumulative
-distribution is the probability that an overlap `δ` locks, and the locking probability of the
-assembled machine is `100 ∫ pdf(δ) P(lock|δ) dδ` over the Monte Carlo bins, per batch. The
-operating point is an `[ErrorFields.scenario]` table: density must be given (it is not an
-equilibrium output); field, major radius, β_N, l_i and the plasma current default from the
-equilibrium.
-
-```toml
 [ErrorFields.scenario]
-n_e = 5.0                       # Electron density for the threshold scaling [1e19 m^-3]
-# i_p = 1.2                     # Plasma current magnitude [MA]; defaults to the equilibrium's
+n_e = 5.0                       # electron density of the threshold scaling [1e19 m^-3]; B_T, R_0, beta_N, l_i and I_p default from the equilibrium
 
 [ErrorFields.Risk]
-year = 2020                     # Publication year of the threshold fit: 2020 (n = 1 and n = 2) or 2026 (n = 1)
-dataset = "O,L"                 # ITPA dataset of the fit: 2020 "O,L" or "O,L,H" (n = 1), "O,L", "O,L,-C", "O,L,N" (n = 2); 2026 "O,L"
-fit = "WLS"                     # Fitting method: "OLS", "DSOLS", or "WLS" (2026: "OLS" or "WLS")
-distribution = "normal"         # How the fit exponents are sampled: "normal", "flat", or "normal_truncated"
-nsample_threshold = 1000000     # Threshold samples
-seed = 1                        # Seed of the threshold sampling
-scan_scales = [0.25, 0.5, 1.0, 2.0, 4.0]   # Tolerance multipliers of the allowable-tolerance scan (empty: no scan)
+year = 2020                     # threshold fit: 2020 (n = 1 and 2) or 2026 (n = 1)
+dataset = "O,L"                 # ITPA dataset of the fit ("O,L", "O,L,H", ...)
+fit = "WLS"                     # "OLS", "DSOLS" or "WLS"
+distribution = "normal"         # how the fit exponents are sampled: "normal", "flat", "normal_truncated"
+nsample_threshold = 1000000
+scan_scales = [0.25, 0.5, 1.0, 2.0, 4.0]   # tolerance multipliers of the allowable-tolerance scan
+
+[ErrorFields.NTV]
+efc_coils = ["d3d_c"]           # the correction arrays; never error-field sources
+method = "fgar"                 # KineticForces torque method, enabled in [KineticForces]
 ```
 
-`ErrorFields/Risk/` holds the threshold density and `P(lock|δ)` on the Monte Carlo grid, the
-locking probability of the intrinsic and corrected distributions (with per-batch values), the
-as-designed risk, and the sharp-threshold risk; `ErrorFields/Risk/ToleranceScan/` the risk
-against tolerance scale. The scan is the stored quantity; the allowable tolerance for a target
-risk is a post-hoc inversion, and every window or fit choice is re-evaluated from the file:
+The tilt pivot matters for multi-filament winding packs: `"conductor"` rotates each filament about its own centre, `"set"` rotates the pack rigidly about its common centre, which is what an engineering axis-line tolerance constrains.
+A coil set that is not an error-field source (a correction array or anything in `exclude_coils`) is swept like the others but left out of the as-designed field, the Monte Carlo and the scans; a tolerance that names it is an error.
+The NTV limits need a `[KineticForces]` section, since each array's torque per kAt² is one kinetic torque evaluation of its unit-current spectrum, with and without the dominant mode projected out.
 
-```julia
-scan = EF.ToleranceScan("gpec.h5")
-EF.allowable_tolerance(scan, 1.0)                  # tolerance multiplier at 1 % locking risk
-EF.allowable_tolerance(scan, 1.0; corrected=true)  # with error-field correction
-risk = EF.locking_risk("gpec.h5"; n_e=5.0, psi_low=0.7, risk_ctrl=EF.RiskControl(; dataset="O,L,H"))
-risk26 = EF.locking_risk("gpec.h5"; n_e=5.0, risk_ctrl=EF.RiskControl(; year=2026, fit="OLS"))
-scan2 = EF.tolerance_scan("gpec.h5"; n_e=5.0, scales=[0.5, 1, 2, 4], coil_subset=["F6A", "F7A"])
-scan3 = EF.tolerance_scan("gpec.h5"; n_e=5.0, scales=[0.5, 1, 2, 4], scale_subset=["F6A", "F7A"])  # scan the outboard pair, hold the rest
+The tolerances are engineering data, reviewed independently of any run, so they live in their own file, echoed into `Input/RawInputs/ErrorFields/tolerance_toml_raw` for replay; every key is checked against the schema.
+Its tables are `[ErrorFields.defaults]` (fallbacks for every coil block), one `[[ErrorFields.coil]]` per coil set that moves on its own, `[[ErrorFields.coherent_group]]` for coil sets that move together, `[ErrorFields.correctability]` and `[ErrorFields.other_field]`:
+
+```toml
+[ErrorFields.defaults]
+shift_sigma_mm = 0.0             # Gaussian placement uncertainty added to the sampled shift [mm]
+tilt_sigma = 0.0                 # the same for the tilt, in tilt_units
+tilt_units = "deg"               # "deg", or "m" for a rim displacement converted through the coil's major radius
+radial_shape = "hollow"          # radial sampling density on the disk: flat, uniform_area, hollow or ring
+tolerance_model = "additive"     # "additive" (independent shift and tilt) or "cylinder" (correlated axis line)
+current_factor = 1.0             # current as built relative to the run's; 0 switches a coil off
+
+[[ErrorFields.coil]]
+name = "PF1U"                    # must match a [[ForcingTerms.coil_set]] of the run
+shift_tol_mm = 0.5               # radius of the disk the coil centre may lie in [mm]
+tilt_tol = 0.019                 # tilt tolerance, in tilt_units
+tolerance_model = "cylinder"
+cylinder_half_height_m = 1.5     # sets the tilt reachable at the given radius
+
+[[ErrorFields.coherent_group]]
+name = "upper_pf_brace"
+members = ["PF1U", "PF2U"]       # one shared draw per sample
+shift_tol_mm = 2.0
+tilt_tol = 0.0
+phase_group = "braces"           # groups naming the same phase_group share the random direction
+rotation_center_z_m = 0.0        # pivot of the group's rigid rotation on the machine axis [m]
+
+[ErrorFields.correctability]
+uncorrectable_coils = ["EFCC_U"] # coil sets the error-field correction cannot reduce
+efc_factor = 2.0                 # divisor applied to correctable contributions under correction
+
+[ErrorFields.other_field]
+magnitude = 8.2e-6               # overlap budget of sources not attributed to any coil
+sigma = 0.0
+radial_shape = "ring"
 ```
 
-A threshold scaling is fitted for one toroidal mode number, so the in-run risk and every
-file-path entry point refuse a run that spans several (`single_toroidal_mode`); project onto one
-n's coupling first.
+A coherent group's tilt is a rigid rotation of its members about the pivot, so a member at height ``z`` also shifts by ``(z - z_\mathrm{pivot})\,\theta``; coil sets without a tolerance block contribute their as-designed overlap only; a coil's `current_factor` scales its overlap and sensitivities together, the knob for a risk against the current in an uncorrectable coil.
 
-A number quoted at the target risk level should be free of sampling and binning bias: `risk_convergence` repeats the Monte Carlo over lists of sample and bin counts, and the batch spread must fall as ``1/\sqrt{n_\mathrm{sample}}`` while the value must not move with the bin count by more than the spread.
-
-## Plots and coil-array phasing
-
-`Analysis.ErrorFields` plots everything above from `gpec.h5`, and every function takes a list
-of `label => path` pairs so coil-design revisions overplot on one axis:
+From a script the stage is one call on the plasma response and the coil sets, and every product is re-evaluated post hoc from the file for any surface window, mode, fit, tolerance scale or coil subset:
 
 ```julia
-AEF = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields
-AEF.plot_coil_sensitivities(["rev A" => "revA/gpec.h5", "rev B" => "revB/gpec.h5"]; quantity=:shift)
-AEF.plot_tolerance_pdf("gpec.h5"; corrected=true)
-AEF.plot_locking_risk("gpec.h5"; target_percent=1.0)     # marks the allowable scale
-AEF.plot_threshold_scaling("gpec.h5")
-AEF.plot_dominant_mode_spectrum("gpec.h5")
+ef = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl);   # ft_ctrl: the [ForcingTerms] control
+                  tolerances=EF.read_tolerance_toml("tolerances.toml"),
+                  scenario=EF.ScenarioParameters(ffs.equil; n_e=5.0))
+save_to_hdf5("gpec.h5", ef)
+
+table = EF.sensitivity_table("gpec.h5"; psi_low=0.5)                        # overlaps and sensitivities per coil set, edge window
+mc    = EF.run_monte_carlo("gpec.h5"; psi_low=0.5, tolerance_scale=2.0)      # |δ| distribution, intrinsic and corrected
+risk  = EF.locking_risk("gpec.h5"; n_e=5.0, risk_ctrl=EF.RiskControl(; year=2026, fit="OLS"))
+EF.allowable_tolerance(EF.ToleranceScan("gpec.h5"), 1.0; corrected=true)    # tolerance multiplier at 1% locking risk
+EF.max_correctable_overlap(EF.read_efc_couplings("gpec.h5")[1]; delta_threshold=1.4e-4, torque_budget=4.0)
 AEF.plot_error_field_summary("gpec.h5"; save_path="error_field_summary.png")
 ```
 
-Four more views answer the questions the assessment's single numbers hide. `plot_overlap_phasors`
-lays each coil's complex overlap head to tail, so a coil that adds to the error field is told
-apart from one that cancels another's; `plot_tolerance_budget` stacks the terms of the worst-case
-bound `abs_delta_worst_case` (`EF.worst_case_terms`) per coil, group and unattributed budget, so the
-tolerance the budget is spent on is visible; `plot_linearity_residuals` shows the curvature the
-linear sensitivity model neglects, at the finite-difference step or rescaled to each coil's own
-tolerance; and `quantity=:fraction` on the sensitivity bars is the resonant share of each coil's
-own spectrum, which separates a coil that is small from one that drives the wrong harmonics.
+`correction_requirement` gives the current each array needs, by the dominant mode or jointly over every rational surface in the least-squares sense, and `uncorrectable_probability` the fraction of the Monte Carlo overlap beyond what the NTV-limited array can correct; `phasing_map` evaluates the dominant-mode field per kilo-ampere-turn over the relative phases of several arrays; `ResonantDriveContext` and `coil_overlaps` assess a new coil design against the stored run at one Biot–Savart pass per coil set, with `combine_overlaps` applying a design current pattern afterwards.
+`Analysis.ErrorFields` plots each product, and every plotting function takes `label => path` pairs so coil-design revisions overplot on one axis.
 
-```julia
-AEF.plot_overlap_phasors("gpec.h5")                                  # one panel per source
-AEF.plot_tolerance_budget("gpec.h5"; sort=:total, top=10)            # largest budget terms first
-AEF.plot_linearity_residuals("gpec.h5"; at=:tolerance)               # curvature over the tolerance range
-AEF.plot_coil_sensitivities("gpec.h5"; quantity=:fraction)           # resonant fraction, in percent
-AEF.plot_coil_sensitivities("gpec.h5"; quantity=:as_designed, yscale=:log10)   # stems, never bars, on a log axis
-AEF.plot_tolerance_pdf("gpec.h5"; show_batches=true)                 # batch spread and the clamped fraction
-EF.worst_case_terms("gpec.h5").total                                 # = ErrorFields/MonteCarlo/abs_delta_worst_case
-```
+## Outputs
 
-When several independently powered coil arrays share the job of correcting the error field,
-the relative phases of their current patterns decide how much dominant-mode field they can
-drive per ampere-turn. `phasing_map` evaluates `|Σ_k δ_k e^{iφ_k}|` per kilo-ampere-turn and
-the resonant fraction of the applied field on a grid of the `N − 1` relative phases from the
-stored nominal spectra, a closed form with no optimizer, and `plot_phasing_map` draws it (a
-line for two arrays, a contour for three):
+| Dataset | Meaning |
+|---|---|
+| `ErrorFields/CoilSensitivities/field_as_designed`, `shift_sensitivity_per_m`, `tilt_sensitivity_per_deg` | the control-surface spectrum of each coil set as built and its derivatives with respect to the rigid shifts and tilts, with the current pattern they were evaluated at and the finite-difference linearity residual per tap |
+| `ErrorFields/CoilSensitivities/DominantMode/delta_as_designed`, … | the overlaps and sensitivities projected onto the run's full-window dominant mode, their direction-averaged in-plane magnitudes, and the shift and tilt that would cancel the as-designed overlap |
+| `ErrorFields/MonteCarlo/abs_delta_pdf`, `abs_delta_efc_pdf`, `abs_delta_bin_edges` | the intrinsic and corrected ``\lvert\delta\rvert`` histograms over the sampled tolerances, per batch and averaged |
+| `ErrorFields/MonteCarlo/abs_delta_total_as_designed`, `abs_delta_worst_case` | the overlap of the design as built and the worst-case bound with every term at its tolerance edge and in phase |
+| `ErrorFields/Risk/locking_probability_given_delta`, threshold density | ``P(\mathrm{lock}\,|\,\delta)`` and the threshold distribution on the Monte Carlo grid |
+| `ErrorFields/Risk/locking_probability_percent`, `locking_probability_efc_percent`, `*_batches_percent`, `locking_probability_as_designed_percent`, `locking_probability_fit_threshold_percent` | the locking probability of the intrinsic and corrected distributions with per-batch values, of the design as built, and at the sharp fitted threshold |
+| `ErrorFields/Risk/ToleranceScan/` | the same against `tolerance_scale`; the allowable tolerance at a target risk is its inversion |
+| `ErrorFields/NTV/` | each correction array's dominant-mode coupling ``C_c``, resonant fraction and NTV torque per kAt² for its full field and with the dominant mode projected out |
 
-```julia
-pmap = EF.phasing_map("gpec.h5", ["EFCC_L", "EFCC_M", "EFCC_U"]; psi_low=0.5)
-EF.extreme_phasing(pmap)                        # best |δ| per kAt and the phases giving it
-AEF.plot_phasing_map(pmap; quantity=:resonant_fraction_percent)
-```
+Every dataset name follows one grammar, `<quantity>[_<instance>][_efc][_<statistic>][_<unit>]`: `delta` is the overlap and `abs_delta` its magnitude; `_as_designed`, `_sampled`, `_worst_case` name the geometry; `_efc` marks error-field correction applied; a probability stored as a percentage carries `_percent`.
 
-## NTV limits of error-field correction
+## Numerical notes
 
-A correction coil cancels the dominant-mode overlap at `C_c` per kilo-ampere-turn, but the
-non-resonant remainder of its field drives a neoclassical toroidal viscosity (NTV) torque
-`T·I²` that a perfect correction does not remove. With a torque budget `T_0` and the threshold
-taken to fall in proportion to the torque spent, the current that corrects an intrinsic overlap
-`δ_EF` solves `δ_EF − C_c I = s δ_thresh (1 − T_residual I²/T_0)`. This is the model used for
-SPARC by Logan et al., Nucl. Fusion (2026), doi:10.1088/1741-4326/ae6086, and for ARC by
-Leuthold et al., J. Plasma Phys. 92, E49 (2026), doi:10.1017/S0022377826101421. It holds only
-while the plasma still rotates, so the current is capped at `I_max = √(T_0/T_residual)`, and the
-largest correctable overlap is whichever comes first: the peak of the quadratic, or the overlap
-cancelled at `I_max`. `max_correctable_overlap` returns that limit (`with_ntv`) together with the two
-published zero-rotation limits, `C_c √(T_0/T_residual)` (SPARC, `residual_only`) and
-`C_c √(T_0/T_full)` (ARC, `torque_only`). `[ErrorFields.NTV]` names the correction arrays; the run
-evaluates each one's `C_c`, resonant fraction, and NTV torque per kAt² for its whole field and
-for its field with the dominant mode projected out — two plasma-response evaluations of the
-unit-current spectrum followed by the kinetic torque, which needs a `[KineticForces]` section —
-and writes `ErrorFields/NTV/`. The spectrum is evaluated on the run's `[ForcingTerms]` boundary
-grid and normalized by the magnitude of the array's ampere-turns, `|nw| × max|I|`, so the winding
-sense and current pattern of the deck stay the phase reference; the torques are stored with their
-sign, and the limits consume the budget with their magnitude (the sign depends on the rotation
-and on conventions, so a negative torque is never read as no torque). Torque budget, threshold
-and safety factor are analysis choices:
+- The sensitivities assume the overlap is linear in the misalignments out to the tolerance edge; the run checks it only at the finite-difference step, and `linearity_check` displaces each coil set by `±scale × tolerance` and recomputes its overlap to report the relative error of the linear model at the largest scale a tolerance scan will use (one Biot–Savart pass per row).
+- Monte Carlo batches are seeded individually, so results are bit-identical for any thread count; `risk_convergence` repeats the Monte Carlo over sample and bin counts, and the batch spread must fall as ``1/\sqrt{n_\mathrm{sample}}`` while the value must not move with the bin count by more than the spread.
+- A threshold scaling is fitted for one toroidal mode number, so the risk refuses a run that spans several; project onto one n's coupling first.
+- A coil set whose field at the run's toroidal mode is round-off (an axisymmetric hoop at n = 1) has no resonant fraction and reports `NaN` rather than the ratio of two noise vectors.
+- The NTV torques are stored with their sign and the limits consume the budget with their magnitude; the torque budget is the plasma's intrinsic torque and an analysis choice.
 
-```toml
-[ErrorFields.NTV]
-efc_coils = ["d3d_c"]           # Coil set names of the correction arrays to evaluate; never error-field sources
-method = "fgar"                 # KineticForces torque method (must be enabled in [KineticForces])
-```
-
-```julia
-couplings = EF.read_efc_couplings("gpec.h5")
-curve = EF.efc_current_curve(couplings[1]; delta_threshold=1.4e-4, torque_budget=4.0)
-EF.max_correctable_overlap(couplings[1]; delta_threshold=1.4e-4, torque_budget=4.0)
-AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0)   # threshold from the run's Risk/ group
-# The SPARC paper's uncertainty: ±50 % on the NTV torque, T_0 = 4 ± 2 N·m
-AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0, torque_rtol=0.5, budget_rtol=0.5)
-AEF.plot_efc_ntv_limits("gpec.h5"; torque_budget=4.0, profiles=true)   # adds T(ψ) integrated from the axis
-```
-
-The torque budget is the plasma's intrinsic torque. The SPARC paper uses 4 N·m for SPARC and the
-ARC paper 5–20 N·m for ARC; pick a value for the machine being analysed.
-
-### Designing the correction
-
-The NTV limits say how much correction current an array *may* carry; `correction_requirement` says how much it *needs*, and on which surfaces the correction falls short.
-For one array the dominant-mode answer is the ratio ``-\delta_\mathrm{source}/\delta_\mathrm{array}``; for several arrays the dominant-mode condition alone leaves a family of solutions (the result names the member with the least total ampere-turns squared), so the joint question is solved over every rational surface: the complex factors on all arrays that minimize the resonant field ``C\,(\tilde b_\mathrm{source} + \sum_k f_k \tilde b_k)`` in the least-squares sense, the field left on each surface, and how much of the source's spectrum each array can see.
-Each current is given twice, as a complex factor on the array's current as given and in kilo-ampere-turns (`ampere_turns_kat`, the normalization of the EFC couplings), which is the form to compare arrays given at different currents and to set beside the NTV-limited current.
-Any `CoilOverlap` can be a source or an array, so an as-built assembly (`combine_overlaps`) can be corrected with arrays that were never part of the run.
-Over the tolerance samples the needed current is a distribution, and `uncorrectable_probability` is the fraction of the Monte Carlo overlap beyond what the NTV-limited array can correct, the explicit-correction counterpart of the `efc_factor` model.
-
-```julia
-req = EF.correction_requirement("gpec.h5", "F_coils_as_built", ["d3d_c", "iu", "il"])
-req.current_factor_least_squares, req.least_squares_rank      # unique when the rank is the number of arrays
-req.current_factor_dominant, req.current_factor_dominant_minimum_norm
-req.current_least_squares_kat                                   # the same in kilo-ampere-turns, comparable across arrays
-abs.(req.resonant_field_least_squares_t) ./ abs.(req.resonant_field_source_t)   # what is left, per surface
-AEF.plot_correction_requirement(req)
-mc = EF.MonteCarloResult("gpec.h5"); c = EF.read_efc_couplings("gpec.h5")[1]
-EF.uncorrectable_probability(mc, c; delta_threshold=1.4e-4, torque_budget=4.0)
-AEF.plot_needed_current(mc, array; coupling=c, delta_threshold=1.4e-4, torque_budget=4.0)
-```
-
-## Analysis after the run
-
-Window the coupling to any range of rational surfaces and project onto any singular mode
-without re-running anything, from memory or from the file:
-
-```julia
-using GeneralizedPerturbedEquilibrium
-EF = GeneralizedPerturbedEquilibrium.ErrorFields
-
-# From the file: the coupling is rebuilt, windowed to 0.5 ≤ ψ_N ≤ 1, and projected onto mode 1
-table = EF.sensitivity_table("gpec.h5"; psi_low=0.5)
-table.delta_as_designed            # complex overlap of each coil set
-table.abs_delta_shift_per_mm       # direction-averaged |∂δ/∂Δ| per millimetre of shift, per coil set
-table.abs_delta_rim_per_mm         # the same for tilt, as rim displacement at the coil's major radius
-table.tilt_sensitivity_per_deg[1, :]               # ∂δ/∂θx per degree, per coil set
-
-# In memory, from the run's returned state (no I/O)
-rc  = PerturbedEquilibrium.ResonantCoupling(run.pe.response)
-dom = PerturbedEquilibrium.dominant_coupling(rc; psi_low=0.5)
-table = EF.sensitivity_table(run.error_fields.sensitivities, dom; mode=1)
-```
-
-### How far the linear model holds
-
-Every sweep above assumes the overlap is linear in the misalignments out to the tolerance edge.
-The run checks that only at the finite-difference step (the stored `*_linearity_residual`
-ratios, `plot_linearity_residuals`). `linearity_check` displaces each coil set with a tolerance
-block by `±scale × tolerance` along each in-plane shift and tilt axis, rotates each coherent group
-as one body about its pivot, recomputes the overlap of the displaced geometry and reports the
-relative error of the linear prediction per row. Include the largest scale a tolerance scan
-will use, since that is the regime it relies on; the cost is one Biot–Savart pass per row.
-
-```julia
-lin = EF.linearity_check("gpec.h5"; scales=(1.0, 2.0, 8.0))
-maximum(filter(!isnan, lin.relative_error))      # the worst row
-AEF.plot_linearity_check(lin)                     # stems per coil, log axis
-AEF.plot_linearity_residuals("gpec.h5"; at=:step, yscale=:log10)   # the stored step residuals, readable below 1 %
-```
-
-A coil set whose field at the run's toroidal mode is round-off (an axisymmetric hoop at n = 1) has no resonant fraction, and `coil_overlaps`, `combine_overlaps` and `plot_coil_sensitivities(quantity=:fraction)` report `NaN` for it rather than the ratio of two noise vectors.
-
-## Comparing coil revisions
-
-Assessing a new coil design against an existing run costs one Biot–Savart pass per coil set and no plasma solve: `ResonantDriveContext("gpec.h5")` gathers the equilibrium, the control surface and the resonant coupling from the file, and `coil_overlaps` evaluates any geometry against it, returning each coil's dimensionless overlap `delta`, its `resonant_fraction_percent` and its spectrum, with every normalization carried on the `CoilOverlap`.
-A design current pattern is applied afterwards, since the field is linear in the currents: evaluate every conductor at 1 kA and combine with `combine_overlaps(ovs, "old_pair_1" => 20.0, "old_pair_2" => -15.0)`, where the weights read as currents in kA; an unmatched name raises rather than contributing zero, so a renamed coil cannot drop out of a comparison.
-`compute_coil_sensitivities` takes the same context for the rigid-motion sensitivities, at thirteen spectrum evaluations per coil set instead of one.
-
-```julia
-ctx = EF.ResonantDriveContext("gpec.h5")                    # nzeta_coil=…, dat_dir=… override the deck
-new = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(new_cfg, 1))
-new[1].delta, new[1].resonant_fraction_percent
-```
-
-## Result names
-
-Every result field of `ErrorFields` is also its dataset name under `ErrorFields/`, built as `<quantity>[_<instance>][_efc][_<statistic>][_<unit>]`: `delta` is the dimensionless dominant-mode overlap and `abs_delta` its magnitude, `_as_designed`, `_sampled` and `_worst_case` say which geometry it is evaluated for, `_efc` marks error-field correction applied, and a probability stored as a percentage always carries `_percent`.
-The grammar is specified in `docs/development/hdf5-conventions.md` of the repository.
-
-## API Reference
+## API reference
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ErrorFields]

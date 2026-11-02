@@ -51,7 +51,7 @@ vac = Vacuum.compute_vacuum_response(inputs, Vacuum.ConformalWall(; standoff_fra
 vac.wv, vac.I_v, vac.plasma_pts, vac.wall_pts
 ```
 
-where `ν(ψ, θ)` is the toroidal-angle offset of the straight-field-line coordinates, ``\phi = 2\pi\zeta + \nu``.
+where `ν(ψ, θ)` is the toroidal-angle offset of the straight-field-line coordinates, ``\phi = 2\pi\zeta + \nu`` with ``\phi`` the internal toroidal angle of the [Conventions Reference](conventions.md) (the laboratory angle carries the helicity sign).
 With `nzvac > 1` the response is evaluated on a toroidal grid, with the singular correction of the [3D kernel](citations.md#3D-vacuum-singular-correction) (`examples/Solovev_ideal_example_3D`).
 
 ## Outputs

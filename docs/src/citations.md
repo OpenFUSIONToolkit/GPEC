@@ -239,6 +239,22 @@ module computes (Eqs. 1–5).
 
 ---
 
+> N. C. Logan et al., "Error field correction limits set by neoclassical toroidal viscosity in SPARC,"
+> *Nuclear Fusion* (2026).
+> DOI: [10.1088/1741-4326/ae6086](https://doi.org/10.1088/1741-4326/ae6086)
+
+The NTV-limited error-field correction model of `ErrorFields.NTV`: the correction current is capped by the torque budget the non-resonant field of the correction array spends.
+
+---
+
+> N. Leuthold et al., "Error field correction and neoclassical toroidal viscosity limits for ARC,"
+> *Journal of Plasma Physics* **92**, E49 (2026).
+> DOI: [10.1017/S0022377826101421](https://doi.org/10.1017/S0022377826101421)
+
+The same model applied to ARC, with the zero-rotation `torque_only` limit reported beside the residual-torque one.
+
+---
+
 ## KineticForces
 
 The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical TRansport Code) formalism.

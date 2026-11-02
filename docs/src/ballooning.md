@@ -26,7 +26,7 @@ At marginal stability the ideal energy principle gives the ballooning equation a
 \mathbf{B}\cdot\nabla\left(\frac{|\nabla\beta|^2}{B^2}\, \mathbf{B}\cdot\nabla\hat{\varphi}\right) + 2\frac{P'}{\chi'}\kappa_w \hat{\varphi} = 0 ,
 ```
 
-with ``\chi`` the poloidal flux, ``P'`` the pressure gradient and the projected curvature
+with ``\chi`` the poloidal flux (the symbol of Connor, Hastie and Taylor for the ``\psi`` of the other pages), ``P'`` the pressure gradient and the projected curvature
 
 ```math
 \kappa_w \equiv \frac{\boldsymbol{\kappa}\times\mathbf{B}}{B^2}\cdot\nabla\beta = \kappa_n - q'\theta\,\kappa_s ,

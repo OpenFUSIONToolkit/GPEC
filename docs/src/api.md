@@ -7,12 +7,12 @@ Every stage is a `solve` of a problem type with an algorithm, or a function on t
 using GeneralizedPerturbedEquilibrium
 
 eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada", kinetic_file="kinetic.h5")
-ffs  = solve(eq, Riccati(); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)           # [ForceFreeStates]
+ffs  = solve(eq, Forward(); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)           # [ForceFreeStates]: Forward, no wall, for the response below
 ls   = solve(LocalStabilityProblem(eq; alpha_boundary_scan=true), Ballooning())          # [LocalStability]
 resp = plasma_response(ffs; compute_singular_coupling=true)                               # [PerturbedEquilibrium]
 pe   = perturbed_equilibrium(resp, RMPField("coils.dat"))                                 #   with the [ForcingTerms] drive
 kf   = kinetic_torque(pe, KineticForcesControl())                                         # [KineticForces]
-ef   = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl); tolerances)     # [ErrorFields]
+ef   = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl); tolerances)     # [ErrorFields]; ft_ctrl: the [ForcingTerms] control, tolerances: an ErrorFields.ToleranceSet
 tear = solve(TearingProblem(ffs), SLAYERModel(); config=TearingConfig())                  # [Tearing]
 
 save_to_hdf5("gpec.h5", ffs; local_stability=ls)
@@ -80,12 +80,12 @@ The weights are linear-combination coefficients, not physical amplitudes: a coil
 The second argument of `solve` picks the formalism and its fields are that formalism's numerical settings; physical inputs belong on `ForceBalanceProblem`:
 
 ```julia
-ffs = solve(eq, Forward(; eulerlagrange_tolerance=1e-8); nn=1, vac_flag=true)   # dense ξ profiles for PerturbedEquilibrium, kinetic solves
+ffs = solve(eq, Forward(; eulerlagrange_tolerance=1e-8); nn=1, vac_flag=true)   # dense ξ profiles: the only input plasma_response accepts; kinetic solves
 ffs = solve(eq, Riccati(; nchunks=40); nn=1, vac_flag=true)                      # chunked propagators, Δ′ matrix (default)
 ffs = solve(eq, Galerkin(; nx=512); nn=1)                                        # finite-element outer-region Δ′
 ```
 
-A result carries `nothing` in the fields its integrator does not produce, and consumers warn and skip rather than erroring; see [Stability](stability.md).
+A result carries `nothing` in the fields its integrator does not produce, and consumers warn and skip rather than erroring; `plasma_response` in particular needs a `Forward()` solve with `wall=nothing` (it errors on a wall or a Galerkin result and skips with a warning on a Riccati one), see [Stability](stability.md).
 A kinetic solve takes `Forward()` with the problem's `kinetic` keyword: `kinetic=KineticForcesControl(; ...)` evaluates the drift-kinetic matrices on the equilibrium's kinetic profiles, `kinetic=TestKineticMatrices(; scale)` uses synthetic matrices, `kinetic_factor` scales either, and `km = kinetic_matrices(prob)` evaluates the source once for reuse in later solves ([`KineticMatrices`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.KineticMatrices)).
 
 ## Inner-layer matching
@@ -113,7 +113,6 @@ ggj = solve(TearingProblem(ffs; coupling_mode=:coupled), GGJModel(; solver=:ray)
     config=TearingConfig(; gamma_range=(1.0, 1e4), omega_range=(-1e4, 1e4)))
 ```
 
-GGJ's η and ρ default from the kinetic data (η by the resistivity closure SLAYER uses, ρ = μ·m_p·n_e); pass `eta` and `rho` to `TearingProblem` to override them.
 Both models report lab-frame frequencies (`omega` in rad/s, `gamma` in 1/s, positive for instability, with `frequency_frame` recorded on the roots group); SLAYER searches a normalized Q box and GGJ a physical (γ, ω) box.
 
 ## Local stability
@@ -136,7 +135,7 @@ GeneralizedPerturbedEquilibrium.perturbed_equilibrium
 
 [`plasma_response`](@ref GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.plasma_response), which builds the
 [`PlasmaResponse`](@ref GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PlasmaResponse) that `perturbed_equilibrium`
-applies, is documented with the [perturbed equilibrium](perturbed_equilibrium.md) module.
+applies, is documented with the [Perturbed Equilibrium](perturbed_equilibrium.md) module.
 
 ## Integrator selectors
 

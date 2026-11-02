@@ -8,13 +8,13 @@
 Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms, GeneralizedPerturbedEquilibrium.Utilities.AdaptiveSampling]
 ```
 
-## Physical Constants
+## Physical constants
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Utilities.PhysicalConstants]
 ```
 
-## Neoclassical Resistivity
+## Neoclassical resistivity
 
 Parallel-resistivity closures (Spitzer, Spitzer-Härm, and the Sauter and Redl
 neoclassical models) used to set the Lundquist number in the tearing stack.
@@ -23,7 +23,7 @@ neoclassical models) used to set the Lundquist number in the tearing stack.
 Modules = [GeneralizedPerturbedEquilibrium.Utilities.NeoclassicalResistivity]
 ```
 
-## HDF5 Annotations
+## HDF5 annotations
 
 Self-describing metadata for `gpec.h5` (long_name/units/dims attributes and HDF5
 Dimension Scales); see the metadata contract in `docs/development/hdf5-conventions.md`.
@@ -40,7 +40,7 @@ The Hermite-cubic basis and packed grid shared by the outer-region and inner-lay
 Modules = [GeneralizedPerturbedEquilibrium.Utilities.HermiteFEM]
 ```
 
-## IMAS Output
+## IMAS output
 
 ```@docs
 GeneralizedPerturbedEquilibrium.write_imas

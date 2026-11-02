@@ -42,7 +42,7 @@ Its global boundary-value problem over all surfaces gives the Δ′ matrix of [G
 `[ForceFreeStates] integrator` selects the radial method; its numerical settings sit in a section of the same name.
 
 - `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in the Riccati basis and assembles the Δ′ matrix. It stores the chunk endpoints only, so it yields no dense ``\xi`` profiles.
-- `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction at each rational surface. It returns dense displacement profiles, is the only integrator the perturbed equilibrium stage consumes for ``\xi``-resolved output, and the only one that supports the kinetic solve.
+- `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction at each rational surface. It returns dense displacement profiles, and is the only integrator whose result `plasma_response` accepts (the response operators are built from the dense ``\xi`` solution; a wall is refused too) and the only one that supports the kinetic solve.
 - `"Galerkin"` (`[Galerkin]`) solves the outer region variationally on a finite-element basis, giving the resistive Δ′ matrix and the PEST-3 blocks but no free-boundary energies; see [Galerkin Solver](galerkin.md).
 
 `kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs `[Equilibrium] kinetic_file`; see [Kinetic Forces](kinetic_forces.md).
@@ -59,7 +59,7 @@ qlow = 1.02              # inner edge of the integration domain
 qhigh = 1e3              # outer bound of qlim (see Integration domain)
 delta_mlow = 8           # extra poloidal modes below the resonant range
 delta_mhigh = 8          # extra poloidal modes above it
-integrator = "Forward"   # "Riccati" is the default
+integrator = "Forward"   # "Riccati" is the default; "Forward" (and no [Wall]) is required for [PerturbedEquilibrium]
 truncate_at_rational_offset = true
 rational_offset_fraction = 0.2
 
@@ -119,7 +119,7 @@ With `truncate_at_rational_offset = false` (limited or analytic equilibria with 
 
 ### Resistive-layer overlap cap
 
-Near the separatrix the rational surfaces crowd faster than their resistive layers narrow, and past the point where adjacent layers touch the matched-asymptotic treatment is not defined (Fitzpatrick (2025), listed under [Tearing](citations.md#Tearing)).
+Near the separatrix the rational surfaces crowd faster than their resistive layers narrow, and past the point where adjacent layers touch the matched-asymptotic treatment is not defined (the diverted-plasma response paper of Fitzpatrick (2025), listed under [Tearing](citations.md#Tearing)).
 `psilim_from_layer_overlap = true` locates that point: each rational surface of each n in the run, including surfaces beyond the equilibrium grid placed on the logarithmic divergence of q at the X-points, gets a layer width from the kinetic profiles with the closures of `[SLAYER]` (a `SLAYERModel` in a script), and the domain is cut at the last surface before two adjacent layers overlap.
 The cap needs kinetic profiles, acts before the `rational_offset_fraction` step, and can only narrow the domain; `examples/DIIID-like_truncation_example` exercises it.
 The scan is written to `ForceFreeStates/LayerOverlap/`:

@@ -21,7 +21,17 @@ Both need the kinetic profiles of `[Equilibrium] kinetic_file` (n_e, T_i, T_e, �
 ## Governing equations
 
 The torque is a sum over species of three nested integrals: over flux ``\psi``, over the pitch variable ``\Lambda`` separating trapped from passing particles, and over the normalized energy ``x = \varepsilon/T``, with a sum over the bounce harmonics ``\ell`` up to `bounce_harmonic_max`.
-The integrand weights the bounce-averaged perturbation of the field strength, ``\langle \delta B_\parallel / B \rangle_\ell`` evaluated from the displacement ``\xi`` of the perturbed equilibrium, by the Maxwellian and by the resonance factor whose numerator carries the rotation and the diamagnetic drifts and whose denominator carries the E×B, bounce and precession frequencies and the collision frequency.
+The integrand weights the bounce-averaged perturbation of the field strength, ``\langle \delta B_\parallel / B \rangle_\ell`` evaluated from the displacement ``\xi`` of the perturbed equilibrium, by the Maxwellian and by the resonance factor ([Logan et al. (2013)](citations.md#KineticForces)):
+
+```math
+T = \sum_s \sum_{\ell} \int d\psi \int d\Lambda \int_0^\infty dx\;
+\frac{\big(\omega_E + \omega_{*n} + (x - \tfrac32)\,\omega_{*T}\big)\, x^{5/2} e^{-x}}{i\,\Omega(x) - \nu}\;
+\mathcal{K}_{s,\ell}(\psi, \Lambda)\,\big|\langle \delta B_\parallel / B \rangle_\ell\big|^2 ,
+\qquad
+\Omega(x) = n\,\omega_E + \ell_\mathrm{eff}\,\omega_b\sqrt{x} + n\,\omega_D\,x ,
+```
+
+with ``\mathcal{K}`` the geometric kernel of the species and harmonic, ``\nu`` the energy-dependent effective collision frequency, and ``\omega_b``, ``\omega_D`` the bounce and precession frequencies at thermal energy (``\ell_\mathrm{eff} = \ell + nq`` for passing and ``\ell`` for trapped particles).
 The rotation that enters is the E×B rotation ``\omega_E`` of the kinetic file, related to the measured toroidal rotation by
 
 ```math

@@ -5,7 +5,7 @@ It is the first stage of every run and the only one that reads physics input fil
 
 ## What it computes
 
-From the poloidal flux ``\psi(R, Z)`` and the profiles ``F = R B_\phi`` and ``p`` of a Grad–Shafranov solution, the module traces the closed flux surfaces, finds the magnetic axis and the separatrix, integrates the safety factor ``q(\psi)`` and the surface quantities ``dV/d\psi``, and builds bicubic splines of the surface geometry ``R(\psi, \theta)``, ``Z(\psi, \theta)`` and of the toroidal-angle offset ``\nu(\psi, \theta)`` in the coordinates selected by `jac_type` (`"hamada"`, `"pest"`, `"boozer"`, `"equal_arc"`, …; see the [Conventions](conventions.md) page).
+From the poloidal flux ``\psi(R, Z)`` and the profiles ``F = R B_\phi`` and ``p`` of a Grad–Shafranov solution, the module traces the closed flux surfaces, finds the magnetic axis and the separatrix, integrates the safety factor ``q(\psi)`` and the surface quantities ``dV/d\psi``, and builds bicubic splines of the surface geometry ``R(\psi, \theta)``, ``Z(\psi, \theta)`` and of the toroidal-angle offset ``\nu(\psi, \theta)`` in the coordinates selected by `jac_type` (`"hamada"`, `"pest"`, `"boozer"`, `"equal_arc"`, …; see the [Conventions Reference](conventions.md) page).
 The normalized flux ``\psi_N \in [0, 1]`` runs from the axis to the boundary, and the rational surfaces q = m/n of the run are located on it.
 
 ## Inputs

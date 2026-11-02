@@ -21,10 +21,10 @@ The [Workflow](workflow.md) page maps every stage to its physics, deck sections 
 | Stage | Deck section | Main output |
 |---|---|---|
 | `Equilibrium` — the axisymmetric equilibrium, its flux-surface coordinates and rational surfaces | `[Equilibrium]` | `Equilibrium/` |
-| `ForceFreeStates` — ideal (or drift-kinetic) MHD stability by the Newcomb criterion, with the `Vacuum` response of the `[Wall]` | `[ForceFreeStates]` | `ForceFreeStates/FreeBoundaryStability/`, `SingularSurfaces/Delta_prime_matrix` |
+| `ForceFreeStates` — ideal (or drift-kinetic) MHD stability by the Newcomb criterion, with the `Vacuum` response of the `[Wall]` (a wall case is a separate deck from a response case) | `[ForceFreeStates]` | `ForceFreeStates/FreeBoundaryStability/`, `SingularSurfaces/Delta_prime_matrix` |
 | `LocalStability` — Mercier, resistive-interchange and ballooning criteria | `[LocalStability]` | `LocalStability/` |
 | `Match` — the resistive inner layer matched to the outer-region Δ′ | `[Match]` | `SingularSurfaces/Match/` |
-| `PerturbedEquilibrium` — the plasma response to the field of `[ForcingTerms]`: resonant fields, islands, overlap | `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/` |
+| `PerturbedEquilibrium` — the plasma response to the field of `[ForcingTerms]`: resonant fields, islands, overlap; needs a `\"Forward\"` solve without a wall | `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/` |
 | `KineticForces` — the neoclassical toroidal viscosity torque of that response | `[KineticForces]` | `KineticForces/` |
 | `ErrorFields` — coil tolerances, locking risk and correction limits | `[ErrorFields]` | `ErrorFields/Risk/` |
 | `Tearing` — tearing growth rates and critical resonant fields from an inner-layer model | `[Tearing]` | `Tearing/Roots/` |
@@ -34,7 +34,7 @@ The [Workflow](workflow.md) page maps every stage to its physics, deck sections 
 - [**Setup**](set_up.md) — Installation on Linux, macOS and Windows (WSL), and a first run
 - [**Workflow**](workflow.md) — The pipeline: physics of each stage, deck sections, examples and the output file
 - [**Scripting API**](api.md) — The same pipeline from Julia scripts
-- [**Conventions**](conventions.md) — Coordinates, signs, normalizations and field amplitudes
+- [**Conventions Reference**](conventions.md) — Coordinates, signs, normalizations and field amplitudes
 - [**Modules**](equilibrium.md) — Governing equations, deck keys, outputs and function reference per module
 - [**Citations**](citations.md) — Papers underpinning GPEC's algorithms
 - [**Developer Notes**](developer_notes.md) — Git workflow, commit conventions and the regression-testing harness

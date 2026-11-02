@@ -43,7 +43,7 @@ and balance is lost above
   = \max_Q \frac{2P\,(Q_0 - Q)}{S\hat\kappa\,\operatorname{Im}[-1/(\alpha + \hat\Delta(Q))]} .
 ```
 
-``P`` is the layer's `P_tor`, ``S`` its Lundquist number, ``Q_0 = \tau_k n \omega_E`` the natural E×B rotation of the mode (from the kinetic file's `omega_E` or the `omega_E_kHz` override; a surface without one is skipped), and the viscosity integral is taken as ``\hat\kappa = 2/s^2``.
+``P`` is the layer's `P_tor`, ``S`` its Lundquist number, ``Q_0 = \tau_k n \omega_E`` the natural E×B rotation of the mode (from the kinetic file's `omega_E` or the `omega_E_kHz` override; a surface without one is skipped), and the viscosity integral is taken as 1/2, so ``\hat\kappa = 2/s^2``.
 Each surface uses its own stability parameter ``\alpha = S^{-1/3}(\Delta_\mathrm{crit} - r_s\Delta')``, so the torque balance shares its poles with the free modes; the threshold needs a tearing-stable surface, and one with ``\alpha \le 0`` is skipped with a warning.
 Penetration is the first resolved saddle-node bifurcation on the path from ``Q_0`` toward the electron fluid at ``Q_e``, above which the shielded branch no longer exists; small numerical extrema and the unshielded zone next to ``Q_e`` are excluded, and a surface without a resolved bifurcation reports NaN.
 `br_crit` is normalized by the toroidal field, and `br_crit_tesla = br_crit·|B0|` is the quantity to compare with `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, the total resonant field of the ideal response; the comparison is approximate, since the theory's ``b_r`` is a cylindrical field at the layer.
@@ -79,6 +79,7 @@ P_perp_model = "D_perp"           # how the perpendicular Prandtl number is buil
 ```
 
 In a script, `solve(TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl()), SLAYERModel(); config=TearingConfig(...))` runs the same stage, and `solve_inner(GGJModel(), p, γ)` evaluates one GGJ layer at a growth rate ``\gamma``.
+GGJ's η and ρ default from the kinetic data (η by the resistivity closure SLAYER uses, ρ = μ·m_p·n_e); pass `eta` and `rho` to `TearingProblem` to override them.
 
 ### SLAYER inputs: perpendicular diffusivities
 
@@ -136,7 +137,7 @@ p = GGJ.q4_surface_benchmark()      # GGJParameters for the q = 4 benchmark surf
 Δ = solve_inner(GGJModel(), p, γ)   # Δ.interchange, Δ.tearing with the default :ray backend
 ```
 
-## API Reference
+## API reference
 
 ### Tearing
 
@@ -156,19 +157,19 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer]
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.GGJ]
 ```
 
-## SLAYER
+### SLAYER
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
 ```
 
-## Dispersion
+### Dispersion
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.Dispersion]
 ```
 
-## CriticalResonantField
+### CriticalResonantField
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
