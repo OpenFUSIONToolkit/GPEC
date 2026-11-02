@@ -32,6 +32,7 @@ using StaticArrays
 using Random
 using Printf
 using DoubleFloats: Double64
+using ...Utilities.HermiteFEM: hermite_basis, pack_grid
 
 import ..InnerLayerModel, ..InnerLayerResponse, ..InnerLayerParameters
 import ..solve_inner, ..solve_inner_profile
@@ -44,7 +45,8 @@ Glasser–Greene–Johnson resistive inner-layer model. `S` selects the solver
 backend: `:ray` (default; rotated contour with an inward-marched far-field condition,
 robust at large |Q|), `:galerkin` (real-axis Hermite FEM with resonant/extension matching
 cells; accuracy depends on the surface and arg Q, even at small |Q|), or `:shooting` (|Q| ≪ 1 only). Backend keywords given at
-construction, e.g. `GGJModel(; solver=:galerkin, nx=1280)`, apply to every solve.
+construction, e.g. `GGJModel(; solver=:galerkin, nx=1280)`, apply to every solve; a keyword the backend does not
+take is an error here, not at the first solve.
 
 ## Fields
 
@@ -54,7 +56,12 @@ struct GGJModel{S,O<:NamedTuple} <: InnerLayerModel
     options::O
 end
 
-GGJModel(; solver::Symbol=:ray, options...) = GGJModel{solver,typeof(values(options))}(values(options))
+function GGJModel(; solver::Symbol=:ray, options...)
+    allowed = _ggj_options(solver)
+    unknown = setdiff(keys(options), allowed)
+    isempty(unknown) || throw(ArgumentError("GGJModel(solver=:$solver) does not take $(join(unknown, ", ")); its options are $(join(allowed, ", "))"))
+    return GGJModel{solver,typeof(values(options))}(values(options))
+end
 GGJModel{S}() where {S} = GGJModel{S,@NamedTuple{}}((;))
 
 # The backends implement the option-free model; a model carrying options forwards them.
@@ -74,6 +81,15 @@ include("Reference.jl")
 include("Shooting.jl")
 include("Galerkin.jl")
 include("Ray.jl")
+
+# Each backend's option names: the keywords of the functions its solves forward them to.
+_kwarg_names(f) = unique!(Symbol[k for m in methods(f) for k in Base.kwarg_decl(m) if !endswith(string(k), "...")])
+function _ggj_options(solver::Symbol)
+    solver === :ray && return union(_kwarg_names(solve_ray), (:real_profiles, :npc, :certify_rtol))
+    solver === :galerkin && return _kwarg_names(_galerkin_solve)
+    solver === :shooting && return Base.kwarg_decl(which(solve_inner, (_BareGGJ{:shooting}, GGJParameters, ComplexF64)))
+    throw(ArgumentError("GGJModel: unknown solver :$solver (expected :ray, :galerkin or :shooting)"))
+end
 
 export GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta

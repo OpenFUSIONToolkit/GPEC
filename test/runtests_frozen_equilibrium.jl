@@ -24,7 +24,7 @@ using GeneralizedPerturbedEquilibrium
     ro, zo, psio, psilim = 3.0, 0.2, 0.5, 0.75
     params = Eq.EquilibriumParameters(; ro, zo, psio, psihigh_resolved=last(xs), bt0=3.0, bt_sign=-1, ip_sign=1)
     inputs = Dict("Equilibrium" => Dict("eq_type" => "efit", "eq_filename" => "absent.geqdsk", "mpsi" => 0, "mtheta" => 16))
-    config = Eq.EquilibriumConfig(inputs["Equilibrium"], "")
+    config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, "")
     R = [ro + sqrt(0.2p) * cos(2π * (t + 0.01p)) for p in xs, t in theta]
     B2 = [(4π^2 * psio * sqrt(0.2p) / (2 + p))^2 + (3 / R[i, j])^2 for (i, p) in enumerate(xs), j in eachindex(theta)]
     physics_values = (sqrt.(B2),
@@ -49,9 +49,9 @@ using GeneralizedPerturbedEquilibrium
             f["Info/dqdpsi_lim"] = 2 + 1.6psilim
             f["Info/mn_index"] = mn
             for field in fieldnames(Eq.EquilibriumParameters)
-                field in GPEC.EQUIL_H5_SKIP && continue
+                field in GPEC.Utilities.EQUIL_H5_SKIP && continue
                 value = getfield(params, field)
-                value === nothing || (f["Equilibrium/$(get(GPEC.EQUIL_H5_NAMES, field, String(field)))"] = value)
+                value === nothing || (f["Equilibrium/$(get(GPEC.Utilities.EQUIL_H5_NAMES, field, String(field)))"] = value)
             end
             for (name, value) in zip(("psi", "2piF", "mu0p", "dVdpsi", "q"), (xs, profile_values...))
                 f["Equilibrium/Profiles/$name"] = value
@@ -105,8 +105,8 @@ using GeneralizedPerturbedEquilibrium
         @test spectra[2] ≈ spectra[1] rtol = 1e-12
         @test rc.C * spectra[2] ≈ rc.C * spectra[1] rtol = 1e-12
         analytic_inputs = deepcopy(inputs)
-        analytic_inputs["Equilibrium"]["eq_type"] = "sol"
-        analytic_inputs["SOL_INPUT"] = Dict("elongation" => 1.8)
+        delete!(analytic_inputs["Equilibrium"], "eq_type")
+        analytic_inputs["Solovev"] = Dict("elongation" => 1.8)
         h5open(path, "r+") do f
             delete_object(f, "Input/gpec_toml_raw")
             f["Input/gpec_toml_raw"] = sprint(io -> TOML.print(io, analytic_inputs))
@@ -117,7 +117,7 @@ using GeneralizedPerturbedEquilibrium
         @test analytic_snapshot.profiles.q_spline.y == profile_values[4]
         # The stored deck's kinetic_file resolves against the h5's directory and is re-read; a missing file warns and leaves none.
         kinetic_path = joinpath(dir, "kinetic.dat")
-        cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), kinetic_path)
+        cp(joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example", "kinetic.dat"), kinetic_path)
         analytic_inputs["Equilibrium"]["kinetic_file"] = "kinetic.dat"
         h5open(path, "r+") do f
             delete_object(f, "Input/gpec_toml_raw")

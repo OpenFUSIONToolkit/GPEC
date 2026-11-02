@@ -12,7 +12,8 @@ import ..Utilities.FourierTransforms: compute_fourier_coefficients
 """
     ForcingTermsControl
 
-User-facing control parameters from TOML [ForcingTerms] section.
+User-facing control parameters from TOML [ForcingTerms] section. A deck run resolves its relative
+file paths against the deck directory; a script's resolve against the working directory.
 
 ## Fields
 
@@ -58,6 +59,7 @@ Data structure for a single forcing mode.
 
       + `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
       + `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
+      + `"unit_flux"`: already unit-norm (a run's materialized forcing, recorded for replay); loaded as is
 """
 Base.@kwdef mutable struct ForcingMode
     n::Int = 0
@@ -66,17 +68,18 @@ Base.@kwdef mutable struct ForcingMode
 end
 
 """
-    load_forcing_data!(forcing_modes, dir_path, forcing_data_file, forcing_data_format, verbose) -> String
+    load_forcing_data!(forcing_modes, filepath, forcing_data_format, verbose=false) -> String
 
 Load forcing data from ASCII or HDF5 file. Returns the normalization tag read
 from the file (or `"normal_field_T"` by default if no tag is present).
 
 **Normalization tags** (set in the file, not in the TOML):
 
-  - `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention.
-    Most intuitive for users; converted to unit-norm (Phi_x) on load.
+  - `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention;
+    converted to unit-norm (Phi_x) on load.
   - `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
     Multiplied by (2π)² on load to reach unit-norm (Phi_x).
+  - `"unit_flux"`: already unit-norm (Phi_x), as a run records its materialized forcing for replay; loaded as is.
 
 **ASCII format** — optional `# normalization: <tag>` header line, then data rows:
 
@@ -97,12 +100,10 @@ Columns: n, m, amplitude_real, amplitude_imag
 """
 function load_forcing_data!(
     forcing_modes::Vector{ForcingMode},
-    dir_path::String,
-    forcing_data_file::String,
+    filepath::String,
     forcing_data_format::String,
     verbose::Bool=false
 )::String
-    filepath = joinpath(dir_path, forcing_data_file)
 
     if verbose
         @info "Loading forcing data from $filepath"
@@ -255,13 +256,10 @@ end
 
 Abstract supertype of every external-forcing description the scripting API accepts: a
 resonant-magnetic-perturbation field, described by where it comes from and how strongly it
-drives. Whether the source is a forcing-mode file, a coil set with currents, or (future) a
-field given on a control surface, they are all just external fields — one type drives the
-perturbed-equilibrium stage.
+drives (a forcing-mode file, a coil set with currents, or a precomputed spectrum).
 
-Nothing is read from disk or computed at construction — the modes are materialized against
-an equilibrium when the perturbed-equilibrium stage runs, so one `RMPField` can drive
-several solves.
+Nothing is read or computed at construction; the modes are materialized against an equilibrium
+when the perturbed-equilibrium stage runs, so one `RMPField` can drive several solves.
 
 ## Construction
 
@@ -279,11 +277,9 @@ the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`RMPSpect
 
 ## Algebra
 
-`RMPField`s form a vector space: `+`, `-` and multiplication by a scalar (real or complex —
-a complex factor phase-rotates the perturbation) build lazy linear combinations without
-materializing anything. The perturbed-equilibrium response is linear in the forcing, so
-materializing a combination equals combining the materialized sources: each term is
-evaluated on the control surface and the mode amplitudes are summed.
+`+`, `-` and multiplication by a real or complex scalar (a complex factor phase-rotates the
+perturbation) build lazy linear combinations. The response is linear in the forcing, so each term
+is materialized on the control surface and the mode amplitudes are summed.
 
 ```julia
 nominal = RMPField("nominal_efc.dat")
@@ -292,16 +288,11 @@ total = 2.0 * nominal + weld_field       # lazy: records terms and weights, comp
 pe = perturbed_equilibrium(plasma_response(ffs), total)   # materializes each term, sums, drives PE
 ```
 
-Amplitude lives with the forcing description itself: per-conductor currents for the coil
-format, per-mode `ForcingMode.amplitude` for the file formats. `scale` is NOT a physical
-amplitude — it is the source's weight in a linear combination, applied to the materialized
-control-surface spectrum uniformly across every toroidal mode (format-independent). Sources
-that are not scalar multiples of each other get their own description and the algebra: a
-coil set with a failed conductor is not `0.9 * nominal`, it is `nominal - failed_coil` (or
-its own source); a magnetic-material field should be computed at the operating point by the
-code that owns its physics, with the weight meaningful only for small linear excursions.
-A per-n weight dictionary is not supported yet; it needs an n-keyed concept ForcingTerms
-does not have.
+Physical amplitude lives in the forcing description (per-conductor currents for coils,
+`ForcingMode.amplitude` for files). `scale` is NOT a physical amplitude: it is the source's weight
+in a linear combination, applied uniformly to the materialized spectrum of every toroidal mode.
+A source that is not a scalar multiple of another needs its own description: a coil set with a
+failed conductor is `nominal - failed_coil`, not `0.9 * nominal`.
 """
 abstract type RMPField end
 
@@ -387,6 +378,22 @@ Base.:*(c::Number, f::RMPSource) = RMPSource(f.ctrl, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::RMPSpectrum) = RMPSpectrum(f.modes, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::RMPFieldSum) = RMPFieldSum([c * t for t in f.terms])
 Base.:*(f::RMPField, c::Number) = c * f
+
+"""
+    snapshot_forcing_modes(ft_ctrl; verbose=false) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
+
+The raw file-based forcing modes of `ft_ctrl` and their normalization tag, so they land in
+`Input/RawInputs/ForcingTerms/` alongside the TOML blob; `nothing` for coil forcing, which is
+recomputed from the `[[coil_set]]` TOML blob on replay. They feed only the writer:
+the PE stage reads and normalizes the forcing file itself.
+"""
+function snapshot_forcing_modes(ft_ctrl::ForcingTermsControl; verbose::Bool=false)
+    ft_ctrl.forcing_data_format in ("ascii", "hdf5") || return nothing
+    modes = ForcingMode[]
+    normalization = load_forcing_data!(modes, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, verbose)
+    return modes, normalization
+end
+
 
 export ForcingTermsControl, ForcingMode, RMPField, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
 

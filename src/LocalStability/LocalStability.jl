@@ -17,4 +17,6 @@ include("Problem.jl")
 export LocalStabilityProblem, Ballooning, LocalStabilityResult, mercier_D_I
 export compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 
+include("Output.jl")
+
 end

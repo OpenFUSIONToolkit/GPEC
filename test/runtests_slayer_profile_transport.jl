@@ -1,14 +1,14 @@
 using Test
 using GeneralizedPerturbedEquilibrium.Equilibrium: KineticProfileData
-using GeneralizedPerturbedEquilibrium.Runner
+using GeneralizedPerturbedEquilibrium: SLAYERModel
+using GeneralizedPerturbedEquilibrium.Tearing: _slayer_profiles
 
 @testset "SLAYER loads only transport profiles used by its model" begin
     psi = collect(range(0.0, 1.0; length=5))
     function load_transport(model; chi_e=ones(5), chi_i=ones(5), chi_phi=ones(5), dc_type=:none)
         data = KineticProfileData(; psi, n_e=fill(5e19, 5), T_e=1000 .- 500 .* psi,
-            T_i=800 .- 300 .* psi, chi_e, chi_i, chi_phi)
-        ctrl = SLAYERControl(; enabled=true, P_perp_model=model, tau_E=0.1, D_c_type=dc_type)
-        return Runner._slayer_profiles(data, ctrl)
+            T_i=800 .- 300 .* psi, chi_e, chi_i, chi_phi, tau_E=0.1)
+        return _slayer_profiles(data, SLAYERModel(; P_perp_model=model, D_c_type=dc_type))
     end
 
     @test load_transport(:tau_E; chi_phi=(-ones(5))).chi_tor === nothing
