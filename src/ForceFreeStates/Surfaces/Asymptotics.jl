@@ -1,0 +1,752 @@
+# Frobenius asymptotics and resonant-basis evaluation at singular surfaces.
+
+"""
+    resonant_block_exponents(m0, sig) -> (α, p_big, p_small)
+
+Eigenvalues λ = tr/2 ∓ √(tr²/4 − det) of one resonant 2×2 M₀ block.
+α = √(tr²/4 − det) is the Mercier half-separation. Powers are sig·λ, big solution
+(more negative real part) first. A traceless block returns α = √(−det) and (−α, +α).
+When tr²/4 − det is negative (Mercier-unstable), α is taken with Im α > 0, so both sides
+of the surface get the same α and the same big root whatever the round-off sign.
+"""
+function resonant_block_exponents(m0::AbstractMatrix, sig::Real)
+    tr = m0[1, 1] + m0[2, 2]
+    det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
+    α = sqrt(ComplexF64(tr * tr / 4 - det))
+    abs(real(α)) <= 64 * Base.eps(Float64) * abs(α) && (α = ComplexF64(0, abs(imag(α))))
+    p_minus = sig * (tr / 2 - α)
+    p_plus = sig * (tr / 2 + α)
+    # Equal real parts: sig ≥ 0 keeps big = sig·(tr/2 − α).
+    if real(p_minus) < real(p_plus) || (real(p_minus) == real(p_plus) && sig >= 0)
+        return α, p_minus, p_plus
+    else
+        return α, p_plus, p_minus
+    end
+end
+
+# Scale the big and small resonant columns by dpsi^power.
+function _apply_column_powers!(big_cols, small_cols, p_big, p_small, dpsi)
+    big_cols .*= dpsi^p_big
+    small_cols .*= dpsi^p_small
+end
+
+"""
+    compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0, sing_order=ctrl.frobenius_order) -> SingAsymptotics
+
+Frobenius power series (`vmat`) of the asymptotic solutions on one side of a singular surface, Glasser
+Phys. Plasmas 2016 112506 Eqs. 41-48.
+
+### Arguments
+
+  - `singp::SingType`: Singular surface parameters
+  - `sig`: Side of the surface, `-1.0` left or `+1.0` right
+  - `sing_order`: Expansion order, defaulting to `ctrl.frobenius_order`. The Galerkin path overrides it
+    per surface (`frobenius_order`, raised for high-Mercier-index surfaces).
+
+Warns once per surface when a resonant block has `abs(tr(M₀))/2` above both `1e-3 * abs(α)` and the
+round-off floor `64 * Base.eps(Float64) * opnorm(M₀, Inf)`.
+"""
+function compute_sing_asymptotics(
+    singp::SingType,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    mats::MatrixSplines,
+    intr::ForceFreeStatesInternal;
+    sig::Float64=1.0,
+    sing_order::Int=ctrl.frobenius_order
+)
+
+    vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * sing_order + 1)
+    mmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * sing_order + 3)
+    power = zeros(ComplexF64, 2 * intr.numpert_total)
+
+    # Resonant (r) and nonresonant (n) indices of the shearing transformation (Glasser 2016 Eq. 41);
+    # 1 indexes the numpert_total dimension, 2 the 2·numpert_total dimension
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    r1 = ipert_res
+    r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
+    n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
+    n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
+
+    # Compute mmat Taylor coefficients with direction parameter sig.
+    # Fortran computes separate mmatl (sig=-1) and mmatr (sig=+1) — the sig flips
+    # odd derivatives of all input quantities (q, F, G, K splines).
+    compute_sing_mmat!(mmat, singp, ctrl, equil.profiles, mats, intr; sig=sig, sing_order=sing_order)
+
+    # Extract direction-specific m0mat from zeroth-order mmat
+    m0mat = if length(r1) == 1
+        Matrix(transpose(mmat[r1[1], r2, :, 1]))
+    else
+        Matrix(vcat([transpose(mmat[r1[i], r2, :, 1]) for i in eachindex(r1)]...))
+    end
+
+    # Zeroth-order non-resonant solutions. Nonresonant powers stay 0.
+    for ipert in 1:intr.numpert_total
+        vmat[ipert, ipert, 1, 1] = 1
+        vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
+    end
+
+    # This side's block: power is sig·λ (big first); the ξ' row is the eigenvector for λ.
+    alpha = Vector{ComplexF64}(undef, length(r1))
+    for i in eachindex(r1)
+        m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+        alpha_i, p_big, p_small = resonant_block_exponents(m0mat_block, sig)
+        alpha[i] = alpha_i
+        # Warn once on the right side, ignoring traces at the block's round-off scale.
+        block_tr = m0mat_block[1, 1] + m0mat_block[2, 2]
+        trace_floor = 64 * Base.eps(Float64) * opnorm(m0mat_block, Inf)
+        sig > 0 && abs(block_tr) / 2 > max(1e-3 * abs(alpha_i), trace_floor) &&
+            @warn @sprintf("Resonant M₀ block at ψ=%.6f, m=%d (sig=%+.0f): |tr|/2 = %.3e is not small against |α| = %.3e",
+                singp.psifac, singp.m[i], sig, abs(block_tr) / 2, abs(alpha_i)) _id = (:resonant_trace, objectid(intr), singp.psifac, singp.m[i]) maxlog = 1
+        r1_i = r1[i]
+        power[r1_i] = p_big
+        power[r1_i+intr.numpert_total] = p_small
+        r2_i = r1_i + intr.numpert_total
+        vmat[r1_i, r1_i, 1, 1] = 1
+        vmat[r1_i, r2_i, 1, 1] = 1
+        vmat[r1_i, r1_i, 2, 1] = -(m0mat_block[1, 1] - sig * p_big) / m0mat_block[1, 2]
+        vmat[r1_i, r2_i, 2, 1] = -(m0mat_block[1, 1] - sig * p_small) / m0mat_block[1, 2]
+    end
+
+    # Higher order solutions — sig propagates through the recursion (Fortran STRIDE sing_solve).
+    for k in 1:(2*sing_order)
+        solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=sig)
+    end
+
+    # Per-crossing m0mat / vmat diagnostics matching Fortran sing_vmat output.
+    # @debug-only: enable via JULIA_DEBUG=GeneralizedPerturbedEquilibrium.
+    @debug begin
+        side_str = sig > 0 ? "right" : "left"
+        ipert0 = r1[1]
+        N = intr.numpert_total
+        msg = "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)\n"
+        msg *= @sprintf("  m0mat(1,1)= %+.12e %+.12ei\n", real(m0mat[1, 1]), imag(m0mat[1, 1]))
+        msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1, 2]), imag(m0mat[1, 2]))
+        msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2, 1]), imag(m0mat[2, 1]))
+        msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2, 2]), imag(m0mat[2, 2]))
+        block_det = m0mat[1, 1] * m0mat[2, 2] - m0mat[2, 1] * m0mat[1, 2]
+        block_tr = m0mat[1, 1] + m0mat[2, 2]
+        msg *= @sprintf("  det= %+.12e, tr= %+.12e %+.12ei\n", real(block_det), real(block_tr), imag(block_tr))
+        msg *= @sprintf("  alpha= %+.12e %+.12ei\n", real(alpha[1]), imag(alpha[1]))
+        msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
+        msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0, 2, 1]), imag(vmat[ipert0, ipert0, 2, 1]))
+        msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0, ipert0+N, 2, 1]), imag(vmat[ipert0, ipert0+N, 2, 1]))
+        for k in 0:(2*sing_order)
+            msg *= @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei\n",
+                k, real(vmat[ipert0, ipert0, 1, k+1]), imag(vmat[ipert0, ipert0, 1, k+1]),
+                real(vmat[ipert0, ipert0, 2, k+1]), imag(vmat[ipert0, ipert0, 2, k+1]))
+            msg *= @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei\n",
+                k, real(vmat[ipert0, ipert0+N, 1, k+1]), imag(vmat[ipert0, ipert0+N, 1, k+1]),
+                real(vmat[ipert0, ipert0+N, 2, k+1]), imag(vmat[ipert0, ipert0+N, 2, k+1]))
+        end
+        msg
+    end
+
+    return SingAsymptotics(sing_order, alpha, r1, r2, power, vmat)
+end
+
+"""
+    compute_sing_mmat!(mmat, singp, ctrl, profiles, mats, intr; sig=1.0, sing_order=ctrl.frobenius_order)
+
+Fill `mmat` with the Taylor coefficients M_k of the matrix M at a singular surface (Glasser 2016 Eqs. 43-44),
+with `sig` flipping odd ψ-derivatives for the left side. Port of Fortran `sing_mmat`, with dense matrices;
+Hermitian matrices store only their lower triangle (suffix `_lower`) and are used through `Hermitian(·, :L)`.
+"""
+@with_pool pool function compute_sing_mmat!(
+    mmat::Array{ComplexF64,4},
+    singp::SingType,
+    ctrl::ForceFreeStatesControl,
+    profiles::Equilibrium.ProfileSplines,
+    mats::MatrixSplines,
+    intr::ForceFreeStatesInternal;
+    sig::Float64=1.0,
+    sing_order::Int=ctrl.frobenius_order
+)
+
+    q_spline = profiles.q_spline
+    q_d1 = profiles.q_deriv
+    q_d2 = deriv2(q_spline)
+    q_d3 = deriv3(q_spline)
+
+    Npert = intr.numpert_total
+
+    singfac = zeros!(pool, Float64, Npert, 4)
+    f_lower_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    g_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    k_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    f_lower = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
+    f0_lower = zeros!(pool, ComplexF64, Npert, Npert)
+    ff_lower = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
+    g_lower = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
+    k = zeros!(pool, ComplexF64, Npert, Npert, sing_order + 1)
+    v = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2)
+    x = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2, sing_order + 1)
+    tmp_vec = acquire!(pool, ComplexF64, Npert)
+
+    # Evaluate q spline and its derivatives, applying sig to odd derivatives.
+    # Fortran STRIDE sing_mmat: q(1)=sig*q', q(2)=q'', q(3)=sig*q'''
+    q = (q_spline(singp.psifac),
+        sig * q_d1(singp.psifac),
+        q_d2(singp.psifac),
+        sig * q_d3(singp.psifac))
+
+    # Evaluate F_spline_lower and derivatives, applying sig to odd derivatives.
+    # Fortran sing_mmat multiplies fmats_f1 and fmats_f3 by sig in the Taylor products.
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=mats._hint)
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    mats.ideal.F_spline_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    @views f_lower_interp[:, :, 2] .*= sig  # 1st derivative
+    @views f_lower_interp[:, :, 4] .*= sig  # 3rd derivative
+
+    # Evaluate G_spline and derivatives, applying sig to odd derivatives
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=mats._hint)
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    mats.ideal.G_spline(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    @views g_interp[:, :, 2] .*= sig
+    @views g_interp[:, :, 4] .*= sig
+
+    # Evaluate K_spline and derivatives, applying sig to odd derivatives
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=mats._hint)
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    mats.ideal.K_spline(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    @views k_interp[:, :, 2] .*= sig
+    @views k_interp[:, :, 4] .*= sig
+
+    # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
+    singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
+    for i in 2:4
+        singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i]; inner=intr.mpert)
+    end
+    # For resonant modes mᵢ - nᵢq(ψ) = [-nᵢq', -nᵢq'', -nᵢq'''] - shift up terms by 1 index
+    # Add scaling to account for hardcoding coefficients in computations below
+    for (mres, nres) in zip(singp.m, singp.n)
+        ipert_res = 1 + mres - intr.mlow + (nres - intr.nlow) * intr.mpert
+        singfac[ipert_res, 1:4] .= (-nres * q[2], -nres * q[3] / 2, -nres * q[4] / 3, 0)
+    end
+
+    # F = QL̄L̄ᴴQᴴ: first the Taylor coefficients of QL̄ without the 1/n! scaling, leaving binomial coefficients
+    # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
+    for ipert_n in 1:intr.npert
+        for jpert_m in 1:intr.mpert
+            for ipert_m in jpert_m:intr.mpert
+                ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                jpert = jpert_m + (ipert_n - 1) * intr.mpert
+                f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
+                if sing_order ≥ 1
+                    f_lower[ipert, jpert, 2] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 2] +
+                                               singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
+                end
+                if sing_order ≥ 2
+                    f_lower[ipert, jpert, 3] =
+                        singfac[ipert, 1] * f_lower_interp[ipert, jpert, 3] +
+                        2 * singfac[ipert, 2] * f_lower_interp[ipert, jpert, 2] +
+                        singfac[ipert, 3] * f_lower_interp[ipert, jpert, 1]
+                end
+                if sing_order ≥ 3
+                    f_lower[ipert, jpert, 4] =
+                        singfac[ipert, 1] * f_lower_interp[ipert, jpert, 4] +
+                        3 * singfac[ipert, 2] * f_lower_interp[ipert, jpert, 3] +
+                        3 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 2] +
+                        singfac[ipert, 4] * f_lower_interp[ipert, jpert, 1]
+                end
+                if sing_order ≥ 4
+                    f_lower[ipert, jpert, 5] =
+                        4 * singfac[ipert, 2] * f_lower_interp[ipert, jpert, 4] +
+                        6 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 3] +
+                        4 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 2]
+                end
+                if sing_order ≥ 5
+                    f_lower[ipert, jpert, 6] = 10 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 4] +
+                                               10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
+                end
+                if sing_order ≥ 6
+                    f_lower[ipert, jpert, 7] = 20 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 4]
+                end
+            end
+        end
+    end
+    @views f0_lower .= f_lower[:, :, 1]
+
+    # Taylor coefficients of F = QL̄L̄ᴴQᴴ (lower half) from QL̄; fac1 = (n choose j) and fac0 = n! give 1/((n-j)! j!)
+    fac0 = 1
+    for n in 0:sing_order
+        fac1 = 1
+        for j in 0:n
+            for ipert_n in 1:intr.npert
+                for jpert_m in 1:intr.mpert
+                    for ipert_m in jpert_m:intr.mpert
+                        for kpert_m in 1:jpert_m
+                            ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                            jpert = jpert_m + (ipert_n - 1) * intr.mpert
+                            kpert = kpert_m + (ipert_n - 1) * intr.mpert
+                            ff_lower[ipert, jpert, n+1] += fac1 * f_lower[ipert, kpert, j+1] * conj(f_lower[jpert, kpert, n-j+1])
+                        end
+                    end
+                end
+            end
+            fac1 *= (n - j) / (j + 1)
+        end
+        @views ff_lower[:, :, n+1] ./= fac0
+        fac0 *= (n + 1)
+    end
+
+    # Compute non-Hermitian matrix K = QK̄ Taylor series coefficients
+    # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
+    for ipert_n in 1:intr.npert
+        for jpert_m in 1:intr.mpert
+            for ipert_m in 1:intr.mpert
+                ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                jpert = jpert_m + (ipert_n - 1) * intr.mpert
+                k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
+                if sing_order ≥ 1
+                    k[ipert, jpert, 2] = singfac[ipert, 1] * k_interp[ipert, jpert, 2] +
+                                         singfac[ipert, 2] * k_interp[ipert, jpert, 1]
+                end
+                if sing_order ≥ 2
+                    k[ipert, jpert, 3] =
+                        singfac[ipert, 1] * k_interp[ipert, jpert, 3] / 2 +
+                        singfac[ipert, 2] * k_interp[ipert, jpert, 2] +
+                        singfac[ipert, 3] * k_interp[ipert, jpert, 1] / 2
+                end
+                if sing_order ≥ 3
+                    k[ipert, jpert, 4] =
+                        singfac[ipert, 1] * k_interp[ipert, jpert, 4] / 6 +
+                        singfac[ipert, 2] * k_interp[ipert, jpert, 3] / 2 +
+                        singfac[ipert, 3] * k_interp[ipert, jpert, 2] / 2 +
+                        singfac[ipert, 4] * k_interp[ipert, jpert, 1] / 6
+                end
+                if sing_order ≥ 4
+                    k[ipert, jpert, 5] =
+                        singfac[ipert, 2] * k_interp[ipert, jpert, 4] / 6 +
+                        singfac[ipert, 3] * k_interp[ipert, jpert, 3] / 4 +
+                        singfac[ipert, 4] * k_interp[ipert, jpert, 2] / 6
+                end
+                if sing_order ≥ 5
+                    k[ipert, jpert, 6] = singfac[ipert, 3] * k_interp[ipert, jpert, 4] / 12 +
+                                         singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
+                end
+                if sing_order ≥ 6
+                    k[ipert, jpert, 7] = singfac[ipert, 4] * k_interp[ipert, jpert, 4] / 36
+                end
+            end
+        end
+    end
+
+    # Compute Hermitian matrix G (lower half only) Taylor series coefficients
+    # G = [G, G', G''/2, G'''/6]
+    for ipert_n in 1:intr.npert
+        for jpert_m in 1:intr.mpert
+            for ipert_m in jpert_m:intr.mpert
+                ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                jpert = jpert_m + (ipert_n - 1) * intr.mpert
+                g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
+                if sing_order ≥ 1
+                    g_lower[ipert, jpert, 2] = g_interp[ipert, jpert, 2]
+                end
+                if sing_order ≥ 2
+                    g_lower[ipert, jpert, 3] = g_interp[ipert, jpert, 3] / 2
+                end
+                if sing_order ≥ 3
+                    g_lower[ipert, jpert, 4] = g_interp[ipert, jpert, 4] / 6
+                end
+            end
+        end
+    end
+
+    # Taylor expansion of x = Lv (Glasser 2016 Eq. 23), with v the identity
+    for ipert in 1:intr.numpert_total
+        v[ipert, ipert, 1] = 1
+        v[ipert, ipert+intr.numpert_total, 2] = 1
+    end
+
+    # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
+    # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
+    for isol in 1:(2*intr.numpert_total)
+        @views mul!(tmp_vec, k[:, :, 1], v[:, isol, 1])
+        @views x[:, isol, 1, 1] .= v[:, isol, 2] .- tmp_vec
+    end
+    @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
+
+    # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
+    for i in 1:sing_order
+        for isol in 1:(2*intr.numpert_total)
+            for j in 1:i
+                @views mul!(tmp_vec, Hermitian(ff_lower[:, :, j+1], :L), x[:, isol, 1, i-j+1])
+                @views x[:, isol, 1, i+1] .-= tmp_vec
+            end
+            @views mul!(tmp_vec, k[:, :, i+1], v[:, isol, 1])
+            @views x[:, isol, 1, i+1] .-= tmp_vec
+        end
+        @views x[:, :, 1, i+1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, i+1])
+    end
+
+    # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ + ∑Kⱼ^† x¹ₙ₋ⱼ at each order
+    for i in 0:sing_order
+        for isol in 1:(2*intr.numpert_total)
+            for j in 0:i
+                @views mul!(tmp_vec, adjoint(k[:, :, j+1]), x[:, isol, 1, i-j+1])
+                @views x[:, isol, 2, i+1] .+= tmp_vec
+            end
+            @views mul!(tmp_vec, Hermitian(g_lower[:, :, i+1], :L), v[:, isol, 1])
+            @views x[:, isol, 2, i+1] .+= tmp_vec
+        end
+    end
+
+    # Power series of M = zS⁻¹(LS - S') in √z (Glasser 2023 PoP Eq. 28)
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    r1 = ipert_res
+    r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
+    n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
+    n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
+
+    j = 0
+    # S⁻¹LS part (Glasser 2023 Eq. 39): order k of L feeds z^k (RLR), z^(k+1/2) (RLA, ALR), z^(k+1) (ALA)
+    for i in 0:sing_order
+        mmat[r1, r2, :, j+1] .= x[r1, r2, :, i+1]
+        mmat[r1, n2, :, j+2] .= x[r1, n2, :, i+1]
+        mmat[n1, r2, :, j+2] .= x[n1, r2, :, i+1]
+        mmat[n1, n2, :, j+3] .= x[n1, n2, :, i+1]
+        # Half-power index steps by 2 per order
+        j += 2
+    end
+    # Shearing term -zS⁻¹S' = 0.5 [R, 0; 0, -R] at zeroth order (Glasser 2023 Eqs. 25, 28)
+    for i in eachindex(r1)
+        mmat[r1[i], r2[2*i-1], 1, 1] += 0.5 * sig
+        mmat[r1[i], r2[2*i], 2, 1] -= 0.5 * sig
+    end
+end
+
+"""
+    solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=1.0)
+
+Solve for order `k` of the power series `vmat` (Glasser 2016 Eq. 47). Port of Fortran `sing_solve`.
+
+### Arguments
+
+  - `vmat::Array{ComplexF64,4}`: V matrix power series (modified in-place)
+  - `mmat::Array{ComplexF64,4}`: M matrix power series
+  - `m0mat::Matrix{ComplexF64}`: Zeroth order M matrix
+  - `alpha::Vector{ComplexF64}`: Mercier exponent of each resonant block
+  - `r1, r2, n1, n2::Vector{Int}`: Resonant and nonresonant indices
+  - `power::Vector{ComplexF64}`: Frobenius power of each solution column (0 for nonresonant)
+  - `k::Int`: The current order in the power series expansion
+"""
+@with_pool pool function solve_higher_order_vmat!(
+    vmat::Array{ComplexF64,4},
+    mmat::Array{ComplexF64,4},
+    m0mat::Matrix{ComplexF64},
+    alpha::Vector{ComplexF64},
+    r1::Vector{Int},
+    r2::Vector{Int},
+    n1::Vector{Int},
+    n2::Vector{Int},
+    power::Vector{ComplexF64},
+    intr::ForceFreeStatesInternal,
+    k::Int;
+    sig::Float64=1.0
+)
+
+    tmp_arr = zeros!(pool, ComplexF64, size(vmat)[1:3])
+    # Compute ∑Mₗvₖ₋ₗ
+    for l in 1:k
+        @views sing_matmul!(tmp_arr, mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
+        vmat[:, :, :, k+1] .+= tmp_arr
+    end
+
+    a = zeros!(pool, ComplexF64, 2, 2)
+    for isol in 1:(2*intr.numpert_total)
+        for i in eachindex(r1)
+            # Fortran sing_solve: a(i,i) = m0mat(i,i) - sig*(k/2 + power(isol))
+            @views m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+            a .= m0mat_block
+            a[1, 1] -= sig * (k / 2.0 + power[isol])
+            a[2, 2] -= sig * (k / 2.0 + power[isol])
+            det = a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1]
+            # Solve the resonant indices
+            x1 = -vmat[r1[i], isol, 1, k+1]
+            x2 = -vmat[r1[i], isol, 2, k+1]
+            vmat[r1[i], isol, 1, k+1] = (a[2, 2] * x1 - a[1, 2] * x2) / det
+            vmat[r1[i], isol, 2, k+1] = (a[1, 1] * x2 - a[2, 1] * x1) / det
+        end
+        # Fortran sing_solve: vmat(n1,isol,:,k) *= sig/(power(isol)+k/2)
+        vmat[n1, isol, :, k+1] .*= sig / (power[isol] + k / 2.0)
+    end
+end
+
+"""
+    sing_matmul!(out, a, b) -> out
+
+Matrix product of two asymptotic-series coefficient arrays into `out`, as the Fortran `sing_matmul`:
+`b` is `(m, n, 2)`, `a` is `(·, 2m, 2)`, and `out` is `(size(a, 1), n, 2)`.
+"""
+@with_pool pool function sing_matmul!(out::AbstractArray{ComplexF64,3}, a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
+    m = size(b, 1)
+    n = size(b, 2)
+
+    if size(a, 2) != 2 * m
+        error("Sing_matmul: size(a,2) = $(size(a,2)) != 2*size(b,1) = $(2*m)")
+    end
+
+    fill!(out, zero(ComplexF64))
+    tmp = acquire!(pool, ComplexF64, size(a, 1))
+    for i in 1:n
+        for j in 1:2
+            @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
+            @views out[:, i, j] .+= tmp
+            @views mul!(tmp, a[:, (m+1):(2*m), j], b[:, i, 2])
+            @views out[:, i, j] .+= tmp
+        end
+    end
+
+    return out
+end
+
+"""
+    sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64) -> ua
+
+Evaluate the asymptotic solutions at distance `dpsi` from the surface, on the side `sing_asymp` was built
+for. Port of Fortran STRIDE `sing_get_ua`.
+
+### Arguments
+
+  - `sing_asymp::SingAsymptotics`: Pre-computed asymptotic data (must be left or right specific)
+  - `dpsi::Float64`: Positive distance from singular surface = |ψ - ψ_res|
+"""
+function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
+
+    r1 = sing_asymp.r1
+    r2 = sing_asymp.r2
+
+    # dpsi ≥ 0 always; the side is carried by the sig of the SingAsymptotics.
+    sqrtfac = sqrt(dpsi)
+
+    # Compute power series via Horner's method (eq. 45 in Glasser 2016)
+    ua = copy(sing_asymp.vmat[:, :, :, 2*sing_asymp.sing_order+1])
+    for iorder in (2*sing_asymp.sing_order-1):-1:0
+        ua .= ua .* sqrtfac .+ sing_asymp.vmat[:, :, :, iorder+1]
+    end
+
+    # Restore powers (unshear v→u). Resonant columns use their Frobenius powers.
+    for i in eachindex(r1)
+        _apply_column_powers!(@view(ua[:, r2[2*i-1], :]), @view(ua[:, r2[2*i], :]),
+            sing_asymp.power[r2[2*i-1]], sing_asymp.power[r2[2*i]], dpsi)
+        ua[r1[i], :, 1] ./= sqrtfac   # resonant row ξ: /√dpsi
+        ua[r1[i], :, 2] .*= sqrtfac   # resonant row ξ': *√dpsi
+    end
+
+    return ua
+end
+
+# Column-restricted evaluation for the outer-region Galerkin solver: only the big (r2[1]) and small (r2[2])
+# resonant columns, into a caller-provided (N, 2, 2) buffer. Requires a single resonance (length(r1) == 1);
+# numerically identical to slicing `sing_get_ua` to [r2[1], r2[2]].
+
+"""
+    sing_get_ua_res!(out, sing_asymp, dpsi) -> out
+
+Evaluate only the big (col 1) and small (col 2) resonant columns of `sing_get_ua` into the
+caller-provided `out` of shape `(numpert_total, 2, 2)`. Allocation-free. See the section comment.
+"""
+function sing_get_ua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
+    vmat = sing_asymp.vmat
+    order = sing_asymp.sing_order
+    N = size(vmat, 1)
+    sqrtfac = sqrt(dpsi)
+    ρ = sing_asymp.r1[1]
+    cbig = sing_asymp.r2[1]
+    csml = sing_asymp.r2[2]
+    nterm = 2 * order
+
+    @inbounds for k in 1:2, ii in 1:N
+        ab = vmat[ii, cbig, k, nterm+1]
+        as = vmat[ii, csml, k, nterm+1]
+        for t in (nterm-1):-1:0
+            ab = ab * sqrtfac + vmat[ii, cbig, k, t+1]
+            as = as * sqrtfac + vmat[ii, csml, k, t+1]
+        end
+        out[ii, 1, k] = ab
+        out[ii, 2, k] = as
+    end
+
+    # Unshear v→u by the column Frobenius powers; resonant row /√dpsi (qty1), *√dpsi (qty2).
+    _apply_column_powers!(@view(out[:, 1, :]), @view(out[:, 2, :]),
+        sing_asymp.power[cbig], sing_asymp.power[csml], dpsi)
+    @inbounds out[ρ, 1, 1] /= sqrtfac
+    @inbounds out[ρ, 2, 1] /= sqrtfac
+    @inbounds out[ρ, 1, 2] *= sqrtfac
+    @inbounds out[ρ, 2, 2] *= sqrtfac
+    return out
+end
+
+"""
+    sing_get_dua_res!(out, sing_asymp, dpsi) -> out
+
+Derivative of the asymptotic series with respect to the positive distance `dpsi = |ψ − ψ_res|`, for
+the big (col 1) and small (col 2) resonant columns only, into the caller-provided `out` of shape
+`(numpert_total, 2, 2)`; Fortran `sing_get_dua` restricted to those columns. Direction is carried by the
+left or right `SingAsymptotics`, so `dpsi` is positive and the caller applies the d/dψ sign on the
+left. Allocation-free; scalar per-term exponents replace a full `power` array. See the section comment.
+"""
+function sing_get_dua_res!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
+    vmat = sing_asymp.vmat
+    order = sing_asymp.sing_order
+    N = size(vmat, 1)
+    sqrtfac = sqrt(dpsi)
+    ρ = sing_asymp.r1[1]
+    cbig = sing_asymp.r2[1]
+    csml = sing_asymp.r2[2]
+    p_big = sing_asymp.power[cbig]
+    p_small = sing_asymp.power[csml]
+    nterm = 2 * order
+
+    # Exponent base in half-powers of dpsi: 2·order + resonant-row offset (∓1 by qty) + 2·power.
+    @inbounds for k in 1:2, ii in 1:N
+        roff = ii == ρ ? (k == 1 ? ComplexF64(-1) : ComplexF64(1)) : ComplexF64(0)
+        pb = nterm + roff + 2 * p_big
+        ps = nterm + roff + 2 * p_small
+        ab = vmat[ii, cbig, k, nterm+1] * pb
+        as = vmat[ii, csml, k, nterm+1] * ps
+        for t in (nterm-1):-1:0
+            pb -= 1
+            ps -= 1
+            ab = ab * sqrtfac + vmat[ii, cbig, k, t+1] * pb
+            as = as * sqrtfac + vmat[ii, csml, k, t+1] * ps
+        end
+        out[ii, 1, k] = ab
+        out[ii, 2, k] = as
+    end
+
+    _apply_column_powers!(@view(out[:, 1, :]), @view(out[:, 2, :]), p_big, p_small, dpsi)
+    twodpsi = 2 * dpsi
+    @inbounds out[ρ, 1, 1] /= sqrtfac
+    @inbounds out[ρ, 2, 1] /= sqrtfac
+    @inbounds out[ρ, 1, 2] *= sqrtfac
+    @inbounds out[ρ, 2, 2] *= sqrtfac
+    # Divide (not multiply by the reciprocal), as Fortran sing_get_dua does; the resonant QuadGK and the
+    # ill-conditioned near-singular solve amplify a 1e-16 input change into ~1e-3 in Δ′.
+    @inbounds for idx in eachindex(out)
+        out[idx] /= twodpsi
+    end
+    return out
+end
+
+"""
+Allocating wrapper for [`sing_get_ua_res!`](@ref); returns the big/small columns as `(N, 2, 2)`.
+"""
+sing_get_ua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
+    sing_get_ua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
+
+"""
+    sing_get_ua_res_cut!(out, sing_asymp, dpsi) -> out
+
+Leading-order ("cut") form of [`sing_get_ua_res!`](@ref): keeps only the `t = 0` term of the
+Frobenius series instead of summing all `2·sing_order` terms, then applies the same unshear.
+
+Used for the *cut* outer solution, the background the resistive inner-layer solution is added to in the
+composite solution; full minus cut is the higher-order content the layer solution replaces.
+"""
+function sing_get_ua_res_cut!(out::AbstractArray{ComplexF64,3}, sing_asymp::SingAsymptotics, dpsi::Float64)
+    vmat = sing_asymp.vmat
+    N = size(vmat, 1)
+    sqrtfac = sqrt(dpsi)
+    ρ = sing_asymp.r1[1]
+    cbig = sing_asymp.r2[1]
+    csml = sing_asymp.r2[2]
+
+    @inbounds for k in 1:2, ii in 1:N
+        out[ii, 1, k] = vmat[ii, cbig, k, 1]
+        out[ii, 2, k] = vmat[ii, csml, k, 1]
+    end
+
+    _apply_column_powers!(@view(out[:, 1, :]), @view(out[:, 2, :]),
+        sing_asymp.power[cbig], sing_asymp.power[csml], dpsi)
+    @inbounds out[ρ, 1, 1] /= sqrtfac
+    @inbounds out[ρ, 2, 1] /= sqrtfac
+    @inbounds out[ρ, 1, 2] *= sqrtfac
+    @inbounds out[ρ, 2, 2] *= sqrtfac
+    return out
+end
+
+"""
+Allocating wrapper for [`sing_get_ua_res_cut!`](@ref); returns the big/small columns as `(N, 2, 2)`.
+"""
+sing_get_ua_res_cut(sing_asymp::SingAsymptotics, dpsi::Float64) =
+    sing_get_ua_res_cut!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
+
+"""
+Allocating wrapper for [`sing_get_dua_res!`](@ref); returns the big/small columns as `(N, 2, 2)`.
+"""
+sing_get_dua_res(sing_asymp::SingAsymptotics, dpsi::Float64) =
+    sing_get_dua_res!(Array{ComplexF64,3}(undef, size(sing_asymp.vmat, 1), 2, 2), sing_asymp, dpsi)
+
+"""
+    sing_matvec!(matvec, kmat, gmat, d1, tmp, sfvec, mats, intr, psi, q, ua, dua) -> matvec
+
+Apply the Euler-Lagrange residual operator `L u = -(F u' + K u)' + (K† u' + G u)` to the asymptotic
+solutions `ua` and their ψ-derivatives `dua`, as Fortran `sing_matvec` (sing.f), for the resonant-quadrature
+integrand. It uses the reduced K̄ and Ḡ splines with the direct singular factor `sfvec = m − n q` on
+`u' = dua[:,:,1]`; `ua[:,:,2]` is the canonical momentum `F u' + K u`, so `-dua[:,:,2] = -(F u' + K u)'`.
+All scratch is caller-owned: `kmat`/`gmat` are `N×N`, `d1`/`tmp`/`sfvec` are length-`N`, `matvec` is
+`N×size(ua,2)`. The accumulation order (separate `gmat*ua` into `tmp`, then add) is kept on purpose: a
+fused 5-arg `mul!` would round differently, and the ill-conditioned near-singular resonant solve amplifies
+a 1e-16 change into ~1e-3 in Δ′.
+"""
+function sing_matvec!(matvec::AbstractMatrix{ComplexF64}, kmat::Matrix{ComplexF64}, gmat::Matrix{ComplexF64},
+    d1::Vector{ComplexF64}, tmp::Vector{ComplexF64}, sfvec::Vector{Float64}, mats::MatrixSplines,
+    intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua::AbstractArray{ComplexF64,3}, dua::AbstractArray{ComplexF64,3})
+
+    N = intr.numpert_total
+    msol = size(ua, 2)
+
+    # Direct singular factor (m - n q), NOT 1/(m - n q); flat order matches vec((m) .- q.*(n)').
+    idx = 0
+    @inbounds for nn in intr.nlow:intr.nhigh, mm in intr.mlow:intr.mhigh
+        idx += 1
+        sfvec[idx] = mm - q * nn
+    end
+
+    mats.ideal.K_spline(vec(kmat), psi; hint=mats._hint)
+    mats.ideal.G_spline(vec(gmat), psi; hint=mats._hint)
+    kdag = adjoint(kmat)
+
+    for isol in 1:msol
+        @views d1 .= dua[:, isol, 1] .* sfvec             # u' · singfac
+        @views mul!(matvec[:, isol], kdag, d1)            # K̄† (u' · singfac)
+        @views mul!(tmp, gmat, ua[:, isol, 1])            # Ḡ u
+        @views matvec[:, isol] .+= tmp                    # + Ḡ u
+        @views matvec[:, isol] .-= dua[:, isol, 2]        # - (F u' + K u)'
+    end
+    return matvec
+end
+
+"""
+    sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::ForceFreeStatesInternal)
+
+Asymptotic expansion coefficients `ca` of `u` in the basis `ua` (Glasser 2016 Eq. 50). Port of Fortran `sing_get_ca`.
+
+### Arguments
+
+  - `u::Array{ComplexF64,3}`: Current solution matrix, shape (numpert_total, numpert_total, 2)
+  - `ua::Array{ComplexF64,3}`: Asymptotic solution matrix, shape (numpert_total, 2·numpert_total, 2)
+"""
+function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::ForceFreeStatesInternal)
+
+    temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
+    temp1[1:intr.numpert_total, :] .= ua[:, :, 1]
+    temp1[(intr.numpert_total+1):(2*intr.numpert_total), :] .= ua[:, :, 2]
+
+    temp2 = zeros(ComplexF64, 2 * intr.numpert_total, intr.numpert_total)
+    temp2[1:intr.numpert_total, :] .= u[:, :, 1]
+    temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= u[:, :, 2]
+
+    temp2 .= lu!(temp1) \ temp2
+
+    ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    @views ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
+    @views ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
+
+    return ca
+end

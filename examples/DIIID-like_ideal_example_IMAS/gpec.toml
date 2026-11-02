@@ -1,0 +1,27 @@
+# DIII-D-like equilibrium read from an IMAS data dictionary (IMASdd.dd) — n=1 ideal stability.
+# The equilibrium is passed in at runtime, not read from a file; eq_filename is a placeholder.
+#
+# Usage (from Julia):
+#   using GeneralizedPerturbedEquilibrium as GPEC
+#   GPEC.main([dirname(@__FILE__)]; dd=my_dd)
+#
+# See run_imas_example.jl for a full workflow.
+
+[Run]
+verbose = true                 # Log each stage's progress
+
+[Equilibrium]
+eq_type      = "imas"          # Type of the input 2D equilibrium file
+eq_filename  = "from_dd"       # Path to equilibrium file (placeholder: equilibrium comes from the runtime dd argument)
+jac_type     = "boozer"        # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+psilow       = 0.01            # Lower limit of normalized poloidal flux
+psihigh      = 0.9995          # Upper limit of normalized poloidal flux
+mpsi         = 128             # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
+mtheta       = 256             # Number of poloidal grid points
+imas_cocos   = 11              # Expected COCOS convention of the input IMAS dd (11 = IMAS standard)
+
+[ForceFreeStates]
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
+vac_flag             = true    # Compute plasma, vacuum, and total energies for free-boundary modes
+delta_mhigh          = 16      # Expands upper bound of Fourier harmonics
+qlow                 = 1.02    # Integration initiated at q determined by min(q0, qlow)

@@ -1,0 +1,151 @@
+cff-version: 1.2.0
+message: "If you use GPEC, please cite it as below, together with the papers behind the modules you use (listed under references and on the documentation's citations page)."
+type: software
+version: "2.0.0"
+title: "GPEC: Generalized Perturbed Equilibrium Code"
+abstract: "GPEC is an open-source Julia reimplementation of the Fortran GPEC suite (DCON, VACUUM, STRIDE, GPEC, PENTRC and SLAYER), consolidated into one code base of cooperating physics modules behind a unified, modern interface. It models the response of tokamak plasmas to small non-axisymmetric magnetic perturbations: equilibrium reconstruction from EFIT, CHEASE or IMAS inputs; ideal MHD stability by Newcomb's criterion with the free-boundary vacuum response; resistive tearing stability from the outer-region Δ′ matrix matched to inner-layer models; the perturbed equilibrium driven by coils or error fields, with resonant flux, island widths and Chirikov overlap; and neoclassical toroidal viscosity torque. Applications include error-field correction, resonant magnetic perturbation optimization, kink and tearing stability, and parameter scans and integrated modeling at scale."
+authors:
+  - given-names: Nikolas
+    family-names: Logan
+  - given-names: Jong-Kyu
+    family-names: Park
+  - given-names: Matthew
+    family-names: Pharr
+  - given-names: Jacob
+    family-names: Halpern
+  - given-names: Daniel
+    family-names: Burgess
+  - given-names: Jaebeom
+    family-names: Cho
+  - given-names: Jaymyoung
+    family-names: Lee
+  - given-names: Sunjae
+    family-names: Lee
+  - given-names: Evan
+    family-names: Bursch
+repository-code: "https://github.com/OpenFUSIONToolkit/GPEC"
+url: "https://openfusiontoolkit.github.io/GPEC/dev/"
+license: MIT
+keywords:
+  - plasma physics
+  - magnetohydrodynamics
+  - tokamak
+  - perturbed equilibrium
+  - Julia
+references:
+  - type: article
+    title: "Vacuum calculations in azimuthally symmetric geometry"
+    authors:
+      - given-names: M. S.
+        family-names: Chance
+    journal: "Physics of Plasmas"
+    volume: 4
+    issue: 6
+    start: "2161"
+    year: 1997
+    doi: "10.1063/1.872380"
+  - type: article
+    title: "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma"
+    authors:
+      - given-names: A. H.
+        family-names: Glasser
+    journal: "Physics of Plasmas"
+    volume: 23
+    issue: 7
+    start: "072505"
+    year: 2016
+    doi: "10.1063/1.4958328"
+  - type: article
+    title: "Computation of three-dimensional tokamak and spherical torus equilibria"
+    authors:
+      - given-names: Jong-Kyu
+        family-names: Park
+      - given-names: Allen H.
+        family-names: Boozer
+      - given-names: Alan H.
+        family-names: Glasser
+    journal: "Physics of Plasmas"
+    volume: 14
+    issue: 5
+    start: "052110"
+    year: 2007
+    doi: "10.1063/1.2732170"
+  - type: article
+    title: "Computation of resistive instabilities by matched asymptotic expansions"
+    authors:
+      - given-names: A. H.
+        family-names: Glasser
+      - given-names: Z. R.
+        family-names: Wang
+      - given-names: J.-K.
+        family-names: Park
+    journal: "Physics of Plasmas"
+    volume: 23
+    issue: 11
+    start: "112506"
+    year: 2016
+    doi: "10.1063/1.4967862"
+  - type: article
+    title: "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time"
+    authors:
+      - given-names: Alexander S.
+        family-names: Glasser
+      - given-names: Egemen
+        family-names: Kolemen
+    journal: "Physics of Plasmas"
+    volume: 25
+    issue: 8
+    start: "082502"
+    year: 2018
+    doi: "10.1063/1.5029477"
+  - type: article
+    title: "Tearing stability prediction combining toroidal calculations with a two-fluid slab layer"
+    authors:
+      - given-names: Daniel A.
+        family-names: Burgess
+      - given-names: Nikolas C.
+        family-names: Logan
+      - given-names: Jong-Kyu
+        family-names: Park
+      - given-names: C. J.
+        family-names: Hansen
+      - given-names: C.
+        family-names: Paz-Soldan
+    journal: "Plasma Physics and Controlled Fusion"
+    volume: 68
+    issue: 6
+    start: "065017"
+    year: 2026
+    doi: "10.1088/1361-6587/ae7156"
+  - type: article
+    title: "Neoclassical toroidal viscosity in perturbed equilibria with general tokamak geometry"
+    authors:
+      - given-names: Nikolas C.
+        family-names: Logan
+      - given-names: Jong-Kyu
+        family-names: Park
+      - given-names: Kimin
+        family-names: Kim
+      - given-names: Zhirui
+        family-names: Wang
+      - given-names: John W.
+        family-names: Berkery
+    journal: "Physics of Plasmas"
+    volume: 20
+    issue: 12
+    start: "122507"
+    year: 2013
+    doi: "10.1063/1.4849395"
+  - type: article
+    title: "Self-consistent perturbed equilibrium with neoclassical toroidal torque in tokamaks"
+    authors:
+      - given-names: Jong-Kyu
+        family-names: Park
+      - given-names: Nikolas C.
+        family-names: Logan
+    journal: "Physics of Plasmas"
+    volume: 24
+    issue: 3
+    start: "032505"
+    year: 2017
+    doi: "10.1063/1.4977898"

@@ -1,0 +1,121 @@
+# Regression case: DIII-D-like n=1 outer-region singular Galerkin Δ′ solve.
+# Tracks the resonant-surface inventory, the PEST-3 Δ matching-matrix diagonal
+# (the physics-meaningful tearing Δ′), norms of the full outer Δ′ matrix and the
+# rpec coil-response (Δ_coil) block, and the inner-layer matching outputs.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "gal_resistive_diiid"
+description = "DIII-D-like, n=1, RDCON outer-region Galerkin Δ′ with rpec coil columns (delta_coil)"
+example_dir = "examples/DIIID-like_gal_resistive_example"
+
+# Number of resonant surfaces in the gal domain
+[quantities.gal_msing]
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/rational_count"
+type = "int_scalar"
+extract = "value"
+label = "gal # singular surfaces"
+noise_threshold = 0
+order = 10
+
+[quantities.gal_sing_q]
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/rational_q"
+type = "real_vector"
+extract = "all_real"
+label = "gal singular q values"
+noise_threshold = 1e-8
+order = 11
+
+# PEST-3 Δ matching matrix — per-surface diagonal (the physics-meaningful tearing Δ′)
+[quantities.gal_pest3_delta_diag]
+h5path = "SingularSurfaces/Delta_prime_matrix"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "gal PEST3 Δ diagonal"
+noise_threshold = 1e-6
+order = 20
+
+# Raw outer Δ′ matrix (2·msing × 2·msing) — Frobenius norm catches any element drift
+[quantities.gal_delta_norm]
+h5path = "SingularSurfaces/Delta_prime_raw"
+type = "complex_matrix"
+extract = "norm"
+label = "||gal Δ′ matrix||"
+noise_threshold = 1e-6
+order = 21
+
+# rpec coil-response block (edge mode × surface-side) — Frobenius norm
+[quantities.gal_delta_coil_norm]
+h5path = "SingularSurfaces/Delta_coil"
+type = "complex_matrix"
+extract = "norm"
+label = "||gal Δ_coil block||"
+noise_threshold = 1e-6
+order = 22
+
+# Mercier index per surface
+[quantities.gal_di]
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/D_I"
+type = "real_vector"
+extract = "all_real"
+label = "gal D_I per surface"
+noise_threshold = 1e-8
+order = 30
+
+# Resonant exponents α per surface
+[quantities.gal_alpha]
+h5path = "ForceFreeStates/Solutions/GalerkinIntegration/alpha"
+type = "complex_vector"
+extract = "all_complex"
+label = "gal α per surface"
+noise_threshold = 1e-8
+order = 31
+
+# --- DRIVEN (RPEC) inner-layer matching ([Match]) ---
+# Only finite, well-defined matching quantities are tracked. The reconstructed ξ/ξ′ are deliberately
+# NOT regressed via norms: ξ′ diverges at the rational surfaces, so any whole-array norm is dominated by
+# the (grid- and ULP-fragile) near-singular points — an ill-posed benchmark.
+
+# Inner-layer matching data Δ(Q) per surface (surface geometry + GGJ inner solver). (msing × 2)
+[quantities.gal_match_deltar_norm]
+h5path = "SingularSurfaces/Match/Delta_r"
+type = "complex_matrix"
+extract = "norm"
+label = "||gal inner-layer Δ||"
+noise_threshold = 1e-6
+order = 41
+
+# Outer-region matched coefficients cout (2·msing × mcoil) — the 4·msing matching assembly + solve.
+[quantities.gal_match_cout_norm]
+h5path = "SingularSurfaces/Match/cout"
+type = "complex_matrix"
+extract = "norm"
+label = "||gal match cout||"
+noise_threshold = 1e-6
+order = 42
+
+# Penetrated resonant field at each layer center (msing × mcoil) — the headline matching output.
+[quantities.gal_match_bpen_norm]
+h5path = "SingularSurfaces/Match/bpen"
+type = "complex_matrix"
+extract = "norm"
+label = "||gal match bpen||"
+noise_threshold = 1e-6
+order = 43
+
+# Matching linear-solve residual ‖mat·cof − rmat‖/‖rmat‖ — health check (should stay ~machine eps).
+[quantities.gal_match_residual]
+h5path = "SingularSurfaces/Match/residual"
+type = "real_scalar"
+extract = "value"
+label = "gal match residual"
+noise_threshold = 1e-10
+order = 44
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999

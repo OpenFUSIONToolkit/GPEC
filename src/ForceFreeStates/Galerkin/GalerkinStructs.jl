@@ -1,0 +1,164 @@
+# Data structures for the RDCON outer-region singular Galerkin solver (Fortran `gal.f` types `cell_type`,
+# `interval_type`, `gal_type`). Fortran `0:np`/`0:msing` dimensions are 1-based here with a `+1` shift
+# (Hermite DOF `ip` ↔ index `ip+1`; interval `ising` ↔ `intvl[ising+1]`).
+#
+# Reference: A. H. Glasser, Z. R. Wang & J.-K. Park, Phys. Plasmas 23, 112506 (2016).
+
+# Hermite-cubic order: 4 DOFs per node-pair (value + slope at each end), indexed 0:np in Fortran.
+const GAL_NP = 3
+
+"""
+Cell type flanking a singular surface (Fortran `cell%etype`, gal.f).
+"""
+@enum GalCellType GCT_NONE GCT_RES GCT_EXT GCT_EXT1 GCT_EXT2
+
+"""
+Which side of the adjacent singular surface a cell lies on (Fortran `cell%extra`).
+"""
+@enum GalSide GAL_SIDE_NONE GAL_SIDE_LEFT GAL_SIDE_RIGHT
+
+"""
+    GalCell
+
+One grid cell of the Galerkin discretization. Port of Fortran `cell_type` (gal.f).
+
+## Fields
+
+  - `etype::GalCellType` — none / resonant / extension(1,2)
+  - `extra::GalSide` — none / left / right (side of the neighbouring singular surface)
+  - `emap::Int` — global index of the extra (small resonant) DOF; 0 if none
+  - `map::Matrix{Int}` — `(mpert, np+1)` local→global DOF map (Fortran `cell%map(mpert, 0:np)`)
+  - `x::NTuple{2,Float64}` — `[x_left, x_right]` of the cell
+  - `x_lsode::Float64` — resonant-integration truncation point (res cells only)
+  - `erhs::ComplexF64`, `ediag::ComplexF64` — resonant RHS and diagonal contributions
+  - `rhs::Matrix{ComplexF64}` — `(mpert, np+1)` cell RHS (driving term from the big solution)
+  - `emat::Matrix{ComplexF64}` — `(mpert, np+1)` coupling of the extra DOF to the Hermite DOFs
+  - `mat::Array{ComplexF64,4}` — `(mpert, mpert, np+1, np+1)` cell stiffness block
+"""
+mutable struct GalCell
+    etype::GalCellType
+    extra::GalSide
+    emap::Int
+    map::Matrix{Int}
+    x::NTuple{2,Float64}
+    x_lsode::Float64
+    erhs::ComplexF64
+    ediag::ComplexF64
+    rhs::Matrix{ComplexF64}
+    emat::Matrix{ComplexF64}
+    mat::Array{ComplexF64,4}
+end
+
+"""
+Construct an empty `GalCell` for `mpert` poloidal modes and Hermite order `np`.
+"""
+function GalCell(mpert::Int, np::Int=GAL_NP)
+    return GalCell(GCT_NONE, GAL_SIDE_NONE, 0,
+        zeros(Int, mpert, np + 1), (0.0, 0.0), 0.0,
+        zero(ComplexF64), zero(ComplexF64),
+        zeros(ComplexF64, mpert, np + 1),
+        zeros(ComplexF64, mpert, np + 1),
+        zeros(ComplexF64, mpert, mpert, np + 1, np + 1))
+end
+
+"""
+    GalInterval
+
+One interval between consecutive singular surfaces (or between a surface and a domain edge).
+Port of Fortran `interval_type` (gal.f). `x`/`dx` are length `nx+1` (Fortran `0:nx`).
+"""
+struct GalInterval
+    x::Vector{Float64}
+    dx::Vector{Float64}
+    cells::Vector{GalCell}
+end
+
+"""
+    GalWorkspace
+
+Global workspace for the Galerkin solve. Port of Fortran `gal_type` (gal.f).
+
+`intvl` has length `msing+1` (Fortran `intvl(0:msing)`, accessed as `intvl[ising+1]`).
+`kl = ku = mpert*(np+1)`. `mat` is stored full band, `ldab = 2*kl + ku + 1` (LAPACK `gbtrf!`
+layout); `solver` records the factorization `gal_banded_solve!` used (`"cholesky"` or `"LU"`).
+"""
+mutable struct GalWorkspace
+    solver::String
+    nx::Int
+    nq::Int
+    np::Int
+    ndim::Int
+    kl::Int
+    ku::Int
+    ldab::Int
+    nsol::Int
+    intvl::Vector{GalInterval}
+    mat::Matrix{ComplexF64}
+    rhs::Matrix{ComplexF64}
+    sol::Matrix{ComplexF64}
+end
+
+"""
+    GalSingAsymp
+
+Two-sided singular asymptotics for the Galerkin solver: separate right (sig=+1) and left (sig=−1)
+power series, mirroring Fortran sing.f `vmatr`/`vmatl`. Each is evaluated at a positive distance
+`|ψ−ψ_s|` (real √, real pfac, no z<0 renormalization), so the directly-extracted Δ′ matches gal.f.
+"""
+struct GalSingAsymp
+    right::SingAsymptotics
+    left::SingAsymptotics
+end
+
+"""
+    GalerkinSolution
+
+Reconstructed outer-region radial solution on the gal-native grid (ξ and analytic ξ′ consumed by
+PerturbedEquilibrium). Populated by `gal_output_solution` (GalerkinSolution.jl).
+
+  - `psi::Vector{Float64}`, `q::Vector{Float64}` — radial grid (inner→edge) and its safety factor.
+  - `issing::Vector{Bool}` — grid points sitting on a singular surface (skipped; left zero).
+  - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ and dξ/dψ.
+  - `xi_cut::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ with the leading-order resonant content removed,
+    the background the inner-layer solution is added to for the composite solution. `(0,0,0)` unless `cut_solution`.
+  - `cut_range::Matrix{Float64}` — `(msing, 2)` ψ bounds of the resonant + extension cells around each surface;
+    the composite inner solution is only meaningful inside them. `(0,0)` unless `cut_solution`.
+"""
+struct GalerkinSolution
+    psi::Vector{Float64}
+    q::Vector{Float64}
+    issing::Vector{Bool}
+    xi::Array{ComplexF64,3}
+    xi_deriv::Array{ComplexF64,3}
+    xi_cut::Array{ComplexF64,3}
+    cut_range::Matrix{Float64}
+end
+
+"""
+    GalerkinResult
+
+Solver internals and FEM diagnostics of the outer-region Galerkin solve. The Δ′ payload is not here;
+`galerkin_solve` returns it separately as a [`DeltaPrimeData`](@ref) (`ForceFreeStatesResult.delta_prime`).
+
+## Fields
+
+  - `msing::Int` — number of resonant surfaces solved; may be fewer than `result.surfaces`, since only
+    surfaces inside the domain and the resolved m-band are kept (`gal_resonant_surfaces`).
+  - `sing_psi, sing_q::Vector{Float64}`, `sing_m, sing_n::Vector{Int}` — per-surface identifiers,
+    core→edge, in the order the Δ′ matrices are indexed.
+  - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
+  - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
+    gal-native grid; `nothing` if no resonant surfaces.
+  - `solver::String` — factorization actually used: `"cholesky"`, `"LU"`, or `"none"` when no resonant surfaces were present.
+"""
+struct GalerkinResult
+    msing::Int
+    sing_psi::Vector{Float64}
+    sing_q::Vector{Float64}
+    sing_m::Vector{Int}
+    sing_n::Vector{Int}
+    di::Vector{Float64}
+    alpha::Vector{ComplexF64}
+    solution::Union{Nothing,GalerkinSolution}
+    solver::String
+end

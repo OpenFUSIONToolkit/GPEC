@@ -1,0 +1,23 @@
+# Kinetic profiles consistent with this Solovev equilibrium's pressure.
+# Constraint: P(psi_n) = n_e*T_e + n_i*T_i must equal the equilibrium pressure
+#   P(psi_n) = P0*(1 - psi_n),  P0 = 4.273e4 Pa  (linear, zero at the edge).
+# Construction (quasineutral, n_e=n_i, T_e=T_i):
+#   T(psi_n) = 100 + 2600*(1 - psi_n) eV      (core 2700 eV, edge 100 eV)
+#   n(psi_n) = P0*(1 - psi_n) / (2*e*T)        (core ~4.9e19; product n0*T0 = P0/2e fixed)
+# Density carries the edge falloff to a small floor at psi_n=1 so T stays finite
+# (avoids T->0 in the collisionality / drift-frequency formulas); the residual edge
+# pressure from the floor is ~1e-6 of P0. omega_E is a free (non-pressure) profile.
+psi_n   n_i_m3       n_e_m3       T_i_eV    T_e_eV    omega_E_rads
+0.00    4.939e19     4.939e19     2700.0    2700.0    1.0e4
+0.10    4.919e19     4.919e19     2440.0    2440.0    9.0e3
+0.20    4.894e19     4.894e19     2180.0    2180.0    8.0e3
+0.30    4.862e19     4.862e19     1920.0    1920.0    7.0e3
+0.40    4.820e19     4.820e19     1660.0    1660.0    6.0e3
+0.50    4.763e19     4.763e19     1400.0    1400.0    5.0e3
+0.60    4.679e19     4.679e19     1140.0    1140.0    4.0e3
+0.70    4.546e19     4.546e19     880.0     880.0     3.0e3
+0.80    4.302e19     4.302e19     620.0     620.0     2.0e3
+0.90    3.705e19     3.705e19     360.0     360.0     1.0e3
+0.95    2.899e19     2.899e19     230.0     230.0     5.0e2
+0.99    1.058e19     1.058e19     126.0     126.0     1.0e2
+1.00    2.000e18     2.000e18     100.0     100.0     0.0

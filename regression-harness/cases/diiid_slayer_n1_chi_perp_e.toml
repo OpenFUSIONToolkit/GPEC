@@ -1,0 +1,10 @@
+# Regression case: the diiid_slayer_n1 deck with P_perp built from the electron diffusivity chi_e alone,
+# the model GPEC used before the D_perp default. It keeps a baseline for the non-default P_perp models
+# and for the electron-channel convention of Fitzpatrick's TJ code.
+[case]
+name = "diiid_slayer_n1_chi_perp_e"
+base = "diiid_slayer_n1"   # Inherit example_dir, [quantities.*] and [overrides] from this case
+description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis with P_perp_model = chi_perp_e"
+
+[overrides]
+"SLAYER.P_perp_model" = "chi_perp_e"   # P_perp from chi_e alone, as before the D_perp default

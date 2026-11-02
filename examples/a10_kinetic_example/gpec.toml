@@ -1,0 +1,73 @@
+# a10 kinetic stability example — drift-kinetic MHD stability of a low-aspect-ratio
+# circular tokamak. Unlike the ideal examples, this run uses the calculated kinetic
+# (neoclassical toroidal viscosity) energy matrices at full strength, so the
+# free-boundary stability includes drift-kinetic effects from a single deuterium ion
+# species with a Maxwellian distribution and a harmonic collision operator.
+# The run stops after the kinetic stability eigenvalues (no [PerturbedEquilibrium] section).
+# The equilibrium g-file and kinetic profile are bundled in this directory.
+
+[Run]
+verbose = true                 # Log each stage's progress
+
+[Equilibrium]
+eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
+kinetic_file = "a10_prof1.txt" # Kinetic-profile file (HDF5 GPEC kinetic schema or 6-column ASCII), read once into the equilibrium
+eq_type = "efit"               # Type of the input 2D equilibrium file
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, custom)
+grid_type = "core_edge_packed" # Radial grid packing type
+psilow = 1e-3                  # Lower limit of normalized poloidal flux
+psihigh = 0.99                 # Upper limit of normalized poloidal flux
+mpsi = 16                      # Number of radial grid points (low value for fast iteration)
+mtheta = 256                   # Number of poloidal grid points
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value; q is positive, so negative values are rejected)
+flux_surface_rtol = 1e-7       # Relative tolerance of the ODE solves that trace each flux surface
+impurity_charge = 6            # Impurity charge
+impurity_mass = 12             # Impurity mass
+
+[[Equilibrium.ion_species]]
+z = 1                            # Charge in units of e
+m = 2                            # Mass in proton masses
+fraction = 1.0                   # Fraction of the n_i profile this species carries
+
+# Presence runs the LocalStability stage (Mercier D_I, resistive D_R, ballooning Δ', first α boundary); keys are the LocalStabilityProblem settings, numerics in [Ballooning]
+[LocalStability]
+theta_k = 0.0                 # Ballooning angle θ_k, used by both the profile scan and the α-boundary scan
+alpha_boundary_scan = true    # Run the first ballooning α-boundary scan (a root find per ψ surface)
+
+# Numerical settings of the ballooning scans
+[Ballooning]
+ode_tol = 1e-8                # Relative and absolute tolerance of the ballooning ODE integration behind Δ'
+n_scan = 24                   # Resolution of the α scan for the first boundary
+max_alpha_scale = 8.0         # Upper end of the α search, as a multiple of the experimental α
+alpha_tol = 1e-3              # Bisection tolerance of the critical α, in the same multiples
+psi_window = [0.1, 0.99]      # ψ_N range of the α scan; surfaces outside it are NaN
+
+[ForceFreeStates]
+vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
+
+truncate_at_rational_offset = false # FALSE for limited/analytical equilibria — rationals sparse, rational_offset_fraction would chop too much edge
+dW_edge_scan_start = 1.0       # Edge dW(ψ) diagnostic scan band [dW_edge_scan_start, psilim]; set ≥ psilim to disable
+qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
+
+nn = 1                         # Toroidal mode number, or consecutive numbers as a list
+delta_mlow = 6                 # Expands lower bound of Fourier harmonics
+delta_mhigh = 6                # Expands upper bound of Fourier harmonics
+mtheta_vacuum = 512            # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+
+kinetic = "KineticForces"     # Kinetic source: the drift-kinetic matrices of the [KineticForces] model (omit for an ideal run)
+integrator = "Forward" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
+singfac_min = 1e-6             # Fractional distance from rational q at which ideal jump enforced
+
+# Numerical settings of the forward integrator
+[Forward]
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
+
+[KineticForces]
+bounce_harmonic_max = 6        # Bounce-harmonic number
+electron = false               # Include electron contribution (false = ion-only)
+nutype = "harmonic"            # Collision operator (zero, small, krook, harmonic)
+f0type = "maxwellian"          # Distribution function (maxwellian, park, cgl)
+atol_pitch = 1e-9              # Absolute tolerance for the pitch integration (median-normalized kernel)
+axis_validity_suppression = true   # Suppress kinetic terms inside the near-axis orbit-width validity limit

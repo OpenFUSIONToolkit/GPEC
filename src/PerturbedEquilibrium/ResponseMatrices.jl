@@ -1,0 +1,400 @@
+"""
+Response matrix construction for perturbed equilibrium calculations.
+
+Based on gpresp.f from GPEC, implementing resp_index=0 (energy-based inductance).
+Uses ForceFreeStates eigenmode solutions and vacuum response data.
+
+Reference: [Park Phys. Plasmas 2009 056115]
+"""
+
+# Theta ↔ mode transforms
+using ..Utilities.FourierTransforms
+
+"""
+    extract_boundary_displacements(
+        equil::Equilibrium.PlasmaEquilibrium,
+        solution::SolutionProfiles,
+        ffs::ForceFreeStatesResult
+    )::NamedTuple
+
+Extract the ForceFreeStates eigenmode displacements at the plasma boundary (the last stored step of
+`solution`) and the quantities needed to turn them into the boundary normal field.
+
+## Returns
+
+Named tuple with:
+
+  - `ξ_psi_boundary`: radial displacement ξ_ψ, `[numpert_total, numpert_total]` (mode × eigenmode)
+  - `dPsi_drho`: flux factor `χ₁·2π = (2π)²·psio` converting ξ_ψ to normal field
+  - `q_boundary`: safety factor at the boundary
+  - `psi_boundary`: normalized flux at the boundary
+"""
+function extract_boundary_displacements(
+    equil::Equilibrium.PlasmaEquilibrium,
+    solution::SolutionProfiles,
+    ffs::ForceFreeStatesResult
+)
+    # u_store is [numpert_total, numpert_total, 2, numsteps]; slot 1 of dim 3 is ξ_ψ, step `solution.step` the boundary
+    ξ_psi_boundary = solution.u_store[:, :, 1, solution.step]
+
+    psi_boundary = solution.psi_store[solution.step]
+
+    q_boundary = solution.q_store[solution.step]
+
+    # bwp_mn = chi1·singfac·2πi·ξ_ψ with chi1 = 2π·psio (Fortran idcon.f, gpeq.f), so the flux factor is (2π)²·psio
+    dPsi_drho = (2π)^2 * equil.psio
+
+    return (
+        ξ_psi_boundary=ξ_psi_boundary,
+        dPsi_drho=dPsi_drho,
+        q_boundary=q_boundary,
+        psi_boundary=psi_boundary
+    )
+end
+
+"""
+    compute_normal_magnetic_field(
+        boundary_data::NamedTuple,
+        ffs::ForceFreeStatesResult
+    )::Matrix{ComplexF64}
+
+Compute the normal magnetic field at the plasma boundary from the eigenmode displacements,
+`bwp_mn[i,j] = i·(dΨ/dρ)·(m_i − n_i·q)·ξ_ψ[i,j]` [Park Phys. Plasmas 2009 056115 eq. 4].
+
+## Arguments
+
+  - `boundary_data`: output of `extract_boundary_displacements`
+  - `ffs`: ForceFreeStates result with the mode space (mlow, mpert, nlow)
+
+## Returns
+
+  - `bwp_mn`: `[numpert_total, numpert_total]`, the normal field of Fourier mode i in response to eigenmode j
+"""
+function compute_normal_magnetic_field(
+    boundary_data::NamedTuple,
+    ffs::ForceFreeStatesResult
+)::Matrix{ComplexF64}
+
+    numpert_total = ffs.numpert_total
+    bwp_mn = zeros(ComplexF64, numpert_total, numpert_total)
+
+    ξ_psi = boundary_data.ξ_psi_boundary
+    dPsi_drho = boundary_data.dPsi_drho
+    q_boundary = boundary_data.q_boundary
+
+    # Singular factor m − n·q per mode; linear index i ↔ m = (i-1) % mpert + mlow, n = (i-1) ÷ mpert + nlow
+    singfac = zeros(Float64, numpert_total)
+    for i in 1:numpert_total
+        m_mode = (i - 1) % ffs.mpert + ffs.mlow
+        n_mode = (i - 1) ÷ ffs.mpert + ffs.nlow
+        singfac[i] = m_mode - n_mode * q_boundary
+    end
+
+    for i in 1:numpert_total
+        for j in 1:numpert_total
+            bwp_mn[i, j] = 1im * dPsi_drho * singfac[i] * ξ_psi[i, j]
+        end
+    end
+
+    return bwp_mn
+end
+
+"""
+    build_flux_matrix(
+        equil::Equilibrium.PlasmaEquilibrium,
+        solution::SolutionProfiles,
+        ffs::ForceFreeStatesResult
+    )::Matrix{ComplexF64}
+
+Build the boundary flux matrix `flxmats[i,j]`: the normal field `bwp_mn` of Fourier mode i in response
+to eigenmode j at the plasma boundary (see `compute_normal_magnetic_field`).
+"""
+function build_flux_matrix(
+    equil::Equilibrium.PlasmaEquilibrium,
+    solution::SolutionProfiles,
+    ffs::ForceFreeStatesResult
+)::Matrix{ComplexF64}
+
+    boundary_data = extract_boundary_displacements(equil, solution, ffs)
+
+    flxmats = compute_normal_magnetic_field(boundary_data, ffs)
+
+    return flxmats
+end
+
+"""
+    calc_plasma_inductance(
+        wt0::Matrix{ComplexF64},
+        ffs::ForceFreeStatesResult,
+        psio::Float64
+    )::Matrix{ComplexF64}
+
+Calculate plasma inductance matrix Λ using the wt0-based energy formula
+(matches Fortran `gpresp_induct` with `resp_induct_flag=TRUE`).
+
+    Λ = inv(2·t₁·wt0·t₂)
+
+where t₁ = im/(χ₁·s_i·2π), t₂ = -im/(χ₁·s_j·2π), s_i = m_i - n·q_lim.
+
+`wt0` already carries the s_i·s_j factors from the vacuum scaling in `free_run`, which t₁·t₂ divide back out.
+
+## Arguments
+
+  - `wt0`: Total energy matrix W = wp + wv, before eigenvector sorting
+  - `ffs`: ForceFreeStates result with the mode space and edge q (mlow, mpert, nlow, qlim)
+  - `psio`: total poloidal flux `equil.psio`, in Wb/rad
+
+## Returns
+
+  - Plasma inductance matrix Lambda [numpert_total × numpert_total]
+"""
+function calc_plasma_inductance(
+    wt0::Matrix{ComplexF64},
+    ffs::ForceFreeStatesResult,
+    psio::Float64
+)::Matrix{ComplexF64}
+
+    mpert = ffs.numpert_total
+    chi1 = 2π * psio          # = Fortran's chi1 = twopi*psio
+    qlim = ffs.qlim      # q at psilim
+
+    # Singular factors s_i = m_i - n_i*qlim  (same as Fortran: mfac(i) - nn*qlim)
+    s = [m - n * qlim for (m, n) in (_mode_mn(ffs, i) for i in 1:mpert)]
+
+    # Fortran idcon_norm scaling of the raw wp+wv: wt0·psio²/(2μ₀)
+    mu0 = 4π * 1e-7
+    wt0_norm = wt0 .* (psio^2 / (mu0 * 2))
+
+    # Build temp2[i,j] = 2·t1_i·wt0[i,j]·t2_j (matches Fortran gpresp_induct)
+    temp2 = Matrix{ComplexF64}(undef, mpert, mpert)
+    for i in 1:mpert, j in 1:mpert
+        t1 = im / (chi1 * s[i] * 2π)
+        t2 = -im / (chi1 * s[j] * 2π)
+        temp2[i, j] = 2 * t1 * wt0_norm[i, j] * t2
+    end
+
+    return inv(temp2)
+end
+
+"""
+    calc_surface_inductance(
+        equil::Equilibrium.PlasmaEquilibrium,
+        ψ::Float64,
+        mtheta::Int,
+        m_modes::AbstractUnitRange{Int},
+        n_modes::Union{Integer,AbstractVector{<:Integer}}
+    )::Matrix{ComplexF64}
+
+Surface inductance L at the flux surface ψ, from the vacuum surface-current matrix, solved
+against a no-wall vacuum.
+
+Solves the 2D vacuum problem with `compute_Iv=true` and inverts. The driving flux harmonics are
+unit columns (`Φ = 𝕀` by construction, matching Fortran `gpvacuum_flxsurf`'s unit driving
+harmonics), so `Φ = L·I^v` (Park 2007, eq. 7 and following text) gives `L = μ₀(2π)²·I_v⁻¹`.
+
+## Arguments
+
+  - `equil`: Plasma equilibrium
+  - `ψ`: Normalized poloidal flux of the surface
+  - `mtheta`: Number of vacuum poloidal grid points
+  - `m_modes`: Poloidal mode range mlow:mhigh
+  - `n_modes`: Toroidal mode number, or range nlow:nhigh
+
+## Returns
+
+  - Surface inductance matrix in henries [mpert·npert × mpert·npert]
+"""
+function calc_surface_inductance(
+    equil::Equilibrium.PlasmaEquilibrium,
+    ψ::Float64,
+    mtheta::Int,
+    m_modes::AbstractUnitRange{Int},
+    n_modes::Union{Integer,AbstractVector{<:Integer}}
+)::Matrix{ComplexF64}
+    vac_input = Vacuum.VacuumInput(equil, ψ, mtheta, 1, m_modes, vcat(n_modes))
+    wall_settings = nothing
+    I_v = Vacuum.compute_vacuum_response(vac_input, wall_settings; compute_Iv=true).I_v
+    μ₀ = 4π * 1e-7
+    return inv(I_v) .* (μ₀ * (2π)^2)
+end
+
+"""
+    calc_permeability(
+        plasma_inductance::Matrix{ComplexF64},
+        surface_inductance::Matrix{ComplexF64}
+    )::Matrix{ComplexF64}
+
+Calculate permeability matrix P = Λ·L⁻¹ (matches Fortran `gpresp_permeab`).
+
+## Arguments
+
+  - `plasma_inductance`: Plasma inductance matrix Lambda
+  - `surface_inductance`: Surface inductance matrix L
+
+## Returns
+
+  - Permeability matrix P = Lambda * L^{-1} [numpert_total, numpert_total]
+"""
+function calc_permeability(
+    plasma_inductance::Matrix{ComplexF64},
+    surface_inductance::Matrix{ComplexF64}
+)::Matrix{ComplexF64}
+    # P = Lambda * L^{-1}  (right-division solves for P s.t. P*L = Lambda)
+    return plasma_inductance / surface_inductance
+end
+
+"""
+    build_control_surface_rootarea_to_area_weight(
+        equil::Equilibrium.PlasmaEquilibrium,
+        ffs::ForceFreeStatesResult
+    )::Tuple{Matrix{ComplexF64}, Float64}
+
+Build the numpert_total × numpert_total root-area-weighted → area-weighted field operator
+`S = Σ/√A` at the control surface (psilim), and return it together with the scalar surface area
+`A = jarea`. The mpert × mpert single-n block (Equilibrium.rootarea_to_area_weight) is repeated
+block-diagonally over the `npert` toroidal harmonics, matching the numpert_total mode ordering used
+by the response matrices.
+
+`S` maps a root-area-weighted control-surface field `b̃` to the area-weighted field `b̄`
+(`b̄ = S·b̃`); poloidal flux is the scalar product `Φ = A·b̄` (so the b̃→flux conform operator is
+`R = S·A`, used only internally). `S` and `A` are the recovery aids users need to express the stored
+coordinate-invariant (b̃) matrices in the area-weighted field or recover flux — see
+`field_space_response_matrices`. [Pharr 2026]
+"""
+function build_control_surface_rootarea_to_area_weight(
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffs::ForceFreeStatesResult
+)::Tuple{Matrix{ComplexF64},Float64}
+    mpert = ffs.mpert
+    npert = ffs.npert
+    Npert = ffs.numpert_total
+
+    mtheta_eq = length(equil.rzphi_ys)
+    ft = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, ffs.mlow)
+    S_block = Equilibrium.rootarea_to_area_weight(equil, ffs.psilim, ft)
+    jarea = Equilibrium.flux_surface_area(equil, ffs.psilim, mtheta_eq)
+
+    npert == 1 && return (Matrix{ComplexF64}(S_block), jarea)
+
+    S_full = zeros(ComplexF64, Npert, Npert)
+    for in in 1:npert
+        r = ((in-1)*mpert+1):(in*mpert)
+        S_full[r, r] .= S_block
+    end
+    return (S_full, jarea)
+end
+
+"""
+    field_space_response_matrices(
+        plasma_inductance, surface_inductance, permeability, reluctance,
+        rootarea_to_area_weight, jarea
+    )::NamedTuple
+
+Express the control-surface response matrices in the coordinate-invariant root-area-weighted
+field (b̃) space, given the flux-space matrices, the b̃→b̄ operator `S = rootarea_to_area_weight`,
+and the scalar surface area `jarea`. The brief internal flux-conform operator is `R = S·jarea`
+(`Φ = R·b̃`); poloidal flux never leaves this function.
+
+The matrices fall into two algebraic classes:
+
+  - **Operators** (map flux → flux): permeability `P` (Φ_tot = P·Φ_x) transforms by similarity
+    `P̃ = R⁻¹·P·R`. Its singular values are coordinate-invariant.
+  - **Quadratic generators** (energy = Φ†·G⁻¹·Φ): inductances `Λ`, `L` transform by congruence
+    `G̃ = R⁻¹·G·R⁻†`; the inverse-inductance-like reluctance `ϱ` (energy = Φ†·ϱ·Φ) transforms as
+    `ϱ̃ = R†·ϱ·R`. Their spectra are coordinate-invariant.
+
+These rules are mutually consistent: `P̃ = Λ̃·L̃⁻¹ = R⁻¹·Λ·L⁻¹·R = R⁻¹·P·R`, and
+`ϱ̃ = L̃⁻¹·(Λ̃−L̃)·L̃⁻¹`. To recover the area-weighted (`b̄`) forms, conform with `S` instead of `R`
+(e.g. `L_b̄ = S·L̃·S†`); recover flux with the scalar `A`: `Φ = A·b̄`. [Pharr 2026]
+"""
+function field_space_response_matrices(
+    plasma_inductance::Matrix{ComplexF64},
+    surface_inductance::Matrix{ComplexF64},
+    permeability::Matrix{ComplexF64},
+    reluctance::Matrix{ComplexF64},
+    rootarea_to_area_weight::Matrix{ComplexF64},
+    jarea::Float64
+)::NamedTuple
+    R = rootarea_to_area_weight .* jarea   # b̃→flux conform operator Σ·√A = (Σ/√A)·A
+    R_inv = inv(R)
+    return (
+        plasma_inductance=R_inv * plasma_inductance * R_inv',
+        surface_inductance=R_inv * surface_inductance * R_inv',
+        permeability=R_inv * permeability * R,
+        reluctance=R' * reluctance * R
+    )
+end
+
+"""
+    map_forcing_to_eigenmodes(
+        forcing_modes::Vector{ForcingMode},
+        ffs::ForceFreeStatesResult
+    )::Vector{ComplexF64}
+
+Map external forcing modes to eigenmode basis.
+
+Matches forcing mode numbers (n,m) to the eigenmode basis used in ForceFreeStates
+and creates a forcing vector in that basis.
+
+**Unit convention**: `ForcingMode.amplitude` is in unit-norm convention (= Fortran Phi_x,
+T·m² per unit-norm cell). Files loaded in `normal_field_T` or `sfl_flux_Wb` convention
+are automatically converted to unit-norm on load (see `ForcingMode` docstring).
+
+## Arguments
+
+  - `forcing_modes`: External forcing modes (amplitudes in unit-norm / Phi_x convention)
+  - `ffs`: ForceFreeStates result with the mode space
+
+## Returns
+
+  - Forcing vector in eigenmode basis [numpert_total]
+"""
+function map_forcing_to_eigenmodes(
+    forcing_modes::Vector{ForcingMode},
+    ffs::ForceFreeStatesResult
+)::Vector{ComplexF64}
+
+    numpert_total = ffs.mpert * ffs.npert
+    forcing_vector = zeros(ComplexF64, numpert_total)
+
+    for forcing_mode in forcing_modes
+        for i in 1:numpert_total
+            m_mode = (i - 1) % ffs.mpert + ffs.mlow
+            n_mode = (i - 1) ÷ ffs.mpert + ffs.nlow
+
+            if m_mode == forcing_mode.m && n_mode == forcing_mode.n
+                forcing_vector[i] = forcing_mode.amplitude
+                break
+            end
+        end
+    end
+
+    return forcing_vector
+end
+
+"""
+    compute_plasma_response_vector(
+        permeability::Matrix{ComplexF64},
+        forcing_vector::Vector{ComplexF64}
+    )::Vector{ComplexF64}
+
+Compute plasma response to external forcing.
+
+Response = Permeability * Forcing
+
+## Arguments
+
+  - `permeability`: Permeability matrix
+  - `forcing_vector`: External forcing in eigenmode basis
+
+## Returns
+
+  - Plasma response vector in eigenmode basis
+"""
+function compute_plasma_response_vector(
+    permeability::Matrix{ComplexF64},
+    forcing_vector::Vector{ComplexF64}
+)::Vector{ComplexF64}
+
+    return permeability * forcing_vector
+end

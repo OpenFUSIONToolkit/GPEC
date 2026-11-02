@@ -1,0 +1,761 @@
+using Test
+using TOML
+using Statistics
+using Printf
+using HDF5
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.ForcingTerms
+using GeneralizedPerturbedEquilibrium.Equilibrium
+
+const COIL_DIR = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries")
+const D3D_IL = joinpath(COIL_DIR, "d3d_il.dat")
+
+# ---------------------------------------------------------------------------
+@testset "CoilGeometry: read_coil_dat" begin
+    @test isfile(D3D_IL)
+
+    cs = ForcingTerms.read_coil_dat(D3D_IL)
+
+    @test cs.ncoil == 6
+    @test cs.s == 1
+    @test cs.nsec == 126
+    @test cs.nw ≈ 1.0
+
+    # Coordinates should be in plausible DIII-D range (R ~ 1–2.5 m, |Z| < 2 m)
+    R_vals = sqrt.(cs.x .^ 2 .+ cs.y .^ 2)
+    @test all(0.5 .< R_vals .< 3.0)
+    @test all(-2.5 .< cs.z .< 2.5)
+
+    # Size check
+    @test size(cs.x) == (6, 1, 126)
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilGeometry: conductors" begin
+    cs = ForcingTerms.read_coil_dat(D3D_IL)
+    parts = ForcingTerms.conductors(cs)
+
+    @test length(parts) == cs.ncoil
+    @test all(p -> p.ncoil == 1, parts)
+    @test [p.name for p in parts] == ["$(cs.name)_$j" for j in 1:cs.ncoil]
+
+    for (j, p) in enumerate(parts)
+        @test p.x[1, :, :] == cs.x[j, :, :]
+        @test p.y[1, :, :] == cs.y[j, :, :]
+        @test p.z[1, :, :] == cs.z[j, :, :]
+        @test p.currents == [cs.currents[j]]
+        @test (p.s, p.nw, p.nsec) == (cs.s, cs.nw, cs.nsec)
+    end
+
+    # A set that already holds one conductor is handed back untouched.
+    single = ForcingTerms.make_pf_hoop(; radius=1.5, height=0.3)
+    @test ForcingTerms.conductors(single)[1] === single
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilGeometry: apply_transforms — shift" begin
+    cs = ForcingTerms.read_coil_dat(D3D_IL)
+    # Assign unit currents
+    cs2 = ForcingTerms.CoilSet(cs.name, cs.ncoil, cs.s, cs.nw, cs.nsec,
+        cs.x, cs.y, cs.z, ones(cs.ncoil))
+
+    Δx = 0.05
+    cfg = ForcingTerms.CoilSetConfig(; shiftx=[Δx for _ in 1:cs.ncoil])
+    cs_shifted = ForcingTerms.apply_transforms(cs2, cfg; n_tilt=0)
+
+    # For n_tilt=0 (rigid shift), every x coordinate should increase by Δx
+    @test all(cs_shifted.x .- cs.x .≈ Δx)
+    @test all(cs_shifted.y .≈ cs.y)
+    @test all(cs_shifted.z .≈ cs.z)
+end
+
+@testset "CoilGeometry: apply_transforms — zero tilt" begin
+    cs = ForcingTerms.read_coil_dat(D3D_IL)
+    cs2 = ForcingTerms.CoilSet(cs.name, cs.ncoil, cs.s, cs.nw, cs.nsec,
+        cs.x, cs.y, cs.z, ones(cs.ncoil))
+    cfg = ForcingTerms.CoilSetConfig()  # all defaults = zero perturbations
+    cs_same = ForcingTerms.apply_transforms(cs2, cfg; n_tilt=1)
+
+    @test all(cs_same.x .≈ cs.x)
+    @test all(cs_same.y .≈ cs.y)
+    @test all(cs_same.z .≈ cs.z)
+end
+
+# ---------------------------------------------------------------------------
+@testset "BiotSavart: circular loop analytic validation" begin
+    # Circular loop of radius a in the xy-plane at z=0, current I in the +θ direction.
+    # At observer (0, 0, h): B_z = μ₀ I a² / (2 (a²+h²)^(3/2))   [Jackson 5.38]
+    a = 1.0
+    I_val = 1.0
+    h = 0.5
+    n_seg = 500
+
+    # Build a discrete circular loop as a CoilSet (ncoil=1, s=1, nsec=n_seg+1)
+    phis = range(0; length=n_seg + 1, stop=2π)
+    xs = a .* cos.(phis)
+    ys = a .* sin.(phis)
+    zs = zeros(n_seg + 1)
+
+    cs = ForcingTerms.CoilSet("test_loop", 1, 1, 1.0, n_seg + 1,
+        reshape(xs, 1, 1, :),
+        reshape(ys, 1, 1, :),
+        reshape(zs, 1, 1, :),
+        [I_val])
+
+    # Allocate output and evaluate at (0, 0, h)
+    Bx = zeros(1)
+    By = zeros(1)
+    Bz = zeros(1)
+    ForcingTerms.accumulate_strand_field!(
+        Bx, By, Bz, 1,
+        0.0, 0.0, h,
+        xs, ys, zs,
+        I_val * cs.nw
+    )
+
+    B_z_analytic = 4π * 1e-7 * I_val * a^2 / (2 * (a^2 + h^2)^(3 / 2))
+    rel_error = abs(Bz[1] - B_z_analytic) / B_z_analytic
+    @test rel_error < 0.005  # <0.5% with 500 segments
+
+    # Transverse components should be near zero by symmetry
+    @test abs(Bx[1]) < 1e-14
+    @test abs(By[1]) < 1e-14
+end
+
+@testset "BiotSavart: straight segment field is exact" begin
+    # Segment from (0,0,-0.5) to (0,0,0.5) m, unit current. Textbook finite-wire field at
+    # distance d, height z: B_φ = μ₀I/(4πd) × ((L/2 - z)/√(d² + (L/2 - z)²) + (L/2 + z)/√(d² + (L/2 + z)²)).
+    xs = [0.0, 0.0]
+    ys = [0.0, 0.0]
+    zs = [-0.5, 0.5]
+    for d in (0.05, 0.25, 0.5, 2.0), z in (0.0, 0.2, 0.9)
+        Bx = zeros(1)
+        By = zeros(1)
+        Bz = zeros(1)
+        ForcingTerms.accumulate_strand_field!(Bx, By, Bz, 1, d, 0.0, z, xs, ys, zs, 1.0)
+        a = 0.5 - z
+        b = 0.5 + z
+        B_exact = 1e-7 / d * (a / sqrt(d^2 + a^2) + b / sqrt(d^2 + b^2))
+        @test By[1] ≈ B_exact rtol = 1e-12
+        @test abs(Bx[1]) < 1e-14 * B_exact && abs(Bz[1]) < 1e-14 * B_exact
+    end
+    @inferred ForcingTerms._segment_field(1.0, 0.2, 0.3, 0.0, 0.0, 1.0, 1.0)
+
+    # Observer on the conductor: the segment contribution is skipped, never Inf/NaN
+    Bx = zeros(1)
+    By = zeros(1)
+    Bz = zeros(1)
+    ForcingTerms.accumulate_strand_field!(Bx, By, Bz, 1, 0.0, 0.0, 0.1, xs, ys, zs, 1.0)
+    @test Bx[1] == 0 && By[1] == 0 && Bz[1] == 0
+end
+
+@testset "BiotSavart: field independent of polyline subdivision" begin
+    # 0.6 m × 0.4 m rectangle in the plane x = 1.25 m with each side split into m collinear
+    # pieces; the conductor is the same for every m, so the field must be too.
+    function rectangle(m)
+        cy = [-0.3, 0.3, 0.3, -0.3, -0.3]
+        cz = [-0.2, -0.2, 0.2, 0.2, -0.2]
+        ys = [cy[s] + p / m * (cy[s+1] - cy[s]) for s in 1:4 for p in 0:(m-1)]
+        zs = [cz[s] + p / m * (cz[s+1] - cz[s]) for s in 1:4 for p in 0:(m-1)]
+        push!(ys, cy[5])
+        push!(zs, cz[5])
+        n = length(ys)
+        return ForcingTerms.CoilSet("rectangle", 1, 1, 1.0, n, reshape(fill(1.25, n), 1, 1, :),
+            reshape(ys, 1, 1, :), reshape(zs, 1, 1, :), [1.0e3])
+    end
+    obs_R = [r for r in 0.95:0.05:1.15 for z in -0.3:0.15:0.3]
+    obs_Z = [z for r in 0.95:0.05:1.15 for z in -0.3:0.15:0.3]
+    obs_phi = fill(0.1, length(obs_R))
+    B = map((1, 16)) do m
+        B_R = zeros(length(obs_R))
+        B_phi = zeros(length(obs_R))
+        B_Z = zeros(length(obs_R))
+        ForcingTerms.compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, [rectangle(m)])
+        hcat(B_R, B_phi, B_Z)
+    end
+    @test maximum(abs, B[1] .- B[2]) < 1e-12 * maximum(abs, B[2])
+end
+
+@testset "BiotSavart: compute_biot_savart_boundary! threading" begin
+    # Same circular loop; verify threaded result matches single-obs result
+    a = 0.8
+    I_val = 500.0
+    n_seg = 200
+    phis = range(0; length=n_seg + 1, stop=2π)
+    xs = a .* cos.(phis)
+    ys = a .* sin.(phis)
+    zs = zeros(n_seg + 1)
+    cs = ForcingTerms.CoilSet("loop", 1, 1, 1.0, n_seg + 1,
+        reshape(xs, 1, 1, :), reshape(ys, 1, 1, :), reshape(zs, 1, 1, :),
+        [I_val])
+
+    # Three observation points
+    obs_R = [0.5, 1.0, 1.5]
+    obs_phi = [0.0, π / 3, π]
+    obs_Z = [0.3, 0.0, -0.2]
+    B_R = zeros(3)
+    B_phi = zeros(3)
+    B_Z = zeros(3)
+
+    ForcingTerms.compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, [cs])
+
+    # Verify B_Z at (0, 0, 0.3): analytic value
+    Bx_s = zeros(1)
+    By_s = zeros(1)
+    Bz_s = zeros(1)
+    obs_x = obs_R[1] * cos(obs_phi[1])
+    obs_y = obs_R[1] * sin(obs_phi[1])
+    ForcingTerms.accumulate_strand_field!(Bx_s, By_s, Bz_s, 1,
+        obs_x, obs_y, obs_Z[1], xs, ys, zs, I_val * cs.nw)
+    B_R_single = Bx_s[1] * cos(obs_phi[1]) + By_s[1] * sin(obs_phi[1])
+    @test B_R[1] ≈ B_R_single rtol = 1e-10
+    @test B_Z[1] ≈ Bz_s[1] rtol = 1e-10
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: sample_boundary_grid" begin
+    # Load Solovev example equilibrium
+    equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
+    @test isdir(equil_dir)
+
+    inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
+    eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, equil_dir)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+
+    mtheta = 48
+    nzeta = 16
+    grid = ForcingTerms.sample_boundary_grid(equil, mtheta, nzeta)
+
+    @test grid.mtheta == mtheta
+    @test grid.nzeta == nzeta
+    @test length(grid.R) == mtheta
+    @test length(grid.phi_grid) == nzeta
+
+    # R should be positive and near the magnetic axis (Solovev: ro≈1.0, a≈0.33)
+    @test all(grid.R .> 0)
+    @test all(0.4 .< grid.R .< 2.0)  # physically reasonable for Solovev (r0=1.0, a=0.33)
+
+    # Toroidal grid starts at 0 and spans one full toroidal turn.
+    # Direction depends on helicity (sign(Bt)*sign(Ip)); test magnitude only.
+    @test grid.phi_grid[1] ≈ 0.0
+    @test abs(grid.phi_grid[end]) ≈ 2π * (nzeta - 1) / nzeta
+end
+
+@testset "CoilFourier: fourier_decompose_bn roundtrip" begin
+    # Synthesize bn(θ, ζ) = cos(m₀*θ - n₀*ζ), decompose, verify dominant mode
+    mtheta = 128
+    nzeta = 64
+    m0 = 5
+    n0 = 2
+
+    theta_grid = range(0; length=mtheta, step=2π / mtheta)
+    zeta_grid = range(0; length=nzeta, step=2π / nzeta)
+
+    bn = [cos(m0 * θ - n0 * ζ) for θ in theta_grid, ζ in zeta_grid]
+
+    # Build a dummy BoundaryGrid (R/Z/derivatives don't matter for this test)
+    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta,
+        ones(mtheta), zeros(mtheta),
+        collect(zeta_grid), zeros(mtheta), ones(mtheta), zeros(mtheta))
+
+    m_low = 1
+    m_high = 10
+    modes = ForcingTerms.fourier_decompose_bn(bn, grid, n0, m_low, m_high)
+
+    @test length(modes) == m_high - m_low + 1
+
+    # Find the (m0, n0) mode
+    idx = findfirst(m -> m.m == m0, modes)
+    @test !isnothing(idx)
+    @test abs(real(modes[idx].amplitude)) ≈ 1.0 rtol = 0.02
+    @test abs(imag(modes[idx].amplitude)) < 0.05
+
+    # All other modes should be near zero
+    for (i, mode) in enumerate(modes)
+        i == idx && continue
+        @test abs(mode.amplitude) < 0.05
+    end
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: reconstruct_bn inverts the decomposition" begin
+    # A wrong sign in the reconstruction basis mirrors the pattern in zeta instead of failing,
+    # so compare against the analytic signal the modes came from rather than against itself.
+    mtheta, nzeta, m0, n0 = 128, 64, 5, 2
+    theta_grid = range(0; length=mtheta, step=2π / mtheta)
+    zeta_grid = range(0; length=nzeta, step=2π / nzeta)
+    bn = [cos(m0 * θ - n0 * ζ) for θ in theta_grid, ζ in zeta_grid]
+    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta, ones(mtheta), zeros(mtheta),
+        collect(zeta_grid), zeros(mtheta), ones(mtheta), zeros(mtheta))
+    modes = ForcingTerms.fourier_decompose_bn(bn, grid, n0, 1, 10)
+
+    rec = ForcingTerms.reconstruct_bn(modes; ntheta=48, nzeta=36, theta_range=(0, 2π))
+    expected = [cos(m0 * θ - n0 * ζ) for θ in rec.theta, ζ in rec.zeta]
+    @test size(rec.bn) == (48, 36)
+    @test rec.bn ≈ expected atol = 1e-10
+
+    # Reversing the toroidal sign is the failure this test exists to catch.
+    mirrored = [cos(m0 * θ + n0 * ζ) for θ in rec.theta, ζ in rec.zeta]
+    @test !isapprox(rec.bn, mirrored; atol=1e-3)
+
+    # The default window centres the outboard midplane rather than cutting it at the edges.
+    centred = ForcingTerms.reconstruct_bn(modes; ntheta=16, nzeta=8)
+    @test centred.theta[1] ≈ -π && centred.theta[end] ≈ π
+
+    @test_throws DimensionMismatch ForcingTerms.reconstruct_bn([1.0 + 0im], [1, 2], [1, 1])
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: project_normal_flux! R-factor" begin
+    # A uniform vertical field B_Z = B0 on a circular boundary of radius `a`
+    # centred at major radius R0.  In unit-norm convention the flux element is:
+    #   Phi_x = 2π × R × (B_R × dZ/dθ_norm - B_Z × dR/dθ_norm)
+    # where dR/dθ_norm = 2π × dR/dθ_phys = 2π × (-a*sin(θ)).
+    # For B_R=0, B_Z=B0:  Phi_x = -2π × R × B0 × dR/dθ_norm = (2π)² × B0 × a × R(θ) × sin(θ)
+
+    mtheta = 64
+    nzeta = 1
+    B0 = 1.0
+    R0 = 2.0
+    a = 0.5
+
+    theta_phys = range(0; length=mtheta, step=2π / mtheta)
+    R_arr = R0 .+ a .* cos.(theta_phys)
+    Z_arr = a .* sin.(theta_phys)
+
+    # Unit-norm derivatives: dR/dθ_norm = 2π × dR/dθ_phys
+    dR_dθ_norm = 2π .* (-a .* sin.(theta_phys))
+    dZ_dθ_norm = 2π .* (a .* cos.(theta_phys))
+
+    phi_grid = [0.0]
+    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta, R_arr, Z_arr, phi_grid, zeros(mtheta), dR_dθ_norm, dZ_dθ_norm)
+
+    # Uniform B_Z = B0, B_R = 0 at all points
+    B_R = zeros(mtheta)
+    B_Z = fill(B0, mtheta)
+    bn = zeros(mtheta, nzeta)
+    ForcingTerms.project_normal_flux!(bn, B_R, B_Z, grid)
+
+    # Expected: 2π × R × (0×dZ_norm - B0×dR_norm) = (2π)² × B0 × a × R(θ) × sin(θ)
+    expected = (2π)^2 .* B0 .* a .* R_arr .* sin.(theta_phys)
+    @test bn[:, 1] ≈ expected rtol = 1e-10
+
+    # Result must vary with R (old code without R factor gave constant amplitude)
+    @test std(abs.(bn[:, 1])) > 0.01 * mean(abs.(bn[:, 1]))
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: B·n̂ file conversion onto the run's harmonics" begin
+    eq_config = Equilibrium.EquilibriumConfig(; eq_type="sol", psilow=0.01, psihigh=0.995)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config, Equilibrium.SolovevConfig())
+    n, m_out, mtheta = 1, -10:14, 256
+    convert(modes) = ForcingTerms.convert_forcing_normalization(modes, "normal_field_T", equil, n, m_out)
+    spectrum(ms, amp) = [ForcingMode(; n, m, amplitude=amp(m)) for m in ms]
+    amplitudes(modes) = [mode.amplitude for mode in modes]
+
+    # A single B·n̂ harmonic gains flux sidebands, and its own harmonic matches a projection onto it alone.
+    single = spectrum(2:2, m -> 1e-4 + 0im)
+    flux = @test_logs (:info, r"Converting") convert(single)
+    @test [mode.m for mode in flux] == collect(m_out)
+    φ = Dict(mode.m => abs(mode.amplitude) for mode in flux)
+    @test φ[1] > 0.05φ[2] && φ[3] > 0.05φ[2]
+    alone = ForcingTerms.convert_forcing_normalization(single, "normal_field_T", equil, n, 2:2)
+    @test alone[1].amplitude ≈ flux[findfirst(==(2), m_out)].amplitude rtol = 1e-12
+
+    # On a range wide enough to hold the weight's whole spectrum, the inverse transform of the
+    # converted flux reproduces J|∇ψ| × B·n̂ on the conversion grid.
+    wide = -60:64
+    flux_wide = ForcingTerms.convert_forcing_normalization(single, "normal_field_T", equil, n, wide)
+    FT = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
+    weight = Equilibrium.compute_jac_delpsi(equil, equil.rzphi_xs[end], mtheta)
+    bn = FT.inverse(FT.FourierTransform(mtheta, 1, 2), [1e-4 + 0im])
+    rebuilt = FT.inverse(FT.FourierTransform(mtheta, length(wide), first(wide)), amplitudes(flux_wide))
+    @test maximum(abs, rebuilt .- weight .* bn) < 1e-6 * maximum(abs, weight .* bn)
+
+    # A file wider than the run loses nothing: its conversion onto a narrow run range equals the
+    # conversion onto a wide range downsampled to it.
+    broad = spectrum(-48:51, m -> 1e-4 * 0.9^abs(m - 2) + 0im)
+    narrow = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, 0:4)
+    downsampled = @test_logs (:info, r"Converting") ForcingTerms.convert_forcing_normalization(broad, "normal_field_T", equil, n, -200:200)
+    @test amplitudes(narrow) ≈ amplitudes(downsampled)[201 .+ (0:4)] rtol = 1e-5
+
+    # A hard-cut flat spectrum warns at both edges; a decaying one converts silently.
+    @test_logs (:info, r"Converting") (:warn, r"m=-2 carries") (:warn, r"m=6 carries") convert(spectrum(-2:6, m -> 1e-4 + 0im))
+    @test_logs (:info, r"Converting") convert(spectrum(-4:8, m -> 1e-4 * 0.3^abs(m - 2) + 0im))
+
+    # sfl_flux_Wb is a pure (2π)² rescale that keeps the file's harmonics.
+    sfl = ForcingTerms.convert_forcing_normalization(spectrum(1:3, m -> 1.0 + 0im), "sfl_flux_Wb", equil, n, m_out)
+    @test [mode.m for mode in sfl] == [1, 2, 3] && all(amplitudes(sfl) .≈ (2π)^2)
+end
+
+# ---------------------------------------------------------------------------
+@testset "Integration: D3D I-coil field pipeline" begin
+    # Skip if coil geometry files not present (shouldn't happen since bundled)
+    @test isdir(COIL_DIR)
+    @test isfile(D3D_IL)
+
+    d3d_iu = joinpath(COIL_DIR, "d3d_iu.dat")
+    @test isfile(d3d_iu)
+
+    # Load DIII-D-like equilibrium
+    equil_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+    @test isdir(equil_dir)
+
+    inputs2 = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
+    eq_config2 = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs2, equil_dir)
+    equil = Equilibrium.PlasmaEquilibrium(eq_config2)
+
+    # Build coil sets manually (standard I-coil currents for RMP studies)
+    il_cfg = ForcingTerms.CoilSetConfig(;
+        dat_file=D3D_IL,
+        currents=fill(10e3, 6)
+    )
+    iu_cfg = ForcingTerms.CoilSetConfig(;
+        dat_file=d3d_iu,
+        currents=fill(10e3, 6)
+    )
+
+    cfg = ForcingTerms.CoilConfig(;
+        mtheta_coil=96,
+        nzeta_coil=64,
+        coil_sets=[il_cfg, iu_cfg]
+    )
+
+    il_set = ForcingTerms.read_coil_dat(D3D_IL)
+    il_set = ForcingTerms.CoilSet(il_set.name, il_set.ncoil, il_set.s, il_set.nw, il_set.nsec,
+        il_set.x, il_set.y, il_set.z, fill(10e3, 6))
+    iu_set = ForcingTerms.read_coil_dat(d3d_iu)
+    iu_set = ForcingTerms.CoilSet(iu_set.name, iu_set.ncoil, iu_set.s, iu_set.nw, iu_set.nsec,
+        iu_set.x, iu_set.y, iu_set.z, fill(10e3, 6))
+
+    forcing_modes = ForcingMode[]
+    n_test = 3  # n=3 is a typical DIII-D RMP configuration
+    m_low = 1
+    m_high = 15
+
+    ForcingTerms.compute_coil_forcing_modes!(
+        forcing_modes, [il_set, iu_set], equil, cfg, n_test, m_low, m_high;
+        verbose=false
+    )
+
+    @test length(forcing_modes) == m_high - m_low + 1
+    @test all(m.n == n_test for m in forcing_modes)
+
+    # Field amplitudes should be non-trivial (I-coils with 10 kA give O(1e-3) T)
+    amplitudes = abs.(getfield.(forcing_modes, :amplitude))
+    @test maximum(amplitudes) > 1e-6
+
+    # Dominant mode should be in the resonant range for DIII-D geometry
+    dominant_m = forcing_modes[argmax(amplitudes)].m
+    @test m_low <= dominant_m <= m_high
+
+    # Per-set evaluation on one shared grid: the assembly through the shared path is the same
+    # numbers as the top-level entry point, and the field's linearity in the coils makes the
+    # per-set spectra sum to it.
+    forcing_grid = ForcingTerms.CoilForcingGrid(equil, cfg, n_test)
+    @test length(forcing_grid.obs_R) == cfg.mtheta_coil * cfg.nzeta_coil
+    both = ForcingTerms.coil_forcing_modes([il_set, iu_set], forcing_grid, n_test, m_low, m_high)
+    @test [m.amplitude for m in both] == [m.amplitude for m in forcing_modes]
+    il_modes = ForcingTerms.coil_forcing_modes(il_set, forcing_grid, n_test, m_low, m_high)
+    iu_modes = ForcingTerms.coil_forcing_modes(iu_set, forcing_grid, n_test, m_low, m_high)
+    @test [m.m for m in il_modes] == [m.m for m in forcing_modes]
+    summed = [a.amplitude + b.amplitude for (a, b) in zip(il_modes, iu_modes)]
+    @test summed ≈ [m.amplitude for m in forcing_modes] rtol = 1e-12
+    @test maximum(abs.(getfield.(il_modes, :amplitude))) > 1e-6
+
+    # Splitting a multi-conductor set the same way: each conductor keeps its own current, so the
+    # per-conductor spectra sum back to the whole set's.
+    part_sum = zeros(ComplexF64, length(il_modes))
+    for p in ForcingTerms.conductors(il_set)
+        part_sum .+= [m.amplitude for m in ForcingTerms.coil_forcing_modes(p, forcing_grid, n_test, m_low, m_high)]
+    end
+    @test part_sum ≈ [m.amplitude for m in il_modes] rtol = 1e-12
+end
+
+# ---------------------------------------------------------------------------
+@testset "Analytic coils: make_pf_hoop" begin
+    a = 1.0
+    I_val = 1.0
+    h = 0.5
+    cs = ForcingTerms.make_pf_hoop(; radius=a, height=0.0, nsec=501)
+    @test size(cs.x) == (1, 1, 501)
+    @test cs.ncoil == 1 && cs.s == 1
+    # Closed loop: last point == first
+    @test cs.x[1, 1, 1] ≈ cs.x[1, 1, end] atol = 1e-12
+    @test cs.y[1, 1, 1] ≈ cs.y[1, 1, end] atol = 1e-12
+
+    # Reproduce Jackson 5.38 on-axis field B_z = μ₀ I a² / (2 (a²+h²)^{3/2})
+    Bx = zeros(1)
+    By = zeros(1)
+    Bz = zeros(1)
+    ForcingTerms.accumulate_strand_field!(Bx, By, Bz, 1, 0.0, 0.0, h,
+        cs.x[1, 1, :], cs.y[1, 1, :], cs.z[1, 1, :], I_val * cs.nw)
+    B_z_analytic = 4π * 1e-7 * I_val * a^2 / (2 * (a^2 + h^2)^(3 / 2))
+    @test abs(Bz[1] - B_z_analytic) / B_z_analytic < 0.005
+    @test abs(Bx[1]) < 1e-14
+    @test abs(By[1]) < 1e-14
+
+    @test_throws ErrorException ForcingTerms.make_pf_hoop(; radius=-1.0, height=0.0)
+    # nsec below the 361 floor (too coarse for a smooth poloidal loop) must error
+    @test_throws ErrorException ForcingTerms.make_pf_hoop(; radius=a, height=0.0, nsec=100)
+end
+
+@testset "Analytic coils: make_window_pane" begin
+    ncoil = 6
+    R0 = 2.2
+    Zlo = -0.6
+    Zhi = 0.6
+    cs = ForcingTerms.make_window_pane(; ncoil=ncoil, rz_corners=[[R0, Zlo], [R0, Zhi]],
+        gap_fraction=0.15, phi0=0.0)
+    @test cs.ncoil == ncoil && cs.s == 1
+
+    # Every coil is a closed loop
+    for j in 1:ncoil
+        @test cs.x[j, 1, 1] ≈ cs.x[j, 1, end]
+        @test cs.y[j, 1, 1] ≈ cs.y[j, 1, end]
+        @test cs.z[j, 1, 1] ≈ cs.z[j, 1, end]
+    end
+
+    # Vertical frame at constant R: cylindrical radius ≈ R0, Z within [Zlo, Zhi]
+    Rcyl = sqrt.(cs.x .^ 2 .+ cs.y .^ 2)
+    @test all(isapprox.(Rcyl, R0; atol=1e-9))
+    @test minimum(cs.z) ≈ Zlo
+    @test maximum(cs.z) ≈ Zhi
+
+    # Toroidal centers spaced 2π/ncoil: mean φ of each coil
+    centers = [atan(mean(cs.y[j, 1, :]), mean(cs.x[j, 1, :])) for j in 1:ncoil]
+    dphi = mod(centers[2] - centers[1], 2π)
+    @test dphi ≈ 2π / ncoil rtol = 1e-6
+
+    @test_throws ErrorException ForcingTerms.make_window_pane(; ncoil=2, rz_corners=[[1.0, 0.0]])
+end
+
+@testset "Analytic coils: make_helical" begin
+    R0 = 1.7
+    a = 0.6
+    n_coils = 4
+    # Full poloidal turn: single helical strand per coil
+    cs = ForcingTerms.make_helical(; R0=R0, a=a, m=4, n=1, n_coils=n_coils)
+    @test cs.ncoil == n_coils && cs.s == 1
+    # Points lie on the circular cross-section torus (offset=0)
+    Rcyl = sqrt.(cs.x .^ 2 .+ cs.y .^ 2)
+    rminor = sqrt.((Rcyl .- R0) .^ 2 .+ cs.z .^ 2)
+    @test all(isapprox.(rminor, a; atol=1e-9))
+
+    # Partial poloidal range: closed loop with offset (theta in degrees)
+    cp = ForcingTerms.make_helical(; R0=R0, a=a, m=3, n=1, n_coils=n_coils,
+        theta_lo=-25.0, theta_hi=25.0, offset=0.05)
+    for j in 1:n_coils
+        @test cp.x[j, 1, 1] ≈ cp.x[j, 1, end] atol = 1e-9
+        @test cp.z[j, 1, 1] ≈ cp.z[j, 1, end] atol = 1e-9
+    end
+
+    @test_throws ErrorException ForcingTerms.make_helical(; R0=R0, a=a, m=2, n=0, n_coils=2)
+end
+
+@testset "Analytic coils: window_pane standoff" begin
+    equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
+    equil = Equilibrium.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, equil_dir),
+        GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+
+    # surface_point_and_normal: outboard midplane (poloidal_angle = 0)
+    R0, Z0, nR0, nZ0 = ForcingTerms.surface_point_and_normal(equil, 0.0)
+    @test isapprox(Z0, equil.zo; atol=1e-3)
+    @test R0 > equil.ro
+    @test isapprox(hypot(nR0, nZ0), 1.0; atol=1e-9)   # unit normal
+    @test nR0 > 0 && isapprox(nZ0, 0.0; atol=1e-3)     # points outward in +R
+
+    # Top of the surface (poloidal_angle = 90°): normal points up
+    _, Ztop, nRtop, nZtop = ForcingTerms.surface_point_and_normal(equil, deg2rad(90.0))
+    @test Ztop > equil.zo
+    @test nZtop > 0
+
+    # make_window_pane_standoff: frame center sits ~standoff outside the surface
+    standoff = 0.2
+    cs = ForcingTerms.make_window_pane_standoff(equil; standoff=standoff, poloidal_angle=0.0,
+        poloidal_length=0.6, ncoil=2)
+    @test cs.ncoil == 2 && cs.s == 1
+    # Centroid of the first frame, in (R, Z)
+    Rc = mean(sqrt.(cs.x[1, 1, :] .^ 2 .+ cs.y[1, 1, :] .^ 2))
+    Zc = mean(cs.z[1, 1, :])
+    @test isapprox(Rc, R0 + standoff; atol=0.05)
+    @test isapprox(Zc, Z0; atol=0.05)
+
+    # With poloidal_tilt=0 at the outboard midplane the legs are ~vertical: corners differ in Z
+    cs1 = ForcingTerms.make_window_pane_standoff(equil; standoff=standoff, poloidal_angle=0.0,
+        poloidal_length=0.6, ncoil=1)
+    Zspan = maximum(cs1.z[1, 1, :]) - minimum(cs1.z[1, 1, :])
+    Rspan = maximum(sqrt.(cs1.x[1, 1, :] .^ 2 .+ cs1.y[1, 1, :] .^ 2)) -
+            minimum(sqrt.(cs1.x[1, 1, :] .^ 2 .+ cs1.y[1, 1, :] .^ 2))
+    @test Zspan > Rspan
+
+    # Winding convention: the first poloidal leg (points 1:np_pol, the c1->c2 leg) runs
+    # lower-Z -> higher-Z, matching make_window_pane's c1->c2 ordering, so +current -> +b_n_x
+    # near the coil (same sense as the corner-built window pane).
+    np_pol = 20  # make_window_pane default
+    @test cs1.z[1, 1, np_pol] > cs1.z[1, 1, 1]
+
+    # Separatrix-touch guard: a 90° tilt with standoff shorter than half the leg length pushes
+    # one corner back through the boundary, which must error. A normal placement still succeeds.
+    @test_throws ErrorException ForcingTerms.make_window_pane_standoff(equil; standoff=0.1,
+        poloidal_angle=0.0, poloidal_length=1.0, poloidal_tilt=90.0, ncoil=1)
+    @test ForcingTerms.make_window_pane_standoff(equil; standoff=0.3, poloidal_angle=0.0,
+        poloidal_length=0.4, poloidal_tilt=0.0, ncoil=1) isa ForcingTerms.CoilSet
+end
+
+# ---------------------------------------------------------------------------
+@testset "Coil HDF5: round-trip vs .dat" begin
+    cs0 = ForcingTerms.read_coil_dat(D3D_IL)
+    mktempdir() do dir
+        h5 = joinpath(dir, "il.h5")
+        ForcingTerms.convert_coil_dat_to_h5(D3D_IL, h5)
+        sets = ForcingTerms.read_coil_h5(h5)
+        @test length(sets) == 1
+        cs = sets[1]
+        @test cs.ncoil == cs0.ncoil
+        @test cs.s == cs0.s
+        @test cs.nsec == cs0.nsec
+        @test cs.nw ≈ cs0.nw
+        @test cs.x ≈ cs0.x
+        @test cs.y ≈ cs0.y
+        @test cs.z ≈ cs0.z
+
+        # h5 -> dat round-trips back to identical geometry
+        dat2 = joinpath(dir, "il_back.dat")
+        ForcingTerms.convert_coil_h5_to_dat(h5, dat2)
+        csb = ForcingTerms.read_coil_dat(dat2)
+        @test csb.x ≈ cs0.x && csb.y ≈ cs0.y && csb.z ≈ cs0.z
+    end
+end
+
+@testset "Coil HDF5: multi-set + content tolerance" begin
+    cs0 = ForcingTerms.read_coil_dat(D3D_IL)
+    hoop = ForcingTerms.make_pf_hoop(; radius=2.0, height=0.1, name="hoop")
+    mktempdir() do dir
+        h5 = joinpath(dir, "multi.h5")
+        ForcingTerms.write_coil_h5(h5, [cs0, hoop])
+
+        # Inject unrelated content the reader must ignore
+        HDF5.h5open(h5, "r+") do f
+            f["coils/junk_dataset"] = [1.0, 2.0, 3.0]
+            f["unrelated/other_stuff"] = 42
+        end
+
+        sets = ForcingTerms.read_coil_h5(h5)
+        @test length(sets) == 2
+        @test sort([s.name for s in sets]) == ["d3d_il", "hoop"]
+
+        # Select a single set by name
+        one = ForcingTerms.read_coil_h5(h5; set="hoop")
+        @test length(one) == 1 && one[1].name == "hoop"
+        @test_throws ErrorException ForcingTerms.read_coil_h5(h5; set="nope")
+    end
+end
+
+# ---------------------------------------------------------------------------
+@testset "load_coil_sets: source dispatch" begin
+    # Analytic source: currents applied, tilt perturbs geometry
+    cfg = ForcingTerms.CoilConfig(; coil_sets=[
+        ForcingTerms.CoilSetConfig(; source="pf_hoop", radius=1.5, height=0.2,
+            currents=[3.0], tiltx=[10.0])
+    ])
+    out = ForcingTerms.load_coil_sets(cfg, 1)
+    @test length(out) == 1
+    @test out[1].currents == [3.0]
+    # A 10° X-tilt should move the (originally flat) hoop out of the z=0.2 plane
+    @test !all(isapprox.(out[1].z, 0.2; atol=1e-6))
+
+    # A misspelled or retired coil_set key is an error, not silently ignored
+    @test_throws ArgumentError ForcingTerms._parse_coil_set_config(Dict{String,Any}("source" => "pf_hoop", "xnom" => [1.0]))
+
+    # File source dispatches on extension: .h5 -> read_coil_h5, .dat -> read_coil_dat
+    mktempdir() do dir
+        h5 = joinpath(dir, "il.h5")
+        ForcingTerms.convert_coil_dat_to_h5(D3D_IL, h5)
+        cfg_h5 = ForcingTerms.CoilConfig(; coil_sets=[
+            ForcingTerms.CoilSetConfig(; source="file", h5_file=h5, currents=fill(1.0, 6))
+        ])
+        cfg_dat = ForcingTerms.CoilConfig(; coil_sets=[
+            ForcingTerms.CoilSetConfig(; dat_file=D3D_IL, currents=fill(1.0, 6))
+        ])
+        a = ForcingTerms.load_coil_sets(cfg_h5, 1)
+        b = ForcingTerms.load_coil_sets(cfg_dat, 1)
+        @test a[1].ncoil == 6 && b[1].ncoil == 6
+        @test a[1].x ≈ b[1].x
+    end
+
+    @test_throws ErrorException ForcingTerms.load_coil_sets(
+        ForcingTerms.CoilConfig(; coil_sets=[ForcingTerms.CoilSetConfig(; source="bogus")]), 1)
+
+    # window_pane standoff mode requires an equilibrium
+    cfg_standoff = ForcingTerms.CoilConfig(;
+        coil_sets=[
+            ForcingTerms.CoilSetConfig(; source="window_pane", n_coils=2,
+                standoff=0.2, poloidal_angle=0.0, poloidal_length=0.6, currents=[1.0, -1.0])
+        ]
+    )
+    @test_throws ErrorException ForcingTerms.load_coil_sets(cfg_standoff, 1)
+
+    # Supplying both rz_corners and standoff is ambiguous
+    cfg_both = ForcingTerms.CoilConfig(;
+        coil_sets=[
+            ForcingTerms.CoilSetConfig(; source="window_pane", n_coils=2,
+                rz_corners=[[2.2, -0.5], [2.2, 0.5]], standoff=0.2, poloidal_angle=0.0)
+        ]
+    )
+    @test_throws ErrorException ForcingTerms.load_coil_sets(cfg_both, 1)
+end
+
+@testset "Coil HDF5 group: save/load round-trip" begin
+    sets_in = [ForcingTerms.make_pf_hoop(; radius=1.2, height=0.0, name="hoopA"),
+        ForcingTerms.make_window_pane(; ncoil=3, rz_corners=[[2.0, -0.5], [2.0, 0.5]], name="wp")]
+    sets_in[1] = ForcingTerms.CoilSet(sets_in[1].name, sets_in[1].ncoil, sets_in[1].s,
+        sets_in[1].nw, sets_in[1].nsec, sets_in[1].x, sets_in[1].y, sets_in[1].z, [7.0])
+    mktempdir() do dir
+        path = joinpath(dir, "snap.h5")
+        HDF5.h5open(path, "w") do f
+            ForcingTerms.save_coils_to_h5(sets_in, HDF5.create_group(f, "Input/RawInputs/Coils"))
+        end
+        sets_out = ForcingTerms.CoilSet[]
+        HDF5.h5open(path, "r") do f
+            ForcingTerms.load_coils_from_h5_group!(sets_out, f["Input/RawInputs/Coils"])
+        end
+        @test length(sets_out) == 2
+        byname = Dict(s.name => s for s in sets_out)
+        @test byname["hoopA"].currents == [7.0]
+        @test byname["hoopA"].x ≈ sets_in[1].x
+        @test byname["wp"].ncoil == 3
+    end
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: helicity follows the g-file current sign" begin
+    # The internal flux is made positive at the axis, so the computed current is always
+    # positive; the handedness of the toroidal grid must come from the file's stated signs.
+    gfile = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk")
+    lines = readlines(gfile)
+    flipped = tempname() * ".geqdsk"
+    open(flipped, "w") do io
+        for (i, l) in enumerate(lines)
+            if i == 4   # header line 4 starts with the plasma current
+                vals = [l[j:min(j + 15, end)] for j in 1:16:length(l)]
+                cur = -parse(Float64, strip(vals[1]))
+                l = @sprintf("%16.9E", cur) * l[17:end]
+            end
+            println(io, l)
+        end
+    end
+    cfg(path) = Equilibrium.EquilibriumConfig(; eq_filename=path, eq_type="efit", jac_type="hamada", grid_type="core_edge_packed", psilow=0.01, psihigh=0.99, mpsi=32, mtheta=64)
+    eq_pos = Equilibrium.PlasmaEquilibrium(cfg(gfile))
+    eq_neg = Equilibrium.PlasmaEquilibrium(cfg(flipped))
+    @test eq_pos.params.ip_sign == 1 && eq_neg.params.ip_sign == -1
+    @test eq_pos.params.bt_sign == eq_neg.params.bt_sign == -1
+    @test eq_pos.params.crnt > 0 && eq_neg.params.crnt > 0          # the computed current carries no sign
+    g_pos = ForcingTerms.sample_boundary_grid(eq_pos, 16, 8; psi=0.9)
+    g_neg = ForcingTerms.sample_boundary_grid(eq_neg, 16, 8; psi=0.9)
+    @test g_pos.phi_grid[2] ≈ 2π / 8                                # helicity −1: φ increases with j
+    @test g_neg.phi_grid[2] ≈ -2π / 8                               # helicity +1: φ decreases with j
+    @test g_neg.phi_offset ≈ -g_pos.phi_offset
+    rm(flipped)
+end

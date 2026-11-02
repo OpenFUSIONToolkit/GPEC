@@ -1,11 +1,11 @@
 using Documenter
 
-# Try to load JPEC package
+# Try to load GeneralizedPerturbedEquilibrium package
 try
-    using JPEC
-    @info "Successfully loaded JPEC package"
+    using GeneralizedPerturbedEquilibrium
+    @info "Successfully loaded GeneralizedPerturbedEquilibrium package"
 catch e
-    @error "Failed to load JPEC package" exception = e
+    @error "Failed to load GeneralizedPerturbedEquilibrium package" exception = e
     # Try to provide helpful debugging info
     using Pkg
     @info "Current project:" Pkg.project().path
@@ -14,31 +14,46 @@ catch e
 end
 
 makedocs(;
-    sitename="JPEC.jl",
+    sitename="GPEC.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", nothing) == "true",
-        canonical="https://OpenFUSIONToolkit.github.io/JPEC/"
+        canonical="https://OpenFUSIONToolkit.github.io/GPEC/",
+        size_threshold=409_600,      # 400 KiB — stability.md is a large single-page module reference
+        size_threshold_warn=204_800  # 200 KiB
     ),
-    modules=[JPEC],
+    modules=[GeneralizedPerturbedEquilibrium],
     pages=[
         "Home" => "index.md",
-        "API Reference" => [
-            "Splines" => "splines.md",
+        "Setup" => "set_up.md",
+        "Workflow" => "workflow.md",
+        "Scripting API" => "api.md",
+        "Conventions Reference" => "conventions.md",
+        "Modules" => [
+            "Equilibrium" => "equilibrium.md",
             "Vacuum" => "vacuum.md",
-            "Equilibrium" => "equilibrium.md"
+            "Stability" => "stability.md",
+            "Galerkin Solver" => "galerkin.md",
+            "Local Stability" => "ballooning.md",
+            "Forcing Terms" => "forcing_terms.md",
+            "Perturbed Equilibrium" => "perturbed_equilibrium.md",
+            "Kinetic Forces" => "kinetic_forces.md",
+            "Error Fields" => "error_fields.md",
+            "Tearing" => "inner_layer.md",
+            "Analysis" => "analysis.md",
+            "Utilities" => "utilities.md"
         ],
-        "Examples" => [
-            "Spline Examples" => "examples/splines.md",
-            "Vacuum Examples" => "examples/vacuum.md",
-            "Equilibrium Examples" => "examples/equilibrium.md"
-        ]
+        "Citations" => "citations.md",
+        "Developer Notes" => "developer_notes.md"
     ],
     checkdocs=:exports
 )
 
-deploydocs(;
-    repo="github.com/OpenFUSIONToolkit/JPEC.git",
-    branch="gh-pages",
-    devbranch="main",
-    push_preview=true
-)
+# Queue candidates validate the build; previews and published docs come from PRs and pushes.
+if get(ENV, "GITHUB_EVENT_NAME", "") != "merge_group"
+    deploydocs(;
+        repo="github.com/OpenFUSIONToolkit/GPEC.git",
+        branch="gh-pages",
+        devbranch="develop",
+        push_preview=true
+    )
+end

@@ -1,0 +1,117 @@
+# Sanity check: riccati_der! correctly evaluates the explicit Riccati ODE.
+#
+# riccati_der! implements [Glasser 2018 Phys. Plasmas 25, 032507, Eq. 19]:
+#   dS/dψ = w†·F̄⁻¹·w - S·Ḡ·S,   w = Q - K̄·S
+#
+# where Q = diag(1/(m - n·q)), F̄ = L·L† (Cholesky), K̄ and Ḡ are the MHD
+# metric matrices evaluated at ψ.
+#
+# NOTE: The identity between this Riccati ODE and the EL chain rule
+#   dS/dψ = dU₁·U₂⁻¹ - S·dU₂·U₂⁻¹
+# holds ONLY for Hermitian S (physical states evolved from the axis, where
+# S†=S is preserved by the EL symmetry). For arbitrary non-Hermitian (U₁, U₂),
+# the two expressions differ — so this script compares riccati_der! against the
+# explicit formula rather than against sing_der!.
+#
+# Usage (from the repository root):
+#   julia --project=. benchmarks/benchmark_riccati_der.jl
+
+using LinearAlgebra, Random, Printf, TOML
+using GeneralizedPerturbedEquilibrium
+
+const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+
+function setup_solovev()
+    GPEC = GeneralizedPerturbedEquilibrium
+    ex = joinpath(@__DIR__, "..", "test", "test_data", "regression_solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
+    prob = GPEC.ForceBalanceProblem(equil; GPEC.force_balance_keywords(inputs, ex)...)
+    ctrl, intr, equil, _, mats = GPEC._prepare_solve(prob, GPEC.force_balance_algorithm(inputs))
+    return ctrl, equil, mats, intr
+end
+
+# Evaluate the Riccati RHS explicitly from splines: dS = w†·F̄⁻¹·w - S·Ḡ·S
+function riccati_rhs_manual(S, psi, equil, mats, intr)
+    N = intr.numpert_total
+    L = zeros(ComplexF64, N, N)
+    Kmat = zeros(ComplexF64, N, N)
+    Gmat = zeros(ComplexF64, N, N)
+    mats.ideal.F_spline_lower(vec(L), psi; hint=mats._hint)
+    mats.ideal.K_spline(vec(Kmat), psi; hint=mats._hint)
+    mats.ideal.G_spline(vec(Gmat), psi; hint=mats._hint)
+
+    q = equil.profiles.q_spline(psi)
+    singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)'))
+
+    # w = Q - K̄·S  (Q is diagonal; add only the diagonal entries)
+    w = -Kmat * S
+    for i in 1:N
+        w[i, i] += singfac[i]
+    end
+
+    # v = F̄⁻¹·w  via stored Cholesky factor L (L·L† = F̄)
+    v = copy(w)
+    ldiv!(LowerTriangular(L), v)
+    ldiv!(UpperTriangular(L'), v)
+
+    return adjoint(w) * v - S * Gmat * S
+end
+
+println("\n=== riccati_der! formula verification ===")
+println("Verifies riccati_der! output matches manual evaluation of Glasser 2018 Eq. 19.")
+println("Test state: Hermitian S (physical constraint). Expected error: ~machine epsilon.\n")
+
+ctrl, equil, mats, intr = setup_solovev()
+N = intr.numpert_total
+
+odet = FFS.OdeState(N, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+chunks = FFS.chunk_el_integration_bounds(odet, ctrl, intr)
+
+# 30% into each chunk: well inside the interval, away from singularities at psi_end
+test_psis = [c.psi_start + 0.3 * (c.psi_end - c.psi_start) for c in chunks]
+
+println("  N=$N modes, $(length(test_psis)) test ψ points (30% into each chunk)\n")
+@printf("  %8s  %14s  %14s  %12s\n", "ψ", "‖dS_manual‖", "‖dS_ric‖", "rel error")
+println("  " * "-"^54)
+
+rng = Random.MersenneTwister(42)
+threshold = 1e-10
+
+max_err = let max_err = 0.0
+    for psi in test_psis
+        # Hermitian S: physical Riccati matrix is Hermitian (preserved by EL symmetry)
+        A = randn(rng, ComplexF64, N, N)
+        S = (A + A') / 2   # Hermitian by construction
+
+        # Manual RHS
+        dS_manual = riccati_rhs_manual(S, psi, equil, mats, intr)
+
+        # riccati_der! RHS
+        u_ric = zeros(ComplexF64, N, N, 2)
+        du_ric = zeros(ComplexF64, N, N, 2)
+        u_ric[:, :, 1] .= S
+        u_ric[:, :, 2] .= Matrix{ComplexF64}(I, N, N)
+        dummy_chunk = FFS.IntegrationChunk(psi, psi, false, 0, 1)
+        params = (ctrl, equil, mats, intr, odet, dummy_chunk)
+        FFS.riccati_der!(du_ric, u_ric, params, psi)
+        dS_ric = du_ric[:, :, 1]
+
+        ref = max(norm(dS_manual), 1e-10)
+        err = norm(dS_ric - dS_manual) / ref
+        max_err = max(max_err, err)
+        status = err < threshold ? "" : "  ← FAIL"
+        @printf("  %8.4f  %14.4e  %14.4e  %12.4e%s\n", psi, norm(dS_manual), norm(dS_ric), err, status)
+    end
+    max_err
+end
+
+println()
+if max_err < threshold
+    @printf("PASSED — max rel error = %.2e (threshold %.0e)\n", max_err, threshold)
+else
+    @printf("FAILED — max rel error = %.2e exceeds threshold %.0e\n", max_err, threshold)
+    exit(1)
+end
+println()

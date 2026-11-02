@@ -1,0 +1,401 @@
+module ForcingTerms
+# Module for external field specification and forcing term calculations
+
+using DelimitedFiles
+using HDF5
+using LinearAlgebra
+
+import ..Equilibrium
+import ..Utilities.FourierTransforms
+import ..Utilities.FourierTransforms: compute_fourier_coefficients
+
+"""
+    ForcingTermsControl
+
+User-facing control parameters from TOML [ForcingTerms] section. A deck run resolves its relative
+file paths against the deck directory; a script's resolve against the working directory.
+
+## Fields
+
+Forcing Data:
+
+  - `forcing_data_file::String` - Path to forcing data file (n, m, complex amplitude)
+  - `forcing_data_format::String` - Format: "ascii", "hdf5", or "coil"
+
+Coil settings (used when `forcing_data_format = "coil"`):
+
+  - `machine::String` - Machine name prefix for .dat files (e.g. "d3d")
+  - `dat_dir::String` - Directory containing .dat files; defaults to bundled `coil_geometries/`
+  - `mtheta_coil::Int` - Poloidal grid resolution for boundary field evaluation (default: 480)
+  - `nzeta_coil::Int` - Toroidal grid resolution; 0 = auto (32 × n)
+  - `coil_sets_raw::Vector{Dict{String,Any}}` - Parsed `[[ForcingTerms.coil_set]]` TOML blocks
+"""
+@kwdef struct ForcingTermsControl
+    # Forcing data file settings (ascii/hdf5 formats)
+    forcing_data_file::String = "forcing.dat"
+    forcing_data_format::String = "ascii"
+
+    # Coil calculation settings (coil format)
+    machine::String = ""
+    dat_dir::String = ""
+    mtheta_coil::Int = 480
+    nzeta_coil::Int = 0
+    coil_sets_raw::Vector{Dict{String,Any}} = Dict{String,Any}[]
+end
+
+"""
+    ForcingMode
+
+Data structure for a single forcing mode.
+
+## Fields
+
+  - `n::Int` - Toroidal mode number
+
+  - `m::Int` - Poloidal mode number
+  - `amplitude::ComplexF64` - Complex amplitude in unit-norm convention (= Fortran Phi_x,
+    T·m² per unit-norm cell) after loading. File inputs are tagged by their input convention:
+
+      + `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
+      + `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
+      + `"unit_flux"`: already unit-norm (a run's materialized forcing, recorded for replay); loaded as is
+"""
+Base.@kwdef mutable struct ForcingMode
+    n::Int = 0
+    m::Int = 0
+    amplitude::ComplexF64 = 0.0 + 0.0im
+end
+
+"""
+    load_forcing_data!(forcing_modes, filepath, forcing_data_format, verbose=false) -> String
+
+Load forcing data from ASCII or HDF5 file. Returns the normalization tag read
+from the file (or `"normal_field_T"` by default if no tag is present).
+
+**Normalization tags** (set in the file, not in the TOML):
+
+  - `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention;
+    converted to unit-norm (Phi_x) on load.
+  - `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
+    Multiplied by (2π)² on load to reach unit-norm (Phi_x).
+  - `"unit_flux"`: already unit-norm (Phi_x), as a run records its materialized forcing for replay; loaded as is.
+
+**ASCII format** — optional `# normalization: <tag>` header line, then data rows:
+
+```
+# normalization: normal_field_T
+1  2  0.5  0.1
+1  3  0.3  -0.2
+```
+
+Columns: n, m, amplitude_real, amplitude_imag
+
+**HDF5 format** — optional root attribute `normalization` (string), plus datasets:
+
+  - `"n"`: Integer array of toroidal mode numbers
+  - `"m"`: Integer array of poloidal mode numbers
+  - `"amplitude_real"`: Real parts of amplitudes
+  - `"amplitude_imag"`: Imaginary parts of amplitudes
+"""
+function load_forcing_data!(
+    forcing_modes::Vector{ForcingMode},
+    filepath::String,
+    forcing_data_format::String,
+    verbose::Bool=false
+)::String
+
+    if verbose
+        @info "Loading forcing data from $filepath"
+    end
+
+    norm_tag = if forcing_data_format == "ascii"
+        load_forcing_ascii!(forcing_modes, filepath, verbose)
+    elseif forcing_data_format == "hdf5"
+        load_forcing_hdf5!(forcing_modes, filepath, verbose)
+    else
+        error("Unknown forcing data format: $(forcing_data_format). Use 'ascii' or 'hdf5'.")
+    end
+
+    if verbose
+        @info "Loaded $(length(forcing_modes)) forcing modes (normalization: $norm_tag)"
+    end
+    return norm_tag
+end
+
+"""
+    load_forcing_ascii!(forcing_modes, filepath, verbose) -> String
+
+Load forcing data from ASCII file. Returns normalization tag (`"normal_field_T"` by default).
+
+Optional first `# normalization: <tag>` header line sets the normalization.
+Remaining `#`-prefixed lines and blank lines are ignored. Data columns: n, m, amplitude_real, amplitude_imag.
+"""
+function load_forcing_ascii!(
+    forcing_modes::Vector{ForcingMode},
+    filepath::String,
+    verbose::Bool
+)::String
+    if !isfile(filepath)
+        error("Forcing data file not found: $filepath")
+    end
+
+    norm_tag = "normal_field_T"  # default
+
+    # Scan header lines for normalization tag before passing to readdlm
+    open(filepath, "r") do io
+        for line in eachline(io)
+            stripped = strip(line)
+            isempty(stripped) && continue
+            startswith(stripped, '#') || break  # stop at first non-comment line
+            m = match(r"#\s*normalization\s*:\s*(\S+)", stripped)
+            if !isnothing(m)
+                norm_tag = m.captures[1]
+            end
+        end
+    end
+
+    data = readdlm(filepath; comments=true, comment_char=('#'))
+    nrows = size(data, 1)
+    ncols = size(data, 2)
+
+    if ncols < 4
+        error("ASCII forcing file must have 4 columns (n, m, amplitude_real, amplitude_imag)")
+    end
+
+    empty!(forcing_modes)
+
+    for i in 1:nrows
+        n = Int(data[i, 1])
+        m = Int(data[i, 2])
+        real_part = Float64(data[i, 3])
+        imag_part = Float64(data[i, 4])
+
+        push!(forcing_modes, ForcingMode(;
+            n=n,
+            m=m,
+            amplitude=complex(real_part, imag_part)
+        ))
+    end
+    return norm_tag
+end
+
+"""
+    load_forcing_hdf5!(forcing_modes, filepath, verbose) -> String
+
+Load forcing data from HDF5 file. Returns normalization tag (`"normal_field_T"` by default).
+
+Optional root attribute `normalization` (string) sets the normalization.
+Required datasets: `n`, `m`, `amplitude_real`, `amplitude_imag`.
+"""
+function load_forcing_hdf5!(
+    forcing_modes::Vector{ForcingMode},
+    filepath::String,
+    verbose::Bool
+)::String
+    if !isfile(filepath)
+        error("Forcing data file not found: $filepath")
+    end
+    return h5open(file -> load_forcing_from_h5_group!(forcing_modes, file), filepath, "r")
+end
+
+# Coil-forcing helpers; these depend on ForcingTermsControl and ForcingMode defined above.
+include("CoilGeometry.jl")
+include("BiotSavart.jl")
+include("CoilFourier.jl")
+
+"""
+    save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group; normalization="normal_field_T")
+
+Write forcing modes to an open HDF5 group (or file root) in the layout `load_forcing_hdf5!`
+consumes: datasets `n`, `m`, `amplitude_real`, `amplitude_imag` and the `normalization`
+attribute. Used by the gpec.h5 snapshot writer so the replay path can re-read forcing data
+from the output file with no reference to the original ASCII/HDF5 ingest file.
+"""
+function save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group; normalization::String="normal_field_T")
+    group["n"] = Int[mode.n for mode in forcing_modes]
+    group["m"] = Int[mode.m for mode in forcing_modes]
+    group["amplitude_real"] = Float64[real(mode.amplitude) for mode in forcing_modes]
+    group["amplitude_imag"] = Float64[imag(mode.amplitude) for mode in forcing_modes]
+    HDF5.attrs(group)["normalization"] = normalization
+    return nothing
+end
+
+"""
+    load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group) -> String
+
+Populate `forcing_modes` from an already-open HDF5 group (or file root) with datasets `n`,
+`m`, `amplitude_real`, `amplitude_imag`, and return its `normalization` attribute
+(`"normal_field_T"` when absent). Mirror of `save_forcing_to_h5`, shared by the forcing-file
+reader and the rerun path that reads `gpec.h5/Input/RawInputs/ForcingTerms/`.
+"""
+function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)::String
+    tag = haskey(HDF5.attrs(group), "normalization") ? HDF5.attrs(group)["normalization"] : "normal_field_T"
+    n_array = read(group, "n")
+    m_array = read(group, "m")
+    amp_real = read(group, "amplitude_real")
+    amp_imag = read(group, "amplitude_imag")
+
+    if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
+        error("Inconsistent array lengths in HDF5 forcing group")
+    end
+
+    empty!(forcing_modes)
+    for i in eachindex(n_array)
+        push!(forcing_modes, ForcingMode(;
+            n=Int(n_array[i]),
+            m=Int(m_array[i]),
+            amplitude=complex(amp_real[i], amp_imag[i])
+        ))
+    end
+    return tag
+end
+
+"""
+    RMPField
+
+Abstract supertype of every external-forcing description the scripting API accepts: a
+resonant-magnetic-perturbation field, described by where it comes from and how strongly it
+drives (a forcing-mode file, a coil set with currents, or a precomputed spectrum).
+
+Nothing is read or computed at construction; the modes are materialized against an equilibrium
+when the perturbed-equilibrium stage runs, so one `RMPField` can drive several solves.
+
+## Construction
+
+    RMPField(path; format=..., scale=1.0, kwargs...)
+    RMPField(coil_sets::Vector{Dict{String,Any}}; scale=1.0, kwargs...)
+    RMPField(ctrl::ForcingTermsControl; scale=1.0)
+    RMPField(modes::Vector{ForcingMode}; scale=1.0)
+
+The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
+or `.hdf5` extension and `"ascii"` otherwise. The second form takes TOML-shaped coil blocks
+(the `[[ForcingTerms.coil_set]]` layout) and selects the coil format. Remaining `kwargs` are
+[`ForcingTermsControl`](@ref) fields. These three return a single-source leaf
+([`RMPSource`](@ref)). The last form takes a control-surface spectrum computed elsewhere, already in
+the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`RMPSpectrum`](@ref)).
+
+## Algebra
+
+`+`, `-` and multiplication by a real or complex scalar (a complex factor phase-rotates the
+perturbation) build lazy linear combinations. The response is linear in the forcing, so each term
+is materialized on the control surface and the mode amplitudes are summed.
+
+```julia
+nominal = RMPField("nominal_efc.dat")
+weld_field = RMPField("weld_fields.h5"; scale=0.5)
+total = 2.0 * nominal + weld_field       # lazy: records terms and weights, computes nothing
+pe = perturbed_equilibrium(plasma_response(ffs), total)   # materializes each term, sums, drives PE
+```
+
+Physical amplitude lives in the forcing description (per-conductor currents for coils,
+`ForcingMode.amplitude` for files). `scale` is NOT a physical amplitude: it is the source's weight
+in a linear combination, applied uniformly to the materialized spectrum of every toroidal mode.
+A source that is not a scalar multiple of another needs its own description: a coil set with a
+failed conductor is `nominal - failed_coil`, not `0.9 * nominal`.
+"""
+abstract type RMPField end
+
+"""
+    RMPSource
+
+A single-source [`RMPField`](@ref) leaf: one forcing description plus a complex weight.
+Built by the `RMPField` constructors; scalar multiplication rescales the weight.
+
+## Fields
+
+  - `ctrl::ForcingTermsControl` - The forcing source: format, file path or machine, and the raw coil-set blocks.
+  - `scale::ComplexF64` - The source's weight in a linear combination, applied to the materialized control-surface spectrum (complex = phase rotation). Not a physical amplitude.
+"""
+struct RMPSource <: RMPField
+    ctrl::ForcingTermsControl
+    scale::ComplexF64
+end
+
+"""
+    RMPSpectrum
+
+A spectrum-literal [`RMPField`](@ref) leaf: control-surface forcing modes computed elsewhere, in the
+unit-norm `Φ_x` convention the response consumes, plus a complex weight. Built by
+`RMPField(modes::Vector{ForcingMode})`; scalar multiplication rescales the weight.
+
+## Fields
+
+  - `modes::Vector{ForcingMode}` - The control-surface spectrum, copied at construction.
+  - `scale::ComplexF64` - The leaf's weight in a linear combination, as for [`RMPSource`](@ref).
+"""
+struct RMPSpectrum <: RMPField
+    modes::Vector{ForcingMode}
+    scale::ComplexF64
+end
+
+"""
+    RMPFieldSum
+
+A lazy linear combination of [`RMPSource`](@ref) and [`RMPSpectrum`](@ref) leaves, built by `+`/`-` on
+[`RMPField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
+the leaves. Materialization evaluates each term against the equilibrium and sums the mode
+amplitudes — valid because the perturbed-equilibrium response is linear in the forcing.
+
+## Fields
+
+  - `terms::Vector{Union{RMPSource,RMPSpectrum}}` - The flattened weighted leaves.
+"""
+struct RMPFieldSum <: RMPField
+    terms::Vector{Union{RMPSource,RMPSpectrum}}
+end
+
+"""
+    _infer_format(path) -> String
+
+Forcing-data format implied by a file extension: `"hdf5"` for `.h5`/`.hdf5`, else `"ascii"`.
+"""
+_infer_format(path::AbstractString) = lowercase(splitext(path)[2]) in (".h5", ".hdf5") ? "hdf5" : "ascii"
+
+RMPField(ctrl::ForcingTermsControl; scale::Number=1.0) = RMPSource(ctrl, ComplexF64(scale))
+
+function RMPField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0, kwargs...)
+    ctrl = ForcingTermsControl(; forcing_data_file=abspath(path), forcing_data_format=format, kwargs...)
+    return RMPSource(ctrl, ComplexF64(scale))
+end
+
+function RMPField(coil_sets::Vector{Dict{String,Any}}; scale::Number=1.0, kwargs...)
+    ctrl = ForcingTermsControl(; forcing_data_format="coil", coil_sets_raw=coil_sets, kwargs...)
+    return RMPSource(ctrl, ComplexF64(scale))
+end
+
+RMPField(modes::Vector{ForcingMode}; scale::Number=1.0) =
+    RMPSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
+
+"""
+Flattened weighted-leaf list of any [`RMPField`](@ref).
+"""
+_rmp_terms(f::Union{RMPSource,RMPSpectrum}) = Union{RMPSource,RMPSpectrum}[f]
+_rmp_terms(f::RMPFieldSum) = f.terms
+
+Base.:+(a::RMPField, b::RMPField) = RMPFieldSum(vcat(_rmp_terms(a), _rmp_terms(b)))
+Base.:-(a::RMPField) = -1 * a
+Base.:-(a::RMPField, b::RMPField) = a + (-1 * b)
+Base.:*(c::Number, f::RMPSource) = RMPSource(f.ctrl, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::RMPSpectrum) = RMPSpectrum(f.modes, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::RMPFieldSum) = RMPFieldSum([c * t for t in f.terms])
+Base.:*(f::RMPField, c::Number) = c * f
+
+"""
+    snapshot_forcing_modes(ft_ctrl; verbose=false) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
+
+The raw file-based forcing modes of `ft_ctrl` and their normalization tag, so they land in
+`Input/RawInputs/ForcingTerms/` alongside the TOML blob; `nothing` for coil forcing, which is
+recomputed from the `[[coil_set]]` TOML blob on replay. They feed only the writer:
+the PE stage reads and normalizes the forcing file itself.
+"""
+function snapshot_forcing_modes(ft_ctrl::ForcingTermsControl; verbose::Bool=false)
+    ft_ctrl.forcing_data_format in ("ascii", "hdf5") || return nothing
+    modes = ForcingMode[]
+    normalization = load_forcing_data!(modes, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, verbose)
+    return modes, normalization
+end
+
+
+export ForcingTermsControl, ForcingMode, RMPField, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
+
+end # module ForcingTerms

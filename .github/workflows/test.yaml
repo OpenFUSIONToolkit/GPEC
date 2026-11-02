@@ -1,39 +1,122 @@
 name: Build and Test Julia Package
 
 on:
+  # Every pull request, whatever its base, so a PR stacked on another feature branch
+  # is tested too; it is tested again once retargeted, when it syncs with develop.
   pull_request:
-    branches:
-      - main
+  merge_group:
+    types: [checks_requested]
   push:
     branches:
       - main
+      - develop
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per branch/PR. Superseded pull request runs are cancelled;
+  # Push and queue runs finish independently on their own refs.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
+  changes:
+    name: Detect Julia changes
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      julia: ${{ steps.filter.outputs.julia }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Check whether the pull request touches Julia code
+        id: filter
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
 
-      - name: Set up Julia
-        uses: julia-actions/setup-julia@v1
-        with:
-          version: '1.11'
+          # Report the decision to the job log as well as the run summary, so
+          # `why did/didn't this run?` is answerable from either one.
+          say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
 
-      - name: Restore Julia cache (packages, artifacts, compiled, registries)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.julia/packages
-            ~/.julia/artifacts
-            ~/.julia/compiled
-            ~/.julia/registries
-          # include Manifest.toml so cache invalidates when resolved versions change
-          key: ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml','**/Manifest.toml') }}
-          restore-keys: |
-           ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml','**/Manifest.toml') }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
-      - name: Run tests (instantiate without registry update + test)
-        run: julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(update_registry=false); include("test/runtests.jl")'
+          # Pushes and queue candidates always run the full battery.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "julia=true" >> "$GITHUB_OUTPUT"
+            say "Event $EVENT_NAME — running the full test suite."
+            exit 0
+          fi
+
+          files=$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
+
+          # Allowlist of what test/runtests.jl actually exercises: the package
+          # itself, the tests and their fixtures, the example decks the tests run
+          # end-to-end, the dependency set (declared in Project.toml and pinned in
+          # ci/manifests), and this workflow. Anything not listed here does not
+          # trigger a run, so new untested Julia (benchmarks, docs scripts, a
+          # future tools/ directory) is excluded by default rather than by
+          # remembering to exclude it.
+          tested='(^src/|^test/|^examples/|^ci/manifests/|^ci/local-julia-cache\.sh$|^Project\.toml$|^\.github/workflows/(test|julia-test-version)\.yaml$)'
+
+          relevant=$(printf '%s\n' "$files" | grep -E "$tested" || true)
+
+          say "### Julia change detection"
+          say ""
+          if [ -n "$relevant" ]; then
+            say "Running the test suite. Matched files:"
+            say '```'
+            say "$relevant"
+            say '```'
+          else
+            say "No Julia code, test data or example decks changed — skipping the test suite."
+            say ""
+            say "Files considered:"
+            say '```'
+            say "$files"
+            say '```'
+          fi
+
+          if [ -n "$relevant" ]; then
+            echo "julia=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "julia=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    name: Julia ${{ matrix.version }}
+    needs: changes
+    if: needs.changes.outputs.julia == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.11', '1.x']
+    uses: ./.github/workflows/julia-test-version.yaml
+    with:
+      version: ${{ matrix.version }}
+
+  # Stable check that is present on every pull request, whether or not the suite
+  # ran. Point branch protection at this job so skipped runs do not block merges.
+  test-status:
+    name: Tests
+    needs: [changes, test]
+    if: always()
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Report suite result
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Change detection failed; cannot tell whether tests were needed."
+            exit 1
+          fi
+          case "${{ needs.test.result }}" in
+            success) echo "Test suite passed." ;;
+            skipped) echo "No Julia code changed; test suite intentionally skipped." ;;
+            *)       echo "Test suite result: ${{ needs.test.result }}"; exit 1 ;;
+          esac

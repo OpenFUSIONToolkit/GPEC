@@ -1,0 +1,215 @@
+# Regression case: DIII-D-like H-mode n=1 SLAYER tearing-mode growth rates.
+# Uncoupled per-surface analysis with the AMR Q-plane scan; tracks the per-surface
+# layer parameters, the diamagnetic drive Q_e/Q_i, and the extracted roots (Q, ω, γ)
+# for the inner three rationals. The n-scaling of Q_e/Q_i, which no single-n case can
+# constrain, is covered by a unit test in test/runtests_slayer_inputs.jl instead.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "diiid_slayer_n1"
+description = "DIII-D-like H-mode equilibrium, n=1, SLAYER tearing-mode analysis (uncoupled per-surface, AMR, validity-gated)"
+example_dir = "examples/DIIID-like_SLAYER_example"
+
+# Per-surface SLAYER layer parameters (geometry + dimensionless)
+[quantities.slayer_ising]
+h5path = "Tearing/PerSurface/rational_index"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER surface indices"
+noise_threshold = 0
+order = 10
+
+[quantities.slayer_m]
+h5path = "Tearing/PerSurface/m"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER poloidal m"
+noise_threshold = 0
+order = 11
+
+[quantities.slayer_n]
+h5path = "Tearing/PerSurface/n"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER toroidal n"
+noise_threshold = 0
+order = 12
+
+[quantities.slayer_rs]
+h5path = "Tearing/PerSurface/rs"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER minor radius rs"
+noise_threshold = 1e-10
+order = 13
+
+[quantities.slayer_sval_r]
+h5path = "Tearing/PerSurface/sval_r"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER r-based shear"
+noise_threshold = 1e-10
+order = 14
+
+[quantities.slayer_lu]
+h5path = "Tearing/PerSurface/S"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Lundquist S"
+noise_threshold = 1e-8
+order = 15
+
+[quantities.slayer_D_norm]
+h5path = "Tearing/PerSurface/D_norm"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER D_norm"
+noise_threshold = 1e-10
+order = 16
+
+[quantities.slayer_P_perp]
+h5path = "Tearing/PerSurface/P_perp"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER P_perp"
+noise_threshold = 1e-8
+order = 17
+
+[quantities.slayer_tauk]
+h5path = "Tearing/PerSurface/tau_k"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER tauk"
+noise_threshold = 1e-12
+order = 18
+
+[quantities.slayer_iota_e]
+h5path = "Tearing/PerSurface/iota_e"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER iota_e"
+noise_threshold = 1e-12
+order = 19
+
+# Normalized diamagnetic frequencies. iota_e above is their ratio, so it is blind
+# to a common factor on both; these pin the drive itself.
+[quantities.slayer_Q_e]
+h5path = "Tearing/PerSurface/Q_e"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Q_e"
+noise_threshold = 1e-12
+order = 20
+
+[quantities.slayer_Q_i]
+h5path = "Tearing/PerSurface/Q_i"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER Q_i"
+noise_threshold = 1e-12
+order = 21
+
+# Toroidal critical-Δ geometric factor, derived on every surface that carries a ResistGeometry
+# whatever dc_type is selected, so it is tracked here at the deck's dc_type = "none".
+[quantities.slayer_D_geo]
+h5path = "Tearing/PerSurface/D_geo"
+type = "real_vector"
+extract = "all_real"
+label = "SLAYER toroidal critical-Δ factor D_geo"
+noise_threshold = 1e-10
+order = 22
+class = "physics_converged"
+
+# Tearing eigenvalue (coupled mode → length 1). The headline deliverable:
+# a real, nonzero growth rate on a realistic equilibrium. Root-extraction
+# is sensitive to the AMR cell topology and ODE solver, so the Q/ω/γ
+# thresholds are absolute and modestly loose; re-pin intentionally if a
+# solver/AMR change shifts the root inventory.
+# Growth-rate / frequency / root outputs. Pinned for the inner three rational
+# surfaces only (2/1, 3/1, 4/1) via `first_3`: the Δ'/γ contour search is
+# numerically unreliable on the outermost surfaces (e.g. 5/1, 6/1, 7/1 near the
+# edge), so those are deliberately not golden-tracked.
+[quantities.slayer_Q]
+h5path = "Tearing/Roots/Q_root"
+type = "complex_vector"
+extract = "first_3_complex"
+label = "SLAYER Q_root [2/1,3/1,4/1]"
+noise_threshold = 1e-4
+order = 30
+
+[quantities.slayer_omega_Hz]
+h5path = "Tearing/Roots/omega"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER ω in rad/s [2/1,3/1,4/1]"
+noise_threshold = 1.0
+order = 32
+
+[quantities.slayer_gamma_Hz]
+h5path = "Tearing/Roots/gamma"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER γ in 1/s [2/1,3/1,4/1]"
+noise_threshold = 1e-1
+order = 33
+
+# no_root flag (1 = extraction failed). Pinned for the inner three surfaces;
+# this case guards that the 2/1, 3/1, 4/1 keep finding a real root.
+[quantities.slayer_no_root]
+h5path = "Tearing/Roots/no_root"
+type = "real_vector"
+extract = "first_3"
+label = "SLAYER no_root flags [2/1,3/1,4/1]"
+noise_threshold = 0
+order = 34
+
+# Critical resonant field (torque balance) for the inner three surfaces, matching the root pins
+# above, and the natural rotation Q0 = τ_k·n·Ω_E it is computed from.
+[quantities.crf_br_crit]
+h5path = "Tearing/CriticalResonantField/br_crit"
+type = "real_vector"
+extract = "first_3"
+label = "CRF b_r/B_φ crit [2/1,3/1,4/1]"
+noise_threshold = 1e-9
+order = 40
+
+[quantities.crf_br_crit_tesla]
+h5path = "Tearing/CriticalResonantField/br_crit_tesla"
+type = "real_vector"
+extract = "first_3"
+label = "CRF b_r crit in tesla [2/1,3/1,4/1]"
+noise_threshold = 1e-9
+order = 43
+
+[quantities.crf_Q_peak]
+h5path = "Tearing/CriticalResonantField/Q_peak"
+type = "real_vector"
+extract = "first_3"
+label = "CRF Q_peak [2/1,3/1,4/1]"
+noise_threshold = 1e-6
+order = 41
+
+[quantities.crf_Q0]
+h5path = "Tearing/CriticalResonantField/Q0"
+type = "real_vector"
+extract = "first_3"
+label = "CRF Q0 [2/1,3/1,4/1]"
+noise_threshold = 1e-10
+order = 42
+
+# Settings (catches accidental config drift)
+[quantities.slayer_enabled]
+h5path = "Tearing/enabled"
+type = "int_scalar"
+extract = "value"
+label = "SLAYER enabled flag"
+noise_threshold = 0
+order = 90
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999

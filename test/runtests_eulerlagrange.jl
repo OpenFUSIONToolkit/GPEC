@@ -1,0 +1,840 @@
+using TOML
+using LinearAlgebra
+
+# TODO: this helper may belong in a shared test-utilities file rather than here.
+# TODO: come up with a Gaussian reduction test that doesn't rely on external data.
+
+function load_u_matrix(filename)
+    lines = readlines(filename)
+    data = [parse.(Float64, split(l)) for l in lines[2:end]]
+    i_vals = Int.(getindex.(data, 1))
+    j_vals = Int.(getindex.(data, 2))
+    ncols = (length(data[1]) - 2) ÷ 2
+    imax = maximum(i_vals)
+    jmax = maximum(j_vals)
+    mat = zeros(ComplexF64, imax, jmax, ncols)
+    for row in data
+        i = Int(row[1])
+        j = Int(row[2])
+        for k in 1:ncols
+            re = Float64(row[2*k+1])
+            im = Float64(row[2*k+2])
+            mat[i, j, k] = complex(re, im)
+        end
+    end
+    return mat
+end
+
+@testset "ODE Tests" begin
+    @testset "resize_storage!" begin
+        # Test that resize_storage! doubles the size of storage arrays
+        mpert = 3
+        numsteps_init = 10
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, numsteps_init, 10, 5)
+
+        # Fill some data
+        odet.step = 8
+        for i in 1:odet.step
+            odet.psi_store[i] = Float64(i)
+            odet.q_store[i] = Float64(i * 2)
+            odet.u_store[:, :, :, i] .= ComplexF64(i)
+        end
+
+        # Resize storage
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.resize_storage!(odet)
+
+        # Check new size is doubled
+        @test length(odet.psi_store) == 2 * numsteps_init
+        @test length(odet.q_store) == 2 * numsteps_init
+        @test size(odet.u_store, 4) == 2 * numsteps_init
+
+        # Derivative stores are materialized after integration, so growth never touches them
+        @test isempty(odet.du_store)
+        @test isempty(odet.xi_s_store)
+
+        # Check data is preserved
+        @test all(odet.psi_store[1:odet.step] .== Float64.(1:odet.step))
+        @test all(odet.q_store[1:odet.step] .== Float64.(2:2:(2*odet.step)))
+        for i in 1:odet.step
+            @test all(odet.u_store[:, :, :, i] .== ComplexF64(i))
+        end
+
+        # Check that you can resize again
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.resize_storage!(odet)
+        @test length(odet.psi_store) == 4 * numsteps_init
+        @test length(odet.q_store) == 4 * numsteps_init
+        @test size(odet.u_store, 4) == 4 * numsteps_init
+    end
+
+    @testset "trim_storage!" begin
+        # Test that trim_storage! resizes arrays to actual step count
+        mpert = 3
+        numsteps_init = 20
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, numsteps_init, 10, 5)
+
+        # Set step to less than initial size
+        odet.step = 12
+        for i in 1:odet.step
+            odet.psi_store[i] = Float64(i)
+            odet.q_store[i] = Float64(i * 2)
+            odet.u_store[:, :, :, i] .= ComplexF64(i)
+        end
+
+        # Trim storage
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.trim_storage!(odet)
+
+        # Check sizes match step count
+        @test length(odet.psi_store) == odet.step
+        @test length(odet.q_store) == odet.step
+        @test size(odet.u_store, 4) == odet.step
+
+        # Check all data is preserved
+        @test all(odet.psi_store .== Float64.(1:odet.step))
+        @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
+    end
+
+    @testset "truncate_integration! drops every trace of the old edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+
+        mpert = 2
+        intr = F.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        intr.sing = [F.SingType(; psifac=p, q=q, m=[m], n=[1]) for (p, q, m) in ((0.30, 2.0, 2), (0.60, 3.0, 3), (0.90, 4.0, 4))]
+        intr.msing = 3
+        odet = F.OdeState(mpert, 10, 5, 3)
+        odet.step = 7
+        odet.psi_store[1:7] = [0.10, 0.25, 0.40, 0.55, 0.75, 0.85, 0.95]
+        odet.q_store[1:7] = 1 .+ odet.psi_store[1:7]
+        for i in 1:7
+            odet.u_store[:, :, 1, i] = ComplexF64[i 0; 0 i]
+            odet.u_store[:, :, 2, i] = ComplexF64[i+0.1 0; 0 i+0.1]
+        end
+        # Two fixups; the second lies past the new edge and is a singular-surface crossing with a zeroed column.
+        odet.ifix = 2
+        odet.fixstep[1:2] = [3, 6]
+        odet.sing_flag[1:2] = [false, true]
+        odet.zeroed_idx[1], odet.zeroed_idx[2] = Int[], [1]
+        for ifix in 1:2
+            odet.fixfac[:, :, ifix] = ComplexF64[1 0.5; 0 1]
+            odet.index[:, ifix] = [1, 2]
+        end
+
+        F.truncate_integration!(odet, intr, equil, 5)
+        @test odet.ifix == 1
+        @test intr.psilim == 0.75 && intr.msing == 2 && size(odet.ca_l, 4) == 2 && size(odet.ca_r, 4) == 2
+        @test intr.q1lim ≈ equil.profiles.q_deriv(0.75)
+
+        edge = copy(odet.u_store[:, :, 1, end])
+        F.transform_u!(odet, intr)
+        @test odet.u_store[:, :, 1, end] ≈ edge && rank(odet.u_store[:, :, 1, end]) == mpert  # rank-deficient before the fix
+    end
+
+    @testset "truncate_chunks! cuts the Riccati chunks back to the edge" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
+        chunks() = [
+            F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0)
+            for (i, (a, b)) in enumerate(((0.10, 0.29), (0.31, 0.59), (0.61, 0.89), (0.91, 0.99)))
+        ]
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.75, 2) == 3  # straddling chunk shortened, so re-integrate it
+        @test length(cs) == 3 && cs[3].psi_end == 0.75 && count(c -> c.needs_crossing, cs) == 2
+
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.89, 2) === nothing  # edge exactly at a chunk end: nothing to re-integrate
+        @test count(c -> c.needs_crossing, cs) == 2  # but its crossing onto the dropped surface is still cleared
+    end
+
+    @testset "transform_u!" begin
+        # Test transformation of solution vectors
+        mpert = 2
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 5, 2)
+
+        # Set up a simple fixup scenario
+        odet.ifix = 1
+        odet.step = 5
+        odet.sing_flag[1] = false
+        odet.fixstep[1] = 3
+        odet.zeroed_idx[1] = Int[]
+
+        # Initialize fixfac with some transformation
+        odet.fixfac[1, 1, 1] = 1.0
+        odet.fixfac[1, 2, 1] = 0.5
+        odet.fixfac[2, 1, 1] = 0.0
+        odet.fixfac[2, 2, 1] = 1.0
+
+        # Initialize index (sorted by unorm)
+        odet.index[:, 1] = [1, 2]
+
+        # Set up some u_store data; derivative stores stay empty on this path
+        for i in 1:odet.step
+            odet.u_store[:, :, 1, i] .= ComplexF64(i)
+            odet.u_store[:, :, 2, i] .= ComplexF64(i + 0.1)
+        end
+
+        u_orig = copy(odet.u_store)
+
+        # Apply transformation
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.transform_u!(odet, intr)
+
+        # Check that u_store was modified (transformation applied)
+        @test !all(odet.u_store .== u_orig)
+
+        # The transformation should preserve the structure but apply the fixfac matrices
+        # transform_u! doesn't resize arrays - it only applies transformations in-place
+        # The storage arrays retain their original allocated size
+        @test size(odet.u_store) == size(u_orig)
+
+        # Empty derivative stores must be skipped, not indexed into
+        @test isempty(odet.du_store)
+        @test isempty(odet.xi_s_store)
+    end
+
+    @testset "transform_u! with pre-filled derivative stores" begin
+        # The galerkin-matched path supplies analytic derivatives before the fixup transforms,
+        # so those arrays must be mixed by the same fixfac matrices as u_store.
+        mpert = 2
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 5, 2)
+
+        odet.ifix = 1
+        odet.step = 5
+        odet.sing_flag[1] = false
+        odet.fixstep[1] = 3
+        odet.zeroed_idx[1] = Int[]
+        odet.fixfac[1, 1, 1] = 1.0
+        odet.fixfac[1, 2, 1] = 0.5
+        odet.fixfac[2, 1, 1] = 0.0
+        odet.fixfac[2, 2, 1] = 1.0
+        odet.index[:, 1] = [1, 2]
+
+        odet.du_store = zeros(ComplexF64, mpert, mpert, odet.step)
+        odet.xi_s_store = zeros(ComplexF64, mpert, mpert, odet.step)
+        for i in 1:odet.step
+            odet.u_store[:, :, 1, i] .= ComplexF64(i)
+            odet.u_store[:, :, 2, i] .= ComplexF64(i + 0.1)
+            odet.du_store[:, :, i] .= ComplexF64(i + 0.2)
+            odet.xi_s_store[:, :, i] .= ComplexF64(i + 0.4)
+        end
+        du_orig = copy(odet.du_store)
+        xi_s_orig = copy(odet.xi_s_store)
+
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.transform_u!(odet, intr)
+
+        @test size(odet.du_store) == size(du_orig)
+        @test size(odet.xi_s_store) == size(xi_s_orig)
+        @test !all(odet.du_store .== du_orig)
+        @test !all(odet.xi_s_store .== xi_s_orig)
+    end
+
+    @testset "apply_gaussian_reduction!" begin
+        # Initialize to random u
+        mpert = 5
+        ifix = 1
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+        odet.u = randn(ComplexF64, mpert, mpert, 2)
+        odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
+        odet.ifix = ifix
+        odet.fixfac = zeros(ComplexF64, mpert, mpert, ifix)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
+
+        # Save copy of original u and run
+        u_orig = copy(odet.u)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+
+        # Very simple tests
+        @test !all(odet.u .== u_orig)  # u should have changed
+        @test all(abs.(diag(odet.fixfac[:, :, ifix])) .≈ 1)  # diagonal of fixfac = 1
+        @test odet.fixstep[1] == odet.step - 1 # fixstep should be set
+        @test odet.sing_flag[1] == false # sing_flag should match input
+
+        mpert = 31
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+        # We'll load in Fortran data for u pulled before and after a fixup
+        # Note that this was generated by manually setting
+        # unorm = [norm(odet.u[:,i,1]) for i in 1:msol] in the Fortran to avoid
+        # also having to save unorm0
+        odet.u = load_u_matrix(joinpath(@__DIR__, "test_data", "u_prefixup.dat"))
+        odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
+        odet.ifix = ifix
+        odet.fixfac = zeros(ComplexF64, mpert, mpert, ifix)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
+
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+
+        u_fortran = load_u_matrix(joinpath(@__DIR__, "test_data", "u_postfixup.dat"))
+        # test that the outputs are approximately equivalent (1e-3 seems ok to account for loading differences)
+        @test all(abs.(odet.u .- u_fortran) .< 1e-3)
+
+        # Test with a simple 2x2 case where we can predict the result
+        mpert = 2
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+
+        # Set up a simple u matrix where first column has larger norm
+        # u[:, 1, 1] = [3, 4] (norm = 5)
+        # u[:, 2, 1] = [1, 0] (norm = 1)
+        odet.u[:, 1, 1] .= [3.0 + 0.0im, 4.0 + 0.0im]
+        odet.u[:, 2, 1] .= [1.0 + 0.0im, 0.0 + 0.0im]
+        odet.u[:, :, 2] .= 0.0  # Set second equation to zero for simplicity
+
+        odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
+        odet.ifix = 1
+        odet.fixfac = zeros(ComplexF64, mpert, mpert, 1)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
+
+        u_before = copy(odet.u)
+
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+
+        # After fixup:
+        # - index should sort by norm: [1, 2] (largest first)
+        @test odet.index[:, 1] == [1, 2]
+
+        # - The largest element in the first column should be used as pivot
+        # - The second column should be modified to eliminate that element
+        # - fixfac should capture the elimination factor
+        @test odet.fixfac[1, 1, 1] == 1.0  # Diagonal
+
+        # The pivot element should not change
+        pivot_idx = argmax(abs.(u_before[:, 1, 1]))
+        @test abs(odet.u[pivot_idx, 1, 1] - u_before[pivot_idx, 1, 1]) < 1e-10
+    end
+
+    @testset "column_abstol" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        u = zeros(ComplexF64, 2, 2, 2)
+        u[:, 1, 1] .= [3.0, -4.0im]   # column 1: U₁ max 4, U₂ max 2
+        u[:, 1, 2] .= [2.0, 0.5]
+        u[:, 2, 2] .= [0.0, 1e-8]     # column 2: U₁ zero (fixed start), U₂ max 1e-8
+        tol = FFS.column_abstol(u, 1e-6)
+        @test size(tol) == size(u)
+        @test all(tol[:, 1, 1] .== 4e-6)
+        @test all(tol[:, 1, 2] .== 2e-6)
+        # A zero block takes its column's other block, so each column is controlled relative to its own scale
+        @test all(tol[:, 2, 1] .≈ 1e-14)
+        @test all(tol[:, 2, 2] .≈ 1e-14)
+        @test FFS.column_abstol!(tol, u, 1e-6) === tol
+        @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
+        # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
+        c = FFS.ForceFreeStatesControl()
+        @test c.algorithm.renorm_threshold == 1e3
+        @test c.algorithm.save_interval == 1
+    end
+
+    @testset "compute_solution_norms!" begin
+        mpert = 2
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; renorm_threshold=10.0))
+
+        # Case 1: Basic norm computation
+        odet.u = zeros(ComplexF64, 2, 2, 2)
+        odet.u[:, 1, 1] .= [3, 4]          # norm = 5
+        odet.u[:, 2, 1] .= [0, 2]          # norm = 2
+
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        # After the first run with new=True (default), unorm0 should be set to unorm
+        # and new should be false
+        @test odet.unorm[1:intr.mpert] ≈ [5, 2]
+        @test odet.unorm0 == odet.unorm
+        @test odet.new == false
+
+        # Case 2: Error on zero norm
+        odet.u[:, 1, 1] .= 0
+        odet.new = true
+        @test_throws ErrorException GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+
+        # Case 3: Normalization on second call
+        odet.u[:, 1, 1] .= [3, 4]   # norm = 5
+        odet.u[:, 2, 1] .= [0, 2]   # norm = 2
+        odet.new = false
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        @test odet.unorm[1:intr.mpert] ≈ [1, 1]
+
+        # Case 4: Trigger fixup via renorm_threshold
+        odet.unorm0 = ones(intr.mpert)
+        odet.u[:, 1, 1] .= [1000, 0]   # large norm
+        odet.u[:, 2, 1] .= [1, 0]      # small norm
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        @test odet.new == true  # implies fixup ran
+
+        # Case 5: Trigger fixup via sing_flag
+        odet.new = false
+        odet.u[:, 1, 1] .= [1, 0]
+        odet.u[:, 2, 1] .= [1, 0]
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+        @test odet.new == true  # fixup triggered
+
+        # Case 6: a singular call right after a reduction still reduces, keeping that reduction's pivot order
+        # rather than the raw-norm order [1, 2, 3]
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        odet = FFS.OdeState(3, 10, 10, 1)
+        odet.u[:, :, 1] .= [6.0 0.4 0.2; 0.5 0.3 2.0; 0.1 5.0 1.5]
+        odet.u[:, :, 2] .= 1.0
+        odet.ifix = 1
+        odet.index[:, 1] .= [3, 1, 2]
+        odet.new = true
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, FFS.ForceFreeStatesInternal(; numpert_total=3), true)
+        @test odet.ifix == 2
+        @test odet.new
+        @test odet.sing_flag[2]
+        @test odet.index[:, 2] == [3, 1, 2]
+    end
+
+    @testset "ideal-crossing reduction isolates the resonant harmonic" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Column 1 has the largest norm but no resonant (row 3) component; column 2 carries the resonance.
+        # Growth order alone would lead with column 1 and pivot it on row 1, leaving row 3 in columns 2 and 3.
+        u0 = zeros(ComplexF64, 3, 3, 2)
+        u0[:, 1, 1] .= [6.0, 0.5, 0.0]
+        u0[:, 2, 1] .= [0.4, 0.3, 5.0]
+        u0[:, 3, 1] .= [0.2, 2.0, 1.5]
+        u0[:, :, 2] .= 1.0
+        intr = FFS.ForceFreeStatesInternal(; numpert_total=3)
+        ctrl = FFS.ForceFreeStatesControl(; algorithm=Forward(; renorm_threshold=1e3))
+        fresh(u) = (odet = FFS.OdeState(3, 10, 10, 1); odet.u .= u; odet)
+
+        odet = fresh(u0)
+        odet.new = false
+        odet.unorm0 .= norm.(eachcol(u0[:, :, 1]))  # every column grown alike since the last reduction
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
+        @test odet.index[1, 1] == 2
+        @test odet.u[3, 2, 1] == u0[3, 2, 1]
+        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0  # only the lead column keeps the resonant harmonic
+        @test odet.sing_flag[1]
+
+        # A crossing right after a renorm_threshold reduction (new = true) still reduces on the resonant row.
+        odet = fresh(u0)
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
+        @test odet.ifix == 1 && odet.index[1, 1] == 2 && odet.new
+        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0
+
+        # Without resonant rows the growth-ordered reduction is unchanged.
+        odet = fresh(u0)
+        odet.new = false
+        odet.unorm0 .= 1.0
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+        @test odet.index[1, 1] == 1
+        @test odet.u[3, 2, 1] != 0
+    end
+
+    @testset "OdeState construction" begin
+        # Test basic OdeState initialization
+        numpert_total = 5
+        numsteps_init = 100
+        numunorms_init = 20
+        msing = 10
+
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(numpert_total, numsteps_init, numunorms_init, msing)
+
+        # Check fields are initialized correctly
+        @test odet.numpert_total == numpert_total
+        @test odet.numsteps_init == numsteps_init
+        @test odet.numunorms_init == numunorms_init
+        @test odet.msing == msing
+        @test odet.step == 1
+        @test odet.new == true
+        @test odet.ifix == 0
+        @test odet.nzero == 0
+
+        # Check array dimensions
+        @test size(odet.u) == (numpert_total, numpert_total, 2)
+        @test size(odet.u_store) == (numpert_total, numpert_total, 2, numsteps_init)
+        # Derivative stores start empty and are sized when materialized
+        @test size(odet.du_store) == (numpert_total, numpert_total, 0)
+        @test size(odet.xi_s_store) == (numpert_total, numpert_total, 0)
+        @test odet.du_store_populated == false
+        @test odet.u_store_el_basis == true
+        @test length(odet.psi_store) == numsteps_init
+        @test length(odet.q_store) == numsteps_init
+        @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
+        @test size(odet.ca_l) == (numpert_total, numpert_total, 2, msing)
+        @test size(odet.fixfac) == (numpert_total, numpert_total, numunorms_init)
+        @test length(odet.unorm) == numpert_total
+        @test length(odet.unorm0) == numpert_total
+    end
+
+    @testset "axis start defaults to the fixed initialization" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        function axis_state(psilow; kwargs...)
+            eq_inputs = copy(inputs["Equilibrium"])
+            eq_inputs["psilow"] = psilow
+            eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => eq_inputs)), ex)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+            deck = deepcopy(inputs)
+            merge!(deck["ForceFreeStates"], Dict{String,Any}(String(k) => v for (k, v) in kwargs))
+            ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(deck, ex)
+            intr = FFS.ForceFreeStatesInternal()
+            intr.nlow = ctrl.nn_low
+            intr.nhigh = ctrl.nn_high
+            intr.npert = 1
+            FFS.sing_lim!(intr, ctrl, equil)
+            FFS.sing_find!(intr, equil)
+            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+            intr.mpert = intr.mhigh - intr.mlow + 1
+            intr.numpert_total = intr.mpert * intr.npert
+            mats = FFS.build_matrix_splines(equil, intr, FFS.make_metric(equil, intr.mpert))
+            odet = FFS.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+            return odet, ctrl, mats, equil, intr
+        end
+        # The default threshold is 0: near the axis the fixed start is used, with no warning.
+        odet, ctrl, mats, equil, intr = axis_state(1e-4)
+        @test ctrl.frobenius_psi_max == 0
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # A start above a positive threshold uses the fixed start, still with no warning.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.01)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+        # Raising the threshold to cover the start opts into the Frobenius start and warns.
+        odet, ctrl, mats, equil, intr = axis_state(0.3; frobenius_psi_max=0.5)
+        @test_logs (:warn, r"Frobenius axis start") FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test odet.u[:, :, 2] ≈ I
+        @test any(!iszero, odet.u[:, :, 1])
+        # An explicit zero selects the fixed start silently even near the axis.
+        odet, ctrl, mats, equil, intr = axis_state(1e-4; frobenius_psi_max=0.0)
+        @test_logs FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        @test iszero(odet.u[:, :, 1]) && odet.u[:, :, 2] ≈ I
+    end
+
+    @testset "chunk_el_integration_bounds tests" begin
+        # Helper to build a minimal control and internal structs
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-4)
+
+        # Case 1: No singular surfaces -> single chunk to edge
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        intr.msing = 0
+        intr.psilim = 1.0
+
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 1
+        @test chunks[1].needs_crossing == false
+
+        # Case 2: One singular surface within limits -> crossing chunk then edge
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        s = GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType()
+        s.psifac = 0.5
+        s.n = [1]
+        s.m = [1]
+        s.q1 = 2.0
+        intr.sing = [s]
+        intr.msing = 1
+        intr.psilim = 1.0
+        intr.mlow = 1
+        intr.mhigh = 1
+
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 2
+        @test chunks[1].needs_crossing == true
+        @test chunks[2].needs_crossing == false
+        # Ensure the first chunk ends just before the singular surface
+        @test chunks[1].psi_end < intr.sing[1].psifac
+
+        # Case 3: Multiple singular surfaces -> multiple crossing chunks
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        s1 = GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=0.3, n=[1], m=[1], q1=1.5)
+        s2 = GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=0.6, n=[1], m=[1], q1=2.5)
+        intr.sing = [s1, s2]
+        intr.msing = 2
+        intr.psilim = 1.0
+        intr.mlow = 1
+        intr.mhigh = 1
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-6)
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 3
+        @test all(c.needs_crossing == true for c in chunks[1:2])
+        @test chunks[3].needs_crossing == false
+
+        # Case 4: singfac_min == 0 should disable crossing logic -> single chunk
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        intr.sing = [GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=0.4, n=[1], m=[1], q1=2.0)]
+        intr.msing = 1
+        intr.psilim = 1.0
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=0.0)
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 1
+        @test chunks[1].needs_crossing == false
+
+        # Case 5: both crossings of q = 2 on q = (2 - ε) + a(ψ - ψ0)², at ψ0 ∓ √(ε/a) with q' = ∓2√(aε).
+        # With n = 1 their standoffs singfac_min/|q'| overlap exactly when 2ε ≤ singfac_min.
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ctrl = FFS.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-4)
+        function reverse_shear_pair(ε; a=3.0, psi0=0.4)
+            intr = FFS.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+            dpsi, q1 = sqrt(ε / a), 2 * sqrt(a * ε)
+            intr.sing = [FFS.SingType(; psifac=psi0 - dpsi, n=[1], m=[2], q=2.0, q1=-q1), FFS.SingType(; psifac=psi0 + dpsi, n=[1], m=[2], q=2.0, q1=q1)]
+            intr.msing = 2
+            intr.psilim = 1.0
+            intr.mlow = 1
+            intr.mhigh = 3
+            odet = FFS.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+            odet.psifac = 0.0
+            return odet, intr
+        end
+        odet, intr = reverse_shear_pair(1e-3)
+        chunks = FFS.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 3
+        @test all(c.needs_crossing for c in chunks[1:2])
+        odet, intr = reverse_shear_pair(1e-5)
+        @test_throws ErrorException FFS.chunk_el_integration_bounds(odet, ctrl, intr)
+
+        # Case 6: a surface tangent to q_min (q' = 0) has an unbounded standoff.
+        intr = FFS.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        intr.sing = [FFS.SingType(; psifac=0.4, n=[1], m=[2], q=2.0, q1=0.0)]
+        intr.msing = 1
+        intr.psilim = 1.0
+        intr.mlow = 1
+        intr.mhigh = 3
+        odet = FFS.OdeState(1, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+        @test_throws ErrorException FFS.chunk_el_integration_bounds(odet, ctrl, intr)
+
+        # Case 7: the kinetic path skips the second of two overlapping crossings, with a warning naming it.
+        ctrl_kin = FFS.ForceFreeStatesControl(; algorithm=Forward(; numsteps_init=10, numunorms_init=5), singfac_min=1e-4, kinetic=FFS.TestKineticMatrices(; scale=1.0))
+        odet, intr = reverse_shear_pair(1e-5)
+        intr.kinsing, intr.kmsing = intr.sing, intr.msing
+        chunks = @test_logs (:warn, r"Skipping kinetic singular surface m/n=2/1") match_mode = :any FFS.chunk_el_integration_bounds(odet, ctrl_kin, intr)
+        @test length(chunks) == 2
+        @test chunks[1].needs_crossing && !chunks[2].needs_crossing
+    end
+
+    @testset "EdgeScanState" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Default construction with sentinel values
+        es = FFS.EdgeScanState(2, 0)
+        @test es.numpert_total == 2
+        @test es.N_edge == 0
+        @test length(es.psi) == 0
+        @test length(es.total_eigenvalue) == 0
+
+        # Non-trivial N_edge: arrays initialized to NaN
+        es2 = FFS.EdgeScanState(3, 5)
+        @test es2.N_edge == 5
+        @test length(es2.psi) == 5
+        @test length(es2.q) == 5
+        @test all(isnan, real.(es2.total_eigenvalue))
+        @test all(isnan, real.(es2.plasma_energy))
+        @test all(isnan, real.(es2.vacuum_energy))
+        @test all(isnan, es2.vacuum_eigenvalue)
+
+        # OdeState default construction (smoke test)
+        ode = FFS.OdeState(2, 100, 10, 0)
+        @test ode.numpert_total == 2
+        @test ode.step == 1
+    end
+end
+
+@testset "materialize_derivative_stores!" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+
+    # Integrate a small ideal case and hand back everything the materializer needs.
+    function setup_solovev_run()
+        example_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
+        intr = FFS.ForceFreeStatesInternal()
+        ctrl = GeneralizedPerturbedEquilibrium.force_balance_control(inputs, example_dir)
+        eq_config = GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, example_dir)
+        sol_cfg = GeneralizedPerturbedEquilibrium.analytic_config(inputs)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, sol_cfg)
+        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.parse_wall(get(inputs, "Wall", nothing))
+        FFS.sing_lim!(intr, ctrl, equil)
+        intr.nlow = ctrl.nn_low
+        intr.nhigh = ctrl.nn_high
+        intr.npert = 1
+        FFS.sing_find!(intr, equil)
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.numpert_total = intr.mpert * intr.npert
+        metric = FFS.make_metric(equil, intr.mpert)
+        mats = FFS.build_matrix_splines(equil, intr, metric)
+        odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
+        return odet, ctrl, equil, mats, intr
+    end
+
+    odet, ctrl, equil, mats, intr = setup_solovev_run()
+    # Untouched copy of the solution, for the column-transform check further down.
+    odet_pristine = deepcopy(odet)
+
+    @testset "fills the stores once" begin
+        @test isempty(odet.du_store)
+        @test !odet.du_store_populated
+        @test FFS.materialize_derivative_stores!(odet, equil, mats, intr)
+        @test odet.du_store_populated
+        @test size(odet.du_store) == (intr.numpert_total, intr.numpert_total, odet.step)
+        @test size(odet.xi_s_store) == (intr.numpert_total, intr.numpert_total, odet.step)
+        @test all(isfinite, abs.(odet.du_store))
+        @test all(isfinite, abs.(odet.xi_s_store))
+
+        # Idempotent: a second call must not overwrite what is already there.
+        du_first = copy(odet.du_store)
+        @test FFS.materialize_derivative_stores!(odet, equil, mats, intr)
+        @test odet.du_store == du_first
+    end
+
+    @testset "agrees with a direct kernel evaluation" begin
+        npert = intr.numpert_total
+        du = zeros(ComplexF64, npert, npert, 2)
+        xi_s = zeros(ComplexF64, npert, npert)
+        for istep in (1, odet.step ÷ 2, odet.step)
+            psi = odet.psi_store[istep]
+            u = odet.u_store[:, :, :, istep]
+            FFS.el_derivatives!(du, u, false, equil, mats, intr, psi, Ref(1), Ref(1))
+            FFS.compute_node_xi_s!(xi_s, @view(du[:, :, 1]), @view(u[:, :, 1]), mats, psi)
+            @test odet.du_store[:, :, istep] == du[:, :, 1]
+            @test odet.xi_s_store[:, :, istep] == xi_s
+        end
+    end
+
+    @testset "commutes with a column transform" begin
+        # The design relies on du(psi, u*T) == du(psi, u)*T, which is what makes it exact to
+        # materialize after the Gaussian fixups and free-boundary normalization rather than
+        # transforming stored derivatives alongside u_store.
+        npert = intr.numpert_total
+        T = Matrix{ComplexF64}(I, npert, npert) .+ 0.25 .* ComplexF64.(reshape(sin.(1:(npert^2)), npert, npert))
+        odet_t = deepcopy(odet_pristine)
+        for istep in 1:odet_t.step
+            odet_t.u_store[:, :, 1, istep] = odet_t.u_store[:, :, 1, istep] * T
+            odet_t.u_store[:, :, 2, istep] = odet_t.u_store[:, :, 2, istep] * T
+        end
+        @test FFS.materialize_derivative_stores!(odet_t, equil, mats, intr)
+
+        for istep in (1, odet.step ÷ 2, odet.step)
+            @test isapprox(odet_t.du_store[:, :, istep], odet.du_store[:, :, istep] * T; rtol=1e-10)
+            @test isapprox(odet_t.xi_s_store[:, :, istep], odet.xi_s_store[:, :, istep] * T; rtol=1e-10)
+        end
+    end
+
+    @testset "refuses a solution outside the Euler-Lagrange basis" begin
+        odet.du_store_populated = false
+        odet.du_store = Array{ComplexF64}(undef, intr.numpert_total, intr.numpert_total, 0)
+        odet.u_store_el_basis = false
+        @test !FFS.materialize_derivative_stores!(odet, equil, mats, intr)
+        @test isempty(odet.du_store)
+        @test !odet.du_store_populated
+    end
+end
+
+@testset "resonant block Frobenius exponents" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+
+    @testset "traceless block reduces to ∓√(−det) on both sides" begin
+        m0 = ComplexF64[1 2; 3 -1]
+        α0 = sqrt(-(m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]))
+        for sig in (1.0, -1.0)
+            α, p_big, p_small = FFS.resonant_block_exponents(m0, sig)
+            @test α ≈ α0
+            @test p_big ≈ -α0
+            @test p_small ≈ α0
+        end
+    end
+
+    @testset "nonzero trace uses the block eigenvalues" begin
+        m0 = ComplexF64[2 1; 0.5 4]
+        tr = m0[1, 1] + m0[2, 2]
+        block_det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
+        α0 = sqrt(tr * tr / 4 - block_det)
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, 1.0)
+        @test α === α0
+        @test p_big === tr / 2 - α0
+        @test p_small === tr / 2 + α0
+        @test abs(det(m0 - p_big * I)) < 1e-12
+        @test abs(det(m0 - p_small * I)) < 1e-12
+
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, -1.0)
+        p_minus = -(tr / 2 - α0)
+        p_plus = -(tr / 2 + α0)
+        @test p_big === (real(p_minus) < real(p_plus) ? p_minus : p_plus)
+        @test p_small === (real(p_minus) < real(p_plus) ? p_plus : p_minus)
+        @test real(p_big) < real(p_small)
+        @test abs(det(m0 - (-p_big) * I)) < 1e-12
+        @test abs(det(m0 - (-p_small) * I)) < 1e-12
+    end
+
+    @testset "equal real parts keep the sig ≥ 0 ordering" begin
+        # tr = 2, det = 2 → α = √(−1). Both powers have the same real part.
+        m0 = ComplexF64[1 1; -1 1]
+        tr = m0[1, 1] + m0[2, 2]
+        block_det = m0[1, 1] * m0[2, 2] - m0[2, 1] * m0[1, 2]
+        α0 = sqrt(tr * tr / 4 - block_det)
+        @test real(α0) == 0
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, 1.0)
+        @test p_big === tr / 2 - α0
+        @test p_small === tr / 2 + α0
+        α, p_big, p_small = FFS.resonant_block_exponents(m0, -1.0)
+        @test p_big === -(tr / 2 + α0)
+        @test p_small === -(tr / 2 - α0)
+    end
+
+    @testset "Hermitian-structured block: shared imaginary shift, real eigenvectors, same powers on both sides" begin
+        # Shape the assembly produces: [−κ+σ/2 φ; γ conj(κ)−σ/2] with φ, γ real and κ → −κ on the left side.
+        κ, φ, γ = 0.3 + 0.02im, 0.7, 2.5
+        m_right = ComplexF64[-κ+0.5 φ; γ conj(κ)-0.5]
+        m_left = ComplexF64[κ-0.5 φ; γ -conj(κ)+0.5]
+        α_right, big_right, small_right = FFS.resonant_block_exponents(m_right, 1.0)
+        α_left, big_left, small_left = FFS.resonant_block_exponents(m_left, -1.0)
+        @test α_right ≈ sqrt((real(κ) - 0.5)^2 + φ * γ)
+        @test α_left ≈ α_right
+        @test imag(big_right) ≈ -imag(κ)
+        @test imag(small_right) ≈ -imag(κ)
+        @test big_left ≈ big_right
+        @test small_left ≈ small_right
+        # ξ′ entries of both leading eigenvectors are real, so the big/small cross-Wronskian 2α/φ is real.
+        @test abs(imag(-(m_right[1, 1] - big_right) / φ)) < 1e-14
+        @test abs(imag(-(m_right[1, 1] - small_right) / φ)) < 1e-14
+        @test -(m_right[1, 1] - small_right) / φ + (m_right[1, 1] - big_right) / φ ≈ 2 * α_right / φ
+    end
+
+    @testset "Mercier-unstable block: round-off sign of Im(tr²/4 − det) does not flip α or the big root" begin
+        # tr²/4 − det = −0.36 ± 1e-17i; without canonicalisation α = ±0.6i, so the big root depends on that sign.
+        for δ in (1e-17, -1e-17)
+            m0 = ComplexF64[0.1im 1.0; -0.36+δ*im 0.1im]
+            α, p_big, p_small = FFS.resonant_block_exponents(m0, 1.0)
+            @test real(α) == 0 && α ≈ 0.6im
+            @test p_big ≈ -0.5im
+            @test p_small ≈ 0.7im
+        end
+    end
+
+    @testset "column scaling multiplies each column by dpsi^power" begin
+        dpsi = 1.3e-4
+        p_big = ComplexF64(-1.2 + 0.1im)
+        p_small = ComplexF64(1.8)
+        big = ones(ComplexF64, 1, 1)
+        small = ones(ComplexF64, 1, 1)
+        FFS._apply_column_powers!(big, small, p_big, p_small, dpsi)
+        big_ref = ones(ComplexF64, 1, 1)
+        small_ref = ones(ComplexF64, 1, 1)
+        big_ref .*= dpsi^p_big
+        small_ref .*= dpsi^p_small
+        @test big == big_ref
+        @test small == small_ref
+    end
+end
+
+@testset "solve_el reports an aborted integration" begin
+    FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+    # du/dψ = u² blows up at ψ = 1, so the solver stops short of the interval's end.
+    blowup = FFS.ODEProblem((du, u, p, t) -> (du .= u .^ 2), ones(ComplexF64, 1, 1, 2), (0.0, 2.0))
+    @test_throws "Euler-Lagrange integration aborted" FFS.solve_el(blowup, 1e-8)
+    calm = FFS.ODEProblem((du, u, p, t) -> (du .= -u), ones(ComplexF64, 1, 1, 2), (0.0, 1.0))
+    @test FFS.solve_el(calm, 1e-8).u[end] ≈ fill(exp(-1), 1, 1, 2) rtol = 1e-6
+end

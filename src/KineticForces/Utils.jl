@@ -1,0 +1,398 @@
+"""
+    Utils
+
+Shared numerical helpers for KineticForces: the generic sign-change root scan and the
+kinetic-resonance surface locator built on it.
+"""
+
+"""
+    check_inner_quadrature(I, E, atol, rtol, what)
+
+Warn once per integral kind `what` and Julia session when the error estimate `E` exceeds `max(atol, rtol·‖I‖)`,
+i.e. QuadGK stopped short of its tolerance (evaluation cap or endpoint roundoff), or when `I` or `E` is not finite.
+"""
+function check_inner_quadrature(I, E, atol, rtol, what::String)
+    nI = norm(I)
+    (isfinite(nI) && isfinite(E) && E <= max(atol, rtol * nI)) ||
+        @warn "KineticForces $what integral did not converge: error estimate $E vs |I| = $nI" maxlog = 1 _id = Symbol(what)
+    return nothing
+end
+
+"""
+    find_sign_change_roots(f, grid) → Vector{Float64}
+
+Locate the zeros of a callable `f` by scanning consecutive `grid` nodes for strict sign
+changes (`f(x[i])·f(x[i+1]) < 0`) and refining each bracket with `Roots.Brent`. Returns
+the refined roots in grid order (empty if `f` never changes sign; a node value of exactly
+zero is not treated as a crossing).
+
+Single source of truth for the scan-then-Brent idiom — used for dB/dθ extrema in the
+bounce averaging and for kinetic-resonance surfaces in the ψ quadrature paneling.
+"""
+function find_sign_change_roots(f, grid)
+    roots = Float64[]
+    fprev = f(grid[firstindex(grid)])
+    for i in (firstindex(grid)+1):lastindex(grid)
+        fcur = f(grid[i])
+        if fprev * fcur < 0
+            push!(roots, find_zero(f, (grid[i-1], grid[i]), Roots.Brent()))
+        end
+        fprev = fcur
+    end
+    return roots
+end
+
+"""
+    _resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n, nl, xeval=2.5) → Vector{Float64}
+
+Scan `grid` for the zeros of the resonance operator
+`Ω_ℓ(x; ψ) = ℓ·ω_b(ψ)·√x + n·(ω_E(ψ) + ω_d(ψ)·x)` at energy `x = xeval`, for every bounce
+harmonic ℓ ∈ −nl:nl, given per-ψ frequency callables. `xeval` defaults to 2.5, the peak of the
+Maxwellian-weighted drive `x^2.5·e^−x`. Roots from all harmonics are concatenated, not deduplicated.
+"""
+function _resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n::Int, nl::Int, xeval::Float64=2.5)
+    nodes = Float64[]
+    sx = sqrt(xeval)
+    for l in -nl:nl
+        append!(nodes, find_sign_change_roots(psi -> l * wbhat_f(psi) * sx + n * (welec_f(psi) + wdhat_f(psi) * xeval), grid))
+    end
+    return nodes
+end
+
+"""
+    kinetic_resonance_psi_nodes(kinetic_profiles, equil; n, nl, zi=1, mi=2, electron=false, wdfac=1.0, xeval=2.5) → Vector{Float64}
+
+ψ_N locations of kinetic resonance surfaces, for use as ψ-quadrature panel boundaries and
+equilibrium grid knots: the zeros of the trapped-branch resonance denominator
+`Ω(x) = ℓ·ω_b·√x + n·(ω_E + ω_d·x)` at `x = xeval` for every ℓ ∈ −nl:nl, where the NTV torque
+density peaks (Logan & Park, Phys. Plasmas 20, 122507 (2013), §IV–V). `xeval` defaults to 2.5, the
+peak of the Maxwellian-weighted drive `x^2.5·e^−x`. The ℓ = 0 node is the ω_d-shifted ExB
+(superbanana-plateau) resonance.
+
+The frequencies are the cheap large-aspect-ratio closed forms
+`ω_b = (π/4)·√(ε/2)·wtran` and `ω_d = q·T_s/(2·ε·R₀²·Z·e·B₀)·wdfac`, with ε = ⟨r⟩/⟨R⟩ clamped
+away from the axis; no bounce averaging, which is enough for panel placement.
+"""
+function kinetic_resonance_psi_nodes(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
+    n::Int, nl::Int, zi::Int=1, mi::Int=2, electron::Bool=false, wdfac::Float64=1.0, xeval::Float64=2.5)
+    chrg = electron ? -e : zi * e
+    mass = electron ? me : mi * mp
+    T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline
+    ro = equil.ro
+    bo = equil.params.b0
+    q_spline = equil.profiles.q_spline
+    avg_r = equil.geometry.avg_r_spline
+    avg_R = equil.geometry.avg_R_spline
+
+    # ε clamp bounds wdhat ∝ 1/ε near the axis; adequate for panel placement only.
+    epsr_f = psi -> max(avg_r(psi) / avg_R(psi), 1e-6)
+    wbhat_f = psi -> (π / 4) * sqrt(epsr_f(psi) / 2) * sqrt(2 * T_spline(psi) / mass) / (q_spline(psi) * ro)
+    wdhat_f = psi -> q_spline(psi) * T_spline(psi) / (2 * epsr_f(psi) * ro^2 * chrg * bo) * wdfac
+
+    grid = filter(x -> x > 0, kinetic_profiles.xs)
+    return _resonance_nodes_from_frequencies(wbhat_f, kinetic_profiles.omegaE_spline, wdhat_f, grid; n, nl, xeval)
+end
+
+"""
+    orbit_widths(psi, T_spline, q_spline, avg_r, avg_R, mass, chrg, ro, bo)
+
+Thermal orbit-width scales of one species at ψ: the minor radius ⟨r⟩ and inverse aspect ratio ε,
+the gyroradius ρ = √(2mT)/(Z·e·B₀), and the three widths that bound the zero-orbit-width ordering —
+potato (q²ρ²R₀)^(1/3), banana qρ/√ε, and poloidal gyroradius qρ/ε. Single source of truth for both
+the validity boundary and the diagnostic profiles.
+"""
+@inline function orbit_widths(psi::Float64, T_spline, q_spline, avg_r, avg_R,
+    mass::Float64, chrg::Float64, ro::Float64, bo::Float64)
+    r = avg_r(psi)
+    eps = max(r / avg_R(psi), 1e-6)
+    rho = sqrt(2 * mass * T_spline(psi)) / (abs(chrg) * bo)
+    q = abs(q_spline(psi))
+    return (; r, eps, rho,
+        w_potato=cbrt(q^2 * rho^2 * ro),
+        rho_banana=q * rho / sqrt(eps),
+        rho_theta=q * rho / eps)
+end
+
+"""
+    kinetic_axis_validity_psi(kinetic_profiles, equil; zi=1, mi=2, electron=false) → Float64
+
+ψ_N below which the zero-orbit-width drift-kinetic ordering fails: the outermost ψ on the
+kinetic-profile grid where any of the three thermal orbit-width scales reaches the local minor
+radius ⟨r⟩ — potato width `(q²ρ²R₀)^(1/3)`, banana width `q·ρ/√ε`, and poloidal gyroradius
+`q·ρ/ε` (ε = ⟨r⟩/⟨R⟩, clamped as in `kinetic_resonance_psi_nodes`; thermal gyroradius
+ρ = √(2·m·T)/(Z·e·B₀) of the computed species). Only the region contiguous with the axis counts;
+a later re-trigger only warns. Returns 0.0 when no criterion is met at the axis.
+"""
+function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
+    zi::Int=1, mi::Int=2, electron::Bool=false)
+    chrg = electron ? e : zi * e
+    mass = electron ? me : mi * mp
+    T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline
+    q_spline = equil.profiles.q_spline
+    avg_r = equil.geometry.avg_r_spline
+    avg_R = equil.geometry.avg_R_spline
+    ro = abs(equil.ro)
+    bo = abs(equil.params.b0)
+    # Only the region contiguous with the axis counts: q is not monotonic, so an edge q rise or a
+    # pedestal gradient can re-trigger the criterion far out, where the model has not lost validity.
+    psi_c = 0.0
+    psi_outer = 0.0
+    contiguous = true
+    for psi in kinetic_profiles.xs
+        psi <= 0 && continue
+        w = orbit_widths(psi, T_spline, q_spline, avg_r, avg_R, mass, chrg, ro, bo)
+        w.r <= 0 && continue
+        if max(w.w_potato, w.rho_banana, w.rho_theta) >= w.r
+            contiguous ? (psi_c = psi) : (psi_outer = max(psi_outer, psi))
+        else
+            contiguous = false
+        end
+    end
+    psi_outer > 0 && @warn "kinetic_axis_validity_psi: orbit widths also reach ⟨r⟩ out to ψ=$(round(psi_outer; sigdigits=3)), " *
+          "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed" maxlog = 1
+    return psi_c
+end
+
+"""
+    kinetic_axis_validity_psi(species, equil) → Float64
+
+Near-axis validity boundary for a resolved multi-species set: the largest single-species ψ_c, so
+suppression covers every ψ where *any* species violates the zero-orbit-width ordering. Heavier or
+less-charged species carry wider orbits (ρ ∝ √(mT)/(Z e B₀)), so the maximum is normally set by the
+main ion; impurities move it only if their √m/Z exceeds the main ion's.
+"""
+function kinetic_axis_validity_psi(species::AbstractVector{<:Equilibrium.ResolvedNTVSpecies}, equil)::Float64
+    psi_c = 0.0
+    for sp in species
+        psi_c = max(psi_c, kinetic_axis_validity_psi(sp.profiles, equil; zi=sp.z, mi=sp.m, electron=sp.electron))
+    end
+    return psi_c
+end
+
+"""
+    kinetic_axis_validity_envelope(psi, psi_c) → Float64
+
+C² quintic smoothstep for the near-axis kinetic suppression: 0 for ψ ≤ ψ_c (drift-kinetic model
+invalid; kernel evaluation may be skipped), rising over `[ψ_c, 2ψ_c]`, 1 above. The transition
+width is tied to ψ_c itself, so there is no independent width parameter. `psi_c ≤ 0` returns 1
+(no suppression).
+"""
+function kinetic_axis_validity_envelope(psi::Float64, psi_c::Float64)
+    psi_c <= 0 && return 1.0
+    t = (psi - psi_c) / psi_c
+    t <= 0 && return 0.0
+    t >= 1 && return 1.0
+    return t^3 * (10 + t * (6 * t - 15))
+end
+
+"""
+    kinetic_validity_profiles(kinetic_profiles, equil; zi=1, mi=2, electron=false) → NamedTuple
+
+Radial profiles of the drift-kinetic validity diagnostics, on the kinetic-profile ψ grid:
+`psi`; the thermal orbit-width scales `rho_i` (gyroradius √(2mT)/(Z·e·B₀)), `rho_banana`
+(q·ρ/√ε), `rho_theta` (poloidal gyroradius q·ρ/ε), `w_potato` ((q²ρ²R₀)^(1/3)); the local
+geometry `r_minor` (⟨r⟩) and `d_separatrix` (⟨r⟩(1) − ⟨r⟩(ψ)); the profile gradient lengths
+`L_p` and `L_q` (|X|·|dr/dψ|/|dX/dψ|, Inf where the profile is flat); the near-axis suppression
+boundary `psi_c` (`kinetic_axis_validity_psi`) with its `envelope`; and `is_valid` — true where
+every zero-orbit-width ordering holds at coefficient 1: max orbit width < r, ρ_banana < L_p and
+L_q, and max(ρ_i, ρ_banana, ρ_θ) < d_separatrix. Validity is diagnostic only — nothing outside
+the near-axis envelope is suppressed (the far edge and steep-gradient regions are flagged, not
+zeroed, since they can dominate the physical NTV).
+"""
+function kinetic_validity_profiles(kinetic_profiles::Equilibrium.KineticProfileSplines, equil;
+    zi::Int=1, mi::Int=2, electron::Bool=false)
+    chrg = electron ? e : zi * e
+    mass = electron ? me : mi * mp
+    T_spline = electron ? kinetic_profiles.Te_spline : kinetic_profiles.Ti_spline
+    q_spline, q_deriv = equil.profiles.q_spline, equil.profiles.q_deriv
+    P_spline, P_deriv = equil.profiles.P_spline, equil.profiles.P_deriv
+    avg_r = equil.geometry.avg_r_spline
+    avg_R = equil.geometry.avg_R_spline
+    r_deriv = deriv1(avg_r)
+    ro = abs(equil.ro)
+    bo = abs(equil.params.b0)
+    r_sep = avg_r(1.0)
+    psi_c = kinetic_axis_validity_psi(kinetic_profiles, equil; zi=zi, mi=mi, electron=electron)
+
+    psi = [x for x in kinetic_profiles.xs if 0 < x <= 1]
+    n = length(psi)
+    rho_i = zeros(n)
+    rho_banana = zeros(n)
+    rho_theta = zeros(n)
+    w_potato = zeros(n)
+    r_minor = zeros(n)
+    L_p = zeros(n)
+    L_q = zeros(n)
+    d_separatrix = zeros(n)
+    envelope = zeros(n)
+    is_valid = falses(n)
+    for (i, x) in pairs(psi)
+        r = avg_r(x)
+        w = orbit_widths(x, T_spline, q_spline, avg_r, avg_R, mass, chrg, ro, bo)
+        rho_i[i] = w.rho
+        rho_banana[i] = w.rho_banana
+        rho_theta[i] = w.rho_theta
+        w_potato[i] = w.w_potato
+        q = abs(q_spline(x))
+        drdpsi = abs(r_deriv(x))
+        r_minor[i] = r
+        d_separatrix[i] = max(r_sep - r, 0.0)
+        dP = abs(P_deriv(x))
+        L_p[i] = dP > 0 ? abs(P_spline(x)) * drdpsi / dP : Inf
+        dq = abs(q_deriv(x))
+        L_q[i] = dq > 0 ? q * drdpsi / dq : Inf
+        envelope[i] = kinetic_axis_validity_envelope(x, psi_c)
+        w_orbit = max(w_potato[i], rho_banana[i], rho_theta[i])
+        is_valid[i] = w_orbit < r && rho_banana[i] < L_p[i] && rho_banana[i] < L_q[i] &&
+                      max(rho_i[i], rho_banana[i], rho_theta[i]) < d_separatrix[i]
+    end
+    return (psi=psi, rho_i=rho_i, rho_banana=rho_banana, rho_theta=rho_theta, w_potato=w_potato,
+        r_minor=r_minor, L_p=L_p, L_q=L_q, d_separatrix=d_separatrix,
+        psi_c=psi_c, envelope=envelope, is_valid=is_valid)
+end
+
+# Bound on how far clearing rationals out of the envelope band may push ψ_c, as a multiple of the
+# orbit-width boundary; beyond it the uncleared boundary is kept (see `clear_rational_windows`).
+const VALIDITY_CLEAR_MAX_FACTOR = 1.5
+
+"""
+    clear_rational_windows(psi_c, rationals) → Float64
+
+Move the near-axis validity boundary outward until no rational surface lies in the envelope's
+transition band `[ψ_c - RATIONAL_RES_RADIUS, 2ψ_c]`. A rational in the band has its near-singular
+kinetic increments multiplied by a steep near-zero envelope, which the matrix splines cannot
+represent and which propagates NaNs into the stability solve.
+
+The move is capped at `VALIDITY_CLEAR_MAX_FACTOR`× the original ψ_c; past that the uncleared
+boundary is returned with a warning, and a run that then produces NaNs needs
+`axis_validity_suppression = false` or a finer ψ grid.
+"""
+function clear_rational_windows(psi_c::Float64, rationals::Vector{Float64})::Float64
+    psi_c <= 0 && return psi_c
+    psi_c0 = psi_c
+    limit = VALIDITY_CLEAR_MAX_FACTOR * psi_c0
+    for _ in 1:length(rationals)
+        inside = filter(r -> psi_c - Equilibrium.RATIONAL_RES_RADIUS <= r <= 2 * psi_c, rationals)
+        isempty(inside) && break
+        psi_c = maximum(inside) + Equilibrium.RATIONAL_RES_RADIUS
+        if psi_c > limit
+            @warn "clear_rational_windows: clearing the envelope band of rationals would push ψ_c from " *
+                  "$(round(psi_c0; sigdigits=3)) past $(round(limit; sigdigits=3)); keeping the orbit-width boundary. " *
+                  "A rational then sits in the transition band — if the stability solve produces NaNs, set " *
+                  "axis_validity_suppression = false or refine the ψ grid there."
+            return psi_c0
+        end
+    end
+    return psi_c
+end
+
+"""
+    main_ion(equil) → (z, m)
+
+Charge and mass (proton masses) of the reference main ion of the equilibrium's kinetic data: the
+first of `equil.kinetic.ion_species`. The single-species NTV runs on it.
+"""
+function main_ion(equil)
+    equil.kinetic === nothing && error("KineticForces needs kinetic profiles: set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
+    ion = first(equil.kinetic.ion_species)
+    return (ion.z, ion.m)
+end
+
+# One main ion carrying all of n_i: the NTV takes its single-species path rather than the species sum.
+_single_main_ion(data) =
+    length(data.ion_species) == 1 && first(data.ion_species).fraction == 1.0 && isempty(first(data.ion_species).density)
+
+"""
+    ntv_profiles(kf_ctrl, equil) → Union{Nothing,KineticProfileSplines}
+
+The NTV view of the kinetic profiles attached to `equil` (`equil.kinetic`), with its main-ion and
+impurity charges and masses and the profile scale factors of `kf_ctrl`; `nothing` when the
+equilibrium carries no kinetic profiles.
+"""
+function ntv_profiles(kf_ctrl::KineticForcesControl, equil)
+    equil.kinetic === nothing && return nothing
+    zi, mi = main_ion(equil)
+    return Equilibrium.kinetic_profile_splines(equil.kinetic;
+        zi=zi, zimp=equil.kinetic.impurity_charge, mi=mi, mimp=equil.kinetic.impurity_mass,
+        density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+        ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+        chi1=2π * equil.psio)
+end
+
+"""
+    ntv_species(kf_ctrl, equil) → Union{Nothing,Vector{ResolvedNTVSpecies}}
+
+The resolved NTV species set of the kinetic profiles attached to `equil` (see
+`Equilibrium.resolve_ntv_species`) when the run sums species (several main ions, a main ion with a
+partial or explicit density, or `kf_ctrl.electron`); `nothing` for the single main-ion run or when
+the equilibrium carries no kinetic profiles.
+"""
+function ntv_species(kf_ctrl::KineticForcesControl, equil)
+    data = equil.kinetic
+    (data !== nothing && (!_single_main_ion(data) || kf_ctrl.electron)) || return nothing
+    return Equilibrium.resolve_ntv_species(data, data.ion_species;
+        electron=kf_ctrl.electron, zimp=data.impurity_charge, mimp=data.impurity_mass,
+        density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+        ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor)
+end
+
+"""
+    axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals=Float64[]) → Float64
+
+ψ_c for a run: the widest-orbit species' near-axis validity boundary, cleared of `rationals` by
+`clear_rational_windows`, or `0.0` when suppression is disabled or no kinetic profiles were loaded.
+Falls back to the equilibrium's main ion when the resolved species set is unavailable.
+"""
+function axis_validity_boundary(kf_ctrl::KineticForcesControl, species, kinetic_profiles, equil,
+    rationals::Vector{Float64}=Float64[])::Float64
+    (kf_ctrl.axis_validity_suppression && kinetic_profiles !== nothing) || return 0.0
+    psi_c =
+        species === nothing ?
+        kinetic_axis_validity_psi(kinetic_profiles, equil; zi=main_ion(equil)[1], mi=main_ion(equil)[2], electron=kf_ctrl.electron) :
+        kinetic_axis_validity_psi(species, equil)
+    return clear_rational_windows(psi_c, rationals)
+end
+
+"""
+    resonance_grid_nodes(ctrl, kf_ctrl, kinetic_profiles, species, equil, intr; rationals=Float64[]) → Vector{Float64}
+
+ψ_N locations to pin into the two-pass equilibrium grid for a self-consistent kinetic run: the
+Ω_ℓ = 0 resonance surfaces of every toroidal mode in the run, outside the near-axis validity region.
+Empty for ideal runs. `rationals` is the pass-1 rational-surface list the boundary is cleared
+against; the caller supplies it because `intr.sing` is not populated until after the grid is built.
+"""
+function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profiles, species,
+    equil, intr; rationals::Vector{Float64}=Float64[])::Vector{Float64}
+    nodes = Float64[]
+    (ForceFreeStates.kinetic_source(ctrl.kinetic) isa KineticForcesControl && kinetic_profiles !== nothing) || return nodes
+    for n_res in intr.nlow:intr.nhigh
+        n_res == 0 && continue
+        append!(
+            nodes,
+            kinetic_resonance_psi_nodes(kinetic_profiles, equil;
+                n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=main_ion(equil)[1], mi=main_ion(equil)[2],
+                electron=kf_ctrl.electron, wdfac=kf_ctrl.magnetic_drift_factor)
+        )
+    end
+    psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
+    psi_c > 0 && filter!(p -> p > psi_c, nodes)
+    return nodes
+end
+
+"""
+    kinetic_validity_profiles(species, equil) → NamedTuple
+
+Validity diagnostics for a resolved multi-species set, computed for the species that sets the
+boundary (largest ψ_c). Reporting one species' profiles alongside another's ψ_c would make
+`is_valid` contradict `envelope` in the same output group.
+"""
+function kinetic_validity_profiles(species::AbstractVector{<:Equilibrium.ResolvedNTVSpecies}, equil)
+    isempty(species) && error("kinetic_validity_profiles: empty species set")
+    widest = species[1]
+    psi_c = -1.0
+    for sp in species
+        c = kinetic_axis_validity_psi(sp.profiles, equil; zi=sp.z, mi=sp.m, electron=sp.electron)
+        c > psi_c && (psi_c = c; widest = sp)
+    end
+    return kinetic_validity_profiles(widest.profiles, equil; zi=widest.z, mi=widest.m, electron=widest.electron)
+end

@@ -1,56 +1,64 @@
-# JPEC.jl
-
-*A Julia implementation of the Generalized Perturbed Equilibrium Code suite*
-
-JPEC.jl is a work-in-progress Julia port of the [Generalized Perturbed Equilibrium Code (GPEC)](https://github.com/PrincetonUniversity/GPEC) suite, providing tools for magnetohydrodynamic (MHD) equilibrium and stability analysis in fusion plasmas.
-
-## Overview
-
-JPEC provides functionality for:
-
-- **some stuff** Fill this in later
-
-## Installation
-
-```julia
-using Pkg
-Pkg.add("JPEC")
+```@meta
+CurrentModule = GeneralizedPerturbedEquilibrium
 ```
 
-## Quick Start
-
-```julia
-using JPEC
-
-# Great question
+```@eval
+using Markdown
+using GeneralizedPerturbedEquilibrium
+readme = read(joinpath(pkgdir(GeneralizedPerturbedEquilibrium), "README.md"), String)
+# The "Full documentation" self-link belongs in the GitHub README, not on the doc site itself.
+# If that line is ever removed from README.md this `replace` silently no-ops, which is fine —
+# the strip is defensive, not load-bearing.
+readme = replace(readme, r"^Full documentation:.*$"m => "")
+Markdown.parse(readme)
 ```
 
-## Modules
+## What GPEC computes
 
-```@contents
-Pages = ["splines.md", "vacuum.md", "equilibrium.md"]
-Depth = 1
-```
+One deck, `gpec.toml`, runs the stages below in order, each when its section is present, into one output file, `gpec.h5`.
+The [Workflow](workflow.md) page maps every stage to its physics, deck sections and datasets.
 
-## Examples
+| Stage | Deck section | Main output |
+|---|---|---|
+| `Equilibrium` — the axisymmetric equilibrium, its flux-surface coordinates and rational surfaces | `[Equilibrium]` | `Equilibrium/` |
+| `ForceFreeStates` — ideal (or drift-kinetic) MHD stability by the Newcomb criterion, with the `Vacuum` response of the `[Wall]` (a wall case is a separate deck from a response case) | `[ForceFreeStates]` | `ForceFreeStates/FreeBoundaryStability/`, `SingularSurfaces/Delta_prime_matrix` |
+| `LocalStability` — Mercier, resistive-interchange and ballooning criteria | `[LocalStability]` | `LocalStability/` |
+| `Match` — the resistive inner layer matched to the outer-region Δ′ | `[Match]` | `SingularSurfaces/Match/` |
+| `PerturbedEquilibrium` — the plasma response to the field of `[ForcingTerms]`: resonant fields, islands, overlap; needs a `"Forward"` solve without a wall | `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/` |
+| `KineticForces` — the neoclassical toroidal viscosity torque of that response | `[KineticForces]` | `KineticForces/` |
+| `ErrorFields` — coil tolerances, locking risk and correction limits | `[ErrorFields]` | `ErrorFields/Risk/` |
+| `Tearing` — tearing growth rates and critical resonant fields from an inner-layer model | `[Tearing]` | `Tearing/Roots/` |
 
-The package includes several Jupyter notebook examples:
+### Coming from the Fortran codes
 
-- `example.ipynb`: Fill this in later
+| Fortran | Here |
+|---|---|
+| DCON | `[ForceFreeStates]` with `integrator = "Forward"` |
+| STRIDE | `integrator = "Riccati"`, with Δ′ in `SingularSurfaces/Delta_prime_matrix` |
+| RDCON and its `rmatch` | `integrator = "Galerkin"` and `[Match]` |
+| VACUUM | the `Vacuum` module, with the wall in `[Wall]` |
+| GPEC | `[ForcingTerms]` and `[PerturbedEquilibrium]` |
+| PENTRC | `[KineticForces]` |
+| SLAYER | `[Tearing]` with `inner_model = "SLAYER"`, options in `[SLAYER]` |
+| `dcon.in`, `vac.in`, `gpec.in`, `pentrc.in`, … | one `gpec.toml`, and one `gpec.h5` for every result |
 
-## Developer Notes
+The [Conventions Reference](conventions.md) states the coordinates, signs and normalizations, including where they differ from the Fortran outputs.
 
-### Commit Messages
+## Documentation
 
-To assist with release note compilation, please follow the commit message format:
-```
-CODE - TAG - Detailed message
-```
-where CODE is EQUIL, DCON, VAC, etc. and TAGs are descriptors like WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc.
+- [**Setup**](set_up.md) — Installation on Linux, macOS and Windows (WSL), and a first run
+- [**Workflow**](workflow.md) — The pipeline: physics of each stage, deck sections, examples and the output file
+- [**Scripting API**](api.md) — The same pipeline from Julia scripts
+- [**Conventions Reference**](conventions.md) — Coordinates, signs, normalizations and field amplitudes
+- [**Modules**](equilibrium.md) — Governing equations, deck keys, outputs and function reference per module
+- [**Citations**](citations.md) — Papers underpinning GPEC's algorithms
+- [**Developer Notes**](developer_notes.md) — Git workflow, commit conventions and the regression-testing harness
+- [**Introduction slides**](https://docs.google.com/presentation/d/1Iey7bsvpDG1WDRow24OD0NOWyKYOXMs0U7QLc7Y-wj4/edit?slide=id.g2798d4bd85b_0_15#slide=id.g2798d4bd85b_0_15) — An overview of GPEC and its physics
 
-Additionally, please see [this](https://docs.google.com/document/d/1XAOTz1IV8ErZAAk-iSuEuddNOLB5XcoVZsAbPKRUUuA) google doc for more details on using the GitHub.
+## Contact
 
-## Links
+GPEC is developed and maintained by **Nikolas Logan** ([ncl2128@columbia.edu](mailto:ncl2128@columbia.edu)) and **Jong-Kyu Park** ([jkpark@snu.ac.kr](mailto:jkpark@snu.ac.kr)) as lead developers.
 
-- [Source Repository](https://github.com/OpenFUSIONToolkit/JPEC)
-- [Original GPEC](https://github.com/PrincetonUniversity/GPEC)
+New users and developers are warmly encouraged to reach out — whether you have questions about running GPEC, want to discuss the physics, or are interested in contributing or collaborating, please get in touch.
+
+For bug reports and feature requests, please open an issue on the [GitHub repository](https://github.com/OpenFUSIONToolkit/GPEC/issues).

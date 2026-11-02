@@ -1,0 +1,198 @@
+# Per-singular-surface Glasser-Greene-Johnson geometric coefficients (E, F, G, H, K, M) and the flux-surface
+# averages needed for τ_A / τ_R, the toroidal critical-Δ factor and neoclassical resistivity.
+#
+# θ-integrands, each weighted by `jac / v1` before integration (1-6 follow Fortran `resist_eval`):
+#   1: B² / |∇ψ|²   2: 1 / |∇ψ|²   3: 1 / B²   4: 1 / (B² · |∇ψ|²)   5: B²   6: |∇ψ|² / B²
+#   7: B (for the Lin-Liu & Miller 1995 trapped fraction)   8: |∇ψ|² (toroidal critical-Δ, ⟨|∇V|²⟩ = v1²⟨|∇ψ_N|²⟩)
+
+"""
+    ResistGeometry
+
+Per-singular-surface Glasser-Greene-Johnson geometric coefficients and
+supporting flux-surface averages. All averages ⟨·⟩ are normalized flux-surface
+averages (⟨1⟩ = 1), and `‖∇ψ_N‖` is the gradient of the normalized poloidal flux.
+
+| field                 | meaning                                                  |
+|:--------------------- |:-------------------------------------------------------- |
+| `E`, `F`              | Glasser interchange parameters (enter `D_I = E+F+H-¼`)   |
+| `G`                   | Coupling coefficient (curvature × pressure gradient)     |
+| `H`                   | Pfirsch-Schlüter coefficient                             |
+| `K`                   | Glasser parameter                                        |
+| `M`                   | Mass factor                                              |
+| `avg_bsq_over_dpsisq` | ⟨B²/‖∇ψ_N‖²⟩ — needed for τ_R                            |
+| `avg_bsq`             | ⟨B²⟩ — needed for τ_R                                    |
+| `avg_dpsisq`          | ⟨‖∇ψ_N‖²⟩ — needed for the toroidal critical-Δ           |
+| `f_trap`              | Lin-Liu & Miller 1995 trapped-particle fraction          |
+| `R_major`             | major radius (R_max + R_min)/2 over the surface, in m    |
+| `eps_local`           | (R_max − R_min)/2 / R_major — local inverse aspect ratio |
+| `p_local`             | Plasma pressure at this surface [Pa]                     |
+| `p1_local`            | dp/dψ at this surface                                    |
+| `v1_local`            | dV/dψ at this surface                                    |
+
+`H` equals the `H` from `mercier_scan!` (`LocalStability/h`). `f_trap`, `R_major` and `eps_local` feed
+`NeoclassicalResistivity.eta_neoclassical` (Sauter, Angioni & Lin-Liu 1999, Phys. Plasmas 6, 2834;
+Lin-Liu & Miller 1995, Phys. Plasmas 2, 1666).
+"""
+struct ResistGeometry
+    E::Float64
+    F::Float64
+    G::Float64
+    H::Float64
+    K::Float64
+    M::Float64
+    avg_bsq_over_dpsisq::Float64
+    avg_bsq::Float64
+    avg_dpsisq::Float64
+    f_trap::Float64
+    R_major::Float64
+    eps_local::Float64
+    p_local::Float64
+    p1_local::Float64
+    v1_local::Float64
+end
+
+"""
+    resist_geometry(equil, psifac, q1; gamma=5/3) -> ResistGeometry
+
+Glasser, Greene & Johnson 1975 (Phys. Fluids 18, 875) resistive-layer coefficients at `psifac`,
+geometric part only (no η or ρ); `ggj_parameters` adds τ_A and τ_R. Port of Fortran RDCON `resist_eval`.
+
+# Arguments
+
+  - `equil::PlasmaEquilibrium` — the fully-solved equilibrium
+  - `psifac` — normalized flux coordinate of the singular surface
+  - `q1`     — dq/dψ at this surface (from `SingType.q1`)
+
+# Keyword arguments
+
+  - `gamma`  — adiabatic index (default 5/3)
+
+!!! note "Contract"
+
+    `psifac` must be an interior surface (`0 < ψ < 1`) with nonzero `q1`, `p1 = dp/dψ` and `p`; the axis,
+    a flat-pressure or a zero-shear surface gives `Inf`/`NaN`.
+"""
+function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
+    psifac::Real, q1::Real; gamma::Real=5 / 3)
+    profiles = equil.profiles
+    twopi = 2π
+    chi1 = twopi * equil.psio
+    psi_f = Float64(psifac)
+
+    twopif = profiles.F_spline(psi_f)
+    p = profiles.P_spline(psi_f)
+    p1 = profiles.P_deriv(psi_f)
+    v1 = profiles.dVdpsi_spline(psi_f)
+    v2 = profiles.dVdpsi_deriv(psi_f)
+    q = profiles.q_spline(psi_f)
+
+    # θ-integrands (see file header) plus running extrema of B and R for f_trap and ε.
+    ntheta = length(equil.rzphi_ys)
+    ff = zeros(Float64, ntheta, 8)
+    B_max = -Inf
+    B_min = Inf
+    R_max = -Inf
+    R_min = Inf
+    for itheta in 1:ntheta
+        theta = equil.rzphi_ys[itheta]
+        f1 = equil.rzphi_rsquared((psi_f, theta))
+        f2 = equil.rzphi_offset((psi_f, theta))
+        jac = equil.rzphi_jac((psi_f, theta))
+        fy1 = FastInterpolations.deriv_view(equil.rzphi_rsquared, (0, 1))((psi_f, theta))
+        fy2 = FastInterpolations.deriv_view(equil.rzphi_offset, (0, 1))((psi_f, theta))
+        fy3 = FastInterpolations.deriv_view(equil.rzphi_nu, (0, 1))((psi_f, theta))
+
+        rfac = sqrt(f1)
+        eta = twopi * (theta + f2)
+        r = equil.ro + rfac * cos(eta)
+
+        v21 = fy1 / (2 * rfac * jac)
+        v22 = (1 + fy2) * twopi * rfac / jac
+        v23 = fy3 * r / jac
+        v33 = twopi * r / jac
+        bsq = chi1^2 * (v21^2 + v22^2 + (v23 + q * v33)^2)
+        dpsisq = (twopi * r)^2 * (v21^2 + v22^2)
+
+        B_here = sqrt(bsq)
+        B_max = max(B_max, B_here)
+        B_min = min(B_min, B_here)
+        R_max = max(R_max, r)
+        R_min = min(R_min, r)
+
+        ff[itheta, 1] = bsq / dpsisq
+        ff[itheta, 2] = 1.0 / dpsisq
+        ff[itheta, 3] = 1.0 / bsq
+        ff[itheta, 4] = 1.0 / (bsq * dpsisq)
+        ff[itheta, 5] = bsq
+        ff[itheta, 6] = dpsisq / bsq
+        ff[itheta, 7] = B_here
+        ff[itheta, 8] = dpsisq
+        @views ff[itheta, :] .*= jac / v1
+    end
+    # Snap the repeated endpoint exactly equal to the start
+    @views ff[end, :] .= ff[1, :]
+
+    # Periodic cubic-spline θ-integral of each column, as in Mercier.jl
+    itp = cubic_interp(equil.rzphi_ys, Series(ff); bc=PeriodicBC())
+    avg = FastInterpolations.integrate(itp)
+    avg_B = avg[7]
+    R_major = 0.5 * (R_max + R_min)
+    eps_local = R_major > 0 ? 0.5 * (R_max - R_min) / R_major : 0.0
+    f_trap = Utilities.NeoclassicalResistivity.trapped_fraction(avg_B, avg[5], B_min, B_max)
+
+    # GGJ coefficients (Fortran RDCON resist_eval)
+    E_coef = p1 * v1 / (q1 * chi1^2)^2 * avg[1] *
+             (twopif * q1 * chi1 / avg[5] - v2)
+    F_coef = (p1 * v1 / (q1 * chi1^2))^2 *
+             (avg[1] * avg[3] + (twopif / chi1)^2 *
+                                (avg[1] * avg[4] - avg[2]^2))
+    H_coef = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
+    M_coef = avg[1] *
+             (avg[6] + (twopif / chi1)^2 * (avg[3] - 1.0 / avg[5]))
+    G_coef = avg[5] / (M_coef * gamma * p)
+    K_coef = (q1 * chi1^2 / (p1 * v1))^2 *
+             avg[5] / (M_coef * avg[1])
+
+    return ResistGeometry(
+        E_coef, F_coef, G_coef, H_coef, K_coef, M_coef,
+        avg[1], avg[5], avg[8],
+        f_trap, R_major, eps_local,
+        p, p1, v1
+    )
+end
+
+"""
+    ggj_parameters(sing, equil; eta, rho, gamma=5/3, ising=0) -> InnerLayer.GGJParameters
+
+GGJ layer parameters at `sing` from its `restype` geometry and the local η (Ω·m) and ρ (kg/m³).
+"""
+function ggj_parameters(sing::SingType, equil::Equilibrium.PlasmaEquilibrium;
+    eta::Real, rho::Real, gamma::Real=5 / 3, ising::Int=0)
+    rg = sing.restype
+    rg === nothing && throw(ArgumentError("ggj_parameters: the surface at ψ=$(sing.psifac) has restype = nothing; run resist_eval_all! first"))
+    equil.params.volume === nothing && throw(ArgumentError("ggj_parameters: equil.params.volume is nothing"))
+    MU_0 = Utilities.PhysicalConstants.MU_0
+    chi1 = 2π * equil.psio
+    taua = sqrt(rho * rg.M * MU_0) / abs(2π * Int(sing.n[1]) * sing.q1 * chi1 / rg.v1_local)
+    taur = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta
+    G = rg.avg_bsq / (rg.M * gamma * rg.p_local)
+    return InnerLayer.GGJParameters(; E=rg.E, F=rg.F, G=G, H=rg.H, K=rg.K, M=rg.M,
+        taua=taua, taur=taur, v1=rg.v1_local / equil.params.volume, ising=ising)
+end
+
+"""
+    resist_eval_all!(intr::ForceFreeStatesInternal, equil; gamma=5/3)
+
+Populate `sing.restype` for every `SingType` in `intr.sing` using
+`resist_geometry`. No-op for surfaces whose `restype` has already been
+filled.
+"""
+function resist_eval_all!(intr::ForceFreeStatesInternal,
+    equil::Equilibrium.PlasmaEquilibrium;
+    gamma::Real=5 / 3)
+    for sing in intr.sing
+        sing.restype === nothing || continue
+        sing.restype = resist_geometry(equil, sing.psifac, sing.q1; gamma=gamma)
+    end
+    return intr
+end

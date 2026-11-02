@@ -1,0 +1,350 @@
+using HDF5
+
+@testset "Multi-ion NTV" begin
+    EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+    KF = GeneralizedPerturbedEquilibrium.KineticForces
+
+    @testset "multi_ion_composition" begin
+        ne = 1.24e20
+        ni = 1.13e20
+        zimp = 6
+        mimp = 12
+        # Reduces exactly to the single-ion formula Zeff = zimp - (ni/ne)*zi*(zimp-zi).
+        for zi in (1, 2)
+            zeff_old = zimp - (ni / ne) * zi * (zimp - zi)
+            zeff, zpitch, nmain, nimp = EQ.multi_ion_composition([zi], [ni], ne; zimp=zimp, mimp=mimp)
+            @test zeff ≈ zeff_old rtol = 1e-12
+            @test nmain ≈ ni
+        end
+        # 50/50 D-T with total ni == single ion at total ni; quasineutrality closes the impurity.
+        zdt, _, nmdt, nimpdt = EQ.multi_ion_composition([1, 1], [ni / 2, ni / 2], ne; zimp=zimp, mimp=mimp)
+        zsingle, _, _, _ = EQ.multi_ion_composition([1], [ni], ne; zimp=zimp, mimp=mimp)
+        @test zdt ≈ zsingle rtol = 1e-12
+        @test nmdt ≈ ni
+        @test ne ≈ ni + zimp * nimpdt rtol = 1e-12          # ne = Σ z_s n_s + z_imp n_imp
+    end
+
+    @testset "IonSpecies + TOML conversion" begin
+        # TOML.jl parses [[Equilibrium.ion_species]] as a Vector{Any} of Dicts.
+        v = Any[Dict("z" => 1, "m" => 2, "fraction" => 0.5), Dict("z" => 1, "m" => 3, "fraction" => 0.5)]
+        c = GeneralizedPerturbedEquilibrium.equilibrium_config(
+            Dict{String,Any}("Equilibrium" =>
+                Dict{String,Any}("eq_type" => "efit", "kinetic_file" => "k.h5", "ion_species" => v)), ".")
+        @test length(c.ion_species) == 2
+        @test (c.ion_species[1].z, c.ion_species[1].m, c.ion_species[1].fraction) == (1, 2, 0.5)
+        @test GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig().ion_species === nothing     # default single-ion
+    end
+
+    @testset "resolve_ntv_species" begin
+        # Synthetic ASCII kinetic profile: psi, n_i(total), n_e, T_i, T_e, omega_E.
+        psi = collect(0.0:0.05:1.0)
+        Ni = @. 1.0e20 * (1 - 0.5psi)
+        ne = @. 1.1e20 * (1 - 0.5psi)
+        Ti = @. 2000.0 * (1 - 0.5psi)
+        Te = @. 2500.0 * (1 - 0.5psi)
+        wE = @. 1.0e4 * (1 - psi)
+        f = tempname() * ".txt"
+        open(f, "w") do io
+            println(io, "# psi ni ne Ti Te wexb")
+            for i in eachindex(psi)
+                println(io, join((psi[i], Ni[i], ne[i], Ti[i], Te[i], wE[i]), "  "))
+            end
+        end
+
+        # Single species [z=1,m=2,fraction=1] reproduces kinetic_profile_splines.
+        single = EQ.kinetic_profile_splines(EQ.read_kinetic_file(f); zi=1, zimp=6, mi=2, mimp=12)
+        sp1 = EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=false, zimp=6, mimp=12)
+        main = sp1[1]
+        for ψ in (0.3, 0.6)
+            @test main.profiles.ni_spline(ψ) ≈ single.ni_spline(ψ) rtol = 1e-8
+            @test main.profiles.nui_spline(ψ) ≈ single.nui_spline(ψ) rtol = 1e-8
+            @test main.profiles.zeff_spline(ψ) ≈ single.zeff_spline(ψ) rtol = 1e-8
+        end
+
+        # D-T-e set = {D, T, impurity, electron}; ν scales as 1/√m at fixed z, T.
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, fraction=0.5)];
+            electron=true, zimp=6, mimp=12)
+        @test length(sp) == 4
+        @test count(s -> !s.electron && s.z == 1, sp) == 2   # D, T
+        @test any(s -> s.z == 6 && !s.electron, sp)          # impurity
+        @test any(s -> s.electron, sp)                       # electron
+        iD = findfirst(s -> s.m == 2, sp)
+        iT = findfirst(s -> s.m == 3, sp)
+        @test sp[iD].profiles.nui_spline(0.5) / sp[iT].profiles.nui_spline(0.5) ≈ sqrt(3 / 2) rtol = 1e-6
+
+        # Exactly one of {fraction, density} required.
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2)]; zimp=6, mimp=12)
+
+        # Unified electron semantics: a single-ion + electron run resolves as
+        # {main ion, impurity, electron} — electrons in ADDITION to the ions.
+        spe = EQ.resolve_ntv_species(EQ.read_kinetic_file(f), [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; electron=true, zimp=6, mimp=12)
+        @test length(spe) == 3
+        @test !spe[1].electron && spe[1].z == 1                  # main ion unchanged
+        @test spe[1].profiles.ni_spline(0.5) ≈ main.profiles.ni_spline(0.5)
+        @test spe[end].electron                                  # electron appended
+        rm(f)
+    end
+
+    @testset "explicit per-species profiles (HDF5)" begin
+        psi = collect(0.0:0.05:1.0)
+        Ni = @. 1.0e20 * (1 - 0.5psi)
+        ne = @. 1.1e20 * (1 - 0.5psi)
+        Ti = @. 2000.0 * (1 - 0.5psi)
+        Te = @. 2500.0 * (1 - 0.5psi)
+        wE = @. 1.0e4 * (1 - psi)
+        h5 = tempname() * ".h5"
+        HDF5.h5open(h5, "w") do file
+            file["psi"] = psi
+            file["n_e"] = ne
+            file["T_i"] = Ti
+            file["T_e"] = Te
+            file["omega_E"] = wE
+            file["n_i"] = Ni
+            file["n_D"] = 0.6 .* Ni
+            file["n_T"] = 0.4 .* Ni     # unequal explicit shapes
+        end
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
+            electron=false, zimp=6, mimp=12)
+        iD = findfirst(s -> s.m == 2, sp)
+        iT = findfirst(s -> s.m == 3, sp)
+        @test sp[iD].profiles.ni_spline(0.5) ≈ 0.6 * 1.0e20 * (1 - 0.25) rtol = 1e-6
+        @test sp[iT].profiles.ni_spline(0.5) ≈ 0.4 * 1.0e20 * (1 - 0.25) rtol = 1e-6
+        # A missing named profile errors clearly.
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_He")]; zimp=6, mimp=12)
+        rm(h5)
+    end
+
+    @testset "write_kinetic_h5 species-density roundtrip" begin
+        psi = collect(0.0:0.1:1.0)
+        mkprof(a) = a .* (1 .- 0.5 .* psi)
+        data = EQ.KineticProfileData(; psi=psi, n_i=mkprof(1.0e20), n_e=mkprof(1.1e20),
+            T_i=mkprof(2000.0), T_e=mkprof(2500.0), omega_E=mkprof(1.0e4),
+            species_densities=Dict("n_D" => mkprof(0.6e20), "n_T" => mkprof(0.4e20)),
+            provenance="roundtrip test")
+        h5 = tempname() * ".h5"
+        EQ.write_kinetic_h5(h5, data)
+        back = EQ.read_kinetic_file(h5)
+        @test back.species_densities !== nothing
+        @test sort(collect(keys(back.species_densities))) == ["n_D", "n_T"]
+        @test back.species_densities["n_D"] ≈ data.species_densities["n_D"]
+        @test back.species_densities["n_T"] ≈ data.species_densities["n_T"]
+        # The written file feeds the explicit-density multi-ion input directly.
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_D"), KF.IonSpecies(; z=1, m=3, density="n_T")];
+            zimp=6, mimp=12)
+        @test count(s -> !s.electron && s.z == 1, sp) == 2
+        # Non-`n_*` species names are rejected at write time (they would not round-trip).
+        bad = EQ.KineticProfileData(; psi=psi, n_e=mkprof(1.1e20),
+            species_densities=Dict("deuterium" => mkprof(0.6e20)))
+        @test_throws ErrorException EQ.write_kinetic_h5(tempname() * ".h5", bad)
+        rm(h5)
+    end
+
+    @testset "input-validation guards" begin
+        psi = collect(0.0:0.05:1.0)
+        Ni = @. 1.0e20 * (1 - 0.5psi)
+        ne = @. 1.1e20 * (1 - 0.5psi)
+        Ti = @. 2000.0 * (1 - 0.5psi)
+        Te = @. 2500.0 * (1 - 0.5psi)
+        wE = @. 1.0e4 * (1 - psi)
+        h5 = tempname() * ".h5"
+        HDF5.h5open(h5, "w") do file
+            file["psi"] = psi
+            file["n_i"] = Ni
+            file["n_e"] = ne
+            file["T_i"] = Ti
+            file["T_e"] = Te
+            file["omega_E"] = wE
+            file["n_T"] = 0.4 .* Ni
+            file["n_dilute"] = 0.05 .* Ni
+        end
+        DT(f1, f2) = [KF.IonSpecies(; z=1, m=2, fraction=f1), KF.IonSpecies(; z=1, m=3, fraction=f2)]
+        # An all-fraction list must account for the full n_i (the impurity is set by n_i/n_e, not a shortfall).
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), DT(0.5, 0.4); zimp=6, mimp=12)
+        # Fractions are shares of n_i, so summing above 1 is fatal in any list, mixed included.
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), DT(0.7, 0.5); zimp=6, mimp=12)
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5),
+            [KF.IonSpecies(; z=1, m=2, fraction=1.2), KF.IonSpecies(; z=1, m=3, density="n_T")]; zimp=6, mimp=12)
+        # A partial fraction alongside an explicit density is legal — the n_i/n_e deficit is the impurity.
+        sp = EQ.resolve_ntv_species(EQ.read_kinetic_file(h5),
+            [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, density="n_T")]; zimp=6, mimp=12)
+        @test count(s -> !s.electron && s.z == 1, sp) == 2
+        # Main-ion z must stay below the impurity charge (zpitch closure pole at Zeff = zimp).
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=6, m=12, fraction=1.0)]; zimp=6, mimp=12)
+        # A dilute main-ion mix drives Zeff toward zimp and warns about the zpitch pole.
+        @test_logs (:warn, r"zpitch closure near its pole") match_mode = :any EQ.resolve_ntv_species(
+            EQ.read_kinetic_file(h5), [KF.IonSpecies(; z=1, m=2, density="n_dilute")]; zimp=6, mimp=12)
+        # Vacuum point: neutral composition, no impurity, finite zpitch.
+        @test EQ.multi_ion_composition([1], [1.0e19], 0.0; zimp=6, mimp=12) == (1.0, 1.0, 1.0e19, 0.0)
+        rm(h5)
+    end
+
+    @testset "cold edge keeps the collision model finite and monotone" begin
+        psi = collect(0.0:0.05:1.0)
+        cold(a) = @. a * (1 - psi)^2
+        data = EQ.KineticProfileData(; psi=psi, n_i=fill(1.0e19, length(psi)), n_e=fill(1.1e19, length(psi)),
+            T_i=cold(2000.0), T_e=cold(2500.0), omega_E=fill(1.0e4, length(psi)))
+        fine = 0.0:0.001:1.0
+        for kp in (EQ.kinetic_profile_splines(data; zi=1, zimp=6, mi=2, mimp=12),
+            only(s.profiles for s in EQ.resolve_ntv_species(data, [KF.IonSpecies(; z=1, m=2, fraction=1.0)]; zimp=6, mimp=12) if s.z == 1))
+            @test all(>=(1.0), kp.loglam_spline.(fine))
+            for nu in (kp.nui_spline, kp.nue_spline)
+                @test all(v -> isfinite(v) && v > 0, nu.(fine))
+                # The ν rise toward the cold edge stays monotone between grid nodes
+                @test issorted(nu.(0.5:0.001:1.0))
+            end
+        end
+        @test_throws ErrorException EQ.kinetic_profile_splines(EQ.KineticProfileData(data; T_e=cold(2500.0) .- 1.0))
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.KineticProfileData(data; T_i=cold(2000.0) .- 1.0), [KF.IonSpecies(; z=1, m=2, fraction=1.0)])
+        # The collision model divides by the densities, so a zero density stops the run as in Fortran PENTRC.
+        @test_throws r"densities must be positive" EQ.kinetic_profile_splines(EQ.KineticProfileData(data; n_e=[fill(1.1e19, length(psi) - 1); 0.0]))
+        # ...but only for the NTV view: the two-pass grid leaves such a file out instead of stopping a deck that does not use NTV.
+        @test EQ.ntv_profiles_usable(data)
+        @test !EQ.ntv_profiles_usable(EQ.KineticProfileData(data; n_e=[fill(1.1e19, length(psi) - 1); 0.0]))
+        # Scaling factors must keep the profiles physical.
+        @test_throws ArgumentError EQ.kinetic_profile_splines(data; temperature_factor=-1.0, chi1=1.0)
+        @test_throws ArgumentError EQ.kinetic_profile_splines(data; density_factor=0.0, chi1=1.0)
+
+        # A pedestal table: the cubic resample overshoots the top, the monotone one stays within the table's range.
+        ped_psi = [0.0, 0.3, 0.6, 0.85, 0.9, 0.95, 1.0]
+        ped_T = [2000.0, 1900.0, 1700.0, 1500.0, 400.0, 100.0, 50.0]
+        reg = collect(0:100) ./ 100
+        @test maximum(EQ.cubic_interp(ped_psi, ped_T; extrap=EQ.ExtendExtrap()).(reg)) > maximum(ped_T) ||
+              minimum(EQ.cubic_interp(ped_psi, ped_T; extrap=EQ.ExtendExtrap()).(reg)) < minimum(ped_T)
+        resampled = EQ._pchip_resample(ped_psi, ped_T, reg)
+        @test minimum(ped_T) <= minimum(resampled) && maximum(resampled) <= maximum(ped_T)
+    end
+
+    @testset "supplied collision rates replace the internal model" begin
+        psi = collect(0.0:0.05:1.0)
+        prof(a) = @. a * (1 - 0.6psi)
+        data = EQ.KineticProfileData(; psi=psi, n_i=prof(1.0e20), n_e=prof(1.1e20), T_i=prof(2000.0), T_e=prof(2500.0),
+            omega_E=prof(1.0e4))
+        model = EQ.kinetic_profile_splines(data)
+        xs = model.xs
+        # The model's own rates, supplied at the table points, come back to interpolation accuracy.
+        own = EQ.KineticProfileData(data; lnLambda=model.loglam_spline.(psi), nu_i=model.nui_spline.(psi), nu_e=model.nue_spline.(psi))
+        sup = EQ.kinetic_profile_splines(own)
+        for f in (:loglam_spline, :nui_spline, :nue_spline)
+            @test getfield(sup, f).(xs) ≈ getfield(model, f).(xs) rtol = 1e-3
+        end
+        # Interpolation is in log space: an exponential in ψ is reproduced exactly, which a linear-space fit would not do.
+        expo = EQ.kinetic_profile_splines(EQ.KineticProfileData(own; nu_i=@.(1e3 * exp(4psi)), nu_e=@.(1e5 * exp(-3psi))))
+        @test expo.nui_spline.(xs) ≈ @.(1e3 * exp(4xs)) rtol = 1e-12
+        @test expo.nue_spline.(xs) ≈ @.(1e5 * exp(-3xs)) rtol = 1e-12
+        # A supplied lnΛ alone feeds the model's ν, which is linear in it.
+        lnl = EQ.kinetic_profile_splines(EQ.KineticProfileData(data; lnLambda=fill(15.0, length(psi))))
+        @test all(≈(15.0), lnl.loglam_spline.(xs))
+        @test lnl.nui_spline.(xs) ≈ model.nui_spline.(xs) .* 15.0 ./ model.loglam_spline.(xs) rtol = 1e-12
+        # Multi-ion: the first main ion takes the supplied ν_i; the others keep the model's (z_s/z₁)²·√(m₁/m_s) ratio.
+        sp = EQ.resolve_ntv_species(own, [KF.IonSpecies(; z=1, m=2, fraction=0.5), KF.IonSpecies(; z=1, m=3, fraction=0.5)]; zimp=6, mimp=12)
+        nu(z, m) = only(s for s in sp if s.z == z && s.m == m).profiles.nui_spline.(xs)
+        @test nu(1, 2) ≈ sup.nui_spline.(xs) rtol = 1e-12
+        @test nu(1, 3) ≈ sqrt(2 / 3) .* nu(1, 2) rtol = 1e-12
+        @test nu(6, 12) ≈ 36 * sqrt(2 / 12) .* nu(1, 2) rtol = 1e-12
+        # Rates must be positive; an all-zero dataset counts as absent.
+        @test_throws ArgumentError EQ.KineticProfileData(data; nu_i=-own.nu_i)
+        @test EQ.KineticProfileData(data; nu_e=zeros(length(psi))).nu_e === nothing
+        # Both file formats carry the rates: HDF5 round-trips them and a 9-column ASCII table reads them.
+        h5 = tempname() * ".h5"
+        EQ.write_kinetic_h5(h5, own)
+        back = EQ.read_kinetic_file(h5)
+        @test back.lnLambda ≈ own.lnLambda && back.nu_i ≈ own.nu_i && back.nu_e ≈ own.nu_e
+        rm(h5)
+        ascii = tempname() * ".kin"
+        open(ascii, "w") do io
+            println(io, "# psi n_i n_e T_i T_e omega_E lnLambda nu_i nu_e")
+            for k in eachindex(psi)
+                println(io, join((psi[k], own.n_i[k], own.n_e[k], own.T_i[k], own.T_e[k], own.omega_E[k], own.lnLambda[k], own.nu_i[k], own.nu_e[k]), " "))
+            end
+        end
+        table = EQ.read_kinetic_file(ascii; format="rates-v1")
+        @test table.nu_i ≈ own.nu_i && table.lnLambda ≈ own.lnLambda
+        # The layout comes from the format, not the column count: a 9-column table read as legacy is an error.
+        @test_throws r"needs 6" EQ.read_kinetic_file(ascii)
+        @test_throws ArgumentError EQ.read_kinetic_file(ascii; format="rates-v2")
+        # A data row with fewer columns than the others is an error, not a silently dropped row.
+        open(io -> println(io, join((1.0, own.n_i[end], own.n_e[end], own.T_i[end], own.T_e[end], own.omega_E[end]), " ")), ascii, "a")
+        @test_throws r"fewer columns" EQ.read_kinetic_file(ascii; format="rates-v1")
+        rm(ascii)
+    end
+
+    @testset "combine_species_states" begin
+        # Combined profile = Σ species dT/dψ interpolated onto the union grid; total = Σ total.
+        mk(psi, dt) = (
+            st = KF.KineticForcesState();
+            st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
+                total_torque=ComplexF64(sum(dt)), psi_grid=collect(Float64, psi),
+                dtdpsi=ComplexF64.(dt), t_cumulative=zeros(ComplexF64, length(dt)),
+                dtdpsi_ell=ComplexF64.(hcat(0.2 .* dt, 0.5 .* dt, 0.3 .* dt)), ell=collect(-1:1));
+            st
+        )
+        s1 = mk(0.0:0.1:1.0, fill(1.0, 11))
+        s2 = mk(0.05:0.1:0.95, fill(2.0, 10))     # different (offset) grid
+        c = KF.combine_species_states([s1, s2])
+        r = c.method_results["fgar"]
+        @test real(r.total_torque) ≈ 31.0         # 11·1 + 10·2
+        @test maximum(abs.(r.dtdpsi)) > 0          # not the all-zeros regression
+        overlap = [real(d) for (p, d) in zip(r.psi_grid, r.dtdpsi) if 0.1 <= p <= 0.9]
+        @test all(x -> isapprox(x, 3.0; atol=1e-9), overlap)   # 1 + 2 on the overlap
+        # A duplicate ψ node in one species' grid must not produce NaN (zero-width interpolation guard).
+        s3 = mk([0.0, 0.5, 0.5, 1.0], fill(1.0, 4))
+        c2 = KF.combine_species_states([s1, s3])
+        @test all(isfinite, real.(c2.method_results["fgar"].dtdpsi))
+        @test all(isfinite, real.(c2.method_results["fgar"].dtdpsi_ell))
+
+        # Per-ℓ survives the combine on the same union grid, and summing over ℓ reproduces the
+        # total exactly (it is derived as the row sum, so this is not merely interpolation noise).
+        @test r.ell == collect(-1:1)
+        @test size(r.dtdpsi_ell) == (length(r.psi_grid), 3)
+        @test vec(sum(r.dtdpsi_ell; dims=2)) ≈ r.dtdpsi
+        ov = [real(d) for (p, d) in zip(r.psi_grid, r.dtdpsi_ell[:, 2]) if 0.1 <= p <= 0.9]
+        @test all(x -> isapprox(x, 1.5; atol=1e-9), ov)        # 0.5·(1 + 2) on the overlap
+        # A species with no per-ℓ data must leave the combined matrix empty, not error.
+        s4 = KF.KineticForcesState()
+        s4.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
+            psi_grid=[0.0, 0.5, 1.0], dtdpsi=fill(ComplexF64(1.0), 3),
+            t_cumulative=zeros(ComplexF64, 3))
+        c3 = KF.combine_species_states([s1, s4])
+        @test isempty(c3.method_results["fgar"].dtdpsi_ell)
+        @test isempty(c3.method_results["fgar"].ell)
+    end
+
+    @testset "per-species HDF5 layout" begin
+        # Per-species groups nest under KineticForces/PerSpecies/<label>/<method>/ with the
+        # summed total at KineticForces/<method>/ (docs/development/hdf5-conventions.md).
+        mk(tt) = (
+            st = KF.KineticForcesState();
+            st.method_results["fgar"] = KF.MethodResult(; method="fgar", nn=1,
+                total_torque=ComplexF64(tt), psi_grid=collect(0.0:0.25:1.0),
+                dtdpsi=fill(ComplexF64(tt), 5), t_cumulative=zeros(ComplexF64, 5),
+                dtdpsi_ell=fill(ComplexF64(tt / 3), 5, 3), ell=collect(-1:1));
+            st
+        )
+        h5 = tempname() * ".h5"
+        HDF5.h5open(h5, "cw") do f
+            KF.save_to_hdf5(f, mk(1.0); species_label="ion_z1_m2")
+            KF.save_to_hdf5(f, mk(2.0); species_label="electron")
+            KF.save_to_hdf5(f, mk(3.0))          # summed total
+        end
+        HDF5.h5open(h5, "r") do f
+            @test sort(collect(keys(f["KineticForces"]))) == ["PerSpecies", "fgar"]
+            @test sort(collect(keys(f["KineticForces"]["PerSpecies"]))) == ["electron", "ion_z1_m2"]
+            @test read(f["KineticForces"]["fgar"]["total_torque"]) == 3.0
+            @test read(f["KineticForces"]["PerSpecies"]["ion_z1_m2"]["fgar"]["total_torque"]) == 1.0
+            # The metadata pass must reach the per-species method level, not stop at PerSpecies.
+            for d in ("total_torque", "dTdpsi", "dTdpsi_ell")
+                a = HDF5.attributes(f["KineticForces"]["PerSpecies"]["electron"]["fgar"][d])
+                @test haskey(a, "long_name") && haskey(a, "units")
+            end
+            # HDF5.jl round-trips the Julia shape, so a read here gives (npsi, nell); a
+            # C-ordered reader (h5py, xarray) sees the transpose, (nell, npsi).
+            g = f["KineticForces"]["fgar"]
+            @test size(read(g["dTdpsi_ell"])) == (5, 3)
+            @test read(g["ell"]) == [-1, 0, 1]
+            # Summing over ℓ must reproduce dTdpsi.
+            @test vec(sum(read(g["dTdpsi_ell"]); dims=2)) ≈ read(g["dTdpsi"])
+            @test haskey(HDF5.attributes(g["dTdpsi_ell"]), "dims")
+        end
+        rm(h5)
+    end
+end

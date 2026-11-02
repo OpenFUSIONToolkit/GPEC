@@ -1,0 +1,651 @@
+"""
+    GaussLegendreRule{N,T}
+
+Allocation-free Gauss–Legendre nodes/weights on the canonical interval [-1, 1].
+Stored as `SVector`s so tight loops can index them efficiently.
+"""
+struct GaussLegendreRule{N,T}
+    x::SVector{N,T}
+    w::SVector{N,T}
+end
+
+@inline function gausslegendre_rule(::Val{N}) where {N}
+    x, w = gausslegendre(N) # canonical [-1, 1]
+    return GaussLegendreRule{N,Float64}(
+        SVector{N,Float64}(ntuple(i -> Float64(x[i]), N)),
+        SVector{N,Float64}(ntuple(i -> Float64(w[i]), N))
+    )
+end
+
+# Precomputed Gauss-Legendre rule
+const GL8 = gausslegendre_rule(Val(8))
+
+"""
+    precompute_lagrange_stencils(gaussian_points)
+
+Precompute 5-point Lagrange interpolation stencils for Gaussian quadrature points.
+
+Returns a tuple `(left, right)` where each entry is a Vector of SVector{5,Float64}
+containing the stencil weights for points on the left/right panel.
+"""
+function precompute_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
+    stencil_points = SVector(-2, -1, 0, 1, 2)
+    npts = length(gaussian_points)
+    left = Vector{SVector{5,Float64}}(undef, npts)
+    right = Vector{SVector{5,Float64}}(undef, npts)
+
+    for ig in 1:npts
+        p_left = -1.0 + gaussian_points[ig]
+        p_right = 1.0 + gaussian_points[ig]
+
+        left[ig] = ntuple(5) do i
+            xi = stencil_points[i]
+            prod(j -> j == i ? 1.0 : (p_left - stencil_points[j]) / (xi - stencil_points[j]), 1:5)
+        end |> SVector
+
+        right[ig] = ntuple(5) do i
+            xi = stencil_points[i]
+            prod(j -> j == i ? 1.0 : (p_right - stencil_points[j]) / (xi - stencil_points[j]), 1:5)
+        end |> SVector
+    end
+
+    return left, right
+end
+
+# Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
+const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
+
+# Pre-computed Gauss quadrature constants (_PN_TG02, _PN_WANUMR, _PN_AGAUS, _PN_BGAUS)
+# and per-n sinh/cosh cache are defined in PnQuadCache.jl.
+
+"""
+    compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, n)
+
+Compute kernels of integral equation for Laplace's equation in a torus.
+**WARNING: This kernel only supports closed toroidal walls currently.
+The residue calculation needs to be updated for open walls.**
+
+# Arguments
+
+  - `grad_greenfunction`: Gradient Green's function matrix (output)
+  - `greenfunction`: Green's function matrix (output)
+  - `observer`: Observer geometry struct (PlasmaGeometry or WallGeometry)
+  - `source`: Source geometry struct (PlasmaGeometry or WallGeometry)
+  - `n`: Toroidal mode number
+
+# Returns
+
+Modifies `grad_greenfunction` and `greenfunction` in place.
+Note that greenfunction is zeroed only when the source is plasma;
+grad_greenfunction is not zeroed since it fills a different block of the
+(2 * mtheta, 2 * mtheta) depending on the source/observer.
+
+# Notes
+
+  - Uses Simpson's rule for integration away from singular points
+  - Uses Gaussian quadrature near singular points for improved accuracy
+  - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
+"""
+@with_pool pool function compute_2D_kernel_matrices!(
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
+    observer::Union{PlasmaGeometry,WallGeometry},
+    source::Union{PlasmaGeometry,WallGeometry},
+    n::Int
+)
+
+    mtheta = length(observer.x)
+    dtheta = 2π / mtheta
+    theta_grid = range(; start=0, length=mtheta, step=dtheta)
+
+    # Take a view of the corresponding block of the grad_greenfunction
+    col_index = (source isa PlasmaGeometry ? 1 : 2)
+    row_index = (observer isa PlasmaGeometry ? 1 : 2)
+    grad_greenfunction_block = view(
+        grad_greenfunction,
+        ((row_index-1)*mtheta+1):(row_index*mtheta),
+        ((col_index-1)*mtheta+1):(col_index*mtheta)
+    )
+
+    # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
+    populate_greenfunction = source isa PlasmaGeometry
+    populate_greenfunction && fill!(greenfunction, 0.0)
+
+    # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
+    log_correction_0 = 16.0 * dtheta * (log(2 * dtheta) - 68.0 / 15.0) / 15.0
+    log_correction_1 = 128.0 * dtheta * (log(2 * dtheta) - 8.0 / 15.0) / 45.0
+    log_correction_2 = 4.0 * dtheta * (7.0 * log(2 * dtheta) - 11.0 / 15.0) / 45.0
+    log_correction_array = SVector(log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2)
+
+    # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
+    # This is constant for all source/observer point pairs within this kernel call.
+    gamma_prefactor = 2 * sqrt(π) * gamma(0.5 - n)
+    pn_cache = get_pn_quad_cache(n)
+
+    # Set up periodic splines used for off-grid Gaussian quadrature points
+    spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
+    spline_z = cubic_interp(theta_grid, source.z; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
+    d1_spline_x = deriv1(spline_x)
+    d1_spline_z = deriv1(spline_z)
+
+    # Precompute 5-point Lagrange stencils for the 8-point Gaussian nodes.
+    stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
+    sing_idx = zeros!(pool, Int, 5)
+
+    # Source derivatives on the grid for the Simpson sum; the off-grid Gaussian points use the splines directly
+    dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
+    dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
+
+    # Call in-place API to avoid allocations
+    d1_spline_x(dx_dtheta_grid, theta_grid)
+    d1_spline_z(dz_dtheta_grid, theta_grid)
+
+    for j in 1:mtheta
+        x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
+
+        # Perform Simpson integration for nonsingular source points
+        # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
+        @inbounds for k in 1:(mtheta-3)
+            isrc = mod1(j + 1 + k, mtheta)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n; gamma_prefactor, pn_cache)
+
+            # Composite Simpson's 1/3 rule weights, excluding singular points
+            # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+            wsimpson = dtheta / 3 * ((k == 1 || k == mtheta - 3) ? 1 : (iseven(k) ? 4 : 2))
+
+            # Sum contributions to Green's function matrices using Simpson weight
+            if populate_greenfunction
+                greenfunction[j, isrc] += G_n * wsimpson
+            end
+            grad_greenfunction_block[j, isrc] += gradG_n * wsimpson
+            # Subtract regular integral component of δⱼᵢK⁰ [Chance Phys. Plasmas 1997 2161 eq. 83]
+            grad_greenfunction_block[j, j] -= gradG_0 * wsimpson
+        end
+
+        # Perform Gaussian quadrature for singular points (source = obs point)
+        # Indices of the singularity region, [j-2, j-1, j, j+1, j+2] (allocation-free)
+        for (offset_idx, offset) in enumerate(-2:2)
+            sing_idx[offset_idx] = mod1(j + offset + mtheta, mtheta)
+        end
+        # Integrate region of length 2 * dtheta on left/right of singularity
+        for leftpanel in (true, false)
+            gauss_mid = theta_obs + (leftpanel ? -dtheta : dtheta)
+            @inbounds for ig in 1:8 # 8-point Gaussian quadrature
+                theta_gauss = gauss_mid + GL8.x[ig] * dtheta
+                theta_gauss0 = mod(theta_gauss, 2π)
+                x_gauss = spline_x(theta_gauss0)
+                dx_dtheta_gauss = d1_spline_x(theta_gauss0)
+                z_gauss = spline_z(theta_gauss0)
+                dz_dtheta_gauss = d1_spline_z(theta_gauss0)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n; gamma_prefactor, pn_cache)
+
+                # Get stencil and weight for the Gaussian point
+                s = leftpanel ? stencils_left[ig] : stencils_right[ig]
+                wgauss = GL8.w[ig] * dtheta
+
+                # First type of singularity: 𝒢ⁿ [Chance Phys. Plasmas 1997 2161 eq. 75]
+                if populate_greenfunction
+                    if observer isa PlasmaGeometry
+                        # Remove singular behavior by adding on leading-order term
+                        G_n += log((theta_obs - theta_gauss)^2) / x_obs
+                    end
+                    @inbounds for stencil_idx in 1:5
+                        greenfunction[j, sing_idx[stencil_idx]] += G_n * s[stencil_idx] * wgauss
+                    end
+                end
+
+                # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
+                @inbounds for stencil_idx in 1:5
+                    grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * s[stencil_idx] * wgauss
+                end
+                # Subtract off the diverging singular n=0 component
+                grad_greenfunction_block[j, j] -= gradG_0 * wgauss
+            end
+        end
+
+        # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75] if plasma-plasma block
+        if populate_greenfunction && observer isa PlasmaGeometry
+            @inbounds for stencil_idx in 1:5
+                greenfunction[j, sing_idx[stencil_idx]] -= log_correction_array[stencil_idx] / x_obs
+            end
+        end
+    end
+
+    # Normals need to point outward from the vacuum region. With counter-clockwise θ the normal used in `green`
+    # points into the enclosed region: out of the vacuum for the plasma but into it for the wall, so wall sources flip.
+    if source isa WallGeometry
+        grad_greenfunction_block .*= -1
+    end
+
+    # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
+    residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
+    @inbounds for i in 1:mtheta
+        grad_greenfunction_block[i, i] += residue
+    end
+
+    # Since we computed 2π𝒢, divide by 2π to get 𝒢
+    if populate_greenfunction
+        greenfunction ./= 2π
+    end
+end
+
+# Legendre functions of the first kind P^n_{-1/2} [Chance 1997 eqs. 47-50]
+
+"""
+    elliptic_integral_k(m1) -> Float64
+
+Polynomial approximation of the complete elliptic integral of the first kind at parameter `1 - m1`.
+Takes the complementary parameter `m1`, not the modulus k.
+"""
+function elliptic_integral_k(m1)
+
+    (m1 < 0.0 || m1 > 1.0) && throw(DomainError(m1, "Input `m1` must be in the range (0, 1]."))
+    log_m1 = log(m1)
+
+    ak0 = 1.38629436112
+    ak1 = 0.09666344259
+    ak2 = 0.03590092383
+    ak3 = 0.03742563713
+    ak4 = 0.01451196212
+    bk0 = 0.5
+    bk1 = 0.12498593597
+    bk2 = 0.06880248576
+    bk3 = 0.03328355346
+    bk4 = 0.00441787012
+
+    p = @evalpoly(m1, ak0, ak1, ak2, ak3, ak4)
+    q = @evalpoly(m1, bk0, bk1, bk2, bk3, bk4)
+
+    ellipk = p - q * log_m1
+    return ellipk
+end
+
+
+"""
+    elliptic_integral_e(m1) -> Float64
+
+Polynomial approximation of the complete elliptic integral of the second kind at parameter `1 - m1`.
+Takes the complementary parameter `m1`, not the modulus k.
+"""
+function elliptic_integral_e(m1)
+
+    (m1 < 0.0 || m1 > 1.0) && throw(DomainError(m1, "Input `x1` must be in the range (0, 1]."))
+    log_x1 = log(m1)
+
+    ae1 = 0.44325141463
+    ae2 = 0.0626060122
+    ae3 = 0.04757383546
+    ae4 = 0.01736506451
+    be1 = 0.2499836831
+    be2 = 0.09200180037
+    be3 = 0.04069697526
+    be4 = 0.00526449639
+
+    p = @evalpoly(m1, 1.0, ae1, ae2, ae3, ae4)
+    q = @evalpoly(m1, 0.0, be1, be2, be3, be4)
+
+    ellipe = p - q * log_x1
+    return ellipe
+
+end
+
+
+# Chance 1997 eq.(49) (original)
+function P0_minus_half(s)
+    m1 = 2 / (s + 1)
+    return 2 / π * sqrt(m1) * elliptic_integral_k(m1)
+end
+
+# Chance 1997 eq.(50) (original)
+# The paper's eq. 50 has a typo: the exponent is -1/4, not +1/2
+function P0_plus_half(s)
+    m1 = (s + sqrt(s^2 - 1))^(-2)
+    return 2 / π * m1^(-1 / 4) * elliptic_integral_e(m1) # This is correct
+end
+
+
+# Chance 1997 eq.(48) (original)
+function P1_minus_half(s)
+    return 0.5 / ((s^2 - 1)^0.5) * (P0_plus_half(s) - s * P0_minus_half(s))
+end
+
+"""
+    Pn_minus_half_1997(s, n) -> Vector{Float64}
+
+Legendre functions of the first kind P^n_{-1/2}(s) by upward recurrence (Chance 1997 eq. 47) from the
+elliptic-integral base cases (eqs. 48-50, with the eq. 50 exponent typo corrected).
+
+# Arguments
+
+  - `s::Real`: Legendre function parameter (s > 1)
+  - `n::Int`: Maximum order n (n ≥ 0)
+
+# Returns
+
+  - `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
+"""
+function Pn_minus_half_1997(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_1997!(P, s, n)
+end
+
+function Pn_minus_half_1997!(P::AbstractVector{Float64}, s::Real, n::Int)
+
+    P .= 0.0
+
+    # n = 0
+    P[1] = P0_minus_half(s)
+    P[2] = P1_minus_half(s)
+    if n == 0
+        return P
+    end
+
+    # n ≥ 1
+    for i in 1:n
+        # Chance 1997 eq.(47)
+        P[i+2] = -2 * i * s / sqrt(s^2 - 1) * P[i+1] - (i - 0.5)^2 * P[i]
+    end
+
+    return P
+end
+
+"""
+    elliptic_integrals_bulirsch(m1; error=1e-8, maxit=10)
+
+Complete elliptic integrals K and E at complementary parameter `m1` by Bulirsch's algorithm.
+Port of Fortran `ek3`.
+
+# Arguments
+
+  - `m1::Float64`: Complementary parameter (1 - k²), where k is the elliptic modulus
+  - `error::Float64`: Convergence tolerance (default 1e-8)
+  - `maxit::Int`: Maximum iterations (default 10)
+
+# Returns
+
+  - `K::Float64`: Complete elliptic integral of the first kind K(m1)
+  - `E::Float64`: Complete elliptic integral of the second kind E(m1)
+  - `convergence::Float64`: Convergence metric
+  - `iterations::Int`: Number of iterations performed
+
+Precision is approximately `error²`. See Chance, J. Comput. Phys. 221 (2007) 330-348.
+"""
+function elliptic_integrals_bulirsch(m1::Float64; error::Float64=1e-8, maxit::Int=10)
+
+    # Check valid input
+    if m1 <= 0.0 || m1 > 1.0
+        throw(DomainError(m1, "Input m1 must be in range (0, 1]"))
+    end
+
+    # Initialize for K and E calculation
+    pp = 1.0
+    aa = 1.0
+    bb1 = 1.0      # for K
+    bb2 = abs(m1)  # for E
+
+    qcval = sqrt(abs(m1))
+    aval0 = aa
+    bval1 = bb1
+    bval2 = bb2
+    pval0 = pp
+
+    eval = qcval
+    emval = 1.0
+
+    # Initialize based on pval0 > 0
+    if pval0 > 0.0
+        pval = sqrt(pval0)
+        aval1 = aval0
+        aval2 = aval0
+        bval1 = bval1 / pval
+        bval2 = bval2 / pval
+    else
+        fval = qcval * qcval
+        tval = 1.0 - fval
+        gval = 1.0 - pval0
+        fval = fval - pval0
+        qval1 = tval * (bval1 - aval0 * pval0)
+        qval2 = tval * (bval2 - aval0 * pval0)
+
+        pval = sqrt(fval / gval)
+        aval1 = (aval0 - bval1) / gval
+        aval2 = (aval0 - bval2) / gval
+        bval1 = aval1 * pval - qval1 / (gval * gval * pval)
+        bval2 = aval2 * pval - qval2 / (gval * gval * pval)
+    end
+
+    # Iterate until convergence
+    kounter = 0
+    sval = 0.0
+
+    while kounter < maxit
+        kounter += 1
+
+        hval1 = aval1
+        hval2 = aval2
+        aval1 = aval1 + bval1 / pval
+        aval2 = aval2 + bval2 / pval
+        rval = eval / pval
+        bval1 = bval1 + hval1 * rval
+        bval1 = bval1 + bval1
+        bval2 = bval2 + hval2 * rval
+        bval2 = bval2 + bval2
+        pval = rval + pval
+
+        sval = emval
+        emval = qcval + emval
+
+        if abs(sval - qcval) <= sval * error
+            break
+        end
+
+        qcval = sqrt(eval)
+        qcval = qcval + qcval
+        eval = qcval * emval
+    end
+
+    # Calculate convergence metric
+    snorm = (sval != 0.0) ? sval * sval : 1.0
+    convergence = (sval - qcval)^2 / snorm
+    convergence = max(convergence, 1.0e-100)
+
+    # Calculate final K and E values
+    K = π / 2 * (bval1 + aval1 * emval) / (emval * (emval + pval))
+    E = π / 2 * (bval2 + aval2 * emval) / (emval * (emval + pval))
+
+    return K, E, convergence, kounter
+end
+
+"""
+    Pn_minus_half_2007(s, n) -> Vector{Float64}
+
+Legendre functions of the first kind P^n_{-1/2}(s) by the method of Chance, J. Comput. Phys. 221 (2007) 330-348:
+Bulirsch elliptic integrals for the base cases, then Gaussian integration when `n * rhohat >= 0.1`
+(`rhohat = 1/√(2yw)`) and upward recurrence otherwise. More accurate than `Pn_minus_half_1997` at large n.
+
+# Arguments
+
+  - `s::Real`: Legendre function parameter (s > 1)
+  - `n::Int`: Maximum order n (n ≥ 0)
+
+# Returns
+
+  - `P::Vector{Float64}`: P^0_{-1/2}(s), P^1_{-1/2}(s), then P^n_{-1/2}(s) and P^{n+1}_{-1/2}(s) in the last two slots (rest zero)
+"""
+function Pn_minus_half_2007(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_2007!(P, s, n; pn_cache=get_pn_quad_cache(n))
+end
+
+function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int; pn_cache::PnQuadEntry)
+
+    # Constants
+    pii = 2.0 / π
+
+    # Initialize output array
+    P .= 0.0
+
+    # Preliminary computations
+    xxq = s * s
+    ysq = xxq - 1.0
+    y = sqrt(ysq)
+    w = s + y
+
+    # rhohat parameter for determining integration method
+    rhohatsq = 1.0 / (2.0 * y * w)
+    rhohat = sqrt(rhohatsq)
+
+    # Compute m1 = 1/w (complementary parameter for elliptic integrals)
+    m1 = 1.0 / w
+    m1sq = m1 * m1
+    m1sqrt = sqrt(m1)      # m1^(1/4)
+    m1sqrti = sqrt(w)      # m1^(-1/4)
+
+    # Compute elliptic integrals using Bulirsch algorithm
+    K, E, conv, iters = elliptic_integrals_bulirsch(m1sq; error=1e-15, maxit=20)
+
+    # Base cases: P^0 and P^1
+    pn = pii * m1sqrt * K
+    pnp = pii * m1sqrti * E
+
+    P[1] = pn  # P^0_{-1/2}
+    pp = (pnp - s * pn) / (2.0 * y)
+    P[2] = pp  # P^1_{-1/2}
+
+    # Use Gaussian integration if n*rhohat >= 0.1
+    if n * rhohat >= 0.1
+
+        gint = 0.0
+        gintp = 0.0
+
+        @inbounds for ig in 1:32
+            # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
+            # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
+            sh = pn_cache.sinh[ig]
+            ch = pn_cache.cosh[ig]
+            dnom = sqrt(muladd(s, sh * sh, sh * ch))
+
+            shp = pn_cache.sinhp[ig]
+            chp = pn_cache.coshp[ig]
+            dnomp = sqrt(muladd(s, shp * shp, shp * chp))
+
+            wanumr = _PN_WANUMR[ig]
+            gint = muladd(wanumr, inv(dnom), gint)
+            gintp = muladd(wanumr, inv(dnomp), gintp)
+        end
+
+        gint *= _PN_BGAUS
+        gintp *= _PN_BGAUS
+
+        # pcoef = √((s-1)/(s+1)) is the only s-dependent factor; the n-only factors are cached in pn_cache (PnQuadCache.jl)
+        pcoef = sqrt((s - 1.0) / (s + 1.0))
+        pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
+
+        P[end-1] = pcoef_n * gint * pn_cache.gauss_norm_n    # P^n_{-1/2}
+        P[end] = pcoef_n * pcoef * gintp * pn_cache.gauss_norm_np1  # P^{n+1}_{-1/2}
+
+    else
+        # Use upward recurrence for small n*rhohat < 0.1
+        if n == 0
+            return P
+        end
+
+        for i in 1:n
+            ak02 = 0.5 - i
+            pm = pn
+            pn = pp
+            pp = -2.0 * i * s * pn / y - ak02 * ak02 * pm
+        end
+
+        P[end-1] = pn   # P^n_{-1/2}
+        P[end] = pp     # P^{n+1}_{-1/2}
+    end
+
+    return P
+end
+
+"""
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; gamma_prefactor, pn_cache, uselegacygreenfunction=false)
+
+Axisymmetric Green's function and its normal-derivative coupling terms, Chance 1997 eqs. 36-42.
+Port of Fortran `green`.
+
+# Arguments
+
+  - `x_obs`: Observation point R-coordinate (Float64)
+  - `z_obs`: Observation point Z-coordinate (Float64)
+  - `x_source`: Source point R-coordinate (Float64)
+  - `z_source`: Source point Z-coordinate (Float64)
+  - `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
+  - `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
+  - `n`: Toroidal mode number (Int)
+  - `gamma_prefactor`: `2√π · Γ(1/2 - n)` (Chance 1997 eq. 40); tight-loop callers compute it once and pass it in.
+  - `pn_cache`: `get_pn_quad_cache(n)`; takes a lock, so tight-loop callers look it up once and pass it in.
+  - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default false, uses 2007 version)
+
+# Returns
+
+  - `G_n`: 2π𝒢ⁿ(θ,θ′) — Green's function value
+  - `coupling_n`: 𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
+  - `coupling_0`: 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
+"""
+@with_pool pool function green(
+    x_obs::Float64,
+    z_obs::Float64,
+    x_source::Float64,
+    z_source::Float64,
+    dx_dtheta::Float64,
+    dz_dtheta::Float64,
+    n::Int;
+    gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n),
+    pn_cache::PnQuadEntry,
+    uselegacygreenfunction::Bool=false
+)
+    x_obs2 = x_obs^2
+    x_source2 = x_source^2
+    x_minus2 = (x_obs - x_source)^2
+    x_multiple = x_obs * x_source
+    ζ = z_obs - z_source
+    ζ2 = ζ^2
+
+    ρ2 = x_minus2 + ζ2
+
+    # Distance parameter ℛ [Chance Phys. Plasmas 1997 2161 eq. 41]
+    R4 = ρ2 * (ρ2 + 4 * x_multiple)
+    R2 = sqrt(R4)
+    R = sqrt(R2)
+    R5 = R4 * R
+
+    S = x_obs2 + x_source2 + ζ2
+    a = x_obs2 - x_source2
+    D = a + ζ2            # x_obs2 - x_source2 + ζ2
+    E = ζ2 - a             # x_source2 - x_obs2 + ζ2
+    fourXmult = 4 * x_multiple
+    twoXobsD = 2 * x_obs * D
+    xSourceE = x_source * E
+
+    s = S / R2
+
+    legendre = acquire!(pool, Float64, n + 2)
+    if uselegacygreenfunction
+        Pn_minus_half_1997!(legendre, s, n)
+    else
+        Pn_minus_half_2007!(legendre, s, n; pn_cache)
+    end
+
+    p0, p1, pnp1, pn = @inbounds legendre[1], legendre[2], legendre[end], legendre[end-1]
+
+    gg = gamma_prefactor / R
+    G_n = gg * pn
+    grad_gg = gg / (2π * R4)
+
+    dG_dX = grad_gg * ((n * S * D - x_source * xSourceE) * pn / x_source + twoXobsD * pnp1)
+    dG_dZ = grad_gg * ((2n + 1) * S * pn + fourXmult * pnp1) * ζ
+
+    coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
+
+    dG_dX0_R5 = twoXobsD * p1 - xSourceE * p0
+    dG_dZ0_R5 = ζ * (S * p0 + fourXmult * p1)
+    coupling_0 = -x_source * (dz_dtheta * dG_dX0_R5 - dx_dtheta * dG_dZ0_R5) / R5
+    return G_n, coupling_n, coupling_0
+end

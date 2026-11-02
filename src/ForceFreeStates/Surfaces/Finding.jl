@@ -1,0 +1,425 @@
+# Rational-surface finding: ideal (q = m/n) and kinetic (cond(F) peak) singular surfaces.
+
+"""
+    _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int, nhigh::Int)
+
+Locate all rational q-surfaces q = m/n for n in `nlow:nhigh` by Brent bisection between
+consecutive extrema of the q-profile (reverse shear gives one root per monotone segment).
+Returns a vector of `(m, n, psifac)` named tuples in discovery order (n outer, ψ-interval
+inner). Requires `equilibrium_qfind!` to have populated `equil.params.qextrema_*`.
+"""
+function _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int, nhigh::Int)
+    profiles = equil.profiles
+    surfaces = @NamedTuple{m::Int, n::Int, psifac::Float64}[]
+
+    for n in nlow:nhigh
+        hint = Ref(1)
+        # Loop over extrema of q, find all rational values in between
+        for iex in 2:equil.params.mextrema
+            dq = equil.params.qextrema_q[iex] - equil.params.qextrema_q[iex-1]
+            dq == 0 && continue
+            m = trunc(Int, n * equil.params.qextrema_q[iex-1])
+            if dq > 0
+                m += 1
+            end
+            dm = Int(sign(dq * n))
+
+            while (m - n * equil.params.qextrema_q[iex-1]) * (m - n * equil.params.qextrema_q[iex]) <= 0
+                psi0 = equil.params.qextrema_psi[iex-1]
+                psi1 = equil.params.qextrema_psi[iex]
+
+                psifac = find_zero(psi -> m - n * profiles.q_spline(psi; hint=hint), (psi0, psi1), Roots.Brent())
+                push!(surfaces, (m=m, n=n, psifac=psifac))
+                m += dm
+            end
+        end
+    end
+    return surfaces
+end
+
+"""
+    rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
+
+Unique ψ_N locations of all rational surfaces q = m/n for n in `nlow:nhigh`, sorted
+increasing. Used as mandatory knots for the two-pass equilibrium grid refinement. Roots
+are deduplicated by (q, ψ), so several (m, n) of equal ratio collapse to one node while the
+two crossings of one rational on a reverse-shear profile stay distinct.
+"""
+function rational_psi_nodes(equil::Equilibrium.PlasmaEquilibrium; nlow::Int, nhigh::Int=nlow)
+    surfaces = _find_rational_surfaces(equil, nlow, nhigh)
+    kept = @NamedTuple{q::Float64, psifac::Float64}[]
+    for s in surfaces
+        q = s.m / s.n
+        any(k -> _same_surface(k.q, k.psifac, q, s.psifac), kept) && continue
+        push!(kept, (q=q, psifac=s.psifac))
+    end
+    return sort!([k.psifac for k in kept])
+end
+
+# Two rational-surface roots are one physical surface when both q and ψ agree.
+const SURFACE_TOLERANCE = 1e-8
+_same_surface(q_a, psi_a, q_b, psi_b) = isapprox(q_a, q_b; atol=SURFACE_TOLERANCE) && isapprox(psi_a, psi_b; atol=SURFACE_TOLERANCE)
+
+"""
+    sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+
+Locate singular rational q-surfaces (q = m/n) by bisection between extrema of the q-profile,
+and store their properties in `intr.sing`, sorted by increasing ψ. Roots of equal ratio m/n at
+the same ψ (e.g. (2,1) and (4,2)) merge into one surface carrying all its (m, n); the two
+crossings of one rational on a reverse-shear profile stay separate surfaces with opposite-sign q′.
+"""
+function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    profiles = equil.profiles
+    hint = Ref(1)
+
+    for s in _find_rational_surfaces(equil, intr.nlow, intr.nhigh)
+        m, n, psifac = s.m, s.n, s.psifac
+        idx = findfirst(sg -> _same_surface(sg.q, sg.psifac, m / n, psifac), intr.sing)
+        if idx !== nothing
+            push!(intr.sing[idx].m, m)
+            push!(intr.sing[idx].n, n)
+        else
+            push!(intr.sing, SingType(;
+                m=[m],
+                n=[n],
+                psifac=psifac,
+                rho=sqrt(psifac),
+                q=m / n,
+                q1=profiles.q_deriv(psifac; hint=hint)
+            ))
+            intr.msing += 1
+        end
+    end
+    intr.sing = sort(intr.sing; by=s -> s.psifac)
+end
+
+"""
+    sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium;
+              psilim_cap=nothing)
+
+Set the outer integration limits `intr.psilim`, `intr.qlim` and `intr.q1lim`.
+
+The target `qlim` starts at `min(equil.params.qmax, ctrl.qhigh)`. When `psilim_cap` is given
+and lies inside the domain, `qlim` is further capped at `q(psilim_cap)`: the resistive-layer
+overlap point of Fitzpatrick, Nucl. Fusion 2025 Sect. 5.9, past which no surface retains a
+well-separated inner region. The cap only ever narrows the domain; one beyond `psihigh` is inert.
+
+If `truncate_at_rational_offset` is true, `qlim` is then moved to `(last rational + rational_offset_fraction) / n` and
+stepped back by `1/n` until it no longer exceeds the bound above, so `rational_offset_fraction` never extends the
+domain past `qmax`, `qhigh` or the cap. A bound that falls exactly on, or less than `rational_offset_fraction / n`
+above, a rational excludes that rational. If `qlim < qmax`, a Newton iteration finds the matching
+`psilim` (outer crossing on a reversed-shear profile); otherwise the equilibrium edge values are used.
+"""
+function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium;
+    psilim_cap::Union{Nothing,Real}=nothing)
+
+    profiles = equil.profiles
+
+    # Initial guesses based on equilibrium
+    intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
+    intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
+    intr.psilim = equil.params.psihigh_resolved
+
+    # Resistive-layer overlap caps qlim (not psilim), so rational_offset_fraction below still picks a surface inside it.
+    if psilim_cap !== nothing && psilim_cap < intr.psilim
+        q_cap = profiles.q_spline(Float64(psilim_cap))
+        if q_cap < intr.qlim
+            @info "Resistive-layer overlap caps the domain: qlim $(@sprintf("%.3f", intr.qlim)) -> " *
+                  "$(@sprintf("%.3f", q_cap)) (psi $(@sprintf("%.6f", intr.psilim)) -> $(@sprintf("%.6f", Float64(psilim_cap))))"
+            intr.qlim = q_cap
+        end
+    end
+
+    # Rational-offset cutoff needs the resolved single-n range on `intr`; multi-n falls back to qhigh / psihigh.
+    if ctrl.truncate_at_rational_offset && intr.nlow <= 0
+        error(
+            "sing_lim!: truncate_at_rational_offset = true requires a resolved toroidal range, but got intr.nlow=$(intr.nlow). " *
+            "Assign intr.nlow / intr.nhigh (resolve_mode_space!) before calling sing_lim!, " *
+            "or set truncate_at_rational_offset = false to truncate via qhigh / psihigh instead."
+        )
+    elseif ctrl.truncate_at_rational_offset && intr.nlow != intr.nhigh
+        @warn "truncate_at_rational_offset = true is ignored for multi-n runs (n = $(intr.nlow):$(intr.nhigh)); falling back to qhigh / psihigh truncation."
+    elseif ctrl.truncate_at_rational_offset
+        @info "Setting psilim via rational_offset_fraction: initial qlim = $(@sprintf("%.3f", intr.qlim)), rational_offset_fraction = $(@sprintf("%.3f", ctrl.rational_offset_fraction))"
+        # Normalize rational_offset_fraction ∈ [0,1)
+        rational_offset_fraction = mod(ctrl.rational_offset_fraction, 1.0)
+        # qlim already holds min(qmax, qhigh, overlap cap); rational_offset_fraction must never step past any of them.
+        qlim_bound = intr.qlim
+        intr.qlim = (trunc(Int, intr.nlow * intr.qlim) + rational_offset_fraction) / intr.nlow
+
+        # Step back one rational at a time until inside the bound, keeping the rational_offset_fraction offset
+        while intr.qlim > qlim_bound
+            intr.qlim -= 1.0 / intr.nlow
+        end
+    end
+
+    # A target below q_min has no psilim: say why instead of failing in the root find, as Fortran's "Can't find psilim"
+    intr.qlim >= equil.params.qmin ||
+        error(
+            "sing_lim!: the integration limit qlim = $(@sprintf("%.3f", intr.qlim)) lies below q_min = $(@sprintf("%.3f", equil.params.qmin)), " *
+            "so no flux surface reaches it. With truncate_at_rational_offset no rational surface of n = $(intr.nlow) is left to truncate at; " *
+            "widen the domain (qhigh, the layer-overlap cap) or set truncate_at_rational_offset = false."
+        )
+
+    # qlim below qmax: Newton-solve q(psilim) = qlim
+    if intr.qlim < equil.params.qmax
+        # Seed from the edge inward at the outermost node with q ≤ qlim, so a reversed-shear profile, which crosses
+        # qlim on both legs of its minimum, gets the outer crossing.
+        qy = profiles.q_spline.y
+        jpsi = something(findlast(<=(intr.qlim), qy), argmin(abs.(qy .- intr.qlim)))
+        jpsi = min(jpsi, length(profiles.xs) - 1)
+
+        hint = Ref(jpsi)
+        intr.psilim = find_zero(
+            (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
+                psi -> profiles.q_deriv(psi; hint=hint)),
+            profiles.xs[jpsi], Roots.Newton()
+        )
+        intr.q1lim = profiles.q_deriv(intr.psilim)
+    end
+end
+
+"""
+    remove_singular_surfs!(intr; psimin=-Inf, psimax=intr.psilim) -> keep
+
+Drop rational surfaces outside `psimin ≤ psifac ≤ psimax` from `intr.sing`, logging any dropped,
+and return the indices of those kept.
+"""
+function remove_singular_surfs!(intr::ForceFreeStatesInternal; psimin::Real=-Inf, psimax::Real=intr.psilim)
+    keep = [j for j in 1:intr.msing if psimin <= intr.sing[j].psifac <= psimax]
+    if length(keep) < intr.msing
+        excluded = [(intr.sing[j].m, intr.sing[j].q) for j in setdiff(1:intr.msing, keep)]
+        @info "Filtered $(length(excluded)) singular surface(s) outside integration domain: $(excluded)"
+        intr.sing = intr.sing[keep]
+        intr.msing = length(keep)
+    end
+    return keep
+end
+
+"""
+    qlow_start_psi(qlow, equil) -> ψ
+
+Lower integration bound set by `qlow`: the outermost crossing of q = qlow, so the whole q < qlow
+region inside it is excluded, whether a monotonic core (q ≤ 1 sawtooth surfaces) or a reversed-shear
+ring around q_min. Read from the same spline q extrema `sing_find!` brackets its roots with, so a dip
+between grid nodes counts; the root is bracketed on the monotone stretch past the outermost extremum
+below qlow. Returns the first grid node when q ≥ qlow everywhere.
+"""
+function qlow_start_psi(qlow::Real, equil::Equilibrium.PlasmaEquilibrium)
+    psiex, qex = equil.params.qextrema_psi, equil.params.qextrema_q
+    k = findlast(<(qlow), qex)
+    k === nothing && return equil.profiles.xs[1]
+    k < length(qex) || error("qlow=$qlow: q < qlow up to the edge of the ψ grid (q there is $(qex[end])), so no integration domain remains.")
+    return find_zero(psi -> equil.profiles.q_spline(psi) - qlow, (psiex[k], psiex[k+1]), Roots.Brent())
+end
+
+"""
+    sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+
+Set the lower integration bound `intr.psilow` to `qlow_start_psi`, the one bound every
+integrator starts from. Excluding the q < qlow region matters most for the outer-region Galerkin
+solve, whose Hermite FEM would otherwise integrate through unhandled q ≤ 1 ideal singularities and
+contaminate Δ′ at the innermost kept surface.
+"""
+function sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+    profiles = equil.profiles
+    intr.psilow = qlow_start_psi(ctrl.qlow, equil)
+    intr.psilow > profiles.xs[1] &&
+        @info "sing_min: qlow=$(@sprintf("%.3f", ctrl.qlow)); raising psilow from $(@sprintf("%.5f", profiles.xs[1])) " *
+              "to $(@sprintf("%.5f", intr.psilow)) (excludes the q < qlow region)"
+    return intr.psilow
+end
+
+"""
+    fbar_block_conditions(psi, kin, equil, intr; hint=Ref(1)) -> Vector{Float64}
+
+Condition number of each toroidal-mode block of the kinetic F̄ matrix at ψ, one entry per n in
+`intr.nlow:intr.nhigh`.
+
+F̄(i,j) = q₁·f0(i,j)·q₂ - q₁·P(i,j) - conj(P†(j,i))·q₂ + R1(i,j)
+
+where q₁ = m₁ - n·q(ψ), q₂ = m₂ - n·q(ψ) are the direct singularity factors. The axisymmetric F̄ is
+block-diagonal in n, so each block is conditioned on its own; the condition number of the whole
+matrix would mix the scales of different n.
+"""
+function fbar_block_conditions(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1))
+    np = intr.numpert_total
+    mpert = intr.mpert
+
+    q = equil.profiles.q_spline(psi; hint=hint)
+
+    f0_vec = zeros(ComplexF64, np * np)
+    p_vec = zeros(ComplexF64, np * np)
+    pa_vec = zeros(ComplexF64, np * np)
+    r1_vec = zeros(ComplexF64, np * np)
+    kin.F0_spline(f0_vec, psi; hint=hint)
+    kin.P_spline(p_vec, psi; hint=hint)
+    kin.P_spline_adj(pa_vec, psi; hint=hint)
+    kin.R1_spline(r1_vec, psi; hint=hint)
+    f0mat = reshape(f0_vec, np, np)
+    pmat = reshape(p_vec, np, np)
+    paat = reshape(pa_vec, np, np)
+    r1mat = reshape(r1_vec, np, np)
+
+    # Assemble each n-block of F̄
+    conds = zeros(Float64, intr.npert)
+    fbar = zeros(ComplexF64, mpert, mpert)
+    for in_idx in 1:intr.npert
+        n = intr.nlow + in_idx - 1
+        off = (in_idx - 1) * mpert
+        for j in 1:mpert
+            q2 = (intr.mlow + j - 1) - n * q
+            for i in 1:mpert
+                q1 = (intr.mlow + i - 1) - n * q
+                fbar[i, j] = q1 * f0mat[off+i, off+j] * q2 - q1 * pmat[off+i, off+j] - conj(paat[off+j, off+i]) * q2 + r1mat[off+i, off+j]
+            end
+        end
+        conds[in_idx] = cond(fbar)
+    end
+    return conds
+end
+
+"""
+    evaluate_fbar_condition(psi, kin, equil, intr; hint=Ref(1))
+
+Largest per-n-block condition number of the kinetic F̄ matrix at ψ (see `fbar_block_conditions`),
+a scale-invariant measure of how close any toroidal mode is to a kinetic singularity.
+"""
+evaluate_fbar_condition(psi::Float64, kin::FKGMatrices, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal; hint=Ref(1)) =
+    maximum(fbar_block_conditions(psi, kin, equil, intr; hint=hint))
+
+# Kinetic F̄ counts as singular above this condition number; structure within
+# KINETIC_RELAXED_FRAC of it is reported as near-singular (the shifted/split resonances).
+const KINETIC_SINGULAR_COND = 1.0e8
+const KINETIC_RELAXED_FRAC = 0.01
+
+"""
+    find_kinetic_singular_surfaces!(mats, equil, intr; ngrid=2000, cond_threshold=1e8)
+
+Find kinetically displaced singular surfaces, where cond(F̄) of the kinetic F̄ matrix peaks, and populate
+`intr.kinsing`, `intr.kmsing` and the `intr.kinsing_scan_*` diagnostics. Condition-number peaks are used
+instead of det(F̄) zeros for scale invariance.
+
+Each toroidal-mode block of F̄ is scanned on a dense ψ grid on its own; its local maxima are refined
+by golden-section minimization of -cond and filtered by threshold and the resonance condition. Each
+surface records the (m, n) of the blocks that produced it, and peaks of different n within one scan
+spacing of each other are merged into a single surface.
+"""
+function find_kinetic_singular_surfaces!(
+    mats::MatrixSplines,
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal;
+    ngrid::Int=2000,
+    cond_threshold::Float64=KINETIC_SINGULAR_COND
+)
+    kin = mats.kinetic
+    kin === nothing && error("find_kinetic_singular_surfaces! requires a kinetic fit; call build_kinetic_matrix_splines first")
+    psilow = equil.profiles.xs[1]
+    psihigh = intr.psilim
+    npert = intr.npert
+
+    # Evaluate cond(F̄) of every n-block on a dense grid
+    psi_grid = collect(range(psilow, psihigh; length=ngrid))
+    block_conds = zeros(ngrid, npert)
+    hint = Ref(1)
+    for i in 1:ngrid
+        try
+            block_conds[i, :] .= fbar_block_conditions(psi_grid[i], kin, equil, intr; hint=hint)
+        catch
+            block_conds[i, :] .= Inf  # singular matrix — definitely a kinsing surface
+        end
+    end
+    cond_vals = vec(maximum(block_conds; dims=2))
+
+    # Keep the scan for output, to show why peaks were or were not accepted
+    intr.kinsing_scan_psi = psi_grid
+    intr.kinsing_scan_cond = cond_vals
+    intr.kinsing_scan_threshold = cond_threshold
+
+    # Local maxima of each block's cond(F̄): points where cond increases then decreases
+    is_peak(c, i) = c[i] > c[i-1] && c[i] > c[i+1]
+    block_peaks = [[i for i in 2:(ngrid-1) if is_peak(view(block_conds, :, k), i)] for k in 1:npert]
+
+    # Peaks below threshold mark near-singular structure (the shifted/split resonances of Park &
+    # Logan Eq. 70); report the strongest few so sharp kinetic structure is visible rather than silent.
+    subthreshold = [(i, k) for k in 1:npert for i in block_peaks[k] if KINETIC_RELAXED_FRAC * cond_threshold < block_conds[i, k] <= cond_threshold]
+    if !isempty(subthreshold)
+        top = sort(subthreshold; by=ik -> block_conds[ik...], rev=true)[1:min(3, length(subthreshold))]
+        @info "Kinetic F̄ near-singular structure below the singular threshold at " *
+              join(["ψ=$(round(psi_grid[i]; digits=4)) (n=$(intr.nlow + k - 1), cond=$(round(block_conds[i, k]; sigdigits=3)))" for (i, k) in top], ", ") *
+              " — full scan in SingularSurfaces/Kinetic/scan_cond; check the ψ grid resolves these if results look grid-sensitive"
+    end
+
+    # Refine each block's peaks on that block's condition number
+    found = Tuple{Float64,Int}[]  # (ψ, n)
+    for k in 1:npert
+        n = intr.nlow + k - 1
+        for idx in block_peaks[k]
+            block_conds[idx, k] > cond_threshold || continue
+            psi_lo = psi_grid[max(idx - 1, 1)]
+            psi_hi = psi_grid[min(idx + 1, ngrid)]
+            psi_refined = _golden_section_max(psi_lo, psi_hi, psi -> fbar_block_conditions(psi, kin, equil, intr)[k])
+            nq = n * equil.profiles.q_spline(psi_refined)
+            intr.mlow <= nq <= intr.mhigh || continue
+            push!(found, (psi_refined, n))
+        end
+    end
+    sort!(found)
+
+    # Merge peaks of different n that coincide to within one scan spacing (e.g. integer q at n = 1 and 2)
+    dpsi = psi_grid[2] - psi_grid[1]
+    groups = Vector{Vector{Tuple{Float64,Int}}}()
+    for f in found
+        if !isempty(groups) && f[1] - groups[end][1][1] <= dpsi && all(g -> g[2] != f[2], groups[end])
+            push!(groups[end], f)
+        else
+            push!(groups, [f])
+        end
+    end
+
+    kinsing_surfaces = SingType[]
+    for g in groups
+        psi_s = g[1][1]
+        hint_ref = Ref(1)
+        q_val = equil.profiles.q_spline(psi_s; hint=hint_ref)
+        q1_val = equil.profiles.q_deriv(psi_s; hint=hint_ref)
+        ns = [f[2] for f in g]
+        push!(kinsing_surfaces, SingType(; psifac=psi_s, rho=sqrt(psi_s), m=[round(Int, n * q_val) for n in ns], n=ns, q=q_val, q1=q1_val))
+    end
+
+    intr.kinsing = kinsing_surfaces
+    intr.kmsing = length(kinsing_surfaces)
+
+    if intr.kmsing > 0
+        @info "Found $(intr.kmsing) kinetic singular surface(s):"
+        for (i, ks) in enumerate(intr.kinsing)
+            @info @sprintf("   kinsing[%d]: ψ = %.6f, q = %.4f, n = %s", i, ks.psifac, ks.q, join(ks.n, ","))
+        end
+    else
+        @info "No kinetic singular surfaces found (cond threshold = $(cond_threshold))"
+    end
+
+    return nothing
+end
+
+"""
+Golden-section search to find the ψ that maximizes f(ψ) on [a, b].
+"""
+function _golden_section_max(a::Float64, b::Float64, f::Function; tol::Float64=1e-10)
+    gr = (sqrt(5) + 1) / 2
+    c = b - (b - a) / gr
+    d = a + (b - a) / gr
+    for _ in 1:100
+        if abs(b - a) < tol
+            break
+        end
+        if f(c) > f(d)
+            b = d
+        else
+            a = c
+        end
+        c = b - (b - a) / gr
+        d = a + (b - a) / gr
+    end
+    return (a + b) / 2
+end

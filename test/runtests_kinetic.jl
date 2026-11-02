@@ -1,0 +1,971 @@
+using TOML
+
+@testset "KineticForces Unit Tests" begin
+
+    KF = GeneralizedPerturbedEquilibrium.KineticForces
+
+    # =========================================================================
+    # powspace grid generation
+    # =========================================================================
+    @testset "powspace" begin
+        @testset "basic properties" begin
+            for pow in 1:9
+                pts, wts = KF.powspace(0.0, 1.0, pow, 100, "both")
+                @test length(pts) == 100
+                @test length(wts) == 100
+                @test pts[1] ≈ 0.0 atol = 1e-14
+                @test pts[end] ≈ 1.0 atol = 1e-14
+                # Monotonicity with tolerance for floating-point rounding.
+                # Tolerance scales with polynomial degree because higher-pow
+                # antiderivatives evaluate ~2*pow+1 terms near |x|=1 and
+                # accumulate FMA/non-FMA ordering noise across Julia minor
+                # versions (1.11 → 1.12 reorders fused-multiply-add chains).
+                @test all(diff(pts) .> -100 * eps(1.0))
+            end
+        end
+
+        @testset "endpoint modes" begin
+            pts_lower, _ = KF.powspace(0.0, 1.0, 2, 50, "lower")
+            pts_upper, _ = KF.powspace(0.0, 1.0, 2, 50, "upper")
+            pts_both, _ = KF.powspace(0.0, 1.0, 2, 50, "both")
+
+            # All modes should span the full range
+            for pts in [pts_lower, pts_upper, pts_both]
+                @test pts[1] ≈ 0.0 atol = 1e-14
+                @test pts[end] ≈ 1.0 atol = 1e-14
+            end
+
+            # "lower" concentrates near xmin, "upper" near xmax
+            mid = 0.5
+            lower_below_mid = count(x -> x < mid, pts_lower)
+            upper_below_mid = count(x -> x < mid, pts_upper)
+            @test lower_below_mid > upper_below_mid
+        end
+
+        @testset "scaling" begin
+            pts1, wts1 = KF.powspace(0.0, 1.0, 3, 50, "both")
+            pts2, wts2 = KF.powspace(2.0, 5.0, 3, 50, "both")
+            @test pts2[1] ≈ 2.0 atol = 1e-14
+            @test pts2[end] ≈ 5.0 atol = 1e-14
+        end
+
+        @testset "error cases" begin
+            @test_throws ErrorException KF.powspace(1.0, 0.0, 2, 50, "both")
+            @test_throws ErrorException KF.powspace(0.0, 1.0, 2, 50, "invalid")
+        end
+    end
+
+    # =========================================================================
+    # _powspace_antideriv
+    # =========================================================================
+    @testset "_powspace_antideriv" begin
+        x = collect(range(-1.0, 1.0; length=101))
+
+        @testset "antisymmetry (all pow)" begin
+            for pow in 1:9
+                ad = KF._powspace_antideriv(x, pow)
+                # |(1-x²)|^pow is symmetric (even), so its antiderivative is odd: f(-x) = -f(x)
+                @test ad[1] ≈ -ad[end] atol = 1e-12
+            end
+        end
+
+        @testset "monotonicity near origin" begin
+            # The integrand |(1-x²)|^pow is positive near x=0
+            # so the antiderivative should be increasing there
+            x_near_zero = collect(range(-0.5, 0.5; length=21))
+            for pow in 1:9
+                ad = KF._powspace_antideriv(x_near_zero, pow)
+                if isodd(pow)
+                    # Odd pow: antiderivative has negative leading term, so decreasing near 0
+                    @test ad[1] > ad[11] || ad[11] < ad[end]
+                end
+            end
+        end
+
+        @testset "unsupported pow" begin
+            @test_throws ErrorException KF._powspace_antideriv(x, 10)
+        end
+    end
+
+    # =========================================================================
+    # Energy integrand analytical limits
+    # =========================================================================
+    @testset "energy_integrand_scalar" begin
+        @testset "CGL limit" begin
+            # In CGL mode, fx = cx^2.5 * exp(-cx) / (i*n) — no resonance denominator
+            p = KF.EnergyParams(
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1,
+                "zero", "cgl", 1.0, false
+            )
+            x = 1.0
+            val = KF.energy_integrand_scalar(x, p)
+            # Expected: x^2.5 * exp(-x) / (i*1) = exp(-1) / i = -i*exp(-1)
+            @test real(val) ≈ 0.0 atol = 1e-14
+            @test imag(val) ≈ -exp(-1.0) atol = 1e-12
+        end
+
+        @testset "collisionless Maxwellian at large x" begin
+            # At large x, the integrand should decay exponentially
+            p = KF.EnergyParams(
+                1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1,
+                "zero", "maxwellian", 1.0, false
+            )
+            val_large = KF.energy_integrand_scalar(50.0, p)
+            # At x=50, exp(-50) ≈ 1.9e-22, so integrand should be negligible
+            @test abs(val_large) < 1e-15
+        end
+
+        @testset "heat flux mode" begin
+            # With qt=true, integrand is multiplied by (x - 2.5)
+            p_no_qt = KF.EnergyParams(
+                1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 1,
+                "zero", "maxwellian", 1.0, false
+            )
+            p_qt = KF.EnergyParams(
+                1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 1,
+                "zero", "maxwellian", 1.0, true
+            )
+            x = 3.0
+            val_no = KF.energy_integrand_scalar(x, p_no_qt)
+            val_qt = KF.energy_integrand_scalar(x, p_qt)
+            # qt multiplies by (x - 2.5) = 0.5
+            @test val_qt ≈ (x - 2.5) * val_no atol = 1e-14
+        end
+
+        @testset "small collisions damp for either rotation sign" begin
+            # Match a positive Krook width for either rotation direction.
+            for we in (2.0, -2.0)
+                p_small = KF.EnergyParams(
+                    1.0, 0.5, we, 0.5, 1.0, 0.0, 1.0, 1,
+                    "small", "maxwellian", 1.0, false
+                )
+                p_krook = KF.EnergyParams(
+                    1.0, 0.5, we, 0.5, 1.0, 1e-5 * abs(we), 1.0, 1,
+                    "krook", "maxwellian", 1.0, false
+                )
+                for x in (0.3, 1.0, 3.0)
+                    @test KF.energy_integrand_scalar(x, p_small) ≈
+                          KF.energy_integrand_scalar(x, p_krook) rtol = 1e-14
+                end
+            end
+        end
+    end
+
+    # =========================================================================
+    # Bounce-point root finding
+    # =========================================================================
+    @testset "bounce-point enumeration" begin
+        # Multi-well periodic B(θ): three distinct wells of unequal depth, so the
+        # deepest-well selection and the wrap through θ = 0/1 are both exercised.
+        xs = collect(range(0.0, 1.0; length=257))
+        B_vals = @. 2.0 + 0.4 * cos(2pi * xs) + 0.12 * cos(4pi * xs + 0.7) + 0.05 * sin(6pi * xs)
+        B_vals[end] = B_vals[1]
+        B_vpar = cubic_interp(xs, B_vals; bc=PeriodicBC())
+        bo = 2.0
+
+        bf = KF._surface_b_field(B_vpar)
+
+        @testset "stationary points are exact" begin
+            # A periodic function has an even number of stationary points per period.
+            @test iseven(length(bf.theta))
+            @test length(bf.theta) >= 2
+            @test issorted(bf.theta)
+            @test all(0.0 .<= bf.theta .< 1.0)
+            # dB/dθ vanishes at each, and the cached B values match the spline.
+            dB = deriv1(B_vpar)
+            scale = maximum(abs, B_vals)
+            for (θ, b) in zip(bf.theta, bf.bval)
+                @test abs(dB(θ)) < 1e-8 * scale
+                @test b ≈ B_vpar(θ) rtol = 1e-14
+            end
+            # Every stationary point of a dense derivative sign scan is accounted for.
+            dense = range(0.0, 1.0; length=20001)
+            dv = [dB(x) for x in dense]
+            nsign = count(i -> dv[i] * dv[i+1] < 0, 1:length(dv)-1)
+            @test length(bf.theta) == nsign
+        end
+
+        bmax = maximum(bf.bval)
+        bmin = minimum(bf.bval)
+        lmdatpb = bo / bmax
+        lmdamax = bo / bmin
+
+        @testset "closed-form cubic roots" begin
+            # Polynomials with known roots, including the repeated-root case where the
+            # discriminant cancels to zero and a naive branch reports only the simple root.
+            for (a, b, c, d, expect) in ((1.0, -6.0, 11.0, -6.0, [1.0, 2.0, 3.0]),   # (u-1)(u-2)(u-3)
+                (1.0, 0.0, -1.0, 0.0, [-1.0, 0.0, 1.0]),     # u³ - u
+                (2.0, -4.0, 2.0, 0.0, [0.0, 1.0]),           # 2u(u-1)², double root
+                (1.0, 0.0, 0.0, -8.0, [2.0]),                # u³ - 8, one real root
+                (0.0, 1.0, -3.0, 2.0, [1.0, 2.0]),           # degenerates to a quadratic
+                (0.0, 0.0, 2.0, -4.0, [2.0]))                # degenerates to a linear
+                n, r1, r2, r3 = KF._real_cubic_roots(a, b, c, d)
+                got = filter(isfinite, [r1, r2, r3][1:min(n, 3)])
+                for e in expect
+                    @test any(abs.(got .- e) .< 1e-9)
+                end
+                # Every returned root satisfies the polynomial.
+                for u in got
+                    @test abs(evalpoly(u, (d, c, b, a))) < 1e-9 * max(1.0, abs(u)^3)
+                end
+            end
+
+            # Three real roots, two nearly coincident: the discriminant cancels to rounding noise
+            # and a branch trusting its sign drops two roots. Built from the roots, so exact.
+            for (x1, x2, x3) in ((0.37, 0.37000001, 0.91), (0.2, 0.8, 0.80000001), (-1.5, 0.5, 0.5 + 1e-7))
+                a = 1.0
+                b = -(x1 + x2 + x3)
+                c = x1 * x2 + x1 * x3 + x2 * x3
+                d = -x1 * x2 * x3
+                n, r1, r2, r3 = KF._real_cubic_roots(a, b, c, d)
+                @test n == 3
+                got = filter(isfinite, [r1, r2, r3][1:min(n, 3)])
+                # A near-double root is only determined to about its own separation, so the
+                # match tolerance is loose; what matters is that nothing was dropped.
+                for x in (x1, x2, x3)
+                    @test any(abs.(got .- x) .< 1e-6)
+                end
+                for u in got
+                    @test abs(evalpoly(u, (d, c, b, a))) < 1e-12
+                end
+            end
+        end
+
+        @testset "near-double quadratic roots" begin
+            # b² − 4ac cancels to rounding noise for a near-double root; a branch trusting its
+            # sign returns no roots at all. Built from the roots, so exact.
+            for (x1, x2) in ((0.5, 0.5 + 1e-9), (0.5, 0.5), (-0.3, -0.3 + 1e-10), (2.0, 2.0 + 1e-8))
+                a = 1.0
+                b = -(x1 + x2)
+                c = x1 * x2
+                n, r1, r2, _ = KF._quadratic_real_roots(a, b, c)
+                @test n == 2
+                for x in (x1, x2)
+                    @test min(abs(r1 - x), abs(r2 - x)) < 1e-6
+                end
+                for u in (r1, r2)
+                    @test abs(evalpoly(u, (c, b, a))) < 1e-12
+                end
+            end
+            # Well-separated roots and the degenerate forms are unaffected.
+            sep = KF._quadratic_real_roots(1.0, -3.0, 2.0)
+            @test sep[1] == 2 && sort([sep[2], sep[3]]) == [1.0, 2.0]
+            @test KF._quadratic_real_roots(0.0, 2.0, -4.0)[1:2] == (1, 2.0)
+            @test KF._quadratic_real_roots(1.0, 0.0, 1.0)[1] == 0
+        end
+
+        @testset "two stationary points in one cell" begin
+            # A coarse grid puts both stationary points of an interval inside one cell, so the
+            # crossing is solved between them, not between knots. Checked to occur before asserting.
+            xs2 = collect(range(0.0, 1.0; length=11))
+            B2 = @. 2.0 + 0.45 * cos(2pi * xs2) + 0.20 * cos(6pi * xs2)
+            B2[end] = B2[1]
+            Bv2 = cubic_interp(xs2, B2; bc=PeriodicBC())
+            bf2 = KF._surface_b_field(Bv2)
+            cells = [KF._cell_index(bf2.knot, t) for t in bf2.theta]
+            shared = findfirst(i -> cells[i] == cells[i+1], 1:length(cells)-1)
+            @test shared !== nothing
+            if shared !== nothing
+                i = shared
+                blo, bhi = minmax(bf2.bval[i], bf2.bval[i+1])
+                buf = Float64[]
+                hints = ones(Int, length(bf2.theta) + 1)
+                for btarget in range(blo, bhi; length=400)[2:end-1]
+                    lmda = bo / btarget
+                    roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf2, lmda, bo))
+                    ref = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(Bv2, lmda, bo, θ), 0.0, 1.0))
+                    @test length(roots) == length(ref)
+                    # The crossing inside the shared cell lies strictly between the two
+                    # stationary points that bound it.
+                    @test any(bf2.theta[i] < r < bf2.theta[i+1] for r in roots)
+                    for r in roots
+                        @test abs(KF._vpar_from_spline(Bv2, lmda, bo, r)) < 1e-14
+                    end
+                end
+            end
+        end
+
+        @testset "agrees with the adaptive scan across λ" begin
+            # Over the bulk of the trapped range the bracketed solver must reproduce
+            # Roots.find_zeros exactly. λ crowded against the boundaries is asserted
+            # separately below: there the two roots straddling an extremum become so
+            # close that whether the adaptive scan still resolves them depends on its
+            # own step heuristics, which is not a contract worth pinning a test to.
+            buf = Float64[]
+            hints = ones(Int, length(bf.theta) + 1)
+            for lmda in range(lmdatpb * (1 + 1e-6), lmdamax * (1 - 1e-6); length=200)
+                new_roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf, lmda, bo))
+                ref_roots = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(B_vpar, lmda, bo, θ), 0.0, 1.0))
+                @test length(new_roots) == length(ref_roots)
+                if length(new_roots) == length(ref_roots)
+                    @test all(abs.(new_roots .- ref_roots) .< 1e-9)
+                end
+                # Roots are returned ascending, as Fortran spline_roots, so the well search pairs neighbours.
+                @test issorted(new_roots)
+                # v_par vanishes at each root.
+                for θ in new_roots
+                    # Solved directly from the cell's cubic, so v_par vanishes to
+                    # machine precision rather than to a solver tolerance.
+                    @test abs(KF._vpar_from_spline(B_vpar, lmda, bo, θ)) < 1e-13
+                end
+            end
+        end
+
+        @testset "deepest well of a four-root surface lies between neighbouring roots" begin
+            # Two B minima give four bounce points at λ between the minima's B values; every well must be a
+            # neighbouring pair, so the chosen window holds no other root and v_par > 0 at its midpoint.
+            xs4 = collect(range(0.0, 1.0; length=257))
+            B4 = @. (1 + 0.1cos(4pi * xs4 + 1.1)) / (1 + 0.05cos(2pi * xs4))
+            B4[end] = B4[1]
+            Bv4 = cubic_interp(xs4, B4; bc=PeriodicBC())
+            bf4 = KF._surface_b_field(Bv4)
+            buf = Float64[]
+            hints = ones(Int, length(bf4.theta) + 1)
+            nfour = 0
+            for lmda in range(1 / maximum(B4), 1 / minimum(B4); length=200)[2:end-1]
+                roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf4, lmda, 1.0))
+                length(roots) == 4 || continue
+                nfour += 1
+                t1, t2 = KF._find_deepest_well(roots, Bv4, lmda, 1.0)
+                @test !any(r -> t1 < r < t2 || t1 < r + 1 < t2, roots)
+                @test KF._vpar_from_spline(Bv4, lmda, 1.0, mod(0.5 * (t1 + t2), 1.0)) > 0
+            end
+            @test nfour > 0
+        end
+
+        @testset "past the midpoint the drift integrand holds its own last value" begin
+            # v_par turns negative at θ = 0.75: the bounce and drift integrands each hold their own previous sample.
+            ntheta = 32
+            pts = collect(range(0.0, 1.0; length=ntheta))
+            wts = fill(1 / (ntheta - 1), ntheta)
+            tspl = (out, θ) -> (out[1] = 1.0; out[2] = 0.5; out[4] = 1.0; out[5] = 0.3; out)
+            Bstep = θ -> θ < 0.75 ? 1.0 : 3.0
+            scr = KF.BounceScratch(ntheta, 1)
+            KF._bounce_samples!(zeros(ntheta), zeros(ComplexF64, ntheta), nothing, nothing, pts, wts, 0.5, 1, 1.0, 1.0, tspl, Bstep, 1.0,
+                [1], [0.0im], [0.0im], 1.0, false, 1, scr)
+            k = findfirst(>=(0.75), pts)
+            @test scr.g_wd[end] == scr.g_wd[k-1] != 0
+            @test scr.g_wb[end] == scr.g_wb[k-1]
+            @test scr.g_wd[end] != scr.g_wb[end]
+        end
+
+        @testset "resolves the pair straddling an extremum" begin
+            # Approaching a boundary, the two bounce points collapse onto the extremum
+            # of B from either side. Assert that directly rather than against another
+            # solver: exactly two roots, one on each side of the extremum, both closing
+            # on it as λ tightens, with v_par vanishing at each.
+            buf = Float64[]
+            hints = ones(Int, length(bf.theta) + 1)
+            θmax = bf.theta[argmax(bf.bval)]
+            θmin = bf.theta[argmin(bf.bval)]
+
+            # Width of the arc between the two roots that encloses θx. θ is periodic,
+            # so the enclosing arc may run through the θ = 0/1 seam — the B maximum of
+            # this fixture sits at θ ≈ 0.999, which exercises exactly that.
+            function enclosing_arc(roots, θx)
+                lo, hi = minimum(roots), maximum(roots)
+                return lo <= θx <= hi ? hi - lo : 1.0 - (hi - lo)
+            end
+
+            prev = Dict(:max => Inf, :min => Inf)
+            for eps in (1e-4, 1e-6, 1e-8, 1e-10, 1e-12)
+                for (key, lmda, θx) in ((:max, lmdatpb * (1 + eps), θmax), (:min, lmdamax * (1 - eps), θmin))
+                    roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf, lmda, bo))
+                    @test length(roots) == 2
+                    length(roots) == 2 || continue
+                    for θ in roots
+                        @test abs(KF._vpar_from_spline(B_vpar, lmda, bo, θ)) < 1e-10
+                    end
+                    # The pair hugs the extremum and closes on it as λ tightens.
+                    arc = enclosing_arc(roots, θx)
+                    @test arc < prev[key]
+                    prev[key] = arc
+                end
+            end
+            # Having closed monotonically from 1e-4 to 1e-12, the pair is now far
+            # tighter than the θ-grid spacing that a node-by-node scan would resolve.
+            @test prev[:max] < 0.5 * (xs[2] - xs[1])
+            @test prev[:min] < 0.5 * (xs[2] - xs[1])
+        end
+
+        @testset "cell hints never change the answer" begin
+            # The hint only says where to start looking. A stale or absurd one must cost
+            # a few extra steps, or a fall back to bisection, and nothing else.
+            buf = Float64[]
+            nh = length(bf.theta) + 1
+            swept = ones(Int, nh)
+            for lmda in range(lmdatpb * (1 + 1e-6), lmdamax * (1 - 1e-6); length=120)
+                want = copy(KF._bounce_points_at_lambda!(buf, swept, bf, lmda, bo))
+                for bogus in (ones(Int, nh), fill(length(bf.poly), nh), fill(-5, nh), fill(10^6, nh))
+                    got = copy(KF._bounce_points_at_lambda!(buf, copy(bogus), bf, lmda, bo))
+                    @test got == want
+                end
+            end
+        end
+
+        @testset "degenerate λ signals the fallback" begin
+            # λ below the trapped-passing boundary puts bo/λ above every B, so no
+            # interval brackets and the caller is told to fall back.
+            buf = Float64[]
+            hints = ones(Int, length(bf.theta) + 1)
+            bmax = maximum(bf.bval)
+            @test length(KF._bounce_points_at_lambda!(buf, hints, bf, 0.5 * bo / bmax, bo)) < 2
+        end
+    end
+
+    # =========================================================================
+    # Resonance root solver
+    # =========================================================================
+    @testset "bounce geometry is harmonic-free" begin
+        # Synthetic surface: periodic B(θ) with one well, unit-ish Jacobian, a few perturbation modes.
+        xs = collect(range(0.0, 1.0; length=65))
+        B = @. 1.0 + 0.3 * cos(2pi * xs)
+        dBdth = @. -0.3 * 2pi * sin(2pi * xs)
+        dBdth[end] = dBdth[1]   # periodic fit requires exact repetition of the first sample
+        tspl = cubic_interp(xs, Series(hcat(B, 0.1 .* B, dBdth, 1.0 .+ 0.1 .* B, 0.05 .* B)); bc=PeriodicBC())
+        B_vpar = cubic_interp(xs, B; bc=PeriodicBC())
+        mfac = collect(-2:2)
+        dbob = ComplexF64[0.1, 0.2im, 0.5, -0.3im, 0.05]
+        divx = ComplexF64[0.02, -0.1, 0.3im, 0.1, 0.0]
+        bo = 1.0
+        args = (0.5, 1, 2.0, bo, maximum(B), minimum(B), xs[argmax(B)], tspl, B_vpar, mfac, 1.0, 1.7,
+            dbob, divx, 1.0, 1.0, 3.3e-27, 1.6e-19, 1.6e-16, "fgar")
+        geom = KF.compute_bounce_geometry(args...; nlmda=32, ntheta=48)
+        @test all(geom.valid)
+        b0 = KF.bounce_harmonic(geom, 0, 1, 2.0, 1.7, 5)
+        b1 = KF.bounce_harmonic(geom, 1, 1, 2.0, 1.7, 5)
+        # The harmonic enters only through the action phase: frequencies and grid are shared exactly.
+        @test b0.wb === geom.wb && b1.wd === geom.wd && b0.lambda === b1.lambda
+        @test all(isfinite, b0.dJdJ) && all(>=(0), b0.dJdJ) && b0.dJdJ != b1.dJdJ
+        # The one-shot entry point is the same two steps.
+        b1_direct = KF.compute_bounce_data(args[1], args[2], 1, args[3:end]...; nlmda=32, ntheta=48)
+        @test b1_direct.dJdJ == b1.dJdJ && b1_direct.wb == b1.wb && b1_direct.wd == b1.wd
+        # Matrix path: packed outer products present and the Hermitian diagonals real.
+        I5 = ComplexF64[i == j ? 1 : 0 for i in 1:5, j in 1:5]
+        gm = KF.compute_bounce_geometry(args...; nlmda=16, ntheta=48, do_matrices=true)
+        bm = KF.bounce_harmonic(gm, -1, 1, 2.0, 1.7, 5; smat=I5, tmat=0.5I5, xmat=I5, ymat=0.2I5, zmat=0.1I5)
+        @test size(bm.wmats_vs_lambda) == (16, KF.nqty_matrix(5))
+        @test all(isfinite, bm.wmats_vs_lambda)
+        @test all(abs(imag(bm.wmats_vs_lambda[k, KF._tri_idx(i, i)])) <= 1e-12 * abs(bm.wmats_vs_lambda[k, KF._tri_idx(i, i)]) + 1e-300 for k in 1:16, i in 1:5)
+    end
+
+    @testset "find_resonance_energies" begin
+        # Roots of Ω(x) = leff·wb·√x + n·(we + wd·x); quadratic n·wd·s² + leff·wb·s + n·we = 0.
+        @testset "no real root (negative discriminant)" begin
+            roots = KF.find_resonance_energies(1.0, 0.3, 1, 1.0, 0.5)
+            @test isempty(roots)
+        end
+
+        @testset "linear case (wd = 0)" begin
+            # b·s + c = 0 with b = leff·wb = 2, c = n·we = -3 ⟹ s = 1.5, x = 2.25.
+            roots = KF.find_resonance_energies(1.0, 2.0, 1, -3.0, 0.0)
+            @test length(roots) == 1
+            @test roots[1] ≈ 2.25 rtol = 1e-12
+            # Same but positive we ⟹ s = -1.5 < 0 ⟹ no positive root.
+            @test isempty(KF.find_resonance_energies(1.0, 2.0, 1, 3.0, 0.0))
+        end
+
+        @testset "two positive roots" begin
+            # a = 0.5, b = -3, c = 1 ⟹ s = (3 ± √7)/1, both positive.
+            roots = KF.find_resonance_energies(1.0, -3.0, 1, 1.0, 0.5)
+            @test length(roots) == 2
+            for x in roots
+                s = sqrt(x)
+                # Ω(x) must vanish at each root.
+                @test 1.0 * (-3.0) * s + 1 * (1.0 + 0.5 * x) ≈ 0.0 atol = 1e-10
+            end
+        end
+    end
+
+    # =========================================================================
+    # Energy integration (u-substitution + Sokhotski-Plemelj pole extraction)
+    # =========================================================================
+    @testset "integrate_energy" begin
+        @testset "CGL integration" begin
+            # CGL mode: ∫₀^∞ x^2.5·exp(-x)/(i·n) dx = Γ(3.5)/(i·1) = -i·(15/8)√π.
+            result = KF.integrate_energy(
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 1, 0.5, 0.5, "fcgl";
+                nutype="zero", f0type="cgl", nufac=1.0, qt=false,
+                atol=1e-12, rtol=1e-10
+            )
+            gamma_3_5 = 15 / 8 * sqrt(π)
+            @test real(result) ≈ 0.0 atol = 1e-6
+            @test imag(result) ≈ -gamma_3_5 atol = 1e-6
+        end
+
+        @testset "collisionless returns finite" begin
+            result = KF.integrate_energy(
+                1.0, 1.0, 1.0, 0.5, 0.3, 0.0, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="zero", f0type="maxwellian"
+            )
+            @test isfinite(real(result))
+            @test isfinite(imag(result))
+        end
+
+        @testset "collisional matches direct x-space quadrature" begin
+            # For ν > 0 the physical integrand N(x)·exp(-x)/denom is finite on the
+            # real axis, so a high-accuracy direct integral over [0,∞) is an
+            # independent reference for the u-substitution + pole-extraction result.
+            wn, wt, we, wd, wb, nuk, leff, n = 0.5, 0.8, -2.0, 0.5, 1.0, 0.3, 1.0, 1
+            p = KF.EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
+                "harmonic", "maxwellian", 1.0, false)
+            x_res = KF.find_resonance_energies(leff, wb, n, we, wd)
+            @test length(x_res) == 1   # this case has exactly one resonance
+            reference, _ = KF.quadgk(x -> KF.energy_integrand_scalar(x, p),
+                0.0, x_res[1], Inf; rtol=1e-12, atol=1e-14)
+            result = KF.integrate_energy(
+                wn, wt, we, wd, wb, nuk, 0, leff, n, 0.5, 0.5, "fgar";
+                nutype="harmonic", f0type="maxwellian", atol=1e-12, rtol=1e-10
+            )
+            @test result ≈ reference rtol = 1e-6
+        end
+
+        @testset "collisionless is the ν → 0⁺ limit" begin
+            # The collisionless result must be continuous with vanishing collisionality.
+            args = (0.5, 0.8, -2.0, 0.5, 1.0)
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "collisionless tail-pole resonance (regression: was NaN)" begin
+            # Resonance deep in the Maxwellian tail (x_res ≈ 56): n·wd·s² + leff·wb·s + n·we = 0
+            # with wb=1e3, wd=5e2, we=-3.5483e4 ⟹ s=√56, x_res≈56. Under the old u-space pole
+            # handling u_res = 1-exp(-56) rounds to 1.0, tripping 0·(-Inf)=NaN. The real-x-space
+            # branch keeps x_res a well-conditioned O(1) number, and the resonance contribution
+            # (∝ exp(-56)) is negligible so the result equals the ν→0⁺ limit (issue #281).
+            args = (0.0, 2.0e3, -3.5483e4, 5.0e2, 1.0e3)
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            @test KF.find_resonance_energies(1.0, 1.0e3, 1, -3.5483e4, 5.0e2)[1] ≈ 56.0 rtol = 1e-2
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(real(collisionless))
+            @test isfinite(imag(collisionless))
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "Ω′ < 0 collisionless causal branch" begin
+            # The unified add-back R·[log(xmax-x_pole) - log(-x_pole)] gets the causal
+            # ∓iπ·sign(Ω′) branch from the SIGNED ZERO of pole_offset = ν/Ω′ at ν=0.
+            # Pick n·wd < 0 so Ω′ = leff·wb/(2√x) + n·wd flips sign in the tail; the
+            # collisionless result must still equal the ν→0⁺ (small-ν krook) limit, which
+            # carries the sign naturally through its off-axis pole.
+            args = (0.0, 2.0e3, 3.5e4, -5.0e2, 1.0e3)   # we>0, wd<0 ⟹ tail root with Ω′<0
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(collisionless)
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "tail pole beyond X_ENERGY_MAX dropped" begin
+            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900,
+            # well past X_ENERGY_MAX. The pole sits where exp(-x_res) underflows; the
+            # `xr >= X_ENERGY_MAX` check in _integrate_energy_resonant drops it cleanly.
+            @test KF.find_resonance_energies(1.0, 1.0, 1, -30.0, 0.0)[1] ≈ 900.0
+            result = KF.integrate_energy(
+                0.5, 0.0, -30.0, 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="harmonic", f0type="maxwellian"
+            )
+            @test isfinite(real(result))
+            @test isfinite(imag(result))
+        end
+
+        @testset "pole at and within 1e-13 of X_ENERGY_MAX (boundary robustness)" begin
+            # Direct analog of the original u→1 bug, relocated to x→X_ENERGY_MAX: a
+            # resonance pole sitting exactly at, just below, and just above the upper
+            # integration limit. Linear case (wd=0) with leff=wb=n=1 gives
+            # x_res = (n·we/(leff·wb))² = we², so we = -√x_target places the pole.
+            xmax = KF.X_ENERGY_MAX
+            run_xres(x_target) = KF.integrate_energy(
+                0.5, 0.3, -sqrt(x_target), 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            below = run_xres(xmax - 1e-13)   # pole kept, subtracted analytically
+            at = run_xres(xmax)              # find_resonance rounds to ≤ xmax; >= guard drops at endpoint
+            above = run_xres(xmax + 1e-13)   # pole dropped (outside domain)
+            @test isfinite(below) && isfinite(at) && isfinite(above)
+            # Continuous across the boundary: the only term that changes is the pole's
+            # contribution ∝ exp(-xmax) ~ exp(-100) ~ 4e-44, negligible on the O(1) bulk
+            # integral. No NaN from log(xmax - x_pole) at the exact endpoint.
+            @test below ≈ at rtol = 1e-9
+            @test at ≈ above rtol = 1e-9
+            # Collisionless result equals the ν→0⁺ (small-ν krook) limit.
+            small_nu = KF.integrate_energy(
+                0.5, 0.3, -sqrt(xmax - 1e-13), 0.0, 1.0, 1e-6, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test below ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "pole_offset overflow guard" begin
+            # Tiny wb gives small omega_prime = leff·wb/(2√x_res) = 5e-16 at x_res=1, while
+            # nuk = 1e300 forces pole_offset = ν/omega_prime = 2e315 → Inf. The
+            # `isfinite(pole_offset) || continue` guard in _integrate_energy_resonant must skip
+            # this pole. Parameters keep abs(wb) > 1e-30 so find_resonance_energies still returns x_res.
+            @test KF.find_resonance_energies(1.0, 1e-15, 1, -1e-15, 0.0)[1] ≈ 1.0
+            result = KF.integrate_energy(
+                0.5, 0.0, -1e-15, 0.0, 1e-15, 1e300, 0, 1.0, 1, 0.5, 0.5, "fgar";
+                nutype="krook", f0type="maxwellian"
+            )
+            @test isfinite(real(result))
+            @test isfinite(imag(result))
+        end
+    end
+
+    # =========================================================================
+    # evaluate_energy_integrand (exported diagnostic vector form)
+    # =========================================================================
+    @testset "evaluate_energy_integrand" begin
+        x_grid = collect(range(0.1, 5.0; length=32))
+        vals = KF.evaluate_energy_integrand(x_grid;
+            wn=0.5, wt=0.8, we=-2.0, wd=0.5, wb=1.0, nuk=0.3, leff=1.0, n=1,
+            nutype="harmonic", f0type="maxwellian")
+        @test vals isa Vector{ComplexF64}
+        @test length(vals) == length(x_grid)
+        @test all(isfinite, vals)
+        # Element-wise match against the scalar form documented in the docstring.
+        p = KF.EnergyParams(0.5, 0.8, -2.0, 0.5, 1.0, 0.3, 1.0, 1,
+            "harmonic", "maxwellian", 1.0, false)
+        @test vals ≈ [KF.energy_integrand_scalar(x, p) for x in x_grid]
+    end
+
+    # =========================================================================
+    # Struct construction and defaults
+    # =========================================================================
+    @testset "fluid CGL energy" begin
+        # Single-mode drives on a θ-varying Jacobian with ∫J dθ = 1. With δB/B = A·e^{2πimθ} alone,
+        # κ·ξ⊥ = -δB/B and T = 2n·i·n_s·T_s·(1/6)(9/2)|A|²; with ∇·ξ⊥ alone the two terms give the same 3/2.
+        jac = (pt; hint = nothing) -> 1.0 + 0.3 * cos(2π * pt[2])
+        equil = (eqfun_B=(pt; hint = nothing) -> 2.0, rzphi_jac=jac)
+        intr = KF.KineticForcesInternal(; mthsurf=128, mfac=collect(-2:2))
+        n, n_s, T_s = 1, 3.0e19, 1.6e-16
+        A = 0.02 + 0.01im
+        dbob = [0.0im, 0.0im, 0.0im, A, 0.0im]   # m = +1
+        zero_m = zeros(ComplexF64, 5)
+        T_dbob = KF.calculate_fcgl(0.5, n, 0, nothing, dbob, zero_m, 1.0, n_s, T_s, equil, intr)
+        @test T_dbob ≈ 1.5 * n * im * n_s * T_s * abs2(A) rtol = 1e-10
+        D = 0.05 - 0.02im
+        divx = [0.0im, D, 0.0im, 0.0im, 0.0im]   # m = -1, scaled by divxfac = 2
+        T_divx = KF.calculate_fcgl(0.5, n, 0, nothing, zero_m, divx, 2.0, n_s, T_s, equil, intr)
+        @test T_divx ≈ 1.5 * n * im * n_s * T_s * abs2(2.0 * D) rtol = 1e-10
+        @test KF.calculate_fcgl(0.5, n, 1, nothing, dbob, divx, 1.0, n_s, T_s, equil, intr) == 0
+    end
+
+    @testset "KineticForcesControl defaults" begin
+        ctrl = KF.KineticForcesControl()
+        @test ctrl.fgar_flag == true
+        @test ctrl.tgar_flag == false
+        @test ctrl.bounce_harmonic_max == 1
+        @test ctrl.nutype == "harmonic"
+        @test ctrl.f0type == "maxwellian"
+        @test ctrl.psilims == [0.0, 1.0]
+        # ψ quadrature is rtol-primary: atol_psi is amplitude-sensitive (NTV ∝ δB²)
+        @test ctrl.atol_psi == 0.0
+        @test ctrl.rtol_psi == 1e-2
+        @test ctrl.maxevals_psi == 2000
+        # Tolerance ladder: pitch derives from ψ by its margin unless set explicitly; the matrix build has its own default.
+        @test isnan(ctrl.rtol_pitch)
+        @test KF.torque_pitch_rtol(ctrl) ≈ 1e-3
+        @test KF.torque_pitch_rtol(KF.KineticForcesControl(; rtol_psi=1e-3)) ≈ 1e-4
+        @test KF.torque_pitch_rtol(KF.KineticForcesControl(; rtol_pitch=1e-5)) == 1e-5
+        @test KF.matrix_pitch_rtol(ctrl) == KF.MATRIX_RTOL_PITCH == 1e-3
+        @test KF.matrix_pitch_rtol(KF.KineticForcesControl(; rtol_pitch=1e-5, rtol_psi=1e-1)) == 1e-5
+    end
+
+    @testset "KineticForcesInternal defaults" begin
+        intr = KF.KineticForcesInternal()
+        @test intr.ro == 0.0
+        @test intr.bo == 0.0
+        @test intr.mpert == 0
+        @test intr.chi1 == 0.0
+        @test isempty(intr.sing_psis)
+    end
+
+    @testset "psi_panel_points" begin
+        sing_psis = [0.2, 0.5, 0.8]
+        # Interior surfaces become panel boundaries, in order
+        @test KF.psi_panel_points(sing_psis, 0.1, 0.9) == [0.1, 0.2, 0.5, 0.8, 0.9]
+        # Surfaces outside the integration bounds are dropped
+        @test KF.psi_panel_points(sing_psis, 0.3, 0.7) == [0.3, 0.5, 0.7]
+        # Surfaces at (or within 1e-8 of) a bound would create a degenerate panel — dropped
+        @test KF.psi_panel_points(sing_psis, 0.2, 0.8) == [0.2, 0.5, 0.8]
+        @test KF.psi_panel_points([0.2 + 5e-9], 0.2, 0.9) == [0.2, 0.9]
+        # No surfaces: plain two-point interval
+        @test KF.psi_panel_points(Float64[], 0.0, 1.0) == [0.0, 1.0]
+        # Unsorted union input (rationals ∪ kinetic resonances) is sorted
+        @test KF.psi_panel_points([0.8, 0.2, 0.5], 0.1, 0.9) == [0.1, 0.2, 0.5, 0.8, 0.9]
+        # Near-coincident points (kinetic resonance on a rational) collapse to one
+        @test KF.psi_panel_points([0.5, 0.5 + 5e-9, 0.2], 0.1, 0.9) == [0.1, 0.2, 0.5, 0.9]
+    end
+
+    @testset "find_sign_change_roots" begin
+        xs = collect(range(0.0, 1.0; length=101))
+        # Two known zeros of a smooth profile
+        spl = KF.cubic_interp(xs, @. sin(2π * xs) + 0.5)
+        roots = KF.find_sign_change_roots(spl, xs)
+        @test length(roots) == 2
+        expected = [(π - asin(-0.5)) / (2π), (2π + asin(-0.5)) / (2π)]
+        @test isapprox(roots, expected; atol=1e-6)
+        # Monotone positive profile: no crossings
+        @test isempty(KF.find_sign_change_roots(KF.cubic_interp(xs, 1.0 .+ xs), xs))
+        # Exact zero at a node is not a strict sign change — no crash, no root from that pair
+        vals = collect(1.0 .- 2 .* xs)
+        vals[51] = 0.0  # xs[51] = 0.5 is the true zero
+        spl0 = KF.cubic_interp(xs, vals)
+        @test length(KF.find_sign_change_roots(spl0, xs)) <= 1
+    end
+
+    @testset "kinetic resonance node scan" begin
+        # Synthetic frequency closures with analytically known Ω_ℓ(x=1) = 0 locations (evaluated
+        # at xeval=1 to keep the closed form): constant ω_b, ω_d and linear ω_E(ψ) = a − b·ψ give
+        # ψ_ℓ = (a + ω_d + ℓ·ω_b/n)/b. Constants chosen so no zero falls exactly on a grid node.
+        grid = collect(range(0.0, 1.0; length=101))
+        wb0, wd0, a, b = 0.1, 0.05, 0.5037, 1.0
+        wbhat_f = _ -> wb0
+        wdhat_f = _ -> wd0
+        welec_f = psi -> a - b * psi
+        nodes = sort(KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=2, xeval=1.0))
+        @test length(nodes) == 5
+        @test isapprox(nodes, [0.3537, 0.4537, 0.5537, 0.6537, 0.7537]; atol=1e-10)
+        # nl = 0 reduces to the ω_d-shifted ExB resonance alone
+        nodes0 = KF._resonance_nodes_from_frequencies(wbhat_f, welec_f, wdhat_f, grid; n=1, nl=0, xeval=1.0)
+        @test isapprox(nodes0, [0.5537]; atol=1e-10)
+        # No crossings when ω_E never approaches the resonance condition
+        @test isempty(KF._resonance_nodes_from_frequencies(wbhat_f, _ -> 10.0, wdhat_f, grid; n=1, nl=2, xeval=1.0))
+    end
+
+    @testset "check_psi_quadrature_convergence" begin
+        ctrl = KF.KineticForcesControl()  # atol_psi=0, rtol_psi=1e-2
+        total = 1.0 + 0.0im
+        # Converged: error below rtol*|T|, no warning
+        @test_logs KF.check_psi_quadrature_convergence(total, 1e-3, ctrl, "fgar")
+        # Hit maxevals: error above tolerance
+        @test_logs (:warn, r"maxevals_psi") KF.check_psi_quadrature_convergence(total, 0.5, ctrl, "fgar")
+        # Nonzero atol_psi dominating a small torque: the silent-garbage scenario
+        ctrl_atol = KF.KineticForcesControl(; atol_psi=1e-2)
+        @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl_atol, "fgar")
+        # A NaN torque fails every tolerance comparison, so it must error instead of passing silently
+        @test_throws ErrorException KF.check_psi_quadrature_convergence(complex(NaN), NaN, ctrl, "fgar")
+        @test_throws ErrorException KF.check_psi_quadrature_convergence(total, NaN, ctrl, "fgar")
+    end
+
+    @testset "check_inner_quadrature" begin
+        # An error estimate above tolerance (QuadGK stopped short) or a NaN must not pass silently
+        @test_logs KF.check_inner_quadrature(1.0 + 0im, 1e-6, 0.0, 1e-5, "test converged")
+        @test_logs (:warn, r"did not converge") KF.check_inner_quadrature(1.0 + 0im, 1e-3, 0.0, 1e-5, "test capped")
+        @test_logs (:warn, r"did not converge") KF.check_inner_quadrature([1.0 + 0im, NaN], 0.0, 0.0, 1e-5, "test nan")
+    end
+
+    @testset "METHOD_REGISTRY" begin
+        # The registry is the single source of truth for NTV methods. Every entry's
+        # flag must be a real KineticForcesControl field (the TOML kwargs splat relies
+        # on it) and carry a recognized dispatch kind. No fixed count is asserted —
+        # adding a method should not require editing a magic number here.
+        for entry in KF.METHOD_REGISTRY
+            @test entry.flag in fieldnames(KF.KineticForcesControl)
+            @test endswith(string(entry.flag), "_flag")
+            @test entry.kind in (:gar, :fcgl)
+            @test KF.method_kind(entry.name) == entry.kind
+        end
+    end
+
+    @testset "KineticForcesState" begin
+        state = KF.KineticForcesState()
+        @test isempty(state.method_results)
+        @test isempty(state.kinetic_matrices)
+    end
+
+    @testset "MethodResult defaults" begin
+        mr = KF.MethodResult(; method="fgar", nn=1)
+        @test mr.total_torque == 0.0 + 0.0im
+        @test mr.total_energy == 0.0
+        @test isempty(mr.dtdpsi_ell) && isempty(mr.ell)
+    end
+
+    # =========================================================================
+    # Kinetic profile I/O: HDF5 schema, ASCII back-compat, writer round-trip
+    # =========================================================================
+    @testset "kinetic profile I/O" begin
+        E = GeneralizedPerturbedEquilibrium.Equilibrium
+        exdir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+        gpeckf = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.gpeckf")
+        h5 = joinpath(exdir, "TkMkr_D3Dlike_Hmode_kinetic.h5")
+
+        @testset "extension dispatch + raw read" begin
+            da = E.read_kinetic_file(gpeckf)
+            db = E.read_kinetic_file(h5)
+            # legacy ASCII carries no optional fields; the example .h5 carries chi
+            @test da.chi_e === nothing && da.chi_i === nothing && da.chi_phi === nothing
+            @test db.chi_e !== nothing && db.chi_i !== nothing && db.chi_phi !== nothing
+            @test all(>(0), db.chi_i)
+            # core columns identical (the .h5 was generated from the .gpeckf)
+            @test da.psi == db.psi
+            @test da.n_e == db.n_e
+            @test da.T_i == db.T_i
+            @test da.omega_E == db.omega_E
+        end
+
+        @testset "NTV splines identical: ASCII vs HDF5" begin
+            ka = E.kinetic_profile_splines(E.read_kinetic_file(gpeckf))
+            kb = E.kinetic_profile_splines(E.read_kinetic_file(h5))
+            for p in 0.0:0.1:1.0
+                @test ka.ne_spline(p) == kb.ne_spline(p)
+                @test ka.Ti_spline(p) == kb.Ti_spline(p)
+                @test ka.omegaE_spline(p) == kb.omegaE_spline(p)
+                @test ka.zeff_spline(p) == kb.zeff_spline(p)
+            end
+        end
+
+        @testset "writer round-trip" begin
+            db = E.read_kinetic_file(h5)
+            tmp = tempname() * ".h5"
+            E.write_kinetic_h5(tmp, db; provenance="roundtrip")
+            dc = E.read_kinetic_file(tmp)
+            @test dc.chi_e ≈ db.chi_e
+            @test dc.chi_phi ≈ db.chi_phi
+            @test dc.n_e ≈ db.n_e
+            @test dc.provenance == "roundtrip"
+            @test dc.chi_i ≈ db.chi_i
+            E.write_kinetic_h5(tmp, E.KineticProfileData(; psi=db.psi, chi_e=db.chi_e))
+            @test E.read_kinetic_file(tmp).chi_i === nothing
+            rm(tmp; force=true)
+        end
+
+        @testset "schema table matches the data fields" begin
+            # Every profile dataset the reader and writer iterate is an optional profile field of KineticProfileData, and vice versa.
+            table = Set(Symbol(first(p)) for p in E._KINETIC_H5_PROFILES)
+            profiles = Set(f for (f, T) in zip(fieldnames(E.KineticProfileData), fieldtypes(E.KineticProfileData)) if T == Union{Nothing,Vector{Float64}})
+            @test table == profiles
+        end
+
+        @testset "missing required field errors" begin
+            # Only psi + n_e: the NTV view must error on the missing T_i
+            d = E.KineticProfileData(; psi=[0.0, 0.5, 1.0], n_e=[1e19, 9e18, 8e18])
+            @test_throws "missing required 'T_i'" E.kinetic_profile_splines(d)
+        end
+
+        @testset "attached to the equilibrium" begin
+            template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+            sol = GeneralizedPerturbedEquilibrium.analytic_config(deck)
+            # A relative kinetic_file resolves against the deck directory, like eq_filename.
+            config = GeneralizedPerturbedEquilibrium.equilibrium_config(
+                merge(deck, Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))))),
+                template
+            )
+            @test config.kinetic_file == normpath(h5)
+            raw = E.read_kinetic_file(h5)
+            equil = E.PlasmaEquilibrium(config, sol)
+            @test equil.kinetic.psi == raw.psi
+            @test equil.kinetic.T_i == raw.T_i
+            @test equil.kinetic.chi_e == raw.chi_e
+            # A re-form passes the data through instead of reading the file again.
+            @test E.PlasmaEquilibrium(config, sol; kinetic=equil.kinetic).kinetic === equil.kinetic
+
+            bare = E.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(deck, template), sol)
+            @test bare.kinetic === nothing
+            E.attach_kinetic_profiles!(bare, gpeckf)
+            @test bare.kinetic.n_e == E.read_kinetic_file(gpeckf).n_e
+            @test E.attach_kinetic_profiles!(bare, raw).kinetic === raw
+        end
+
+        @testset "NTV views of the attached profiles" begin
+            GPEC = GeneralizedPerturbedEquilibrium
+            KF = GPEC.KineticForces
+            template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            deck = TOML.parsefile(joinpath(template, "gpec.toml"))
+            equil = E.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(deck, template), GeneralizedPerturbedEquilibrium.analytic_config(deck))
+            kf = KF.KineticForcesControl()
+            @test KF.ntv_profiles(kf, equil) === nothing
+
+            raw = E.read_kinetic_file(h5)
+            E.attach_kinetic_profiles!(equil, raw)
+            view = KF.ntv_profiles(kf, equil)
+            zi, mi = KF.main_ion(equil)
+            ref = E.kinetic_profile_splines(raw; zi, zimp=raw.impurity_charge, mi, mimp=raw.impurity_mass, chi1=2π * equil.psio)
+            for ψ in 0.0:0.1:1.0
+                @test view.Ti_spline(ψ) == ref.Ti_spline(ψ)
+                @test view.nui_spline(ψ) == ref.nui_spline(ψ)
+                @test view.zeff_spline(ψ) == ref.zeff_spline(ψ)
+            end
+            @test KF.ntv_species(kf, equil) === nothing
+            with_e = KF.ntv_species(KF.KineticForcesControl(; electron=true), equil)
+            @test any(sp -> sp.electron, with_e)
+        end
+    end
+
+    # =========================================================================
+    # Multi-n kinetic geometry: each n-block must match an independent single-n build
+    # =========================================================================
+    @testset "multi-n kinetic geometry and F̄ blocks" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # The default Solovev plasma on a coarse 16-interval grid, with the n = 1, 2 mode space truncated at psihigh.
+        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; eq_type="sol", jac_type="pest",
+            grid_type="core_edge_packed", psilow=1e-4, psihigh=0.9995, mpsi=16, mtheta=256, flux_surface_rtol=1e-7)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig())
+        ctrl = FFS.ForceFreeStatesControl(; nn_low=1, nn_high=2, qlow=1.02, qhigh=1e3, singfac_min=1e-4, truncate_at_rational_offset=false)
+        # One shared poloidal band so the blocks of every mode space are directly comparable.
+        mlow = floor(Int, min(equil.params.qmin, 0)) - 4
+        mhigh = trunc(Int, 2 * equil.params.qmax)
+        function mode_space(nlow, nhigh)
+            intr = FFS.ForceFreeStatesInternal()
+            intr.nlow, intr.nhigh, intr.npert = nlow, nhigh, nhigh - nlow + 1
+            FFS.sing_lim!(intr, ctrl, equil)
+            intr.mlow, intr.mhigh = mlow, mhigh
+            intr.mpert = mhigh - mlow + 1
+            intr.numpert_total = intr.mpert * intr.npert
+            return intr
+        end
+        intr12 = mode_space(1, 2)
+        mpert = intr12.mpert
+        metric = FFS.make_metric(equil, mpert)
+        geom12 = FFS.build_kinetic_metric_matrices(equil, intr12, metric)
+        psis = [0.05, 0.3, 0.61, 0.87]
+
+        # Every geometric matrix of block k equals the single-n build at n = k.
+        for n in 1:2
+            geom_n = FFS.build_kinetic_metric_matrices(equil, mode_space(n, n), metric)
+            for name in (:smats, :tmats, :xmats, :ymats, :zmats), psi in psis
+                @test FFS.kinetic_metric_block(geom12[name], psi, mpert, n) ≈ reshape(geom_n[name](psi), mpert, mpert) rtol = 1e-13
+            end
+        end
+        # Y and Z carry n, so the n = 2 block is not a copy of n = 1.
+        @test !(FFS.kinetic_metric_block(geom12.ymats, 0.3, mpert, 2) ≈ FFS.kinetic_metric_block(geom12.ymats, 0.3, mpert, 1))
+        @test !(FFS.kinetic_metric_block(geom12.zmats, 0.3, mpert, 2) ≈ FFS.kinetic_metric_block(geom12.zmats, 0.3, mpert, 1))
+
+        # The condition number of each F̄ block equals the single-n F̄ built from the same kinetic block.
+        # Single-n kinetic matrices are tiled into a block-diagonal multi-n set, as the calculated source does.
+        mats12 = FFS.build_matrix_splines(equil, intr12, metric)
+        xs = metric.xs
+        mpsi = length(xs)
+        kw12 = zeros(ComplexF64, mpsi, (2mpert)^2, 6)
+        kt12 = zeros(ComplexF64, mpsi, (2mpert)^2, 6)
+        singles = map(1:2) do n
+            intr = mode_space(n, n)
+            mats = FFS.build_matrix_splines(equil, intr, metric)
+            kw, _ = FFS.fixed_kinetic_matrices(mpert, mpert, mpsi, 0.05, mlow, mats, xs)
+            kt = 0.3im .* kw
+            for k in 1:6, j in 1:mpert, i in 1:mpert
+                idx = ((n - 1) * mpert + j - 1) * 2mpert + (n - 1) * mpert + i
+                kw12[:, idx, k] .= kw[:, i+(j-1)*mpert, k]
+                kt12[:, idx, k] .= kt[:, i+(j-1)*mpert, k]
+            end
+            (intr, FFS._compute_fkg_matrices(mats, equil, intr, metric, kw, kt))
+        end
+        kin12 = FFS._compute_fkg_matrices(mats12, equil, intr12, metric, kw12, kt12).kinetic
+        for psi in psis
+            conds12 = FFS.fbar_block_conditions(psi, kin12, equil, intr12)
+            for n in 1:2
+                intr_n, mats_n = singles[n]
+                @test conds12[n] ≈ only(FFS.fbar_block_conditions(psi, mats_n.kinetic, equil, intr_n)) rtol = 1e-8
+            end
+            @test FFS.evaluate_fbar_condition(psi, kin12, equil, intr12) == maximum(conds12)
+        end
+    end
+end

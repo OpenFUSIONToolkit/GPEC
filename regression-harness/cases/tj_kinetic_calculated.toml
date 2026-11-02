@@ -1,0 +1,170 @@
+# Regression case: TJ-analytic n=1 with the "calculated" kinetic path at full strength.
+# Guards the real KineticForces (PENTRC-style) physics path against drift, with the main
+# ion declared as a 50/50 D-T mix so the self-consistent kinetic-matrix species loop
+# (multi-ion accumulation) is pinned end-to-end. Each [quantities.*] block names an HDF5
+# path in the run output, how to extract it, and the noise floor below which a difference
+# is treated as zero.
+[case]
+name = "tj_kinetic_calculated"
+description = "TJ-analytic, n=1, no wall, kinetic = 'KineticForces', 50/50 D-T multi-ion kinetic matrices; pressure-consistent kinetic.dat (P₀≈784 Pa)."
+example_dir = "examples/TJ_kinetic_calculated_example"
+
+# Energies — leading eigenvalues
+[quantities.et_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+
+[quantities.et_imag]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "imag_first"
+label = "total energy Im(et[1])"
+noise_threshold = 1e-10
+
+[quantities.ep_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "plasma energy Re(ep[1])"
+noise_threshold = 1e-10
+
+[quantities.ev_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "vacuum energy Re(ev[1])"
+noise_threshold = 1e-10
+
+# Energies — full eigenvalue arrays
+[quantities.et_all]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "all_complex"
+label = "total energy (all)"
+noise_threshold = 1e-10
+
+# Integration
+[quantities.nstep]
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (saved)"
+noise_threshold = 0
+
+[quantities.nstep_total]
+h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (total)"
+noise_threshold = 0
+
+# Equilibrium
+[quantities.q0]
+h5path = "Equilibrium/q_axis"
+type = "real_scalar"
+extract = "value"
+label = "q0"
+noise_threshold = 1e-12
+
+[quantities.q95]
+h5path = "Equilibrium/q_95"
+type = "real_scalar"
+extract = "value"
+label = "q95"
+noise_threshold = 1e-12
+
+# Singular surfaces
+[quantities.msing]
+h5path = "SingularSurfaces/rational_count"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+
+[quantities.sing_psi]
+h5path = "SingularSurfaces/rational_psi"
+type = "real_vector"
+extract = "all_real"
+label = "singular psi locations"
+noise_threshold = 1e-8
+
+[quantities.sing_q]
+h5path = "SingularSurfaces/rational_q"
+type = "real_vector"
+extract = "all_real"
+label = "singular q values"
+noise_threshold = 1e-8
+
+# Mode numbers
+[quantities.mpert]
+h5path = "Info/mpert"
+type = "int_scalar"
+extract = "value"
+label = "mpert"
+noise_threshold = 0
+
+[quantities.npert]
+h5path = "Info/npert"
+type = "int_scalar"
+extract = "value"
+label = "npert"
+noise_threshold = 0
+
+# Torque of the run's own forcing, three routes on one kinetic solve: the ψ-resolved torque
+# response matrix T_xe contracted with the applied field (its Hermitian part carries the torque),
+# the boundary-response torque from the plasma inductance (same number, different algebra), and
+# the KineticForces NTV quadrature of the same displacement (an independent evaluation that
+# agrees only to the level the kinetic-matrix and quadrature discretizations do).
+[quantities.torque_response_total]
+h5path = "PerturbedEquilibrium/TorqueResponse/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "T_xe applied-forcing torque [N·m]"
+noise_threshold = 1e-10
+
+[quantities.boundary_torque]
+h5path = "PerturbedEquilibrium/Energies/toroidal_torque"
+type = "real_scalar"
+extract = "value"
+label = "boundary-response torque [N·m]"
+noise_threshold = 1e-10
+
+[quantities.ntv_fgar_torque]
+h5path = "KineticForces/fgar/total_torque"
+type = "real_scalar"
+extract = "value"
+label = "NTV fgar quadrature torque [N·m]"
+noise_threshold = 1e-10
+
+# Perturbed equilibrium — Clebsch displacements and regularized b^θ from the kinetic solve
+[quantities.pe_clebsch_alpha_norm]
+h5path = "PerturbedEquilibrium/Response/xi_clebsch_alpha"
+type = "complex_matrix"
+extract = "norm"
+label = "||xi_clebsch_alpha||"
+noise_threshold = 1e-8
+
+[quantities.pe_clebsch_psi1_norm]
+h5path = "PerturbedEquilibrium/Response/dxi_clebsch_psidpsi"
+type = "complex_matrix"
+extract = "norm"
+label = "||dxi_clebsch_psi/dpsi||"
+noise_threshold = 1e-8
+
+[quantities.pe_b_theta_reg_norm]
+h5path = "PerturbedEquilibrium/Response/Jb_theta_reg"
+type = "complex_matrix"
+extract = "norm"
+label = "||Jb_theta_reg||"
+noise_threshold = 1e-8
+
+# Runtime (special: not from H5)
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0

@@ -1,0 +1,401 @@
+using HDF5
+using TOML
+
+# Tests for the gpec.h5 snapshot + replay feature, kept deliberately light: one full-pipeline
+# source run + replay (the analytic TJ path), plus pipeline-free ingest round-trip checks
+# for the direct (EFIT) and inverse (CHEASE) equilibrium kinds and the override flags.
+
+# Collect every leaf dataset path under an open HDF5 file, skipping the groups/paths that
+# legitimately differ between a source run and its replay (`Input/` is re-emitted with the
+# rerun's own filename/TOML blob; `Info/git_version` reflects the running commit;
+# `Info/Runtimes/` records wall-clock seconds, which never repeat).
+function _rerun_leaf_paths(h5)
+    skip_toplevel = Set(["Input"])
+    skip_paths = Set(["Info/git_version", "Info/Runtimes"])
+    paths = String[]
+    function walk(node, prefix)
+        for k in keys(node)
+            full = isempty(prefix) ? k : prefix * "/" * k
+            (isempty(prefix) && k in skip_toplevel) && continue
+            full in skip_paths && continue
+            child = node[k]
+            child isa HDF5.Group ? walk(child, full) : push!(paths, full)
+        end
+    end
+    walk(h5, "")
+    return paths
+end
+
+# Count datasets that differ between a source gpec.h5 and its replay. Zero mismatches over the
+# whole output is the strongest snapshot drift guard: it fires if any TOML var or IO field is
+# added but not threaded through the snapshot + replay path.
+function _rerun_dataset_mismatches(source_h5, rerun_h5)
+    n_compared = 0
+    n_mismatched = 0
+    h5open(source_h5, "r") do hs
+        h5open(rerun_h5, "r") do hr
+            src = Set(_rerun_leaf_paths(hs))
+            rer = Set(_rerun_leaf_paths(hr))
+            for p in union(src, rer)
+                n_compared += 1
+                # `isequal` (not `!=`) so a faithfully-reproduced NaN counts as a match — some
+                # datasets (e.g. ballooning `LocalStability/alpha_critical` where no boundary exists) are
+                # legitimately all-NaN, and `NaN != NaN` would otherwise flag them as drift.
+                if !(p in src) || !(p in rer) || !isequal(read(hs, p), read(hr, p))
+                    n_mismatched += 1
+                end
+            end
+        end
+    end
+    return n_compared, n_mismatched
+end
+
+# Analytic (TJ) equilibrium with ASCII file forcing: the single end-to-end source + replay.
+# The forcing file is deleted before replay and the replay runs from a temp directory, proving
+# the snapshot is self-contained (no g-file or forcing data needed), and reproduces the source
+# bit-for-bit across every output dataset, the normalized perturbed equilibrium included.
+@testset "Rerun from gpec.h5 (analytic TJ)" begin
+    template_dir = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
+
+    mktempdir() do snapshot_dir
+        for name in readdir(template_dir)
+            cp(joinpath(template_dir, name), joinpath(snapshot_dir, name))
+        end
+        forcing_dat = joinpath(snapshot_dir, "forcing.dat")
+        cp(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"), forcing_dat)
+        toml_path = joinpath(snapshot_dir, "gpec.toml")
+        inputs = TOML.parsefile(toml_path)
+        inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
+        inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+            "compute_singular_coupling" => true)
+        open(io -> TOML.print(io, inputs), toml_path, "w")
+
+        @info "Generating source gpec.h5 for rerun tests"
+        GeneralizedPerturbedEquilibrium.main([snapshot_dir])
+        source_h5 = joinpath(snapshot_dir, "gpec.h5")
+        @test isfile(source_h5)
+        h5open(source_h5, "r") do h5
+            @test HDF5.attrs(h5["Input/RawInputs/ForcingTerms"])["normalization"] == "normal_field_T"
+        end
+        rm(forcing_dat)
+
+        @testset "self-contained replay matches source across all datasets" begin
+            mktempdir() do replay_dir
+                GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", replay_dir])
+                replay_h5 = joinpath(replay_dir, "gpec_rerun.h5")
+                @test isfile(replay_h5)
+                @test isfile(joinpath(replay_dir, "gpec_rerun_forcing.h5"))
+                @test "PerturbedEquilibrium" in h5open(keys, replay_h5, "r")
+
+                n_compared, n_mismatched = _rerun_dataset_mismatches(source_h5, replay_h5)
+                @test n_compared > 0
+                @test n_mismatched == 0
+            end
+        end
+
+        # `build_inputs_from_h5` reconstructs the run inputs without executing the pipeline, so
+        # both override flags are covered through the real code path with no extra runs.
+        @testset "override flags propagate through build_inputs_from_h5" begin
+            mktempdir() do out_dir
+                inline = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.qlow=1.05"])
+                @test inline[1]["ForceFreeStates"]["qlow"] == 1.05
+
+                override_toml = joinpath(out_dir, "overrides.toml")
+                write(override_toml, "[ForceFreeStates]\nqlow = 1.06\n")
+                from_file = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override-file", override_toml])
+                @test from_file[1]["ForceFreeStates"]["qlow"] == 1.06
+            end
+        end
+
+        # An override that sets a retired key stops the replay before any solve.
+        @testset "retired ForceFreeStates keys stop a replay" begin
+            mktempdir() do out_dir
+                @test_throws r"`use_parallel`" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.use_parallel=true"])
+            end
+        end
+
+        # A gpec.h5 from an older GPEC stores a deck with retired keys, which the replay cannot delete.
+        @testset "a stored deck with retired keys stops the replay" begin
+            mktempdir() do out_dir
+                old_h5 = joinpath(out_dir, "old.h5")
+                cp(source_h5, old_h5)
+                h5open(old_h5, "r+") do h5
+                    inputs = TOML.parse(read(h5, "Input/gpec_toml_raw"))
+                    inputs["PerturbedEquilibrium"]["fixed_boundary"] = false
+                    delete_object(h5, "Input/gpec_toml_raw")
+                    h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                    delete_object(h5, "Info/git_version")
+                    h5["Info/git_version"] = "v1.5.0-412-gabc1234-dirty"
+                end
+                # The error keeps the per-key advice and tells the user which version wrote the file and how to get it.
+                err = try
+                    GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+                catch e
+                    e
+                end
+                @test err isa ErrorException
+                @test occursin("`fixed_boundary`, which is no longer a key; remove from gpec.toml", err.msg)
+                @test occursin("written by GPEC v1.5.0-412-gabc1234-dirty", err.msg)
+                @test occursin("git checkout abc1234", err.msg) && occursin("uncommitted changes", err.msg)
+                @test occursin("h5read(\"$(abspath(old_h5))\", \"Input/gpec_toml_raw\")", err.msg)
+            end
+        end
+
+        @testset "a recorded version names the commit to check out" begin
+            for (version, checkout) in ("v2.0.0" => "v2.0.0", "v2.0.0-3-gdeadbee" => "deadbee", "deadbee" => "deadbee", "unknown" => nothing)
+                @test GeneralizedPerturbedEquilibrium._version_checkout(version) == checkout
+            end
+        end
+
+        @testset "rerun refuses to overwrite its own source" begin
+            # Default output is `<basename>_rerun.h5`, so clobbering only happens if the user
+            # routes the rerun back onto the source file; exercise that guard.
+            @test_throws ErrorException GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", snapshot_dir, "--output-name", "gpec.h5"])
+            # The same file under another name, as the output or as one of its side files, is refused too.
+            mktempdir() do out_dir
+                symlink(source_h5, joinpath(out_dir, "alias.h5"))
+                @test_throws r"Refusing to overwrite" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--output-name", "alias.h5"])
+                symlink(source_h5, joinpath(out_dir, "run_forcing.h5"))
+                @test_throws r"Refusing to overwrite" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--output-name", "run.h5"])
+            end
+        end
+
+        @testset "kinetic profiles and a file wall replay from the snapshot" begin
+            mktempdir() do out_dir
+                doctored = joinpath(out_dir, "source.h5")
+                cp(source_h5, doctored)
+                kinetic = GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example", "kinetic.dat"))
+                wall_text = "3\n1.0\nindex R Z\n1 2.0 0.0\n2 1.5 0.5\n3 1.5 -0.5\n"
+                h5open(doctored, "r+") do h5
+                    inputs = TOML.parse(read(h5, "Input/gpec_toml_raw"))
+                    # Neither file exists: the replay must take both from the snapshot.
+                    inputs["Equilibrium"]["kinetic_file"] = joinpath(out_dir, "gone.dat")
+                    inputs["Wall"] = Dict{String,Any}("shape" => "file", "file" => joinpath(out_dir, "gone_wall.dat"))
+                    delete_object(h5, "Input/gpec_toml_raw")
+                    h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                end
+                @test_throws r"records no Input/RawInputs/Kinetic" GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir])
+                h5open(doctored, "r+") do h5
+                    GeneralizedPerturbedEquilibrium.Equilibrium.write_kinetic_group!(create_group(h5, "Input/RawInputs/Kinetic"), kinetic)
+                end
+                @test_throws r"records no Input/RawInputs/Wall" GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir])
+                h5open(h5 -> h5["Input/RawInputs/Wall/wall_file_raw"] = wall_text, doctored, "r+")
+                inputs = first(GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir]))
+                @test inputs["Equilibrium"]["kinetic_file"] == "source_rerun_kinetic.h5"
+                @test GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(joinpath(out_dir, "source_rerun_kinetic.h5")).n_e == kinetic.n_e
+                @test inputs["Wall"]["file"] == "source_rerun_wall.dat"
+                @test read(joinpath(out_dir, "source_rerun_wall.dat"), String) == wall_text
+            end
+        end
+
+        @testset "--coil-source coils errors when source has no coil snapshot" begin
+            # This source run used ASCII forcing, so there is no
+            # Input/RawInputs/Coils group to replay from.
+            mktempdir() do replay_dir
+                @test_throws ErrorException GeneralizedPerturbedEquilibrium.main([
+                    source_h5, "--output-dir", replay_dir, "--coil-source", "coils"
+                ])
+            end
+        end
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Coil-geometry snapshot: a coil run stores its geometry in gpec.h5 so it can be
+# replayed without the original .dat. The decisive test deletes the .dat between
+# the source run and the replay: the default (recompute-from-TOML) path then
+# fails, while `--coil-source coils` succeeds from the stored geometry.
+@testset "Rerun from gpec.h5: coil geometry snapshot" begin
+    template_dir = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
+    src_dat = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries", "d3d_il.dat")
+
+    read_resfield(path) =
+        h5open(path, "r") do h5
+            key = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
+            haskey(h5, key) ? read(h5, key) : ComplexF64[]
+        end
+
+    mktempdir() do snapshot_dir
+        for name in readdir(template_dir)
+            src = joinpath(template_dir, name)
+            isfile(src) && cp(src, joinpath(snapshot_dir, name))
+        end
+
+        # Point the coil set at a throwaway .dat we can delete before replay.
+        coil_dat = joinpath(snapshot_dir, "my_coils.dat")
+        cp(src_dat, coil_dat)
+
+        toml_path = joinpath(snapshot_dir, "gpec.toml")
+        inputs = TOML.parsefile(toml_path)
+        inputs["PerturbedEquilibrium"] = Dict{String,Any}(
+            "compute_singular_coupling" => true)
+        inputs["ForcingTerms"] = Dict{String,Any}(
+            "forcing_data_format" => "coil", "mtheta_coil" => 64, "nzeta_coil" => 32,
+            "coil_set" => [Dict{String,Any}(
+                "dat_file" => coil_dat,
+                "currents" => fill(1.0e3, 6)
+            )]
+        )
+        open(toml_path, "w") do io
+            TOML.print(io, inputs)
+        end
+
+        @info "Generating source gpec.h5 for coil rerun test"
+        GeneralizedPerturbedEquilibrium.main([snapshot_dir])
+        source_h5 = joinpath(snapshot_dir, "gpec.h5")
+        @test isfile(source_h5)
+
+        # The coil geometry actually used must be captured in the snapshot.
+        h5open(source_h5, "r") do h5
+            @test haskey(h5, "Input/RawInputs/Coils")
+            @test haskey(h5, "Input/RawInputs/Coils/my_coils")
+        end
+        src_field = read_resfield(source_h5)
+        @test !isempty(src_field)
+        @test maximum(abs.(src_field)) > 0
+
+        # Delete the .dat: the snapshot must now be the only source of geometry.
+        rm(coil_dat)
+
+        @testset "default replay needs the .dat and fails once it is gone" begin
+            mktempdir() do replay_dir
+                @test_throws Exception GeneralizedPerturbedEquilibrium.main([
+                    source_h5, "--output-dir", replay_dir
+                ])
+            end
+        end
+
+        @testset "--coil-source coils replays from the stored geometry" begin
+            mktempdir() do replay_dir
+                GeneralizedPerturbedEquilibrium.main([
+                    source_h5, "--output-dir", replay_dir, "--coil-source", "coils"
+                ])
+                replay_h5 = joinpath(replay_dir, "gpec_rerun.h5")
+                @test isfile(replay_h5)
+                @test read_resfield(replay_h5) ≈ src_field rtol = 1e-6
+            end
+        end
+    end
+end
+
+# Round-trip the typed equilibrium ingest through a temp h5 exactly as the snapshot writer and
+# replay reader do (field-by-field write + `read_equilibrium_ingest`), then rebuild the solver
+# input. The rebuilt splines must evaluate bit-for-bit identical to the originals. This is the
+# pipeline-free guard on the capture → store → restore path, run once per equilibrium kind.
+function _roundtrip_ingest(ingest, kind)
+    mktempdir() do d
+        h5path = joinpath(d, "raw.h5")
+        h5open(h5path, "w") do f
+            f["Input/RawInputs/Equilibrium/ingest_kind"] = kind
+            for nm in fieldnames(typeof(ingest))
+                f["Input/RawInputs/Equilibrium/$nm"] = getfield(ingest, nm)
+            end
+        end
+        restored = h5open(GeneralizedPerturbedEquilibrium.read_equilibrium_ingest, h5path, "r")
+        @test restored isa typeof(ingest)
+        return restored
+    end
+end
+
+# Direct (DIII-D EFIT) equilibrium recovery through the h5 path, without a pipeline run.
+@testset "Rerun direct-equilibrium recovery through h5" begin
+    Equil = GeneralizedPerturbedEquilibrium.Equilibrium
+    config = Equil.EquilibriumConfig(;
+        eq_filename=joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk"),
+        eq_type="efit"
+    )
+    src = Equil.read_efit(config)
+    @test src isa Equil.DirectRunInput
+    @test src.ingest isa Equil.DirectIngest
+
+    restored = _roundtrip_ingest(src.ingest, "direct")
+    rebuilt = Equil.build_direct_from_ingest(config, restored)
+
+    @test rebuilt.rmin == src.rmin
+    @test rebuilt.rmax == src.rmax
+    @test rebuilt.zmin == src.zmin
+    @test rebuilt.zmax == src.zmax
+    @test rebuilt.psio == src.psio
+    @test rebuilt.bt_sign == src.bt_sign
+    @test rebuilt.psi_in_xs == src.psi_in_xs
+    @test rebuilt.psi_in_ys == src.psi_in_ys
+
+    # 2D flux interpolant must evaluate bit-for-bit at interior sample points.
+    for fr in (0.25, 0.5, 0.75), fz in (0.4, 0.6)
+        R = src.rmin + fr * (src.rmax - src.rmin)
+        Z = src.zmin + fz * (src.zmax - src.zmin)
+        @test rebuilt.psi_in((R, Z)) == src.psi_in((R, Z))
+    end
+    # 1D profile spline likewise.
+    for frac in (0.1, 0.5, 0.9)
+        x = src.psi_in_xs[1] + frac * (src.psi_in_xs[end] - src.psi_in_xs[1])
+        @test rebuilt.sq_in(x) == src.sq_in(x)
+    end
+end
+
+# Inverse (CHEASE) equilibrium recovery through the same h5 path — exercises the InverseIngest
+# branch and `build_inverse_from_ingest`, the kind that was not rerunnable before this change.
+@testset "Rerun inverse-equilibrium recovery through h5" begin
+    Equil = GeneralizedPerturbedEquilibrium.Equilibrium
+    config = Equil.EquilibriumConfig(;
+        eq_filename=joinpath(@__DIR__, "test_data", "CHEASE_test_data", "INP1_ascii"),
+        eq_type="chease_ascii", jac_type="boozer", grid_type="core_edge_packed",
+        psilow=0.01, psihigh=0.994, r0_norm=6.8, b0_norm=7.4
+    )
+    src = Equil.read_chease_ascii(config)
+    @test src isa Equil.InverseRunInput
+    @test src.ingest isa Equil.InverseIngest
+
+    restored = _roundtrip_ingest(src.ingest, "inverse")
+    rebuilt = Equil.build_inverse_from_ingest(config, restored)
+
+    @test rebuilt.ro == src.ro
+    @test rebuilt.zo == src.zo
+    @test rebuilt.psio == src.psio
+    @test rebuilt.rz_in_xs == src.rz_in_xs
+    @test rebuilt.rz_in_ys == src.rz_in_ys
+
+    # R, Z interpolants must evaluate bit-for-bit at interior (ψ, θ) sample points.
+    for fpsi in (0.25, 0.5, 0.75), fth in (0.2, 0.6)
+        ψ = src.rz_in_xs[1] + fpsi * (src.rz_in_xs[end] - src.rz_in_xs[1])
+        θ = src.rz_in_ys[1] + fth * (src.rz_in_ys[end] - src.rz_in_ys[1])
+        @test rebuilt.rz_in_R((ψ, θ)) == src.rz_in_R((ψ, θ))
+        @test rebuilt.rz_in_Z((ψ, θ)) == src.rz_in_Z((ψ, θ))
+    end
+end
+
+# `parse_override_flag` (pure): literal typing and the string-fallback warning for bare words.
+@testset "parse_override_flag literal typing and warn" begin
+    pf = GeneralizedPerturbedEquilibrium.parse_override_flag
+    @test pf("ForceFreeStates.npert=5")["ForceFreeStates"]["npert"] === 5
+    @test pf("ForceFreeStates.eulerlagrange_tolerance=1.5e-3")["ForceFreeStates"]["eulerlagrange_tolerance"] === 1.5e-3
+    @test pf("ForceFreeStates.kin_flag=true")["ForceFreeStates"]["kin_flag"] === true
+
+    bad = @test_logs (:warn,) pf("ForceFreeStates.mode=blorp")
+    @test bad["ForceFreeStates"]["mode"] == "blorp"
+end
+
+# Drift guard for the analytic-equilibrium registry: `run_input` and the deck parser both
+# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed row would silently break one path.
+@testset "ANALYTIC_EQ registry is well-formed and drives the deck's analytic sections" begin
+    GPEC = GeneralizedPerturbedEquilibrium
+    Equil = GPEC.Equilibrium
+    for (eq_type, spec) in Equil.ANALYTIC_EQ
+        # The section is the config type's name without "Config".
+        @test spec.section * "Config" == String(nameof(spec.config_type))
+        @test hasmethod(spec.run_fn, Tuple{Equil.EquilibriumConfig,spec.config_type})
+        # The section alone selects the equilibrium: its config with defaults, and the implied eq_type.
+        deck = Dict{String,Any}("Equilibrium" => Dict{String,Any}(), spec.section => Dict{String,Any}())
+        @test GPEC.analytic_config(deck) isa spec.config_type
+        @test GPEC.equilibrium_config(deck, ".").eq_type == eq_type
+        @test Equil.analytic_eq_type(spec.config_type()) == eq_type
+    end
+    # An analytic deck sets no eq_type, holds one analytic section, and does not name the internal token.
+    stated = Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol"), "Solovev" => Dict{String,Any}())
+    @test_throws ErrorException GPEC.equilibrium_config(stated, ".")
+    @test_throws ErrorException GPEC.equilibrium_config(Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol")), ".")
+    @test_throws ErrorException GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}(), "TJAnalytic" => Dict{String,Any}()))
+    @test_throws ArgumentError GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}("lar_r0" => 1.0)))
+    @test GPEC.analytic_config(Dict{String,Any}("TJAnalytic" => Dict{String,Any}("solver" => "direct"))).solver === :direct
+    @test_throws ErrorException GPEC._stop_on_deprecated_deck_keys(Dict{String,Any}("SOL_INPUT" => Dict{String,Any}()))
+end

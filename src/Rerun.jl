@@ -1,0 +1,491 @@
+# Rerun support: save a run's inputs into gpec.h5 and replay them. Turns a gpec.h5 output into
+# a self-contained snapshot rerunnable from any directory, with optional overrides, without the
+# original g-file / CHEASE / wall inputs.
+#
+# Included directly into the GeneralizedPerturbedEquilibrium module.
+
+"""
+    read_equilibrium_ingest(in_h5) -> EquilibriumIngest
+
+Reconstruct the [`DirectIngest`](@ref)/[`InverseIngest`](@ref) stored under
+`Input/RawInputs/Equilibrium/` by `save_equilibrium_ingest!`. Returns `nothing` when the group is absent,
+which marks an analytic equilibrium, replayed from its TOML section.
+"""
+function read_equilibrium_ingest(in_h5)
+    group_path = "Input/RawInputs/Equilibrium"  # written by save_equilibrium_ingest!
+    haskey(in_h5, group_path) || return nothing
+    group = in_h5[group_path]
+    kind = read(group, "ingest_kind")
+    T =
+        kind == "direct" ? Equilibrium.DirectIngest :
+        kind == "inverse" ? Equilibrium.InverseIngest :
+        error("Unknown equilibrium ingest_kind in gpec.h5: $kind (expected \"direct\" or \"inverse\")")
+    # Positional reconstruction in `fieldnames(T)` order; a file without ip_sign was a positive-current run, so it defaults to +1.
+    return T((haskey(group, String(f)) ? read(group, String(f)) : (f == :ip_sign ? 1 : error("missing equilibrium ingest field $f in gpec.h5")) for f in fieldnames(T))...)
+end
+
+"""
+    apply_toml_overrides!(inputs, overrides)
+
+In-place deep merge of a nested override dict onto `inputs`: leaf values replace, tables merge recursively.
+"""
+function apply_toml_overrides!(inputs::Dict{String,Any}, overrides::Dict{String,Any})
+    for (k, v) in overrides
+        if v isa Dict && haskey(inputs, k) && inputs[k] isa Dict
+            apply_toml_overrides!(inputs[k], v)
+        else
+            inputs[k] = v
+        end
+    end
+    return inputs
+end
+
+"""
+    parse_override_flag(expr::AbstractString) -> Dict{String,Any}
+
+Parse a `--override section.key=value` expression into a nested override dict. The value is
+parsed as a TOML literal; one that does not parse is kept as a string, with a warning.
+"""
+function parse_override_flag(expr::AbstractString)
+    eqidx = findfirst(==('='), expr)
+    eqidx === nothing && error("--override expects key=value, got: $expr")
+    lhs = String(strip(expr[1:eqidx-1]))
+    rhs = String(strip(expr[eqidx+1:end]))
+    isempty(lhs) && error("--override key cannot be empty: $expr")
+
+    parts = split(lhs, '.')
+    length(parts) < 2 && error("--override key must be dotted (section.key[.subkey]): $expr")
+
+    # Parse RHS as a TOML value by wrapping it in a throwaway key=value line.
+    sentinel = "_rerun_override_"
+    parsed_val = try
+        TOML.parse("$sentinel = $rhs")[sentinel]
+    catch e
+        # Warn rather than silently stringify a bare word, which would fail later where a number is expected.
+        @warn "Could not parse --override value as a TOML literal; storing it as a string. " *
+              "Quote it explicitly if a string was intended." key = lhs value = rhs error = e
+        rhs
+    end
+
+    root = Dict{String,Any}()
+    cursor = root
+    for p in parts[1:end-1]
+        cursor[String(p)] = Dict{String,Any}()
+        cursor = cursor[String(p)]
+    end
+    cursor[String(parts[end])] = parsed_val
+    return root
+end
+
+"""
+    parse_rerun_cli(args) -> NamedTuple
+
+Parse the rerun CLI. Returns `(source_h5, output_dir, output_name, override_file, overrides, coil_source)`. Unknown flags error out early.
+
+Supported flags:
+
+  - `--output-dir <path>`       — directory to write the replay output into (default: pwd())
+  - `--output-name <filename>`  — output HDF5 filename (default: `<basename>_rerun.h5`)
+  - `--override-file <path>`    — TOML file merged onto the stored TOML
+  - `--override key=value`      — single-field override (repeatable)
+  - `--coil-source <which>`     — for coil runs, which snapshot drives the replay:
+    `forcing-modes` (default) reuses the frozen forcing modes exactly; `coils`
+    recomputes the field from the stored coil geometry (lets the equilibrium change).
+"""
+function parse_rerun_cli(args::Vector{String})
+    isempty(args) && error("build_inputs_from_h5 requires a positional source .h5 path")
+    source_h5 = args[1]
+
+    output_dir = pwd()
+    output_name = nothing
+    override_file = nothing
+    overrides = Dict{String,Any}()
+    coil_source = "forcing-modes"
+
+    i = 2
+    while i <= length(args)
+        flag = args[i]
+        if flag == "--output-dir"
+            i + 1 > length(args) && error("--output-dir requires a value")
+            output_dir = args[i+1]
+            i += 2
+        elseif flag == "--output-name"
+            i + 1 > length(args) && error("--output-name requires a value")
+            output_name = args[i+1]
+            i += 2
+        elseif flag == "--override-file"
+            i + 1 > length(args) && error("--override-file requires a value")
+            override_file = args[i+1]
+            i += 2
+        elseif flag == "--override"
+            i + 1 > length(args) && error("--override requires a key=value expression")
+            merged = parse_override_flag(args[i+1])
+            apply_toml_overrides!(overrides, merged)
+            i += 2
+        elseif flag == "--coil-source"
+            i + 1 > length(args) && error("--coil-source requires a value (forcing-modes|coils)")
+            coil_source = args[i+1]
+            coil_source in ("forcing-modes", "coils") ||
+                error("--coil-source must be 'forcing-modes' or 'coils', got: $coil_source")
+            i += 2
+        else
+            error("Unknown rerun flag: $flag")
+        end
+    end
+
+    return (source_h5=source_h5, output_dir=output_dir, output_name=output_name,
+        override_file=override_file, overrides=overrides, coil_source=coil_source)
+end
+
+"""
+    resolve_rerun_output_path(source_h5, output_dir, output_name) -> (dir, name)
+
+Decide where the rerun output should go. Default naming rule: take the source
+basename, drop `.h5`, and append `_rerun.h5`. Refuse to overwrite the source
+file if the output or one of its side files (`_RERUN_SIDE_FILES`) is the
+source, by path or as the same file under another name (a link, or a case-only
+difference on a case-insensitive file system).
+"""
+function resolve_rerun_output_path(source_h5::String, output_dir::String, output_name::Union{Nothing,String})
+    source_abs = abspath(source_h5)
+    if output_name === nothing
+        base = basename(source_abs)
+        stem = endswith(lowercase(base), ".h5") ? base[1:end-3] : base
+        output_name = string(stem, "_rerun.h5")
+    end
+    for name in (output_name, (_rerun_side_file(output_name, s) for s in _RERUN_SIDE_FILES)...)
+        dest = abspath(joinpath(output_dir, name))
+        if dest == source_abs || (isfile(dest) && samefile(dest, source_abs))
+            error("Refusing to overwrite source HDF5 at $source_abs with $dest. " *
+                  "Pass `--output-dir <newdir>` or `--output-name <other.h5>`.")
+        end
+    end
+    return (output_dir, output_name)
+end
+
+# Suffixes of the input files a rerun writes next to its output from the source snapshot.
+const _RERUN_SIDE_FILES = (forcing="_forcing.h5", tolerances="_tolerances.toml", kinetic="_kinetic.h5", wall="_wall.dat")
+
+# The side file a rerun writes next to `output_name` for one of the `_RERUN_SIDE_FILES` suffixes.
+_rerun_side_file(output_name::AbstractString, suffix::AbstractString) = splitext(output_name)[1] * suffix
+
+# Where a run records the external files it read (written by ForceFreeStates.save_input_files!).
+const _RECORDED_KINETIC = "Input/RawInputs/Kinetic"
+const _RECORDED_WALL = "Input/RawInputs/Wall/wall_file_raw"
+
+# The running GPEC's version as `git describe` gives it, or "unknown" outside a git clone.
+function _gpec_git_version()
+    try
+        String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
+    catch
+        "unknown"
+    end
+end
+
+# The commit or tag to check out for a recorded `git describe` version, or `nothing` when the version is unknown.
+function _version_checkout(version::AbstractString)
+    version == "unknown" && return nothing
+    m = match(r"^(.+?)(?:-\d+-g([0-9a-f]+))?(?:-dirty)?$", version)
+    m === nothing && return nothing
+    return something(m.captures[2], m.captures[1])
+end
+
+# What a user can do with a gpec.h5 this GPEC cannot replay: replay it with the version that wrote it, or run its deck with this one.
+function _replay_remedy(h5path::AbstractString, source_git::AbstractString; has_deck::Bool=true)
+    h5abs = abspath(h5path)
+    wrote = source_git == "unknown" ? "a GPEC version it does not record" : "GPEC $source_git"
+    io = IOBuffer()
+    checkout = _version_checkout(source_git)
+    print(io, "\nThe file was written by $wrote; this is GPEC $(_gpec_git_version()). To continue",
+        checkout === nothing ? ":" : ", either:")
+    if checkout !== nothing
+        print(io, "\n  - Replay it with the version that wrote it: in your GPEC clone run `git checkout $checkout` and ",
+            "`julia --project -e 'using Pkg; Pkg.instantiate()'`, then replay the file again",
+            endswith(source_git, "-dirty") ? " (that run had uncommitted changes to GPEC, so its results may not reproduce exactly)" : "",
+            ". Return with `git checkout -` when done.")
+    end
+    if has_deck
+        deck_dir = joinpath(dirname(h5abs), "stored_deck")
+        print(io, "\n  - Run its deck with this version: from your GPEC clone, write the deck the file stores to $deck_dir with\n",
+            "      julia --project -e 'using HDF5; mkpath(\"$deck_dir\"); write(\"$deck_dir/gpec.toml\", h5read(\"$h5abs\", \"Input/gpec_toml_raw\"))'\n",
+            "    and run that directory. The deck reads its input files from the paths the original run used, ",
+            "and GPEC names any key it must change.")
+    else
+        print(io, "\n  - Run your original gpec.toml with this version; GPEC names any key it must change.")
+    end
+    return String(take!(io))
+end
+
+# Stop on retired keys in a stored deck, keeping the per-key advice (it is what running the deck needs) and adding `remedy`.
+function _stop_on_stale_stored_deck(check, h5path, remedy)
+    try
+        check()
+    catch e
+        e isa ErrorException || rethrow()
+        error("$h5path cannot be replayed by this GPEC version because its stored deck is out of date:\n  $(e.msg)$remedy")
+    end
+    return nothing
+end
+
+# Point the stored deck's kinetic_file and file wall at copies written from the source snapshot. A deck that names
+# either without its snapshot comes from an older GPEC and cannot be replayed faithfully.
+function _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic::Bool, wall_raw, remedy)
+    equil = inputs["Equilibrium"]
+    if has_kinetic
+        kinetic_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.kinetic)
+        Equilibrium.write_kinetic_h5(joinpath(output_dir, kinetic_file), h5open(f -> Equilibrium._read_kinetic_group(f[_RECORDED_KINETIC], source_h5), source_h5))
+        equil["kinetic_file"], equil["kinetic_group"] = kinetic_file, "/"
+    elseif !isempty(get(equil, "kinetic_file", ""))
+        error("$source_h5 cannot be replayed: its deck names a kinetic_file but the file records no $_RECORDED_KINETIC.$remedy")
+    end
+    wall = get(inputs, "Wall", nothing)
+    if wall !== nothing && get(wall, "shape", "") == "file"
+        wall_raw === nothing && error("$source_h5 cannot be replayed: its deck names a wall file but the file records no $_RECORDED_WALL.$remedy")
+        wall_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.wall)
+        write(joinpath(output_dir, wall_file), wall_raw)
+        wall["file"] = wall_file
+    end
+    return inputs
+end
+
+"""
+    build_inputs_from_h5(args::Vector{String})
+        -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_coils)
+
+Rerun input builder for `main_from_inputs`: parse the rerun CLI flags, read the snapshot out of the source
+HDF5, apply overrides, and rebuild the equilibrium input (a `DirectRunInput`/`InverseRunInput` from the
+stored ingest, or an analytic `*Config`).
+
+The recorded forcing (`Input/RawInputs/ForcingTerms/`) is written next to the rerun output as
+`<stem>_forcing.h5` and `[ForcingTerms]` is pointed at it before overrides apply, so the replay reads
+and normalizes it against its own equilibrium exactly as a deck run reads its file; a recorded
+tolerance file is written as `<stem>_tolerances.toml` and `[ErrorFields] tolerance_file` points at it.
+The recorded kinetic profiles and file wall are written as `<stem>_kinetic.h5` and `<stem>_wall.dat` the same
+way, so a replay never reads the files the source run named.
+"""
+function build_inputs_from_h5(args::Vector{String})
+    cli = parse_rerun_cli(args)
+    source_h5 = cli.source_h5
+    isfile(source_h5) || error("Source HDF5 not found: $source_h5")
+
+    # Stored TOML, equilibrium ingest and the forcing snapshot (present only with [PerturbedEquilibrium]).
+    use_coils = cli.coil_source == "coils"
+    toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils, tolerance_raw, has_kinetic, wall_raw = h5open(source_h5, "r") do in_h5
+        source_git = haskey(in_h5, "Info/git_version") ? read(in_h5, "Info/git_version") : "unknown"
+        haskey(in_h5, "Input/gpec_toml_raw") ||
+            error("$source_h5 cannot be replayed: it records no deck (Input/gpec_toml_raw)." * _replay_remedy(source_h5, source_git; has_deck=false))
+        forcing_modes = if !haskey(in_h5, "Input/RawInputs/ForcingTerms")
+            nothing
+        else
+            modes = ForcingTerms.ForcingMode[]
+            normalization = ForcingTerms.load_forcing_from_h5_group!(modes, in_h5["Input/RawInputs/ForcingTerms"])
+            (modes, normalization)
+        end
+        coil_sets = if use_coils
+            haskey(in_h5, "Input/RawInputs/Coils") ||
+                error("--coil-source coils requested but $source_h5 has no Input/RawInputs/Coils " *
+                    "(the source run did not use coils, or predates coil-snapshot support)")
+            sets = ForcingTerms.CoilSet[]
+            ForcingTerms.load_coils_from_h5_group!(sets, in_h5["Input/RawInputs/Coils"])
+            sets
+        else
+            nothing
+        end
+        (
+            read(in_h5, "Input/gpec_toml_raw"),
+            read_equilibrium_ingest(in_h5),
+            source_git,
+            forcing_modes,
+            coil_sets,
+            haskey(in_h5, _RECORDED_TOLERANCES) ? read(in_h5, _RECORDED_TOLERANCES) : nothing,
+            haskey(in_h5, _RECORDED_KINETIC),
+            haskey(in_h5, _RECORDED_WALL) ? read(in_h5, _RECORDED_WALL) : nothing
+        )
+    end
+
+    output_dir, output_name = resolve_rerun_output_path(source_h5, cli.output_dir, cli.output_name)
+    isdir(output_dir) || mkpath(output_dir)
+
+    # Parse TOML blob, replay the frozen forcing file, then fold in overrides: file overrides
+    # first, then CLI flags, so an overridden [ForcingTerms] still wins.
+    inputs = TOML.parse(toml_raw)
+    # Overrides can set keys but not delete them, so a stored deck with retired keys cannot be replayed.
+    remedy = _replay_remedy(source_h5, source_git)
+    _stop_on_stale_stored_deck(() -> _stop_on_deprecated_deck_keys(inputs), source_h5, remedy)
+    if forcing_snapshot !== nothing
+        forcing_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.forcing)
+        modes, normalization = forcing_snapshot
+        h5open(f -> ForcingTerms.save_forcing_to_h5(modes, f; normalization), joinpath(output_dir, forcing_file), "w")
+        ft = get!(inputs, "ForcingTerms", Dict{String,Any}())
+        ft["forcing_data_file"] = forcing_file
+        ft["forcing_data_format"] = "hdf5"
+    end
+    if tolerance_raw !== nothing && haskey(inputs, "ErrorFields")
+        tolerance_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.tolerances)
+        write(joinpath(output_dir, tolerance_file), tolerance_raw)
+        inputs["ErrorFields"]["tolerance_file"] = tolerance_file
+    end
+    _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic, wall_raw, remedy)
+    if cli.override_file !== nothing
+        isfile(cli.override_file) || error("Override file not found: $(cli.override_file)")
+        file_overrides = TOML.parsefile(cli.override_file)
+        apply_toml_overrides!(inputs, file_overrides)
+    end
+    if !isempty(cli.overrides)
+        apply_toml_overrides!(inputs, cli.overrides)
+    end
+
+    # Force the rerun output file name so the source is never overwritten.
+    get!(inputs, "Run", Dict{String,Any}())["output_file"] = output_name
+
+    current_git = _gpec_git_version()
+
+    @info "\n$_BANNER\n  GPEC RERUN  [source git: $source_git → current: $current_git]\n" *
+          "  source: $(abspath(source_h5))\n" *
+          "  output: $(abspath(joinpath(output_dir, output_name)))\n$_BANNER"
+
+    eq_config, additional_input = rebuild_equilibrium_inputs(inputs, ingest, output_dir)
+
+    return inputs, eq_config, additional_input, output_dir, current_git, preloaded_coils
+end
+
+"""
+    rebuild_equilibrium_inputs(inputs, ingest, output_dir) -> (eq_config, additional_input)
+
+The equilibrium configuration and the input `PlasmaEquilibrium` consumes, rebuilt from a stored
+TOML `inputs` dict and the equilibrium `ingest` read from a `gpec.h5`. Analytic kinds regenerate
+from their deck section; file-based kinds rebuild splines from the stored ingest. A file-based
+run with no ingest can only come from a pre-ingest `gpec.h5` and is an error. Stops on
+deprecated equilibrium keys.
+"""
+function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir::AbstractString)
+    _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
+    # Clear eq_filename on a copy: unused on replay, and `inputs` itself is re-serialized into the rerun's gpec_toml_raw.
+    equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => ""))
+    eq_config = equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => equil_dict)), String(output_dir))
+
+    analytic = analytic_config(inputs)
+    additional_input = if analytic !== nothing
+        analytic
+    elseif ingest isa Equilibrium.DirectIngest
+        Equilibrium.build_direct_from_ingest(eq_config, ingest)
+    elseif ingest isa Equilibrium.InverseIngest
+        Equilibrium.build_inverse_from_ingest(eq_config, ingest)
+    else
+        error(
+            "gpec.h5 has no equilibrium ingest and eq_type=$(eq_config.eq_type) is not analytic — cannot replay. " *
+            "A file-based eq_type needs a stored ingest (pre-ingest snapshots lack one)."
+        )
+    end
+    return eq_config, additional_input
+end
+
+# The GPEC version recorded in an open gpec.h5.
+_recorded_version(f) = haskey(f, "Info/git_version") ? read(f, "Info/git_version") : "unknown"
+
+# The recorded kinetic profiles with the stored deck's composition; `nothing` when the run had none.
+function _replay_kinetic_profiles(f, config::Equilibrium.EquilibriumConfig, h5path)
+    if !haskey(f, _RECORDED_KINETIC)
+        isempty(config.kinetic_file) && return nothing
+        error("$h5path cannot be restored: its deck names a kinetic_file but the file records no $_RECORDED_KINETIC." *
+              _replay_remedy(h5path, _recorded_version(f)))
+    end
+    raw = Equilibrium._read_kinetic_group(f[_RECORDED_KINETIC], "$h5path $_RECORDED_KINETIC")
+    return Equilibrium.KineticProfileData(raw; Equilibrium.kinetic_composition(config)...)
+end
+
+"""
+    equilibrium_from_h5(h5path) -> (; equil, inputs, psilim)
+
+Restore the processed `PlasmaEquilibrium` from the profile and geometry arrays saved in
+`gpec.h5`, using the native spline constructors without retracing flux surfaces. `inputs` is the
+stored TOML and `psilim` the original control surface (`Info/psilim`), so post-hoc analyses use
+one consistent frozen equilibrium and the surface described by the stored response matrices.
+"""
+function equilibrium_from_h5(h5path::AbstractString)
+    isfile(h5path) || error("HDF5 file not found: $h5path")
+    return h5open(h5path, "r") do f
+        haskey(f, "Input/gpec_toml_raw") ||
+            error("$h5path cannot be restored: it records no deck (Input/gpec_toml_raw)." * _replay_remedy(h5path, _recorded_version(f); has_deck=false))
+        haskey(f, "Info/psilim") || error("$h5path has no Info/psilim")
+        inputs = TOML.parse(read(f, "Input/gpec_toml_raw"))
+        _stop_on_stale_stored_deck(() -> _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium"), h5path,
+            _replay_remedy(h5path, _recorded_version(f)))
+        config = equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => "")))), dirname(abspath(h5path)))
+        params = Equilibrium.EquilibriumParameters()
+        for field in fieldnames(Equilibrium.EquilibriumParameters)
+            field in Utilities.EQUIL_H5_SKIP && continue
+            path = "Equilibrium/$(get(Utilities.EQUIL_H5_NAMES, field, String(field)))"
+            haskey(f, path) && setfield!(params, field, read(f, path))
+        end
+        params.ro === nothing && error("$h5path has no Equilibrium/R_axis")
+        params.zo === nothing && error("$h5path has no Equilibrium/Z_axis")
+        params.psio === nothing && error("$h5path has no Equilibrium/psi_total")
+        params.psi0 = params.psi_axis = params.psio
+        params.zsep = params.zext === nothing ? nothing : copy(params.zext)
+        profiles = Equilibrium.ProfileSplines((Vector{Float64}(read(f, "Equilibrium/Profiles/$name")) for name in ("psi", "2piF", "mu0p", "dVdpsi", "q"))...)
+        xs = Vector{Float64}(read(f, "Equilibrium/Geometry/psi"))
+        ys = Vector{Float64}(read(f, "Equilibrium/Geometry/theta"))
+        profiles.xs == xs || error("$h5path has inconsistent equilibrium profile and geometry grids")
+        theta = range(first(ys), last(ys); length=length(ys))
+        collect(theta) == ys || error("$h5path has a nonuniform equilibrium theta grid")
+        grid2d = (xs, theta)
+        opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rzphi = map(("rcoords", "offset", "nu", "jac")) do name
+            cubic_interp(grid2d, Matrix{Float64}(read(f, "Equilibrium/Geometry/$name")); opts2d...)
+        end
+        eqfun = Equilibrium._eqfun_from_geometry(profiles, rzphi..., params.ro, params.psio, grid2d, opts2d)
+        geometry = Equilibrium.compute_geometry_profiles(xs, ys, rzphi[1], rzphi[2], rzphi[4], params.ro)
+        equil = Equilibrium.PlasmaEquilibrium(config, params, profiles, geometry, xs, ys, rzphi..., eqfun..., params.ro, params.zo, params.psio,
+            read_equilibrium_ingest(f), analytic_config(inputs), _replay_kinetic_profiles(f, config, h5path))
+        return (; equil, inputs, psilim=Float64(read(f, "Info/psilim")))
+    end
+end
+
+"""
+    ErrorFields.compute_coil_sensitivities(h5path, coil_sets; kwargs...) -> CoilSensitivities
+
+Post-hoc coil linearization against a finished run: the resonant coupling and control-surface
+conform come from `gpec.h5` ([`PerturbedEquilibrium.ResonantCoupling`](@ref)), the equilibrium
+is rebuilt with [`equilibrium_from_h5`](@ref), and `coil_sets` — any geometry, not necessarily
+the run's — are swept on the run's own control surface. Keyword arguments are
+`ErrorFields.ErrorFieldsControl` fields and `verbose`; the boundary-grid resolution follows the run's
+`[ForcingTerms]` section when present. Nothing is written.
+"""
+function ErrorFields.compute_coil_sensitivities(h5path::AbstractString, coil_sets::Vector{ForcingTerms.CoilSet}; verbose::Bool=false, kwargs...)
+    ctrl_fields = fieldnames(ErrorFields.ErrorFieldsControl)
+    ctrl = ErrorFields.ErrorFieldsControl(; (k => v for (k, v) in kwargs if k in ctrl_fields)...)
+    ctx = ErrorFields.ResonantDriveContext(h5path; (k => v for (k, v) in kwargs if !(k in ctrl_fields))...)
+    return ErrorFields.compute_coil_sensitivities(ctx, coil_sets, ctrl; verbose)
+end
+
+"""
+    ErrorFields.ResonantDriveContext(h5path; psi_low=CORE_PSI_LOW, psi_high=CORE_PSI_HIGH,
+                               mtheta_coil=nothing, nzeta_coil=nothing, dat_dir=nothing) -> ResonantDriveContext
+
+Gather everything a post-hoc coil analysis needs from a finished run: the resonant coupling read
+from `gpec.h5`, the equilibrium rebuilt by [`equilibrium_from_h5`](@ref), the deck's coil
+configuration, and the boundary grids. Nothing is written.
+
+The stored deck's `dat_dir` is an absolute path on the machine that ran it; a missing one is warned
+about, and `dat_dir` points elsewhere. `mtheta_coil` and `nzeta_coil` override the deck's boundary resolution.
+"""
+function ErrorFields.ResonantDriveContext(h5path::AbstractString; dat_dir=nothing, kwargs...)
+    rc = PerturbedEquilibrium.ResonantCoupling(h5path)
+    equil, inputs, psilim = equilibrium_from_h5(h5path)
+    cfg = ForcingTerms.CoilConfig(forcing_terms_control(inputs, dirname(abspath(h5path))))
+    cfg = ErrorFields.regrid(cfg; dat_dir)
+    isempty(cfg.dat_dir) || isdir(cfg.dat_dir) ||
+        @warn "Coil geometry directory from the stored deck does not exist here: $(cfg.dat_dir). Pass dat_dir to point at a local copy."
+    return ErrorFields.ResonantDriveContext(equil, rc, cfg; psilim, b_t0=equil.params.bt0, kwargs...)
+end
+
+"""
+    ErrorFields.coil_overlaps(h5path, coil_sets; mode=1, kwargs...) -> Vector{CoilOverlap}
+
+Resonant overlap of each coil set against a finished run, with the context built from `h5path`.
+Keyword arguments beyond `mode` are [`ErrorFields.ResonantDriveContext`](@ref)'s.
+"""
+function ErrorFields.coil_overlaps(h5path::AbstractString, coil_sets::AbstractVector{ForcingTerms.CoilSet}; mode::Int=1, kwargs...)
+    return ErrorFields.coil_overlaps(ErrorFields.ResonantDriveContext(h5path; kwargs...), coil_sets; mode)
+end
