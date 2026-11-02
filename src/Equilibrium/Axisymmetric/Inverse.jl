@@ -285,7 +285,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     q0 = f_sq[1, 4] - f1_sq_lo[4] * sq_xs[1]
 
     if newq0 != 0
-        f0 = f_sq[1, 2] - f1_sq_lo[2] * sq_xs[1]
+        f0 = f_sq[1, 1] - f1_sq_lo[1] * sq_xs[1]
         f0fac = f0^2 * ((newq0 / q0)^2 - 1)
         q0 = newq0
         for ipsi in 0:mpsi
