@@ -48,7 +48,7 @@ function _slayer_profiles(data::KineticProfileData, control)
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    # A supplied Coulomb logarithm replaces the closure's lnLambda_form one; interpolated in log space, so it stays positive.
+    # A supplied Coulomb logarithm replaces the closure's lnLambda_form one; interpolated in log space as the collision model's.
     lnLambda = if data.lnLambda === nothing
         nothing
     else

@@ -370,6 +370,10 @@ using HDF5
         spitzer_eta(lnL) = (attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3),
             T_i=flat(1e3), omega_E=flat(2π * 1e3), resistivity_model=:spitzer, lnLambda=flat(lnL))); GPEC.InnerLayer.layer_eta(keq, kgal.surfaces))
         @test spitzer_eta(30.0) ≈ 2 .* spitzer_eta(15.0) rtol = 1e-12
+        # The neoclassical closure takes it too, through the Spitzer factor and ν*_e: η rises with lnΛ.
+        sauter_eta(lnL) = (attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3),
+            T_i=flat(1e3), omega_E=flat(2π * 1e3), lnLambda=flat(lnL))); GPEC.InnerLayer.layer_eta(keq, kgal.surfaces))
+        @test all(sauter_eta(30.0) .> sauter_eta(15.0))
         # Explicit values override each default on its own.
         given = MatchProblem(kgal; eta=1e-7, rotation=fill(3.0, n))
         @test given.eta == fill(1e-7, n) && given.rho == prob.rho && given.rotation == fill(3.0, n)

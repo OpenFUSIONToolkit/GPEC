@@ -211,10 +211,10 @@ using HDF5
         for f in (:loglam_spline, :nui_spline, :nue_spline)
             @test getfield(sup, f).(xs) ≈ getfield(model, f).(xs) rtol = 1e-3
         end
-        # Interpolation is in log space, so scaling the supplied rates scales the profiles exactly.
-        double = EQ.kinetic_profile_splines(EQ.KineticProfileData(own; nu_i=2 .* own.nu_i, nu_e=2 .* own.nu_e))
-        @test double.nui_spline.(xs) ≈ 2 .* sup.nui_spline.(xs) rtol = 1e-12
-        @test double.nue_spline.(xs) ≈ 2 .* sup.nue_spline.(xs) rtol = 1e-12
+        # Interpolation is in log space: an exponential in ψ is reproduced exactly, which a linear-space fit would not do.
+        expo = EQ.kinetic_profile_splines(EQ.KineticProfileData(own; nu_i=@.(1e3 * exp(4psi)), nu_e=@.(1e5 * exp(-3psi))))
+        @test expo.nui_spline.(xs) ≈ @.(1e3 * exp(4xs)) rtol = 1e-12
+        @test expo.nue_spline.(xs) ≈ @.(1e5 * exp(-3xs)) rtol = 1e-12
         # A supplied lnΛ alone feeds the model's ν, which is linear in it.
         lnl = EQ.kinetic_profile_splines(EQ.KineticProfileData(data; lnLambda=fill(15.0, length(psi))))
         @test all(≈(15.0), lnl.loglam_spline.(xs))
@@ -243,6 +243,9 @@ using HDF5
         end
         table = EQ.read_kinetic_file(ascii)
         @test table.nu_i ≈ own.nu_i && table.lnLambda ≈ own.lnLambda
+        # A data row with fewer columns than the others is an error, not a silently dropped row.
+        open(io -> println(io, join((1.0, own.n_i[end], own.n_e[end], own.T_i[end], own.T_e[end], own.omega_E[end]), " ")), ascii, "a")
+        @test_throws r"fewer columns" EQ.read_kinetic_file(ascii)
         rm(ascii)
     end
 

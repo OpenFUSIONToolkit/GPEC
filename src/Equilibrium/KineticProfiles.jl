@@ -271,7 +271,7 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     _assert_positive_density(source, "n_i (total)", ni_total, psi_reg)
     _assert_nonneg_profile(source, "T_i", Ti, psi_reg)
     _assert_nonneg_profile(source, "T_e", Te, psi_reg)
-    _warn_collision_floors(source, ne, Te, Ti)
+    all(f -> getfield(data, f) !== nothing, (:lnLambda, :nu_i, :nu_e)) || _warn_collision_floors(source, ne, Te, Ti)
 
     # Fractions are shares of the total n_i: never above 1, and exactly 1 when every species is fraction-specified.
     fracs = [s.fraction for s in ion_species if !isnan(s.fraction)]
@@ -434,7 +434,7 @@ function kinetic_profile_splines(data::KineticProfileData;
     _assert_positive_density(_describe(data), "n_i", ni, psi_reg)
     _assert_nonneg_profile(_describe(data), "T_i", Ti, psi_reg)
     _assert_nonneg_profile(_describe(data), "T_e", Te, psi_reg)
-    _warn_collision_floors(_describe(data), ne, Te, Ti)
+    all(f -> getfield(data, f) !== nothing, (:lnLambda, :nu_i, :nu_e)) || _warn_collision_floors(_describe(data), ne, Te, Ti)
 
     needs_rotation_reform = density_factor != 1.0 || temperature_factor != 1.0 || toroidal_rotation_factor != 1.0
     any_scaling = needs_rotation_reform || ExB_rotation_factor != 1.0
@@ -514,13 +514,18 @@ Returns the columns.
 function _read_kinetic_table(kinetic_file::AbstractString)
     table = DelimitedFiles.readdlm(kinetic_file; comments=true)
 
+    # readdlm pads a short row with empty strings, so a data row (numeric first entry) that is not all numeric is ragged.
+    ragged = findfirst(row -> row[1] isa Number && !all(x -> isa(x, Number), row), collect(eachrow(table)))
+    ragged === nothing ||
+        error("kinetic file $kinetic_file: data row $ragged has fewer columns than the others; every data row needs 6 columns, or 9 with lnLambda nu_i nu_e")
+
     # Keep numeric rows and stack them row-wise (reshape(:, 6) is column-major and would scramble columns).
     numeric_rows = [collect(row) for row in eachrow(table) if all(x -> isa(x, Number), row)]
     if isempty(numeric_rows)
         error("No numeric data rows found in kinetic file: $kinetic_file")
     end
     ncol = length(numeric_rows[1])
-    (ncol in (6, 9) && all(r -> length(r) == ncol, numeric_rows)) ||
+    ncol in (6, 9) ||
         error("kinetic file $kinetic_file: every data row needs 6 columns, or 9 with lnLambda nu_i nu_e")
     table = reduce(vcat, (reshape(Float64.(r), 1, ncol) for r in numeric_rows))
     return [collect(table[:, j]) for j in 1:ncol]
