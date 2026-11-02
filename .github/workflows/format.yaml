@@ -3,18 +3,18 @@ name: Format and Hygiene
 # Runs the repository's pre-commit suite (JuliaFormatter + file hygiene) so that
 # contributors who have not run `pre-commit install` locally are still caught.
 #
-# DISABLED as a pull request gate for now: the repository has pre-existing
-# formatting drift that has to be cleaned up first. Until then, run this
-# manually from the Actions tab ("Run workflow") to see the current damage.
+# The `pre-commit` job fails whenever the hooks rewrite a tracked file, so it
+# reports whether the repository is currently clean under the formatter. It is
+# expected to fail until the one-off `pre-commit run --all-files` sweep lands.
 #
-# To enable it as a gate, uncomment the `pull_request` trigger below. If the
-# test suite's `Tests` job is a required status check, add `pre-commit` too.
+# Make `pre-commit` a required status check only after that sweep, otherwise it
+# blocks every pull request on pre-existing drift.
 on:
   workflow_dispatch:
-  # pull_request:
-  #   branches:
-  #     - main
-  #     - develop
+  pull_request:
+    branches:
+      - main
+      - develop
 
 permissions:
   contents: read
