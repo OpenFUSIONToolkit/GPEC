@@ -11,6 +11,7 @@ Post-processing and visualization utilities for GPEC simulation outputs.
   - `PerturbedEquilibrium`: Plotting functions for perturbed equilibrium and singular coupling results
   - `PerturbedEquilibriumModes`: Data helpers to convert modal GPEC output to (ψ, θ) and (ψ, θ, φ) grids
   - `ErrorFields`: Plotting functions for the error-field assessment (coil sensitivities, tolerance Monte Carlo, locking risk, phasing maps)
+  - `EnergyDecomposition`: Decomposition of the plasma energy of free-boundary eigenmodes on the (ψ, θ) grid
 """
 module Analysis
 
@@ -20,5 +21,6 @@ include("CoilForcing.jl")
 include("PerturbedEquilibrium.jl")
 include("PerturbedEquilibriumModes.jl")
 include("ErrorFields.jl")
+include("EnergyDecomposition.jl")
 
 end # module Analysis
