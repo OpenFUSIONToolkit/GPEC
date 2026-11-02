@@ -68,7 +68,7 @@ Page: [Local Stability](ballooning.md).
 
 ### Match
 
-Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, writing the matched solution and the penetrated resonant fields to `SingularSurfaces/Match/`; `ideal = true` keeps the shielded limit for comparison. A matched result cannot yet drive `[PerturbedEquilibrium]`.
+Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, writing the matched solution and the penetrated resonant fields to `SingularSurfaces/Match/`; `ideal = true` keeps the shielded limit for comparison.
 Outputs: `SingularSurfaces/Match/`.
 Page: [Tearing](inner_layer.md).
 

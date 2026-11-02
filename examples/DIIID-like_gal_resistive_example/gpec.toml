@@ -2,8 +2,7 @@
 # n=1 tearing stability on the bundled geqdsk: the gal solver computes the Δ′
 # matching matrix (PEST-3 convention) plus rpec coil-response columns (delta_coil).
 # The core_edge_packed radial grid is densest at the axis and edge; psihigh = 0.993
-# stays clear of the separatrix. No forcing and no PerturbedEquilibrium stage: a Galerkin or
-# matched result cannot drive the plasma response yet.
+# stays clear of the separatrix. No forcing and no PerturbedEquilibrium stage.
 [Run]
 verbose = true                 # Log each stage's progress
 
