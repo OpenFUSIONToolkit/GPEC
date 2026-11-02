@@ -1,7 +1,8 @@
 # DIII-D-like H-mode equilibrium — n=1 ideal stability + perturbed equilibrium.
 # Free-boundary (nowall) external-kink analysis with DIII-D C-coil forcing applied
-# via Biot-Savart from 3D coil wires. This is the canonical Δ'-matrix regression
-# fixture (stable, clean BVP Δ') and the default benchmark case.
+# via Biot-Savart from 3D coil wires. This is the canonical ideal free-boundary and
+# perturbed-equilibrium regression fixture (diiid_n1) and the default benchmark case;
+# the Δ'-matrix fixture is the sibling DIIID-like_riccati_deltaprime_example.
 
 [Run]
 verbose = true                 # Log each stage's progress

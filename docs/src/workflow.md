@@ -54,7 +54,7 @@ With `vac_flag = true` the `Vacuum` module adds the vacuum energy for the wall o
 `[ForceFreeStates] integrator` selects the radial method and its section: `"Riccati"` (the default; `[Riccati]`) also produces the Δ′ matrix, `"Forward"` (`[Forward]`) is the plain ODE integration, and `"Galerkin"` (`[Galerkin]`) is the resistive outer-region solve on a finite-element basis.
 `kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs a kinetic file.
 Outputs: `ForceFreeStates/FreeBoundaryStability/`, `ForceFreeStates/Solutions/`, `ForceFreeStates/EdgeScan/`, `SingularSurfaces/` and `SurfaceGeometries/`.
-Key references: [Glasser (2016)](citations.md#ForceFreeStates-Module), [Glasser (2018)](citations.md#ForceFreeStates-Module), [Chance et al. (1997)](citations.md#Vacuum-Module).
+Key references: [Glasser (2016)](citations.md#ForceFreeStates-Module), [Glasser (2018)](citations.md#ForceFreeStates-Module), [Chance (1997)](citations.md#Vacuum-Module).
 Pages: [Stability](stability.md), [Galerkin solver](galerkin.md), [Vacuum](vacuum.md).
 
 ### LocalStability

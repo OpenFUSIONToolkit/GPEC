@@ -188,7 +188,7 @@ Combines the toroidal outer-region calculation with the two-fluid slab layer mod
 > *Nuclear Fusion* (2025).
 > DOI: [10.1088/1741-4326/ae4fdd](https://doi.org/10.1088/1741-4326/ae4fdd) (open access: arXiv:2511.07666)
 
-Gives the diffusive-resistive layer width (Eq. 100) and, in Sect. 5.9, restricts the response calculation to the region inside the point where adjacent resonant layers first overlap. Both are implemented by the layer-overlap scan in `src/Tearing/LayerOverlap.jl`, which feeds the `psilim_from_layer_overlap` cap described in [Integration domain truncation](@ref).
+Gives the diffusive-resistive layer width (Eq. 100) and, in Sect. 5.9, restricts the response calculation to the region inside the point where adjacent resonant layers first overlap. Both are implemented by the layer-overlap scan in `src/Tearing/LayerOverlap.jl`, which feeds the `psilim_from_layer_overlap` cap described in [Integration domain](@ref).
 
 ---
 
