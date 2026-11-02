@@ -166,6 +166,9 @@ function main_from_inputs(
     equil = _timed_stage(runtimes, "equilibrium", "Equilibrium") do
         Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
     end
+    # The KineticForces stage needs the NTV view; stop before any solve rather than after the perturbed equilibrium.
+    deck.kinetic_forces !== nothing && equil.kinetic !== nothing && !Equilibrium.has_ntv_fields(equil.kinetic) &&
+        error("[KineticForces] needs n_e, T_i, T_e and omega_E in the kinetic profiles; the kinetic file lacks at least one")
 
     if deck.force_balance !== nothing
         ffs = _timed_stage(runtimes, "force_free_states", "Force-Free States") do

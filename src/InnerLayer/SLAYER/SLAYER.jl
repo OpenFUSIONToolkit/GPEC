@@ -52,7 +52,9 @@ a dispersion `solve_inner` path.
     reference (consumed only by `:toroidal`, which also takes its parallel wavenumber from the equilibrium,
     `toroidal_kpar`). An explicit `D_R = 0.0` disables the offset for every `D_c_type`; `D_geo = 0.0` only for `:toroidal`.
   - `chi_perp_Dc` - Electron perpendicular heat diffusivity [m²/s] used only by the critical Δ; `nothing` (default)
-    uses the χ⊥,e that P_perp sees. Set it when P_perp is built from a diffusivity the critical Δ should not use.
+    uses the χ⊥,e that P_perp sees. Set it when P_perp is built from a diffusivity the critical Δ should not use. It
+    replaces χ⊥,e in the critical Δ at every surface, over any `chi_e` profile, reaches the critical resonant field through
+    the critical Δ, and has no effect with `D_c_type = :none`.
   - `theta_sample` - Poloidal angle (normalized to [0, 1)) of the minor-radius chord of the `:midplane`
     radial label, used only by API callers that pass `rs_method = :midplane`; the default toroidal-flux
     label does not depend on angle, so a nonzero value warns (default 0, the outboard midplane).

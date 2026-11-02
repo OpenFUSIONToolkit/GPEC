@@ -2,12 +2,12 @@ using TOML
 using HDF5
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
-# same pipeline the TOML driver does. Every assertion is anchored on the coarse Solovev fixture
+# same pipeline the TOML driver does. Every assertion is anchored on the coarse TJ fixture
 # deck (mpsi=16, mtheta_vacuum=64, delta_m=0), so an API run is compared against `main` on the same deck.
 @testset "solve API" begin
     GPEC = GeneralizedPerturbedEquilibrium
     FFS = GPEC.ForceFreeStates
-    template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
     deck = TOML.parsefile(joinpath(template, "gpec.toml"))
 
     # The fixture equilibrium and wall, built exactly as `build_inputs_from_toml` builds them.
@@ -132,6 +132,8 @@ using HDF5
             @test api.free_boundary.et[1] ≈ reference.free_boundary.et[1] rtol = 1e-10
             @test api.diagnostics.nzero == reference.diagnostics.nzero
             @test api.kinetic.kmsing == reference.kinetic.kmsing
+            # This fixture solves with a wall, and the free-space surface inductance cannot pair with its Λ.
+            @test_throws "without a wall" plasma_response(api)
 
             # The KineticForces matrices evaluated once solve identically when reused, and only on the problem they were made for.
             alg = GPEC.force_balance_algorithm(kdeck)
@@ -164,6 +166,22 @@ using HDF5
         ideal = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
         pass1.kinetic = kinetic
         @test refined.rzphi_xs != ideal.rzphi_xs
+        # Profiles without omega_E (read for SLAYER, say) cannot form the NTV view: the grid follows the
+        # equilibrium alone, unless the run computes calculated kinetic matrices, which need it.
+        no_omega = GPEC.Equilibrium.KineticProfileData(; psi=kinetic.psi, n_i=kinetic.n_i, n_e=kinetic.n_e,
+            T_i=kinetic.T_i, T_e=kinetic.T_e, chi_e=kinetic.chi_e, chi_i=kinetic.chi_i, chi_phi=kinetic.chi_phi)
+        @test GPEC.Equilibrium.has_ntv_fields(kinetic)
+        @test !GPEC.Equilibrium.has_ntv_fields(no_omega)
+        pass1.kinetic = no_omega
+        no_omega_grid = GPEC.maybe_reform_equilibrium(pass1, sl_intr, sl_ctrl)
+        @test no_omega_grid.kinetic === no_omega
+        @test no_omega_grid.rzphi_xs == ideal.rzphi_xs
+        calc_deck = merge(sl_deck, Dict("ForceFreeStates" => merge(sl_deck["ForceFreeStates"], Dict("kinetic" => "KineticForces"))))
+        calc_ctrl = GPEC.force_balance_control(calc_deck, sl_dir)
+        @test_throws "missing required 'omega_E'" GPEC.maybe_reform_equilibrium(pass1, sl_intr, calc_ctrl)
+        # The KineticForces source stops up front, before any solve.
+        @test_throws "omega_E" solve(pass1, FFS.Forward(); nn=1, kinetic=GPEC.KineticForcesControl())
+        pass1.kinetic = kinetic
     end
 
     @testset "galerkin solve returns a gal result with a unified delta_prime" begin
@@ -192,7 +210,7 @@ using HDF5
     end
 
     @testset "perturbed_equilibrium round-trips a forward result" begin
-        forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+        forcing = joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat")
         pe_section = Dict{String,Any}(
             "compute_singular_coupling" => true)
         pe_kw = (; verbose=false)
@@ -448,7 +466,7 @@ using HDF5
             pe_kwargs = (; compute_singular_coupling=true)
             mktempdir() do dir
                 modes = GPEC.ForcingTerms.ForcingMode[]
-                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), "ascii", false)
+                GPEC.ForcingTerms.load_forcing_data!(modes, joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"), "ascii", false)
                 h5open(f -> GPEC.ForcingTerms.save_forcing_to_h5(modes, f), joinpath(dir, "forcing.h5"), "w")
                 _stage_deck(dir;
                     extra_sections=Dict{String,Any}(
@@ -523,6 +541,14 @@ using HDF5
                 deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("ideal" => true)))
                 @test_throws "[Match] needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
+
+            # A perturbed equilibrium with a wall stops at parse time.
+            mktempdir() do dir
+                walled = Dict{String,Any}("Wall" => Dict{String,Any}("shape" => "conformal", "standoff_fraction" => 0.2),
+                    "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
+                deck_dir = _stage_deck(dir; extra_sections=walled)
+                @test_throws "without a wall" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
         end
 
         @testset "deck kinetic source names" begin
@@ -537,7 +563,7 @@ using HDF5
 
         @testset "kinetic torque" begin
             # The deck's [KineticForces] stage is kinetic_torque on its perturbed equilibrium, saved by its save method.
-            ntv_dir = joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example")
+            ntv_dir = joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example")
             mktempdir() do dir
                 for name in readdir(ntv_dir)
                     cp(joinpath(ntv_dir, name), joinpath(dir, name))
