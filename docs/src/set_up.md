@@ -419,7 +419,9 @@ end
 
 ### Pre-commit Hooks
 
-The repository uses pre-commit hooks to maintain code quality. They run automatically on `git commit` and:
+The repository uses pre-commit hooks to maintain code quality. They run automatically on `git commit`, and
+the same hooks run in CI on every pull request (the `pre-commit` check), which fails if they would change a file.
+They:
 - Format Julia code according to `.JuliaFormatter.toml` settings
 - Remove trailing whitespace and fix line endings
 - Validate YAML/TOML syntax
@@ -433,8 +435,9 @@ The repository uses pre-commit hooks to maintain code quality. They run automati
 # Install pre-commit (requires Python/pip)
 pip install pre-commit
 
-# Install JuliaFormatter globally (required for Julia code formatting hook)
-julia -e 'using Pkg; Pkg.add("JuliaFormatter")'
+# Install JuliaFormatter 1.0.62 in the default environment: the hook runs whatever version is there,
+# and CI pins this one, so another version formats differently and fails the check
+julia -e 'using Pkg; Pkg.add(PackageSpec(name="JuliaFormatter", version="1.0.62"))'
 
 # Install the git hooks in your local repository
 cd /path/to/GPEC
