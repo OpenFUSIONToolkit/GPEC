@@ -52,6 +52,7 @@ function save_to_hdf5(
     end
 
     save_equilibrium_ingest!(out_h5, equil)
+    save_input_files!(out_h5, equil, result.wall_settings)
     Utilities.record_inputs!(out_h5, result)
 
     # Write derived run parameters

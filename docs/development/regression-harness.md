@@ -72,6 +72,11 @@ singular q values            [4 elements]             [4 elements]             0
 Summary: 23 unchanged, 3 missing/N/A
 ```
 
+Each row's status is `OK` (within the case's noise threshold), `** CHANGED **` (moved past it),
+`** CHANGED (missing) **` (on the earlier ref, gone from the later one), `** CHANGED (type) **` (stored
+with a different shape or type), `NEW` (only on the later ref), `N/A` (on neither ref) or `FAILED`.
+Every `CHANGED` status counts toward `--fail-on-change`; `NEW` and `N/A` do not.
+
 **Compare your uncommitted working tree against develop:**
 ```bash
 regress --cases solovev_n1 --refs develop,local
@@ -102,7 +107,7 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
 - `--no-pin-manifest` — let each ref resolve its own package set (see below)
 - `--allow-env-mismatch` — reuse cached results produced in a different environment
-- `--fail-on-change` — exit non-zero when any tracked quantity changed
+- `--fail-on-change` — exit non-zero when any tracked quantity changed, disappeared or changed storage type
 
 GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, and the count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines). Thread count is deliberately not part of the cache key, so `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
 

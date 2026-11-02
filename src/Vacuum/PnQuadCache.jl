@@ -46,7 +46,7 @@ into the package image.
 """
 function reset_caches!()
     @lock _PN_CACHE_LOCK empty!(_PN_CACHE)
-    SINGULAR_QUAD_CACHE[] = nothing
+    @lock _SINGULAR_QUAD_LOCK SINGULAR_QUAD_CACHE[] = nothing
     return nothing
 end
 
