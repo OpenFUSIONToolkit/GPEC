@@ -179,7 +179,7 @@
 
         # The model key, through the same assembly TearingProblem uses.
         Tearing = GeneralizedPerturbedEquilibrium.Tearing
-        loaded = (; profiles, chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing, zeff=nothing, zeff_source=:scalar)
+        loaded = (; profiles, chi_perp_e=nothing, chi_perp_i=nothing, chi_tor=nothing, zeff=nothing, zeff_source=:scalar, lnLambda=nothing)
         model(; c...) = SLAYERModel(; P_perp_model=:chi_perp_e, D_R=0.01, D_c_type=:fitzpatrick, c...)
         attached = equil.kinetic
         equil.kinetic = Equilibrium.KineticProfileData(; psi=psi_pts, n_e=fill(5.0e19, length(psi_pts)),
