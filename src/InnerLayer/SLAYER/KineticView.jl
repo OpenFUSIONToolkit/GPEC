@@ -49,15 +49,8 @@ function _slayer_profiles(data::KineticProfileData, control)
         cubic_interp(psi_xs, z)
     end
     zeff_source = _usable(data.zeff) ? :file : zeff === nothing ? :scalar : :closure
-    # A supplied Coulomb logarithm replaces the closure's lnLambda_form one; interpolated in log space as the collision model's.
-    lnLambda = if data.lnLambda === nothing
-        nothing
-    else
-        log_spl = pchip_interp(psi_xs, log.(data.lnLambda); extrap=ExtendExtrap())
-        ψ -> exp(log_spl(ψ))
-    end
     return (profiles=profiles, chi_perp_e=chi_perp_e, chi_perp_i=chi_perp_i, chi_tor=chi_tor, zeff=zeff, zeff_source=zeff_source,
-        has_omega_E=(data.omega_E !== nothing), lnLambda=lnLambda)
+        has_omega_E=(data.omega_E !== nothing))
 end
 
 # Map the TOML resistivity_model symbol to a NeoResistivityModel instance.

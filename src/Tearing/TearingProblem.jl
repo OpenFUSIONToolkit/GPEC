@@ -60,8 +60,7 @@ function _tearing_params(model::SLAYERModel, equil, surfaces, loaded)
         dc_type=model.D_c_type,
         theta=model.theta_sample,
         resistivity_model=_build_resistivity_model(data.resistivity_model),
-        lnLambda_form=data.lnLambda_form,
-        lnLambda=loaded.lnLambda)
+        lnLambda_form=data.lnLambda_form)
 end
 
 """

@@ -146,7 +146,7 @@ layer-overlap scan) reads the composition and closure from here, so they all see
 | `chi_i`             | ion perpendicular heat diffusivity χ⊥,i                                                                           |
 | `chi_phi`           | toroidal momentum diffusivity χ_φ                                                                                 |
 | `zeff`              | effective charge Z_eff(ψ) supplied directly (optional); the resistive-layer analysis prefers it to its closure    |
-| `lnLambda`          | Coulomb logarithm supplied directly (optional); replaces the internal one in the collision model and resistivity  |
+| `lnLambda`          | Coulomb logarithm supplied directly (optional); replaces the internal one in the NTV collision model              |
 | `nu_i`/`nu_e`       | main-ion / electron collision rates in 1/s supplied directly (optional); replace the internal collision model     |
 | `species_densities` | named per-species densities (e.g. `"n_D"`, `"n_T"`) for explicit multi-ion input; `nothing` for ASCII / no extras |
 | `provenance`        | short string recording the source file/format                                                                     |
