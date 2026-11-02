@@ -13,7 +13,7 @@ render it to the website. It is a contributor-facing reference, read here in the
 repository — which is why `developer_notes.md` links to it by GitHub URL rather
 than as a site-internal page.
 
-The `Ballooning and Mercier Local Stability` and `Inner Layer Module` pages are
+The `Stability` and `Local Stability` pages are
 the reference exemplars; new or reworked module pages should follow their shape.
 
 ## Module-page template
@@ -21,24 +21,18 @@ the reference exemplars; new or reworked module pages should follow their shape.
 A module reference page (`docs/src/<module>.md`) has these sections, in order.
 Not every section is large for every module, but the skeleton is the same.
 
-1. **Overview** — what the module computes and where it sits in the
-   equilibrium → stability → perturbed-equilibrium pipeline.
-2. **Governing equations** — the physics the module discretizes, written as
-   numbered display equations. Each equation or block cites the paper it comes
-   from (the PDFs in `docs/resources/`), e.g. *(GWP2016 Eq. 11)*. Citing
-   equation numbers is required, not optional — it is what makes the
-   implementation auditable against theory.
-3. **Numerical method** — the discretization and algorithm: what is expanded in
-   what basis, how the linear/eigenvalue/BVP problem is assembled and solved,
-   and the *design choices* that matter (why this contour, this ordering, this
-   precision). This is the part that distinguishes a methods page from an API
-   dump.
-4. **Validation & benchmarks** — evidence the method is correct: a table of
-   pinned values cross-checked against an independent code or analytic result,
-   and figures (see below) showing convergence, invariance, or agreement.
-5. **Practical usage** — the configuration keys and the public entry points a
-   user calls, with a short worked example.
-6. **API Reference** — an `@autodocs` block for the module so every exported
+1. **What it computes** — the physics of the stage in at most two paragraphs,
+   and where it sits in the pipeline (a link back to the Workflow page).
+2. **Governing equations** — the equations the module discretizes, as display
+   equations, each citing its paper by "Author (year)" with a link to the
+   citations page; equation numbers where the paper is in `docs/resources/`.
+3. **Running it** — the deck section(s), as a snippet copied from a shipped
+   example that is named, and the matching scripting-API call.
+4. **Outputs** — a table of the `gpec.h5` datasets the stage writes, by full
+   path, with meaning and units.
+5. **Numerical notes** — the discretization and algorithm choices that matter
+   to a user, kept short, with the validation figures (see below).
+6. **API reference** — an `@autodocs` block for the module so every exported
    docstring is rendered and `checkdocs=:exports` stays satisfied.
 
 ## Figures

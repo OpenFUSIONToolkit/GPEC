@@ -205,3 +205,42 @@ If the two refs in a comparison ran under different thread counts, the report fl
 
 - `0` — every run completed (and, with `--fail-on-change`, nothing changed)
 - `1` — a run failed, or a quantity changed under `--fail-on-change`
+
+## Pinned Δ′ and grid convergence
+
+The ideal Δ′ diagonal pinned in `test/runtests_parallel_integration.jl` and tracked by the harness is a
+single-grid snapshot that catches unintended changes, not a converged value. A `psi_accuracy` scan of the
+DIII-D-like SLAYER deck on the automatic grid (`implied` is the knot count `implied_knot_count` asks for
+after the refined solve):
+
+| psi_accuracy | knots | implied | dpm[1,1] | dpm[2,2] | dpm[3,3] | gamma 2/1 (Hz) |
+|---|---|---|---|---|---|---|
+| 2.0e-3   | 172 | –    | 6.850 | -5.783 | -16.308 | 165.3 |
+| 1.0e-3   | 205 | –    | 6.387 | -5.873 | -16.867 | 154.3 |
+| 5.0e-4   | 252 | –    | 8.003 | -6.105 | -16.413 | 192.9 |
+| 2.5e-4   | 307 | 522  | 8.567 | -6.235 | -16.529 | 206.2 |
+| 1.25e-4  | 372 | 666  | 8.146 | -6.285 | -16.649 | 196.2 |
+| 6.25e-5  | 457 | 916  | 8.911 | -6.477 | -16.510 | 214.4 |
+| 3.125e-5 | 559 | 1226 | 9.514 | -6.260 | -16.485 | 228.7 |
+
+The same deck on a fixed `core_edge_packed` grid:
+
+| mpsi | dpm[1,1] | dpm[2,2] | dpm[3,3] | gamma 2/1 (Hz) |
+|---|---|---|---|---|
+| 128  | 5.208 | -8.666 | -19.157 | 126.2 |
+| 256  | 7.097 | -5.187 | -15.729 | 171.2 |
+| 512  | 8.489 | -6.217 | -16.517 | 204.4 |
+| 1024 | 8.932 | -6.298 | -16.529 | 214.9 |
+| 2048 | 8.914 | -6.385 | -16.468 | 214.5 |
+
+- Convergence is per surface: the q = 4 `dpm[3,3]` settles near -16.5 on both grid families, while the q = 2
+  `dpm[1,1]` converges to about 8.91 only on the fixed grid and keeps moving on the automatic one.
+- The SLAYER growth rate is linear in Δ′ here (`gamma/dpm[1,1]` ≈ 24.1 within 0.5%), so a converged Δ′ gives a
+  converged growth rate.
+- The automatic grid stops after its second pass, and the knot count it implies grows faster than the grid in
+  use as `psi_accuracy` tightens, so tightening moves it further from self-consistency.
+
+A plateau criterion (scan `psi_accuracy` and the truncation controls, pin the stationary value per surface)
+would be a real convergence statement; it needs either the fixed grid or knot refinement iterated to a fixed
+point, and is not implemented. Until then, read a pinned diagonal as a sign and order-of-magnitude signal and
+re-pin it when the equilibrium grid changes.
