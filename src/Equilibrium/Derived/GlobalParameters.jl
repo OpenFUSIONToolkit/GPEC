@@ -171,18 +171,14 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
         c = q_d2(x0)
         d = q_d3(x0)
 
-        if d != 0.0
-            xcrit = -c / d
-            dx2 = xcrit^2 - 2b / d
-            if dx2 ≥ 0
-                dx = sqrt(dx2)
-                for delta in (dx, -dx)
-                    x = xcrit - delta
-                    if 0 ≤ x < xmax
-                        ψ = x0 + x
-                        push!(psiexl, ψ)
-                        push!(qexl, q_spline(ψ))
-                    end
+        disc = c^2 - 2b * d
+        if disc ≥ 0
+            s = -(c + copysign(sqrt(disc), c)) / 2
+            for x in (disc > 0 ? (2s / d, b / s) : (2s / d,))
+                if 0 ≤ x < xmax
+                    ψ = x0 + x
+                    push!(psiexl, ψ)
+                    push!(qexl, q_spline(ψ))
                 end
             end
         end

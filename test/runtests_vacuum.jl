@@ -61,6 +61,12 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             @test ModDeeWall().center_offset == 0.0
         end
 
+        @testset "2D response rejects non-contiguous modes" begin
+            inputs = VacuumInput(; mtheta_in=5, nzeta_in=1, x=[1.0, 1.1, 1.2, 1.1, 1.0], z=[0.0, -0.1, 0.0, 0.1, 0.0], ν=zeros(5),
+                mtheta=5, m_modes=[1, 3], n_modes=[1], nzeta=1)
+            @test_throws ArgumentError GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, nothing)
+        end
+
         @testset "PlasmaGeometry" begin
             @testset "from VacuumInput" begin
                 inputs = VacuumInput(;

@@ -448,9 +448,11 @@ function allowable_tolerance(scan::ToleranceScan, target_percent::Real; correcte
         (p1 > 0 && p2 > 0) || continue
         l1, l2 = log10(p1), log10(p2)
         (min(l1, l2) <= lt <= max(l1, l2)) || continue
-        l1 == l2 && return scan.tolerance_scale[i]
+        s1, s2 = scan.tolerance_scale[i], scan.tolerance_scale[i+1]
+        lt == l1 && return s1
+        lt == l2 && return s2
         f = (lt - l1) / (l2 - l1)
-        return 10^(log10(scan.tolerance_scale[i]) + f * (log10(scan.tolerance_scale[i+1]) - log10(scan.tolerance_scale[i])))
+        return s1 > 0 ? 10^(log10(s1) + f * (log10(s2) - log10(s1))) : s1 + f * (s2 - s1)
     end
     return NaN
 end
