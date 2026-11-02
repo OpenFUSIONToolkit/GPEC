@@ -1,6 +1,6 @@
 # Galerkin Solver
 
-The Galerkin solver is the third `[ForceFreeStates] integrator`: the singular Galerkin method of the Fortran RDCON for the outer-region Δ′ of resistive stability ([Glasser, Wang and Park (2016)](citations.md#InnerLayer-Module)).
+The Galerkin solver is the third `[ForceFreeStates] integrator`: the singular Galerkin method of the Fortran RDCON for the outer-region Δ′ of resistive stability ([Glasser, Wang and Park (2016)](citations.md#Tearing)).
 Instead of integrating the Euler–Lagrange system radially, it discretizes the displacement on a packed radial grid of Hermite-cubic finite elements and solves one global banded system.
 The cells adjacent to each rational surface carry the large and small power-law asymptotic solutions analytically, so the singular behavior is built into the basis rather than resolved numerically.
 

@@ -1,6 +1,6 @@
 # Vacuum
 
-`Vacuum` computes the magnetostatic response of the region between the plasma boundary and a conducting wall, or of free space when there is no wall, following [Chance (1997)](citations.md#Vacuum-Module) and [Chance et al. (2007)](citations.md#Vacuum-Module).
+`Vacuum` computes the magnetostatic response of the region between the plasma boundary and a conducting wall, or of free space when there is no wall, following [Chance (1997)](citations.md#Vacuum) and [Chance et al. (2007)](citations.md#Vacuum).
 It runs inside `ForceFreeStates` whenever `vac_flag = true`, and its matrices are shared with `PerturbedEquilibrium`.
 
 ## What it computes

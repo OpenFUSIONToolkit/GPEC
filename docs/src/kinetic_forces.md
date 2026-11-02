@@ -1,7 +1,7 @@
 # Kinetic Forces
 
 `KineticForces` computes the neoclassical toroidal viscosity (NTV) of a perturbed equilibrium: the toroidal torque and the kinetic energy that a non-axisymmetric field exerts on the plasma through the drift-kinetic response of its particles.
-It implements the PENTRC formulation of [Park et al. (2009)](citations.md#Kinetic-Forces), [Logan et al. (2013)](citations.md#Kinetic-Forces) and [Park and Logan (2017)](citations.md#Kinetic-Forces).
+It implements the PENTRC formulation of [Park et al. (2009)](citations.md#KineticForces), [Logan et al. (2013)](citations.md#KineticForces) and [Park and Logan (2017)](citations.md#KineticForces).
 
 ## What it computes
 
@@ -30,7 +30,7 @@ The rotation that enters is the E×B rotation ``\omega_E`` of the kinetic file, 
 \omega_{*T,i} = -\frac{2\pi}{\chi_1 Z_i e}\,\frac{dT_i}{d\psi},
 ```
 
-with the diamagnetic frequencies from the spline derivatives of the profiles; the sign conventions are on the [Conventions](conventions.md) page.
+with the diamagnetic frequencies from the spline derivatives of the profiles; the sign conventions are under [KineticForces rotation conventions](conventions.md#KineticForces-rotation-conventions).
 The collision operator is selected by `nutype`: `"harmonic"` (the default), `"krook"`, `"small"` or `"zero"` (the collisionless limit), with the collision frequencies computed from the density and temperature profiles; `f0type` selects the equilibrium distribution, `"maxwellian"` (the default), `"park"` or `"cgl"`.
 
 ### Torque methods
@@ -87,7 +87,7 @@ The sum is written to `KineticForces/<method>/` as in a single-ion run and each 
 ### Regularization
 
 `[PerturbedEquilibrium] regularization_width` multiplies ``\xi^{\psi\prime}`` and ``\xi^\alpha`` by ``Q^2/(Q^2 + w^2)`` with ``Q = m - nq`` before they drive the NTV integrand.
-It exists because the ideal response diverges as ``1/Q`` at every rational surface, so the torque integral of an ideal solve does not converge; the self-consistent kinetic solve has no such singularity, since the finite torque moves the zeros of the kinetic coefficient off the real ``\psi`` axis ([Park and Logan (2017)](citations.md#Kinetic-Forces)).
+It exists because the ideal response diverges as ``1/Q`` at every rational surface, so the torque integral of an ideal solve does not converge; the self-consistent kinetic solve has no such singularity, since the finite torque moves the zeros of the kinetic coefficient off the real ``\psi`` axis ([Park and Logan (2017)](citations.md#KineticForces)).
 The default is 0; set it, typically to 0.05, only for the torque of an ideal solve, and leave it at 0 for a kinetic run, where it would suppress a finite physical response.
 
 ## Outputs

@@ -139,21 +139,9 @@ sigma = 0.0                      # Gaussian uncertainty on that budget
 radial_shape = "ring"            # Radial sampling density of the budget magnitude
 ```
 
-The shift tolerance is one number, the radius of the disk the coil centre may sit in; the
-direction is sampled. A tilt may be given in degrees or, as legacy tolerance tables do, as a
-rim displacement in metres, which `tilt_tolerance_deg` converts through the coil set's
-arc-length-weighted major radius exactly as the coil loader's `tilt_in_meters` does. A coherent
-group's tilt is a rigid rotation of all its members about a pivot on the machine axis at
-`rotation_center_z_m`, so a member at height `z` also shifts laterally by `(z − z_pivot)·θ`.
-Groups sharing a `phase_group` label draw the same random direction with independent
-amplitudes. A group's tilt given in metres is converted through `tilt_lever_arm_m` when the
-group has one (a reference structure's lever arm is its own, not any member coil's radius), and
-otherwise through the members' common major radius. A group is correctable only if none of its
-members is listed as uncorrectable. Coil sets of the run without a tolerance block contribute
-their as-designed overlap only. A coil's `current_factor` scales its as-designed overlap and its
-sensitivities together, since the field is linear in current: `0` switches a coil off, `0.5` runs
-it at half current, a negative value reverses it; this is the knob for a risk against the current
-in an uncorrectable coil.
+The shift tolerance is the radius of the disk the coil centre may sit in, with the direction sampled; a tilt is given in degrees or, as legacy tables do, as a rim displacement in metres converted through the coil set's arc-length-weighted major radius (`tilt_lever_arm_m` for a coherent group).
+A coherent group's tilt is a rigid rotation of its members about a pivot on the machine axis at `rotation_center_z_m`, so a member at height `z` also shifts by `(z − z_pivot)·θ`, and groups sharing a `phase_group` draw the same random direction.
+Coil sets without a tolerance block contribute their as-designed overlap only; a coil's `current_factor` scales its overlap and sensitivities together (`0` switches it off, a negative value reverses it), which is the knob for a risk against the current in an uncorrectable coil.
 
 Every key is checked against the schema, so a misspelled key is an error rather than a silent
 default. `read_tolerance_toml` parses a file into a `ToleranceSet`, `validate_tolerances`
@@ -211,14 +199,8 @@ scale_subset = []               # Coil sets and groups that tolerance_scale appl
 scale_map = {}                  # Extra multiplier per coil set or group name, e.g. {F6A = 2.0}
 ```
 
-`coil_subset` and `scale_subset` answer different questions. `coil_subset` samples only the
-named coils and gives every other coil zero tolerance, which isolates one coil's contribution.
-`scale_subset` applies `tolerance_scale` to the named coils and groups and leaves every other
-name at its own tolerance, which is the product question of a design review: how far can the
-tolerance of one class of coils be relaxed while the rest of the machine holds its own? Names
-in either that are not coil sets of the run or groups of the tolerance file are errors. Neither
-changes which random numbers are drawn, so runs with the same seed differ only through the
-tolerances they scale.
+`coil_subset` samples only the named coils and gives every other coil zero tolerance, which isolates one coil's contribution; `scale_subset` applies `tolerance_scale` to the named coils and groups and leaves the rest at their own tolerance, the design-review question of how far one class of coils can be relaxed while the rest of the machine holds.
+Neither changes which random numbers are drawn.
 
 The run's histogram is the full-window, dominant-mode summary. Any other window or mode, a
 tolerance scale, or a coil subset is a post-hoc re-run of the same kernel:
@@ -233,7 +215,7 @@ mc.abs_delta_sampled_mean, mc.abs_delta_total_as_designed
 ## Locking risk and allowable tolerance
 
 An overlap distribution becomes a locking risk through the empirical ITPA penetration-threshold
-scalings ([citations](citations.md#ErrorFields-Module)): the n = 1 fits of Logan et al.,
+scalings ([citations](citations.md#ErrorFields)): the n = 1 fits of Logan et al.,
 *Plasma Phys. Control. Fusion* **62**, 084001 (2020) and of Bursch et al., *Plasma Phys. Control.
 Fusion* (2026), [doi:10.1088/1361-6587/aea7d6](https://doi.org/10.1088/1361-6587/aea7d6), and the n = 2 fits of Logan et al.,
 *Nucl. Fusion* **60**, 086010 (2020):
@@ -445,42 +427,15 @@ A coil set whose field at the run's toroidal mode is round-off (an axisymmetric 
 
 ## Comparing coil revisions
 
-Assessing a *new* coil design against an existing run costs one Biot-Savart pass per coil set and
-no plasma solve: the equilibrium, the control surface and the resonant coupling all come from the
-stored file. Gather them once with `ResonantDriveContext` and hand it whatever geometry you like.
+Assessing a new coil design against an existing run costs one Biot–Savart pass per coil set and no plasma solve: `ResonantDriveContext("gpec.h5")` gathers the equilibrium, the control surface and the resonant coupling from the file, and `coil_overlaps` evaluates any geometry against it, returning each coil's dimensionless overlap `delta`, its `resonant_fraction_percent` and its spectrum, with every normalization carried on the `CoilOverlap`.
+A design current pattern is applied afterwards, since the field is linear in the currents: evaluate every conductor at 1 kA and combine with `combine_overlaps(ovs, "old_pair_1" => 20.0, "old_pair_2" => -15.0)`, where the weights read as currents in kA; an unmatched name raises rather than contributing zero, so a renamed coil cannot drop out of a comparison.
+`compute_coil_sensitivities` takes the same context for the rigid-motion sensitivities, at thirteen spectrum evaluations per coil set instead of one.
 
 ```julia
 ctx = EF.ResonantDriveContext("gpec.h5")                    # nzeta_coil=…, dat_dir=… override the deck
-old = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(old_cfg, 1))
 new = EF.coil_overlaps(ctx, ForcingTerms.load_coil_sets(new_cfg, 1))
-
-new[1].delta               # dimensionless overlap δ = Vᴴb̃ / B_T0
-new[1].resonant_fraction_percent    # how much of this coil's own spectrum is resonant
-new[1].spectrum            # b̃ itself, for the diagnostics below
+new[1].delta, new[1].resonant_fraction_percent
 ```
-
-Every normalization the quantity is quoted in travels on the `CoilOverlap`, so a caller
-never has to work out which one a bare number was in.
-
-A revision can rename or split coils. Because the field is linear in the currents, a design current
-pattern is applied afterwards rather than by re-running the geometry, and a split is written as the
-combination it is:
-
-```julia
-sets = ForcingTerms.conductors(ForcingTerms.read_coil_dat("old_pair.dat"))   # one file, two coils
-ovs  = EF.coil_overlaps(ctx, sets)                                          # each at 1 kA, say
-
-EF.combine_overlaps(ovs, "old_pair_1" => 20.0, "old_pair_2" => -15.0)       # weights in kA
-```
-
-Weights multiply each spectrum as it was evaluated; they are not absolute currents, since the sets
-may have been swept at any current. Evaluating every conductor at 1 kA and weighting by the design
-current in kA is the idiom that makes them read as currents. An unmatched name raises rather than
-contributing zero, so a coil renamed between revisions cannot quietly drop out of a comparison.
-
-For sensitivities to rigid motion as well, `compute_coil_sensitivities` takes the same context.
-It costs thirteen spectrum evaluations per coil set instead of one, so reach for `coil_overlaps`
-when only the overlaps are wanted.
 
 ## Result names
 

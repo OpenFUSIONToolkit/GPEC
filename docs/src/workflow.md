@@ -54,7 +54,7 @@ With `vac_flag = true` the `Vacuum` module adds the vacuum energy for the wall o
 `[ForceFreeStates] integrator` selects the radial method and its section: `"Riccati"` (the default; `[Riccati]`) also produces the Δ′ matrix, `"Forward"` (`[Forward]`) is the plain ODE integration, and `"Galerkin"` (`[Galerkin]`) is the resistive outer-region solve on a finite-element basis.
 `kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs a kinetic file.
 Outputs: `ForceFreeStates/FreeBoundaryStability/`, `ForceFreeStates/Solutions/`, `ForceFreeStates/EdgeScan/`, `SingularSurfaces/` and `SurfaceGeometries/`.
-Key references: [Glasser (2016)](citations.md#ForceFreeStates-Module), [Glasser (2018)](citations.md#ForceFreeStates-Module), [Chance (1997)](citations.md#Vacuum-Module).
+Key references: [Glasser (2016)](citations.md#ForceFreeStates), [Glasser (2018)](citations.md#ForceFreeStates), [Chance (1997)](citations.md#Vacuum).
 Pages: [Stability](stability.md), [Galerkin solver](galerkin.md), [Vacuum](vacuum.md).
 
 ### LocalStability
@@ -75,7 +75,7 @@ Page: [Tearing](inner_layer.md).
 Computes the plasma response to an external non-axisymmetric field: `plasma_response` builds the permeability, inductance and reluctance operators on the control surface from the force-free states and the vacuum matrices, and `perturbed_equilibrium` applies them to the drive that `ForcingTerms` supplies, either a normal-field spectrum from a file or the Biot–Savart field of `[[ForcingTerms.coil_set]]` coils.
 The resonant fields, island half-widths and Chirikov parameter at each rational surface follow from the singular coupling (`compute_singular_coupling`), and `regularization_width` controls the regularization of the ideal response there.
 Outputs: `PerturbedEquilibrium/ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`.
-Key references: [Park et al. (2007a)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2009)](citations.md#PerturbedEquilibrium-Module).
+Key references: [Park et al. (2007a)](citations.md#PerturbedEquilibrium), [Park et al. (2009)](citations.md#PerturbedEquilibrium).
 Pages: [Forcing terms](forcing_terms.md), [Perturbed equilibrium](perturbed_equilibrium.md).
 
 ### KineticForces
@@ -83,7 +83,7 @@ Pages: [Forcing terms](forcing_terms.md), [Perturbed equilibrium](perturbed_equi
 Integrates the NTV torque and kinetic energy of the perturbed equilibrium over ψ for each torque `method`, by species when the ion composition has more than one.
 Runs after `PerturbedEquilibrium` and needs n_e, T_i, T_e and ω_E in the kinetic file; without `[PerturbedEquilibrium]` the section only configures the kinetic solve of `ForceFreeStates`.
 Outputs: `KineticForces/<method>/` and `KineticForces/PerSpecies/`.
-Key references: [Park and Logan (2017)](citations.md#Kinetic-Forces), [Logan et al. (2013)](citations.md#Kinetic-Forces).
+Key references: [Park and Logan (2017)](citations.md#KineticForces), [Logan et al. (2013)](citations.md#KineticForces).
 Page: [Kinetic forces](kinetic_forces.md).
 
 ### ErrorFields
@@ -99,7 +99,7 @@ Solves the tearing dispersion relation of each rational surface by matching the 
 `[Tearing.search]` sets the root search in the complex frequency plane, and `[Tearing.CriticalResonantField]` adds the resonant field at which the layer's shielding is overcome.
 Needs the Δ′ matrix of `"Riccati"` with `vac_flag = true` or `"Galerkin"` with `[Galerkin] rpec_flag = true`, and the kinetic profiles of `[Equilibrium] kinetic_file` (`SLAYER` reads its densities, temperatures, rotation and diffusivities there).
 Outputs: `Tearing/PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/`.
-Key references: [Glasser, Wang and Park (2016)](citations.md#InnerLayer-Module), [Park (2022)](citations.md#InnerLayer-Module).
+Key references: [Glasser, Wang and Park (2016)](citations.md#Tearing), [Park (2022)](citations.md#Tearing).
 Page: [Tearing](inner_layer.md).
 
 ## The deck

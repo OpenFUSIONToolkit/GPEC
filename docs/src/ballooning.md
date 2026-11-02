@@ -6,8 +6,8 @@ It runs as its own stage, after `ForceFreeStates` and on the same equilibrium, a
 ## What it computes
 
 - **Mercier criterion** ``D_I``: the ideal interchange index of each surface. A surface is Mercier unstable where ``D_I > 0``; the same number sets the exponents ``-1/2 \pm \sqrt{-D_I}`` of the large and small solutions that the global integration matches at every rational surface.
-- **Resistive interchange** ``D_R = D_I + (H - 1/2)^2``, with ``H`` from the flux-surface averages of [Glasser, Greene and Johnson (1975)](citations.md#LocalStability-Module). ``D_R > 0`` indicates resistive interchange instability.
-- **Ballooning stability** ``\Delta'``: the high-``n`` ballooning index, obtained by integrating the marginal ballooning equation along the field line and matching the solution to its asymptotic forms at both ends ([Connor, Hastie and Taylor (1978)](citations.md#LocalStability-Module)). It is distinct from the tearing Δ′ of `SingularSurfaces/`; ``\Delta' = 0`` is the marginal ballooning boundary.
+- **Resistive interchange** ``D_R = D_I + (H - 1/2)^2``, with ``H`` from the flux-surface averages of [Glasser, Greene and Johnson (1975)](citations.md#LocalStability). ``D_R > 0`` indicates resistive interchange instability.
+- **Ballooning stability** ``\Delta'``: the high-``n`` ballooning index, obtained by integrating the marginal ballooning equation along the field line and matching the solution to its asymptotic forms at both ends ([Connor, Hastie and Taylor (1978)](citations.md#LocalStability)). It is distinct from the tearing Δ′ of `SingularSurfaces/`; ``\Delta' = 0`` is the marginal ballooning boundary.
 - **Critical pressure gradient**: with `alpha_boundary_scan = true` the pressure gradient of each surface is scaled until the ballooning boundary is reached, giving the normalized gradient ``\alpha`` and its critical value ``\alpha_\mathrm{crit}``, the s–α diagram collapsed to a profile.
 
 ## Governing equations

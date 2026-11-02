@@ -1,20 +1,14 @@
 # Conventions Reference
 
-This page is a comprehensive reference for the sign, coordinate, and field-amplitude conventions
-used throughout GPEC. Understanding them is essential for interpreting outputs, interfacing with
-other codes, and correctly setting up perturbed-equilibrium and kinetic calculations.
-
-These conventions are inherited from the Fortran GPEC suite and are GPEC-native: they predate
-and do not fully coincide with the COCOS standard (see [COCOS Compatibility](@ref) below).
-Each section names the Julia source that establishes the convention so the documentation stays
-traceable to the implementation.
+The sign, coordinate and field-amplitude conventions used throughout GPEC, for reading its output and interfacing it with other codes.
+They are inherited from the Fortran GPEC suite and predate the COCOS standard (see [COCOS Compatibility](@ref)); each section names the source that establishes the convention.
 
 ## Quick Reference
 
 | Quantity | Convention | Forced? |
 |----------|-----------|---------|
 | ``\psi`` (poloidal flux) | Normalized 0 (axis) to 1 (edge), no ``2\pi`` | Yes, positive |
-| ``\theta`` (poloidal angle) | Upward outboard | Fixed |
+| ``\theta`` (poloidal angle) | Upward outboard, one circuit = 1 | Fixed |
 | ``\phi`` (toroidal angle) | CCW for LH, CW for RH | By helicity |
 | ``F = R B_\phi`` | Always positive | Yes, `abs` |
 | ``q`` (safety factor) | Computed (direct) / input (inverse), positive | Effectively positive |
@@ -22,6 +16,7 @@ traceable to the implementation.
 | Resonant ``m`` | Always positive (since ``n>0``, ``q>0``) | By construction |
 | helicity | +1 RH, ``-1`` LH | Computed |
 | ``\omega_E`` | Positive = direction of ``\zeta`` | No |
+| Field amplitudes | ``b``, ``\bar b``, ``\tilde b``, all in tesla | By area weighting |
 
 ## Coordinate System
 
@@ -31,48 +26,28 @@ GPEC uses right-handed magnetic coordinates ``(\psi, \theta, \zeta)`` with the F
 \exp\!\big(i(m\theta - n\zeta)\big),
 ```
 
-matching the Fortran ``\exp(im\theta - in\phi)`` convention. The forward analysis transform that
-produces the mode coefficients ``f_m`` from a real-space profile ``f(\theta)`` uses the conjugate
-kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\theta)``
-(`src/Utilities/FourierTransforms.jl`).
+matching the Fortran ``\exp(im\theta - in\phi)`` convention.
+The analysis transform that produces the mode coefficients ``f_m`` of a profile ``f(\theta)`` uses the conjugate kernel ``\exp(-im\theta)``, and the synthesis reconstructs with ``\exp(+im\theta)`` (`Utilities.FourierTransforms`).
 
 ### Poloidal Flux ``\psi``
 
-- Normalized from 0 (magnetic axis) to 1 (plasma boundary).
-- ``\psi_0 = |\psi_\mathrm{bry} - \psi_\mathrm{axis}|`` is **forced positive** on read
-  (`read_eq_efit` in `src/Equilibrium/Sources/GFile.jl`). If the EQDSK has
-  ``\psi_\mathrm{bry} < \psi_\mathrm{axis}``, the 2D flux array is sign-flipped so that ``\psi``
-  increases from axis to edge.
-- The internal ``\psi`` carries **no** factor of ``2\pi`` (poloidal flux per radian). IMAS inputs,
-  which use the full poloidal flux, are divided by ``2\pi`` on read — see
-  [COCOS Compatibility](@ref).
-- Occasionally ``\rho = \sqrt{\psi}`` is used as a radius-like variable.
+- Normalized from 0 (magnetic axis) to 1 (plasma boundary); ``\psi_0 = |\psi_\mathrm{bry} - \psi_\mathrm{axis}|`` is forced positive on read, and an EQDSK with ``\psi_\mathrm{bry} < \psi_\mathrm{axis}`` has its flux array sign-flipped so that ``\psi`` increases outward (`Equilibrium.Sources.GFile`).
+- The internal ``\psi`` carries no factor of ``2\pi`` (poloidal flux per radian); IMAS inputs, which use the full flux, are divided by ``2\pi`` on read.
+- ``\rho = \sqrt{\psi}`` serves as a radius-like variable where one is needed.
 
 ### Poloidal Angle ``\theta``
 
-- "Upward outboard" convention, always: ``\theta = 0`` on the outboard midplane, increasing
-  upward.
-- ``\theta`` is normalized to increase by 1 (not ``2\pi``) over one poloidal circuit. This is fixed
-  regardless of helicity or working-coordinate choice.
+- Upward outboard, always: ``\theta = 0`` on the outboard midplane, increasing upward.
+- Normalized to increase by 1, not ``2\pi``, over one poloidal circuit, whatever the helicity or working coordinate.
 
 ### Toroidal Coordinate ``\zeta`` and ``\phi``
 
-- The magnetic coordinate toroidal angle is ``\zeta = (\phi - \nu(\psi,\theta))/(2\pi)``, where ``\phi`` is GPEC's internal
-  toroidal angle (the physical angle is ``-\mathrm{helicity}\,\phi``, below) and ``\nu`` is a single-valued
-  straight-field-line offset that depends on the working coordinate. PEST coordinates have ``\nu = 0``.
-- The physical toroidal angle is reconstructed as
-  ``\phi = -\,\mathrm{helicity}\,(2\pi\zeta + \nu)`` (`sample_boundary_grid` in
-  `src/ForcingTerms/CoilFourier.jl`). Thus ``\phi`` is effectively **counter-clockwise** (viewed
-  from above) for left-handed (LH) configurations and **clockwise** for right-handed (RH)
-  configurations.
+- The magnetic toroidal angle is ``\zeta = (\phi - \nu(\psi,\theta))/(2\pi)``, with ``\phi`` the internal toroidal angle and ``\nu`` the single-valued straight-field-line offset of the working coordinate (``\nu = 0`` in PEST coordinates).
+- The physical toroidal angle is ``\phi = -\,\mathrm{helicity}\,(2\pi\zeta + \nu)`` (`ForcingTerms`), so ``\phi`` runs counter-clockwise viewed from above for left-handed configurations and clockwise for right-handed ones.
 
 ### Working Coordinate Options
 
-Controlled by `jac_type` in the `[Equilibrium]` section of `gpec.toml`. The Jacobian is
-``J \propto B_p^{p_{bp}}\, B^{p_b}\, R^{-p_r}\, r_c^{-p_{rc}}``, where ``B_p`` is the poloidal
-field magnitude, ``B`` is the total field magnitude, ``R`` is the major radius, and
-``r_c = \sqrt{(R-R_0)^2 + (Z-Z_0)^2}`` is the minor radius (distance from the magnetic axis
-``(R_0, Z_0)``):
+`[Equilibrium] jac_type` selects the Jacobian ``J \propto B_p^{p_{bp}}\, B^{p_b}\, R^{-p_r}\, r_c^{-p_{rc}}``, with ``B_p`` the poloidal field, ``B`` the total field, ``R`` the major radius and ``r_c`` the distance from the magnetic axis:
 
 | Name | `power_bp` | `power_b` | `power_r` | `power_rc` |
 |------|-----------|-----------|-----------|------------|
@@ -82,342 +57,160 @@ field magnitude, ``B`` is the total field magnitude, ``R`` is the major radius, 
 | Equal-arc | 1 | 0 | 0 | 0 |
 | Park | 0 | 1 | 0 | 0 |
 
-The powers are set automatically from `jac_type` (`EquilibriumConfig` in
-`src/Equilibrium/Config.jl`) and applied in the field-line Jacobian
-(`direct_fieldline_der!` in `src/Equilibrium/Axisymmetric/Direct.jl`). Setting `jac_type = "custom"`
-lets you specify the four exponents manually via `jac_custom_power_bp`, `jac_custom_power_b`,
-`jac_custom_power_r`, and `jac_custom_power_rc`.
+`jac_type = "custom"` sets the four exponents by hand through `jac_custom_power_bp`, `jac_custom_power_b`, `jac_custom_power_r` and `jac_custom_power_rc`.
 
 ## Helicity and Handedness
 
-Helicity is derived from the equilibrium current and toroidal-field directions:
-
-```julia
-helicity = bt_sign * Int(sign(crnt))   # src/ForcingTerms/CoilFourier.jl
-```
-
-- `bt_sign` is the toroidal-field direction and `crnt` is the signed plasma current.
-- **helicity = +1**: right-handed (RH) --- ``B_t`` and ``I_p`` in the same direction.
-- **helicity = -1**: left-handed (LH) --- ``B_t`` and ``I_p`` opposed.
-- Helicity sets the toroidal-grid direction ``\phi_j = -\mathrm{helicity}\times 2\pi j/n_\zeta`` and
-  the output sign flips (see [Spectrum Output Sign Conventions](@ref)). For DIII-D
-  (``B_t < 0``, ``I_p > 0`` ⇒ helicity = ``-1``) ``\phi`` increases with ``j``.
+Helicity is the product of the toroidal-field and plasma-current directions, `helicity = bt_sign * sign(crnt)` (`ForcingTerms`): +1 is right-handed (``B_t`` and ``I_p`` parallel), ``-1`` left-handed (opposed).
+It sets the toroidal-grid direction ``\phi_j = -\mathrm{helicity}\times 2\pi j/n_\zeta`` and the output sign flips of [Spectrum Output Sign Conventions](@ref); for DIII-D (``B_t < 0``, ``I_p > 0``, helicity ``-1``) ``\phi`` increases with ``j``.
 
 ## ``F = R B_\phi``
 
-The poloidal-current function ``F = R B_\phi`` from the Grad-Shafranov equation is **forced
-positive** via `abs` (`read_eq_efit` in `src/Equilibrium/Sources/GFile.jl`):
-
-```julia
-abs.(fpol_data)
-```
-
-The code always works with ``|F|``; the sign of ``B_t`` is carried separately (`fpol_sign`, and the
-`bt_sign`/`crnt` helicity inputs).
+The poloidal-current function is forced positive on read, ``F = |F|`` (`Equilibrium.Sources.GFile`); the sign of ``B_t`` is carried separately by `fpol_sign` and the helicity inputs.
 
 ## Safety Factor ``q``
 
-The direct solver **computes** ``q`` by field-line integration for direct (EFIT) equilibria and
-overwrites the file profile (`direct_run` in `src/Equilibrium/Axisymmetric/Direct.jl`):
+The direct solver computes ``q`` by field-line integration and overwrites the file profile (`Equilibrium.Axisymmetric.Direct`),
 
 ```math
-q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p .
+q = \frac{F}{2\pi}\oint \frac{J}{B_p}\,dl_p ,
 ```
 
-- Because the Jacobian ``J > 0``, the closed-loop integral is positive, and ``F = |F|`` is forced
-  positive, **``q`` is positive** in standard operation. The solver emits a warning if the on-axis
-  extrapolation yields ``q_0 \le 0``, treating it as a spline artifact rather than a physical
-  result.
-- **Inverse** equilibria, for which only CHEASE and analytic options are currently supported, instead use the ``q`` profile supplied with the input
-  (`src/Equilibrium/Axisymmetric/Inverse.jl`). This follows the fortran GPEC CHEASE reading convention.
+which is positive because ``J > 0`` and ``F = |F|``; a warning marks an on-axis extrapolation with ``q_0 \le 0`` as a spline artifact.
+Inverse equilibria use the ``q`` profile supplied with the input (`Equilibrium.Axisymmetric.Inverse`), the convention of the Fortran GPEC CHEASE reader.
 
 ## Mode Numbers ``m`` and ``n``
 
 ### Toroidal Mode Number ``n``
 
-- Set as a **positive integer** via `[ForceFreeStates] nn` in `gpec.toml`. ``n < 1`` is not supported
-  and is clamped to 1 with a warning (`src/GeneralizedPerturbedEquilibrium.jl`). Results for
-  multiple ``n`` can be superposed.
+`[ForceFreeStates] nn` is a positive integer or a list of consecutive integers.
+``n < 1`` is not supported: a run whose modes are all below 1 is an error, and a lowest mode below 1 is clamped to 1 with a warning (`ForceFreeStates.Run`).
+Results for several ``n`` can be superposed.
 
 ### Poloidal Mode Range
 
-The poloidal spectrum spans `mlow` to `mhigh` (`src/GeneralizedPerturbedEquilibrium.jl`):
+The poloidal spectrum spans `mlow` to `mhigh` (`ForceFreeStates.ForceBalance`):
 
 ```math
-m_\mathrm{low} = \min(\lfloor n\,q_\mathrm{min}\rfloor,\,0) - 4 - \Delta m_\mathrm{low}, \qquad
-m_\mathrm{high} = \lfloor n\,q_\mathrm{max}\rfloor + 2\,\Delta m_\mathrm{high}.
+m_\mathrm{low} = \min(\lfloor n_\mathrm{low}\,q_\mathrm{min}\rfloor,\,0) - 4 - \Delta m_\mathrm{low}, \qquad
+m_\mathrm{high} = \lfloor n_\mathrm{high}\,q_\mathrm{max}\rfloor + 2\,\Delta m_\mathrm{high}.
 ```
 
-`delta_mlow` and `delta_mhigh` widen the range beyond the resonant modes. Note the asymmetric
-factor of 2 on ``\Delta m_\mathrm{high}``: `delta_mhigh` is doubled before being applied (for
-consistency with the Fortran DCON convention), so the user-supplied value adds twice as many
-modes on the high side as `delta_mlow` does on the low side.
+`delta_mlow` and `delta_mhigh` widen the range beyond the resonant modes; `delta_mhigh` is doubled before use, the Fortran DCON convention, so it adds twice as many modes on the high side as `delta_mlow` does on the low side.
 
 ### Why Positive ``m`` Is Always Resonant
 
-Resonant surfaces are found by `sing_find!` (`src/ForceFreeStates/Surfaces/Finding.jl`), which locates flux
-surfaces where ``m = n\,q(\psi)``. Since ``n > 0`` by convention and ``q > 0`` for a standard
-tokamak, the resonant ``m`` is always positive:
-
-```math
-m_\mathrm{res} = n\,q > 0 .
-```
-
-Negative-``m`` modes are always non-resonant. This is by design: the ``m = 2`` displacement shows
-resonant behavior at ``q = 2``, etc.
+Resonant surfaces are the flux surfaces where ``m = n\,q(\psi)`` (`ForceFreeStates.Surfaces`).
+Since ``n > 0`` by convention and ``q > 0`` for a standard tokamak, the resonant ``m`` is always positive, ``m_\mathrm{res} = n\,q > 0``, and negative-``m`` modes are never resonant: the ``m = 2`` displacement resonates at ``q = 2``.
 
 ## Spectrum Output Sign Conventions
 
-For the real-space representation, GPEC takes the complex conjugate for **right-handed**
-configurations. This is implemented in the mode reconstruction
-(`src/Analysis/PerturbedEquilibriumModes.jl`):
-
-```julia
-if helicity > 0
-    theta_data[:, :, k] .= conj.(theta_data[:, :, k])
-end
-```
-
-The straight-field-line offset enters as ``\exp(i\,n\,\nu)`` before the conjugation. For the full
-Fourier representation ``\exp(i(m\theta - n\zeta))`` the conjugate operation flips both the
-toroidal direction and the up/down (poloidal) sense.
+For the real-space representation GPEC takes the complex conjugate of the mode amplitudes for right-handed configurations (`Analysis.PerturbedEquilibriumModes`), after the straight-field-line offset has entered as ``\exp(i\,n\,\nu)``.
+For the full Fourier representation ``\exp(i(m\theta - n\zeta))`` the conjugation flips both the toroidal direction and the up/down sense.
 
 ### Interfacing with SURFMN
 
-SURFMN expands in ``\exp(-im\theta - in\phi)`` with CCW ``\phi``. To convert from GPEC:
+SURFMN expands in ``\exp(-im\theta - in\phi)`` with CCW ``\phi``; to convert from GPEC,
 
 ```python
 m_surfmn = helicity * m_gpec
 b_surfmn = real(b_m) - 1j * helicity * imag(b_m)
 ```
 
-For LH configurations only the sign of ``m`` is flipped; for RH, ``m`` is unchanged but the complex
-conjugate is taken.
+so that for LH configurations only the sign of ``m`` is flipped and for RH the complex conjugate is taken.
 
 ### Interfacing with Vacuum
 
-Unlike the Fortran VACUUM code, the GPEC Vacuum module works in the same angles as the rest of the code: ``\theta`` upward-outboard (counter-clockwise in the
-``(R, Z)`` plane) and the Fourier basis ``\exp(-i(m\theta - 2\pi n\zeta))``. A plasma contour passed in clockwise is rejected;
-a clockwise wall file is reversed with a warning. The ``\nu`` passed to Vacuum is GPEC's ``\nu = \phi - 2\pi\zeta``.
-Chance 1997 eq. 97 writes ``\zeta = \phi + \nu`` for the same ``\nu`` because the Fortran VACUUM code's ``\theta`` and ``\phi`` both
-run opposite to GPEC's.
+The `Vacuum` module works in the same angles as the rest of GPEC, ``\theta`` upward-outboard and the basis ``\exp(-i(m\theta - 2\pi n\zeta))``, unlike the Fortran VACUUM code whose ``\theta`` and ``\phi`` both run the other way; a clockwise plasma contour is rejected and a clockwise wall file is reversed with a warning.
+The ``\nu`` passed to it is GPEC's ``\nu = \phi - 2\pi\zeta``, which Chance (1997, Eq. 97) writes as ``\zeta = \phi + \nu``.
 
 ## Field Amplitudes and Units
 
-GPEC reports perturbed magnetic fields as Fourier spectra on flux surfaces. The spectrum of a field
-on a surface depends in general on the coordinate system used. However, certain resonant components
-on rational surfaces or the 2-norm of the Fourier coefficient vector on any surface can be made
-coordinate-independent if the proper area weighting is used within the Fourier decomposition. The
-coordinate-invariance of the weightings used in GPEC is established in Pharr (2026) (see
-[Citations](citations.md)). In each case, we normalize the harmonics by scalar area factors in such
-a way that the units are always Tesla.
+GPEC reports perturbed fields as Fourier spectra on flux surfaces.
+A raw spectrum depends on the working coordinate ([Park, Boozer and Menard (2008)](citations.md)), but the resonant component on a rational surface and the 2-norm of the spectrum on any surface become coordinate-invariant with the right area weighting in the Fourier integrand ([Pharr et al. (2026)](citations.md)).
+GPEC therefore works with three decompositions of the normal field, all in tesla, distinguished only by that weight:
 
-### Resonant Field
-
-The resonant field is the pitch-resonant (``m = nq``) Fourier component of the perturbed flux at a
-rational surface, divided by the **scalar area** ``A^r`` of that surface:
-
-```math
-b^r = \frac{\Phi^r}{A^r} \qquad [\mathrm{T}].
-```
-
-Dividing the resonant flux ``\Phi^r`` by the surface area turns it into a field amplitude in Tesla
-that is invariant under changes of the poloidal-angle (working) coordinate. This is the quantity
-reported as `resonant_flux`. The need for this normalization is the central point of Park, Boozer,
-and Menard (2008) (see [Citations](citations.md)): the raw Fourier spectrum of the perturbed field is
-*spectrally asymmetric* and changes with the magnetic working coordinate, so only the resonant
-harmonic scaled by the scalar surface area ``A^r`` is a coordinate-independent physical measure of
-the resonant field.
-
-Note that there is strictly NO resonant field in ideal MHD perturbed equilibrium calculations, and
-only the effective resonant field is non-zero in these cases. Effective resonant fields are computed
-as above but for the resonant component of flux that is being shielded by the shielding current layer
-on the rational surface. Resistive and kinetic MHD perturbed equilibria have, in general, finite
-resonant fields as well as effective resonant fields.
-
-### Root-Area Normalized Field
-
-The root-area normalized field is the Fourier spectrum of the square-root-area-weighted normal field
-``\sqrt{\mathcal{J}\,|\nabla\psi|}\,(\mathbf{b}\cdot\hat{\mathbf{n}})``, divided by the scalar
-``\sqrt{A}`` of the surface:
-
-```math
-\tilde{b}_m = \frac{1}{\sqrt{A}}\oint \sqrt{\mathcal{J}\,|\nabla\psi|}\;
-(\mathbf{b}\cdot\hat{\mathbf{n}})\, e^{-i m\theta}\, d\theta \qquad [\mathrm{T}].
-```
-
-According to Parseval's theorem, the sum of its squared mode amplitudes equals the
-area-averaged squared normal field — the surface-averaged field "power",
-
-```math
-\sum_m |\tilde{b}_m|^2 = \big\langle (\mathbf{b}\cdot\hat{\mathbf{n}})^2 \big\rangle.
-```
-
-The ``\sqrt{A}`` weighting is the unique one for which the spectrum transforms unitarily between
-working coordinates, so the power-normalized amplitudes — and quantities derived from them, such as
-the singular values of the resonant coupling matrix — are coordinate-invariant.
-
-### The Three Field Amplitudes
-
-Following Pharr (2026), *Coordinate-invariant flux-surface Fourier analysis in tokamaks* (see
-[Citations](citations.md)), GPEC works with **three** Fourier decompositions of the normal field, **all
-in field units (tesla)**, distinguished only by the **area weight applied to the Fourier integrand**.
-These are the authoritative names used in prose, in code, and in the HDF5 output:
-
-| Pharr symbol | FT integrand weight ``W`` | English name | HDF5 token |
+| Pharr symbol | Integrand weight | Name | HDF5 token |
 |---|---|---|---|
-| ``b`` (bare) | ``1`` | **normal field** | `b_n` |
-| ``\bar b`` (bar) | ``\mathcal{J}\,\lvert\nabla\psi\rvert`` | **area-weighted field** | `area` |
-| ``\tilde b`` (tilde) | ``\sqrt{\mathcal{J}\,\lvert\nabla\psi\rvert}`` | **root-area-weighted field** | `root_area` |
-
-All three carry units of tesla because each integral is divided by the appropriate power of the
-coordinate-invariant scalar surface area ``A``:
+| ``b`` (bare) | ``1`` | normal field | `b_n` |
+| ``\bar b`` (bar) | ``\mathcal{J}\,\lvert\nabla\psi\rvert`` | area-weighted field | `area` |
+| ``\tilde b`` (tilde) | ``\sqrt{\mathcal{J}\,\lvert\nabla\psi\rvert}`` | root-area-weighted field | `root_area` |
 
 ```math
 b_m = \oint (\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta, \qquad
 \bar b_m = \frac{1}{A}\oint \mathcal{J}\lvert\nabla\psi\rvert\,(\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta, \qquad
-\tilde b_m = \frac{1}{\sqrt{A}}\oint \sqrt{\mathcal{J}\lvert\nabla\psi\rvert}\,(\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta .
+\tilde b_m = \frac{1}{\sqrt{A}}\oint \sqrt{\mathcal{J}\lvert\nabla\psi\rvert}\,(\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta ,
 ```
 
-Only the **square-root-area weighting** ``\tilde b`` transforms unitarily between working coordinates, so
-its 2-norm (and quantities derived from it, such as the singular values of the resonant coupling matrix)
-are coordinate-invariant. Note that the "root-area-weighted field" sometimes appears as "power-normalized
-field" in early GPEC literature, as the latter names a Parseval *property* of ``\tilde b``. The **full-area weighting** ``\bar b`` is coordinate-invariant for the
-pitch-resonant ``m = nq`` harmonic on a rational surface — the **resonant area-weighted field**
-``\bar b^{\,r} = \Phi^r/A^r`` as described above.
+with ``A`` the scalar surface area.
+The root-area weighting is the unique one under which the spectrum transforms unitarily between working coordinates, so ``\sum_m |\tilde b_m|^2 = \langle (\mathbf{b}\cdot\hat{\mathbf n})^2 \rangle`` (Parseval) and the quantities derived from ``\tilde b``, such as the singular values of the resonant coupling matrix, are coordinate-invariant; "power-normalized field" in early GPEC literature names this property.
+The area weighting is coordinate-invariant for the pitch-resonant ``m = nq`` harmonic on a rational surface: the **resonant field** ``\bar b^{\,r} = \Phi^r/A^r``, the resonant flux divided by the surface area, stored as `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`.
+In an ideal perturbed equilibrium the surface is perfectly shielded and the stored value is the effective resonant field, the resonant flux the shielding current cancels; resistive and kinetic equilibria have finite resonant fields as well.
 
-GPEC operates and outputs **only in these field representations — poloidal flux ``\Phi`` (weber) is never
-stored.** Flux appears, briefly, only internally when a user supplies flux-valued forcing, and is
-recovered on demand as the scalar product ``\Phi = A\,\bar b``.
-
-### Translation Operators
-
-With ``\Sigma`` ≡ `sqrtamat` (the mode-space ``\sqrt{}``weight convolution) and the scalar surface area
-``A`` ≡ `jarea`, the three fields are related by (`Equilibrium/CoordinateInvariant.jl`):
+With ``\Sigma`` the mode-space square-root-weight convolution (`sqrtamat`) and ``A`` the surface area (`jarea`), the three fields and the flux are related by (`Equilibrium.CoordinateInvariant`)
 
 ```math
 \tilde b = \Sigma\, b, \qquad
 \bar b = (\Sigma/\sqrt{A})\,\tilde b, \qquad
-\Phi = A\,\bar b = \Sigma\sqrt{A}\;\tilde b .
+\Phi = A\,\bar b = \Sigma\sqrt{A}\;\tilde b ,
 ```
 
-- **`rootarea_to_area_weight`** ``= \Sigma/\sqrt{A}`` maps ``\tilde b \to \bar b``.
-- **`area_to_rootarea_weight`** ``= \sqrt{A}\,\Sigma^{-1}`` is its inverse (``\bar b \to \tilde b``).
-
-The internal flux-conform operator is just ``R = \Sigma\sqrt{A} = `` `rootarea_to_area_weight` ``\cdot A``.
+where `rootarea_to_area_weight` ``= \Sigma/\sqrt{A}`` maps ``\tilde b \to \bar b``, `area_to_rootarea_weight` is its inverse, and ``R = \Sigma\sqrt{A}`` is the internal flux-conform operator.
+Flux ``\Phi`` is never stored: it appears only when a user supplies flux-valued forcing and is recovered on demand as ``\Phi = A\,\bar b``.
 
 ### Field Representations in GPEC Output
 
-- **`forcing_b` / `forcing_b_root_area` / `forcing_b_area`** (and the `response_*` triplet) — the
-  control-surface forcing and response spectra in the bare (``b``), root-area-weighted (``\tilde b``) and
-  area-weighted (``\bar b``) representations, under `PerturbedEquilibrium/`.
-- **`b_n`** — the bare normal field ``\mathbf{b}\cdot\hat{\mathbf n}`` (and the area-weighted radial field
-  `b_psi_area_weighted`), under `PerturbedEquilibrium/Response/`.
-- **`resonant_area_weighted_field`** / **`C_resonant_area_weighted_field`** — the resonant area-weighted
-  field ``\bar b^{\,r} = \Phi^r/A^r`` and its coupling matrix, under
-  `PerturbedEquilibrium/SingularCoupling/`. The sibling `penetrated_area_weighted_field` follows the
-  same convention.
-- **Root-area-weighted (``\tilde b``) space** — the control-surface response matrices (`permeability`,
-  `reluctance`, `plasma_inductance`, `surface_inductance`) are stored in this coordinate-invariant space
-  under `PerturbedEquilibrium/ResponseMatrices/`. The stored `rootarea_to_area_weight_operator` ``S``
-  recovers the area-weighted field forms (``L_{\bar b} = S\,\tilde L\,S^\dagger``) and the scalar
-  `surface_area` ``A`` recovers flux (``\Phi = A\,\bar b``).
-- **Eigenmode energies** (`ForceFreeStates/FreeBoundaryStability/eigenmode_energies`) — the generalized eigenvalues of the
-  pencil ``W\,v = \lambda\,N\,v``, where ``N`` is the power-normalization (surface-norm) matrix built from
-  the Jacobian Fourier coefficients: ``\xi^\dagger N\,\xi = \oint J\,|\xi(\theta)|^2\,d\theta\,/\,V' =
-  \langle|\xi|^2\rangle``. The eigenvalues are stationary values of the power quotient
-  ``\xi^\dagger W \xi / \xi^\dagger N \xi`` — energies per unit surface-averaged squared displacement
-  (a normalization convention, not raw joules). Because ``W`` and ``N`` transform by the same congruence
-  under a change of working (Jacobian) coordinate, the spectrum is invariant to that coordinate choice.
-  ``N`` is not an inertia matrix (the stability stage carries no velocities); it is the DCON power
-  normalization promoted from a post-hoc per-eigenvector division into the metric of the eigenproblem.
+- `PerturbedEquilibrium/forcing_b`, `forcing_b_root_area`, `forcing_b_area` and the `response_*` triplet: the control-surface spectra in the bare, root-area-weighted and area-weighted representations.
+- `PerturbedEquilibrium/Response/b_n` and `b_psi_area_weighted`: the bare normal field and the area-weighted radial field profiles.
+- `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, `C_resonant_area_weighted_field` and `penetrated_area_weighted_field`: the resonant area-weighted field, its coupling matrix and the penetrated field.
+- `PerturbedEquilibrium/ResponseMatrices/`: the response matrices in root-area-weighted space, with `rootarea_to_area_weight_operator` ``S`` (``L_{\bar b} = S\,\tilde L\,S^\dagger``) and `surface_area` ``A`` (``\Phi = A\,\bar b``) to recover the other forms.
+- `ForceFreeStates/FreeBoundaryStability/eigenmode_energies`: energies per unit surface-averaged squared displacement, a normalization described on the [Stability](stability.md) page.
 
+## KineticForces rotation conventions
 
-## Rotation Velocity Conventions (KineticForces)
-
-The `KineticForces` module (the Julia port of PENTRC) conventions below are used in
-`src/KineticForces/Torque.jl`, `EnergyIntegration.jl`, and `PitchIntegration.jl`.
+The rotation profiles enter the `KineticForces` integrals as follows.
 
 ### ``\omega_E`` (E × B Rotation)
 
-- ``\omega_E`` is the input E × B toroidal-rotation profile, evaluated as
-  `welec = omegaE_spline(psi)` (`Torque.jl`). Positive ``\omega_E`` means rotation in the direction
-  of the toroidal coordinate ``\zeta``.
-- The mapping to current direction follows from the ``\zeta``/``\phi`` convention fixed by helicity
-  ([Helicity and Handedness](@ref)); it is not re-derived inside the kinetic module, which only
-  reads the supplied profile.
+``\omega_E`` is the input E × B toroidal rotation profile, positive in the direction of the toroidal coordinate ``\zeta``; its relation to the current direction follows from the ``\zeta``/``\phi`` convention fixed by helicity ([Helicity and Handedness](@ref)) and is not re-derived by the kinetic module.
 
 ### Diamagnetic Frequencies
 
-Computed at evaluation time from the kinetic-profile gradients (Logan & Park 2013, Eq. 7;
-`Torque.jl`):
+Computed at evaluation time from the kinetic-profile gradients (Logan et al. (2013), Eq. 7):
 
 ```math
 \omega_{*n} = -\frac{2\pi\, T_i}{e\, Z_i\, \chi_1\, n_i}\frac{dn_i}{d\psi_n}, \qquad
 \omega_{*T} = -\frac{2\pi}{e\, Z_i\, \chi_1}\frac{dT_i}{d\psi_n},
 ```
 
-where ``\chi_1 = 2\pi\psi_0`` (`chi1 = 2π·psio`). The negative signs mean a negative
-(outward-decreasing) density or temperature gradient yields a positive diamagnetic frequency. The
-total toroidal rotation is the sum
-
-```math
-\omega_\phi = \omega_E + \omega_{*n} + \omega_{*T} .
-```
+with ``\chi_1 = 2\pi\psi_0``, so that an outward-decreasing density or temperature gives a positive diamagnetic frequency; the total toroidal rotation is ``\omega_\phi = \omega_E + \omega_{*n} + \omega_{*T}``.
 
 ### Energy Integral Resonance
 
-In the kinetic energy integral (`integrate_energy` in `EnergyIntegration.jl`) the resonance
-denominator is ``i\,\Omega(x) - \nu``, where the resonance condition is
+The resonance denominator of the energy integral is ``i\,\Omega(x) - \nu`` with
 
 ```math
 \Omega(x) = n\,\omega_E + \ell_\mathrm{eff}\,\omega_b\sqrt{x} + n\,\omega_D\,x ,
+\qquad
+\ell_\mathrm{eff} = \begin{cases} \ell + n q & \text{passing particles},\\ \ell & \text{trapped particles}, \end{cases}
 ```
 
-with ``x = E/T`` the normalized energy and ``\nu`` the (energy-dependent) effective collisionality.
-Here:
-
-- ``\omega_b`` and ``\omega_D`` are the bounce and magnetic-precession frequency **coefficients at
-  thermal energy** (``x = 1``): ``\omega_b \propto v_\mathrm{th}`` and
-  ``\omega_D \propto v_\mathrm{th}^2`` (`wbhat`, `wdhat` in `Torque.jl`). Their velocity-space
-  dependence enters explicitly as ``\sqrt{x}`` (bounce ``\propto v``) and ``x`` (precession
-  ``\propto E``).
-- ``\ell_\mathrm{eff}`` is the effective bounce harmonic (`PitchIntegration.jl`):
-
-```math
-\ell_\mathrm{eff} =
-\begin{cases}
-\ell + n q & \text{circulating (passing) particles},\\
-\ell & \text{trapped particles}.
-\end{cases}
-```
-
-The sign of ``\omega_E`` shifts the resonance location in velocity space.
-
+where ``x = E/T`` is the normalized energy, ``\nu`` the energy-dependent effective collisionality, and ``\omega_b``, ``\omega_D`` the bounce and precession frequencies at thermal energy (``\omega_b \propto v_\mathrm{th}``, ``\omega_D \propto v_\mathrm{th}^2``).
+The sign of ``\omega_E`` shifts the resonance in velocity space.
 
 ## COCOS Compatibility
 
-The conventions above are GPEC-native and predate the COCOS standard, as defined in
-[Sauter, Comp. Phys. Comm. 2013](https://doi.org/10.1016/j.cpc.2012.09.010). The internal convention:
-
-- Right-handed magnetic coordinates ``(\psi, \theta, \zeta)``.
-- ``\psi`` excludes the ``2\pi`` factor (poloidal flux per radian) and increases from axis to edge.
-- ``q > 0`` and ``n > 0`` in standard operation; ``F = |F|``.
-
-The code labels this internal convention **COCOS 2** (`read_imas` in
-`src/Equilibrium/Sources/IMAS.jl`) and converts IMAS inputs accordingly:
+The conventions above are GPEC-native and predate the COCOS standard of [Sauter and Medvedev (2013)](https://doi.org/10.1016/j.cpc.2012.09.010): right-handed ``(\psi, \theta, \zeta)``, ``\psi`` without the ``2\pi`` and increasing outward, ``q > 0``, ``n > 0`` and ``F = |F|``.
+The code labels this internal convention COCOS 2 (`Equilibrium.Sources.IMAS`) and accepts IMAS input in two forms:
 
 ```julia
 imas_cocos = 11   # default: IMAS standard, ψ divided by 2π on read
 imas_cocos = 2    # data already in the internal convention, no conversion
 ```
 
-!!! warning "The COCOS indexing is still a beta feature"
-    Note that the IMAS reader converts COCOS 11 → "COCOS 2" by simply dividing ``\psi`` by ``2\pi``
-    (i.e. conversion from COCOS 11 to 1) and relying on the standardly enforced sign conventions
-    above to eventually conform to the COCOS 2 conventions.
+The conversion from COCOS 11 divides ``\psi`` by ``2\pi`` and relies on the forced sign conventions above (positive ``\psi``, ``F`` and ``q``) for the rest; no other COCOS index is converted.
 
 ## See also
 
-- [Workflow](workflow.md) --- where each convention enters the analysis pipeline
-- [Citations](citations.md) --- theoretical references for GPEC's algorithms
+- [Workflow](workflow.md), where each convention enters the pipeline
+- [Citations](citations.md), the references behind the conventions

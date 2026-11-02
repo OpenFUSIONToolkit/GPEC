@@ -1,7 +1,7 @@
 # Stability
 
 `ForceFreeStates` determines the ideal MHD stability of the equilibrium and produces the force-free states, the displacement fields that every later stage builds on.
-It implements the direct Newcomb criterion of the Fortran DCON ([Glasser (2016)](citations.md#ForceFreeStates-Module)): rather than solving an eigenvalue problem for the growth rate, it integrates the Euler–Lagrange equations of the perturbed potential energy across the plasma and reads stability from the solutions themselves.
+It implements the direct Newcomb criterion of the Fortran DCON ([Glasser (2016)](citations.md#ForceFreeStates)): rather than solving an eigenvalue problem for the growth rate, it integrates the Euler–Lagrange equations of the perturbed potential energy across the plasma and reads stability from the solutions themselves.
 
 ## What it computes
 
@@ -34,8 +34,8 @@ where ``\mathbf{L}`` is built from the Fourier-space metric matrices ``\bar{F}``
 The resonance factor vanishes at each rational surface, so the solutions there behave as ``|\psi - \psi_s|^{-1/2 \pm \sqrt{-D_I}}``, a large and a small solution governed by the Mercier index ``D_I``; GPEC assembles the right-hand side from reduced matrices that carry explicit ``(m - nq)`` factors rather than their inverses, the convention used on every page.
 The Newcomb criterion states that the plasma is fixed-boundary stable if and only if the solution that is regular at the axis remains nonsingular across every rational surface and up to the edge.
 
-The Riccati integrator works with the matrix ``S = U_1 U_2^{-1}`` ([Glasser, Kolemen and Glasser (2018)](citations.md#ForceFreeStates-Module), Eq. 19), which obeys a quadratic matrix ODE and stays bounded where ``U_1`` and ``U_2`` grow exponentially, so that the rational surfaces can be crossed without the Gaussian reduction of the forward integration.
-Its global boundary-value problem over all surfaces gives the Δ′ matrix of [Glasser and Kolemen (2018)](citations.md#InnerLayer-Module), stored in the PEST-3 convention: the diagonal entry of each surface is its outer-region Δ′, positive when the outer region drives the tearing mode, and the off-diagonal entries couple the surfaces.
+The Riccati integrator works with the matrix ``S = U_1 U_2^{-1}`` ([Glasser, Kolemen and Glasser (2018)](citations.md#ForceFreeStates), Eq. 19), which obeys a quadratic matrix ODE and stays bounded where ``U_1`` and ``U_2`` grow exponentially, so that the rational surfaces can be crossed without the Gaussian reduction of the forward integration.
+Its global boundary-value problem over all surfaces gives the Δ′ matrix of [Glasser and Kolemen (2018)](citations.md#Tearing), stored in the PEST-3 convention: the diagonal entry of each surface is its outer-region Δ′, positive when the outer region drives the tearing mode, and the off-diagonal entries couple the surfaces.
 
 ## Integrators
 
@@ -107,6 +107,7 @@ The number of Julia threads is set at startup (`-t N` or `JULIA_NUM_THREADS`); t
 | `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, from `"Riccati"` or `"Galerkin"`; `Delta_prime_raw` is the side-major (left, right) matrix it is folded from, `Delta_coil` the edge coil-response columns |
 | `SingularSurfaces/Kinetic/` | the surfaces of a kinetic solve |
 
+The energy matrices are power-normalized: the eigenmode energies are the generalized eigenvalues of the pencil ``W v = \lambda N v``, with ``N`` the surface-norm matrix ``\xi^\dagger N \xi = \langle|\xi|^2\rangle`` built from the Jacobian Fourier coefficients, so each is an energy per unit surface-averaged squared displacement rather than joules, and the spectrum is invariant to the working coordinate because ``W`` and ``N`` transform by the same congruence.
 `Info/psilim` and `Info/qlim` record the outer edge of the integration domain.
 
 ## Integration domain
@@ -118,7 +119,7 @@ With `truncate_at_rational_offset = false` (limited or analytic equilibria with 
 
 ### Resistive-layer overlap cap
 
-Near the separatrix the rational surfaces crowd faster than their resistive layers narrow, and past the point where adjacent layers touch the matched-asymptotic treatment is not defined (Fitzpatrick (2025), listed under [InnerLayer Module](@ref)).
+Near the separatrix the rational surfaces crowd faster than their resistive layers narrow, and past the point where adjacent layers touch the matched-asymptotic treatment is not defined (Fitzpatrick (2025), listed under [Tearing](citations.md#Tearing)).
 `psilim_from_layer_overlap = true` locates that point: each rational surface of each n in the run, including surfaces beyond the equilibrium grid placed on the logarithmic divergence of q at the X-points, gets a layer width from the kinetic profiles with the closures of `[SLAYER]` (a `SLAYERModel` in a script), and the domain is cut at the last surface before two adjacent layers overlap.
 The cap needs kinetic profiles, acts before the `rational_offset_fraction` step, and can only narrow the domain; `examples/DIIID-like_truncation_example` exercises it.
 The scan is written to `ForceFreeStates/LayerOverlap/`:
