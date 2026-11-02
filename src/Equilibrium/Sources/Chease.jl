@@ -1,3 +1,7 @@
+# CHEASE supplies q directly and GPEC requires q > 0, so a non-positive q stops here, as Fortran's chease reader does.
+_chease_q(zq, config) =
+    minimum(zq) > 0 ? zq : error("CHEASE input $(config.eq_filename) has q = $(minimum(zq)) ≤ 0; GPEC requires q > 0")
+
 """
     read_chease_binary(config) -> InverseRunInput
 
@@ -40,7 +44,7 @@ function read_chease_binary(config::EquilibriumConfig)
         fs = zeros(npsi1, 4)
         fs[:, 1] .= ztmf
         fs[:, 2] .= zcppr
-        fs[:, 3] .= zq
+        fs[:, 3] .= _chease_q(zq, config)
 
         # Pressure from the cumulative integral of the P′ column.
         itp_pressure = cubic_interp(xs, fs[:, 2])
@@ -205,7 +209,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     # ztmf equals zq .* zfb (both are F).
     fs[:, 1] .= ztmf
     fs[:, 2] .= zcppr # normalized Pressure
-    fs[:, 3] .= zq # q profile
+    fs[:, 3] .= _chease_q(zq, config) # q profile
     # Pressure from the cumulative integral of the P′ column.
     itp_pressure = cubic_interp(xs, fs[:, 2])
     fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)

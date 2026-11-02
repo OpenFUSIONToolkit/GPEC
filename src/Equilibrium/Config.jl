@@ -53,13 +53,15 @@ specified in the input.
     two-pass auto grid (knot count scales as τ^(-1/3))
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Float64` - Target on-axis safety factor q(0); the q and F profiles are rescaled to
-    meet it (0 = use input value, -1 = use the axis extrapolation with its sign flipped)
+    meet it (0 = use input value); q is positive, so negative values are rejected
   - `flux_surface_rtol::Float64` - Relative tolerance of the ODE solves that trace each flux surface; their absolute tolerance
     is `equil_abstol(flux_surface_rtol)`, i.e. `flux_surface_rtol` capped at `EQUIL_ABSTOL_MAX`
   - `imas_cocos::Int` - Expected COCOS convention of an IMAS `dd.equilibrium` input (11 = IMAS standard, 2 = GPEC internal)
   - `kinetic_file::String` - Kinetic-profile file read once into `PlasmaEquilibrium.kinetic` (see [`read_kinetic_file`](@ref));
     empty for none. Every kinetic consumer (NTV, tearing, the layer-overlap scan, grid refinement) derives its view from it.
   - `kinetic_group::String` - HDF5 group of `kinetic_file` holding the profiles
+  - `kinetic_format::String` - Column layout of an ASCII `kinetic_file`: `"legacy"` (6 columns) or `"rates-v1"` (9 columns,
+    appending supplied `lnLambda nu_i nu_e`); see [`read_kinetic_file`](@ref)
   - `ion_species`, `impurity_charge`, `impurity_mass`, `zeff_default`, `chi_e_default`, `chi_i_default`,
     `chi_phi_default`, `tau_E`, `resistivity_model`, `lnLambda_form` - The plasma composition, profile defaults
     and resistivity closure applied to the profiles of `kinetic_file` (see [`KineticProfileData`](@ref)); `nothing`
@@ -96,6 +98,7 @@ specified in the input.
 
     kinetic_file::String = ""
     kinetic_group::String = "/"
+    kinetic_format::String = "legacy"
     ion_species::Union{Nothing,Vector{IonSpecies}} = nothing
     impurity_charge::Union{Nothing,Int} = nothing
     impurity_mass::Union{Nothing,Int} = nothing
@@ -114,7 +117,7 @@ specified in the input.
     function EquilibriumConfig(eq_type, eq_filename, r0_norm, b0_norm, jac_type, _, _, _, _,
         jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-        imas_cocos, kinetic_file, kinetic_group, composition...)
+        imas_cocos, kinetic_file, kinetic_group, kinetic_format, composition...)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -174,18 +177,24 @@ specified in the input.
             error("Cannot recognize jac_type = $(jac_type)")
         end
         (isfinite(flux_surface_rtol) && flux_surface_rtol > 0) || error("flux_surface_rtol = $flux_surface_rtol must be a positive, finite relative tolerance")
+        newq0 >= 0 || error("newq0 = $newq0 is not supported: q must be positive. Use newq0 = 0 (keep the input q) or newq0 > 0.")
         if psihigh > 1.0
             @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
         end
         psihigh = min(psihigh, 1.0)
+        kinetic_format in KINETIC_FORMATS || error("kinetic_format = \"$kinetic_format\" must be one of $KINETIC_FORMATS")
         isempty(kinetic_file) && any(!isnothing, composition) &&
             error("the kinetic composition keys of [Equilibrium] describe the profiles of kinetic_file; set kinetic_file")
         return new(eq_type, eq_filename, r0_norm, b0_norm, jac_type, power_bp, power_b, power_r, power_rc,
             jac_custom_power_bp, jac_custom_power_b, jac_custom_power_r, jac_custom_power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, flux_surface_rtol,
-            imas_cocos, kinetic_file, kinetic_group, composition...)
+            imas_cocos, kinetic_file, kinetic_group, kinetic_format, composition...)
     end
 end
+
+# ASCII kinetic-table layouts, named as Fortran PENTRC `kinetic_format`, and their column counts.
+const KINETIC_FORMATS = ("legacy", "rates-v1")
+const KINETIC_FORMAT_COLUMNS = Dict("legacy" => 6, "rates-v1" => 9)
 
 # The kinetic composition keys of a config, the ones it sets, as `KineticProfileData` keywords.
 const KINETIC_COMPOSITION_KEYS = (:ion_species, :impurity_charge, :impurity_mass, :zeff_default, :chi_e_default, :chi_i_default,

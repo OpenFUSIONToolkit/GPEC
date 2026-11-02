@@ -308,7 +308,8 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
     u_max = sqrt(X_ENERGY_MAX)
 
     if npole == 0
-        val, _ = quadgk(integrand_u, 0.0, u_max; atol=atol, rtol=rtol, segbuf=segbuf)
+        val, err = quadgk(integrand_u, 0.0, u_max; atol=atol, rtol=rtol, segbuf=segbuf)
+        check_inner_quadrature(val, err, atol, rtol, "energy")
         return val
     end
 
@@ -330,7 +331,8 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
     end
     sort!(pts)
     unique!(pts)
-    smooth_val, _ = _quadgk_breaks(integrand_u, pts, atol, rtol, segbuf)
+    smooth_val, err = _quadgk_breaks(integrand_u, pts, atol, rtol, segbuf)
+    check_inner_quadrature(smooth_val, err, atol, rtol, "energy")
     return smooth_val + pole_contribution
 end
 
@@ -358,7 +360,8 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
     # CGL has no resonance denominator and no pole — integrate the physical
     # x-space integrand directly over the half line (QuadGK maps [0,∞) itself).
     if f0type == "cgl"
-        val, _ = quadgk(x -> _energy_integrand_real(x, p), 0.0, Inf; atol=atol, rtol=rtol, segbuf=segbuf)
+        val, err = quadgk(x -> _energy_integrand_real(x, p), 0.0, Inf; atol=atol, rtol=rtol, segbuf=segbuf)
+        check_inner_quadrature(val, err, atol, rtol, "CGL energy")
         return val
     end
 

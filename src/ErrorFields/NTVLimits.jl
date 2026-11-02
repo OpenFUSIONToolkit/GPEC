@@ -530,10 +530,11 @@ function efc_couplings(
         KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
         return kf_intr
     end
+    # One quiet logger for the whole scan, so a `maxlog` warning prints once per scan rather than once per point.
+    logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
     # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.
     function torque_of(kf_intr, profiles)
         kf_state = KineticForces.KineticForcesState()
-        logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
         Base.CoreLogging.with_logger(logger) do
             KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, profiles)
         end

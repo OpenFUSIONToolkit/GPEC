@@ -451,8 +451,6 @@ function _setup_surface_state(
 
     wdian = -twopi * T_s * dn_s_dpsi / (chrg * intr.chi1 * n_s)
     wdiat = -twopi * dT_s_dpsi / (chrg * intr.chi1)
-    wtran = sqrt(2 * T_s / mass) / (q * intr.ro)
-    wgyro = chrg * intr.bo / mass
     nuk = nu_s
 
     rsquared_bmin = equil.rzphi_rsquared((psi, theta_bmin))
@@ -462,7 +460,6 @@ function _setup_surface_state(
     avg_r = equil.geometry.avg_r_spline(psi)
     avg_R = equil.geometry.avg_R_spline(psi)
     epsr = avg_r / avg_R
-    dVdpsi = equil.profiles.dVdpsi_spline(psi)
 
     # Cells and stationary points of B(θ), reused by every λ of every harmonic.
     bf = _surface_b_field(B_vpar)
@@ -471,8 +468,8 @@ function _setup_surface_state(
         chrg, mass,
         tspl, B_vpar, bf, bmax, bmin, theta_bmax,
         q, n_s, T_s, welec,
-        wdian, wdiat, wtran, wgyro, nuk,
-        epsr, dVdpsi
+        wdian, wdiat, nuk,
+        epsr
     )
 end
 
