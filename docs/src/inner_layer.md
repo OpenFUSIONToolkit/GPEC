@@ -13,7 +13,7 @@ Two layer models are available, selected by `[Tearing] inner_model`:
 For each surface the `Dispersion` search scans the complex frequency plane, extracts the roots of the dispersion relation and classifies them, and `[Tearing.search]` sets the scan.
 With `[Tearing.CriticalResonantField]` the stage also computes, for the `SLAYER` layer, the resonant field at which a static error field overcomes the layer's shielding: the error-field penetration threshold.
 
-The same GGJ layer serves the `[Match]` stage of the [Workflow](workflow.md), which does the complementary job: instead of finding the free modes it imposes the layer response on the driven force-free states, so that the plasma response of [Perturbed Equilibrium](perturbed_equilibrium.md) is resistive rather than perfectly shielded.
+The same GGJ layer serves the `[Match]` stage of the [Workflow](workflow.md), which does the complementary job: instead of finding the free modes it imposes the layer response on the driven force-free states and writes the matched solution to `SingularSurfaces/Match/`. Driving the [Perturbed Equilibrium](perturbed_equilibrium.md) response from a matched result is not yet supported.
 
 ## Governing equations
 
@@ -43,7 +43,7 @@ and balance is lost above
   = \max_Q \frac{2P\,(Q_0 - Q)}{S\hat\kappa\,\operatorname{Im}[-1/(\alpha + \hat\Delta(Q))]} .
 ```
 
-``P`` is the layer's `P_tor`, ``S`` its Lundquist number, ``Q_0 = \tau_k n \omega_E`` the natural E×B rotation of the mode (from the kinetic file's `omega_E` or the `omega_E_kHz` override; a surface without one is skipped), and the viscosity integral is taken as 1/2, so ``\hat\kappa = 2/s^2``.
+``P`` is the layer's `P_tor`, ``S`` its Lundquist number, ``Q_0 = \tau_k n \omega_E`` the natural E×B rotation of the mode (from the kinetic file's `omega_E` or the `omega_E_kHz` override, a `[Tearing]` table keyed by surface such as `omega_E_kHz = { "2/1" = 3.0 }`; a surface without one is skipped), and the viscosity integral is taken as 1/2, so ``\hat\kappa = 2/s^2``.
 Each surface uses its own stability parameter ``\alpha = S^{-1/3}(\Delta_\mathrm{crit} - r_s\Delta')``, so the torque balance shares its poles with the free modes; the threshold needs a tearing-stable surface, and one with ``\alpha \le 0`` is skipped with a warning.
 Penetration is the first resolved saddle-node bifurcation on the path from ``Q_0`` toward the electron fluid at ``Q_e``, above which the shielded branch no longer exists; small numerical extrema and the unshielded zone next to ``Q_e`` are excluded, and a surface without a resolved bifurcation reports NaN.
 `br_crit` is normalized by the toroidal field, and `br_crit_tesla = br_crit·|B0|` is the quantity to compare with `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, the total resonant field of the ideal response; the comparison is approximate, since the theory's ``b_r`` is a cylindrical field at the layer.

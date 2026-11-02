@@ -29,6 +29,21 @@ The [Workflow](workflow.md) page maps every stage to its physics, deck sections 
 | `ErrorFields` — coil tolerances, locking risk and correction limits | `[ErrorFields]` | `ErrorFields/Risk/` |
 | `Tearing` — tearing growth rates and critical resonant fields from an inner-layer model | `[Tearing]` | `Tearing/Roots/` |
 
+### Coming from the Fortran codes
+
+| Fortran | Here |
+|---|---|
+| DCON | `[ForceFreeStates]` with `integrator = "Forward"` |
+| STRIDE | `integrator = "Riccati"`, with Δ′ in `SingularSurfaces/Delta_prime_matrix` |
+| RDCON and its `rmatch` | `integrator = "Galerkin"` and `[Match]` |
+| VACUUM | the `Vacuum` module, with the wall in `[Wall]` |
+| GPEC | `[ForcingTerms]` and `[PerturbedEquilibrium]` |
+| PENTRC | `[KineticForces]` |
+| SLAYER | `[Tearing]` with `inner_model = "SLAYER"`, options in `[SLAYER]` |
+| `dcon.in`, `vac.in`, `gpec.in`, `pentrc.in`, … | one `gpec.toml`, and one `gpec.h5` for every result |
+
+The [Conventions Reference](conventions.md) states the coordinates, signs and normalizations, including where they differ from the Fortran outputs.
+
 ## Documentation
 
 - [**Setup**](set_up.md) — Installation on Linux, macOS and Windows (WSL), and a first run

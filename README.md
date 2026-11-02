@@ -1,12 +1,13 @@
 # GPEC — Generalized Perturbed Equilibrium Code
 
-GPEC is a Julia implementation of the [GPEC suite](https://github.com/PrincetonUniversity/GPEC) for magnetohydrodynamic (MHD) analysis of fusion plasmas. The Fortran suite (DCON, VACUUM, STRIDE, GPEC, PENTRC and SLAYER) has long been used to model the response of tokamak plasmas to small non-axisymmetric magnetic perturbations, from error-field correction and resonant magnetic perturbation optimization to kink and tearing stability. This implementation consolidates them into one code base of cooperating physics modules that share data in memory behind a unified, modern interface, which removes the hand-offs between separate codes and makes parameter scans, uncertainty quantification and integrated modeling practical.
+This Julia implementation of GPEC continues the legacy of the Fortran [GPEC suite](https://github.com/PrincetonUniversity/GPEC) for magnetohydrodynamic (MHD) analysis of fusion plasmas. The Fortran suite (DCON, VACUUM, STRIDE, GPEC, PENTRC and SLAYER) has long been used to model the response of tokamak plasmas to small non-axisymmetric magnetic perturbations, from error-field correction and resonant magnetic perturbation optimization to kink and tearing stability. This implementation consolidates them into one code base of cooperating physics modules that share data in memory behind a unified, modern interface, which removes the hand-offs between separate codes and makes parameter scans, uncertainty quantification and integrated modeling practical.
 
-Its pipeline runs, stage by stage as a deck asks for them:
+One input deck runs the stages it names, in order, into one output file:
 
-1. **Equilibrium reconstruction** from experimental data (EFIT, CHEASE) or analytical models — solves the Grad-Shafranov equation, computes flux surfaces, safety factor q(ψ), and builds field quantity splines.
-2. **Ideal MHD stability analysis** via Newcomb's criterion — identifies singular surfaces where q = m/n, computes force-free eigenfunctions ξ(ψ,θ), evaluates the tearing stability parameter Δ' at each rational surface, and checks fixed/free boundary stability.
-3. **Perturbed equilibrium** — quantifies the self-consistent plasma response to external magnetic perturbations (RMPs, error fields, correction coils). Key outputs include resonant flux, island half-widths, and the Chirikov overlap parameter — the principal diagnostics for ELM suppression, error field correction, and disruption avoidance.
+1. **Equilibrium** — reads an EFIT or CHEASE reconstruction, an IMAS data dictionary or an analytic model, maps it to straight-field-line flux coordinates, and finds the rational surfaces q = m/n.
+2. **Stability** — ideal MHD stability by Newcomb's criterion (the DCON integration, or the STRIDE Riccati and RDCON Galerkin formulations): the force-free states ξ(ψ,θ), the free-boundary kink energies with the VACUUM response, and the tearing stability matrix Δ′.
+3. **Perturbed equilibrium** — the plasma response to external non-axisymmetric fields (RMPs, error fields, correction coils): resonant fields, island half-widths and the Chirikov overlap parameter.
+4. **Torque, error fields and tearing** — the neoclassical toroidal viscosity torque (PENTRC), coil-tolerance and locking-risk analysis, and tearing growth rates and critical resonant fields from inner-layer models (SLAYER, GGJ).
 
 Full documentation: [https://openfusiontoolkit.github.io/GPEC/dev/](https://openfusiontoolkit.github.io/GPEC/dev/)
 

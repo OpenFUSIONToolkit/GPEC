@@ -12,7 +12,8 @@ ls   = solve(LocalStabilityProblem(eq; alpha_boundary_scan=true), Ballooning()) 
 resp = plasma_response(ffs; compute_singular_coupling=true)                               # [PerturbedEquilibrium]
 pe   = perturbed_equilibrium(resp, RMPField("coils.dat"))                                 #   with the [ForcingTerms] drive
 kf   = kinetic_torque(pe, KineticForcesControl())                                         # [KineticForces]
-ef   = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl); tolerances)     # [ErrorFields]; ft_ctrl: the [ForcingTerms] control, tolerances: an ErrorFields.ToleranceSet
+ef   = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl);                  # [ErrorFields]; ft_ctrl: the [ForcingTerms] control
+                    tolerances=ErrorFields.read_tolerance_toml("tolerances.toml"))
 tear = solve(TearingProblem(ffs), SLAYERModel(); config=TearingConfig())                  # [Tearing]
 
 save_to_hdf5("gpec.h5", ffs; local_stability=ls)

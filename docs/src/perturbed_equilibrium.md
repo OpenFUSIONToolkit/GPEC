@@ -141,7 +141,7 @@ with the `RMPField` built from coils or a file as on the [Scripting API](api.md)
 | `PerturbedEquilibrium/SingularCoupling/resonant_current` | the pitch-resonant current | A |
 | `PerturbedEquilibrium/SingularCoupling/island_width_sq`, `island_half_width` | ``w_s^2`` and ``w_s`` in ψ_N | |
 | `PerturbedEquilibrium/SingularCoupling/chirikov_parameter` | ``\sigma_s`` | |
-| `PerturbedEquilibrium/SingularCoupling/Delta_prime` | the forcing-driven tearing Δ′ per surface (Riccati solves) | |
+| `PerturbedEquilibrium/SingularCoupling/Delta_prime` | the forcing-driven tearing Δ′ per surface | |
 | `PerturbedEquilibrium/SingularCoupling/C_*` | the coupling matrices from the applied ``\tilde b`` to each quantity above | |
 | `PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values`, `right_singular_vectors`, `left_singular_vectors`, `rational_index`, `forcing_overlap` | the core-window SVD of the resonant-field coupling | |
 | `PerturbedEquilibrium/Energies/plasma_energy`, `vacuum_energy`, `surface_energy` | the perturbed energies | J |

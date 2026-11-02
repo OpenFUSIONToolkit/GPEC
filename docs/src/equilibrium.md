@@ -75,7 +75,7 @@ The same from a script, with the deck keys as keywords:
 using GeneralizedPerturbedEquilibrium
 
 eq = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada", psihigh=0.995)
-eq = PlasmaEquilibrium(LargeAspectRatioConfig(; r0=10.0, a=1.0, beta0=1e-3))   # an analytic equilibrium
+eq = PlasmaEquilibrium(Equilibrium.LargeAspectRatioConfig(; r0=10.0, a=1.0, beta0=1e-3))   # an analytic equilibrium
 ```
 
 Relative paths in the deck are resolved against the deck directory.

@@ -68,7 +68,7 @@ Page: [Local Stability](ballooning.md).
 
 ### Match
 
-Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, so that the later stages see a resistive rather than perfectly shielded plasma; `ideal = true` keeps the shielded limit for comparison.
+Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, writing the matched solution and the penetrated resonant fields to `SingularSurfaces/Match/`; `ideal = true` keeps the shielded limit for comparison. A matched result cannot yet drive `[PerturbedEquilibrium]`.
 Outputs: `SingularSurfaces/Match/`.
 Page: [Tearing](inner_layer.md).
 
@@ -142,7 +142,7 @@ compute_singular_coupling = true
 regularization_width = 0.05
 ```
 
-Every key is documented on the module page of its section, and every example deck carries an inline comment per key.
+The keys each section accepts are the fields of its control struct, listed in the API reference at the end of its module page, and every example deck carries an inline comment per key. A deck that still uses a GPEC v1 key, such as `nn_low` or `[SLAYER] enabled`, stops with a message naming the key's new home.
 
 ### Deck section index
 
@@ -200,7 +200,7 @@ From Julia, the same pipeline is `GeneralizedPerturbedEquilibrium.main(["example
 | `TJ_kinetic_calculated_example` | the drift-kinetic stability solve (`kinetic = "KineticForces"`) with a D–T main ion |
 | `TJ_kinetic_multiion_example` | NTV summed over D, T, the impurity and electrons |
 | `a10_kinetic_example` | drift-kinetic stability of a low-aspect-ratio circular tokamak |
-| `efit_fixedbdy_separatrix_example` | a fixed-boundary EFIT file whose box hugs the separatrix, for the separatrix search |
+| `efit_fixedbdy_separatrix_example` | an equilibrium file only, no deck: a fixed-boundary EFIT file whose box hugs the separatrix, read by the tests of the separatrix search |
 
 ## The output file
 
@@ -220,4 +220,18 @@ All results are written to one HDF5 file (`[Run] output_file`, default `gpec.h5`
 | `Tearing/` | `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/` |
 | `SurfaceGeometries/` | Plasma and wall surface point clouds for visualization |
 
-Rerunning `main(["gpec.h5"])` on an output file reproduces the run from its `Input/` snapshot; see the [Scripting API](api.md).
+### Replaying a run
+
+`gpec.h5` carries what it takes to run again: the deck the run used, `Input/gpec_toml_raw`, and copies of the data it read under `Input/RawInputs/` (the equilibrium, the forcing spectrum or coil geometry, the kinetic profiles, a wall file and the error-field tolerances).
+Pass the file in place of a directory to replay it, from the shell or as `main(["gpec.h5", ...])` in Julia, changing any key on the way:
+
+```bash
+./gpec runs/shot123/gpec.h5 --output-dir runs/shot123_reg --override PerturbedEquilibrium.regularization_width=0.05
+```
+
+The replay writes `gpec_rerun.h5` (or `--output-name`) into `--output-dir`, default the current directory, and never overwrites its source; the inputs it replays from the snapshot (a forcing spectrum, tolerances, kinetic profiles, a wall file) are written beside it as `<stem>_forcing.h5`, `<stem>_tolerances.toml`, `<stem>_kinetic.h5` and `<stem>_wall.dat`.
+`--override section.key=value` may repeat, and `--override-file` merges a TOML file of changes.
+A coil-driven run re-reads the coil files its deck names unless `--coil-source coils` is given, which rebuilds the field from the coil geometry stored in the file, so the original coil files are not needed.
+
+A replay is tied to the GPEC version that wrote the file, which `Info/git_version` records.
+When the current version cannot replay it, because a key the stored deck uses has since moved or the file predates a snapshot this version needs, GPEC stops and prints both ways forward: check out that version in your clone (`git checkout <commit>`, then `julia --project -e 'using Pkg; Pkg.instantiate()'`), or write the stored deck out of the file and run it with the current version, fixing the keys the error names.
