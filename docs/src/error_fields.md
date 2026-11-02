@@ -59,12 +59,10 @@ exclude_coils = []              # coil sets that are not error-field sources (th
 tolerance_file = "tolerances.toml"   # manufacturing tolerances, relative to the deck directory
 
 [ErrorFields.MonteCarlo]
-nsample = 1000000               # samples per batch
+nsample = 200000                # samples per batch
 nbatch = 10                     # independent batches; their spread is the statistical error bar
 seed = 1
 nbins = 300                     # histogram bins on [0, delta_max]; delta_max = 0 is 1.5 × the worst-case bound
-tolerance_scale = 1.0           # multiplies every tolerance (for scans); scale_subset / scale_map restrict it
-coil_subset = []                # coil sets sampled; empty = all (the others get zero tolerance)
 
 [ErrorFields.scenario]
 n_e = 5.0                       # electron density of the threshold scaling [1e19 m^-3]; B_T, R_0, beta_N, l_i and I_p default from the equilibrium
@@ -73,14 +71,21 @@ n_e = 5.0                       # electron density of the threshold scaling [1e1
 year = 2020                     # threshold fit: 2020 (n = 1 and 2) or 2026 (n = 1)
 dataset = "O,L"                 # ITPA dataset of the fit ("O,L", "O,L,H", ...)
 fit = "WLS"                     # "OLS", "DSOLS" or "WLS"
-distribution = "normal"         # how the fit exponents are sampled: "normal", "flat", "normal_truncated"
 nsample_threshold = 1000000
-scan_scales = [0.25, 0.5, 1.0, 2.0, 4.0]   # tolerance multipliers of the allowable-tolerance scan
+scan_scales = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]   # tolerance multipliers of the allowable-tolerance scan
 
 [ErrorFields.NTV]
 efc_coils = ["d3d_c"]           # the correction arrays; never error-field sources
 method = "fgar"                 # KineticForces torque method, enabled in [KineticForces]
+rotation_scan = true            # tabulate the torques against a rigid E×B rotation shift
+rotation_scan_points = 5
+rotation_scan_max_points = 9
+rotation_scan_tolerance = 0.05
+rotation_span_factor = 1.0
+rotation_offset_factor = 2.0
 ```
+
+`[ErrorFields.MonteCarlo]` also takes `tolerance_scale` (multiplies every tolerance, for scans; `scale_subset` and `scale_map` restrict it) and `coil_subset` (the coil sets sampled; empty samples all), and `[ErrorFields.Risk]` takes `distribution`, how the fit exponents are sampled (`"normal"`, `"flat"`, `"normal_truncated"`).
 
 The tilt pivot matters for multi-filament winding packs: `"conductor"` rotates each filament about its own centre, `"set"` rotates the pack rigidly about its common centre, which is what an engineering axis-line tolerance constrains.
 A coil set that is not an error-field source (a correction array or anything in `exclude_coils`) is swept like the others but left out of the as-designed field, the Monte Carlo and the scans; a tolerance that names it is an error.

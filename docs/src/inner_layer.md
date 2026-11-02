@@ -7,7 +7,7 @@ The outer region, ideal MHD everywhere except at the rational surfaces, gives th
 
 Two layer models are available, selected by `[Tearing] inner_model`:
 
-- `"SLAYER"`, the two-fluid drift-MHD slab layer of Fitzpatrick ([Park (2022)](citations.md#Tearing), [Burgess et al. (2026)](citations.md#Tearing)), with resistivity, perpendicular and toroidal transport, diamagnetic drifts and E×B rotation taken from the kinetic profiles of the equilibrium; its options are in `[SLAYER]`.
+- `"SLAYER"`, the two-fluid drift-MHD slab layer equations of Cole and Fitzpatrick (2006), in the form Park's SLAYER solver takes them with a few terms dropped ([Park (2022)](citations.md#Tearing), [Burgess et al. (2026)](citations.md#Tearing)), with resistivity, perpendicular and toroidal transport, diamagnetic drifts and E×B rotation taken from the kinetic profiles of the equilibrium; its options are in `[SLAYER]`.
 - `"GGJ"`, the toroidal resistive-MHD layer of Glasser, Greene and Johnson ([Glasser, Wang and Park (2016)](citations.md#Tearing), [Glasser and Wang (2020)](citations.md#Tearing)), whose coefficients E, F, G, H, K are the flux-surface averages stored under `SingularSurfaces/`; its solver options are in `[GGJ]`.
 
 For each surface the `Dispersion` search scans the complex frequency plane, extracts the roots of the dispersion relation and classifies them, and `[Tearing.search]` sets the scan.
@@ -95,8 +95,9 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | Dataset | Meaning |
 |---|---|
 | `Tearing/PerSurface/rational_psi`, `rational_q`, `m`, `n` | the analyzed surfaces |
-| `Tearing/PerSurface/S`, `tau`, `c_beta`, `P_perp`, `P_tor`, `Q_e`, `Q_i`, `tau_R`, `tau_A`, `eta`, `rs`, … | the layer parameters of each surface (SLAYER), and `E`, `F`, `G`, `H`, `K`, `M` (GGJ) |
-| `Tearing/PerSurface/Delta_prime_norm`, `delta_prime_conversion`, `Delta_prime_raw` | the Δ′ normalization of the layer and the outer matrix it was matched to |
+| `Tearing/PerSurface/S`, `tau`, `c_beta`, `P_perp`, `P_tor`, `Q_e`, `Q_i`, `tau_k`, `tau_R`, `eta`, `rs`, … | the layer parameters of each surface (SLAYER); `E`, `F`, `G`, `H`, `K`, `M`, `tau_A` and `tau_R` for GGJ |
+| `Tearing/PerSurface/Delta_prime_raw` and `Delta_prime_matrix_rs` (SLAYER) or `Delta_prime_matrix` (GGJ) | the outer matrix each layer was matched to |
+| `Tearing/PerSurface/Delta_prime_norm`, `delta_prime_conversion` | the Δ′ normalization of the SLAYER layer |
 | `Tearing/Roots/Q_root`, `omega`, `gamma`, `no_root` | the dispersion root of each surface in the lab frame (`frequency_frame` attribute), its real frequency and growth rate, and the flag of a surface with no usable root |
 | `Tearing/LayerWidths/delta_s`, `delta_s_abs`, `d_beta` | the complex resistive layer thickness, its magnitude in metres, and the ion drift scale |
 | `Tearing/Diagnostics/ValidRoots`, `Poles`, `FilteredRoots` | the root classification of the scan |
@@ -119,7 +120,7 @@ The `GGJ` model exposes three solvers through the `solver` type parameter of [`G
 ![Relative error of the :shooting and :galerkin backends against the :ray reference along the imaginary-Q axis, on the q = 4 DIII-D-like benchmark surface; each curve's crossing of the 1% line marks that method's practical reach.](figures/inner_layer/backend_regime_map.png)
 
 Validation: at the real operating point ``Q = 0.1234`` of Glasser and Wang (2020) the `:galerkin` backend reproduces the Fortran `rmatch` solver to ``\sim 10^{-8}`` and `:ray` agrees to ``4\times10^{-7}`` in ``\Delta_-`` (``1.3\times10^{-4}`` in ``\Delta_+``, which sits near a pole); on the ``q = 4`` benchmark surface ([`q4_surface_benchmark`](@ref InnerLayer.GGJ.q4_surface_benchmark), ``S \approx 4.6\times10^6``, ``D_I \approx -0.31``) `:ray` is pinned at ``Q = 500i`` to ``\Delta_+ = 2.4720 + 13.3540\,i``, ``\Delta_- = 0.13750 + 0.74275\,i``, with a knob-perturbation error bar of ``\sim 5\times10^{-6}`` and ``6\times10^{-7}``.
-The critical-field torque balance reproduces the Fortran SLAYER's balance to all printed digits when fed the same Δ(Q) table; the thresholds differ through the layer model (Park's drift-MHD layer against Fitzpatrick's) and the selection rule above.
+The critical-field torque balance reproduces the Fortran SLAYER's balance to all printed digits when fed the same Δ(Q) table; the thresholds differ through the layer model (Park's reduced form of the layer equations against Cole and Fitzpatrick's full ones) and the selection rule above.
 
 ![Fortran and Julia inner-layer Δ(Q) and torque balance on the DIII-D-like example.](assets/crf_fortran_benchmark.png)
 

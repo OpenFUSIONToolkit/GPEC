@@ -13,7 +13,7 @@ render it to the website. It is a contributor-facing reference, read here in the
 repository — which is why `developer_notes.md` links to it by GitHub URL rather
 than as a site-internal page.
 
-The `Ballooning and Mercier Local Stability` and `Inner Layer Module` pages are
+The `Stability` and `Local Stability` pages are
 the reference exemplars; new or reworked module pages should follow their shape.
 
 ## Module-page template

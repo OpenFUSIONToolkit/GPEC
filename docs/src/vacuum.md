@@ -7,7 +7,7 @@ It runs inside `ForceFreeStates` whenever `vac_flag = true`, and its matrices ar
 
 For a normal displacement ``\xi`` of the plasma boundary, expanded in the poloidal harmonics of the run, the perturbed vacuum field is found from a Green's-function integral over the boundary and the wall, and the vacuum energy is the quadratic form ``\delta W_v = \xi^\dagger W_v \xi``.
 ``W_v`` is the vacuum part of the free-boundary energy, ``W = W_\mathrm{plasma} + W_\mathrm{vacuum}``, whose eigenvalues decide the ideal kink stability on the [Stability](stability.md) page: a close conducting wall raises ``W_v`` and stabilizes external modes, no wall gives the free-space limit.
-The stored matrix `wv` is scaled by the resonance factors ``(m - nq)(m' - nq)`` of its row and column harmonics, the convention of Chance (1997).
+`ForceFreeStates` scales `wv` by the resonance factors ``(m - nq)(m' - nq)`` of its row and column harmonics, the convention of Chance (1997), before adding it to the plasma energy; `compute_vacuum_response` returns it unscaled.
 When the run needs it, the module also returns the vacuum surface-current matrix ``I_v``, which `PerturbedEquilibrium` inverts into the surface inductance ``L`` of the plasma response.
 
 ## Running it
@@ -46,13 +46,13 @@ In a script the shapes are `ConformalWall`, `EllipticalWall`, `DeeWall`, `ModDee
 ```julia
 using GeneralizedPerturbedEquilibrium
 
-inputs = Vacuum.VacuumInput(; r=plasma_r, z=plasma_z, ν=nu, mlow=1, mpert=10, n=1, mtheta=256, kernelsign=1.0)
-vac = Vacuum.compute_vacuum_response(inputs, Vacuum.ConformalWall(; standoff_fraction=0.3))
-vac.wv, vac.I_v, vac.plasma_pts, vac.wall_pts
+inputs = Vacuum.VacuumInput(eq, 0.995, 256, 1, 1:10, [1])   # the surface at ψ_N = 0.995: mtheta, nzeta, m_modes, n_modes
+vac = Vacuum.compute_vacuum_response(inputs, Vacuum.ConformalWall(; standoff_fraction=0.3); compute_Iv=true)
+vac.wv, vac.I_v, vac.plasma_pts, vac.wall_pts            # I_v is zero unless compute_Iv=true
 ```
 
-where `ν(ψ, θ)` is the toroidal-angle offset of the straight-field-line coordinates, ``\phi = 2\pi\zeta + \nu`` with ``\phi`` the internal toroidal angle of the [Conventions Reference](conventions.md) (the laboratory angle carries the helicity sign).
-With `nzvac > 1` the response is evaluated on a toroidal grid, with the singular correction of the [3D kernel](citations.md#3D-vacuum-singular-correction) (`examples/Solovev_ideal_example_3D`).
+with `eq` a `PlasmaEquilibrium`; `VacuumInput(; x, z, ν, mtheta_in, m_modes, n_modes, mtheta, nzeta)` takes a boundary given point by point instead, where `ν(ψ, θ)` is the toroidal-angle offset of the straight-field-line coordinates, ``\phi = 2\pi\zeta + \nu`` with ``\phi`` the internal toroidal angle of the [Conventions Reference](conventions.md) (the laboratory angle carries the helicity sign).
+With `[ForceFreeStates] nzeta_vacuum > 1` the response is evaluated on a toroidal grid, with the singular correction of the [3D kernel](citations.md#3D-vacuum-singular-correction) (`examples/Solovev_ideal_example_3D`).
 
 ## Outputs
 

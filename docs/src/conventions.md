@@ -26,7 +26,7 @@ GPEC uses right-handed magnetic coordinates ``(\psi, \theta, \zeta)`` with the F
 \exp\!\big(i(m\theta - n\zeta)\big),
 ```
 
-matching the Fortran ``\exp(im\theta - in\phi)`` convention.
+matching the Fortran ``\exp(im\theta - in\phi)`` convention, with the angles in radians in the kernel (``2\pi`` times the unit-period ``\theta`` and ``\zeta`` below).
 The analysis transform that produces the mode coefficients ``f_m`` of a profile ``f(\theta)`` uses the conjugate kernel ``\exp(-im\theta)``, and the synthesis reconstructs with ``\exp(+im\theta)`` (`Utilities.FourierTransforms`).
 
 ### Poloidal flux ``\psi``
@@ -121,7 +121,7 @@ so that for LH configurations only the sign of ``m`` is flipped and for RH the c
 
 ### Interfacing with Vacuum
 
-The `Vacuum` module works in the same angles as the rest of GPEC, ``\theta`` upward-outboard and the basis ``\exp(-i(m\theta - 2\pi n\zeta))``, unlike the Fortran VACUUM code whose ``\theta`` and ``\phi`` both run the other way; a clockwise plasma contour is rejected and a clockwise wall file is reversed with a warning.
+The `Vacuum` module works in the same angles as the rest of GPEC, ``\theta`` upward-outboard and the analysis basis ``\exp(-i(m\theta - n\zeta))`` in radians, unlike the Fortran VACUUM code whose ``\theta`` and ``\phi`` both run the other way; a clockwise plasma contour is rejected and a clockwise wall file is reversed with a warning.
 The ``\nu`` passed to it is GPEC's ``\nu = \phi - 2\pi\zeta``, which Chance (1997, Eq. 97) writes as ``\zeta = \phi + \nu``.
 
 ## Field amplitudes and units

@@ -49,7 +49,7 @@ Its global boundary-value problem over all surfaces gives the Δ′ matrix of [G
 
 ## Running it
 
-From `examples/DIIID-like_ideal_example/gpec.toml` (abridged), with the `[Riccati]` keys of `examples/DIIID-like_riccati_deltaprime_example`:
+From `examples/DIIID-like_ideal_example/gpec.toml` (abridged):
 
 ```toml
 [ForceFreeStates]
@@ -65,12 +65,11 @@ rational_offset_fraction = 0.2
 
 [Forward]
 eulerlagrange_tolerance = 1e-10
-
-[Riccati]
-eulerlagrange_tolerance = 1e-10
-save_interval = 1
-renorm_threshold = 1e3   # renormalize the Riccati basis above this solution norm
+save_interval = 1        # save every Nth ODE step; steps near rational surfaces are always saved
+renorm_threshold = 1e3   # renormalize the solution basis above this column norm
 ```
+
+`examples/DIIID-like_riccati_deltaprime_example` sets the same three keys under `[Riccati]`.
 
 The same solve from a script takes the deck keys as keywords of the problem and the integrator:
 

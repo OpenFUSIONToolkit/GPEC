@@ -28,7 +28,7 @@ foreach(r -> save_to_hdf5("gpec.h5", r), (pe, kf, ef, tear))
 | ForceFreeStates | `[ForceFreeStates]` + `[Forward]`, `[Riccati]` or `[Galerkin]` | `solve(ForceBalanceProblem(eq; ...), Forward() \| Riccati() \| Galerkin())` | `ForceFreeStatesResult` |
 | LocalStability | `[LocalStability]` + `[Ballooning]` | `solve(LocalStabilityProblem(eq; ...), Ballooning(; ...))` | `LocalStabilityResult` |
 | Match | `[Match]` + `[GGJ]` | `solve(MatchProblem(ffs; ...), GGJModel())` | `ForceFreeStatesResult` with `closure == :matched` |
-| Drive | `[ForcingTerms]` | `RMPField(file)`, `RMPField(coil_config)`, `RMPField(modes)` | `RMPField` |
+| Drive | `[ForcingTerms]` | `RMPField(ft_ctrl)` (a `ForcingTermsControl`), `RMPField(file)`, `RMPField(modes)` | `RMPField` |
 | PerturbedEquilibrium | `[PerturbedEquilibrium]` | `plasma_response(ffs; ...)`, then `perturbed_equilibrium(resp, rmp; ...)` | `PlasmaResponse`, `PerturbedEquilibriumState` |
 | KineticForces | `[KineticForces]` | `kinetic_torque(pe, KineticForcesControl(; ...))` | `KineticForcesResult` |
 | ErrorFields | `[ErrorFields]` | `error_fields(resp, pe.coil_sets, CoilConfig(...); ...)` | `ErrorFieldsResult` |

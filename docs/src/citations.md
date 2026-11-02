@@ -164,7 +164,7 @@ Demonstrates asymptotic matching for resistive plasma response in realistic toro
 > *Physics of Plasmas* **29**, 072506 (2022).
 > DOI: [10.1063/5.0093079](https://doi.org/10.1063/5.0093079)
 
-The two-fluid slab layer model implemented in `InnerLayer.SLAYER`, which computes the inner-layer response of each rational surface.
+The SLAYER solver implemented in `InnerLayer.SLAYER`: the two-fluid slab layer equations of Cole and Fitzpatrick (2006) with a few terms dropped, solved for the inner-layer response of each rational surface.
 
 ---
 
@@ -172,7 +172,7 @@ The two-fluid slab layer model implemented in `InnerLayer.SLAYER`, which compute
 > *Physics of Plasmas* **13**, 032503 (2006).
 > DOI: [10.1063/1.2178167](https://doi.org/10.1063/1.2178167)
 
-The torque-balance error-field penetration threshold (Eqs. 61–62) behind the critical resonant field computed in `Tearing.CriticalResonantField`.
+The two-fluid drift-MHD layer equations that SLAYER solves in reduced form, and the torque-balance error-field penetration threshold (Eqs. 61–62) behind the critical resonant field computed in `Tearing.CriticalResonantField`.
 
 ---
 
@@ -239,15 +239,15 @@ module computes (Eqs. 1–5).
 
 ---
 
-> Logan et al., SPARC error-field correction with NTV limits,
-> *Nuclear Fusion* (2026).
+> N. C. Logan et al., "SPARC tokamak error field expectations and physics-based correction coil design,"
+> *Nuclear Fusion* **66**, 066003 (2026).
 > DOI: [10.1088/1741-4326/ae6086](https://doi.org/10.1088/1741-4326/ae6086)
 
 The NTV-limited error-field correction model of `ErrorFields.NTV`: the correction current is capped by the torque budget the non-resonant field of the correction array spends.
 
 ---
 
-> Leuthold et al., ARC error-field correction with NTV limits,
+> N. Leuthold et al., "ARC physics basis–magnetohydrodynamics,"
 > *Journal of Plasma Physics* **92**, E49 (2026).
 > DOI: [10.1017/S0022377826101421](https://doi.org/10.1017/S0022377826101421)
 

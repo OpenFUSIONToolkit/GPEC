@@ -76,7 +76,7 @@ Page: [Tearing](inner_layer.md).
 
 Computes the plasma response to an external non-axisymmetric field: `plasma_response` builds the permeability, inductance and reluctance operators on the control surface from the force-free states and the vacuum matrices, and `perturbed_equilibrium` applies them to the drive that `ForcingTerms` supplies, either a normal-field spectrum from a file or the Biot–Savart field of `[[ForcingTerms.coil_set]]` coils.
 The resonant fields, island half-widths and Chirikov parameter at each rational surface follow from the singular coupling (`compute_singular_coupling`), and `regularization_width` controls the regularization of the ideal response there.
-The response is built only from a `\"Forward\"` solve without a wall: a `\"Riccati\"` result (the default) makes `plasma_response` skip the operators with a warning, and a `\"Galerkin\"` or matched result or a wall is an error.
+The response is built only from a `"Forward"` solve without a wall: a `"Riccati"` result (the default) makes `plasma_response` skip the operators with a warning, and a `"Galerkin"` or matched result or a wall is an error.
 Outputs: `PerturbedEquilibrium/ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`.
 Key references: [Park et al. (2007a)](citations.md#PerturbedEquilibrium), [Park et al. (2009)](citations.md#PerturbedEquilibrium).
 Pages: [Forcing Terms](forcing_terms.md), [Perturbed Equilibrium](perturbed_equilibrium.md).
@@ -107,7 +107,7 @@ Page: [Tearing](inner_layer.md).
 
 ## The deck
 
-A stage runs when its section is present, so a deck with only `[Equilibrium]` and `[ForceFreeStates]` stops after the stability solve, and one without `[ForceFreeStates]` writes nothing.
+A stage runs when its section is present, so a deck with only `[Equilibrium]` and `[ForceFreeStates]` stops after the stability solve; a deck without `[ForceFreeStates]` writes nothing, and any other stage section without it is an error.
 The abridged `examples/DIIID-like_ideal_example/gpec.toml` below runs the equilibrium, the ideal free-boundary solve with local stability, and the coil-driven perturbed equilibrium:
 
 ```toml
@@ -184,7 +184,7 @@ From Julia, the same pipeline is `GeneralizedPerturbedEquilibrium.main(["example
 | `DIIID-like_ideal_example_IMAS` | the same equilibrium read from an `IMASdd.dd`, run from `run_imas_example.jl` |
 | `DIIID-like_riccati_deltaprime_example` | the Δ′ matrix on the `"Riccati"` integrator, no forcing |
 | `DIIID-like_gal_resistive_example` | the `"Galerkin"` outer-region Δ′ solve, no forcing |
-| `DIIID-like_gal_resistive_pe_example` | Galerkin Δ′ with `[Match]` inner-layer matching and coil forcing |
+| `DIIID-like_gal_resistive_pe_example` | Galerkin Δ′ with `[Match]` inner-layer matching, with coil forcing staged for a response the Galerkin result cannot drive yet (the run stops at `PerturbedEquilibrium`) |
 | `DIIID-like_SLAYER_example` | tearing growth rates and critical resonant fields with the `SLAYER` layer model |
 | `DIIID-like_truncation_example` | the resistive-layer overlap cap on the edge of the integration domain |
 | `DIIID-like_error_field_example` | error-field sensitivities, Monte Carlo tolerances and locking risk for the DIII-D poloidal-field coils |

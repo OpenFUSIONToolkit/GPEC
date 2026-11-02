@@ -16,7 +16,7 @@ A forcing file declares its own normalization by a tag; a coil set needs none, b
 
 ## File formats
 
-ASCII (`forcing_data_format = "ascii"`): an optional `# normalization: <tag>` line, comment lines starting with `#`, and one `n  m  real(amplitude)  imag(amplitude)` row per mode (the imaginary part defaults to 0):
+ASCII (`forcing_data_format = "ascii"`): an optional `# normalization: <tag>` line, comment lines starting with `#`, and one `n  m  real(amplitude)  imag(amplitude)` row per mode; all four columns are required:
 
 ```
 # normalization: normal_field_T
@@ -24,7 +24,7 @@ ASCII (`forcing_data_format = "ascii"`): an optional `# normalization: <tag>` li
 1  7  5.0e-5  2.0e-5
 ```
 
-HDF5 (`forcing_data_format = "hdf5"`): datasets `n`, `m`, `amplitude_real` and optional `amplitude_imag`, with the optional root attribute `normalization`:
+HDF5 (`forcing_data_format = "hdf5"`): datasets `n`, `m`, `amplitude_real` and `amplitude_imag`, all required, with the optional root attribute `normalization`:
 
 ```julia
 using HDF5
@@ -32,6 +32,7 @@ h5open("forcing.h5", "w") do f
     f["n"] = [1, 1, 1]
     f["m"] = [5, 6, 7]
     f["amplitude_real"] = [1e-4, 2e-4, 1e-4]
+    f["amplitude_imag"] = [0.0, 0.0, 0.0]
     HDF5.attrs(f)["normalization"] = "normal_field_T"
 end
 ```

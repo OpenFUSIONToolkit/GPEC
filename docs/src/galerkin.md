@@ -14,16 +14,19 @@ The weak form of the same system as on the [Stability](stability.md) page is ass
 
 ## Running it
 
-Select it in `[ForceFreeStates]` and set its options in `[Galerkin]`, as in `examples/DIIID-like_gal_resistive_example`:
+Select it in `[ForceFreeStates]` and set its options in `[Galerkin]`, as in `examples/DIIID-like_gal_resistive_example` (abridged):
 
 ```toml
 [ForceFreeStates]
 integrator = "Galerkin"
 
 [Galerkin]
+nx = 256                # Hermite-cubic elements per interval between singular surfaces
+pfac = 0.03             # grid packing ratio toward the singular surfaces
 rpec_flag = true        # edge coil-response columns (Delta_coil), needed by [Match] and [Tearing]
-cut_solution = false    # true: the cut solution that composite inner-region profiles need
 ```
+
+`cut_solution = true` (default `false`) adds the cut solution that composite inner-region profiles need.
 
 It replaces the radial integration rather than supplementing it: the run computes its own vacuum response at the control surface (with `vac_flag`) but produces no free-boundary energies, no ODE trace and no `crit` scan, it does not support the kinetic solve, and its result cannot drive `[PerturbedEquilibrium]`, which needs the free-boundary δW of a `"Forward"` solve.
 A `[Match]` section matches the inner layer to its Δ′ and gives a driven ``\xi`` solution; the composite inner-region profiles need `cut_solution = true` (`Galerkin(; cut_solution=true)` followed by `solve(MatchProblem(ffs))` in a script).

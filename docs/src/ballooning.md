@@ -12,29 +12,7 @@ It runs as its own stage, after `ForceFreeStates` and on the same equilibrium, a
 
 ## Governing equations
 
-Ballooning modes have long wavelength along the field and short wavelength across it.
-A perturbation ``\varphi`` periodic in the poloidal angle ``\theta`` and the Clebsch angle ``\beta = \zeta - q\theta + \int q' \theta_0\, d\psi`` is represented on the covering space ``-\infty < \theta < \infty``,
-
-```math
-\varphi(\psi, \theta, \beta) = \sum_{l=-\infty}^{\infty} \hat{\varphi}(\psi, \theta - l)\, \exp[-2\pi i n(\beta + lq)],
-```
-
-so that the secular growth of the perpendicular wave number with the shear ``q'`` enters through ``|\nabla\beta|^2``.
-At marginal stability the ideal energy principle gives the ballooning equation along the field line,
-
-```math
-\mathbf{B}\cdot\nabla\left(\frac{|\nabla\beta|^2}{B^2}\, \mathbf{B}\cdot\nabla\hat{\varphi}\right) + 2\frac{P'}{\chi'}\kappa_w \hat{\varphi} = 0 ,
-```
-
-with ``\chi`` the poloidal flux (the symbol of Connor, Hastie and Taylor for the ``\psi`` of the other pages), ``P'`` the pressure gradient and the projected curvature
-
-```math
-\kappa_w \equiv \frac{\boldsymbol{\kappa}\times\mathbf{B}}{B^2}\cdot\nabla\beta = \kappa_n - q'\theta\,\kappa_s ,
-\qquad
-\kappa_s = \frac{\boldsymbol{\kappa}\times\mathbf{B}}{B^2}\cdot\nabla\psi = -\frac{\pi f}{\mathcal{J}}\frac{\partial}{\partial\theta}\left(\frac{1}{B^2}\right),
-```
-
-split into its non-secular part ``\kappa_n`` and the secular part driven by the shear.
+The stage integrates the marginal ballooning equation of [Connor, Hastie and Taylor (1978)](citations.md#LocalStability) for the perturbation ``\hat{\varphi}`` along the field line on the covering space ``-\infty < \theta < \infty``, where the shear ``q'`` enters through ``|\nabla\beta|^2`` of the Clebsch angle ``\beta`` and the projected curvature ``\kappa_w = \kappa_n - q'\theta\,\kappa_s`` splits into a non-secular part and a secular part driven by the shear (``\chi``, ``P'`` and ``\mathcal{J}`` below are the poloidal flux, the pressure gradient and the Jacobian).
 The code integrates it as the first-order system ``\partial_\theta \mathbf{u} = \mathbf{L}\mathbf{u}`` in ``\mathbf{u} = (\hat{\varphi},\ |\nabla\beta|^2 \chi' \partial_\theta\hat{\varphi}/(B^2\mathcal{J}))``.
 
 As ``\theta \to \infty`` the coefficients diverge like ``q'^2\theta^2|\nabla\psi|^2``.
