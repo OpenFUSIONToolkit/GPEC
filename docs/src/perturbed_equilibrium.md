@@ -74,6 +74,40 @@ As a summary the run also stores the core-window decomposition (`ψ_N ≤ CORE_P
 `PerturbedEquilibrium/SingularCoupling/DominantMode/`, with `forcing_overlap` holding the run's
 own forcing coefficients `Vᴴ·b̃_x`.
 
+### Other coupling matrices and local windows
+
+The run writes five coupling matrices under `PerturbedEquilibrium/SingularCoupling/`. Each has one row per
+rational surface (labelled by `rational_psi`, `rational_q`, `rational_m`, `rational_n`) and acts on the same
+applied b̃ columns:
+
+| Dataset | Maps b̃ to | Units |
+|:--- |:--- |:--- |
+| `C_resonant_area_weighted_field` | resonant area-weighted field b̄ʳ = Φʳ/Aʳ | dimensionless |
+| `C_resonant_current` | pitch-resonant current | A/T |
+| `C_island_width_sq` | squared island half-width | 1/T |
+| `C_penetrated_area_weighted_field` | penetrated area-weighted field | dimensionless |
+| `C_Delta_prime` | forcing-driven Δ′ | 1/T |
+
+`ResonantCoupling` wraps the first. Any of the others decomposes the same way through the bare-matrix form
+of `dominant_coupling`; take the b̃ conform from a `ResonantCoupling` of the same file:
+
+```julia
+using HDF5
+C, ψr = h5open("gpec.h5") do f
+    g = f["PerturbedEquilibrium/SingularCoupling"]
+    read(g["C_resonant_current"]), read(g["rational_psi"])
+end
+dom = dominant_coupling(C, ψr; psi_low=0.3, psi_high=0.6)  # any window of surfaces
+c = coupling_overlap(dom, rootarea_field(rc, coil_modes))   # rc = ResonantCoupling("gpec.h5")
+dom.singular_values .* c                                    # the quantity each mode drives, in C's units times T
+```
+
+The bare form carries no (m, n) labels, so `check_mode_basis` cannot guard the projection: build `rc` from
+the same file as `C`.
+
+The window replaces Fortran GPEC's local-coupling outputs. There, a different range of surfaces meant a new
+run; here any range, on any of the five matrices, takes one SVD of the stored matrix.
+
 ```@docs
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.ResonantCoupling
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.DominantCoupling
