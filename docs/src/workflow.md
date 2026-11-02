@@ -184,7 +184,6 @@ From Julia, the same pipeline is `GeneralizedPerturbedEquilibrium.main(["example
 | `DIIID-like_ideal_example_IMAS` | the same equilibrium read from an `IMASdd.dd`, run from `run_imas_example.jl` |
 | `DIIID-like_riccati_deltaprime_example` | the Δ′ matrix on the `"Riccati"` integrator, no forcing |
 | `DIIID-like_gal_resistive_example` | the `"Galerkin"` outer-region Δ′ solve, no forcing |
-| `DIIID-like_gal_resistive_pe_example` | Galerkin Δ′ with `[Match]` inner-layer matching, with coil forcing staged for a response the Galerkin result cannot drive yet (the run stops at `PerturbedEquilibrium`) |
 | `DIIID-like_SLAYER_example` | tearing growth rates and critical resonant fields with the `SLAYER` layer model |
 | `DIIID-like_truncation_example` | the resistive-layer overlap cap on the edge of the integration domain |
 | `DIIID-like_error_field_example` | error-field sensitivities, Monte Carlo tolerances and locking risk for the DIII-D poloidal-field coils |
