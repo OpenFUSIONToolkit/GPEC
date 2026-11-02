@@ -7,7 +7,7 @@
 [ballooning.delta_prime_matching]
 commit = "legacy"
 date = "unknown"
-depends = ["src/ForceFreeStates/Ballooning.jl"]
+depends = ["src/LocalStability/Ballooning.jl"]
 note = "Predates the provenance system; compared methods for extracting the ballooning Delta_prime and c_a1. Original generator script not preserved."
 script = "(not preserved)"
 
