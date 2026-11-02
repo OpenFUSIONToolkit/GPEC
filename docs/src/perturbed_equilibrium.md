@@ -70,6 +70,11 @@ convention the forcing loaders and coil integration produce and the b̃ basis th
 `coupling_overlap` takes care of the conjugation. Singular vectors carry an arbitrary global
 phase, so compare `abs` of overlaps across runs, not the complex value.
 
+In a multi-n run the matrix is block-diagonal in n, so every singular mode has a single n. The ranking spans all n,
+so the dominant mode belongs to the most strongly coupled n, and `DominantMode` stores that mode. For one n, decompose
+its block: `dominant_coupling(rc.C[rows, cols], rc.rational_psi[rows])` with `rows = rc.rational_n .== n` and
+`cols = rc.n_modes .== n`, and project `rootarea_field(rc, modes)[cols]`.
+
 As a summary the run also stores the core-window decomposition (`ψ_N ≤ CORE_PSI_HIGH = 0.9`) under
 `PerturbedEquilibrium/SingularCoupling/DominantMode/`, with `forcing_overlap` holding the run's
 own forcing coefficients `Vᴴ·b̃_x`.
