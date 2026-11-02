@@ -17,6 +17,7 @@ function _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int
         # Loop over extrema of q, find all rational values in between
         for iex in 2:equil.params.mextrema
             dq = equil.params.qextrema_q[iex] - equil.params.qextrema_q[iex-1]
+            dq == 0 && continue
             m = trunc(Int, n * equil.params.qextrema_q[iex-1])
             if dq > 0
                 m += 1
@@ -151,6 +152,14 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
             intr.qlim -= 1.0 / intr.nlow
         end
     end
+
+    # A target below q_min has no psilim: say why instead of failing in the root find, as Fortran's "Can't find psilim"
+    intr.qlim >= equil.params.qmin ||
+        error(
+            "sing_lim!: the integration limit qlim = $(@sprintf("%.3f", intr.qlim)) lies below q_min = $(@sprintf("%.3f", equil.params.qmin)), " *
+            "so no flux surface reaches it. With truncate_at_rational_offset no rational surface of n = $(intr.nlow) is left to truncate at; " *
+            "widen the domain (qhigh, the layer-overlap cap) or set truncate_at_rational_offset = false."
+        )
 
     # qlim below qmax: Newton-solve q(psilim) = qlim
     if intr.qlim < equil.params.qmax

@@ -172,7 +172,8 @@ The rotation profiles enter the `KineticForces` integrals as follows.
 
 ### ``\omega_E`` (E × B rotation)
 
-``\omega_E`` is the input E × B toroidal rotation profile, positive in the direction of the toroidal coordinate ``\zeta``; its relation to the current direction follows from the ``\zeta``/``\phi`` convention fixed by helicity ([Helicity and handedness](@ref)) and is not re-derived by the kinetic module.
+``\omega_E`` is the input E × B toroidal rotation profile, positive in the direction of the toroidal coordinate ``\zeta``.
+In the laboratory frame, with ``\phi`` counter-clockwise viewed from above, ``\phi = -h\,(2\pi\zeta + \nu)`` for helicity ``h`` ([Helicity and handedness](@ref)), so positive ``\omega_E`` is counter-clockwise with sign ``-h``, and its sign relative to the plasma current is ``-h\,s_I = -s_B`` with ``s_I``, ``s_B`` the signs of ``I_p`` and ``B_t`` (`ip_sign`, `bt_sign`): positive ``\omega_E`` is co-current exactly when ``B_t`` is clockwise (``s_B = -1``), whatever the helicity.
 
 ### Diamagnetic frequencies
 
@@ -195,7 +196,7 @@ The resonance denominator of the energy integral is ``i\,\Omega(x) - \nu`` with
 \ell_\mathrm{eff} = \begin{cases} \ell + n q & \text{passing particles},\\ \ell & \text{trapped particles}, \end{cases}
 ```
 
-where ``x = E/T`` is the normalized energy, ``\nu`` the energy-dependent effective collisionality, and ``\omega_b``, ``\omega_D`` the bounce and precession frequencies at thermal energy (``\omega_b \propto v_\mathrm{th}``, ``\omega_D \propto v_\mathrm{th}^2``).
+where ``x = E/T`` is the normalized energy, ``\nu`` the energy-dependent effective collisionality, and ``\omega_b``, ``\omega_D`` the bounce and precession frequencies at thermal energy (``\omega_b \propto v_\mathrm{th}``, ``\omega_D \propto v_\mathrm{th}^2``; `BounceAveraging.jl`).
 The sign of ``\omega_E`` shifts the resonance in velocity space.
 
 ## COCOS compatibility

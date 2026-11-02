@@ -96,11 +96,12 @@ function integrate_pitch_gar_quadgk(
     bobmax_clip = clamp(bobmax, lambda_min, lambda_max)
     buf = zeros(ComplexF64, nqty)
     kernel! = (out, λ) -> _pitch_gar_kernel_quadgk!(out, λ, params)
-    I, _ = if lambda_min < bobmax_clip < lambda_max
+    I, E = if lambda_min < bobmax_clip < lambda_max
         quadgk!(kernel!, buf, lambda_min, bobmax_clip, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
     else
         quadgk!(kernel!, buf, lambda_min, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
     end
+    check_inner_quadrature(I, E, pitch_atol, pitch_rtol, "pitch")
     return copy(I)
 end
 
@@ -185,11 +186,12 @@ function integrate_pitch_gar_quadgk_wt(
     bobmax_clip = clamp(bobmax, lambda_min, lambda_max)
     buf = zeros(ComplexF64, 2 * nqty)
     kernel! = (out, λ) -> _pitch_gar_kernel_quadgk_wt!(out, λ, params)
-    I, _ = if lambda_min < bobmax_clip < lambda_max
+    I, E = if lambda_min < bobmax_clip < lambda_max
         quadgk!(kernel!, buf, lambda_min, bobmax_clip, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
     else
         quadgk!(kernel!, buf, lambda_min, lambda_max; atol=pitch_atol, rtol=pitch_rtol)
     end
+    check_inner_quadrature(I, E, pitch_atol, pitch_rtol, "pitch")
     return copy(I)
 end
 

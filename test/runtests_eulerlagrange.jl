@@ -369,6 +369,21 @@ end
         odet.u[:, 2, 1] .= [1, 0]
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
         @test odet.new == true  # fixup triggered
+
+        # Case 6: a singular call right after a reduction still reduces, keeping that reduction's pivot order
+        # rather than the raw-norm order [1, 2, 3]
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        odet = FFS.OdeState(3, 10, 10, 1)
+        odet.u[:, :, 1] .= [6.0 0.4 0.2; 0.5 0.3 2.0; 0.1 5.0 1.5]
+        odet.u[:, :, 2] .= 1.0
+        odet.ifix = 1
+        odet.index[:, 1] .= [3, 1, 2]
+        odet.new = true
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, FFS.ForceFreeStatesInternal(; numpert_total=3), true)
+        @test odet.ifix == 2
+        @test odet.new
+        @test odet.sing_flag[2]
+        @test odet.index[:, 2] == [3, 1, 2]
     end
 
     @testset "ideal-crossing reduction isolates the resonant harmonic" begin

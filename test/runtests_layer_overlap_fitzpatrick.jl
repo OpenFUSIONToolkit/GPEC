@@ -196,6 +196,15 @@ end
         @test i.qlim <= qh
     end
 
+    # No rational surface far enough below the bound leaves nothing to truncate at: a clear error, not a failed root find.
+    # The offset puts the last rational's truncation point above qhigh and the one before it below q_min.
+    qmin = equil.params.qmin
+    c_none = ForceFreeStatesControl(; truncate_at_rational_offset=true, rational_offset_fraction=mod(qmin, 1) + 0.04,
+        qhigh=qmin + 0.02)
+    @test_throws r"lies below q_min" sing_lim!(_fresh(), c_none, equil)
+    # Without truncation, a qhigh below q_min fails the same way.
+    @test_throws r"lies below q_min" sing_lim!(_fresh(), ForceFreeStatesControl(; truncate_at_rational_offset=false, qhigh=qmin - 0.1), equil)
+
     # A cap placed exactly on a rational must exclude it on either side of the float knife-edge.
     q_of = equil.profiles.q_spline
     lo, hi = equil.profiles.xs[1], equil.params.psihigh_resolved

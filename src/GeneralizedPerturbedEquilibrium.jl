@@ -96,11 +96,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     path = length(args) >= 1 ? args[1] : "./"
 
     # Capture git version for reproducibility
-    git_version = try
-        String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
-    catch
-        "unknown"
-    end
+    git_version = _gpec_git_version()
 
     @info "\n$_BANNER\n  GPEC - Generalized Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
 

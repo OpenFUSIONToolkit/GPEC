@@ -124,8 +124,26 @@ end
                     inputs["PerturbedEquilibrium"]["fixed_boundary"] = false
                     delete_object(h5, "Input/gpec_toml_raw")
                     h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                    delete_object(h5, "Info/git_version")
+                    h5["Info/git_version"] = "v1.5.0-412-gabc1234-dirty"
                 end
-                @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+                # The error keeps the per-key advice and tells the user which version wrote the file and how to get it.
+                err = try
+                    GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+                catch e
+                    e
+                end
+                @test err isa ErrorException
+                @test occursin("`fixed_boundary`, which is no longer a key; remove from gpec.toml", err.msg)
+                @test occursin("written by GPEC v1.5.0-412-gabc1234-dirty", err.msg)
+                @test occursin("git checkout abc1234", err.msg) && occursin("uncommitted changes", err.msg)
+                @test occursin("h5read(\"$(abspath(old_h5))\", \"Input/gpec_toml_raw\")", err.msg)
+            end
+        end
+
+        @testset "a recorded version names the commit to check out" begin
+            for (version, checkout) in ("v2.0.0" => "v2.0.0", "v2.0.0-3-gdeadbee" => "deadbee", "deadbee" => "deadbee", "unknown" => nothing)
+                @test GeneralizedPerturbedEquilibrium._version_checkout(version) == checkout
             end
         end
 
@@ -133,6 +151,41 @@ end
             # Default output is `<basename>_rerun.h5`, so clobbering only happens if the user
             # routes the rerun back onto the source file; exercise that guard.
             @test_throws ErrorException GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", snapshot_dir, "--output-name", "gpec.h5"])
+            # The same file under another name, as the output or as one of its side files, is refused too.
+            mktempdir() do out_dir
+                symlink(source_h5, joinpath(out_dir, "alias.h5"))
+                @test_throws r"Refusing to overwrite" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--output-name", "alias.h5"])
+                symlink(source_h5, joinpath(out_dir, "run_forcing.h5"))
+                @test_throws r"Refusing to overwrite" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--output-name", "run.h5"])
+            end
+        end
+
+        @testset "kinetic profiles and a file wall replay from the snapshot" begin
+            mktempdir() do out_dir
+                doctored = joinpath(out_dir, "source.h5")
+                cp(source_h5, doctored)
+                kinetic = GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example", "kinetic.dat"))
+                wall_text = "3\n1.0\nindex R Z\n1 2.0 0.0\n2 1.5 0.5\n3 1.5 -0.5\n"
+                h5open(doctored, "r+") do h5
+                    inputs = TOML.parse(read(h5, "Input/gpec_toml_raw"))
+                    # Neither file exists: the replay must take both from the snapshot.
+                    inputs["Equilibrium"]["kinetic_file"] = joinpath(out_dir, "gone.dat")
+                    inputs["Wall"] = Dict{String,Any}("shape" => "file", "file" => joinpath(out_dir, "gone_wall.dat"))
+                    delete_object(h5, "Input/gpec_toml_raw")
+                    h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                end
+                @test_throws r"records no Input/RawInputs/Kinetic" GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir])
+                h5open(doctored, "r+") do h5
+                    GeneralizedPerturbedEquilibrium.Equilibrium.write_kinetic_group!(create_group(h5, "Input/RawInputs/Kinetic"), kinetic)
+                end
+                @test_throws r"records no Input/RawInputs/Wall" GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir])
+                h5open(h5 -> h5["Input/RawInputs/Wall/wall_file_raw"] = wall_text, doctored, "r+")
+                inputs = first(GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir]))
+                @test inputs["Equilibrium"]["kinetic_file"] == "source_rerun_kinetic.h5"
+                @test GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(joinpath(out_dir, "source_rerun_kinetic.h5")).n_e == kinetic.n_e
+                @test inputs["Wall"]["file"] == "source_rerun_wall.dat"
+                @test read(joinpath(out_dir, "source_rerun_wall.dat"), String) == wall_text
+            end
         end
 
         @testset "--coil-source coils errors when source has no coil snapshot" begin

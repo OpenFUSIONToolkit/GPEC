@@ -7,8 +7,7 @@ Single source of truth for the NTV calculation methods. Each entry is a NamedTup
   - `name`  — short method identifier used as the HDF5 group key and in `intr.method`
   - `flag`  — the `KineticForcesControl` field symbol that enables the method
   - `kind`  — dispatch routing tag consumed by `method_kind` / `Torque.jl`
-    (`:gar` for the GAR/matrix family, `:fcgl`/`:rlar`/`:clar` for the
-    three special-cased methods)
+    (`:gar` for the GAR/matrix family, `:fcgl` for the fluid CGL method)
   - `doc`   — one-line description printed in verbose output
 
 To add a method: append an entry here and add the matching `*_flag` field
@@ -18,8 +17,6 @@ const METHOD_REGISTRY = (
     (name="fgar", flag=:fgar_flag, kind=:gar, doc="Full general-aspect-ratio calculation"),
     (name="tgar", flag=:tgar_flag, kind=:gar, doc="Trapped particle general-aspect-ratio calculation"),
     (name="pgar", flag=:pgar_flag, kind=:gar, doc="Passing particle general-aspect-ratio calculation"),
-    (name="rlar", flag=:rlar_flag, kind=:rlar, doc="Trapped particle large-aspect-ratio calculation"),
-    (name="clar", flag=:clar_flag, kind=:clar, doc="Trapped particle cylindrical large-aspect-ratio calculation"),
     (name="fcgl", flag=:fcgl_flag, kind=:fcgl, doc="Fluid Chew–Goldberger–Low calculation"),
     (name="fwmm", flag=:fwmm_flag, kind=:gar, doc="Full energy calculation using MXM Euler–Lagrange matrix"),
     (name="twmm", flag=:twmm_flag, kind=:gar, doc="Trapped energy calculation using MXM Euler–Lagrange matrix"),
@@ -37,7 +34,7 @@ const METHOD_REGISTRY = (
 """
     method_kind(name) -> Symbol
 
-Return the dispatch routing tag (`:gar`, `:fcgl`, `:rlar`, `:clar`) for the NTV
+Return the dispatch routing tag (`:gar` or `:fcgl`) for the NTV
 method `name`, looked up from [`METHOD_REGISTRY`]. Errors on an unknown method.
 """
 function method_kind(name::AbstractString)
@@ -80,8 +77,6 @@ Immutable: vary a field by building a new control.
     fgar_flag::Bool = true          # Full general-aspect-ratio
     tgar_flag::Bool = false         # Trapped particle GAR
     pgar_flag::Bool = false         # Passing particle GAR
-    rlar_flag::Bool = false         # Trapped particle large-aspect-ratio
-    clar_flag::Bool = false         # Trapped cylindrical LAR
     fcgl_flag::Bool = false         # Fluid Chew-Goldberger-Low
     fwmm_flag::Bool = false         # Full energy via MXM E-L matrix
     twmm_flag::Bool = false         # Trapped energy via MXM E-L matrix

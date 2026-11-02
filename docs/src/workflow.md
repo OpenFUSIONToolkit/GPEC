@@ -209,7 +209,7 @@ All results are written to one HDF5 file (`[Run] output_file`, default `gpec.h5`
 | Group | Contents |
 |---|---|
 | `Info/` | Run metadata: git version, mode-number ranges, `psilim`, `qlim`, `Runtimes/` (per-stage wall-clock seconds) |
-| `Input/` | Rerun snapshot: the recorded deck and the raw equilibrium, forcing and coil inputs |
+| `Input/` | Rerun snapshot: the recorded deck and the raw equilibrium, forcing, coil, kinetic-profile and wall-file inputs |
 | `Equilibrium/` | Scalars (`beta_N`, `q_axis`, `q_95`, …), 1-D profiles (`Profiles/`), 2-D geometry (`Geometry/`) |
 | `ForceFreeStates/` | `Solutions/`, `FreeBoundaryStability/`, `EdgeScan/`, and `EulerLagrangeMatrices/` when `write_el_matrices = true` |
 | `LocalStability/` | `D_I`, `D_R`, `ballooning_Delta_prime` on `psi`; the α boundary on `ballooning_psi` |

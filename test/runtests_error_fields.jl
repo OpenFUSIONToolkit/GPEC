@@ -370,6 +370,10 @@ include("h5_metadata_check.jl")
             @test norm(two.resonant_field_least_squares_t) < 1e-8 * norm(two.resonant_field_source_t)
             @test two.least_squares_rank == 2 && one.least_squares_rank == 1
             @test two.current_factor_least_squares ≈ [-1.0, 0.0] atol = 1e-6
+            # Identical arrays leave R rank-deficient; the minimum-norm solution splits the current evenly.
+            dup = EF.correction_requirement(ctx_plot, src, [src, src])
+            @test dup.least_squares_rank == 1
+            @test dup.current_factor_least_squares ≈ [-0.5, -0.5] atol = 1e-6
             # With two arrays the dominant-mode condition is one equation in two unknowns: the
             # minimum-current member of its family cancels the mode exactly and carries less current
             # than the exact solution (−1, 0), which is also in the family.
@@ -498,6 +502,9 @@ include("h5_metadata_check.jl")
             rebuilt = GPEC.equilibrium_from_h5(h5path)
             @test rebuilt.psilim == ffs.psilim
             @test rebuilt.equil.params.bt0 ≈ ffs.equil.params.bt0
+            # The run records its kinetic profiles, and the rebuilt equilibrium carries them.
+            @test h5open(f -> haskey(f, "Input/RawInputs/Kinetic"), h5path)
+            @test rebuilt.equil.kinetic.n_e == ffs.equil.kinetic.n_e
             post_hoc = EF.compute_coil_sensitivities(h5path, sets[1:1])
             @test post_hoc.field_as_designed ≈ sens.field_as_designed[:, 1:1] rtol = 1e-10
             @test post_hoc.shift_sensitivity_per_m ≈ sens.shift_sensitivity_per_m[:, :, 1:1] rtol = 1e-10

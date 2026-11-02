@@ -30,6 +30,28 @@ dom.singular_values[1] * abs(c[1])                       # resonant field the do
 
 Singular vectors carry an arbitrary global phase, so compare `abs` of overlaps across runs, not the complex value.
 
+In a multi-n run the matrix is block-diagonal in n, so every singular mode has a single n; the ranking spans all n, so the dominant mode, and the stored `DominantMode`, belong to the most strongly coupled n.
+For one n, decompose its block, `dominant_coupling(rc.C[rows, cols], rc.rational_psi[rows])` with `rows = rc.rational_n .== n` and `cols = rc.n_modes .== n`, and project `rootarea_field(rc, modes)[cols]`.
+
+The run writes up to five coupling matrices under `PerturbedEquilibrium/SingularCoupling/`, each with one row per rational surface and the same applied ``\tilde b`` columns:
+
+| Dataset | Maps ``\tilde b`` to | Units |
+|---|---|---|
+| `C_resonant_area_weighted_field` | the resonant field ``\bar b^r`` | dimensionless |
+| `C_resonant_current` | the pitch-resonant current | A/T |
+| `C_island_width_sq` | the squared island half-width | 1/T |
+| `C_penetrated_area_weighted_field` | the penetrated field, when the run computes it | dimensionless |
+| `C_Delta_prime` | the forcing-driven Δ′ | 1/T |
+
+`ResonantCoupling` wraps the first; any of the others decomposes over any window of surfaces through the bare-matrix form of `dominant_coupling`, with the ``\tilde b`` conform taken from a `ResonantCoupling` of the same file, since the bare matrix carries no (m, n) labels for `check_mode_basis` to guard the projection:
+
+```julia
+C, ψr = h5open(f -> (read(f, "PerturbedEquilibrium/SingularCoupling/C_resonant_current"),
+                     read(f, "PerturbedEquilibrium/SingularCoupling/rational_psi")), "gpec.h5")
+dom = dominant_coupling(C, ψr; psi_low=0.3, psi_high=0.6)
+dom.singular_values .* coupling_overlap(dom, rootarea_field(rc, coil_modes))   # in C's units times T
+```
+
 ### Torque response matrices
 
 A kinetic forward solve (`integrator = "Forward"`, `kinetic = "KineticForces"`) carries the drift-kinetic response inside its Euler–Lagrange energy: the complex plasma energy inside a flux surface has an anti-Hermitian part that is the neoclassical toroidal viscosity torque ([Logan et al. (2013)](citations.md#KineticForces)).

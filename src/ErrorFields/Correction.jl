@@ -86,7 +86,7 @@ function correction_requirement(ctx::ResonantDriveContext, source::CoilOverlap, 
     a = all(k -> isfinite(k) && k > 0, kat) ? kat : ones(length(kat))
     δ = [o.delta for o in arrays] ./ a
     f_mn = sum(abs2, δ) > 0 ? (-source.delta .* conj.(δ) ./ sum(abs2, δ)) ./ a : fill(NaN + NaN * im, length(δ))
-    f_ls = -((R ./ a') \ r_source) ./ a
+    f_ls = -(pinv(R ./ a') * r_source) ./ a
     r_ls = r_source .+ R * f_ls
     n_src = norm(source.spectrum)
     cosines = [(n = norm(o.spectrum); n > 0 && n_src > 0 ? abs(dot(o.spectrum, source.spectrum)) / (n * n_src) : NaN) for o in arrays]

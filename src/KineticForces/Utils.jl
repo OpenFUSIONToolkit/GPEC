@@ -6,6 +6,19 @@ kinetic-resonance surface locator built on it.
 """
 
 """
+    check_inner_quadrature(I, E, atol, rtol, what)
+
+Warn once per integral kind `what` and Julia session when the error estimate `E` exceeds `max(atol, rtol·‖I‖)`,
+i.e. QuadGK stopped short of its tolerance (evaluation cap or endpoint roundoff), or when `I` or `E` is not finite.
+"""
+function check_inner_quadrature(I, E, atol, rtol, what::String)
+    nI = norm(I)
+    (isfinite(nI) && isfinite(E) && E <= max(atol, rtol * nI)) ||
+        @warn "KineticForces $what integral did not converge: error estimate $E vs |I| = $nI" maxlog = 1 _id = Symbol(what)
+    return nothing
+end
+
+"""
     find_sign_change_roots(f, grid) → Vector{Float64}
 
 Locate the zeros of a callable `f` by scanning consecutive `grid` nodes for strict sign
@@ -56,7 +69,7 @@ density peaks (Logan & Park, Phys. Plasmas 20, 122507 (2013), §IV–V). `xeval`
 peak of the Maxwellian-weighted drive `x^2.5·e^−x`. The ℓ = 0 node is the ω_d-shifted ExB
 (superbanana-plateau) resonance.
 
-The frequencies are the cheap large-aspect-ratio closed forms of the `rlar` method,
+The frequencies are the cheap large-aspect-ratio closed forms
 `ω_b = (π/4)·√(ε/2)·wtran` and `ω_d = q·T_s/(2·ε·R₀²·Z·e·B₀)·wdfac`, with ε = ⟨r⟩/⟨R⟩ clamped
 away from the axis; no bounce averaging, which is enough for panel placement.
 """

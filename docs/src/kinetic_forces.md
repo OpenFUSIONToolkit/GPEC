@@ -24,6 +24,10 @@ The torque is a sum over species of three nested integrals, over flux ``\psi``, 
 The integrand is the bounce-averaged perturbation of the field strength ``\langle \delta B_\parallel / B \rangle_\ell``, evaluated from the displacement ``\xi`` of the perturbed equilibrium, weighted by the Maxwellian and by the resonance factor ``1/(i\Omega(x) - \nu)``: the energy integral is Eq. 8 of [Logan et al. (2013)](citations.md#KineticForces) and the torque and its normalization Eq. 19, ``\operatorname{Im} T = 2n\,\delta W_k``.
 The resonance frequency ``\Omega(x)``, and the diamagnetic frequencies that relate the E×B rotation ``\omega_E`` of the kinetic file to the toroidal rotation, are given with their sign conventions under [KineticForces rotation conventions](conventions.md#KineticForces-rotation-conventions).
 The collision operator is selected by `nutype`: `"harmonic"` (the default), `"krook"`, `"small"` or `"zero"` (the collisionless limit), with the collision frequencies computed from the density and temperature profiles; `f0type` selects the equilibrium distribution, `"maxwellian"` (the default), `"park"` or `"cgl"`.
+The kinetic file may also supply the Coulomb logarithm and collision rates `lnLambda`, `nu_i` and `nu_e`, which then replace the collision model of the NTV calculation (Logan et al. (2013), Eq. 6) that otherwise computes them from ``n`` and ``T``.
+Each is optional and must be positive; they are interpolated, and extended past the table's ψ range, in log space, so supply them over the whole range.
+A supplied `nu_i` is the first main ion's rate, and the other ions and the impurity keep the model's ``(Z_s/Z_1)^2\sqrt{m_1/m_s}`` ratio to it.
+They feed only the NTV calculation (the tearing layers' resistivity keeps its `lnLambda_form` closure), the density and temperature scaling factors do not rescale them, and `collisionality_factor` still multiplies them.
 
 ### Torque methods
 
