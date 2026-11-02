@@ -119,7 +119,12 @@ const KF_METHOD_H5_ANNOTATIONS = [
     "dTdpsi" => (; long_name="complex torque density dT/dψ_N = dT_φ/dψ_N + 2i·n·dδW_k/dψ_N; divide by dVdpsi for dT/dV", units="N*m", dims=("psi",), attach=(1 => "psi",)),
     "T" => (; long_name="cumulative complex torque T(ψ_N) = T_φ + 2i·n·δW_k (trapezoidal)", units="N*m", dims=("psi",), attach=(1 => "psi",)),
     "ell" => (; long_name="bounce harmonic ℓ ∈ -nl:nl of the per-harmonic torque density", scale="ell"),
-    "dTdpsi_ell" => (; long_name="complex torque density dT/dψ_N resolved by bounce harmonic ℓ; summing over ℓ reproduces dTdpsi", units="N*m", dims=("psi", "ell"), attach=(1 => "psi", 2 => "ell")),
+    "dTdpsi_ell" => (;
+        long_name="complex torque density dT/dψ_N resolved by bounce harmonic ℓ; summing over ℓ reproduces dTdpsi",
+        units="N*m",
+        dims=("psi", "ell"),
+        attach=(1 => "psi", 2 => "ell")
+    ),
     "dVdpsi" => (; long_name="flux-surface volume derivative dV/dψ_N at quadrature points", units="m^3", dims=("psi",), attach=(1 => "psi",)),
     "KineticMatrices/A" => (; long_name="Logan 2015 drift-kinetic coefficient matrix A = W_Z†W_Z (energy normalization)", dims=("mode_row", "mode_col")),
     "KineticMatrices/B" => (; long_name="Logan 2015 drift-kinetic coefficient matrix B = W_Z†W_X (energy normalization)", dims=("mode_row", "mode_col")),

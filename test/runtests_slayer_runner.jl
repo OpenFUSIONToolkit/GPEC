@@ -188,7 +188,8 @@
             # The LAR deck carries no kinetic profiles, so a missing ρ is named in the error.
             @test_throws "GGJ tearing: give rho, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7), GGJModel();
                 config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
-            @test_throws "SLAYER input" solve(TearingProblem(ffs; eta=1e-7, rho=1e-7,
+            @test_throws "SLAYER input" solve(
+                TearingProblem(ffs; eta=1e-7, rho=1e-7,
                     critical_resonant_field=GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantFieldControl()), GGJModel();
                 config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
         end

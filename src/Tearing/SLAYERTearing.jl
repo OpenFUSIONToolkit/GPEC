@@ -175,10 +175,12 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     rational_q::Vector{Float64}=Float64[],
     omega_E::Vector{Float64}=Float64[])
     validate(problem, config)
-    _is_ggj(model) && throw(ArgumentError(
-        "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no GGJ growth rate. " *
-        "Use Dispersion.ggj_growth_rates on multi_surface_coupling_full, which matches both parity channels, and " *
-        "solve_inner for the GGJ layer's Δ."))
+    _is_ggj(model) && throw(
+        ArgumentError(
+            "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no GGJ growth rate. " *
+            "Use Dispersion.ggj_growth_rates on multi_surface_coupling_full, which matches both parity channels, and " *
+            "solve_inner for the GGJ layer's Δ.")
+    )
     isempty(params) && return empty_tearing_result(problem, config, model)
 
     n = length(params)
@@ -333,8 +335,12 @@ function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::
     length(omega_E) == nsurf ||
         throw(ArgumentError("run_critical_resonant_field: omega_E has $(length(omega_E)) entries for $nsurf surfaces."))
     nsurf > 0 && all(isnan, omega_E) &&
-        throw(ArgumentError("run_critical_resonant_field: the critical resonant field needs the E×B rotation, but the " *
-                            "kinetic file has no omega_E and no [SLAYER] omega_E_kHz entry covers the surfaces."))
+        throw(
+            ArgumentError(
+                "run_critical_resonant_field: the critical resonant field needs the E×B rotation, but the " *
+                "kinetic file has no omega_E and no [SLAYER] omega_E_kHz entry covers the surfaces."
+            )
+        )
     Q_peak, br_crit = fill(NaN, nsurf), fill(NaN, nsurf)
     # Cole Sec. IV: ω0 is the mode frequency in the E×B frame; diamagnetic parts enter via Q_e, Q_i.
     Q0 = Float64[p.tauk * p.n * Ω for (p, Ω) in zip(params, omega_E)]
@@ -348,4 +354,3 @@ function run_critical_resonant_field(model::InnerLayer.InnerLayerModel, params::
     br_crit_tesla = br_crit .* Float64[abs(p.bt) for p in params]
     return CriticalResonantFieldResult(true, Int[p.ising for p in params], Q_peak, br_crit, br_crit_tesla, Q0, scan)
 end
-

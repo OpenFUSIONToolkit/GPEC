@@ -199,8 +199,11 @@ using HDF5
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
 
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"),
-                extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))]).ffs
+            reference =
+                GPEC.main([
+                    _stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"),
+                        extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))
+                ]).ffs
             @test reference.galerkin.msing == msing
             @test dp.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
             @test dp.raw ≈ reference.delta_prime.raw rtol = 1e-12
@@ -287,7 +290,7 @@ using HDF5
         @test d.terms[2].scale == 1.0 + 0.0im
         @test (im * a).scale == im
         @test (a * 3).scale == 3.0 + 0.0im
-        @test (a - b).terms[2].scale == -0.5 + 0.0im
+        @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
     end
 
@@ -385,12 +388,19 @@ using HDF5
         @test prob.rotation ≈ fill(1e3, n)
         # A supplied Coulomb logarithm replaces the closure's in η: the Spitzer η is linear in lnΛ.
         keq = deepcopy(kgal.equil)
-        spitzer_eta(lnL) = (attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3),
-            T_i=flat(1e3), omega_E=flat(2π * 1e3), resistivity_model=:spitzer, lnLambda=flat(lnL))); GPEC.InnerLayer.layer_eta(keq, kgal.surfaces))
+        spitzer_eta(lnL) = (
+            attach_kinetic_profiles!(
+                keq,
+                KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3),
+                    T_i=flat(1e3), omega_E=flat(2π * 1e3), resistivity_model=:spitzer, lnLambda=flat(lnL))
+            );
+            GPEC.InnerLayer.layer_eta(keq, kgal.surfaces)
+        )
         @test spitzer_eta(30.0) ≈ 2 .* spitzer_eta(15.0) rtol = 1e-12
         # The neoclassical closure takes it too, through the Spitzer factor and ν*_e: η rises with lnΛ.
         sauter_eta(lnL) = (attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3),
-            T_i=flat(1e3), omega_E=flat(2π * 1e3), lnLambda=flat(lnL))); GPEC.InnerLayer.layer_eta(keq, kgal.surfaces))
+            T_i=flat(1e3), omega_E=flat(2π * 1e3), lnLambda=flat(lnL)));
+        GPEC.InnerLayer.layer_eta(keq, kgal.surfaces))
         @test all(sauter_eta(30.0) .> sauter_eta(15.0))
         # Explicit values override each default on its own.
         given = MatchProblem(kgal; eta=1e-7, rotation=fill(3.0, n))
@@ -562,9 +572,10 @@ using HDF5
 
         @testset "deck kinetic source names" begin
             # A deck selects only the KineticForces model; test matrices and the retired key stop the parse.
-            parsed(overrides) = mktempdir() do dir
-                GPEC.parse_deck(TOML.parsefile(joinpath(_stage_deck(dir; ffs_overrides=overrides), "gpec.toml")), dir)
-            end
+            parsed(overrides) =
+                mktempdir() do dir
+                    GPEC.parse_deck(TOML.parsefile(joinpath(_stage_deck(dir; ffs_overrides=overrides), "gpec.toml")), dir)
+                end
             @test_throws "script-only" parsed(Dict{String,Any}("kinetic" => "TestKineticMatrices"))
             @test_throws "not a kinetic source" parsed(Dict{String,Any}("kinetic" => "fixed"))
             @test_throws "no longer a key" parsed(Dict{String,Any}("kinetic_source" => "fixed"))

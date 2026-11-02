@@ -193,7 +193,7 @@
     end
 
     @testset "build_slayer_inputs: P_perp_model forwards the profile gradients and minor radius" begin
-        sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
+        sings = [_mk_sing(; psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
         kw = (; bt=2.0, chi_perp_e=2.0, chi_perp_i=1.0, chi_tor=1.5, dr_val=0.0)
         ref = build_slayer_inputs(equil, sings, profiles; P_perp_model=:chi_perp_e, kw...)[1]
         # Flat n_e and linear T_e, T_i: the D_⊥ weights are T_s′/(T_e′ + T_i′) = 7/13 and 6/13

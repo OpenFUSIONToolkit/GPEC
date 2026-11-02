@@ -398,7 +398,7 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             @warn(
                 "build_slayer_inputs: sing.restype not populated; using the " *
                 "slab Mercier exponent α = 1/2 for the Δ' reference-length " *
-                "conversion at all such surfaces.", maxlog=1)
+                "conversion at all such surfaces.", maxlog = 1)
             0.5
         else
             sqrt(max(-(rg.E + rg.F + rg.H - 0.25), 0.0))

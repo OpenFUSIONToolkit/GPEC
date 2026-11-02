@@ -88,7 +88,7 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
     if coupled
         outside = [labels[k] for k in 1:count if !(config.omega_range[1] <= n * Ω_shift[k] <= config.omega_range[2])]
         isempty(outside) || @warn "GGJ tearing: the E×B frames of $(join(outside, ", ")) (ω = n·Ω_E) lie outside omega_range = " *
-                                  "$(config.omega_range); a root near those frequencies would be missed."
+              "$(config.omega_range); a root near those frequencies would be missed."
     end
 
     # Coupled: each layer sees the lab-frame growth rate in its own E×B frame, s_k = s + i·n·Ω_E,k, so differential

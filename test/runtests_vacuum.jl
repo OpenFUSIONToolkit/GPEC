@@ -879,11 +879,11 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
         # so the two agree only if both use the same relation. Negating ν in 2D alone misses by O(0.1).
         @testset "2D and 3D paths agree for a nonzero ν" begin
             mtheta = 48
-            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            θ = range(; start=0, length=mtheta, step=2π / mtheta)
             R = 1.7 .+ 0.3 .* cos.(θ)
             Z = 0.3 .* sin.(θ) .+ 0.08 .* sin.(2θ) .+ 0.08 .* cos.(θ)
             ν = 0.25 .* sin.(θ) .+ 0.1 .* cos.(2θ) .+ 0.05
-            make(nzeta, ν) = VacuumInput(x=collect(R), z=collect(Z), ν=collect(ν),
+            make(nzeta, ν) = VacuumInput(; x=collect(R), z=collect(Z), ν=collect(ν),
                 mtheta_in=mtheta, nzeta_in=1, m_modes=collect(-3:3), n_modes=[1], mtheta=mtheta, nzeta=nzeta)
             nowall = nothing
 
@@ -896,7 +896,7 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
         # D = diag(exp(i·m·a)). An operator left in the conjugate frame follows D†·A·D instead and fails this by O(0.1).
         @testset "wv and I_v follow a θ-origin shift in the same Fourier frame" begin
             mtheta, k = 64, 4
-            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            θ = range(; start=0, length=mtheta, step=2π / mtheta)
             R = 1.7 .+ 0.5 .* cos.(θ .+ 0.3 .* sin.(θ))
             Z = 0.8 .* sin.(θ) .+ 0.08 .* cos.(θ) .+ 0.1 .* cos.(2θ)
             m_modes = collect(-4:6)
@@ -914,21 +914,22 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
 
         @testset "clockwise contours" begin
             mtheta = 32
-            θ = range(; start=0, length=mtheta, step=2π/mtheta)
+            θ = range(; start=0, length=mtheta, step=2π / mtheta)
             R, Z = 1.7 .+ 0.3 .* cos.(θ), 0.4 .* sin.(θ)
             make(x, z) = VacuumInput(; x, z, ν=zeros(mtheta), mtheta_in=mtheta, nzeta_in=1, m_modes=collect(-2:2), n_modes=[1], mtheta, nzeta=1)
             @test_throws ArgumentError compute_vacuum_response(make(reverse(R), reverse(Z)), nothing)
 
             # A wall file written clockwise is turned round and gives the same operator as its counter-clockwise twin
             Rw, Zw = 1.7 .+ 0.6 .* cos.(θ), 0.8 .* sin.(θ)
-            wall_response(x, z) = mktempdir() do dir
-                path = joinpath(dir, "wall.dat")
-                open(path, "w") do io
-                    println(io, mtheta, "\n", 1.7, "\nindex R Z")
-                    foreach(i -> println(io, i, " ", x[i], " ", z[i]), 1:mtheta)
+            wall_response(x, z) =
+                mktempdir() do dir
+                    path = joinpath(dir, "wall.dat")
+                    open(path, "w") do io
+                        println(io, mtheta, "\n", 1.7, "\nindex R Z")
+                        foreach(i -> println(io, i, " ", x[i], " ", z[i]), 1:mtheta)
+                    end
+                    compute_vacuum_response(make(collect(R), collect(Z)), FileWall(; file=path, equal_arc_wall=false))
                 end
-                compute_vacuum_response(make(collect(R), collect(Z)), FileWall(; file=path, equal_arc_wall=false))
-            end
             ccw = wall_response(Rw, Zw)
             cw = @test_logs (:warn, r"runs clockwise") match_mode = :any wall_response(circshift(reverse(Rw), 1), circshift(reverse(Zw), 1))
             @test cw.wv ≈ ccw.wv

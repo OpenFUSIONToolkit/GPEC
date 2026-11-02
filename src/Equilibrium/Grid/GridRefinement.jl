@@ -408,8 +408,8 @@ function bracket_mandatory_nodes(grid::Vector{Float64}, centers::Vector{Float64}
         right < hi && push!(kept, (right, true))
     end
     isempty(capped) || @warn "$(length(capped)) rational surface(s) have grid bracket half-widths capped below their Δ′ stencil " *
-                             "(neighboring surface or domain edge too close, or a near-tangent surface with q′ ≈ 0); Δ′ there is less accurate. " *
-                             "(ψ, half-width, stencil): $(join(capped, ", "))"
+          "(neighboring surface or domain edge too close, or a near-tangent surface with q′ ≈ 0); Δ′ there is less accurate. " *
+          "(ψ, half-width, stencil): $(join(capped, ", "))"
     sort!(kept; by=first)
     merged = Float64[]
     for (v, _) in kept

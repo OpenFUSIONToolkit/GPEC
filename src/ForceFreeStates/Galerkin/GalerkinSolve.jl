@@ -194,7 +194,7 @@ function gal_scaled_lu_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{Com
     n = size(mat, 2)
     off = kl + ku + 1  # band row holding the diagonal
     d = [iszero(mat[off, j]) ? 1.0 : 1 / sqrt(abs(mat[off, j])) for j in 1:n]
-    for j in 1:n, i in max(1, j-ku):min(n, j+kl)
+    for j in 1:n, i in max(1, j - ku):min(n, j + kl)
         mat[off+i-j, j] *= d[i] * d[j]
     end
     sol .*= d
@@ -362,18 +362,18 @@ function gal_cholesky_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{Comp
     n = size(mat, 2)
     off = 2kl + 1
     a(i, j) = mat[off+i-j, j]
-    band(i) = max(1, i-kl):min(n, i+kl)
+    band(i) = max(1, i - kl):min(n, i + kl)
     fixed = [all(j == i ? a(i, j) == 1 : iszero(a(i, j)) for j in band(i)) for i in 1:n]
     for j in 1:n
         isfinite(a(j, j)) || return false
-        for i in (j+1):min(n, j+kl)
+        for i in (j+1):min(n, j + kl)
             isfinite(a(i, j)) && isfinite(a(j, i)) || return false
             fixed[i] || fixed[j] ||
                 abs(a(i, j) - conj(a(j, i))) <= 1e-10 * sqrt(abs(a(i, i))) * sqrt(abs(a(j, j))) || return false
         end
     end
     ab = zeros(ComplexF64, kl + 1, n)
-    for j in 1:n, i in j:min(n, j+kl)
+    for j in 1:n, i in j:min(n, j + kl)
         ab[1+i-j, j] = fixed[i] || fixed[j] ? (i == j ? one(ComplexF64) : zero(ComplexF64)) : a(i, j)
     end
     gal_zpbtrf!(ab, kl) || return false

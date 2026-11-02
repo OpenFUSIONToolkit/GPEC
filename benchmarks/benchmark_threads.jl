@@ -49,6 +49,6 @@ for (label, ex) in [("Solovev", sol_ex), ("DIIID-like", diiid_ex)]
     println("$label (N=$N, nthreads=$nthreads)")
     @printf("  forward    et[1]=%.5f  t=%.2fs  speedup=1.00×\n", et_fwd, t_fwd)
     @printf("  riccati    et[1]=%.5f  t=%.2fs  speedup=%.2f×  err=%.4f%%\n",
-        et_ric, t_ric, t_fwd/t_ric, err_ric)
+        et_ric, t_ric, t_fwd / t_ric, err_ric)
     println()
 end

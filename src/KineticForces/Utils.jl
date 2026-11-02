@@ -136,7 +136,7 @@ function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileS
         end
     end
     psi_outer > 0 && @warn "kinetic_axis_validity_psi: orbit widths also reach ⟨r⟩ out to ψ=$(round(psi_outer; sigdigits=3)), " *
-                           "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed" maxlog = 1
+          "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed" maxlog = 1
     return psi_c
 end
 
@@ -354,9 +354,12 @@ function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profi
     (ForceFreeStates.kinetic_source(ctrl.kinetic) isa KineticForcesControl && kinetic_profiles !== nothing) || return nodes
     for n_res in intr.nlow:intr.nhigh
         n_res == 0 && continue
-        append!(nodes, kinetic_resonance_psi_nodes(kinetic_profiles, equil;
-            n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=main_ion(equil)[1], mi=main_ion(equil)[2],
-            electron=kf_ctrl.electron, wdfac=kf_ctrl.magnetic_drift_factor))
+        append!(
+            nodes,
+            kinetic_resonance_psi_nodes(kinetic_profiles, equil;
+                n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=main_ion(equil)[1], mi=main_ion(equil)[2],
+                electron=kf_ctrl.electron, wdfac=kf_ctrl.magnetic_drift_factor)
+        )
     end
     psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
     psi_c > 0 && filter!(p -> p > psi_c, nodes)

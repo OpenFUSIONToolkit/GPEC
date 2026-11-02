@@ -218,6 +218,7 @@ model does not use may be left `nothing`; one it uses must be given, positive an
 # Arguments
 
   - `n_e` -- electron density in m⁻³
+
   - `t_e`, `t_i` -- electron and ion temperatures in eV
   - `omega_e`, `omega_i` -- electron and ion diamagnetic frequencies in rad/s
   - `qval` -- safety factor at the surface
@@ -234,6 +235,7 @@ model does not use may be left `nothing`; one it uses must be given, positive an
   - `a_minor` -- plasma minor radius `a` in m; needed by `:tau_E`
   - `dlnn`, `dlnTe`, `dlnTi` -- radial log-gradients of n, T_e, T_i in any common radial variable (only ratios enter); needed by `:D_perp`
   - `P_perp_model` -- how `P_perp` is built (default `:D_perp`, as in the `[SLAYER]` deck):
+
       + `:D_perp` -- τ_R/τ_⊥ with τ_⊥ = r_s²/D_⊥, Fitzpatrick, Phys. Plasmas 29, 032507 (2022), Eq. 16 (with Eqs. 4-6 and
         η_⊥ = η_∥); its τ = (T_e/T_i)(1+η_e)/(1+η_i) is the inverse of the `tau` field; flat temperatures give the `:c_beta` value
       + `:chi_perp_e`, `:chi_perp_i` -- τ_R·χ⊥/r_s² with the electron or ion χ⊥
@@ -365,8 +367,12 @@ function slayer_parameters(;
         all(x -> x !== nothing && isfinite(x), (dlnn, dlnTe, dlnTi)) ||
             throw(ArgumentError("slayer_parameters: P_perp_model=:D_perp needs finite dlnn, dlnTe and dlnTi; got $dlnn, $dlnTe, $dlnTi"))
         dp = t_e * (dlnn + dlnTe) + t_i * (dlnn + dlnTi)
-        dp != 0 || throw(ArgumentError("slayer_parameters: P_perp_model=:D_perp is undefined where the pressure gradient vanishes " *
-                                       "(t_e(dlnn+dlnTe) + t_i(dlnn+dlnTi) = 0); choose another P_perp_model for this surface"))
+        dp != 0 || throw(
+            ArgumentError(
+                "slayer_parameters: P_perp_model=:D_perp is undefined where the pressure gradient vanishes " *
+                "(t_e(dlnn+dlnTe) + t_i(dlnn+dlnTi) = 0); choose another P_perp_model for this surface"
+            )
+        )
         D_perp = c_beta^2 * eta / MU_0 +
                  (2 / 3) * (1 - c_beta^2) * (t_e * dlnTe * chi_perp_e + t_i * dlnTi * chi_perp_i) / dp
         tau_r / (rs^2 / D_perp)
@@ -377,8 +383,12 @@ function slayer_parameters(;
                             "Allowed: $(ALLOWED_P_PERP_MODELS)"))
     end
     isfinite(P_perp) && P_perp > 0 ||
-        throw(ArgumentError("slayer_parameters: P_perp_model=:$P_perp_model gave P_perp=$P_perp; check its inputs " *
-                            "(chi_perp_e=$chi_perp_e, chi_perp_i=$chi_perp_i, dlnn=$dlnn, dlnTe=$dlnTe, dlnTi=$dlnTi)"))
+        throw(
+            ArgumentError(
+                "slayer_parameters: P_perp_model=:$P_perp_model gave P_perp=$P_perp; check its inputs " *
+                "(chi_perp_e=$chi_perp_e, chi_perp_i=$chi_perp_i, dlnn=$dlnn, dlnTe=$dlnTe, dlnTi=$dlnTi)"
+            )
+        )
 
     # Normalized beta-related width and Δ-normalization
     d_beta = c_beta * d_i

@@ -97,7 +97,7 @@ function compute_sing_asymptotics(
         trace_floor = 64 * Base.eps(Float64) * opnorm(m0mat_block, Inf)
         sig > 0 && abs(block_tr) / 2 > max(1e-3 * abs(alpha_i), trace_floor) &&
             @warn @sprintf("Resonant M₀ block at ψ=%.6f, m=%d (sig=%+.0f): |tr|/2 = %.3e is not small against |α| = %.3e",
-                singp.psifac, singp.m[i], sig, abs(block_tr) / 2, abs(alpha_i)) _id=(:resonant_trace, objectid(intr), singp.psifac, singp.m[i]) maxlog=1
+                singp.psifac, singp.m[i], sig, abs(block_tr) / 2, abs(alpha_i)) _id = (:resonant_trace, objectid(intr), singp.psifac, singp.m[i]) maxlog = 1
         r1_i = r1[i]
         power[r1_i] = p_big
         power[r1_i+intr.numpert_total] = p_small
@@ -124,7 +124,7 @@ function compute_sing_asymptotics(
         msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1, 2]), imag(m0mat[1, 2]))
         msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2, 1]), imag(m0mat[2, 1]))
         msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2, 2]), imag(m0mat[2, 2]))
-        block_det = m0mat[1, 1]*m0mat[2, 2] - m0mat[2, 1]*m0mat[1, 2]
+        block_det = m0mat[1, 1] * m0mat[2, 2] - m0mat[2, 1] * m0mat[1, 2]
         block_tr = m0mat[1, 1] + m0mat[2, 2]
         msg *= @sprintf("  det= %+.12e, tr= %+.12e %+.12ei\n", real(block_det), real(block_tr), imag(block_tr))
         msg *= @sprintf("  alpha= %+.12e %+.12ei\n", real(alpha[1]), imag(alpha[1]))

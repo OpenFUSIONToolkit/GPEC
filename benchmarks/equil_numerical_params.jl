@@ -21,26 +21,26 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
-config_path  = joinpath(example_path, "gpec.toml")
+config_path = joinpath(example_path, "gpec.toml")
 
 function make_config(path, eq_type, mpsi, mtheta)
     raw = TOML.parsefile(path)
     raw["Equilibrium"]["eq_type"] = eq_type
-    raw["Equilibrium"]["mpsi"]    = mpsi
-    raw["Equilibrium"]["mtheta"]  = mtheta
+    raw["Equilibrium"]["mpsi"] = mpsi
+    raw["Equilibrium"]["mtheta"] = mtheta
     return GeneralizedPerturbedEquilibrium.equilibrium_config(raw, dirname(path))
 end
 
 function roundtrip_error(pe, raw_profile)
     psi_xs = pe.rzphi_xs
-    psio   = pe.psio
+    psio = pe.psio
     mtheta = length(pe.rzphi_ys) - 1
     errors = Float64[]
     for ipsi in 1:4:length(psi_xs)
         ψ = psi_xs[ipsi]
         for itheta in 1:8:mtheta+1
             θ = pe.rzphi_ys[itheta]
-            r2  = pe.rzphi_rsquared((ψ, θ))
+            r2 = pe.rzphi_rsquared((ψ, θ))
             off = pe.rzphi_offset((ψ, θ))
             rfac = sqrt(max(r2, 0.0))
             η = 2π * (θ + off)
@@ -61,9 +61,9 @@ PlasmaEquilibrium(warmup_cfg)
 rows = []
 
 # ── mpsi scan ──────────────────────────────────────────────────────────────────
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("mpsi scan (mtheta=256, default reltol)")
-println("=" ^ 65)
+println("="^65)
 for method in ["efit", "efit_arclength", "efit_by_inversion"]
     for mpsi in [64, 128, 256]
         cfg = make_config(config_path, method, mpsi, 256)
@@ -87,9 +87,9 @@ for method in ["efit", "efit_arclength", "efit_by_inversion"]
 end
 
 # ── mtheta scan ────────────────────────────────────────────────────────────────
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("mtheta scan (mpsi=128, default reltol)")
-println("=" ^ 65)
+println("="^65)
 for method in ["efit", "efit_arclength", "efit_by_inversion"]
     for mtheta in [128, 256, 512]
         cfg = make_config(config_path, method, 128, mtheta)
@@ -116,17 +116,17 @@ end
 # Note: reltol is not exposed through EquilibriumConfig yet.
 # This scan patches it by temporarily modifying the solver call.
 # TODO: expose etol/reltol as a config parameter when needed.
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("ODE reltol scan — NOTE: not yet exposed via config; using default reltol")
 println("(Add reltol to EquilibriumConfig and threading to enable this scan)")
-println("=" ^ 65)
+println("="^65)
 
 # ── Contour grid resolution scan (efit_by_inversion only) ─────────────────────
 # resolution_factor scales the adaptive contour grid of equilibrium_solver_by_inversion.
 # We call it directly here, bypassing the PlasmaEquilibrium constructor.
-println("\n" * "=" ^ 65)
+println("\n" * "="^65)
 println("Contour grid resolution scan (efit_by_inversion only, mpsi=128, mtheta=256)")
-println("=" ^ 65)
+println("="^65)
 for resolution_factor in [2.0, 4.0, 8.0]
     cfg = make_config(config_path, "efit_by_inversion", 128, 256)
     raw_input = Equilibrium.read_efit(cfg)

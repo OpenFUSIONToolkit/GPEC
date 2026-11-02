@@ -129,7 +129,7 @@ function _solution_at(
 
     # Same-side candidate nodes around the bracket, trimmed to the 4 nearest psi.
     side = sign(psi - psi_surf)
-    idxs = [j for j in max(1, il-3):min(nstep, ir+3) if sign(odet.psi_store[j] - psi_surf) == side]
+    idxs = [j for j in max(1, il - 3):min(nstep, ir + 3) if sign(odet.psi_store[j] - psi_surf) == side]
     while length(idxs) > 4
         abs(odet.psi_store[idxs[1]] - psi) > abs(odet.psi_store[idxs[end]] - psi) ? popfirst!(idxs) : pop!(idxs)
     end
@@ -284,7 +284,7 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
         resp.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     else
         resp.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
-        @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog=1
+        @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog = 1
     end
     resp.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
     resp.rational_psi = zeros(Float64, n_rational)

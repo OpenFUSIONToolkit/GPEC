@@ -714,17 +714,18 @@ function ballooning_alpha_crossings(
     ref = salpha_reference(psi_idx, plasma_eq)
 
     # Δ' vs α scaling at fixed shear; a failed evaluation (extreme corrections) returns NaN and is not a crossing.
-    delta_at(scale) = try
-        ballooning_delta_prime(
-            psi_idx,
-            plasma_eq;
-            corr_qprime=0.0,
-            corr_pprime=ref.pprime_norm_ref * (scale - 1.0),
-            theta_k=theta_k
-        ).delta_prime
-    catch
-        NaN
-    end
+    delta_at(scale) =
+        try
+            ballooning_delta_prime(
+                psi_idx,
+                plasma_eq;
+                corr_qprime=0.0,
+                corr_pprime=ref.pprime_norm_ref * (scale - 1.0),
+                theta_k=theta_k
+            ).delta_prime
+        catch
+            NaN
+        end
 
     samples = collect(range(0.0, max_alpha_scale; length=n_scan + 1))
     scales = _ballooning_marginal_crossings(delta_at, samples, tol; max_crossings=max_crossings)
@@ -896,7 +897,7 @@ function ballooning_alpha_boundaries(
             length(cr.alphas) >= 2 && (alpha_critical2[i] = cr.alphas[2])
         catch err
             if verbose
-                @warn "ballooning alpha boundaries failed" psi_idx=i exception=err
+                @warn "ballooning alpha boundaries failed" psi_idx = i exception = err
             end
         end
     end
@@ -930,17 +931,18 @@ function ballooning_qprime_crossings(
     ref = salpha_reference(psi_idx, plasma_eq)
 
     # Δ' vs q' scaling at the experimental pressure gradient; a failed evaluation returns NaN and is not a crossing.
-    delta_at(scale) = try
-        ballooning_delta_prime(
-            psi_idx,
-            plasma_eq;
-            corr_qprime=ref.qprime_norm_ref * (scale - 1.0),
-            corr_pprime=0.0,
-            theta_k=theta_k
-        ).delta_prime
-    catch
-        NaN
-    end
+    delta_at(scale) =
+        try
+            ballooning_delta_prime(
+                psi_idx,
+                plasma_eq;
+                corr_qprime=ref.qprime_norm_ref * (scale - 1.0),
+                corr_pprime=0.0,
+                theta_k=theta_k
+            ).delta_prime
+        catch
+            NaN
+        end
 
     samples = collect(range(max_qprime_scale, min_qprime_scale; length=n_scan + 1))
     scales = _ballooning_marginal_crossings(delta_at, samples, tol)
@@ -985,7 +987,7 @@ function ballooning_qprime_boundaries(
             length(cr.qprimes) >= 2 && (qprime_critical2[i] = cr.qprimes[2])
         catch err
             if verbose
-                @warn "ballooning qprime boundaries failed" psi_idx=i exception=err
+                @warn "ballooning qprime boundaries failed" psi_idx = i exception = err
             end
         end
     end
@@ -1029,7 +1031,7 @@ function ballooning_delta_prime_map(
             delta_prime[k, :] .= vec(res.delta_prime)
         catch err
             if verbose
-                @warn "ballooning delta-prime map failed" psi_idx=i exception=err
+                @warn "ballooning delta-prime map failed" psi_idx = i exception = err
             end
         end
     end
@@ -1076,7 +1078,7 @@ function ballooning_qprime_delta_prime_map(
             delta_prime[k, :] .= vec(res.delta_prime)
         catch err
             if verbose
-                @warn "ballooning qprime delta-prime map failed" psi_idx=i exception=err
+                @warn "ballooning qprime delta-prime map failed" psi_idx = i exception = err
             end
         end
     end
