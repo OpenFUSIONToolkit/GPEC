@@ -436,7 +436,8 @@ end
 The tolerance multiplier at which the locking risk reaches `target_percent`, by linear
 interpolation in the logarithms of both the scale and the risk between the two scan points
 that bracket the target (the scan need not be monotonic; the first bracketing pair from the
-smallest scale is used). Returns `NaN` when no pair brackets the target. `corrected` reads the
+smallest scale is used). A pair that starts at scale 0 is interpolated linearly in the scale.
+Returns `NaN` when no pair brackets the target. `corrected` reads the
 error-field-corrected curve.
 """
 function allowable_tolerance(scan::ToleranceScan, target_percent::Real; corrected::Bool=false)

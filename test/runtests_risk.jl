@@ -142,7 +142,7 @@ using Statistics
         scan0 = EF.ToleranceScan([0.0, 1.0, 2.0], [0.5, 2.0, 10.0], [0.5, 2.0, 10.0], z, z, 0.5)
         @test EF.allowable_tolerance(scan0, 0.5) == 0.0
         @test EF.allowable_tolerance(scan0, 2.0) == 1.0
-        @test 0 < EF.allowable_tolerance(scan0, 1.0) < 1
+        @test EF.allowable_tolerance(scan0, 1.0) ≈ 0.5
         @test_throws ArgumentError EF.tolerance_scan(table, ts, sets, mc_ctrl, sharp, scen; scales=Float64[])
     end
 
