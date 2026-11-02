@@ -26,16 +26,32 @@ const _T_FLOOR_KEV = 1.0e-6      # collision-model temperature floor (1 meV), as
 _collision_tkev(T) = max(T / _KEV_J, _T_FLOOR_KEV)
 
 # NRL-formulary Coulomb logarithm (natural log) at the floored temperature, floored at 1; n_e in m⁻³, T_e in J.
-_coulomb_log(ne, Te) = ne > 0 ? max(17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(_collision_tkev(Te)), 1.0) : 1.0
+_coulomb_log(ne, Te) = max(17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(_collision_tkev(Te)), 1.0)
+
+# Warn once, as Fortran PENTRC, when a cold node engages the temperature or Coulomb-logarithm floor.
+function _warn_collision_floors(source, ne, Te, Ti)
+    any(T -> T / _KEV_J < _T_FLOOR_KEV, Te) | any(T -> T / _KEV_J < _T_FLOOR_KEV, Ti) &&
+        @warn "$source: flooring T at 1 meV in the collision frequencies" maxlog = 1
+    any(i -> 17.3 - 0.5 * log(ne[i] / 1.0e20) + 1.5 * log(_collision_tkev(Te[i])) < 1, eachindex(ne)) &&
+        @warn "$source: flooring the Coulomb logarithm at 1 in the collision frequencies" maxlog = 1
+    return nothing
+end
 
 # Names kinetic profiles in error messages by their provenance, when they carry one.
 _describe(data) = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
 
-# Hard stop on an unphysical negative density or temperature (bad input or a resample overshoot).
+# Hard stop on an unphysical negative density or temperature (bad input or an extrapolation past the table).
 function _assert_nonneg_profile(source, label, arr, psi_reg)
     i = findfirst(<(0), arr)
     i === nothing ||
         error("$source: negative $label = $(arr[i]) at ψ_n = $(psi_reg[i]) — unphysical")
+end
+
+# Hard stop on a non-positive electron or main-ion density, which the collision model divides by.
+function _assert_positive_density(source, label, arr, psi_reg)
+    i = findfirst(<=(0), arr)
+    i === nothing ||
+        error("$source: $label = $(arr[i]) at ψ_n = $(psi_reg[i]) — densities must be positive")
 end
 
 """
@@ -236,8 +252,6 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     Te_in = _need(data.T_e, "T_e")
     omE_in = _need(data.omega_E, "omega_E")
     ni_in = data.n_i === nothing ? copy(ne_in) : data.n_i   # TOTAL main-ion density
-    _assert_nonneg_profile(source, "T_i", Ti_in, psi_in)
-    _assert_nonneg_profile(source, "T_e", Te_in, psi_in)
 
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
@@ -246,8 +260,11 @@ function resolve_ntv_species(data::KineticProfileData, ion_species::AbstractVect
     Ti = _pchip_resample(psi_in, Ti_in, psi_reg) .* _EV_J
     Te = _pchip_resample(psi_in, Te_in, psi_reg) .* _EV_J
     omegaE = _pchip_resample(psi_in, omE_in, psi_reg)
-    _assert_nonneg_profile(source, "n_e", ne, psi_reg)
-    _assert_nonneg_profile(source, "n_i (total)", ni_total, psi_reg)
+    _assert_positive_density(source, "n_e", ne, psi_reg)
+    _assert_positive_density(source, "n_i (total)", ni_total, psi_reg)
+    _assert_nonneg_profile(source, "T_i", Ti, psi_reg)
+    _assert_nonneg_profile(source, "T_e", Te, psi_reg)
+    _warn_collision_floors(source, ne, Te, Ti)
 
     # Fractions are shares of the total n_i: never above 1, and exactly 1 when every species is fraction-specified.
     fracs = [s.fraction for s in ion_species if !isnan(s.fraction)]
@@ -349,7 +366,7 @@ end
 
 The NTV view of raw kinetic profiles (e.g. `equil.kinetic`): interpolate onto a regular
 101-point ψ grid, optionally apply profile scaling knobs, derive collisional / Z_eff
-diagnostics, and return a `KineticProfileSplines` with independent named cubic splines.
+diagnostics, and return a `KineticProfileSplines` of named splines (pchip for lnΛ and ν, cubic otherwise).
 
 Needs `n_e`, `T_i`, `T_e` and `omega_E`; `n_i` defaults to `n_e`. See
 [`read_kinetic_file`](@ref) for the file formats.
@@ -389,8 +406,6 @@ function kinetic_profile_splines(data::KineticProfileData;
     Te_input_eV = _need(data.T_e, "T_e")
     omegaE_input = _need(data.omega_E, "omega_E")
     ni_input = data.n_i === nothing ? copy(ne_input) : data.n_i
-    _assert_nonneg_profile(_describe(data), "T_i", Ti_input_eV, psi_input)
-    _assert_nonneg_profile(_describe(data), "T_e", Te_input_eV, psi_input)
 
     nkin = _NKIN
     psi_reg = collect(0:nkin) ./ nkin
@@ -401,6 +416,11 @@ function kinetic_profile_splines(data::KineticProfileData;
     Ti = _pchip_resample(psi_input, Ti_input_eV, psi_reg) .* _EV_J
     Te = _pchip_resample(psi_input, Te_input_eV, psi_reg) .* _EV_J
     omegaE = _pchip_resample(psi_input, omegaE_input, psi_reg)
+    _assert_positive_density(_describe(data), "n_e", ne, psi_reg)
+    _assert_positive_density(_describe(data), "n_i", ni, psi_reg)
+    _assert_nonneg_profile(_describe(data), "T_i", Ti, psi_reg)
+    _assert_nonneg_profile(_describe(data), "T_e", Te, psi_reg)
+    _warn_collision_floors(_describe(data), ne, Te, Ti)
 
     needs_rotation_reform = density_factor != 1.0 || temperature_factor != 1.0 || toroidal_rotation_factor != 1.0
     any_scaling = needs_rotation_reform || ExB_rotation_factor != 1.0
@@ -454,7 +474,7 @@ function kinetic_profile_splines(data::KineticProfileData;
         T_i = Ti[i]
         T_e = Te[i]
 
-        z = n_e > 0 ? zimp - (n_i / n_e) * zi * (zimp - zi) : Float64(zimp)
+        z = zimp - (n_i / n_e) * zi * (zimp - zi)
         zpitch = 1.0 + (1.0 + mimp) / (2.0 * mimp) * zimp * (z - 1.0) / (zimp - z)
 
         ll = _coulomb_log(n_e, T_e)

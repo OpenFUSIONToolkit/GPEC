@@ -222,7 +222,7 @@ KineticProfileData(data::KineticProfileData; kwargs...) =
 """
     KineticProfileSplines
 
-Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures, ExB rotation,
+Named 1D spline interpolants for kinetic profiles (densities, temperatures, ExB rotation,
 collisional diagnostics) on the regular kinetic ψ grid, with derivative views of the densities and
 temperatures for the diamagnetic frequencies of the NTV kernel. The Coulomb logarithm and collision
 frequencies are monotone (pchip) interpolants, so a steep cold edge cannot ring below zero.

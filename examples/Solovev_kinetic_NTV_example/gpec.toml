@@ -16,7 +16,7 @@ psilow = 1e-4                           # Lower limit of normalized poloidal flu
 psihigh = 0.9995                        # Upper limit of normalized poloidal flux
 mpsi = 128                              # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
-newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
+newq0 = 0                               # Target on-axis safety factor q(0) (0 = use input value; q is positive, so negative values are rejected)
 flux_surface_rtol = 1e-7                # Relative tolerance of the ODE solves that trace each flux surface
 
 [Wall]

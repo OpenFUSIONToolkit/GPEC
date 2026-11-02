@@ -193,6 +193,9 @@ using HDF5
             end
         end
         @test_throws ErrorException EQ.kinetic_profile_splines(EQ.KineticProfileData(data; T_e=cold(2500.0) .- 1.0))
+        @test_throws ErrorException EQ.resolve_ntv_species(EQ.KineticProfileData(data; T_i=cold(2000.0) .- 1.0), [KF.IonSpecies(; z=1, m=2, fraction=1.0)])
+        # The collision model divides by the densities, so a zero density stops the run as in Fortran PENTRC.
+        @test_throws r"densities must be positive" EQ.kinetic_profile_splines(EQ.KineticProfileData(data; n_e=[fill(1.1e19, length(psi) - 1); 0.0]))
     end
 
     @testset "combine_species_states" begin
