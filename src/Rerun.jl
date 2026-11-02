@@ -173,21 +173,74 @@ _rerun_side_file(output_name::AbstractString, suffix::AbstractString) = splitext
 const _RECORDED_KINETIC = "Input/RawInputs/Kinetic"
 const _RECORDED_WALL = "Input/RawInputs/Wall/wall_file_raw"
 
+# The running GPEC's version as `git describe` gives it, or "unknown" outside a git clone.
+function _gpec_git_version()
+    try
+        String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
+    catch
+        "unknown"
+    end
+end
+
+# The commit or tag to check out for a recorded `git describe` version, or `nothing` when the version is unknown.
+function _version_checkout(version::AbstractString)
+    version == "unknown" && return nothing
+    m = match(r"^(.+?)(?:-\d+-g([0-9a-f]+))?(?:-dirty)?$", version)
+    m === nothing && return nothing
+    return something(m.captures[2], m.captures[1])
+end
+
+# What a user can do with a gpec.h5 this GPEC cannot replay: replay it with the version that wrote it, or run its deck with this one.
+function _replay_remedy(h5path::AbstractString, source_git::AbstractString; has_deck::Bool=true)
+    h5abs = abspath(h5path)
+    wrote = source_git == "unknown" ? "a GPEC version it does not record" : "GPEC $source_git"
+    io = IOBuffer()
+    checkout = _version_checkout(source_git)
+    print(io, "\nThe file was written by $wrote; this is GPEC $(_gpec_git_version()). To continue",
+        checkout === nothing ? ":" : ", either:")
+    if checkout !== nothing
+        print(io, "\n  - Replay it with the version that wrote it: in your GPEC clone run `git checkout $checkout` and ",
+            "`julia --project -e 'using Pkg; Pkg.instantiate()'`, then replay the file again",
+            endswith(source_git, "-dirty") ? " (that run had uncommitted changes to GPEC, so its results may not reproduce exactly)" : "",
+            ". Return with `git checkout -` when done.")
+    end
+    if has_deck
+        deck_dir = joinpath(dirname(h5abs), "stored_deck")
+        print(io, "\n  - Run its deck with this version: from your GPEC clone, write the deck the file stores to $deck_dir with\n",
+            "      julia --project -e 'using HDF5; mkpath(\"$deck_dir\"); write(\"$deck_dir/gpec.toml\", h5read(\"$h5abs\", \"Input/gpec_toml_raw\"))'\n",
+            "    and run that directory. The deck reads its input files from the paths the original run used, ",
+            "and GPEC names any key it must change.")
+    else
+        print(io, "\n  - Run your original gpec.toml with this version; GPEC names any key it must change.")
+    end
+    return String(take!(io))
+end
+
+# Stop on retired keys in a stored deck, keeping the per-key advice (it is what running the deck needs) and adding `remedy`.
+function _stop_on_stale_stored_deck(check, h5path, remedy)
+    try
+        check()
+    catch e
+        e isa ErrorException || rethrow()
+        error("$h5path cannot be replayed by this GPEC version because its stored deck is out of date:\n  $(e.msg)$remedy")
+    end
+    return nothing
+end
+
 # Point the stored deck's kinetic_file and file wall at copies written from the source snapshot. A deck that names
 # either without its snapshot comes from an older GPEC and cannot be replayed faithfully.
-function _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic::Bool, wall_raw)
-    remedy = "re-run from the original deck instead of replaying it"
+function _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic::Bool, wall_raw, remedy)
     equil = inputs["Equilibrium"]
     if has_kinetic
         kinetic_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.kinetic)
         Equilibrium.write_kinetic_h5(joinpath(output_dir, kinetic_file), h5open(f -> Equilibrium._read_kinetic_group(f[_RECORDED_KINETIC], source_h5), source_h5))
         equil["kinetic_file"], equil["kinetic_group"] = kinetic_file, "/"
     elseif !isempty(get(equil, "kinetic_file", ""))
-        error("$source_h5 names a kinetic_file but records no $_RECORDED_KINETIC; $remedy")
+        error("$source_h5 cannot be replayed: its deck names a kinetic_file but the file records no $_RECORDED_KINETIC.$remedy")
     end
     wall = get(inputs, "Wall", nothing)
     if wall !== nothing && get(wall, "shape", "") == "file"
-        wall_raw === nothing && error("$source_h5 has a file wall but records no $_RECORDED_WALL; $remedy")
+        wall_raw === nothing && error("$source_h5 cannot be replayed: its deck names a wall file but the file records no $_RECORDED_WALL.$remedy")
         wall_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.wall)
         write(joinpath(output_dir, wall_file), wall_raw)
         wall["file"] = wall_file
@@ -218,8 +271,9 @@ function build_inputs_from_h5(args::Vector{String})
     # Stored TOML, equilibrium ingest and the forcing snapshot (present only with [PerturbedEquilibrium]).
     use_coils = cli.coil_source == "coils"
     toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils, tolerance_raw, has_kinetic, wall_raw = h5open(source_h5, "r") do in_h5
+        source_git = haskey(in_h5, "Info/git_version") ? read(in_h5, "Info/git_version") : "unknown"
         haskey(in_h5, "Input/gpec_toml_raw") ||
-            error("Source HDF5 $source_h5 has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
+            error("$source_h5 cannot be replayed: it records no deck (Input/gpec_toml_raw)." * _replay_remedy(source_h5, source_git; has_deck=false))
         forcing_modes = if !haskey(in_h5, "Input/RawInputs/ForcingTerms")
             nothing
         else
@@ -240,7 +294,7 @@ function build_inputs_from_h5(args::Vector{String})
         (
             read(in_h5, "Input/gpec_toml_raw"),
             read_equilibrium_ingest(in_h5),
-            haskey(in_h5, "Info/git_version") ? read(in_h5, "Info/git_version") : "unknown",
+            source_git,
             forcing_modes,
             coil_sets,
             haskey(in_h5, _RECORDED_TOLERANCES) ? read(in_h5, _RECORDED_TOLERANCES) : nothing,
@@ -256,8 +310,8 @@ function build_inputs_from_h5(args::Vector{String})
     # first, then CLI flags, so an overridden [ForcingTerms] still wins.
     inputs = TOML.parse(toml_raw)
     # Overrides can set keys but not delete them, so a stored deck with retired keys cannot be replayed.
-    _stop_on_deprecated_deck_keys(inputs;
-        remedy="$source_h5 was written by an older GPEC version; re-run from the original deck instead of replaying it")
+    remedy = _replay_remedy(source_h5, source_git)
+    _stop_on_stale_stored_deck(() -> _stop_on_deprecated_deck_keys(inputs), source_h5, remedy)
     if forcing_snapshot !== nothing
         forcing_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.forcing)
         modes, normalization = forcing_snapshot
@@ -271,7 +325,7 @@ function build_inputs_from_h5(args::Vector{String})
         write(joinpath(output_dir, tolerance_file), tolerance_raw)
         inputs["ErrorFields"]["tolerance_file"] = tolerance_file
     end
-    _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic, wall_raw)
+    _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic, wall_raw, remedy)
     if cli.override_file !== nothing
         isfile(cli.override_file) || error("Override file not found: $(cli.override_file)")
         file_overrides = TOML.parsefile(cli.override_file)
@@ -284,11 +338,7 @@ function build_inputs_from_h5(args::Vector{String})
     # Force the rerun output file name so the source is never overwritten.
     get!(inputs, "Run", Dict{String,Any}())["output_file"] = output_name
 
-    current_git = try
-        String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
-    catch
-        "unknown"
-    end
+    current_git = _gpec_git_version()
 
     @info "\n$_BANNER\n  GPEC RERUN  [source git: $source_git → current: $current_git]\n" *
           "  source: $(abspath(source_h5))\n" *
@@ -330,11 +380,15 @@ function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir
     return eq_config, additional_input
 end
 
+# The GPEC version recorded in an open gpec.h5.
+_recorded_version(f) = haskey(f, "Info/git_version") ? read(f, "Info/git_version") : "unknown"
+
 # The recorded kinetic profiles with the stored deck's composition; `nothing` when the run had none.
 function _replay_kinetic_profiles(f, config::Equilibrium.EquilibriumConfig, h5path)
     if !haskey(f, _RECORDED_KINETIC)
         isempty(config.kinetic_file) && return nothing
-        error("$h5path names a kinetic_file but records no $_RECORDED_KINETIC; re-run from the original deck")
+        error("$h5path cannot be restored: its deck names a kinetic_file but the file records no $_RECORDED_KINETIC." *
+              _replay_remedy(h5path, _recorded_version(f)))
     end
     raw = Equilibrium._read_kinetic_group(f[_RECORDED_KINETIC], "$h5path $_RECORDED_KINETIC")
     return Equilibrium.KineticProfileData(raw; Equilibrium.kinetic_composition(config)...)
@@ -351,10 +405,12 @@ one consistent frozen equilibrium and the surface described by the stored respon
 function equilibrium_from_h5(h5path::AbstractString)
     isfile(h5path) || error("HDF5 file not found: $h5path")
     return h5open(h5path, "r") do f
-        haskey(f, "Input/gpec_toml_raw") || error("$h5path has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
+        haskey(f, "Input/gpec_toml_raw") ||
+            error("$h5path cannot be restored: it records no deck (Input/gpec_toml_raw)." * _replay_remedy(h5path, _recorded_version(f); has_deck=false))
         haskey(f, "Info/psilim") || error("$h5path has no Info/psilim")
         inputs = TOML.parse(read(f, "Input/gpec_toml_raw"))
-        _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium")
+        _stop_on_stale_stored_deck(() -> _stop_on_deprecated_keys(inputs["Equilibrium"], _DEPRECATED_EQUIL_KEYS, "Equilibrium"), h5path,
+            _replay_remedy(h5path, _recorded_version(f)))
         config = equilibrium_config(merge(inputs, Dict{String,Any}("Equilibrium" => merge(inputs["Equilibrium"], Dict{String,Any}("eq_filename" => "")))), dirname(abspath(h5path)))
         params = Equilibrium.EquilibriumParameters()
         for field in fieldnames(Equilibrium.EquilibriumParameters)

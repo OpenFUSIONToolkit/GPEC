@@ -124,8 +124,26 @@ end
                     inputs["PerturbedEquilibrium"]["fixed_boundary"] = false
                     delete_object(h5, "Input/gpec_toml_raw")
                     h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                    delete_object(h5, "Info/git_version")
+                    h5["Info/git_version"] = "v1.5.0-412-gabc1234-dirty"
                 end
-                @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+                # The error keeps the per-key advice and tells the user which version wrote the file and how to get it.
+                err = try
+                    GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+                catch e
+                    e
+                end
+                @test err isa ErrorException
+                @test occursin("`fixed_boundary`, which is no longer a key; remove from gpec.toml", err.msg)
+                @test occursin("written by GPEC v1.5.0-412-gabc1234-dirty", err.msg)
+                @test occursin("git checkout abc1234", err.msg) && occursin("uncommitted changes", err.msg)
+                @test occursin("h5read(\"$(abspath(old_h5))\", \"Input/gpec_toml_raw\")", err.msg)
+            end
+        end
+
+        @testset "a recorded version names the commit to check out" begin
+            for (version, checkout) in ("v2.0.0" => "v2.0.0", "v2.0.0-3-gdeadbee" => "deadbee", "deadbee" => "deadbee", "unknown" => nothing)
+                @test GeneralizedPerturbedEquilibrium._version_checkout(version) == checkout
             end
         end
 
