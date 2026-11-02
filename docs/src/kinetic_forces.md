@@ -28,17 +28,18 @@ extension:
     compatibility, or nine columns that append `lnLambda nu_i[1/s] nu_e[1/s]`
     (the Fortran PENTRC `kinetic_format = "rates-v1"` table). Header rows are skipped.
 
-Supplied collision rates replace the internal Krook collision model of the NTV calculation, which
-otherwise computes them from ``n`` and ``T`` (Logan & Park 2013 Eq. 6). Each is optional and must be
-positive. Like Fortran PENTRC, they are interpolated in log space, geometrically between table
-points; outside the table's ψ range the end interval's curve is extended in log space, so supply
-the rates over the whole ψ range. A supplied `lnLambda` also replaces the `lnLambda_form` Coulomb
-logarithm of the resistivity closure, so the tearing layers see the same value; the closure's
-electron collisionality ``\nu_{*e}`` is still built from ``n_e`` and ``T_e`` with that ``\ln\Lambda``,
-not from a supplied `nu_e`. A supplied `nu_i` is the first main ion's rate; the other ion species,
-the impurity among them, keep the internal model's ``(Z_s/Z_1)^2\sqrt{m_1/m_s}`` ratio to it. The
-density and temperature scaling factors of `[KineticForces]` do not rescale supplied rates, while
-`collisionality_factor` still multiplies them.
+Supplied collision rates replace the internal Krook collision model of the NTV calculation
+(Logan & Park 2013 Eq. 6), which otherwise computes them from ``n`` and ``T``:
+
+  - Each of `lnLambda`, `nu_i` and `nu_e` is optional and must be positive.
+  - They are interpolated in log space. Outside the table's ψ range the end interval is extended in log
+    space, so supply them over the whole ψ range.
+  - A supplied `nu_i` is the first main ion's rate; the other ion species and the impurity keep the
+    model's ``(Z_s/Z_1)^2\sqrt{m_1/m_s}`` ratio to it.
+  - A supplied `lnLambda` also replaces the `lnLambda_form` one in the tearing layers' resistivity. Their
+    ``\nu_{*e}`` is built from ``n_e``, ``T_e`` and that ``\ln\Lambda``, not from a supplied `nu_e`.
+  - The density and temperature scaling factors of `[KineticForces]` do not rescale supplied rates;
+    `collisionality_factor` still multiplies them.
 
 The NTV calculation consumes `n_i, n_e, T_i, T_e, omega_E`; `chi_e`/`chi_i`/`chi_phi`/`zeff`,
 when present, are carried for the resistive-layer (SLAYER) analysis and ignored

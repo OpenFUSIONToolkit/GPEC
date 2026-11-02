@@ -40,8 +40,7 @@ end
 # Names kinetic profiles in error messages by their provenance, when they carry one.
 _describe(data) = isempty(data.provenance) ? "kinetic profiles" : "kinetic profiles ($(data.provenance))"
 
-# A supplied rate profile on the kinetic grid: pchip in log space, as Fortran PENTRC `rates-v1`, so it interpolates
-# geometrically across decades.
+# Supplied rate on the kinetic grid: pchip in log space, as Fortran rates-v1, so it stays positive between points.
 _supplied_rate(psi_in, v, psi_reg) = v === nothing ? nothing : exp.(_pchip_resample(psi_in, log.(v), psi_reg))
 
 # Hard stop on an unphysical negative density or temperature (bad input or an extrapolation past the table).
@@ -90,7 +89,7 @@ const _KINETIC_H5_PROFILES = ("n_i" => "m^-3", "n_e" => "m^-3", "T_i" => "eV", "
 Read a kinetic-profile file, dispatching on extension: HDF5 (`.h5`/`.hdf5`) via
 the GPEC kinetic schema, otherwise a 6-column ASCII table (`.gpeckf`/`.kin`/`.dat`:
 `psi_n n_i n_e T_i[eV] T_e[eV] omega_E`), or a 9-column one that appends `lnLambda nu_i[1/s] nu_e[1/s]`
-as Fortran PENTRC `kinetic_format = "rates-v1"`. Returns the raw columns; downstream consumers
+(the Fortran PENTRC rates-v1 table). Returns the raw columns; downstream consumers
 validate the fields they require.
 """
 function read_kinetic_file(path::AbstractString; group::AbstractString="/")
@@ -236,7 +235,8 @@ paths (the KineticForces quadrature and the self-consistent kinetic-matrix build
 this set. Errors on any negative density.
 
 Each descriptor's `profiles` carries that species' density as `ni_spline` and its full-composition
-Krook collision frequency (Logan & Park 2013 Eq. 6) as `nui_spline`; the other profiles are shared.
+Krook collision frequency (Logan & Park 2013 Eq. 6) as `nui_spline`, or, when `nu_i` is supplied, that rate
+scaled by (z_s/z₁)²·√(m₁/m_s); the other profiles are shared.
 A main ion's density is `fraction · n_i` (`n_i` is the total main-ion density) or the named `n_*`
 dataset given by `density` (e.g. `"n_D"`). In a mixed fraction/density list the impurity content is
 set by the file's n_i/n_e deficit. The `zpitch` closure is exact for z=1 main ions and approximate
@@ -390,8 +390,9 @@ The NTV view of raw kinetic profiles (e.g. `equil.kinetic`): interpolate onto a 
 101-point ψ grid, optionally apply profile scaling knobs, derive collisional / Z_eff
 diagnostics, and return a `KineticProfileSplines` of named splines (pchip for lnΛ and ν, cubic otherwise).
 
-Needs `n_e`, `T_i`, `T_e` and `omega_E`; `n_i` defaults to `n_e`. See
-[`read_kinetic_file`](@ref) for the file formats.
+Needs `n_e`, `T_i`, `T_e` and `omega_E`; `n_i` defaults to `n_e`. Supplied `lnLambda`, `nu_i` and `nu_e`
+replace the model's values and are not rescaled by the scaling factors. See [`read_kinetic_file`](@ref)
+for the file formats.
 
 # Arguments
 

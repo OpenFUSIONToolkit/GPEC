@@ -110,8 +110,7 @@ dom.singular_values .* c                                    # the quantity each 
 The bare form carries no (m, n) labels, so `check_mode_basis` cannot guard the projection: build `rc` from
 the same file as `C`.
 
-The window replaces Fortran GPEC's local-coupling outputs. There, a different range of surfaces meant a new
-run; here any range, on any of the five matrices, takes one SVD of the stored matrix.
+Any window, on any of the five matrices, is one SVD of the stored matrix.
 
 ```@docs
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.ResonantCoupling

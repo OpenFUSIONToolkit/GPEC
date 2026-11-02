@@ -8,9 +8,8 @@ kinetic-resonance surface locator built on it.
 """
     check_inner_quadrature(I, E, atol, rtol, what)
 
-Warn once per integral kind `what` when a pitch or energy quadrature returned an error estimate `E`
-above its tolerance `max(atol, rtol·|I|)`, which QuadGK does only when it stops at its evaluation cap,
-or a non-finite result. The ψ quadrature sees only the values these return, not their errors.
+Warn once per integral kind `what` and Julia session when the error estimate `E` exceeds `max(atol, rtol·‖I‖)`,
+i.e. QuadGK stopped short of its tolerance (evaluation cap or endpoint roundoff), or when `I` or `E` is not finite.
 """
 function check_inner_quadrature(I, E, atol, rtol, what::String)
     nI = norm(I)
