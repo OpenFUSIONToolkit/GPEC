@@ -1,0 +1,18 @@
+# GPEC documentation-figure provenance manifest.
+# One [<module>.<figure>] entry per committed PNG under docs/src/figures/.
+# Regenerate a figure (and this entry) only when a file in its `depends`
+# list changes the numbers it shows — see docs/DOC_STANDARD.md.
+
+
+[ballooning.delta_prime_matching]
+commit = "legacy"
+date = "unknown"
+depends = ["src/ForceFreeStates/Ballooning.jl"]
+note = "Predates the provenance system; compared methods for extracting the ballooning Delta_prime and c_a1. Original generator script not preserved."
+script = "(not preserved)"
+
+[inner_layer.backend_regime_map]
+commit = "3a0837e3-dirty"
+date = "2026-07-08"
+depends = ["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/Galerkin.jl", "src/InnerLayer/GGJ/Shooting.jl"]
+script = "make_backend_regime_map.jl"
