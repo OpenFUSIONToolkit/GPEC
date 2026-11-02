@@ -4,13 +4,15 @@ name: Format and Hygiene
 # contributors who have not run `pre-commit install` locally are still caught.
 #
 # The `pre-commit` job fails whenever the hooks rewrite a tracked file, so it
-# reports whether the repository is currently clean under the formatter. It is
-# expected to fail until the one-off `pre-commit run --all-files` sweep lands.
-#
-# Make `pre-commit` a required status check only after that sweep, otherwise it
-# blocks every pull request on pre-existing drift.
+# reports whether the repository is clean under the formatter. The repository
+# was swept with `pre-commit run --all-files` when this check was enabled, so
+# `pre-commit` can be a required status check. Pushes to develop are checked too,
+# since two pull requests that are each clean can merge into unformatted code.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - develop
   pull_request:
     branches:
       - main
