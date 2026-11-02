@@ -722,7 +722,7 @@ using TOML
         for entry in KF.METHOD_REGISTRY
             @test entry.flag in fieldnames(KF.KineticForcesControl)
             @test endswith(string(entry.flag), "_flag")
-            @test entry.kind in (:gar, :fcgl, :rlar, :clar)
+            @test entry.kind in (:gar, :fcgl)
             @test KF.method_kind(entry.name) == entry.kind
         end
     end

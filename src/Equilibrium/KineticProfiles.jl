@@ -87,25 +87,27 @@ Read the GPEC HDF5 kinetic schema. Only `psi` is required; other standard datase
 optional and surfaced as-is. Non-standard `n_*` datasets become named per-species densities.
 """
 function _read_kinetic_h5(path::AbstractString; group::AbstractString="/")
-    h5open(path, "r") do f
-        g = group == "/" ? f : f[group]
-        haskey(g, "psi") || error("kinetic HDF5 '$path' group '$group': missing required dataset 'psi'")
-        rd(name) = haskey(g, name) ? Float64.(vec(read(g[name]))) : nothing
-        prov = ""
-        ats = attributes(g)
-        haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
-        # Non-standard datasets named `n_*` (e.g. "n_D", "n_T") are named per-species density
-        # profiles for explicit multi-ion input; other names are reserved for future schema fields.
-        extras = Dict{String,Vector{Float64}}()
-        for k in keys(g)
-            (k == "psi" || any(p -> first(p) == k, _KINETIC_H5_PROFILES) || !startswith(k, "n_")) && continue
-            v = read(g[k])
-            v isa AbstractArray && (extras[k] = Float64.(vec(v)))
-        end
-        return KineticProfileData(; psi=Float64.(vec(read(g["psi"]))),
-            (Symbol(name) => rd(name) for (name, _) in _KINETIC_H5_PROFILES)...,
-            species_densities=(isempty(extras) ? nothing : extras), provenance=prov)
+    h5open(f -> _read_kinetic_group(group == "/" ? f : f[group], "kinetic HDF5 '$path' group '$group'"), path, "r")
+end
+
+# The kinetic profiles in the open HDF5 file or group `g`; `label` names it in errors.
+function _read_kinetic_group(g, label::AbstractString)
+    haskey(g, "psi") || error("$label: missing required dataset 'psi'")
+    rd(name) = haskey(g, name) ? Float64.(vec(read(g[name]))) : nothing
+    prov = ""
+    ats = attributes(g)
+    haskey(ats, "provenance") && (prov = string(read(ats["provenance"])))
+    # Non-standard datasets named `n_*` (e.g. "n_D", "n_T") are named per-species density
+    # profiles for explicit multi-ion input; other names are reserved for future schema fields.
+    extras = Dict{String,Vector{Float64}}()
+    for k in keys(g)
+        (k == "psi" || any(p -> first(p) == k, _KINETIC_H5_PROFILES) || !startswith(k, "n_")) && continue
+        v = read(g[k])
+        v isa AbstractArray && (extras[k] = Float64.(vec(v)))
     end
+    return KineticProfileData(; psi=Float64.(vec(read(g["psi"]))),
+        (Symbol(name) => rd(name) for (name, _) in _KINETIC_H5_PROFILES)...,
+        species_densities=(isempty(extras) ? nothing : extras), provenance=prov)
 end
 
 """
@@ -143,30 +145,38 @@ with `read_kinetic_file`. The group carries `schema_version` and `provenance` at
 function write_kinetic_h5(path::AbstractString, data::KineticProfileData;
     group::AbstractString="/", schema_version::AbstractString="1.0",
     provenance::AbstractString=data.provenance)
-    h5open(path, "w") do f
-        g = group == "/" ? f : create_group(f, group)
-        function put(name, v, units)
-            v === nothing && return
-            g[name] = collect(Float64, v)
-            attributes(g[name])["units"] = units
-        end
-        put("psi", data.psi, "normalized poloidal flux")
-        for (name, units) in _KINETIC_H5_PROFILES
-            put(name, getfield(data, Symbol(name)), units)
-        end
-        # Named per-species densities (multi-ion input); dataset names must be `n_*` to round-trip.
-        if data.species_densities !== nothing
-            for (name, v) in data.species_densities
-                startswith(name, "n_") ||
-                    error("species density dataset `$name` must be named `n_*` to be readable as a per-species profile")
-                g[name] = collect(Float64, v)
-                attributes(g[name])["units"] = "m^-3"
-            end
-        end
-        attributes(g)["schema_version"] = schema_version
-        attributes(g)["provenance"] = provenance
-    end
+    h5open(f -> write_kinetic_group!(group == "/" ? f : create_group(f, group), data; schema_version, provenance), path, "w")
     return path
+end
+
+"""
+    write_kinetic_group!(g, data; schema_version="1.0", provenance=data.provenance) -> g
+
+Write the profiles of `data` into the open HDF5 file or group `g` in the GPEC kinetic schema, as
+[`write_kinetic_h5`](@ref) does for a new file; the composition and closure fields are not written.
+"""
+function write_kinetic_group!(g, data::KineticProfileData; schema_version::AbstractString="1.0", provenance::AbstractString=data.provenance)
+    function put(name, v, units)
+        v === nothing && return
+        g[name] = collect(Float64, v)
+        attributes(g[name])["units"] = units
+    end
+    put("psi", data.psi, "normalized poloidal flux")
+    for (name, units) in _KINETIC_H5_PROFILES
+        put(name, getfield(data, Symbol(name)), units)
+    end
+    # Named per-species densities (multi-ion input); dataset names must be `n_*` to round-trip.
+    if data.species_densities !== nothing
+        for (name, v) in data.species_densities
+            startswith(name, "n_") ||
+                error("species density dataset `$name` must be named `n_*` to be readable as a per-species profile")
+            g[name] = collect(Float64, v)
+            attributes(g[name])["units"] = "m^-3"
+        end
+    end
+    attributes(g)["schema_version"] = schema_version
+    attributes(g)["provenance"] = provenance
+    return g
 end
 
 """

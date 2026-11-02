@@ -142,7 +142,9 @@ end
 
 Decide where the rerun output should go. Default naming rule: take the source
 basename, drop `.h5`, and append `_rerun.h5`. Refuse to overwrite the source
-file if the resolved destination collides.
+file if the output or one of its side files (`_RERUN_SIDE_FILES`) is the
+source, by path or as the same file under another name (a link, or a case-only
+difference on a case-insensitive file system).
 """
 function resolve_rerun_output_path(source_h5::String, output_dir::String, output_name::Union{Nothing,String})
     source_abs = abspath(source_h5)
@@ -151,11 +153,46 @@ function resolve_rerun_output_path(source_h5::String, output_dir::String, output
         stem = endswith(lowercase(base), ".h5") ? base[1:end-3] : base
         output_name = string(stem, "_rerun.h5")
     end
-    if abspath(joinpath(output_dir, output_name)) == source_abs
-        error("Refusing to overwrite source HDF5 at $source_abs. " *
-              "Pass `--output-dir <newdir>` or `--output-name <other.h5>`.")
+    for name in (output_name, (_rerun_side_file(output_name, s) for s in _RERUN_SIDE_FILES)...)
+        dest = abspath(joinpath(output_dir, name))
+        if dest == source_abs || (isfile(dest) && samefile(dest, source_abs))
+            error("Refusing to overwrite source HDF5 at $source_abs with $dest. " *
+                  "Pass `--output-dir <newdir>` or `--output-name <other.h5>`.")
+        end
     end
     return (output_dir, output_name)
+end
+
+# Suffixes of the input files a rerun writes next to its output from the source snapshot.
+const _RERUN_SIDE_FILES = (forcing="_forcing.h5", tolerances="_tolerances.toml", kinetic="_kinetic.h5", wall="_wall.dat")
+
+# The side file a rerun writes next to `output_name` for one of the `_RERUN_SIDE_FILES` suffixes.
+_rerun_side_file(output_name::AbstractString, suffix::AbstractString) = splitext(output_name)[1] * suffix
+
+# Where a run records the external files it read (written by ForceFreeStates.save_input_files!).
+const _RECORDED_KINETIC = "Input/RawInputs/Kinetic"
+const _RECORDED_WALL = "Input/RawInputs/Wall/wall_file_raw"
+
+# Point the stored deck's kinetic_file and file wall at copies written from the source snapshot. A deck that names
+# either without its snapshot comes from an older GPEC and cannot be replayed faithfully.
+function _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic::Bool, wall_raw)
+    remedy = "re-run from the original deck instead of replaying it"
+    equil = inputs["Equilibrium"]
+    if has_kinetic
+        kinetic_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.kinetic)
+        Equilibrium.write_kinetic_h5(joinpath(output_dir, kinetic_file), h5open(f -> Equilibrium._read_kinetic_group(f[_RECORDED_KINETIC], source_h5), source_h5))
+        equil["kinetic_file"], equil["kinetic_group"] = kinetic_file, "/"
+    elseif !isempty(get(equil, "kinetic_file", ""))
+        error("$source_h5 names a kinetic_file but records no $_RECORDED_KINETIC; $remedy")
+    end
+    wall = get(inputs, "Wall", nothing)
+    if wall !== nothing && get(wall, "shape", "") == "file"
+        wall_raw === nothing && error("$source_h5 has a file wall but records no $_RECORDED_WALL; $remedy")
+        wall_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.wall)
+        write(joinpath(output_dir, wall_file), wall_raw)
+        wall["file"] = wall_file
+    end
+    return inputs
 end
 
 """
@@ -170,6 +207,8 @@ The recorded forcing (`Input/RawInputs/ForcingTerms/`) is written next to the re
 `<stem>_forcing.h5` and `[ForcingTerms]` is pointed at it before overrides apply, so the replay reads
 and normalizes it against its own equilibrium exactly as a deck run reads its file; a recorded
 tolerance file is written as `<stem>_tolerances.toml` and `[ErrorFields] tolerance_file` points at it.
+The recorded kinetic profiles and file wall are written as `<stem>_kinetic.h5` and `<stem>_wall.dat` the same
+way, so a replay never reads the files the source run named.
 """
 function build_inputs_from_h5(args::Vector{String})
     cli = parse_rerun_cli(args)
@@ -178,7 +217,7 @@ function build_inputs_from_h5(args::Vector{String})
 
     # Stored TOML, equilibrium ingest and the forcing snapshot (present only with [PerturbedEquilibrium]).
     use_coils = cli.coil_source == "coils"
-    toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils, tolerance_raw = h5open(source_h5, "r") do in_h5
+    toml_raw, ingest, source_git, forcing_snapshot, preloaded_coils, tolerance_raw, has_kinetic, wall_raw = h5open(source_h5, "r") do in_h5
         haskey(in_h5, "Input/gpec_toml_raw") ||
             error("Source HDF5 $source_h5 has no Input/gpec_toml_raw — produced by a pre-rerun version of GPEC")
         forcing_modes = if !haskey(in_h5, "Input/RawInputs/ForcingTerms")
@@ -204,7 +243,9 @@ function build_inputs_from_h5(args::Vector{String})
             haskey(in_h5, "Info/git_version") ? read(in_h5, "Info/git_version") : "unknown",
             forcing_modes,
             coil_sets,
-            haskey(in_h5, _RECORDED_TOLERANCES) ? read(in_h5, _RECORDED_TOLERANCES) : nothing
+            haskey(in_h5, _RECORDED_TOLERANCES) ? read(in_h5, _RECORDED_TOLERANCES) : nothing,
+            haskey(in_h5, _RECORDED_KINETIC),
+            haskey(in_h5, _RECORDED_WALL) ? read(in_h5, _RECORDED_WALL) : nothing
         )
     end
 
@@ -218,7 +259,7 @@ function build_inputs_from_h5(args::Vector{String})
     _stop_on_deprecated_deck_keys(inputs;
         remedy="$source_h5 was written by an older GPEC version; re-run from the original deck instead of replaying it")
     if forcing_snapshot !== nothing
-        forcing_file = splitext(output_name)[1] * "_forcing.h5"
+        forcing_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.forcing)
         modes, normalization = forcing_snapshot
         h5open(f -> ForcingTerms.save_forcing_to_h5(modes, f; normalization), joinpath(output_dir, forcing_file), "w")
         ft = get!(inputs, "ForcingTerms", Dict{String,Any}())
@@ -226,10 +267,11 @@ function build_inputs_from_h5(args::Vector{String})
         ft["forcing_data_format"] = "hdf5"
     end
     if tolerance_raw !== nothing && haskey(inputs, "ErrorFields")
-        tolerance_file = splitext(output_name)[1] * "_tolerances.toml"
+        tolerance_file = _rerun_side_file(output_name, _RERUN_SIDE_FILES.tolerances)
         write(joinpath(output_dir, tolerance_file), tolerance_raw)
         inputs["ErrorFields"]["tolerance_file"] = tolerance_file
     end
+    _replay_input_files!(inputs, source_h5, output_dir, output_name, has_kinetic, wall_raw)
     if cli.override_file !== nothing
         isfile(cli.override_file) || error("Override file not found: $(cli.override_file)")
         file_overrides = TOML.parsefile(cli.override_file)
@@ -288,12 +330,14 @@ function rebuild_equilibrium_inputs(inputs::Dict{String,Any}, ingest, output_dir
     return eq_config, additional_input
 end
 
-# The stored deck's kinetic profiles, re-read from its file; a file that has since moved leaves the equilibrium without them.
-function _replay_kinetic_profiles(config::Equilibrium.EquilibriumConfig)
-    isempty(config.kinetic_file) && return nothing
-    isfile(config.kinetic_file) && return Equilibrium.configured_kinetic_profiles(config)
-    @warn "The stored deck's kinetic_file is not readable; the restored equilibrium carries no kinetic profiles" file = config.kinetic_file
-    return nothing
+# The recorded kinetic profiles with the stored deck's composition; `nothing` when the run had none.
+function _replay_kinetic_profiles(f, config::Equilibrium.EquilibriumConfig, h5path)
+    if !haskey(f, _RECORDED_KINETIC)
+        isempty(config.kinetic_file) && return nothing
+        error("$h5path names a kinetic_file but records no $_RECORDED_KINETIC; re-run from the original deck")
+    end
+    raw = Equilibrium._read_kinetic_group(f[_RECORDED_KINETIC], "$h5path $_RECORDED_KINETIC")
+    return Equilibrium.KineticProfileData(raw; Equilibrium.kinetic_composition(config)...)
 end
 
 """
@@ -337,7 +381,7 @@ function equilibrium_from_h5(h5path::AbstractString)
         eqfun = Equilibrium._eqfun_from_geometry(profiles, rzphi..., params.ro, params.psio, grid2d, opts2d)
         geometry = Equilibrium.compute_geometry_profiles(xs, ys, rzphi[1], rzphi[2], rzphi[4], params.ro)
         equil = Equilibrium.PlasmaEquilibrium(config, params, profiles, geometry, xs, ys, rzphi..., eqfun..., params.ro, params.zo, params.psio,
-            read_equilibrium_ingest(f), analytic_config(inputs), _replay_kinetic_profiles(config))
+            read_equilibrium_ingest(f), analytic_config(inputs), _replay_kinetic_profiles(f, config, h5path))
         return (; equil, inputs, psilim=Float64(read(f, "Info/psilim")))
     end
 end

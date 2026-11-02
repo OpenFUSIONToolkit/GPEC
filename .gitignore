@@ -44,3 +44,6 @@ profiling/
 
 # Per-developer package preferences (e.g. the precompile_workload switch)
 LocalPreferences.toml
+
+# Python bytecode from the CI convention scripts
+__pycache__/

@@ -498,6 +498,9 @@ include("h5_metadata_check.jl")
             rebuilt = GPEC.equilibrium_from_h5(h5path)
             @test rebuilt.psilim == ffs.psilim
             @test rebuilt.equil.params.bt0 ≈ ffs.equil.params.bt0
+            # The run records its kinetic profiles, and the rebuilt equilibrium carries them.
+            @test h5open(f -> haskey(f, "Input/RawInputs/Kinetic"), h5path)
+            @test rebuilt.equil.kinetic.n_e == ffs.equil.kinetic.n_e
             post_hoc = EF.compute_coil_sensitivities(h5path, sets[1:1])
             @test post_hoc.field_as_designed ≈ sens.field_as_designed[:, 1:1] rtol = 1e-10
             @test post_hoc.shift_sensitivity_per_m ≈ sens.shift_sensitivity_per_m[:, :, 1:1] rtol = 1e-10
