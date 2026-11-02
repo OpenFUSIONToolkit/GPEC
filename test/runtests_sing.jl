@@ -172,6 +172,25 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         end
     end
 
+    @testset "q extrema of a quadratic profile and flat segments" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        equil = load_equilibrium_from_gpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "gpec.toml"))
+        # On a uniform grid a quadratic q is fit exactly, so most cells have q‴ = 0; put the minimum on a knot.
+        xs = collect(range(0.0, 1.0; length=129))
+        ψmin = xs[52]
+        q_quad = @. 1.8 + 3 * (xs - ψmin)^2
+        equil.profiles = GeneralizedPerturbedEquilibrium.Equilibrium.ProfileSplines(xs, ones(129), zeros(129), ones(129), q_quad)
+        GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_qfind!(equil)
+        @test equil.params.qmin ≈ 1.8 atol = 1e-10
+        @test any(ψ -> isapprox(ψ, ψmin; atol=1e-10), equil.params.qextrema_psi)
+        @test count(s -> s.m == 2, FFS._find_rational_surfaces(equil, 1, 1)) == 2
+        # Two extrema at the same rational q bound no isolated crossing, and the search must still end.
+        equil.params.qextrema_psi = [xs[1], xs[end]]
+        equil.params.qextrema_q = [2.0, 2.0]
+        equil.params.mextrema = 2
+        @test isempty(FFS._find_rational_surfaces(equil, 1, 1))
+    end
+
     @testset "sing_find reverse shear" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         equil = load_equilibrium_from_gpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "gpec.toml"))

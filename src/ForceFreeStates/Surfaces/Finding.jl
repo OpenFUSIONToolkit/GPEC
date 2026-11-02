@@ -17,6 +17,7 @@ function _find_rational_surfaces(equil::Equilibrium.PlasmaEquilibrium, nlow::Int
         # Loop over extrema of q, find all rational values in between
         for iex in 2:equil.params.mextrema
             dq = equil.params.qextrema_q[iex] - equil.params.qextrema_q[iex-1]
+            dq == 0 && continue
             m = trunc(Int, n * equil.params.qextrema_q[iex-1])
             if dq > 0
                 m += 1
