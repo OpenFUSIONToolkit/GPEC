@@ -15,7 +15,7 @@ using GeneralizedPerturbedEquilibrium
     # Nothing at or above ψ = 0.1 is dropped.
     @test count(>=(0.1), kept) == count(>=(0.1), xs)
     # Below it, kept knots are at least 5% of ψ apart.
-    core = kept[kept .< 0.1]
+    core = kept[kept.<0.1]
     @test all(diff(core) .>= 0.05 .* core[2:end])
 
     # A core rational ends the capped region before its resolution window.

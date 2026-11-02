@@ -222,7 +222,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             sols_cut = gal_sol.xi_cut
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
-                      "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog=1
+                      "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog = 1
                 empty!(inner_psi)
                 empty!(inner_xi)
                 empty!(inner_b)

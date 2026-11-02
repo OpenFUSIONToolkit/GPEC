@@ -22,7 +22,7 @@ using GeneralizedPerturbedEquilibrium
 function run_test_file(testfile)
     @info "Running test file" testfile
     measurement = @timed include(testfile)
-    @info "Completed test file" testfile elapsed_seconds=measurement.time compile_seconds=measurement.compile_time recompile_seconds=measurement.recompile_time
+    @info "Completed test file" testfile elapsed_seconds = measurement.time compile_seconds = measurement.compile_time recompile_seconds = measurement.recompile_time
     return nothing
 end
 

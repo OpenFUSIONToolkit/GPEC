@@ -19,7 +19,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
-config_path  = joinpath(example_path, "gpec.toml")
+config_path = joinpath(example_path, "gpec.toml")
 
 psilow_values = [1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4]
 methods = ["efit", "efit_arclength", "efit_by_inversion"]
@@ -42,7 +42,7 @@ function read_efit_header_qaxis(eq_filename)
     lines_per_block = cld(nw, 5)
     # q-profile starts after 4 header lines + 4 data blocks (fpol,pres,ffprime,pprime) + psi 2D block
     nh = parse(Int, header_parts[end])
-    q_start = 6 + (4 + cld(nw*nh, 5)) * lines_per_block  # rough; parse all blocks
+    q_start = 6 + (4 + cld(nw * nh, 5)) * lines_per_block  # rough; parse all blocks
     # Simpler: just extrapolate from the first two q-values returned by our config
     return nothing  # will use profile extrapolation below
 end
@@ -52,9 +52,9 @@ println("JIT warmup...")
 warmup_cfg = make_config(config_path, "efit", 1e-2)
 PlasmaEquilibrium(warmup_cfg)
 
-println("=" ^ 70)
+println("="^70)
 println("psilow near-axis accuracy scan")
-println("=" ^ 70)
+println("="^70)
 
 rows = []
 
@@ -82,7 +82,7 @@ for method in methods
             raw_profile = Equilibrium.read_efit(cfg)
             psi_xs = pe.rzphi_xs
             mtheta = length(pe.rzphi_ys) - 1
-            psio   = pe.psio
+            psio = pe.psio
 
             # q0 extrapolated to axis (linear from innermost two grid points)
             q1 = pe.profiles.q_spline.y[1]
@@ -96,7 +96,7 @@ for method in methods
                 ψ = psi_xs[ipsi]
                 for itheta in 1:8:mtheta+1
                     θ = pe.rzphi_ys[itheta]
-                    r2  = pe.rzphi_rsquared((ψ, θ))
+                    r2 = pe.rzphi_rsquared((ψ, θ))
                     off = pe.rzphi_offset((ψ, θ))
                     rfac = sqrt(max(r2, 0.0))
                     η = 2π * (θ + off)

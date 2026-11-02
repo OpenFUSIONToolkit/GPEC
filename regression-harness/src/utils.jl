@@ -130,7 +130,7 @@ newest. Without it, two refs are compared across two different package sets and 
 differences surface as physics regressions.
 """
 function create_worktree(commit_hash::String, repo_root::String;
-                         pin_manifest_from::Union{String,Nothing}=nothing)::String
+    pin_manifest_from::Union{String,Nothing}=nothing)::String
     short = commit_hash[1:min(8, length(commit_hash))]
     worktree_path = tempname() * "_gpec_$(short)"
     try

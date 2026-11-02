@@ -56,6 +56,7 @@ Output of the tearing solve: summary eigenvalues (ω, γ) and the full root-extr
 ## Fields
 
   - `enabled`             -- `true` only when the analysis actually ran
+
   - `problem`             -- producing TearingProblem, or nothing for a low-level scan
   - `config`              -- resolved scan configuration used by the model
   - `model`               -- the inner-layer model solved; `nothing` when the analysis did not run

@@ -3,7 +3,7 @@
 # `riccati_integrator_callback!` saves every step within this fraction of the span (or absolute ψ
 # floor, for short chunks) of a segment's right end; elsewhere every `save_interval`-th step.
 const SAVE_NEAR_END_FRAC = 0.05
-const SAVE_NEAR_END_PSI  = 1e-4
+const SAVE_NEAR_END_PSI = 1e-4
 
 """
     assemble_fm_matrix(propagators, idx_range; condition=false, T_init=nothing) -> Matrix{ComplexF64}
@@ -13,6 +13,7 @@ mapping the IC at the start of `idx_range[1]` to the state at the end of `idx_ra
 (`T_init` defaults to the identity).
 
 Each `ChunkPropagator` stores the 2N columns of Φ split into two N×N×2 blocks:
+
 ```
   block_upper_ic[:,:,1:2] ↔ Φ[:,1:N]     (result from IC=(I,0))
   block_lower_ic[:,:,1:2] ↔ Φ[:,N+1:2N]  (result from IC=(0,I))
@@ -23,8 +24,8 @@ the N U₂ columns survive. Use it only for the axis→first-surface segment, wh
 needs only U₂ ICs; never for inter-surface segments, where both halves carry information.
 """
 function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range;
-                            condition::Bool=false,
-                            T_init::Union{Nothing,Matrix{ComplexF64}}=nothing)
+    condition::Bool=false,
+    T_init::Union{Nothing,Matrix{ComplexF64}}=nothing)
     # Take N from T_init when given, so an empty idx_range (or propagator list) still works.
     N = if T_init !== nothing
         size(T_init, 1) ÷ 2
@@ -110,7 +111,7 @@ end
     riccati_der!(du, u, params, psieval)
 
 Evaluate the explicit dual Riccati ODE right-hand side:
-  dS/dψ = w†·F̄⁻¹·w - S·Ḡ·S,   w = Q - K̄·S
+dS/dψ = w†·F̄⁻¹·w - S·Ḡ·S,   w = Q - K̄·S
 
 where Q = diag(1/(m - n·q)) is the diagonal singular factor matrix.
 The identity slice u[:,:,2] = I does not evolve (du[:,:,2] = 0).
@@ -132,7 +133,7 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     _, equil, mats, intr, odet, _ = params
 
     Npert = intr.numpert_total
-    S  = @view u[:, :, 1]
+    S = @view u[:, :, 1]
     dS = @view du[:, :, 1]
     @view(du[:, :, 2]) .= 0  # identity does not evolve
 
@@ -146,9 +147,9 @@ See: Glasser (2018) Phys. Plasmas 25, 032507 — Eq. 19 (dual Riccati form)
     fmat_lower = acquire!(pool, ComplexF64, Npert, Npert)
     kmat = similar!(pool, fmat_lower)
     gmat = similar!(pool, fmat_lower)
-    w    = similar!(pool, fmat_lower)  # w = Q - K̄·S
-    v    = similar!(pool, fmat_lower)  # v = F̄⁻¹·w (then reused for S·Ḡ·S)
-    tmp  = similar!(pool, fmat_lower)  # scratch
+    w = similar!(pool, fmat_lower)  # w = Q - K̄·S
+    v = similar!(pool, fmat_lower)  # v = F̄⁻¹·w (then reused for S·Ḡ·S)
+    tmp = similar!(pool, fmat_lower)  # scratch
 
     # Evaluate F̄ (Cholesky factor), K̄, Ḡ splines at current ψ
     mats.ideal.F_spline_lower(vec(fmat_lower), psieval; hint=mats._hint)
@@ -225,7 +226,7 @@ function riccati_integrate_chunk!(
     cb = DiscreteCallback((u, t, integrator) -> true, riccati_integrator_callback!)
     rtol = ctrl.algorithm.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
-                      (ctrl, equil, mats, intr, odet, chunk))
+        (ctrl, equil, mats, intr, odet, chunk))
     sol = solve_el(prob, rtol; callback=cb)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
@@ -239,8 +240,8 @@ end
     renormalize_riccati_inplace!(u, N)
 
 In-place Riccati renormalization on an arbitrary N×N×2 array:
-  u[:,:,1] = U₁ · U₂⁻¹  (new S)
-  u[:,:,2] = I
+u[:,:,1] = U₁ · U₂⁻¹  (new S)
+u[:,:,2] = I
 
 The Riccati analogue of Gaussian reduction: keeps the inputs to `sing_der!` bounded.
 """
@@ -282,8 +283,8 @@ function integrate_propagator_chunk!(
     N = intr.numpert_total
     # Backward chunks integrate psi_end → psi_start, where forward-growing solutions decay.
     tspan = chunk.direction == 1 ?
-        (chunk.psi_start, chunk.psi_end) :
-        (chunk.psi_end,   chunk.psi_start)
+            (chunk.psi_start, chunk.psi_end) :
+            (chunk.psi_end, chunk.psi_start)
     rtol = ctrl.algorithm.eulerlagrange_tolerance
     params = (ctrl, equil, mats, intr, odet_proxy, chunk)
 
@@ -331,12 +332,12 @@ function integrate_fm_with_ua_ic(
     equil::Equilibrium.PlasmaEquilibrium,
     mats::MatrixSplines,
     intr::ForceFreeStatesInternal;
-    backward::Bool = false,
-    psi_ua::Float64 = NaN
+    backward::Bool=false,
+    psi_ua::Float64=NaN
 )
     N = intr.numpert_total
     psi_start = chunks[first(chunk_range)].psi_start
-    psi_end   = chunks[last(chunk_range)].psi_end
+    psi_end = chunks[last(chunk_range)].psi_end
     # ua lives at the inner-layer boundary psi_ua, which may differ slightly from the chunk boundary.
     if backward && !isnan(psi_ua)
         psi_end = psi_ua
@@ -359,8 +360,8 @@ function integrate_fm_with_ua_ic(
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
     sol = solve_el(prob, rtol)
-    result[1:N, 1:N]     .= sol.u[end][:, :, 1]
-    result[N+1:2N, 1:N]  .= sol.u[end][:, :, 2]
+    result[1:N, 1:N] .= sol.u[end][:, :, 1]
+    result[N+1:2N, 1:N] .= sol.u[end][:, :, 2]
 
     # Batch 2: columns N+1:2N of T (small solutions)
     u0[:, :, 1] .= ua[:, N+1:2N, 1]
@@ -369,8 +370,8 @@ function integrate_fm_with_ua_ic(
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
     sol = solve_el(prob, rtol)
-    result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]
-    result[N+1:2N, N+1:2N]  .= sol.u[end][:, :, 2]
+    result[1:N, N+1:2N] .= sol.u[end][:, :, 1]
+    result[N+1:2N, N+1:2N] .= sol.u[end][:, :, 2]
 
     return result
 end
@@ -422,8 +423,8 @@ function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
          prop.block_upper_ic[:,:,2]  prop.block_lower_ic[:,:,2]]
     #! format: on
     # x = Φ_bwd⁻¹ · [U₁_old; U₂_old] advances psi_start → psi_end.
-    u_old = [odet.u[:,:,1]; odet.u[:,:,2]]   # 2N × N
+    u_old = [odet.u[:, :, 1]; odet.u[:, :, 2]]   # 2N × N
     u_new = Φ \ u_old                         # LU solve, 2N × N
-    odet.u[:,:,1] .= u_new[1:N, :]
-    odet.u[:,:,2] .= u_new[N+1:2N, :]
+    odet.u[:, :, 1] .= u_new[1:N, :]
+    odet.u[:, :, 2] .= u_new[N+1:2N, :]
 end

@@ -233,7 +233,8 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         @test isapprox(intr.qlim, equil.params.qmax; atol=1e-12)
         @test isapprox(intr.psilim, equil.params.psihigh_resolved; atol=1e-12)
 
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; qhigh=max(equil.params.qmin + 0.1, equil.params.qmax - 0.5), truncate_at_rational_offset=false)
+        ctrl =
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; qhigh=max(equil.params.qmin + 0.1, equil.params.qmax - 0.5), truncate_at_rational_offset=false)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         @test intr.qlim < equil.params.qmax + 1e-12
         @test intr.psilim <= equil.params.psihigh_resolved

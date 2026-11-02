@@ -28,11 +28,11 @@ end
 
 Output of `amr_scan`.
 
-| field       | meaning                                                  |
-|:----------- |:-------------------------------------------------------- |
-| `cells`     | Final list of `AMRCell` after all refinement passes      |
-| `Q`         | Flat `Vector{ComplexF64}` of every unique residual eval  |
-| `Δ`         | Corresponding `Vector{ComplexF64}` of residual values    |
+| field       | meaning                                                                              |
+|:----------- |:------------------------------------------------------------------------------------ |
+| `cells`     | Final list of `AMRCell` after all refinement passes                                  |
+| `Q`         | Flat `Vector{ComplexF64}` of every unique residual eval                              |
+| `Δ`         | Corresponding `Vector{ComplexF64}` of residual values                                |
 | `truncated` | `true` if `max_cells` was hit under `:warn_truncate`; the scan is then not converged |
 """
 struct AMRResult

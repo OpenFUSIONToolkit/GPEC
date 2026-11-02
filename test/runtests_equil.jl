@@ -230,8 +230,12 @@ using TOML
         @test_throws r"set kinetic_file in \[Equilibrium\]" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["kinetic"] = "KineticForces"), template)
         # Values take their field types: an array becomes a range or a tuple, a string a Symbol.
         @test GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 2]), template).force_balance.keywords[:nn] == 1:2
-        tearing = GPEC.tearing_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("inner_model" => "SLAYER", "coupling_mode" => "coupled",
-            "search" => Dict{String,Any}("Q_re_range" => [-2, 2]), "CriticalResonantField" => Dict{String,Any}("n" => 500))))
+        tearing = GPEC.tearing_from_deck(
+            Dict{String,Any}(
+                "Tearing" => Dict{String,Any}("inner_model" => "SLAYER", "coupling_mode" => "coupled",
+                    "search" => Dict{String,Any}("Q_re_range" => [-2, 2]), "CriticalResonantField" => Dict{String,Any}("n" => 500))
+            )
+        )
         @test tearing.problem[:coupling_mode] === :coupled
         @test tearing.config.Q_re_range === (-2.0, 2.0)
         @test tearing.problem[:critical_resonant_field].n == 500

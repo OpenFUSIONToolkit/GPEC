@@ -76,7 +76,7 @@ function VacuumInput(
         x=r[1:(end-1)],
         z=z[1:(end-1)],
         ν=ν[1:(end-1)],
-        mtheta_in=length(r)-1,
+        mtheta_in=length(r) - 1,
         m_modes=collect(Int, m_modes),
         n_modes=collect(Int, n_modes),
         mtheta=mtheta,
@@ -375,8 +375,8 @@ function PlasmaGeometry(inputs::VacuumInput)
     @assert length(inputs.x) == length(inputs.z) == length(inputs.ν) "x, z, and ν must have the same length"
 
     # Interpolate arrays from input onto mtheta grid
-    θ_in = range(; start=0, length=inputs.mtheta_in, step=2π/inputs.mtheta_in)
-    θ_out = range(; start=0, length=inputs.mtheta, step=2π/inputs.mtheta)
+    θ_in = range(; start=0, length=inputs.mtheta_in, step=2π / inputs.mtheta_in)
+    θ_out = range(; start=0, length=inputs.mtheta, step=2π / inputs.mtheta)
 
     x = cubic_interp(θ_in, inputs.x, θ_out; bc=PeriodicBC(; endpoint=:exclusive))
     z = cubic_interp(θ_in, inputs.z, θ_out; bc=PeriodicBC(; endpoint=:exclusive))
@@ -456,8 +456,8 @@ function PlasmaGeometry3D(inputs::VacuumInput)
         # Interpolate 3D inputs onto vacuum grid
         @assert !isempty(inputs.y) "y must be provided for 3D (nzeta_in > 1) inputs"
         @assert length(inputs.x) == length(inputs.y) == length(inputs.z) == inputs.mtheta_in * inputs.nzeta_in "x, y, z must have length mtheta_in * nzeta_in"
-        θ_in = range(; start=0, length=inputs.mtheta_in, step=2π/inputs.mtheta_in)
-        ζ_in = range(; start=0, length=inputs.nzeta_in, step=2π/inputs.nzeta_in)
+        θ_in = range(; start=0, length=inputs.mtheta_in, step=2π / inputs.mtheta_in)
+        ζ_in = range(; start=0, length=inputs.nzeta_in, step=2π / inputs.nzeta_in)
         θ_flat = repeat(collect(θ_grid), nzeta)
         ζ_flat = repeat(collect(ζ_grid); inner=mtheta)
         grid_points = (θ_flat, ζ_flat)
@@ -573,7 +573,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
 
         zrad = 0.5 * (zmax - zmin)
         zh = sqrt(abs(zrad^2 - r_minor^2))
-        zmuw = log((a/zh) + sqrt((a/zh)^2 + 1))
+        zmuw = log((a / zh) + sqrt((a / zh)^2 + 1))
         bw_eff = (zh * cosh(zmuw)) / a
 
         for i in 1:mtheta
@@ -590,7 +590,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
         for i in 1:mtheta
             the = (i - 1) * (2π / mtheta)
             x_wall[i] = wcentr + r_minor * (1.0 + a - cw) * cos(the + dw * sin(the))
-            z_wall[i] = bw * r_minor * (1.0 + a - cw) * sin(the + tw * sin(2.0*the)) + aw * r_minor * sin(2.0*the)
+            z_wall[i] = bw * r_minor * (1.0 + a - cw) * sin(the + tw * sin(2.0 * the)) + aw * r_minor * sin(2.0 * the)
         end
 
     elseif wall_settings isa ModDeeWall
@@ -601,7 +601,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
         for i in 1:mtheta
             the = (i - 1) * (2π / mtheta)
             x_wall[i] = cw + a * cos(the + dw * sin(the))
-            z_wall[i] = bw * a * sin(the + tw * sin(2.0*the)) + aw * sin(2.0*the)
+            z_wall[i] = bw * a * sin(the + tw * sin(2.0 * the)) + aw * sin(2.0 * the)
         end
 
     else

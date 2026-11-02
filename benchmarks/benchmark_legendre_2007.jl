@@ -104,7 +104,7 @@ for (s, n) in test_cases
     speedup = time_1997 / time_2007
 
     println(@sprintf("%-8.2f %-8d %-20.6f %-20.6f %-15.2fx",
-        s, n, time_1997*1000, time_2007*1000, speedup))
+        s, n, time_1997 * 1000, time_2007 * 1000, speedup))
 end
 
 println("\n3. VISUAL CHECK: rhohat parameter and integration method selection")
