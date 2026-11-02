@@ -28,14 +28,14 @@ _collision_tkev(T) = max(T / _KEV_J, _T_FLOOR_KEV)
 # NRL-formulary Coulomb logarithm (natural log) at the floored temperature, floored at 1; n_e in m⁻³, T_e in J.
 _coulomb_log(ne, Te) = max(17.3 - 0.5 * log(ne / 1.0e20) + 1.5 * log(_collision_tkev(Te)), 1.0)
 
-# Warn once, as Fortran PENTRC, when a cold node engages the temperature or Coulomb-logarithm floor of a model rate
-# (supplied rates in `data` use neither).
+# Warn once per kinetic source, as Fortran PENTRC, when a cold node engages the temperature or Coulomb-logarithm floor
+# of a model rate (supplied rates in `data` use neither).
 function _warn_collision_floors(source, data, ne, Te, Ti)
     data.nu_i !== nothing && data.nu_e !== nothing && return nothing
     any(T -> T / _KEV_J < _T_FLOOR_KEV, Te) | any(T -> T / _KEV_J < _T_FLOOR_KEV, Ti) &&
-        @warn "$source: flooring T at 1 meV in the collision frequencies" maxlog = 1
+        @warn "$source: flooring T at 1 meV in the collision frequencies" maxlog = 1 _id = Symbol("T_floor ", source)
     data.lnLambda === nothing && any(i -> 17.3 - 0.5 * log(ne[i] / 1.0e20) + 1.5 * log(_collision_tkev(Te[i])) < 1, eachindex(ne)) &&
-        @warn "$source: flooring the Coulomb logarithm at 1 in the collision frequencies" maxlog = 1
+        @warn "$source: flooring the Coulomb logarithm at 1 in the collision frequencies" maxlog = 1 _id = Symbol("lnLambda_floor ", source)
     return nothing
 end
 
@@ -387,6 +387,16 @@ Whether `data` carries the profiles the NTV view needs (`n_e`, `T_i`, `T_e` and 
 has_ntv_fields(data::KineticProfileData) = all(!isnothing, (data.n_e, data.T_i, data.T_e, data.omega_E))
 
 """
+    ntv_profiles_usable(data::KineticProfileData) -> Bool
+
+Whether `data` has the NTV fields with positive densities and non-negative temperatures at its table points,
+the inputs `kinetic_profile_splines` accepts.
+"""
+ntv_profiles_usable(data::KineticProfileData) =
+    has_ntv_fields(data) && all(>(0), data.n_e) && (data.n_i === nothing || all(>(0), data.n_i)) &&
+    all(>=(0), data.T_i) && all(>=(0), data.T_e)
+
+"""
     kinetic_profile_splines(data::KineticProfileData;
                             zi::Int=1, zimp::Int=6, mi::Int=2, mimp::Int=12,
                             density_factor::Float64=1.0, temperature_factor::Float64=1.0,
@@ -429,6 +439,8 @@ function kinetic_profile_splines(data::KineticProfileData;
     ExB_rotation_factor::Float64=1.0, toroidal_rotation_factor::Float64=1.0,
     chi1::Union{Nothing,Float64}=nothing)
 
+    density_factor > 0 && temperature_factor > 0 ||
+        throw(ArgumentError("density_factor = $density_factor and temperature_factor = $temperature_factor must be positive"))
     # n_i defaults to n_e (quasineutrality); omega_tor and the diffusivities are unused here.
     _need(field, name) = field === nothing ? error("$(_describe(data)) missing required '$name'") : field
     psi_input = data.psi
@@ -451,7 +463,6 @@ function kinetic_profile_splines(data::KineticProfileData;
     _assert_positive_density(_describe(data), "n_i", ni, psi_reg)
     _assert_nonneg_profile(_describe(data), "T_i", Ti, psi_reg)
     _assert_nonneg_profile(_describe(data), "T_e", Te, psi_reg)
-    _warn_collision_floors(_describe(data), data, ne, Te, Ti)
 
     needs_rotation_reform = density_factor != 1.0 || temperature_factor != 1.0 || toroidal_rotation_factor != 1.0
     any_scaling = needs_rotation_reform || ExB_rotation_factor != 1.0
@@ -493,6 +504,8 @@ function kinetic_profile_splines(data::KineticProfileData;
     if ExB_rotation_factor != 1.0
         omegaE .*= ExB_rotation_factor
     end
+    # After scaling, so a small temperature_factor that engages the floor is reported.
+    _warn_collision_floors(_describe(data), data, ne, Te, Ti)
 
     loglam = zeros(Float64, nkin + 1)
     nui = zeros(Float64, nkin + 1)

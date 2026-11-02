@@ -585,6 +585,13 @@ using HDF5
             @test_throws "script-only" parsed(Dict{String,Any}("kinetic" => "TestKineticMatrices"))
             @test_throws "not a kinetic source" parsed(Dict{String,Any}("kinetic" => "fixed"))
             @test_throws "no longer a key" parsed(Dict{String,Any}("kinetic_source" => "fixed"))
+            # The removed large-aspect-ratio torque methods stop the parse whatever their value.
+            for key in ("rlar_flag", "clar_flag"), value in (true, false)
+                mktempdir() do dir
+                    deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("KineticForces" => Dict{String,Any}(key => value)))
+                    @test_throws "large-aspect-ratio methods are not ported" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+                end
+            end
         end
 
         @testset "kinetic torque" begin

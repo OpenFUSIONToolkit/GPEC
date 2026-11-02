@@ -140,6 +140,17 @@ using TOML
         xs = eq_target.profiles.xs
         q_axis = eq_target.profiles.q_spline.y[1] - eq_target.profiles.q_deriv(xs[1]; hint=Ref(1)) * xs[1]
         @test isapprox(q_axis, 1.05; rtol=0.02)
+
+        # The inverse path rescales F to meet the target too.
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        eq_inv = Eq.PlasmaEquilibrium(
+            Eq.EquilibriumConfig(; eq_type="chease_binary", eq_filename=joinpath(data_dir, "INP1_binary"),
+                jac_type="boozer", mpsi=16, psilow=0.01, psihigh=0.99, r0_norm=6.8, b0_norm=7.4, newq0=1.5)
+        )
+        xs = eq_inv.profiles.xs
+        @test isapprox(eq_inv.profiles.q_spline.y[1] - eq_inv.profiles.q_deriv(xs[1]; hint=Ref(1)) * xs[1], 1.5; rtol=0.02)
+        # CHEASE supplies q directly, so a non-positive q stops the read.
+        @test_throws r"GPEC requires q > 0" Eq._chease_q([1.2, -0.1], (; eq_filename="INP1"))
     end
 
     @testset "flux_surface_rtol must be positive and finite" begin
