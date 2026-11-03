@@ -15,6 +15,8 @@ _fmt(::Nothing) = "—"
 _fmt(z::Complex) = iszero(imag(z)) ? _fmt(real(z)) : string(_fmt(real(z)), imag(z) < 0 ? " - " : " + ", _fmt(abs(imag(z))), "im")
 
 _span(v) = isempty(v) ? "empty" : string("[", _fmt(minimum(v)), ", ", _fmt(maximum(v)), "]")
+# "name ∈ [a, b]", or "name = a" when the values are a single point.
+_in(name, v) = !isempty(v) && minimum(v) == maximum(v) ? "$name = $(_fmt(first(v)))" : "$name ∈ $(_span(v))"
 _shape(a) = join(size(a), "×")
 _plural(k, word) = string(k, " ", word, k == 1 ? "" : "s")
 
@@ -25,13 +27,13 @@ function _list(items; max::Int=6)
     return extra > 0 ? string(s, ", … ", extra, " more") : s
 end
 
-_row(io, label, value) = print(io, "\n  ", rpad(label, 15), value)
+_row(io, label, value) = print(io, "\n  ", rpad(label, 17), value)
 
 # Range of `ψ` where `mask` holds, as "k/N points, ψ ∈ [a, b]"; "none" when nowhere.
 function _where(psi, mask)
     k = count(mask)
     k == 0 && return "none"
-    return string(k, "/", length(mask), " points, ψ ∈ ", _span(psi[mask]))
+    return string(k, "/", length(mask), " points, ", _in("ψ", psi[mask]))
 end
 
 # Equilibrium
@@ -72,8 +74,17 @@ end
 _ballooning_margin(r::LocalStability.LocalStabilityResult) =
     filter(isfinite, r.alpha_critical ./ r.alpha)
 
+function _ballooning_note(r::LocalStability.LocalStabilityResult)
+    isempty(r.ballooning_psi) && return "α-boundary scan not run"
+    window = r.ballooning_psi[isfinite.(r.alpha)]
+    isempty(window) && return "α-boundary scan window held no points"
+    margin = _ballooning_margin(r)
+    isempty(margin) && return "no α_crit found on $(length(window)) scan points ($(_in("ψ", window)))"
+    return "min α_crit/α = $(_fmt(minimum(margin))) over $(length(window)) scan points ($(_in("ψ", window)))"
+end
+
 function Base.show(io::IO, r::LocalStability.LocalStabilityResult)
-    bal = isempty(r.ballooning_psi) ? "no α scan" : "α scan"
+    bal = isempty(r.ballooning_psi) ? "no α scan" : isempty(_ballooning_margin(r)) ? "α scan (no boundary)" : "α scan"
     return print(io, "LocalStabilityResult(", length(r.psi), " ψ, Mercier unstable ", count(>(0), r.D_I), ", ", bal, ")")
 end
 
@@ -81,12 +92,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::LocalStability.LocalStabilityR
     print(io, "LocalStabilityResult  ", length(r.psi), " ψ points ∈ ", _span(r.psi))
     _row(io, "Mercier", "D_I > 0 (unstable): " * _where(r.psi, r.D_I .> 0))
     _row(io, "Resistive", "D_R > 0 (unstable): " * _where(r.psi, r.D_R .> 0))
-    if isempty(r.ballooning_psi)
-        _row(io, "Ballooning", "α-boundary scan not run")
-    else
-        margin = _ballooning_margin(r)
-        _row(io, "Ballooning", isempty(margin) ? "no first-stability boundary found" : "min α_crit/α = $(_fmt(minimum(margin))) over ψ ∈ $(_span(r.ballooning_psi))")
-    end
+    _row(io, "Ballooning", _ballooning_note(r))
     return nothing
 end
 
@@ -120,10 +126,29 @@ function Base.show(io::IO, o::OdeState)
 end
 
 _integrator_name(r::ForceFreeStates.ForceFreeStatesResult) = nameof(typeof(r.algorithm))
+
+_wall_label(::Nothing) = "none"
+_wall_label(w::Vacuum.ConformalWall) = "ConformalWall: a = $(_fmt(w.standoff_fraction)) (standoff in minor radii)"
+_wall_label(w::Vacuum.WallSettings) = "custom wall ($(nameof(typeof(w))))"
+
+# How the singularities at the rationals were closed, naming the inner-layer model of a matched closure.
+function _closure_label(r::ForceFreeStates.ForceFreeStatesResult)
+    r.closure === :matched && r.match !== nothing && return "matched closure ($(InnerLayer.model_name(r.match.model)))"
+    return "$(r.closure) closure"
+end
+
+function _physics_label(r::ForceFreeStates.ForceFreeStatesResult)
+    k = r.control.kinetic
+    k === nothing && return "ideal MHD"
+    factor = r.control.kinetic_factor == 1 ? "" : ", factor $(_fmt(r.control.kinetic_factor))"
+    return "kinetic ($(nameof(typeof(k)))$factor)"
+end
 _nrange(r) = r.nlow == r.nhigh ? "n = $(r.nlow)" : "n = $(r.nlow):$(r.nhigh)"
 
 function Base.show(io::IO, r::ForceFreeStates.ForceFreeStatesResult)
     print(io, "ForceFreeStatesResult(", _integrator_name(r), ", ", _nrange(r), ", ", _plural(length(r.surfaces), "surface"))
+    r.control.kinetic === nothing || print(io, ", kinetic")
+    r.closure === :matched && r.match !== nothing && print(io, ", matched ", InnerLayer.model_name(r.match.model))
     r.free_boundary === nothing || print(io, ", et₁ = ", _fmt(real(first(r.free_boundary.et))))
     return print(io, ")")
 end
@@ -144,7 +169,8 @@ function _free_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", r::ForceFreeStates.ForceFreeStatesResult)
-    print(io, "ForceFreeStatesResult  ", _integrator_name(r), ", ", r.closure, " closure")
+    print(io, "ForceFreeStatesResult  ", _integrator_name(r), ", ", _closure_label(r))
+    _row(io, "Physics", _physics_label(r))
     _row(io, "Modes", "$(_nrange(r)), m = $(r.mlow):$(r.mhigh) ($(r.numpert_total) total)")
     _row(io, "Domain", "ψ ∈ [$(_fmt(r.psilow)), $(_fmt(r.psilim))], q_lim = $(_fmt(r.qlim))" * (r.layer_overlap === nothing ? "" : " (capped by layer overlap)"))
     surf = isempty(r.surfaces) ? "none" : _list(["$(_surface_label(s)) @ ψ = $(_fmt(s.psifac))" for s in r.surfaces]; max=4)
@@ -157,7 +183,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::ForceFreeStates.ForceFreeState
     r.galerkin === nothing || _row(io, "Galerkin", "$(_plural(r.galerkin.msing, "surface")), $(r.galerkin.solver) factorization")
     r.match === nothing || _row(io, "Match", sprint(show, r.match))
     r.kinetic.kmsing > 0 && _row(io, "Kinetic", "$(_plural(r.kinetic.kmsing, "kinetic singular surface"))")
-    _row(io, "Wall", r.wall_settings === nothing ? "none" : string(nameof(typeof(r.wall_settings))))
+    _row(io, "Wall", _wall_label(r.wall_settings))
     return nothing
 end
 
@@ -170,7 +196,8 @@ function Base.show(io::IO, ::MIME"text/plain", m::MatchResult)
     _row(io, "Surfaces", "$(size(m.deltar, 1)) matched, $(size(m.cout, 2)) edge drives")
     _row(io, "Residual", _fmt(m.residual))
     _row(io, "rpec eigs", isempty(m.rpec_eig) ? "none" : _list(_fmt.(m.rpec_eig); max=3))
-    _row(io, "Stored", "Galerkin ξ basis $(isempty(m.xi) ? "not kept" : _shape(m.xi)), inner profiles $(isempty(m.inner_psi) ? "not kept" : "on $(length(m.inner_psi)) surfaces")")
+    outer = isempty(m.xi) ? "not kept" : "$(_shape(m.xi)) (one column per edge drive)"
+    _row(io, "Stored", "matched outer ξ $outer, inner profiles $(isempty(m.inner_psi) ? "not kept" : "on $(length(m.inner_psi)) surfaces")")
     return nothing
 end
 
@@ -215,11 +242,11 @@ function Base.show(io::IO, ::MIME"text/plain", s::PerturbedEquilibriumState)
         _row(io, "Resonances", "singular coupling not computed")
     else
         _row(io, "Resonances", _list(_resonances(r)))
-        _row(io, "|Φ_res|", _list(_fmt.(abs.(s.resonant_area_weighted_field))))
-        _row(io, "Island w", _list(_fmt.(2 .* s.island_half_width)))
+        _row(io, "|b̄_res| [T]", _list(_fmt.(abs.(s.resonant_area_weighted_field))))
+        _row(io, "Island w/2 [ψ_N]", _list(_fmt.(s.island_half_width)))
         _row(io, "Chirikov", "max $(_fmt(maximum(s.chirikov_parameter)))")
     end
-    isempty(s.dominant_forcing_overlap) || _row(io, "Dominant", "overlap with mode 1 = $(_fmt(abs(first(s.dominant_forcing_overlap))))")
+    isempty(s.dominant_forcing_overlap) || _row(io, "Dominant", "overlap with mode 1 = $(_fmt(abs(first(s.dominant_forcing_overlap)))) T")
     _row(io, "Profiles", s.xi_modes === nothing ? "not stored" : "ξ, b on $(length(s.psi_grid)) ψ nodes")
     s.torque_response === nothing || _row(io, "Torque resp.", "computed")
     iszero(s.regularization_width) || _row(io, "Regularized", "width $(_fmt(s.regularization_width))")
@@ -286,7 +313,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::ErrorFieldsResult)
         _row(
             io,
             "Monte Carlo",
-            "$(mc.nsample) samples; |δ| as designed $(_fmt(mc.abs_delta_total_as_designed)), mean $(_fmt(mc.abs_delta_sampled_mean)), with EFC $(_fmt(mc.abs_delta_efc_sampled_mean))"
+            "$(mc.nsample) samples; |δ|/B_T as designed $(_fmt(mc.abs_delta_total_as_designed)), mean $(_fmt(mc.abs_delta_sampled_mean)), with EFC $(_fmt(mc.abs_delta_efc_sampled_mean))"
         )
     end
     if r.risk === nothing
@@ -298,7 +325,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::ErrorFieldsResult)
             "Locking risk",
             "$(_fmt(rk.locking_probability_percent)) %, with EFC $(_fmt(rk.locking_probability_efc_percent)) %, as designed $(_fmt(rk.locking_probability_as_designed_percent)) %"
         )
-        _row(io, "Threshold", "fit $(_fmt(rk.threshold_fit))")
+        _row(io, "Threshold", "fit |δ|/B_T = $(_fmt(rk.threshold_fit))")
     end
     r.scan === nothing || _row(io, "Tolerance scan", "computed")
     r.couplings === nothing || _row(io, "EFC coils", _list([c.coil_name for c in r.couplings]))
@@ -313,10 +340,29 @@ end
 
 _tearing_mode(r::TearingResult) = r.coupled_extraction === nothing ? "uncoupled" : "coupled"
 
+# The root extraction behind each entry of `gamma`: one per surface uncoupled, the single global root coupled.
+_extractions(r::TearingResult) = r.coupled_extraction === nothing ? r.per_surface_extraction : [r.coupled_extraction]
+
+# Whether each entry of `gamma` found no root; its γ and ω are then 0 placeholders.
+function _no_root(r::TearingResult)
+    ex = _extractions(r)
+    length(ex) == length(r.gamma) || return falses(length(r.gamma))
+    return [:no_root in g.warning_flags for g in ex]
+end
+
+function _root_names(r::TearingResult)
+    r.coupled_extraction === nothing || return ["coupled"]
+    length(r.rational_q) == length(r.gamma) && return ["q = $(_fmt(q))" for q in r.rational_q]
+    return ["#$i" for i in eachindex(r.gamma)]
+end
+
+_rooted(v, none) = [n ? "—" : _fmt(x) for (x, n) in zip(v, none)]
+
 function Base.show(io::IO, r::TearingResult)
     r.enabled || return print(io, "TearingResult(disabled)")
     print(io, "TearingResult(", InnerLayer.model_name(r.model), ", ", _tearing_mode(r), ", ", _plural(length(r.params), "surface"))
-    isempty(r.gamma) || print(io, ", max γ = ", _fmt(maximum(r.gamma)), " 1/s")
+    found = r.gamma[.!_no_root(r)]
+    isempty(found) || print(io, ", max γ = ", _fmt(maximum(found)), " 1/s")
     return print(io, ")")
 end
 
@@ -324,13 +370,18 @@ function Base.show(io::IO, ::MIME"text/plain", r::TearingResult)
     r.enabled || return print(io, "TearingResult  disabled (the analysis did not run)")
     print(io, "TearingResult  ", InnerLayer.model_name(r.model), ", ", _tearing_mode(r))
     isempty(r.rational_q) || _row(io, "Surfaces", "q = " * _list(_fmt.(r.rational_q)))
-    _row(io, "γ [1/s]", _list(_fmt.(r.gamma)) * (any(>(0), r.gamma) ? "  (unstable)" : "  (stable)"))
-    _row(io, "ω [rad/s]", _list(_fmt.(r.omega)))
+    none = _no_root(r)
+    found = r.gamma[.!none]
+    verdict = isempty(found) ? "  (no roots found)" : any(>(0), found) ? "  (unstable)" : "  (stable)"
+    _row(io, "γ [1/s]", _list(_rooted(r.gamma, none)) * verdict)
+    _row(io, "ω [rad/s]", _list(_rooted(r.omega, none)))
     isempty(r.dp_matrix) || _row(io, "Δ′ diagonal", _list([_fmt(real(r.dp_matrix[i, i])) for i in 1:minimum(size(r.dp_matrix))]))
     isempty(r.layer_widths) || _row(io, "Layer δ [m]", _list([_fmt(w.delta_s_m) for w in r.layer_widths]))
-    flags = unique(reduce(vcat, [g.warning_flags for g in r.per_surface_extraction]; init=Symbol[]))
-    r.coupled_extraction === nothing || append!(flags, r.coupled_extraction.warning_flags)
-    isempty(flags) || _row(io, "Warnings", join(unique(flags), ", "))
+    ex = _extractions(r)
+    if length(ex) == length(r.gamma)
+        flagged = ["$name: $(join(g.warning_flags, ", "))" for (name, g) in zip(_root_names(r), ex) if !isempty(g.warning_flags)]
+        isempty(flagged) || _row(io, "Warnings", _list(flagged; max=4))
+    end
     crf = r.critical_resonant_field
     crf.enabled && _row(io, "B_r,crit [T]", _list(_fmt.(crf.br_crit_tesla)))
     isempty(r.scan_data) || _row(io, "Scan data", "$(length(r.scan_data)) stored")
