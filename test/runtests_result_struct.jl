@@ -208,7 +208,9 @@ include("display_check.jl")
                     @test !iszero(dp.coil)
 
                     _check_main_display(ret)
-                    @test occursin("Galerkin", _check_display(ffs))
+                    plain = _check_display(ffs)
+                    @test occursin("Galerkin", plain) && occursin("ideal MHD", plain)
+                    ideal || @test occursin("matched closure (", plain)
                     foreach(_check_display, (ffs.galerkin, ffs.solution))
 
                     # The ideal-flag match skips the inner layer, so its basis is ideal-closed.
