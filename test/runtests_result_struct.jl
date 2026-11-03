@@ -87,11 +87,11 @@ include("display_check.jl")
             @test ffs.integrator === :forward
 
             # Each result prints a short summary, and the returned named tuple stays on one line.
+            _check_display_ledger()
+            _check_main_display(ret)
             @test occursin("ξ profiles stored", _check_display(ffs))
             @test occursin("q₉₅", _check_display(ret.equil))
-            _check_display(ret.local_stability)
             foreach(_check_display, (ffs.solution, ffs.free_boundary, ffs.diagnostics, first(ffs.surfaces)))
-            @test !occursin('\n', repr(ret))
         end
     end
 
@@ -168,7 +168,8 @@ include("display_check.jl")
             @testset "$deck" begin
                 mktempdir() do dir
                     _stage_deck(dir, joinpath(@__DIR__, "..", "examples", deck))
-                    ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
+                    ret = GeneralizedPerturbedEquilibrium.main([dir])
+                    ffs = ret.ffs
 
                     @test ffs.integrator === :galerkin
                     @test ffs.galerkin !== nothing
@@ -206,8 +207,9 @@ include("display_check.jl")
                     @test size(dp.coil) == (2msing, ffs.numpert_total)
                     @test !iszero(dp.coil)
 
+                    _check_main_display(ret)
                     @test occursin("Galerkin", _check_display(ffs))
-                    foreach(_check_display, (ffs.match, ffs.galerkin, ffs.solution))
+                    foreach(_check_display, (ffs.galerkin, ffs.solution))
 
                     # The ideal-flag match skips the inner layer, so its basis is ideal-closed.
                     if ideal
