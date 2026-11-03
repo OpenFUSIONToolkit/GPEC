@@ -98,6 +98,7 @@ using HDF5
         ideal = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
 
         @test scaled.mats.kinetic !== nothing && ideal.mats.kinetic === nothing
+        @test scaled.closure === :regular && ideal.closure === :ideal && iszero(scaled.bpen)
         @test !isapprox(scaled.free_boundary.et[1], ideal.free_boundary.et[1]; rtol=1e-6)
         @test factored.free_boundary.et[1] ≈ scaled.free_boundary.et[1] rtol = 1e-10
         @test factored.kinetic.kmsing == scaled.kinetic.kmsing
