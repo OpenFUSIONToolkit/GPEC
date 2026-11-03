@@ -57,6 +57,7 @@ Modules, with the abbreviation to use in prose:
 |---|---|---|
 | `Analysis` | — | `src/Analysis/` |
 | `Deck` | — | `src/Deck.jl` |
+| `Display` | — | `src/Display.jl` |
 | `Equilibrium` | EQUIL | `src/Equilibrium/` |
 | `ErrorFields` | EF | `src/ErrorFields/` |
 | `ForceFreeStates` | FFS | `src/ForceFreeStates/` |

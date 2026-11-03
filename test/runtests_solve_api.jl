@@ -609,6 +609,8 @@ using HDF5
                 open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
                 @test reference.kinetic isa KineticForcesResult && reference.kinetic.pe === reference.pe
+                @test occursin("T_φ", repr(MIME"text/plain"(), reference.kinetic))
+                @test !occursin('\n', repr(reference.kinetic))
 
                 kf = kinetic_torque(reference.pe, GPEC.kinetic_forces_control(ntv_deck))
                 @test sort!(collect(keys(kf.total.method_results))) == sort!(collect(keys(reference.kinetic.total.method_results)))

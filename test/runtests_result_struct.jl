@@ -1,6 +1,7 @@
 using TOML
 using HDF5
 include("h5_metadata_check.jl")
+include("display_check.jl")
 
 # ForceFreeStatesResult: what each formalism publishes, and how consumers gate on it.
 # The Solovev fixture deck (mpsi=16, delta_m=0) is coarse but has two rational surfaces,
@@ -84,6 +85,13 @@ include("h5_metadata_check.jl")
             @test 0 < ffs.psilim <= 1
             @test !isempty(ffs.surfaces)
             @test ffs.integrator === :forward
+
+            # Each result prints a short summary, and the returned named tuple stays on one line.
+            @test occursin("ξ profiles stored", _check_display(ffs))
+            @test occursin("q₉₅", _check_display(ret.equil))
+            _check_display(ret.local_stability)
+            foreach(_check_display, (ffs.solution, ffs.free_boundary, ffs.diagnostics, first(ffs.surfaces)))
+            @test !occursin('\n', repr(ret))
         end
     end
 
@@ -111,6 +119,10 @@ include("h5_metadata_check.jl")
             @test ffs.delta_prime.Gamma === nothing
             @test ffs.delta_prime.matrix ≈ FFS.pest3_decompose(ffs.delta_prime.raw).Δ
             @test ffs.free_boundary !== nothing
+
+            plain = _check_display(ffs)
+            @test occursin("Riccati stores none", plain) && occursin("Δ′ diagonal", plain)
+            _check_display(ffs.delta_prime)
         end
     end
 
@@ -144,6 +156,8 @@ include("h5_metadata_check.jl")
             @test ret.pe !== nothing
             @test isempty(ret.pe.response.permeability)
             @test isempty(ret.pe.response.C_delta_prime)
+            @test occursin("not built", _check_display(ret.resp))
+            _check_display(ret.pe)
         end
     end
 
@@ -191,6 +205,9 @@ include("h5_metadata_check.jl")
                     # The rpec coil block is normalized to the Riccati orientation at pack time.
                     @test size(dp.coil) == (2msing, ffs.numpert_total)
                     @test !iszero(dp.coil)
+
+                    @test occursin("Galerkin", _check_display(ffs))
+                    foreach(_check_display, (ffs.match, ffs.galerkin, ffs.solution))
 
                     # The ideal-flag match skips the inner layer, so its basis is ideal-closed.
                     if ideal
