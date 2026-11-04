@@ -248,6 +248,19 @@ end
 
 _resonances(r::PlasmaResponse) = ["$(m)/$(n)" for (m, n) in zip(r.rational_m_res, r.rational_n)]
 
+function _missing_operators_note(r::PlasmaResponse)
+    r.ffs.free_boundary === nothing && return "not computed (needs a free-boundary result)"
+    r.ffs.solution === nothing && return "not computed (needs stored ξ profiles)"
+    return "not computed"
+end
+
+function _missing_coupling_note(r::PlasmaResponse)
+    r.compute_singular_coupling || return "not computed (singular coupling off)"
+    isempty(r.permeability_flux) && return _missing_operators_note(r)
+    isempty(r.rational_psi) && return "none (no resonant surfaces)"
+    return "not computed"
+end
+
 function Base.show(io::IO, r::PlasmaResponse)
     return print(io, "PlasmaResponse(", length(r.m_modes), " modes, ", _plural(length(r.rational_psi), "resonant surface"), ")")
 end
@@ -255,9 +268,9 @@ end
 function Base.show(io::IO, ::MIME"text/plain", r::PlasmaResponse)
     print(io, "PlasmaResponse  on ", r.ffs)
     _row(io, "Modes", "n = $(_irange(r.n_modes)), m = $(_irange(r.m_modes)) ($(length(r.m_modes)) total)")
-    _row(io, "Operators", isempty(r.permeability_flux) ? "not computed (needs a free-boundary result)" : "permeability, inductances $(_shape(r.permeability_flux))")
+    _row(io, "Operators", isempty(r.permeability_flux) ? _missing_operators_note(r) : "permeability, inductances $(_shape(r.permeability_flux))")
     _row(io, "Resonances", isempty(r.rational_psi) ? "none" : _list(_resonances(r)))
-    _row(io, "Coupling", isempty(r.C_resonant_area_weighted_field) ? "not computed" : "C $(_shape(r.C_resonant_area_weighted_field))")
+    _row(io, "Coupling", isempty(r.C_resonant_area_weighted_field) ? _missing_coupling_note(r) : "C $(_shape(r.C_resonant_area_weighted_field))")
     isempty(r.dominant_singular_values) || _row(io, "Dominant σ", _list(_fmt.(r.dominant_singular_values); max=3))
     _row(io, "Torque resp.", isempty(r.T_xe) ? "not computed" : "T_xe $(_shape(r.T_xe))")
     r.odet_from_gal && _row(io, "Basis", "Galerkin-native solution")
@@ -282,7 +295,7 @@ function Base.show(io::IO, ::MIME"text/plain", s::PerturbedEquilibriumState)
     _row(io, "Energy", "vacuum $(_fmt(s.vacuum_energy)) J, surface $(_fmt(s.surface_energy)) J, plasma $(_fmt(s.plasma_energy)) J")
     _row(io, "Torque", "$(_fmt(s.toroidal_torque)) N·m (boundary response; not the KineticForces NTV torque)")
     if isempty(s.island_half_width)
-        _row(io, "Resonances", "not computed (singular coupling off)")
+        _row(io, "Resonances", _missing_coupling_note(r))
     else
         _row(io, "Resonances", _list(_resonances(r)))
         _row(io, "|b̄_res| [T]", _list(_fmt.(abs.(s.resonant_area_weighted_field))))
