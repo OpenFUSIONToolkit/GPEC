@@ -175,7 +175,7 @@ end
 function _fixed_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
     r.diagnostics === nothing && return "not computed by the $(r.integrator) integrator"
     k = r.diagnostics.nzero
-    return k == 0 ? "stable (no zero crossings of the critical determinant)" : "unstable ($(_plural(k, "zero crossing")) of the stability criterion)"
+    return k == 0 ? "stable (no zero crossings of the critical determinant)" : "unstable ($(_plural(k, "zero crossing")) of the critical determinant)"
 end
 
 function _free_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
