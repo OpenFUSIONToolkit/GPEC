@@ -29,7 +29,9 @@ function _check_main_display(ret)
         T = typeof(x)
         @test parentmodule(which(show, Tuple{IO,MIME"text/plain",T})) === GPEC
         @test haskey(GPEC._DISPLAY_FIELDS, Base.typename(T).wrapper)
-        _check_display(x)
+        plain = _check_display(x)
+        # A result with registered plots says how many it can draw.
+        @test occursin("Plots", plain) == (last(GPEC.Analysis.plot_counts(x)) > 0)
     end
     @test !occursin('\n', repr(ret))
 end
