@@ -68,6 +68,9 @@ The data products `src` holds, by the names plots declare in their `needs`: a re
 """
 function capabilities end
 
+# A type no plot takes holds nothing a plot reads.
+capabilities(_) = Set{Symbol}()
+
 capabilities(::PlasmaEquilibrium) = Set([:equilibrium])
 
 function capabilities(r::ForceFreeStatesResult)
