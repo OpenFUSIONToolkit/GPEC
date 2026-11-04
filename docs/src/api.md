@@ -44,13 +44,15 @@ Each result prints a short summary at the REPL: its headline numbers, which opti
 ```julia-repl
 julia> ffs
 ForceFreeStatesResult  Riccati, ideal closure
-  Modes          n = 1, m = -4:3 (8 total)
-  Domain         ψ ∈ [0.0001, 0.9995], q_lim = 3.262
-  Surfaces       2: 2/1 @ ψ = 0.1221, 3/1 @ ψ = 0.8804
-  Free boundary  et₁ = 16.4 (stable), ep₁ = 14.04, ev₁ = 2.365, vacuum λ = 2.315
-  Δ′ diagonal    0.1781, -215.7
-  Solution       no ξ profiles (Riccati stores none)
-  Wall           ConformalWall
+  Physics            ideal MHD
+  Modes              n = 1, m = -4:3 (8 total)
+  Domain             ψ ∈ [0.0001, 0.9995], q_lim = 3.262
+  Surfaces           2: 2/1 @ ψ = 0.1221, 3/1 @ ψ = 0.8804
+  Fixed boundary     stable (no zero crossings of the critical determinant)
+  Free boundary      stable: et₁ = 16.4, ep₁ = 14.04, ev₁ = 2.365, vacuum λ = 2.315
+  Δ′_ii (ψ_N)        2/1: 0.1781, 3/1: -215.7
+  Solution           not computed (Riccati stores no ξ profiles)
+  Wall               ConformalWall, standoff = 0.2415 a
 ```
 
 The fields themselves are documented in each type's docstring.

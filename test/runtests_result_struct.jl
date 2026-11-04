@@ -89,7 +89,10 @@ include("display_check.jl")
             # Each result prints a short summary, and the returned named tuple stays on one line.
             _check_display_ledger()
             _check_main_display(ret)
-            @test occursin("ξ profiles stored", _check_display(ffs))
+            plain = _check_display(ffs)
+            @test occursin("ξ profiles stored", plain) && occursin("Fixed boundary", plain)
+            # A default surface has no mode numbers yet; displaying it must not throw.
+            @test repr(FFS.SingType()) == "SingType(m/n = ?/?, ψ = 0, q = 0)"
             @test occursin("q₉₅", _check_display(ret.equil))
             foreach(_check_display, (ffs.solution, ffs.free_boundary, ffs.diagnostics, first(ffs.surfaces)))
         end
@@ -121,7 +124,7 @@ include("display_check.jl")
             @test ffs.free_boundary !== nothing
 
             plain = _check_display(ffs)
-            @test occursin("Riccati stores none", plain) && occursin("Δ′ diagonal", plain)
+            @test occursin("Riccati stores no ξ profiles", plain) && occursin("Δ′_ii (ψ_N)", plain)
             _check_display(ffs.delta_prime)
         end
     end
@@ -156,7 +159,7 @@ include("display_check.jl")
             @test ret.pe !== nothing
             @test isempty(ret.pe.response.permeability)
             @test isempty(ret.pe.response.C_delta_prime)
-            @test occursin("not built", _check_display(ret.resp))
+            @test occursin("needs a free-boundary result", _check_display(ret.resp))
             _check_display(ret.pe)
         end
     end
