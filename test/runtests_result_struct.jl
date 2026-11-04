@@ -159,8 +159,28 @@ include("display_check.jl")
             @test ret.pe !== nothing
             @test isempty(ret.pe.response.permeability)
             @test isempty(ret.pe.response.C_delta_prime)
-            @test occursin("needs a free-boundary result", _check_display(ret.resp))
-            _check_display(ret.pe)
+            @test ret.ffs.free_boundary !== nothing && ret.ffs.solution === nothing
+            @test ret.resp.compute_singular_coupling
+            for result in (ret.resp, ret.pe)
+                plain = _check_display(result)
+                @test occursin("needs stored ξ profiles", plain)
+                @test !occursin("needs a free-boundary result", plain)
+                @test !occursin("singular coupling off", plain)
+            end
+        end
+    end
+
+    @testset "display distinguishes disabled coupling from no resonances" begin
+        PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+        ffs = forward_result[]
+        for enabled in (false, true)
+            resp = PlasmaResponse(; ffs, compute_singular_coupling=enabled,
+                permeability_flux=zeros(ComplexF64, ffs.numpert_total, ffs.numpert_total))
+            pe = PE.PerturbedEquilibriumState(; response=resp)
+            expected = enabled ? "none (no resonant surfaces)" : "not computed (singular coupling off)"
+            for result in (resp, pe)
+                @test occursin(expected, _check_display(result))
+            end
         end
     end
 
@@ -283,6 +303,11 @@ include("display_check.jl")
             @test ffs.wp !== nothing
             @test size(ffs.wp) == (ffs.numpert_total, ffs.numpert_total)
             @test all(isfinite, ffs.wp)
+            resp = PlasmaResponse(; ffs)
+            pe = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState(; response=resp)
+            for result in (resp, pe)
+                @test occursin("needs a free-boundary result", _check_display(result))
+            end
         end
     end
 
