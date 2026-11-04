@@ -1,7 +1,8 @@
 # Concise REPL display for the published result types: a one-line `show(io, x)` used inside
 # containers (the named tuple `main` returns, nested fields) and a short labelled `text/plain`
 # summary. Arrays are summarized by shape or range and never printed. Absent products read
-# "not computed" (not requested or not producible) or "none" (computed, but empty).
+# "not computed" (not requested or not producible) or "none" (computed, but empty). Results with
+# registered plots end with how many of them they can draw.
 #
 # Included directly into the GeneralizedPerturbedEquilibrium module, after every submodule.
 
@@ -33,6 +34,13 @@ function _list(items; max::Int=6)
 end
 
 _row(io, label, value) = print(io, "\n  ", rpad(label, 19), value)
+
+# How many registered plots `x` can draw, pointing at the catalog that names them.
+function _plots_row(io, x)
+    ok, n = Analysis.plot_counts(x)
+    n == 0 || _row(io, "Plots", "$ok of $n available (see available_plots)")
+    return nothing
+end
 
 # Range of `ψ` where `mask` holds, as "k/N points, ψ ∈ [a, b]"; "none" when nowhere.
 function _where(psi, mask)
@@ -72,6 +80,7 @@ function Base.show(io::IO, ::MIME"text/plain", eq::PlasmaEquilibrium)
     _row(io, "Shape", "R = $(_fmt(p.rmean)) m, a = $(_fmt(p.amean)) m, κ = $(_fmt(p.kappa)), δ_upper = $(_fmt(p.delta1)), δ_lower = $(_fmt(p.delta2))")
     _row(io, "Grid", "$(length(eq.rzphi_xs)) ψ × $(length(eq.rzphi_ys)) θ, ψ ∈ $(_span(eq.rzphi_xs)), $(eq.config.jac_type) coordinates")
     _row(io, "Kinetic", eq.kinetic === nothing ? "none attached" : _list(_kinetic_names(eq.kinetic); max=14))
+    _plots_row(io, eq)
     return nothing
 end
 
@@ -103,6 +112,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::LocalStability.LocalStabilityR
     _row(io, "Mercier", "D_I > 0 (unstable): " * _where(r.psi, r.D_I .> 0))
     _row(io, "Resistive", "D_R > 0 (unstable): " * _where(r.psi, r.D_R .> 0))
     _row(io, "Ballooning", _ballooning_note(r))
+    _plots_row(io, r)
     return nothing
 end
 
@@ -216,6 +226,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::ForceFreeStates.ForceFreeState
     r.match === nothing || _row(io, "Match", sprint(show, r.match))
     r.kinetic.kmsing > 0 && _row(io, "Kinetic", "$(_plural(r.kinetic.kmsing, "kinetic singular surface"))")
     _row(io, "Wall", _wall_label(r.wall_settings))
+    _plots_row(io, r)
     return nothing
 end
 
@@ -296,6 +307,7 @@ function Base.show(io::IO, ::MIME"text/plain", s::PerturbedEquilibriumState)
     _row(io, "Profiles", s.xi_modes === nothing ? "not computed" : "ξ, b on $(length(s.psi_grid)) ψ nodes")
     s.torque_response === nothing || _row(io, "Torque resp.", "computed")
     iszero(s.regularization_width) || _row(io, "Regularized", "width $(_fmt(s.regularization_width))")
+    _plots_row(io, s)
     return nothing
 end
 
@@ -375,6 +387,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::ErrorFieldsResult)
     end
     r.scan === nothing || _row(io, "Tolerance scan", "$(length(r.scan.tolerance_scale)) points, $(_in("scale", r.scan.tolerance_scale))")
     r.couplings === nothing || _row(io, "EFC coils", _list([c.coil_name for c in r.couplings]))
+    _plots_row(io, r)
     return nothing
 end
 

@@ -260,6 +260,20 @@ include("display_check.jl")
             @test AEF.plot_coil_sensitivities(h5path; quantity=:rim)[1][:yaxis][:guide] == "|δ| per mm of rim displacement"
             @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; quantity=:bogus)
 
+            # The assessment in memory supplies what its saved file does, and every registered plot draws from both.
+            ef = res.error_fields
+            from_result, from_file = AEF._load(ef), AEF._load(h5path)
+            for k in keys(from_result)
+                k === :tolerances && continue
+                a, b = from_result[k], from_file[k]
+                @test (a === nothing && b === nothing) || (a isa AbstractArray{<:Number} ? isapprox(a, b; rtol=1e-10) : isequal(a, b))
+            end
+            for e in GPEC.Analysis.PLOTS
+                GPEC.Analysis._accepts(e, ef) || continue
+                @test e.fn(ef) isa Plots.Plot
+                @test e.fn(h5path) isa Plots.Plot
+            end
+
             # An in-memory table plots the same way a stored run does, which is the whole point of
             # the dual entry points: coil geometry that was never part of a run has no file to read.
             in_memory = AEF.plot_coil_sensitivities(table)

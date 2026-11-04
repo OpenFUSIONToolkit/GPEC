@@ -2,15 +2,15 @@ using HDF5
 using Plots
 using TOML
 
-# Smoke tests of the gpec.h5 plots against real writer output: each plot must read the datasets the
-# writers emit, so a renamed path fails here instead of silently drawing a "No ... data" placeholder.
-@testset "Analysis plots from gpec.h5" begin
+# Every registered plot against real writer output, from the result in memory and from the gpec.h5 it was saved to:
+# both sources must supply the same data, draw the same plots, and refuse the same ones with the registry's reason.
+@testset "Analysis plots from a result or gpec.h5" begin
     ENV["GKSwstype"] = "100"
     GPEC = GeneralizedPerturbedEquilibrium
     A = GPEC.Analysis
 
-    # Copy a coarse fixture deck into `dir` with HDF5 output on and the given extra sections; return its gpec.h5.
-    function _run_fixture(dir, fixture; sections=Dict{String,Any}(), ffs=Dict{String,Any}())
+    # Copy a coarse fixture deck into `dir` with HDF5 output on and the given extra sections; return main's results and its gpec.h5.
+    function _run_fixture(dir, fixture; sections=Dict{String,Any}(), ffs=Dict{String,Any}(), edit=identity)
         template = joinpath(@__DIR__, "test_data", fixture)
         for name in readdir(template)
             cp(joinpath(template, name), joinpath(dir, name))
@@ -19,16 +19,58 @@ using TOML
         inputs = TOML.parsefile(toml_path)
         merge!(inputs, sections)
         merge!(inputs["ForceFreeStates"], ffs)
+        edit(inputs)
         open(io -> TOML.print(io, inputs), toml_path, "w")
-        GPEC.main([dir])
-        return joinpath(dir, "gpec.h5")
+        return GPEC.main([dir]), joinpath(dir, "gpec.h5")
     end
-    _placeholder(p) = any(sp -> startswith(string(get(sp.attr, :title, "")), "No "), p.subplots)
-    _drew(p) = p isa Plots.Plot && !_placeholder(p)
 
-    @testset "ideal run with coil forcing and the perturbed-equilibrium response" begin
+    # The data extractors each dual-source plot reads, by the capability that guards them.
+    extractors = (
+        (A.ForceFreeStates._mode_displacement_data, :solution_profiles), (A.ForceFreeStates._criterion_data, :fixed_boundary_criterion),
+        (A.ForceFreeStates._energy_eigenvector_data, :free_boundary), (A.ForceFreeStates._delta_prime_data, :delta_prime),
+        (A.ForceFreeStates._cond_fbar_data, :kinetic_scan), (A.Equilibrium._global_data, :equilibrium),
+        (A.PerturbedEquilibrium._coupling_data, :singular_coupling))
+    _same(a::NamedTuple, b::NamedTuple) = keys(a) == keys(b) && all(_same(a[k], b[k]) for k in keys(a))
+    _same(a::AbstractArray{<:Number}, b::AbstractArray{<:Number}) = size(a) == size(b) && isapprox(a, b; rtol=1e-10, nans=true)
+    _same(a::Number, b::Number) = isapprox(a, b; rtol=1e-12)
+    _same(a, b) = isequal(a, b)
+
+    # Every plot registered for `x` has a method for each source it lists, draws from `x` and from `h5` when the
+    # capabilities allow, and otherwise throws the registry's reason from both.
+    function _check_sources(x, h5)
+        caps = A.capabilities(x)
+        # The file holds every capability a plot can read from a path (coil geometry is in memory only).
+        path_needs = union((e.needs for e in A.PLOTS if A._accepts(e, h5))...)
+        @test intersect(caps, path_needs) ⊆ A.capabilities(h5)
+        for (f, cap) in extractors
+            cap in caps && hasmethod(f, Tuple{typeof(x)}) && @test _same(f(x), f(h5))
+        end
+        for e in A.PLOTS
+            A._accepts(e, x) || continue
+            @test all(T -> hasmethod(e.fn, Tuple{T}), e.sources)
+            sources = A._accepts(e, h5) ? (x, h5) : (x,)
+            if A._can(e.fn, caps)
+                for src in sources
+                    @test e.fn(src) isa Plots.Plot
+                end
+            else
+                reason = A._why(A._missing(e, caps))
+                for src in sources
+                    err = try
+                        e.fn(src)
+                        nothing
+                    catch caught
+                        caught
+                    end
+                    @test err isa ArgumentError && occursin(reason, err.msg)
+                end
+            end
+        end
+    end
+
+    @testset "ideal Forward run with coil forcing, the response and local stability" begin
         mktempdir() do dir
-            h5 = _run_fixture(
+            ret, h5 = _run_fixture(
                 dir,
                 "regression_tj_ideal_example";
                 ffs=Dict{String,Any}("dW_edge_scan_start" => 0.95),
@@ -38,39 +80,49 @@ using TOML
                             "currents" => [2.0e3], "tiltx" => [3.0])]),
                     "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
             )
-
-            for f in (A.Equilibrium.plot_qprofile, A.Equilibrium.plot_pressure_profile, A.Equilibrium.plot_f_profile,
-                A.Equilibrium.plot_flux_surfaces, A.Equilibrium.plot_equilibrium_summary)
-                @test _drew(f(h5))
+            for x in (ret.equil, ret.ffs, ret.pe)
+                _check_sources(x, h5)
             end
-            for f in (A.ForceFreeStates.plot_mode_displacement, A.ForceFreeStates.plot_fixed_boundary_stability_criterion,
-                A.ForceFreeStates.plot_energy_eigenvectors, A.ForceFreeStates.plot_edge_stability_scan,
-                A.ForceFreeStates.plot_eigenvalues, A.ForceFreeStates.plot_delta_prime,
-                A.ForceFreeStates.plot_ballooning_alpha_boundary, A.ForceFreeStates.plot_ffs_summary)
-                @test _drew(f(h5))
-            end
-            for f in (A.PerturbedEquilibrium.plot_resonant_area_weighted_field_amplitude, A.PerturbedEquilibrium.plot_island_widths,
-                A.PerturbedEquilibrium.plot_chirikov_parameter, A.PerturbedEquilibrium.plot_driven_delta_prime,
-                A.PerturbedEquilibrium.plot_resonant_area_weighted_field, A.PerturbedEquilibrium.plot_perturbed_equilibrium_summary)
-                @test _drew(f(h5))
-            end
+            ret.local_stability === nothing || _check_sources(ret.local_stability, h5)
             for component in (:xi_psi, :b_psi, :Jb_theta, :Jb_zeta)
-                @test _drew(A.PerturbedEquilibrium.plot_mode_spectrogram(h5; component=component))
+                @test _same(A.PerturbedEquilibrium._response_data(ret.pe, component), A.PerturbedEquilibrium._response_data(h5, component))
+                @test A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component) isa Plots.Plot
             end
-            @test_throws ErrorException A.PerturbedEquilibrium.plot_mode_spectrogram(h5; component=:b_theta)
+            @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(h5; component=:b_theta)
 
-            # Optional outputs this run does not produce: no kinetic scan, no GSE sidecar files.
-            @test (@test_logs (:warn,) A.ForceFreeStates.plot_cond_fbar(h5)) === nothing
-            @test A.Equilibrium.plot_gse_by_theta(h5) === nothing
-            @test A.Equilibrium.plot_gse_integrated(h5) === nothing
+            # The catalog lists a Forward run's absent products with what to change, for a result, a path and main's tuple.
+            listing = repr(MIME"text/plain"(), available_plots(ret.ffs))
+            @test occursin("✓ ForceFreeStates.plot_mode_displacement", listing)
+            @test occursin("✗ ForceFreeStates.plot_delta_prime", listing) && occursin(A.REASONS[:delta_prime], listing)
+            @test occursin("✗ Equilibrium.plot_gse_by_theta", repr(MIME"text/plain"(), available_plots(h5)))
+            @test length(available_plots(ret).sections) == count(x -> x !== nothing && any(e -> A._accepts(e, x), A.PLOTS), unique(values(ret)))
+            @test A.plot_counts(ret.ffs) == (11, 13)
+
+            # Optional outputs this run does not produce throw instead of drawing a placeholder.
+            @test_throws ArgumentError A.ForceFreeStates.plot_cond_fbar(h5)
+            @test_throws ArgumentError A.Equilibrium.plot_gse_by_theta(h5)
+            @test_throws ArgumentError A.Equilibrium.plot_gse_integrated(h5)
 
             png = joinpath(dir, "qprofile.png")
-            A.Equilibrium.plot_qprofile(h5; save_path=png)
+            A.Equilibrium.plot_qprofile(ret.equil; save_path=png)
             @test isfile(png)
 
             theta_data, theta_grid, n_vals = A.PerturbedEquilibriumModes.modes_to_theta(h5, "PerturbedEquilibrium/Response/xi_psi")
             npsi = h5open(f -> length(read(f, "PerturbedEquilibrium/Response/psi")), h5)
             @test size(theta_data) == (npsi, length(theta_grid), length(n_vals))
+        end
+    end
+
+    @testset "Riccati run offers Δ′ but no solution profiles" begin
+        mktempdir() do dir
+            ret, h5 = _run_fixture(dir, "regression_solovev_ideal_example";
+                edit=d -> (d["ForceFreeStates"]["integrator"] = "Riccati"; d["Riccati"] = pop!(d, "Forward")))
+            _check_sources(ret.ffs, h5)
+            @test :delta_prime in A.capabilities(ret.ffs) && :solution_profiles ∉ A.capabilities(ret.ffs)
+            @test_throws A.REASONS[:solution_profiles] A.ForceFreeStates.plot_mode_displacement(ret.ffs)
+            @test occursin("✗ ForceFreeStates.plot_mode_displacement", repr(MIME"text/plain"(), available_plots(ret.ffs)))
+            # The summary leaves out the ξ panel rather than failing: three panels and a blank fourth.
+            @test length(A.ForceFreeStates.plot_ffs_summary(ret.ffs).subplots) == 4
         end
     end
 
@@ -81,9 +133,11 @@ using TOML
             fixture = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
             kwargs = merge(GPEC.force_balance_keywords(inputs, fixture), Dict(:kinetic => TestKineticMatrices(; scale=1e-9)))
             prob = ForceBalanceProblem(PlasmaEquilibrium(config, analytic); kwargs...)
+            ffs = solve(prob, GPEC.force_balance_algorithm(inputs))
             h5 = joinpath(dir, "gpec.h5")
-            save_to_hdf5(h5, solve(prob, GPEC.force_balance_algorithm(inputs)))
-            @test _drew(A.ForceFreeStates.plot_cond_fbar(h5))
+            save_to_hdf5(h5, ffs)
+            _check_sources(ffs, h5)
+            @test A.ForceFreeStates.plot_cond_fbar(ffs) isa Plots.Plot
         end
     end
 end
