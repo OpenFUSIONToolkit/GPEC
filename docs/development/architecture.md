@@ -210,7 +210,7 @@ The complete GPEC analysis pipeline:
 ### Stability
 - `SingType` - Singular surface data including:
   - Rational surface location (ψ, ρ, q = m/n, dq/dψ)
-  - Δ' (tearing stability parameter) — **stub**; the valid Δ' is `ForceFreeStatesResult.delta_prime.matrix`
+  - Δ' (tearing stability parameter) — **stub**; the valid Δ' is `ForceFreeStatesResult.delta_prime` (`DeltaPrimeData`)
   - Asymptotic solution bases at the inner-layer boundaries
 - `ForceFreeStatesResult` - Published product of a solve: mode space, metric/matrix fits, singular
   surfaces, and the per-integrator products (ξ solution and its basis, free-boundary energies,

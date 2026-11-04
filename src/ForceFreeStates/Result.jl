@@ -8,7 +8,7 @@ formalism produced the solution.
 ## Fields
 
   - `basis::Symbol` - Which formalism's basis the profiles are in: `:el_axis` (forward
-    integrator, axis Euler-Lagrange basis) or `:gal_native` (inner-layer-matched Galerkin
+    integrator, axis Euler-Lagrange basis) or `:gal_native` (ideal or inner-layer-matched Galerkin
     solution, identity-at-edge basis).
   - `step::Int` - Number of stored radial nodes.
   - `psi_store::Vector{Float64}` - ψ at each node.
@@ -40,10 +40,10 @@ Optional fields are `Union{Nothing,T}` and follow a presence-equals-capability r
 consumer that needs one gates on [`require`](@ref) (or [`require_solution`](@ref) for the
 ξ profiles) and warns-and-skips rather than erroring, so a result from an integrator that
 cannot supply a given product still flows through the pipeline. PerturbedEquilibrium refuses
-Galerkin and `:matched` results instead, since they publish no `wp` or `free_boundary` yet.
+Galerkin and `:matched` results instead, since they publish no `free_boundary` yet.
 
-A jump condition at the rational surfaces is always applied before a final result is built,
-so bpen and closure are always present.
+A Forward or Riccati solve applies the ideal jump condition at the rationals; a Galerkin solve
+is ideal-closed by its EF columns (`error_field_response`), and is unclosed without them.
 
 ## Fields
 
@@ -58,17 +58,20 @@ so bpen and closure are always present.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
   - `closure::Symbol` - How the basis is closed at the rationals: `:ideal` (the ideal jump
-    condition was imposed) or `:matched` (an inner-layer solution was matched in). A
-    `:matched` result carries no ideal δW: `wp` and `free_boundary` are `nothing`.
+    condition was imposed) or `:matched` (an inner-layer solution was matched in). A matched
+    Galerkin result carries the matched edge response as `wp`; a matched Riccati result none.
   - `bpen::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated resonant field from the
     inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` closure.
   - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
-    formalism produced none (Riccati, and Galerkin without a match).
+    formalism produced none (Riccati, and Galerkin without `error_field_response`).
   - `diagnostics::Union{Nothing,OdeState}` - The integrator's raw ODE state (ψ trace, `crit`,
     edge scan, asymptotic coefficients). Written to HDF5; not a consumable solution.
-  - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix `W_p = (U₂·U₁⁻¹)/ψ₀²` at
-    `psilim`. Present for any Euler-Lagrange sweep regardless of `vac_flag`; equals `free_boundary.wp` when that ran.
+  - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix at `psilim`, the edge
+    displacement → edge momentum map over ψ₀² [Glasser 2016 PoP 23 072505, Eq. 66]: `(U₂·U₁⁻¹)/ψ₀²` for an
+    Euler-Lagrange sweep (regardless of `vac_flag`; equals `free_boundary.wp` when that ran), the EF-column
+    edge response over ψ₀² for Galerkin. Under `:matched` closure it is the complex matched edge response, whose
+    anti-Hermitian part is the torque the inner layers absorb [Logan 2013, eq. 19].
   - `free_boundary::Union{Nothing,FreeBoundaryResult}` - Free-boundary energies and eigenmodes; `nothing` when the vacuum step was skipped or the formalism computes none.
   - `delta_prime::Union{Nothing,DeltaPrimeData}` - Δ′/outer-region matching payload from
     whichever formalism ran (Riccati BVP or Galerkin); `nothing` when neither produced one.
@@ -144,17 +147,27 @@ function require_solution(result::ForceFreeStatesResult, calc::AbstractString)
     return false
 end
 
-# Pack the matched Galerkin solution into `SolutionProfiles`: on-surface `issing` points are dropped, Ξ′ is the
-# analytic Galerkin derivative, and Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) as in `sing_der!`. Grid runs inner→edge.
-function _matched_gal_profiles(gal_result::GalerkinResult, m::MatchResult, mats::MatrixSplines, intr::ModeSpace)
-    sol = gal_result.solution
+# Columns of the Galerkin error-field (EF) drives (error_field_response).
+gal_ef_columns(gal::GalerkinResult) = (2gal.msing+1):size(gal.edge_response, 2)
+
+# Plasma energy matrix W_P of the ideal (no `cout`) or matched Galerkin solution, in the units of `(U₂·U₁⁻¹)/ψ₀²`.
+function gal_wp(gal::GalerkinResult, psio::Float64; cout::Union{Nothing,Matrix{ComplexF64}}=nothing)
+    F = gal.edge_response
+    W = F[:, gal_ef_columns(gal)]
+    cout === nothing || mul!(W, @view(F[:, 1:(2gal.msing)]), cout, true, true)
+    return W ./ psio^2
+end
+
+# `SolutionProfiles` of closed Galerkin columns `xi`, `xi_deriv` (npert, ngrid, ncol) on the grid of `sol`, without on-surface points.
+function _gal_profiles(sol::GalerkinSolution, xi::AbstractArray{ComplexF64,3}, xi_deriv::AbstractArray{ComplexF64,3}, mats::MatrixSplines,
+    intr::ModeSpace)
     npert = intr.numpert_total
 
     keep = .!sol.issing
     psi_f = sol.psi[keep]
     q_f = sol.q[keep]
-    xi_f = m.xi[:, keep, :]          # (npert, ngrid_f, mcoil)
-    dxi_f = m.xi_deriv[:, keep, :]
+    xi_f = xi[:, keep, :]          # (npert, ngrid_f, ncol)
+    dxi_f = xi_deriv[:, keep, :]
     ngrid_f = length(psi_f)
 
     # u_store[:, :, 2] stays zero: the conjugate momentum has no consumer on this path and no
@@ -180,8 +193,9 @@ end
         -> ForceFreeStatesResult
 
 Assemble the published result once the solve is finished, with the ideal closure (a `MatchProblem`
-solve transforms it afterwards). Materializes the forward path's derivative stores and forms `W_p`
-when the free-boundary stage did not run; everything else is copied or aliased.
+solve transforms it afterwards). Materializes the forward path's derivative stores, packs the Galerkin
+EF columns as the solution, and forms `W_p` when the free-boundary stage did not run; everything else
+is copied or aliased.
 
 `odet` is the ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` are the Galerkin internals and
 its Δ′ payload (`nothing` otherwise).
@@ -198,22 +212,27 @@ function build_result(
     gal_data::Union{Nothing,GalerkinResult},
     gal_dp::Union{Nothing,DeltaPrimeData}
 )
+    # The Galerkin EF columns (ξ = eⱼ at the edge, no big-solution drive) are its ideal closure.
+    gal_ef = gal_data === nothing || gal_data.solution === nothing ? (1:0) : gal_ef_columns(gal_data)
+
     # The forward sweep is the only formalism whose stores need materializing; doing it here
     # keeps `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
     solution = if integrator === :forward && odet !== nothing
         materialize_derivative_stores!(odet, equil, mats, intr)
         SolutionProfiles(:el_axis, odet.step, odet.psi_store, odet.q_store,
             odet.u_store, odet.du_store, odet.xi_s_store)
+    elseif !isempty(gal_ef)
+        gs = gal_data.solution
+        _gal_profiles(gs, @view(gs.xi[:, :, gal_ef]), @view(gs.xi_deriv[:, :, gal_ef]), mats, intr)
     else
         nothing
     end
 
-    # One Δ′ payload whichever formalism produced it; Riccati leaves the PEST-3 blocks unfilled
-    # because it persists only the raw D′ and recovers them on demand via `pest3_decompose`.
+    # One Δ′ payload whichever formalism produced it.
     delta_prime = if gal_dp !== nothing
         gal_dp
-    elseif !isempty(intr.delta_prime_matrix)
-        DeltaPrimeData(intr.delta_prime_matrix, intr.delta_prime_raw, intr.delta_coil, nothing, nothing, nothing)
+    elseif !isempty(intr.delta_prime_raw_freeboundary) || !isempty(intr.delta_prime_raw_fixedboundary)
+        DeltaPrimeData(intr.delta_prime_raw_freeboundary, intr.delta_prime_raw_fixedboundary, intr.delta_ef)
     else
         nothing
     end
@@ -229,6 +248,8 @@ function build_result(
         free_energies.wp
     elseif odet !== nothing
         (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    elseif !isempty(gal_ef)
+        gal_wp(gal_data, equil.psio)
     else
         nothing
     end

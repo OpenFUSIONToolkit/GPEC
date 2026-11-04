@@ -29,12 +29,11 @@ end
             x = factor \ rhs
             raw[row, :] = x[[3, 5]]
         end
-        delta = reshape([raw[2, 2] - raw[2, 1] - raw[1, 2] + raw[1, 1]], 1, 1)
-        return ComplexF64.(delta), ComplexF64.(raw)
+        return ComplexF64.(raw)
     end
-    default = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, nothing, false)
-    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(), false)
-    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; algorithm=Riccati(; extended_precision_bvp=false)), false)
+    default = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], nothing, nothing, false)
+    extended = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(), false)
+    ordinary = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; algorithm=Riccati(; extended_precision_bvp=false)), false)
     @test default == reference
     @test extended == reference
     @test ordinary != reference
@@ -254,7 +253,7 @@ end
         function run_solovev(integrator)
             ctrl, intr, equil, metric, mats = _prepared_solovev(integrator)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run((odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2, ctrl, equil, mats, intr)
             return real(vac.et[1]), intr
         end
 

@@ -135,7 +135,7 @@ OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int
 
 **Stub, not physically valid.** Per-surface Δ' estimate `(ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)`
 from the asymptotic coefficients. It ignores inter-surface coupling and the vacuum, so it does not
-agree with the physical `ForceFreeStatesInternal.delta_prime_matrix`. Used only by tests.
+agree with the physical the BVP Δ' (`DeltaPrimeData`). Used only by tests.
 """
 function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl

@@ -26,22 +26,17 @@ which requires forward crossing chunks.
 
 ## Output: PEST3-convention Δ' (deltap)
 
-The raw BVP solution is a 2·msing × 2·msing matrix `dp` with left/right
-sub-indices at each surface, stored in `intr.delta_prime_raw`. The PEST3-convention Δ' is
-[Chance, PPPL-2527]:
-
-```
-  deltap(i,j) = dp(2i,2j) - dp(2i,2j-1) - dp(2i-1,2j) + dp(2i-1,2j-1)
-```
-
-stored in `intr.delta_prime_matrix` (msing × msing).
+The raw BVP solution is a 2·msing × 2·msing matrix with left/right sub-indices at each surface:
+`intr.delta_prime_raw_freeboundary` with the vacuum edge, `intr.delta_prime_raw_fixedboundary` with
+ξ(edge) = 0 (from the vacuum-edge matrix with a Dirichlet edge, which also gives `intr.delta_ef`, or
+directly when `wv = nothing`). `pest3_decompose` gives the PEST-3 blocks [Chance, PPPL-2527].
 
 ## Limitations
 
 Assumes one resonant mode per surface: if any surface carries several (a multi-`n` run where one
 q satisfies two `(m, n)`, e.g. q = 2 with (2, 1) and (4, 2)), it warns and skips the BVP.
 
-`intr.delta_prime_matrix` is the only physically valid Δ'; the per-surface ca-based
+The BVP Δ' is the only physically valid one; the per-surface ca-based
 `intr.sing[*].delta_prime` is a diagnostic placeholder and need not agree with it.
 """
 function compute_delta_prime_matrix!(
@@ -106,18 +101,18 @@ function compute_delta_prime_matrix!(
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
     end
 
-    # rpec coil-response block: needs the S-axis row layout that `_solve_bvp_edge_coil` assumes
-    # for its edge rows, and a vacuum edge in the assembled matrix (col_edge in junc_rows).
-    if use_S_axis && wv !== nothing
-        intr.delta_coil = _solve_bvp_edge_coil(M, col_edge, msing, N, ipert_all)
+    raw = _solve_bvp_raw(M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+    if wv === nothing
+        intr.delta_prime_raw_fixedboundary = raw
+    else
+        intr.delta_prime_raw_freeboundary = raw
+        # The fixed edge and the EF block need the S-axis row layout of the edge rows.
+        if use_S_axis
+            Mc = _fixed_edge_bvp(M, msing, N, col_edge)
+            intr.delta_prime_raw_fixedboundary = _solve_bvp_raw(Mc, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+            (ctrl === nothing || ctrl.algorithm.error_field_response) && (intr.delta_ef = _solve_bvp_edge_ef(Mc, msing, N, ipert_all))
+        end
     end
-
-    deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
-        M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
-
-    # The raw side-major D' (Fortran gal_write_delta layout) feeds `pest3_decompose`.
-    intr.delta_prime_matrix = deltap
-    intr.delta_prime_raw = dp_raw_persisted
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -393,26 +388,33 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
-# Coil-response block for the Eq. (37) edge [Glasser-Kolemen 2018 PoP 25, 032501]: impose the rpec edge BC
-# (RDCON `gal_set_boundary`, unit source per poloidal mode) and read the small-solution coefficient at each
-# surface side, solving all N modes with one factorization. Returns delta_coil (2·msing × N).
-function _solve_bvp_edge_coil(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
+# The S-axis BVP matrix `M` with its Eq. (38) vacuum-edge rows [Glasser-Kolemen 2018 PoP 25, 032501] replaced by a
+# Dirichlet edge, whose edge coefficients equal the right-hand side (0 for the fixed-boundary D′).
+function _fixed_edge_bvp(M::Matrix{ComplexF64}, msing::Int, N::Int, col_edge)
     nMat = size(M, 1)
-    bot = (nMat-2msing-N+1):(nMat-2msing)   # Eq. (38) bottom rows, carrying the W_V block
+    bot = (nMat-2msing-N+1):(nMat-2msing)
     Mc = copy(M)
     Mc[bot, :] .= 0
-    Mc[bot, col_edge] .= I(N)               # Dirichlet edge: the edge coefficients equal the source
+    Mc[bot, col_edge] .= I(N)
+    return Mc
+end
+
+# Δ_EF (2·msing × N) from the fixed-edge BVP matrix `Mc`: the small-solution coefficient at each surface side for a
+# unit edge displacement in each poloidal mode.
+function _solve_bvp_edge_ef(Mc::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int})
+    nMat = size(Mc, 1)
+    bot = (nMat-2msing-N+1):(nMat-2msing)
     B = zeros(ComplexF64, nMat, N)
     B[bot, :] .= I(N)                       # unit drive, one column per edge poloidal mode
     X = lu(Mc) \ B
-    delta_coil = zeros(ComplexF64, 2msing, N)
+    delta_ef = zeros(ComplexF64, 2msing, N)
     for j in 1:msing
         row_left = _col_left(j, N)[ipert_all[j]+N]
         row_right = _col_right(j, N)[ipert_all[j]+N]
-        @views delta_coil[2j-1, :] .= X[row_left, :]
-        @views delta_coil[2j, :] .= X[row_right, :]
+        @views delta_ef[2j-1, :] .= X[row_left, :]
+        @views delta_ef[2j, :] .= X[row_right, :]
     end
-    return delta_coil
+    return delta_ef
 end
 
 # Fallback BVP assembly with FM-based axis BC (used when no Riccati S matrices are available).
@@ -468,8 +470,8 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
-# Solve the BVP and apply the PEST3 four-term combination.
-function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
+# Solve the BVP for the raw side-major D′ (2·msing × 2·msing).
+function _solve_bvp_raw(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
     use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
     ctrl, debug::Bool)
     s2 = 2 * msing
@@ -501,15 +503,8 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
         end
     end
 
-    # PEST3 four-term combination [Chance PPPL-2527; Glasser-Kolemen 2018 PoP 25, 032501 Eq. 31].
-    # Δ'[i,j] = (NW − NE − SW + SE) on each 2×2 block of dp_raw.
-    deltap = zeros(Tc, msing, msing)
-    for i in 1:msing, j in 1:msing
-        deltap[i, j] = dp_raw[2i, 2j] - dp_raw[2i, 2j-1] - dp_raw[2i-1, 2j] + dp_raw[2i-1, 2j-1]
-    end
-
-    debug && _log_bvp_pest3(dp_raw, deltap, s2, msing)
-    return ComplexF64.(deltap), ComplexF64.(dp_raw)
+    debug && _log_bvp_pest3(dp_raw, pest3_decompose(ComplexF64.(dp_raw)).Delta, s2, msing)
+    return ComplexF64.(dp_raw)
 end
 
 # Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
@@ -616,61 +611,4 @@ function _log_bvp_pest3(dp_raw, deltap, s2, msing)
     end
     @info "Δ' BVP: Raw dp diagonal = $([@sprintf("%.4f%+.4fi", Float64(real(dp_raw[i,i])), Float64(imag(dp_raw[i,i]))) for i in 1:s2])"
     @info "Δ' BVP: deltap diagonal = $([@sprintf("%.4f%+.4fi", real(deltap[i,i]), imag(deltap[i,i])) for i in 1:msing])"
-end
-
-"""
-    pest3_decompose(dp_raw::AbstractMatrix) -> NamedTuple{(:A, :B, :Γ, :Δ)}
-
-Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
-ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
-blocks. Given rows and columns paired by surface (odd index = left, even
-index = right), the Fortran RDCON parity combination is
-
-```
-A'(i,j) = RR + RL + LR + LL    (even-i, even-j)   — interchange↔interchange
-B'(i,j) = RR − RL + LR − LL    (even-i, odd-j)    — interchange↔tearing
-Γ'(i,j) = RR + RL − LR − LL    (odd-i,  even-j)   — tearing↔interchange
-Δ'(i,j) = RR − RL − LR + LL    (odd-i,  odd-j)    — tearing↔tearing
-```
-
-where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
-`LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
-
-No Pletzer–Dewar ½ prefactor, matching Fortran RDCON; it cancels in `det(D' − D(γ)) = 0`.
-
-The Δ' block returned here equals `intr.delta_prime_matrix` (the m×m PEST3
-tearing projection computed inside `compute_delta_prime_matrix!`).
-
-# Arguments
-
-  - `dp_raw` — 2m×2m complex matrix (typically `intr.delta_prime_raw`).
-
-# Returns
-
-Named tuple `(A, B, Γ, Δ)` of m×m matrices, the blocks of `D' = [[A' B'] [Γ' Δ']]` in the
-`det(D' − D(γ)) = 0` problem (interchange upper-left, tearing lower-right).
-"""
-function pest3_decompose(dp_raw::AbstractMatrix)
-    s2 = size(dp_raw, 1)
-    size(dp_raw, 2) == s2 ||
-        throw(ArgumentError("pest3_decompose: dp_raw must be square, got $(size(dp_raw))"))
-    iseven(s2) ||
-        throw(ArgumentError("pest3_decompose: dp_raw side must be 2m for integer m, got $s2"))
-    m = s2 ÷ 2
-    Tc = eltype(dp_raw)
-    Ap = zeros(Tc, m, m)
-    Bp = zeros(Tc, m, m)
-    Gp = zeros(Tc, m, m)
-    Dp = zeros(Tc, m, m)
-    for i in 1:m, j in 1:m
-        LL = dp_raw[2i-1, 2j-1]
-        LR = dp_raw[2i-1, 2j]
-        RL = dp_raw[2i, 2j-1]
-        RR = dp_raw[2i, 2j]
-        Ap[i, j] = RR + RL + LR + LL
-        Bp[i, j] = RR - RL + LR - LL
-        Gp[i, j] = RR + RL - LR - LL
-        Dp[i, j] = RR - RL - LR + LL
-    end
-    return (A=Ap, B=Bp, Γ=Gp, Δ=Dp)
 end

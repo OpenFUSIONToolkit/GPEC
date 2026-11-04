@@ -137,7 +137,7 @@
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one
-    # does: `result.delta_prime.matrix` is populated and already sized to the surface list, which
+    # does: `result.delta_prime.freeboundary` is populated and already sized to the surface list, which
     # is the predicate the tearing solve uses to accept it over the per-surface diagonal stub.
     @testset "Galerkin-fed SLAYER: gal Δ' drives the coupled solve" begin
         mktempdir() do dir
@@ -156,7 +156,7 @@
             ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
             @test ffs.integrator === :galerkin
 
-            dpm = ffs.delta_prime.matrix
+            dpm = ffs.delta_prime.freeboundary.Delta
             @test size(dpm) == (length(ffs.surfaces), length(ffs.surfaces))
             @test size(dpm, 1) == 2
 

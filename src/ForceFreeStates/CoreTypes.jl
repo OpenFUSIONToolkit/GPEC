@@ -60,25 +60,12 @@ Solve-time scratch state for a force-balance solve: the resolved mode space, sin
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
     verbose::Bool = false
     """
-    Inter-surface Δ' matrix, `msing × msing`, PEST3 convention: the odd-parity projection of
-    `delta_prime_raw`, set by `compute_delta_prime_matrix!` (Riccati path only).
+    Riccati Δ' BVP results (`compute_delta_prime_matrix!`): raw side-major `2msing × 2msing` D' with the vacuum edge
+    and with ξ(edge) = 0, and Δ_EF (`2msing × numpert_total`). Empty when not computed.
     """
-    delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-
-    """
-    Edge coil-response matrix, `2msing × numpert_total`: column k is the resonant small-solution
-    response at each surface side to a unit source on edge mode k (Eq. 37 rpec edge condition,
-    `_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
-    """
-    delta_coil::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-
-    """
-    Raw `2msing × 2msing` outer-region matching matrix D' (Pletzer–Dewar 1991, before parity
-    rotation), side-major ordering `[L_s1, R_s1, …, L_sm, R_sm]`. `pest3_decompose` recovers the
-    A', B', Γ', Δ' blocks. No ½ prefactor (matches Fortran rdcon; the paper applies ½).
-    Empty unless the Riccati integrator was used.
-    """
-    delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    delta_prime_raw_freeboundary::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    delta_prime_raw_fixedboundary::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    delta_ef::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """
@@ -124,7 +111,7 @@ Physical and workflow controls for a force-balance solve, together with its sele
 """
 @kwdef struct ForceFreeStatesControl{A<:AbstractIntegrator}
     algorithm::A = Riccati()
-    vac_flag::Bool = false
+    vac_flag::Bool = true
     mtheta_vacuum::Int = 480
     nzeta_vacuum::Int = 1
     nn_low::Int = 0

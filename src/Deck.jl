@@ -32,13 +32,14 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "extended_precision_bvp" => "moved to [Riccati]",
         "nchunks" => "moved to [Riccati]",
         "gal_match_flag" => "add a [Match] section to match the inner layer",
-        "gal_ideal_flag" => "moved to [Match] as ideal",
+        "gal_ideal_flag" => "removed: a Galerkin solve with [Galerkin] error_field_response = true is the ideal solution",
         "gal_inner_solver" => "moved to [GGJ] as solver",
         (k => "moved to the integrator's section, [Forward] or [Riccati]" for k in _ODE_DECK_KEYS)...,
         ("gal_$k" => "moved to [Match] as $k" for k in ("eta", "rho", "rotation", "gamma"))...,
         ("gal_inner_$k" => "moved to [GGJ] as $k" for k in ("xfac", "nx", "nq", "cutoff", "kmax"))...,
         ("gal_$k" => "moved to [Galerkin] as $k" for k in ("nx", "nq", "pfac", "dx0", "dx1", "dx2", "cutoff", "tol", "gnstep",
-                "dx1dx2_flag", "rpec_flag", "edge_onesided"))...,
+            "dx1dx2_flag", "edge_onesided"))...,
+        "gal_rpec_flag" => "moved to [Galerkin] as error_field_response",
         "gal_sing_order_ceiling" => "moved to [Galerkin] as frobenius_order_ceiling"),
     "LocalStability" => Dict{String,String}(
         k => "moved to [Ballooning]" for k in ("ode_tol", "n_scan", "max_alpha_scale", "alpha_tol", "psi_window")),
@@ -344,7 +345,7 @@ end
 """
 function match_from_deck(inputs::AbstractDict)
     haskey(inputs, "Match") || return nothing
-    fields = Dict{Symbol,Any}(:eta => Any, :rho => Any, :rotation => Any, :gamma => Any, :ideal => Bool, :inner_model => String)
+    fields = Dict{Symbol,Any}(:eta => Any, :rho => Any, :rotation => Any, :gamma => Any, :inner_model => String)
     problem = section_keywords(inputs["Match"], "Match", fields)
     _selector(inputs["Match"], "Match", "inner_model", ("GGJ",), "GGJ")
     delete!(problem, :inner_model)
@@ -467,8 +468,8 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     if match !== nothing
         (; keywords, algorithm) = force_balance
         first(keywords[:nn]) == last(keywords[:nn]) || error("[Match] is single-n: set [ForceFreeStates] nn to one toroidal mode number")
-        (algorithm isa Galerkin && algorithm.rpec_flag) || (algorithm isa Riccati && get(keywords, :vac_flag, false)) ||
-            error("[Match] needs Δ′: use integrator = \"Galerkin\" with [Galerkin] rpec_flag = true, or \"Riccati\" with vac_flag = true")
+        hasproperty(algorithm, :error_field_response) && algorithm.error_field_response ||
+            error("[Match] needs Δ_EF: use the \"Galerkin\" or \"Riccati\" integrator with error_field_response = true")
     end
     tearing = tearing_from_deck(inputs)
     perturbed_equilibrium = perturbed_equilibrium_from_deck(inputs)

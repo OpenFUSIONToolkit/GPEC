@@ -29,7 +29,7 @@ Every stage after `Equilibrium` reads the force-free states, and `KineticForces`
 | What are the tearing growth rate and critical resonant field? | `[Tearing]` (+ `[SLAYER]` or `[GGJ]`) | `Tearing/Roots/gamma`, `Tearing/Roots/omega`, `Tearing/CriticalResonantField/` |
 | What does a resistive inner layer do to the response? | `[Match]` (+ `[GGJ]`) | `SingularSurfaces/Match/` |
 
-`[PerturbedEquilibrium]` and the stages built on it need a `[ForceFreeStates]` solve with `integrator = "Forward"` and no `[Wall]`, while the Δ′ matrix, `[Tearing]` and wall stability need `"Riccati"` or `"Galerkin"` or a `[Wall]`, so one deck cannot do both: run the response and the Δ′ or wall cases as separate decks (`DIIID-like_ideal_example` and `DIIID-like_riccati_deltaprime_example` are such a pair).
+`[PerturbedEquilibrium]` and the stages built on it need a `[ForceFreeStates]` solve with `integrator = "Forward"`, or `"Galerkin"` with `error_field_response = true` and `vac_flag = true`, and no `[Wall]`, while the Δ′ matrix, `[Tearing]` and wall stability need `"Riccati"` or `"Galerkin"` or a `[Wall]`. Only a `"Galerkin"` deck without a `[Wall]` does both; otherwise run the response and the Δ′ or wall cases as separate decks (`DIIID-like_ideal_example` and `DIIID-like_riccati_deltaprime_example` are such a pair).
 
 ### Headline outputs
 
@@ -68,7 +68,7 @@ Page: [Local Stability](ballooning.md).
 
 ### Match
 
-Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, writing the matched solution and the penetrated resonant fields to `SingularSurfaces/Match/`; `ideal = true` keeps the shielded limit for comparison.
+Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, writing the matched solution and the penetrated resonant fields to `SingularSurfaces/Match/`; the Galerkin solve without `[Match]` is the shielded limit for comparison.
 Outputs: `SingularSurfaces/Match/`.
 Page: [Tearing](inner_layer.md).
 
@@ -76,7 +76,7 @@ Page: [Tearing](inner_layer.md).
 
 Computes the plasma response to an external non-axisymmetric field: `plasma_response` builds the permeability, inductance and reluctance operators on the control surface from the force-free states and the vacuum matrices, and `perturbed_equilibrium` applies them to the drive that `ForcingTerms` supplies, either a normal-field spectrum from a file or the Biot–Savart field of `[[ForcingTerms.coil_set]]` coils.
 The resonant fields, island half-widths and Chirikov parameter at each rational surface follow from the singular coupling (`compute_singular_coupling`), and `regularization_width` controls the regularization of the ideal response there.
-The response is built only from a `"Forward"` solve without a wall: a `"Riccati"` result (the default) makes `plasma_response` skip the operators with a warning, and a `"Galerkin"` or matched result or a wall is an error.
+The response is built from a `"Forward"` solve, or a `"Galerkin"` solve with `error_field_response = true` and `vac_flag = true`, without a wall: a `"Riccati"` result (the default) makes `plasma_response` skip the operators with a warning, and any other `"Galerkin"` result, a matched result or a wall is an error.
 Outputs: `PerturbedEquilibrium/ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`.
 Key references: [Park et al. (2007a)](citations.md#PerturbedEquilibrium), [Park et al. (2009)](citations.md#PerturbedEquilibrium).
 Pages: [Forcing Terms](forcing_terms.md), [Perturbed Equilibrium](perturbed_equilibrium.md).
@@ -100,7 +100,7 @@ Page: [Error Fields](error_fields.md).
 
 Solves the tearing dispersion relation of each rational surface by matching the outer-region Δ′ to an inner-layer model: the two-fluid slab `SLAYER` (`[SLAYER]`) or the toroidal resistive-MHD `GGJ` (`[GGJ]`), selected by `[Tearing] inner_model`.
 `[Tearing.search]` sets the root search in the complex frequency plane, and `[Tearing.CriticalResonantField]` adds the resonant field at which the layer's shielding is overcome.
-Needs the Δ′ matrix of `"Riccati"` with `vac_flag = true` or `"Galerkin"` with `[Galerkin] rpec_flag = true`, and the kinetic profiles of `[Equilibrium] kinetic_file` (`SLAYER` reads its densities, temperatures, rotation and diffusivities there).
+Needs the free-boundary Δ′ matrix of `"Riccati"` or `"Galerkin"` with `vac_flag = true` (or the fixed-boundary one with `fixed_boundary = true`), and the kinetic profiles of `[Equilibrium] kinetic_file` (`SLAYER` reads its densities, temperatures, rotation and diffusivities there).
 Outputs: `Tearing/PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/`.
 Key references: [Glasser, Wang and Park (2016)](citations.md#Tearing), [Park (2022)](citations.md#Tearing).
 Page: [Tearing](inner_layer.md).
@@ -127,7 +127,7 @@ alpha_boundary_scan = true
 [ForceFreeStates]
 nn = 1
 vac_flag = true
-integrator = "Forward"   # "Forward": [PerturbedEquilibrium] needs the dense ξ solution and no [Wall] ("Riccati" is the default)
+integrator = "Forward"   # "Forward": [PerturbedEquilibrium] needs a dense ξ solution and no [Wall] ("Riccati" is the default)
 
 [ForcingTerms]
 forcing_data_format = "coil"
@@ -191,7 +191,7 @@ From Julia, the same pipeline is `GeneralizedPerturbedEquilibrium.main(["example
 | `Solovev_ideal_example_3D` | the same plasma with the vacuum response on a toroidal grid |
 | `Solovev_ideal_example_multi_n` | the same plasma swept over n = 1 and 2 in one run, with single-n cross-checks |
 | `LAR_reversed_shear_example` | a `[LargeAspectRatio]` equilibrium with reversed shear, q = 2 crossed twice |
-| `LAR_ideal_match_test` | a `[TJAnalytic]` equilibrium with `[Match] ideal = true`, the shielded reference for the resistive case |
+| `LAR_ideal_match_test` | a `[TJAnalytic]` equilibrium solved by Galerkin without `[Match]`, the shielded reference for the resistive case |
 | `LAR_resistive_match_test` | the same equilibrium with resistive GGJ matching |
 | `LAR_beta_scan`, `LAR_epsilon_scan` | `run_scan.jl` sweeps of the `[TJAnalytic]` pressure factor and inverse aspect ratio |
 | `TJ_ideal_example` | a `[TJAnalytic]` equilibrium: n = 1 stability and a file-driven perturbed equilibrium |

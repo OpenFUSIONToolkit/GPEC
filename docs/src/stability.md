@@ -59,7 +59,7 @@ qlow = 1.02              # inner edge of the integration domain
 qhigh = 1e3              # outer bound of qlim (see Integration domain)
 delta_mlow = 8           # extra poloidal modes below the resonant range
 delta_mhigh = 8          # extra poloidal modes above it
-integrator = "Forward"   # "Riccati" is the default; "Forward" (and no [Wall]) is required for [PerturbedEquilibrium]
+integrator = "Forward"   # "Riccati" is the default; "Forward" or an error_field_response "Galerkin" (and no [Wall]) is required for [PerturbedEquilibrium]
 truncate_at_rational_offset = true
 rational_offset_fraction = 0.2
 
@@ -81,7 +81,7 @@ ffs = solve(eq, Riccati(; eulerlagrange_tolerance=1e-10); nn=1, delta_mlow=8, de
 
 real(ffs.free_boundary.et[1])                 # least free-boundary eigenmode energy: negative is unstable
 for (s, sing) in enumerate(ffs.surfaces)
-    println("q = $(sing.m[1])/$(sing.n[1]) at ψ_N = $(sing.psifac): Δ′ = $(real(ffs.delta_prime.matrix[s, s]))")
+    println("q = $(sing.m[1])/$(sing.n[1]) at ψ_N = $(sing.psifac): Δ′ = $(real(ffs.delta_prime.freeboundary.Delta[s, s]))")
 end
 ```
 
@@ -103,7 +103,7 @@ The number of Julia threads is set at startup (`-t N` or `JULIA_NUM_THREADS`); t
 | `SingularSurfaces/rational_psi`, `rational_q`, `rational_m`, `rational_n`, `dqdpsi` | the rational surfaces of the domain, core to edge |
 | `SingularSurfaces/D_I`, `E`, `F`, `G`, `H`, `K`, `M` | the Mercier index and the Glasser–Greene–Johnson layer coefficients at each surface |
 | `SingularSurfaces/ca_left`, `ca_right` | the asymptotic (large, small) coefficients on either side of each surface, from ideal crossings |
-| `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, from `"Riccati"` or `"Galerkin"`; `Delta_prime_raw` is the side-major (left, right) matrix it is folded from, `Delta_coil` the edge coil-response columns |
+| `SingularSurfaces/Delta_prime_matrix` | the free-boundary Δ′ matrix in the PEST-3 convention, from `"Riccati"` or `"Galerkin"`, with `pest3_A`, `pest3_B`, `pest3_Gamma`; `Delta_prime_raw_freeboundary` is the side-major (left, right) matrix they are folded from. The same set with a `_fixedboundary` suffix is the Δ′ with a conformal wall on the plasma, and `Delta_EF` the error-field response |
 | `SingularSurfaces/Kinetic/` | the surfaces of a kinetic solve |
 
 The energy matrices are power-normalized: the eigenmode energies are the generalized eigenvalues of the pencil ``W v = \lambda N v``, with ``N`` the surface-norm matrix ``\xi^\dagger N \xi = \langle|\xi|^2\rangle`` built from the Jacobian Fourier coefficients, so each is an energy per unit surface-averaged squared displacement rather than joules, and the spectrum is invariant to the working coordinate because ``W`` and ``N`` transform by the same congruence.

@@ -21,18 +21,27 @@ noise_threshold = 1e-8
 order = 10
 
 [quantities.delta_prime_raw]
-h5path = "SingularSurfaces/Delta_prime_raw"
+h5path = "SingularSurfaces/Delta_prime_raw_freeboundary"
 type = "complex_matrix"
 extract = "all_complex"
 label = "delta prime (raw side-major)"
 noise_threshold = 1e-8
 order = 11
 
-[quantities.delta_coil]
-h5path = "SingularSurfaces/Delta_coil"
+# Fixed-boundary (conformal wall on the plasma) PEST-3 Δ′ diagonal
+[quantities.delta_prime_fixedboundary_diag]
+h5path = "SingularSurfaces/Delta_prime_matrix_fixedboundary"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "delta prime fixed boundary (BVP diagonal)"
+noise_threshold = 1e-8
+order = 13
+
+[quantities.delta_ef]
+h5path = "SingularSurfaces/Delta_EF"
 type = "complex_matrix"
 extract = "all_complex"
-label = "edge coil response delta_coil"
+label = "edge coil response delta_ef"
 noise_threshold = 1e-8
 order = 12
 

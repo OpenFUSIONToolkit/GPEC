@@ -1,20 +1,21 @@
 # GalerkinSolve.jl
 #
 # Top-level driver for the RDCON outer-region singular Galerkin Δ′ solve, plus the per-cell assembly
-# orchestration, the banded solve, Δ′ extraction, PEST-3 blocks, and HDF5 output.
-# Ports gal_make_arrays (gal.f), gal_solve (gal.f), and gal_write_pest3_data
+# orchestration, the banded solve, Δ′ extraction, and HDF5 output. Ports gal_make_arrays and gal_solve
 # (gal.f). Inner-layer matching is applied afterwards by MatchProblem.
 
 """
-    gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
+    gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn)
 
-Assemble the global banded matrix and RHS. For each cell: Gauss-Lobatto Hermite stiffness
-(`gal_gauss_quad!`), then the resonant (`gal_resonant!`) or extension (`gal_extension!`) contributions;
-then the boundary conditions and the scatter into `ws.mat`/`ws.rhs`. Port of `gal_make_arrays`.
+Assemble the global banded matrix and RHS with the fixed edge (plus the EF sources): per-cell stiffness and
+resonant/extension contributions, the boundary conditions, and the scatter into `ws.mat`/`ws.rhs`. Port of
+`gal_make_arrays`.
+
+Returns the edge cell's stiffness before the boundary conditions, `(mpert, mpert, np+1, np+1)`.
 """
 function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
     intr::ForceFreeStatesInternal, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
-    nn::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
+    nn::Int)
 
     mpert = intr.numpert_total
     msing = length(ws.intvl) - 1
@@ -33,17 +34,61 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
         end
     end
 
-    gal_set_boundary!(ws, mpert, wv_edge)
+    edge_mat = copy(ws.intvl[msing+1].cells[ws.nx].mat)
+    gal_set_boundary!(ws, mpert, nothing)
     gal_assemble_mat!(ws, mpert)
     gal_assemble_rhs!(ws, mpert)
-    return ws
+    return edge_mat
+end
+
+"""
+    gal_vacuum_edge_solve(ws, edge_mat, wv_edge, mpert) -> Matrix{ComplexF64}
+
+Solve the 2·msing big-solution columns of an assembled workspace again with the vacuum edge `wv_edge`
+instead of the fixed edge, restoring the edge cell from `edge_mat`. Returns the `(ndim, 2msing)`
+solution, which gives the free-boundary Δ′.
+"""
+function gal_vacuum_edge_solve(ws::GalWorkspace, edge_mat::Array{ComplexF64,4}, wv_edge::Matrix{ComplexF64}, mpert::Int)
+    msing = length(ws.intvl) - 1
+    ws.intvl[msing+1].cells[ws.nx].mat .= edge_mat
+    gal_set_boundary!(ws, mpert, wv_edge; nef=0)
+    fill!(ws.mat, 0)
+    gal_assemble_mat!(ws, mpert)
+    sol = ws.rhs[:, 1:(2msing)]
+    gal_banded_solve!(ws.mat, sol, ws.kl, ws.ku, "auto")
+    return sol
+end
+
+"""
+    gal_small_coefficients(ws, sol) -> Matrix{ComplexF64}
+
+Small-solution coefficients of the columns of `sol`, `(ncol, 2msing)`, surface sides in side-major order.
+"""
+function gal_small_coefficients(ws::GalWorkspace, sol::AbstractMatrix{ComplexF64})
+    rows = [cell.emap for intvl in ws.intvl for cell in intvl.cells if cell.etype == GCT_RES]
+    return permutedims(sol[rows, :])
+end
+
+"""
+    gal_edge_response(edge_rows, edge_map, sol) -> Matrix{ComplexF64}
+
+Edge momentum FΞ′ + KΞ, `(mpert, nsol)`, of each column of `sol`, from the unconstrained edge rows
+`edge_rows` of the edge cell mapped by `edge_map`. On the columns with `ξ(edge) = eⱼ` it is `W_P·ψ₀²`
+[Glasser 2016 PoP 23 072505, Eq. 66].
+"""
+function gal_edge_response(edge_rows::Array{ComplexF64,3}, edge_map::Matrix{Int}, sol::Matrix{ComplexF64})
+    force = zeros(ComplexF64, size(edge_rows, 1), size(sol, 2))
+    for jp in axes(edge_rows, 3)
+        mul!(force, @view(edge_rows[:, :, jp]), @view(sol[edge_map[:, jp], :]), true, true)
+    end
+    return force
 end
 
 """
 Empty `GalerkinResult` for a domain with no resonant surfaces.
 """
 function empty_galerkin_result()
-    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, "none")
+    return GalerkinResult(0, Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], nothing, "none", Matrix{ComplexF64}(undef, 0, 0))
 end
 
 """
@@ -55,9 +100,9 @@ Compute the outer-region Δ′ matching matrix by the singular Galerkin method. 
 `GalerkinResult` alongside the Δ′ payload as the shared [`DeltaPrimeData`](@ref); if there are no
 resonant surfaces in the domain it returns an empty result and `nothing`.
 
-`wv` is the vacuum energy matrix from `free_run`, which supplies the free-boundary edge term
-`wv_edge = wv · psio²`; pass `nothing` for a fixed-boundary edge. `cut_solution` also keeps the
-cut solution, for a later `MatchProblem`'s composite inner profiles.
+The fixed-boundary Δ′ is always computed; `wv`, the singfac-scaled vacuum matrix, adds the free-boundary
+Δ′ unless `free_boundary_delta_prime` is off. `cut_solution` also keeps the cut solution, for a later
+`MatchProblem`'s composite inner profiles.
 """
 function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines,
     intr::ForceFreeStatesInternal; wv=nothing, cut_solution::Bool=false)
@@ -99,10 +144,10 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     kl = mpert * (np + 1)
     ku = kl
     ldab = 2kl + ku + 1
-    # rpec_flag (RDCON, gal.f): append mpert coil-response columns. Each is a unit source at
-    # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
-    ncoil = ctrl.algorithm.rpec_flag ? mpert : 0
-    nsol = 2 * msing + ncoil
+    # error_field_response (RDCON rpec_flag, gal.f): append mpert error-field (EF) columns, each a unit edge displacement in one
+    # poloidal mode with no big-solution drive; their small coefficients are the Δ_EF block.
+    nef = ctrl.algorithm.error_field_response ? mpert : 0
+    nsol = 2 * msing + nef
     intvl = [GalInterval(zeros(Float64, nx + 1), zeros(Float64, nx + 1), [GalCell(mpert) for _ in 1:nx])
              for _ in 0:msing]
     ws = GalWorkspace("auto", nx, ctrl.algorithm.nq, np, 0, kl, ku, ldab, nsol,
@@ -117,15 +162,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     ws.rhs = zeros(ComplexF64, ws.ndim, nsol)
     ws.sol = zeros(ComplexF64, ws.ndim, nsol)
 
-    # Free-boundary edge term wvac·psio² (wv is already singfac-scaled at qlim in free_run).
-    # rpec passes wv_edge=nothing; gal_set_boundary! then applies the identity edge AND injects the coil
-    # unit sources (its three-way branch). The vacuum block is only built for the non-rpec free case.
-    wv_edge = nothing
-    if ctrl.vac_flag && wv !== nothing && ncoil == 0
-        wv_edge = Matrix{ComplexF64}(wv .* equil.psio^2)
-    end
-
-    gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn, wv_edge)
+    edge_mat = gal_make_arrays!(ws, ctrl, equil, mats, intr, asymps, sings, nn)
 
     if intr.verbose
         offdbg = ws.kl + ws.ku + 1
@@ -143,31 +180,14 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     ws.sol .= ws.rhs
     ws.solver = gal_banded_solve!(ws.mat, ws.sol, ws.kl, ws.ku, "auto")
     intr.verbose && @info "Galerkin banded solve: $(ws.solver)"
+    edge_response = gal_edge_response(edge_mat[:, :, 4, :], ws.intvl[msing+1].cells[ws.nx].map, ws.sol)
 
     # --- extract Δ′ from the small resonant coefficients (gal.f) ---
-    delta = zeros(ComplexF64, nsol, 2 * msing)
-    jsol = 0
-    for ising in 0:msing
-        for cell in ws.intvl[ising+1].cells
-            if cell.etype == GCT_RES
-                jsol += 1
-                @views delta[:, jsol] .= ws.sol[cell.emap, :]
-            end
-        end
-    end
-
-    Ap, Bp, Gammap, Deltap = gal_pest3_blocks(delta, msing)
+    delta = gal_small_coefficients(ws, ws.sol)
 
     # Mercier index D_I = -Re(α²). α is the half-separation of the resonant exponents.
     di = [real(-asymps[i].right.alpha[1]^2) for i in 1:msing]
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
-
-    # Pack the Δ′ payload in the shared layout: the raw D′ is the leading 2msing×2msing side-major
-    # block, and the coil-response rows 2*msing+1 : 2*msing+mpert (rpec_flag) transpose into the
-    # (surface-side × edge mode) orientation the Riccati BVP also produces.
-    dp_raw = delta[1:(2*msing), 1:(2*msing)]
-    dp_coil = ncoil > 0 ? permutedims(delta[(2*msing+1):(2*msing+ncoil), :]) : Matrix{ComplexF64}(undef, 0, 0)
-    dp = DeltaPrimeData(Deltap, dp_raw, dp_coil, Ap, Bp, Gammap)
 
     # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution); the cut
     # solution only when a later match needs the composite inner profiles.
@@ -175,11 +195,22 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh;
         delta=(cut_solution ? delta : nothing))
 
+    # The fixed-edge solve gives the fixed-boundary D′ and, in the (surface-side × edge mode) orientation, Δ_EF.
+    # The free-boundary D′ comes from re-solving the big-solution columns with the vacuum edge.
+    raw_fixed = delta[1:(2msing), :]
+    ef = nef > 0 ? permutedims(delta[(2msing+1):end, :]) : Matrix{ComplexF64}(undef, 0, 0)
+    raw_free = Matrix{ComplexF64}(undef, 0, 0)
+    if ctrl.vac_flag && wv !== nothing && ctrl.algorithm.free_boundary_delta_prime
+        # wv is singfac-scaled at qlim; the Galerkin edge term is wv·ψ₀².
+        raw_free = gal_small_coefficients(ws, gal_vacuum_edge_solve(ws, edge_mat, Matrix{ComplexF64}(wv .* equil.psio^2), mpert))
+    end
+    dp = DeltaPrimeData(raw_free, raw_fixed, ef)
+
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]
     sing_m = [s.m[1] for s in sings]
     sing_n = [s.n[1] for s in sings]
-    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, ws.solver), dp
+    return GalerkinResult(msing, sing_psi, sing_q, sing_m, sing_n, di, alpha, solution, ws.solver, edge_response), dp
 end
 
 """
@@ -202,30 +233,6 @@ function gal_scaled_lu_solve!(mat::Matrix{ComplexF64}, sol::AbstractVecOrMat{Com
     LAPACK.gbtrs!('N', kl, ku, n, mat, ipiv, sol)
     sol .*= d
     return sol
-end
-
-"""
-    gal_pest3_blocks(delta, msing) -> (Ap, Bp, Gammap, Deltap)
-
-PEST-3 matching blocks (each `msing×msing`) as ± combinations of the left/right Δ′ entries. Port of
-`gal_write_pest3_data`. Row index `2i-1`/`2i` = left/right of surface `i`.
-"""
-function gal_pest3_blocks(delta::Matrix{ComplexF64}, msing::Int)
-    Ap = zeros(ComplexF64, msing, msing)
-    Bp = zeros(ComplexF64, msing, msing)
-    Gammap = zeros(ComplexF64, msing, msing)
-    Deltap = zeros(ComplexF64, msing, msing)
-    for i in 1:msing, j in 1:msing
-        d11 = delta[2i-1, 2j-1]
-        d12 = delta[2i-1, 2j]
-        d21 = delta[2i, 2j-1]
-        d22 = delta[2i, 2j]
-        Ap[i, j] = d22 + d21 + d12 + d11
-        Bp[i, j] = d22 - d21 + d12 - d11
-        Gammap[i, j] = d22 + d21 - d12 - d11
-        Deltap[i, j] = d22 - d21 - d12 + d11
-    end
-    return Ap, Bp, Gammap, Deltap
 end
 
 """
@@ -350,7 +357,7 @@ end
     gal_cholesky_solve!(mat, sol, kl, ku) -> Bool
 
 Banded Cholesky solve of the full-band system `mat`, leaving `mat` untouched. Rows that are
-identity rows (Dirichlet DOFs: axis, fixed or coil edge) have their columns moved to the
+identity rows (Dirichlet DOFs: axis, fixed or EF edge) have their columns moved to the
 right-hand side. The free block's off-diagonal entries must agree with their conjugate
 partners within `1e-10 * sqrt(abs(A_ii)) * sqrt(abs(A_jj))`. Cholesky uses the lower band
 and deliberately projects the diagonal onto its real part. Returns `false`, with `sol`

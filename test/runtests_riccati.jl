@@ -102,13 +102,13 @@ end
     # (which overwrites intr_ric.sing[s].delta_prime)
     delta_prime_inline = [copy(intr_ric.sing[s].delta_prime) for s in 1:intr_ric.msing]
 
-    vac_ric = FFS.free_run(odet_ric, ctrl, equil, mats, intr_ric)
+    vac_ric = FFS.free_run((odet_ric.u[:, :, 2] / odet_ric.u[:, :, 1]) ./ equil.psio^2, ctrl, equil, mats, intr_ric)
     et_ric = real(vac_ric.et[1])
 
     # Forward integration (needed only for energy comparison).
     _, intr_fwd, _, _, _ = prepared_solovev()
     odet_fwd, _, _, _ = FFS.forward_eulerlagrange_integration(ctrl, equil, mats, intr_fwd)
-    vac_fwd = FFS.free_run(odet_fwd, ctrl, equil, mats, intr_fwd)
+    vac_fwd = FFS.free_run((odet_fwd.u[:, :, 2] / odet_fwd.u[:, :, 1]) ./ equil.psio^2, ctrl, equil, mats, intr_fwd)
     et_fwd = real(vac_fwd.et[1])
 
     # ─────────────────────────────────────────────────────────────────────────
