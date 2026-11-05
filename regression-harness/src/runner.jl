@@ -36,14 +36,18 @@ patched there, so one shared example can serve several cases (e.g. a collisionle
 references in the deck (e.g. `Equilibrium.kinetic_file = "../<other_example>/..."`) still resolve.
 Override keys are dotted paths into the TOML; missing intermediate tables are created. Each
 section named in `remove_sections` is dropped (a dotted name drops a sub-table), so a run can stop before that stage.
+`private=true` copies the deck even without changes, so concurrent cases sharing an example cannot overwrite each other's output.
 Returns `(rundir, is_temp)`; the caller removes `rundir` when `is_temp`.
 """
-function _materialize_rundir(example_path::String, overrides::Dict{String,Any}, remove_sections::Vector{String}=String[])
-    isempty(overrides) && isempty(remove_sections) && return (example_path, false)
+function _materialize_rundir(example_path::String, overrides::Dict{String,Any}, remove_sections::Vector{String}=String[];
+    private::Bool=false)
+    unchanged = isempty(overrides) && isempty(remove_sections)
+    unchanged && !private && return (example_path, false)
     # Unique per invocation, so concurrent runs from one checkout cannot share (and race on) a rundir.
     rundir = mktempdir(dirname(example_path); prefix=".regress-override-" * basename(example_path) * "-", cleanup=false)
     cp(example_path, rundir; force=true)
     rm(joinpath(rundir, "gpec.h5"); force=true)   # drop any stale output copied along
+    unchanged && return (rundir, true)
     cfg = TOML.parsefile(joinpath(rundir, "gpec.toml"))
     for (dotted, val) in overrides
         ks = split(dotted, ".")
@@ -190,6 +194,30 @@ function _render_script(template::String; no_instantiate::Bool)::String
 end
 
 """
+Run a case script template against `project_root` with `args`. With `slot === nothing` the script
+runs in its own `julia` subprocess; otherwise it runs in the slot's warm worker, which has already
+instantiated the project. Failures leave the script's output in `stderr_buf` and throw.
+"""
+function run_script(slot::Union{WorkerSlot,Nothing}, project_root::String, template::String, args::Vector{String},
+    case_spec::CaseSpec, stderr_buf::IO; verbose::Bool, no_instantiate::Bool)
+    tmpscript = tempname() * ".jl"
+    try
+        write(tmpscript, _render_script(template; no_instantiate=no_instantiate || slot !== nothing))
+        slot === nothing || return run_in_worker(slot, tmpscript, args, case_spec, stderr_buf)
+        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $args`, case_spec)
+        if verbose
+            run(pipeline(cmd))
+        else
+            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
+        end
+    finally
+        rm(tmpscript; force=true)
+    end
+end
+
+run_mode(slot::Union{WorkerSlot,Nothing}) = slot === nothing ? "isolated" : "warm"
+
+"""
 Run GPEC for a single commit/ref and case. Dispatches to run_local for
 the working tree or run_at_commit for a git ref.
 
@@ -198,7 +226,8 @@ runs against the same package set; `nothing` disables pinning. `expected_key` is
 key a fresh run will carry — a cached run whose key differs is re-run rather than reused.
 `worktree_path`, when given, is reused instead of creating/removing a fresh worktree for this
 call — see [`run_cases_at_ref`](@ref), which shares one worktree (and thus one
-`Pkg.instantiate`/precompile) across every case at a commit.
+`Pkg.instantiate`/precompile) across every case at a commit. `slot` runs the case in a warm
+worker (`nothing` spawns a subprocess for it), and `private_rundir` gives it its own copy of the deck.
 """
 function run_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     case_spec::CaseSpec, repo_root::String;
@@ -206,43 +235,45 @@ function run_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     no_instantiate::Bool=false,
     pin_manifest::Union{String,Nothing}=nothing,
     expected_key::Union{String,Nothing}=nothing,
-    worktree_path::Union{String,Nothing}=nothing)
+    worktree_path::Union{String,Nothing}=nothing,
+    slot::Union{WorkerSlot,Nothing}=nothing, private_rundir::Bool=false)
     if case_spec.kind == "computed"
         if commit_hash == LOCAL_REF
             return run_computed_local(db, case_spec, repo_root;
                 verbose=verbose, no_instantiate=no_instantiate,
-                pin_manifest=pin_manifest)
+                pin_manifest=pin_manifest, slot=slot)
         end
         return run_computed_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
             force=force, verbose=verbose, no_instantiate=no_instantiate,
             pin_manifest=pin_manifest, expected_key=expected_key,
-            worktree_path=worktree_path)
+            worktree_path=worktree_path, slot=slot)
     end
     if commit_hash == LOCAL_REF
         return run_local(db, case_spec, repo_root;
             force=force, verbose=verbose, no_instantiate=no_instantiate,
-            pin_manifest=pin_manifest)
+            pin_manifest=pin_manifest, slot=slot, private_rundir=private_rundir)
     end
     return run_at_commit(db, commit_hash, ref_name, case_spec, repo_root;
         force=force, verbose=verbose, no_instantiate=no_instantiate,
         pin_manifest=pin_manifest, expected_key=expected_key,
-        worktree_path=worktree_path)
+        worktree_path=worktree_path, slot=slot, private_rundir=private_rundir)
 end
 
 """
 Run every case in `case_specs` against `ref`. For a git ref (not `"local"`), a single
-worktree is created and reused across all cases at that commit — each case still spawns
-its own `julia` subprocess, but since they share the same `--project` path (and the same
-pinned Manifest, when pinning is on), only the first subprocess pays for
-`Pkg.instantiate()`/precompilation; the rest hit Julia's on-disk pkgimage cache for that
-path. Worktree creation is skipped entirely when every case is already cached in the
-expected environment (and `force` is false). If the worktree cannot be created, the
-failure is recorded for each case needing a run and the remaining refs still proceed.
+worktree is created and reused across all cases at that commit, so only the first run pays for
+`Pkg.instantiate()`/precompilation. Cases run in `jobs` concurrent lanes; each lane holds warm
+workers that load GPEC once and run its cases in sequence, or spawns one subprocess per case when
+`isolate` is set. With several lanes, cases are dealt longest-first by their last recorded runtime
+and each gets a private copy of its deck. Worktree creation is skipped entirely when every case is
+already cached in the expected environment (and `force` is false). If the worktree cannot be
+created, the failure is recorded for each case needing a run and the remaining refs still proceed.
 """
 function run_cases_at_ref(db::SQLite.DB, ref::ResolvedRef, case_specs::Vector{CaseSpec}, repo_root::String;
     force::Bool=false, verbose::Bool=false, no_instantiate::Bool=false,
     pin_manifest::Union{String,Nothing}=nothing,
-    expected_key::Union{String,Nothing}=nothing)
+    expected_key::Union{String,Nothing}=nothing,
+    jobs::Int=1, isolate::Bool=false)
     needs_worktree = !is_local_ref(ref) &&
                      (force || any(!is_cached(db, ref.commit_hash, cs.name; expected_key=expected_key) for cs in case_specs))
 
@@ -264,15 +295,46 @@ function run_cases_at_ref(db::SQLite.DB, ref::ResolvedRef, case_specs::Vector{Ca
         end
     end
 
+    pending = [cs for cs in case_specs if is_local_ref(ref) || force || !is_cached(db, ref.commit_hash, cs.name; expected_key=expected_key)]
+    project_root = something(worktree_path, repo_root)
+    lanes = [isolate ? nothing : WorkerSlot(project_root; no_instantiate=no_instantiate, verbose=verbose) for _ in 1:min(jobs, max(length(pending), 1))]
     try
-        for case_spec in case_specs
+        # Report the cached cases, then run the rest in their lanes.
+        for case_spec in filter(cs -> !(cs in pending), case_specs)
             run_commit(db, ref.commit_hash, ref.name, case_spec, repo_root;
-                force=force, verbose=verbose, no_instantiate=no_instantiate,
-                pin_manifest=pin_manifest, expected_key=expected_key,
-                worktree_path=worktree_path)
+                force=force, expected_key=expected_key, worktree_path=worktree_path)
+        end
+        if length(lanes) > 1
+            sort!(pending; by=cs -> -something(last_runtime(db, cs.name), Inf))
+            # One worker compiles first, so the rest load from the pkgimage cache instead of racing to build it.
+            lanes[1] === nothing || _start_first_worker!(lanes[1], pending)
+        end
+        queue = Channel{CaseSpec}(Inf)
+        foreach(cs -> put!(queue, cs), pending)
+        close(queue)
+        @sync for lane in lanes
+            @async for case_spec in queue
+                run_commit(db, ref.commit_hash, ref.name, case_spec, repo_root;
+                    force=force, verbose=verbose, no_instantiate=no_instantiate,
+                    pin_manifest=pin_manifest, expected_key=expected_key,
+                    worktree_path=worktree_path, slot=lane, private_rundir=length(lanes) > 1)
+            end
         end
     finally
+        foreach(shutdown!, lanes)
         worktree_path === nothing || remove_worktree(worktree_path, repo_root)
+    end
+end
+
+"""
+Start `slot`'s worker for the build mode most cases use; a failure is left for the cases to report.
+"""
+function _start_first_worker!(slot::WorkerSlot, pending::Vector{CaseSpec})
+    i = something(findfirst(cs -> !cs.precompile_workload, pending), 1)
+    try
+        get_worker!(slot, pending[i])
+    catch e
+        @warn "Warm worker failed to start: $(first(sprint(showerror, e), 200))"
     end
 end
 
@@ -299,20 +361,14 @@ so callers can handle store_failed_run uniformly.
 """
 function _execute_computed(case_spec::CaseSpec, project_root::String;
     verbose::Bool, no_instantiate::Bool,
-    stderr_buf::IO, pin_manifest::Union{String,Nothing}=nothing)
-    script_content = _render_script(_computed_script_template(case_spec); no_instantiate=no_instantiate)
-    tmpscript = tempname() * ".jl"
+    stderr_buf::IO, pin_manifest::Union{String,Nothing}=nothing,
+    slot::Union{WorkerSlot,Nothing}=nothing)
     h5path = tempname() * ".h5"
     runinfo_file = tempname() * ".runinfo"
     try
-        write(tmpscript, script_content)
-        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $h5path $runinfo_file`, case_spec)
-        if verbose
-            run(pipeline(cmd))
-        else
-            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
-        end
-        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        run_script(slot, project_root, _computed_script_template(case_spec), [h5path, runinfo_file], case_spec, stderr_buf;
+            verbose=verbose, no_instantiate=no_instantiate)
+        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing, run_mode(slot))
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
         _warn_build_mode(fingerprint, case_spec)
@@ -322,7 +378,6 @@ function _execute_computed(case_spec::CaseSpec, project_root::String;
         extracted = extract_quantities(h5path, case_spec.quantities, runtime_s)
         return extracted, runtime_s, fingerprint
     finally
-        rm(tmpscript; force=true)
         rm(h5path; force=true)
         rm(runinfo_file; force=true)
     end
@@ -344,7 +399,8 @@ Run a kind="computed" case against the working tree.
 """
 function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     verbose::Bool=false, no_instantiate::Bool=false,
-    pin_manifest::Union{String,Nothing}=nothing)
+    pin_manifest::Union{String,Nothing}=nothing,
+    slot::Union{WorkerSlot,Nothing}=nothing)
     delete_cached(db, LOCAL_REF, case_spec.name)
     date = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
     @info "Running: $(case_spec.name) @ local (working tree, computed)"
@@ -354,12 +410,12 @@ function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::Strin
             verbose=verbose,
             no_instantiate=no_instantiate,
             stderr_buf=stderr_buf,
-            pin_manifest=pin_manifest)
+            pin_manifest=pin_manifest, slot=slot)
         store_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
             runtime_s, extracted; fingerprint=fingerprint)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
-        err_msg = if e isa ProcessFailedException
+        err_msg = if e isa Union{ProcessFailedException,ScriptFailed}
             stderr_str = String(take!(stderr_buf))
             isempty(stderr_str) ? "Subprocess failed" : stderr_str
         else
@@ -386,7 +442,8 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
     no_instantiate::Bool=false,
     pin_manifest::Union{String,Nothing}=nothing,
     expected_key::Union{String,Nothing}=nothing,
-    worktree_path::Union{String,Nothing}=nothing)
+    worktree_path::Union{String,Nothing}=nothing,
+    slot::Union{WorkerSlot,Nothing}=nothing)
     if !force && is_cached(db, commit_hash, case_spec.name; expected_key=expected_key)
         info = get_run_info(db, commit_hash, case_spec.name)
         if info !== nothing
@@ -411,12 +468,12 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
             verbose=verbose,
             no_instantiate=no_instantiate,
             stderr_buf=stderr_buf,
-            pin_manifest=pin_manifest)
+            pin_manifest=pin_manifest, slot=slot)
         store_run(db, commit_hash, commit_info.short, commit_info.date,
             commit_info.msg, case_spec.name, runtime_s, extracted; fingerprint=fingerprint)
         @info "  Completed in $(round(runtime_s, digits=3))s — $(length(extracted)) quantities extracted"
     catch e
-        err_msg = if e isa ProcessFailedException
+        err_msg = if e isa Union{ProcessFailedException,ScriptFailed}
             stderr_str = String(take!(stderr_buf))
             isempty(stderr_str) ? "Subprocess failed" : stderr_str
         else
@@ -488,7 +545,8 @@ Always re-runs (local results are never cached since the working tree is mutable
 function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     force::Bool=false, verbose::Bool=false,
     no_instantiate::Bool=false,
-    pin_manifest::Union{String,Nothing}=nothing)
+    pin_manifest::Union{String,Nothing}=nothing,
+    slot::Union{WorkerSlot,Nothing}=nothing, private_rundir::Bool=false)
     # Always delete previous local results and re-run
     delete_cached(db, LOCAL_REF, case_spec.name)
 
@@ -503,28 +561,19 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         return
     end
 
-    tmpscript = nothing
     runinfo_file = nothing
     rundir = nothing
     rundir_is_temp = false
     stderr_buf = IOBuffer()
 
     try
-        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides, case_spec.remove_sections)
+        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides, case_spec.remove_sections; private=private_rundir)
         rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output would mask a failed run
 
-        script_content = _render_script(RUNNER_SCRIPT_TEMPLATE; no_instantiate=no_instantiate)
-        tmpscript = tempname() * ".jl"
         runinfo_file = tempname() * ".runinfo"
-        write(tmpscript, script_content)
-
-        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$repo_root $tmpscript $rundir $runinfo_file`, case_spec)
-        if verbose
-            run(pipeline(cmd))
-        else
-            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
-        end
-        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        run_script(slot, repo_root, RUNNER_SCRIPT_TEMPLATE, [rundir, runinfo_file], case_spec, stderr_buf;
+            verbose=verbose, no_instantiate=no_instantiate)
+        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing, run_mode(slot))
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, case_spec.name)
         _warn_build_mode(fingerprint, case_spec)
@@ -544,7 +593,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
     catch e
-        err_msg = if e isa ProcessFailedException
+        err_msg = if e isa Union{ProcessFailedException,ScriptFailed}
             stderr_str = String(take!(stderr_buf))
             isempty(stderr_str) ? "Subprocess failed (stderr was printed to terminal in verbose mode)" : stderr_str
         else
@@ -558,9 +607,6 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
             err_msg_short)
     finally
-        if tmpscript !== nothing
-            rm(tmpscript; force=true)
-        end
         if runinfo_file !== nothing
             rm(runinfo_file; force=true)
         end
@@ -583,7 +629,8 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     no_instantiate::Bool=false,
     pin_manifest::Union{String,Nothing}=nothing,
     expected_key::Union{String,Nothing}=nothing,
-    worktree_path::Union{String,Nothing}=nothing)
+    worktree_path::Union{String,Nothing}=nothing,
+    slot::Union{WorkerSlot,Nothing}=nothing, private_rundir::Bool=false)
     # Check cache
     if !force && is_cached(db, commit_hash, case_spec.name; expected_key=expected_key)
         info = get_run_info(db, commit_hash, case_spec.name)
@@ -605,7 +652,6 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     @info "  $(commit_info.msg)"
 
     own_worktree = worktree_path === nothing
-    tmpscript = nothing
     runinfo_file = nothing
     rundir = nothing
     rundir_is_temp = false
@@ -625,25 +671,13 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             return
         end
 
-        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides, case_spec.remove_sections)
+        (rundir, rundir_is_temp) = _materialize_rundir(example_path, case_spec.overrides, case_spec.remove_sections; private=private_rundir)
         rm(joinpath(rundir, "gpec.h5"); force=true)   # a stale output (e.g. from an earlier case sharing the worktree) would mask a failed run
 
-        # Write temp runner script
-        script_content = _render_script(RUNNER_SCRIPT_TEMPLATE; no_instantiate=no_instantiate)
-        tmpscript = tempname() * ".jl"
         runinfo_file = tempname() * ".runinfo"
-        write(tmpscript, script_content)
-
-        # Run GPEC in subprocess
-        project_root = worktree_path
-
-        cmd = with_workload_preference(`julia --startup-file=no -t $SUBPROCESS_THREADS --project=$project_root $tmpscript $rundir $runinfo_file`, case_spec)
-        if verbose
-            run(pipeline(cmd))
-        else
-            run(pipeline(cmd; stdout=devnull, stderr=stderr_buf))
-        end
-        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing)
+        run_script(slot, worktree_path, RUNNER_SCRIPT_TEMPLATE, [rundir, runinfo_file], case_spec, stderr_buf;
+            verbose=verbose, no_instantiate=no_instantiate)
+        runtime_s, fingerprint = read_runinfo(runinfo_file, pin_manifest !== nothing, run_mode(slot))
         isempty(fingerprint.julia_version) && error("subprocess wrote no run-info metadata — does the script template end with %RUNINFO%?")
         _warn_pin_broken(pin_manifest, fingerprint, commit_info.short)
         _warn_build_mode(fingerprint, case_spec)
@@ -668,7 +702,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
         @info "  Completed in $(round(runtime_s, digits=1))s — $(length(extracted)) quantities extracted"
 
     catch e
-        err_msg = if e isa ProcessFailedException
+        err_msg = if e isa Union{ProcessFailedException,ScriptFailed}
             stderr_str = String(take!(stderr_buf))
             isempty(stderr_str) ? "Subprocess failed (stderr was printed to terminal in verbose mode)" : stderr_str
         else
@@ -684,9 +718,6 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             commit_info.msg, case_spec.name, err_msg_short)
     finally
         # Clean up
-        if tmpscript !== nothing
-            rm(tmpscript; force=true)
-        end
         if runinfo_file !== nothing
             rm(runinfo_file; force=true)
         end
