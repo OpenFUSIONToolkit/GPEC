@@ -33,7 +33,7 @@ end
 
 Cell boundaries `0 = s₀ < s₁ < … = S` for the Hermite BVP: each cell resolves the full local WKB rate
 μ + ρs, the model's [`fast_rates`](@ref) μ (for GGJ the Ohm and Υ-family pairs |√Q| + √(|Q|·|G+KF|)) and
-its [`parabolic_rate`](@ref) ρ (Re(e^{2iθ}/√Q) for GGJ), whether or not the mode is present, since
+its [`parabolic_resolution_rate`](@ref) ρ (Re(e^{2iθ}/√Q) for GGJ), whether or not the mode is present, since
 unresolved dormant modes alias into spurious discrete ones. `min_cells` floors the resolution where the local rates
 are small (|Q| ≪ 1).
 """
@@ -42,10 +42,11 @@ function ray_breaks(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64,
     ρ = parabolic_rate(params, Q, θ)
     ρ > 0 || throw(ArgumentError("contour angle θ=$θ gives non-decaying parabolic pair (ρ=$ρ ≤ 0); use θ ≈ default_ray_angle(params, Q)"))
     μ = fast_rates(params, Q)
+    ρres = parabolic_resolution_rate(params, Q, θ)
     hmax = S / min_cells
     breaks = [0.0]
     while breaks[end] < S
-        h = min(cfl / (μ + ρ * breaks[end]), hmax)
+        h = min(cfl / (μ + ρres * breaks[end]), hmax)
         snew = breaks[end] + h
         push!(breaks, snew >= S - 0.25 * h ? S : snew)
     end
@@ -94,7 +95,7 @@ function decaying_pair(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float
     for λ in eigvals(Matrix(ph * ode_matrix(params, Q, ph * (S + ΔS))))
         gmax_loc = max(gmax_loc, abs(real(λ)))
     end
-    rate = max(ρ * (S + ΔS) + ohm_rate(params, Q), gmax_loc)
+    rate = max(parabolic_resolution_rate(params, Q, θ) * (S + ΔS) + ohm_rate(params, Q), gmax_loc)
     nsteps = clamp(ceil(Int, dp_res * rate * ΔS), 200, 2_000_000)
     h = -ΔS / nsteps
 
@@ -322,6 +323,8 @@ function solve_ray(params::ToroidalLayerParameters, Q::ComplexF64;
     ztrk::Float64=0.3, purge_budget::Float64=2.5, dp_res::Float64=20.0,
     handoff::Union{Nothing,NTuple{2,Vector{ComplexF64}}}=nothing,
     verbose::Bool=false)
+    ray_angle_admissible(params, Q, θ) ||
+        throw(ArgumentError("contour angle θ=$θ lets an exponential family stop decaying between the real axis and the ray at Q=$Q; use default_ray_angle"))
 
     cache = build_asymptotics(params, Q; kmax=kmax)
     series_ok = true
@@ -427,13 +430,20 @@ end
 
 Error bar for the matching data: re-solve with each numerical knob perturbed in turn (contour
 angle, mesh, series order and radius, march tolerance, BVP edge s_m, decaying-pair separation) and
-report the relative change of (Δ₊, Δ₋); `spread` is the worst case per parity. θ moves outward
-only, away from the pseudo-resonance x² = −Q²(G+KF).
+report the relative change of (Δ₊, Δ₋); `spread` is the worst case per parity. θ moves outward, away from the
+pseudo-resonance x² = −Q²(G+KF), or inward when the outward angle is not [`ray_angle_admissible`](@ref).
 """
+# The contour-angle knob of delta_convergence: outward by 20%, or inward by 20% when outward is inadmissible.
+function θ_variation(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64)
+    θout = θ == 0 ? 0.1 : 1.2 * θ
+    ray_angle_admissible(params, Q, θout) && return ("θ → 1.2θ", (; θ=θout))
+    return ("θ → 0.8θ", (; θ=0.8 * θ))
+end
+
 function delta_convergence(params::ToroidalLayerParameters, Q::ComplexF64; verbose::Bool=true, kwargs...)
     base = solve_ray(params, Q; kwargs...)
     variations = [
-        ("θ → 1.2θ", (; θ=(base.θ == 0 ? 0.1 : 1.2 * base.θ))),
+        θ_variation(params, Q, base.θ),
         ("mesh ×2", (; cfl=(base.cfl / 2), min_cells=2 * base.min_cells)),
         ("kmax+4, S↑", (; kmax=16, smax_tol=1e-10)),
         ("march_rtol/100", (; march_rtol=1e-11)),

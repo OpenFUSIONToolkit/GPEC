@@ -138,6 +138,19 @@ p = GGJ.q4_surface_benchmark()      # GGJParameters for the q = 4 benchmark surf
 Δ = solve_inner(GGJModel(), p, γ)   # Δ.interchange, Δ.tearing with the default :ray backend
 ```
 
+### CCC: diamagnetic drift and perpendicular transport
+
+[`CCCModel`](@ref InnerLayer.CCC.CCCModel) solves the drift-resistive layer equations of [Cho, Choi and Choi (1987)](citations.md#Tearing), in the form of [Kim, Cho and Choi (1988)](citations.md#Tearing), Eqs. (1a)–(1c): the GGJ equations with the electron diamagnetic frequency ``Q_* = \omega_{*e}/Q_0`` in Ohm's law and vorticity and the perpendicular-transport weight ``M_\perp/M`` on the pressure equation.
+[`CCCParameters`](@ref InnerLayer.CCC.CCCParameters) holds a `GGJParameters` plus `Qstar` and `mperp`; ``Q_* = 0``, ``M_\perp/M = 1`` give the GGJ equations, and the GGJ scales, Mercier exponents and Δ normalization carry over unchanged.
+Its far field splits GGJ's double exponential pair into two families with scales ``\sigma_j`` set by Kim's Eq. (2) ([`parabolic_scales`](@ref InnerLayer.CCC.parabolic_scales)), so the asymptotic basis uses a general Sylvester splitting solve and the ray is centred between the families, ``\theta = (\arg\sigma_1 + \arg\sigma_2)/4``; an angle at which either family stops decaying between the real axis and the ray is refused.
+Only the `:ray` backend is available.
+When the two families decay at very different rates (large ``K Q Q_*^2``) the march resolves the faster one across the slower one's whole band, and a solve can take tens of seconds.
+
+```julia
+p = CCCParameters(GGJ.q4_surface_benchmark(), 0.5, 1.4)   # GGJ coefficients, Q*, M⊥/M
+Δ = solve_inner(CCCModel(), p, 5im * GGJ.q0(p.ggj))
+```
+
 ## API reference
 
 ### Tearing
@@ -156,6 +169,12 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.GGJ]
+```
+
+### CCC
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.CCC]
 ```
 
 ### ToroidalLayer
