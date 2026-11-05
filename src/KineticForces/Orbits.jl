@@ -91,7 +91,7 @@ function guiding_center_field(equil; omegaE=nothing)
     phi = nothing
     if omegaE !== nothing
         dphi = [-equil.psio * omegaE(ψ) for ψ in xs]
-        phi = cubic_interp(xs, FastInterpolations.cumulative_integrate(cubic_interp(xs, dphi)))
+        phi = cubic_interp(xs, FastInterpolations.cumulative_integrate(cubic_interp(xs, dphi)); extrap=ExtendExtrap())
     end
     return GuidingCenterField(itp(Bt), itp(bpsi), itp(btheta), itp(jac), itp(R), itp(Z),
         F, dF, phi, s, equil.psio, abs(F(0.0)) / equil.ro, equil.ro, first(xs), last(xs))
