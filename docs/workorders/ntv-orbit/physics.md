@@ -15,8 +15,7 @@ straight-field-line angle on [0, 1); `bo` is the axis toroidal field
 ## 1. What the code computes now (zero orbit width)
 
 The kinetic energy of species s for toroidal mode number n is, in the
-action-angle form of Park 2011 as implemented in Logan 2013 Eq. 8 and 19
-[VERIFY: equation numbers],
+action-angle form of Park 2011 Eqs. 8–15 (δW_K Eq. 8/14, T_φ Eq. 9/15, δJ Eq. 10, bounce-averaged δf Eq. 12) as implemented in Logan 2013: phase-space integrand Eq. 5, bounce-averaged torque Eq. 16, normalized form Eqs. 19–20 (verified from the papers, 2026-11-05; Logan 2013 Eq. 8 is the form of δf, not the integrand),
 
 T = T_φ + 2in δW_K,
 T = tnorm ∫dψ Σ_ℓ ∫dλ |δJ_ℓ(ψ, λ)|² ∫₀^∞ dx N(x) e^{−x} / [iΩ(x) − ν(x)],
@@ -47,7 +46,7 @@ Guiding-center motion in the axisymmetric equilibrium conserves E (kinetic energ
 
 P_φ = m R v_∥ B_φ/B − Z e ψ_p,
 
-where ψ_p = `psio`·ψ is the poloidal flux per radian [VERIFY: sign of the Ze ψ term with the code's ψ increasing outward and `ip_sign`, `bt_sign`; White & Chance 1984 Eq. for P_ζ in flux coordinates; the form m R v_∥ B_φ/B = m v_∥ F/B with F = R B_φ = `F_spline/2π`].
+where ψ_p = `psio`·ψ is the poloidal flux per radian [VERIFY: sign of the Ze ψ term with the code's ψ increasing outward and `ip_sign`, `bt_sign`; White & Chance 1984 Eq. 16: P_ζ = g ρ_c − ψ_p (ρ_c canonical parallel gyroradius, g = R B_φ in their normalization; Antonenas 2021 Eq. 2.3 same form); the form m R v_∥ B_φ/B = m v_∥ F/B with F = R B_φ = `F_spline/2π`].
 
 For given (E, μ, P_φ) and sign of v_∥, the orbit is the curve ψ(θ) solving
 
@@ -84,7 +83,7 @@ Analytic reference for the frequencies: Antonenas, Anastassiou, Kominis, J. Plas
 The perturbed field is first order along the unperturbed orbit (δB from `PerturbedEquilibrium`, including the plasma response). The action variation for bounce harmonic ℓ is the time integral along the orbit,
 
 δJ_ℓ = ∮ dt  A(t) exp(−i n ζ_osc(t)) exp(−i ℓ ω_b t),
-A(t) = (v_∥ ∇·ξ_⊥ + (δB/B)(2E − 3μB)/(2 m v_∥)) evaluated at (ψ(t), θ(t)) [VERIFY: this is the time-domain form of the existing `jvtheta` integrand; the ZOW integrand J B (divx √vpar + dbob (1 − 3λB/2B₀)/√vpar) dθ equals A dt up to the constant v and the Jacobian; confirm the factor and the sign of the ∇·ξ_⊥ term against Park 2011 Eq. for δJ].
+A(t) = (v_∥ ∇·ξ_⊥ + (δB/B)(2E − 3μB)/(2 m v_∥)) evaluated at (ψ(t), θ(t)) [VERIFY: this is the time-domain form of the existing `jvtheta` integrand; the ZOW integrand J B (divx √vpar + dbob (1 − 3λB/2B₀)/√vpar) dθ equals A dt up to the constant v and the Jacobian; confirm the factor and the sign of the ∇·ξ_⊥ term against Park 2011 Eq. 10 (δJ) and Eq. 13 (bounce-averaged δJ^l: (2E − 3μB) δB_L/B + (2E − 2μB) ∇·ξ_⊥)].
 
 The modes δB/B and ∇·ξ_⊥ are the code's `dbob_m(ψ)` and `divx_m(ψ)` summed over poloidal mode numbers at θ(t), with ψ(t) varying along the orbit; this is the only place the new path reads a field, and it reads exactly what the old path reads, at a different ψ.
 
