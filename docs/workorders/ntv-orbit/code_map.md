@@ -167,6 +167,9 @@ Per θ sample, with `dt` the `powspace` weight and `jac = tspl[4]` (J/chi1):
   - So ω_b = 2π / [(2-σ)∫ J B dθ/√vpar] × v_th/R0. This is 2π over the full bounce time for trapped (the factor 2) and over the transit time for passing.
 - `wdbar = ro*bo*wdfac*wbbar*2*(2 - sigma)*total_wd` (`:356`); `wd_arr = wdbar*dhat`.
   - This is the bounce-averaged precession at thermal energy; the energy scaling ω_D·x happens in the resonance denominator.
+  - Sign map (measured at M1 against `Orbits.jl`): the geometric toroidal rate is ⟨φ̇⟩ = s·ω_D·x for trapped ions, and Φ adds s·ω_E,
+    with s = sign of the poloidal field in the straight-field-line form (s = −1 in the DIII-D-like example, F > 0).
+    `g_wd` is the ψ-derivative of the bounce action, so ω_D is not a low-β form.
   - `wdfac` is `ctrl.magnetic_drift_factor`.
 - A degenerate orbit (`total_wb ≈ 0`) leaves the outputs zero with `valid=false`.
 
