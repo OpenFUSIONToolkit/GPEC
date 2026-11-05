@@ -49,6 +49,7 @@ const TEST_SUITES = [
     "runtests_critical_resonant_field.jl" => "errorfields",
     "runtests_slayer_runner.jl" => "errorfields",
     "runtests_kinetic.jl" => "core",
+    "runtests_orbits.jl" => "core",
     "runtests_kinetic_validity.jl" => "core",
     "runtests_multiion.jl" => "core",
     "runtests_fullruns.jl" => "api",

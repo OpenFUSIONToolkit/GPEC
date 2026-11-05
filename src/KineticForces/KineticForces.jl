@@ -17,6 +17,7 @@ using Statistics
 
 using FastInterpolations
 using Roots
+using OrdinaryDiffEq: ODEProblem, solve, Vern9, VectorContinuousCallback, terminate!
 import ..ForceFreeStates
 import ..Equilibrium
 using ..Equilibrium: IonSpecies
@@ -33,6 +34,7 @@ include("BounceAveraging.jl")
 include("Torque.jl")
 include("EnergyIntegration.jl")
 include("PitchIntegration.jl")
+include("Orbits.jl")
 
 # High-level computation functions
 include("Compute.jl")
