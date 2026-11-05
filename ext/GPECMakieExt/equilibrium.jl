@@ -18,16 +18,16 @@ function _profile!(ax, psi, y, label)
 end
 
 # Rational surfaces labelled as m/n along the top of `ax`.
-function _rationals_on_top!(fig, slot, ax, d)
+function _rationals_on_top!(pos, ax, d)
     isempty(d.sing_psi) && return nothing
-    return _surfaces_on_top!(fig, slot, ax, d.sing_psi, _rational_label.(d.sing_q))
+    return _surfaces_on_top!(pos, ax, d.sing_psi, _rational_label.(d.sing_q))
 end
 
 function _single_profile(d, y, label)
     fig = Figure(; size=(760, 420))
     ax = Axis(fig[1, 1]; xlabel=PSIN)
     _profile!(ax, d.psi, y, label)
-    _rationals_on_top!(fig, (1, 1), ax, d)
+    _rationals_on_top!(fig[1, 1], ax, d)
     return fig
 end
 
@@ -41,7 +41,7 @@ function EQ._plot_qprofile(d; show_singular=true)
             hlines!(ax, v; color=(:black, 0.35), linestyle=:dot, linewidth=1)
             text!(ax, x, v; text=rich("q", subscript(name), " = ", _num(v)), align, fontsize=12, color=(:black, 0.6))
         end
-        show_singular && _rationals_on_top!(fig, (1, 1), ax, d)
+        show_singular && _rationals_on_top!(fig[1, 1], ax, d)
         fig
     end
 end
@@ -112,7 +112,7 @@ function EQ._plot_equilibrium_summary(g, prof, geo)
             push!(axs, a)
         end
         linkxaxes!(axs...)
-        _rationals_on_top!(fig, (1, 2), axs[1], prof)
+        _rationals_on_top!(fig[1, 2], axs[1], prof)
         colsize!(fig.layout, 1, Relative(0.36))
         rowgap!(fig.layout, 8)
         colgap!(fig.layout, 24)

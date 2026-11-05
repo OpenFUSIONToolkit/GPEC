@@ -99,7 +99,7 @@ using TOML
             @test occursin("✓ ForceFreeStates.plot_mode_displacement", listing)
             @test occursin("✗ ForceFreeStates.plot_delta_prime", listing) && occursin(A.REASONS[:delta_prime], listing)
             @test length(available_plots(ret).sections) == count(x -> x !== nothing && any(e -> A._accepts(e, x), A.PLOTS), unique(values(ret)))
-            @test A.plot_counts(ret.ffs) == (11, 13)
+            @test A.plot_counts(ret.ffs) == (11, 15)
 
             # Optional outputs this run does not produce throw instead of drawing a placeholder.
             @test_throws ArgumentError A.ForceFreeStates.plot_cond_fbar(h5)
@@ -125,8 +125,14 @@ using TOML
             @test :delta_prime in A.capabilities(ret.ffs) && :solution_profiles ∉ A.capabilities(ret.ffs)
             @test_throws A.REASONS[:solution_profiles] A.ForceFreeStates.plot_mode_displacement(ret.ffs)
             @test occursin("✗ ForceFreeStates.plot_mode_displacement", repr(MIME"text/plain"(), available_plots(ret.ffs)))
-            # The summary leaves out the ξ panel rather than failing: three panels and a blank fourth.
-            @test length(A.ForceFreeStates.plot_ffs_summary(ret.ffs).subplots) == 4
+            # The summary leaves out the ξ panel rather than failing, keeping the other four.
+            caps = A.capabilities(ret.ffs)
+            @test count(((f, _),) -> A._can(f, caps), A.ForceFreeStates._ffs_panels(ret.ffs)) == 4
+            @test A.ForceFreeStates.plot_ffs_summary(ret.ffs) isa Figure
+            # The Δ′ family draws any part of its complex entries and refuses others.
+            @test A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:abs) isa Figure
+            @test A.ForceFreeStates.plot_delta_coil(h5; part=:imag) isa Figure
+            @test_throws ArgumentError A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:phase)
         end
     end
 

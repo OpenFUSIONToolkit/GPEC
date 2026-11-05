@@ -52,11 +52,9 @@ function _symlims(v)
     return (lo < 0 ? 1.5lo : -1.0, hi > 0 ? 1.25hi : 1.0)
 end
 
-_surface_labels(m, n) = ["$(mi)/$(ni)" for (mi, ni) in zip(m, n)]
-
-# Rational surfaces as a q = m/n axis along the top of a ψ_N axis, linked to it.
-function _surfaces_on_top!(fig, slot, ax, psi, labels; title="")
-    top = Axis(fig[slot...]; xaxisposition=:top, xticks=(psi, labels), xticklabelsize=11, xticklabelrotation=π / 2, title,
+# Rational surfaces as a q = m/n axis along the top of the ψ_N axis `ax`, laid over it at grid position `pos`.
+function _surfaces_on_top!(pos, ax, psi, labels; title="")
+    top = Axis(pos; xaxisposition=:top, xticks=(psi, labels), xticklabelsize=11, xticklabelrotation=π / 2, title,
         xgridvisible=false, ygridvisible=false, yticksvisible=false, yticklabelsvisible=false)
     hidespines!(top)
     linkxaxes!(ax, top)

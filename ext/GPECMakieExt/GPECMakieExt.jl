@@ -11,6 +11,7 @@ import GeneralizedPerturbedEquilibrium.Analysis as A
 
 include("theme.jl")
 include("equilibrium.jl")
+include("forcefreestates.jl")
 
 # Save `fig` to `path` with the loaded backend; GLMakie writes raster images only.
 function A._save(fig::Figure, path::AbstractString)
@@ -22,6 +23,12 @@ function A._save(fig::Figure, path::AbstractString)
     return nothing
 end
 
-__init__() = (A._BACKEND[] = true)
+# Math is set in the theme's sans face, so accented symbols such as F̄ match the text; this applies to the session's
+# LaTeX strings once GPEC's figures are loaded.
+function __init__()
+    Makie.MathTeXEngine.set_texfont_family!(Makie.MathTeXEngine.FontFamily("TeXGyreHeros"))
+    A._BACKEND[] = true
+    return nothing
+end
 
 end # module GPECMakieExt

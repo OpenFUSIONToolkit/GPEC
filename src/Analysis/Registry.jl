@@ -45,6 +45,7 @@ const REASONS = Dict{Symbol,String}(
     :free_boundary => "needs the free-boundary energies: run with vac_flag = true and the Forward or Riccati integrator",
     :edge_scan => "needs the edge stability scan: set dW_edge_scan_start below psilim",
     :delta_prime => "needs the Δ′ matrix: use the Riccati or Galerkin integrator (Forward computes none)",
+    :delta_coil => "needs Δ_coil: use the Riccati integrator, or Galerkin with rpec_flag = true",
     :kinetic_scan => "needs the kinetic singular-surface scan: run with a kinetic source and singfac_min > 0",
     :ballooning_scan => "needs the ballooning scan: add a [LocalStability] section",
     :singular_coupling => "needs the singular coupling: run PerturbedEquilibrium with compute_singular_coupling = true",
@@ -81,6 +82,7 @@ function capabilities(r::ForceFreeStatesResult)
     diag === nothing || isempty(diag.edge_scan.psi) || push!(caps, :edge_scan)
     r.free_boundary === nothing || isempty(r.free_boundary.et) || push!(caps, :free_boundary)
     r.delta_prime === nothing || isempty(r.delta_prime.matrix) || push!(caps, :delta_prime)
+    r.delta_prime === nothing || isempty(r.delta_prime.coil) || push!(caps, :delta_coil)
     isempty(r.kinetic.scan_psi) || push!(caps, :kinetic_scan)
     return caps
 end
@@ -114,6 +116,7 @@ const _H5_CAPABILITIES = (
     :edge_scan => "ForceFreeStates/EdgeScan/psi",
     :free_boundary => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",
     :delta_prime => "SingularSurfaces/Delta_prime_matrix",
+    :delta_coil => "SingularSurfaces/Delta_coil",
     :kinetic_scan => "SingularSurfaces/Kinetic/scan_psi",
     :ballooning_scan => "LocalStability/alpha",
     :singular_coupling => "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field",

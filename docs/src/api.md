@@ -53,7 +53,7 @@ ForceFreeStatesResult  Riccati, ideal closure
   Δ′_ii (ψ_N)        2/1: 0.1781, 3/1: -215.7
   Solution           not computed (Riccati stores no ξ profiles)
   Wall               ConformalWall, standoff = 0.2415 a
-  Plots              11 of 13 available (see available_plots)
+  Plots              13 of 15 available (see available_plots)
 ```
 
 The fields themselves are documented in each type's docstring.
@@ -64,10 +64,10 @@ Every plot in [`Analysis`](analysis.md) takes the result in memory or the path o
 
 ```julia-repl
 julia> available_plots(ffs)
-Plots for ForceFreeStatesResult (riccati): 11 of 13 available
+Plots for ForceFreeStatesResult (riccati): 13 of 15 available
   ✓ ForceFreeStates.plot_ffs_summary                         the stability panels the run supplies
   ✗ ForceFreeStates.plot_mode_displacement                   needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)
-  ✓ ForceFreeStates.plot_fixed_boundary_stability_criterion  critical determinant against ψ_N
+  ✓ ForceFreeStates.plot_critical_determinant                critical determinant against ψ_N
   ⋮
 ```
 
