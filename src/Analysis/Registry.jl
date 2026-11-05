@@ -47,7 +47,6 @@ const REASONS = Dict{Symbol,String}(
     :delta_prime => "needs the Δ′ matrix: use the Riccati or Galerkin integrator (Forward computes none)",
     :kinetic_scan => "needs the kinetic singular-surface scan: run with a kinetic source and singfac_min > 0",
     :ballooning_scan => "needs the ballooning scan: add a [LocalStability] section",
-    :gse_files => "needs gse.h5 next to the file: set diagnose_src = true in [Equilibrium]",
     :singular_coupling => "needs the singular coupling: run PerturbedEquilibrium with compute_singular_coupling = true",
     :response_xi => "needs the reconstructed displacement ξ: run PerturbedEquilibrium on a Forward free-boundary result",
     :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a Forward free-boundary result",
@@ -137,7 +136,6 @@ function capabilities(h5path::AbstractString)
             any(has, keys isa Tuple ? keys : (keys,)) && push!(caps, cap)
         end
     end
-    isfile(joinpath(dirname(h5path), "gse.h5")) && push!(caps, :gse_files)
     return caps
 end
 

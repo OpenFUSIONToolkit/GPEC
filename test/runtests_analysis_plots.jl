@@ -1,3 +1,4 @@
+using CairoMakie
 using HDF5
 using Plots
 using TOML
@@ -35,6 +36,9 @@ using TOML
     _same(a::Number, b::Number) = isapprox(a, b; rtol=1e-12)
     _same(a, b) = isequal(a, b)
 
+    # Ported plots return a Makie figure, the rest still a Plots.jl plot.
+    _drawn(p) = p isa Figure || p isa Plots.Plot
+
     # Every plot registered for `x` has a method for each source it lists, draws from `x` and from `h5` when the
     # capabilities allow, and otherwise throws the registry's reason from both.
     function _check_sources(x, h5)
@@ -51,7 +55,7 @@ using TOML
             sources = A._accepts(e, h5) ? (x, h5) : (x,)
             if A._can(e.fn, caps)
                 for src in sources
-                    @test e.fn(src) isa Plots.Plot
+                    @test _drawn(e.fn(src))
                 end
             else
                 reason = A._why(A._missing(e, caps))
@@ -86,7 +90,7 @@ using TOML
             ret.local_stability === nothing || _check_sources(ret.local_stability, h5)
             for component in (:xi_psi, :b_psi, :Jb_theta, :Jb_zeta)
                 @test _same(A.PerturbedEquilibrium._response_data(ret.pe, component), A.PerturbedEquilibrium._response_data(h5, component))
-                @test A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component) isa Plots.Plot
+                @test _drawn(A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component))
             end
             @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(h5; component=:b_theta)
 
@@ -94,14 +98,14 @@ using TOML
             listing = repr(MIME"text/plain"(), available_plots(ret.ffs))
             @test occursin("✓ ForceFreeStates.plot_mode_displacement", listing)
             @test occursin("✗ ForceFreeStates.plot_delta_prime", listing) && occursin(A.REASONS[:delta_prime], listing)
-            @test occursin("✗ Equilibrium.plot_gse_by_theta", repr(MIME"text/plain"(), available_plots(h5)))
             @test length(available_plots(ret).sections) == count(x -> x !== nothing && any(e -> A._accepts(e, x), A.PLOTS), unique(values(ret)))
             @test A.plot_counts(ret.ffs) == (11, 13)
 
             # Optional outputs this run does not produce throw instead of drawing a placeholder.
             @test_throws ArgumentError A.ForceFreeStates.plot_cond_fbar(h5)
-            @test_throws ArgumentError A.Equilibrium.plot_gse_by_theta(h5)
-            @test_throws ArgumentError A.Equilibrium.plot_gse_integrated(h5)
+
+            # The Grad-Shafranov residual plot is an unregistered stub that draws the residual computed in memory.
+            @test A.Equilibrium.plot_gse(GPEC.Equilibrium.equilibrium_gse!(ret.equil)) isa Figure
 
             png = joinpath(dir, "qprofile.png")
             A.Equilibrium.plot_qprofile(ret.equil; save_path=png)
@@ -137,7 +141,7 @@ using TOML
             h5 = joinpath(dir, "gpec.h5")
             save_to_hdf5(h5, ffs)
             _check_sources(ffs, h5)
-            @test A.ForceFreeStates.plot_cond_fbar(ffs) isa Plots.Plot
+            @test _drawn(A.ForceFreeStates.plot_cond_fbar(ffs))
         end
     end
 end
