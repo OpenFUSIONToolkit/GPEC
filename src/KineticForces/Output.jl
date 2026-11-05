@@ -156,7 +156,10 @@ end
 function ForceFreeStates.write_kinetic_validity!(h5file::Union{HDF5.File,HDF5.Group}, ctrl::KineticForcesControl,
     ffs::ForceFreeStates.ForceFreeStatesResult)
     equil = ffs.equil
-    return write_validity!(h5file, ctrl, ntv_species(ctrl, equil), ntv_profiles(ctrl, equil), equil, Float64[sng.psifac for sng in ffs.surfaces])
+    profiles = ntv_profiles(ctrl, equil)
+    write_validity!(h5file, ctrl, ntv_species(ctrl, equil), profiles, equil, Float64[sng.psifac for sng in ffs.surfaces])
+    ctrl.orbit_diagnostic && write_orbits!(h5file, ctrl, profiles, equil)
+    return nothing
 end
 
 """

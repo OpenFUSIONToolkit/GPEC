@@ -606,6 +606,7 @@ using HDF5
                 delete!(ntv_deck, "LocalStability")
                 delete!(ntv_deck, "Ballooning")
                 ntv_deck["Run"]["verbose"] = false
+                ntv_deck["KineticForces"]["orbit_diagnostic"] = true
                 open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
                 @test reference.kinetic isa KineticForcesResult && reference.kinetic.pe === reference.pe
@@ -625,6 +626,7 @@ using HDF5
                             @test read(api_h5["KineticForces/$method/total_torque"]) == read(deck_h5["KineticForces/$method/total_torque"])
                         end
                         @test read(api_h5["KineticForces/Validity/psi_c"]) == read(deck_h5["KineticForces/Validity/psi_c"])
+                        @test isequal(read(api_h5["KineticForces/Orbits/wb"]), read(deck_h5["KineticForces/Orbits/wb"]))
                     end
                 end
             end

@@ -71,6 +71,11 @@ Immutable: vary a field by building a new control.
     `psi_tolerance_margin × rtol_psi` = 1e-3) ⊃ `rtol_x` (default `nested_tolerance_margin × rtol_pitch` = 1e-5).
     Each inner level is resolved one margin tighter than the outer and no further. Set `rtol_pitch`/`rtol_x`
     explicitly to override (see `torque_pitch_rtol`, `matrix_pitch_rtol`).
+  - `orbit_diagnostic::Bool` - Integrate main-ion guiding-center orbits in the constants of motion on a fixed
+    (ψ, λ, x, σ) sample and write their class, bounce frequency, toroidal rate and orbit-averaged ψ to
+    `KineticForces/Orbits` (see [`write_orbits!`](@ref)). Diagnostic only; nothing else changes. Default `false`.
+  - `orbit_potential::Bool` - Include the electrostatic potential built from the kinetic `omega_E` in the orbit
+    Hamiltonian (dΦ/dψ_N = −psio·ω_E), so the E×B drift is part of the orbit. Default `true`.
 """
 @kwdef struct KineticForcesControl
     # Method flags (which methods to calculate)
@@ -130,6 +135,10 @@ Immutable: vary a field by building a new control.
 
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi
+
+    # Guiding-center orbit diagnostic
+    orbit_diagnostic::Bool = false  # Write main-ion orbit frequencies to KineticForces/Orbits
+    orbit_potential::Bool = true    # Include the potential from omega_E in the orbit Hamiltonian
 end
 
 """
