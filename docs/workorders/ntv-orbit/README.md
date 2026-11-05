@@ -13,8 +13,8 @@ Add to `KineticForces` a second way of evaluating the action variation δJ
 and the kinetic energy δW_K: along the real guiding-center orbit in
 constants of motion (E, μ, P_φ), instead of along a flux surface. Reuse the
 resonance operator, the energy integral and the torque identity. Reproduce
-the existing path as the orbit width goes to zero. Add an isotropic
-slowing-down alpha distribution with analytic derivatives. Produce two
+the existing path as the orbit width goes to zero. Add slowing-down
+alpha and beam distributions with analytic derivatives (physics.md §6). Produce two
 results for the paper (PLAN.md KR1, KR2) and one methods figure (KR3).
 
 ## Scope boundary
@@ -27,7 +27,7 @@ already computes them; the fixed-MHD field scan via TokaMaker.
 Out of scope: orbit following in the 3D field (the perturbation is first
 order along the unperturbed orbit); stochastic ripple loss; finite Larmor
 radius; collisional orbit-width effects beyond the existing collision
-operator; anisotropic alpha distributions; any change to
+operator; anisotropic distributions outside the Liu 2014 beam family; any change to
 `ForceFreeStates`, `PerturbedEquilibrium` or `Vacuum`.
 
 ## Code-side milestone ladder

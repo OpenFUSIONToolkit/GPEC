@@ -1,10 +1,11 @@
 # physics.md — orbit-averaged kinetic energy and NTV torque
 
-**Status: v0, unsigned.** Written at hand-off (2026-11-05) without Zotero or
-the PDFs; every item marked `[VERIFY]` is a statement Nik confirms, corrects
-or strikes in the M0 sign-off card. Nothing after M0 starts while a
-`[VERIFY]` is open. Once signed, this file changes only through a Decisions
-card.
+**Status: v1, signed (Q4 answer B, 2026-11-05).** v0 was written at hand-off;
+its [VERIFY] items were resolved in the M0 card Q4 and Nik signed with two
+exceptions, both resolved here: the finite-β (∇p) physics is kept (§2, §3) and
+the electrostatic potential is in the orbit (§2, §4). The beam distribution of
+card Q7 (answer B) is in §6. From here this file changes only through a
+Decisions card.
 
 Equations are transcribed in the code's conventions where the code has one
 (see `code_map.md`): ψ is the normalized poloidal flux ψ_N ∈ [0, 1] with
@@ -36,97 +37,175 @@ Three properties of this form matter for what follows.
 
 (b) The drive is a ψ-derivative on the surface: N(x) comes from ∂f_M/∂ψ at fixed E, with ω_E entering both the drive and the precession.
 
-(c) The torque identity T_φ = Re T, δW_K = Im T/(2n) is a property of the action-angle form and does not depend on the orbit being surface-local [VERIFY: Park 2009 states this for general orbits, or only for the surface-local form].
+(c) The torque identity T_φ = Re T, δW_K = Im T/(2n) is a property of the action-angle form for a single toroidal harmonic n: δW_K and T_φ are the same quadratic form in δJ with the real and imaginary parts of one resonance operator (Park 2011 Eqs. 8–9, 14–15), and the orbit enters only through δJ and the frequencies. The literature does not state it for finite-width orbits (Park 2009 has no statement of it); the paper says so.
 
 The code also suppresses the kinetic terms inside ψ_c, where a thermal orbit width reaches ⟨r⟩ (`axis_validity_suppression`). The new path has no such limit; the envelope stays on for the old path and off for the new one.
 
 ## 2. The orbit in constants of motion
 
-Guiding-center motion in the axisymmetric equilibrium conserves E (kinetic energy; the electrostatic potential is handled in §4), μ = m v_⊥²/(2B), and the canonical toroidal momentum
+The orbit is the exact guiding-center motion (Littlejohn's equations) in the
+axisymmetric equilibrium, with the electrostatic potential in the Hamiltonian:
 
-P_φ = m R v_∥ B_φ/B − Z e ψ_p,
+H = ½ m v∥² + μ B(ψ, θ) + Z e Φ(ψ),
+dX/dt = [v∥ B* + b × ∇H / (Z e)] / B∥*,   m dv∥/dt = −B*·∇H / B∥*,
+B* = B + (m v∥/Z e) ∇×b,   B∥* = b·B*,
 
-where ψ_p = `psio`·ψ is the poloidal flux per radian [VERIFY: sign of the Ze ψ term with the code's ψ increasing outward and `ip_sign`, `bt_sign`; White & Chance 1984 Eq. 16: P_ζ = g ρ_c − ψ_p (ρ_c canonical parallel gyroradius, g = R B_φ in their normalization; Antonenas 2021 Eq. 2.3 same form); the form m R v_∥ B_φ/B = m v_∥ F/B with F = R B_φ = `F_spline/2π`].
+with ∇H taken at fixed v∥. The constants of motion are E = H (total energy),
+μ, and
 
-For given (E, μ, P_φ) and sign of v_∥, the orbit is the curve ψ(θ) solving
+P_φ = m v∥ b_φ − Z e s psio ψ,   b_φ = F/B,  F = R B_φ = `F_spline`/2π,
 
-P_φ = m v_∥(ψ, θ) F(ψ)/B(ψ, θ) − Z e psio ψ,   v_∥ = ± √(2(E − μ B(ψ, θ))/m),
+with s = ±1 the sign that gives a positive q, i.e.
+q = (1/2π) ∮ B^φ/B^θ dθ (this fixes the relative sign of the two terms; M1
+check 3 confirms it physically: co-current passing ions sit outward in R).
+White & Chance 1984 Eq. 16 and Antonenas 2021 Eq. 2.3 have the same form.
 
-a scalar root in ψ at each θ. Bounce points are where E = μ B on the orbit (v_∥ = 0). The orbit is
+Coordinates are (ψ_N, θ, φ) with θ the equilibrium's straight-field-line
+angle on [0, 1) and φ the geometric toroidal angle (so g_ψφ = g_θφ = 0 and the
+ν offset never enters). The metric, the Jacobian 𝒥 = R(R_θ Z_ψ − R_ψ Z_θ) and
+the covariant b_i = B_i/B come from R(ψ, θ), Z(ψ, θ) (`rzphi_rsquared`,
+`rzphi_offset`); B^θ = s psio/𝒥, B^φ = F/R², B_ψ = g_ψθ B^θ, B_θ = g_θθ B^θ.
+∇×b is taken numerically from the covariant b_i, so the curvature, the ∇p
+part of it and the parallel current all enter as the equilibrium has them.
+There is no low-β drift formula anywhere in the orbit.
 
-- **trapped** if v_∥ changes sign along it (two bounce points, both legs),
-- **passing** if v_∥ keeps its sign over θ ∈ [0, 1),
-- **lost** if ψ(θ) reaches `psilim` (the last closed surface) before closing.
+Note on the existing path (correcting the M0 card): the ZOW precession
+integrand `g_wd` is ∂/∂ψ at fixed (E, μ) of the bounce action
+∮ J B √(v∥/v) dθ, the action-derivative form of the precession. That form
+does not depend on β, so the old path is not a low-β approximation either,
+and the ZOW limit of the exact orbit should reproduce it.
 
-Potato and stagnation orbits near the axis are classified by the same rule; their cost is a Decisions card if they dominate the grid.
+**Integration.** The orbit is integrated in time (OrdinaryDiffEq, already a
+GPEC dependency), in units of R₀/v, with E and P_φ conservation monitored as
+the accuracy diagnostic. This replaces the scalar root solve ψ(θ) of v0: the
+root solve is singular at the turning points of a finite-width orbit (where
+the two v∥ legs meet away from v∥ = 0) and fails for potato orbits, while time
+integration treats trapped, passing, potato and lost orbits alike, and M2's δJ
+is a time integral anyway.
 
-Time along the orbit: dt = dθ / θ̇ with θ̇ = v_∥ B^θ/B + v_d·∇θ, where B^θ = chi1/(2π J) [VERIFY: the code's J = `rzphi_jac` is the Jacobian of (ψ_N, θ, ζ) with θ on [0,1); check the 2π factors] and v_d the ∇B + curvature drift
+**Labels.** An orbit is started at its crossing of θ₀ = 0 (outboard midplane)
+with (ψ₀, λ, x, σ): kinetic energy E_k = x T at ψ₀, μ = λ E_k/B₀, v∥ = σ v
+√(1 − λB/B₀). This fixes (E, μ, P_φ) and makes the ZOW comparison at the
+same (ψ, λ) direct.
 
-v_d = (m/(Z e B)) (v_∥² + v_⊥²/2) (b × ∇B)/B  (low β; the curvature term equals the ∇B term in a force-free sense [VERIFY: keep the ∇p correction or not — the existing `g_wd` integrand uses dB/dψ and dJ/dψ, which is the low-β form]).
+**Classification.**
+- trapped: v∥ changes sign along the orbit; the period is the return to θ₀
+  in the starting direction,
+- passing: θ advances by ±1 with no sign change of v∥,
+- lost: ψ reaches `psilim`,
+- axis: ψ reaches the innermost grid surface (flux coordinates are singular
+  there); counted, not used; their share is reported.
 
-Toroidal angle along the orbit: dζ/dt = v_∥ B^ζ/B + v_d·∇ζ, with B^ζ = q B^θ in SFL coordinates.
+**Per orbit**: τ, ω_b = 2π/τ, Δφ over one period and ⟨φ̇⟩ = Δφ/τ,
+⟨ψ⟩ = (1/τ)∫ψ dt, ψ_min and ψ_max, the class, and the relative drift of E and
+P_φ.
 
-Definitions on the closed orbit (period τ, the full bounce for trapped, one transit for passing):
+Zero-orbit-width limit: ω_b → the code's `wb`·√x; for passing,
+⟨φ̇⟩ → ±q ω_b + ω_D x + ω_E; for trapped, ⟨φ̇⟩ → ω_D x + ω_E. The relative
+sign between the code's ω_D and the physical toroidal direction is fixed by
+this comparison in M1 and recorded in code_map.md.
 
-- ω_b = 2π/τ,
-- ⟨ζ̇⟩ = Δζ/τ, the secular toroidal advance per period (this includes the parallel advance 2πq per transit for passing particles and the drift precession for both),
-- ζ_osc(t) = ζ(t) − ζ(0) − ⟨ζ̇⟩ t, the oscillatory part,
-- ⟨ψ⟩ = (1/τ) ∮ ψ dt, the orbit-averaged flux label,
-- the lost flag.
-
-Zero-orbit-width limit: ψ(θ) → ψ, ω_b → the code's `wb`, ⟨ζ̇⟩ → σ q ω_b + ω_D (so that n⟨ζ̇⟩ + ℓ ω_b = ℓ_eff ω_b + n ω_D), ζ_osc → 2πq(θ − θ₀) − 2π σ q s. These are the M1 and M2 checks.
-
-Analytic reference for the frequencies: Antonenas, Anastassiou, Kominis, J. Plasma Phys. 87, 855870101 (2021), zero-drift-width bounce and transit frequencies in terms of elliptic integrals of the trapping parameter [VERIFY: which of their equations; §3 of the paper].
+Analytic reference for the frequencies: Antonenas 2021 Eqs. 4.6–4.7 (pendulum
+ω_b, ω_t with the complete K) on a large-aspect-ratio circular equilibrium,
+where they hold to O(ε).
 
 ## 3. The orbit-averaged action variation
 
-The perturbed field is first order along the unperturbed orbit (δB from `PerturbedEquilibrium`, including the plasma response). The action variation for bounce harmonic ℓ is the time integral along the orbit,
+The perturbed field is first order along the unperturbed orbit (δB from
+`PerturbedEquilibrium`, including the plasma response). The action variation
+for bounce harmonic ℓ is the time integral along the orbit,
 
-δJ_ℓ = ∮ dt  A(t) exp(−i n ζ_osc(t)) exp(−i ℓ ω_b t),
-A(t) = (v_∥ ∇·ξ_⊥ + (δB/B)(2E − 3μB)/(2 m v_∥)) evaluated at (ψ(t), θ(t)) [VERIFY: this is the time-domain form of the existing `jvtheta` integrand; the ZOW integrand J B (divx √vpar + dbob (1 − 3λB/2B₀)/√vpar) dθ equals A dt up to the constant v and the Jacobian; confirm the factor and the sign of the ∇·ξ_⊥ term against Park 2011 Eq. 10 (δJ) and Eq. 13 (bounce-averaged δJ^l: (2E − 3μB) δB_L/B + (2E − 2μB) ∇·ξ_⊥)].
+δJ_ℓ = ∮ dt A(t) exp(−i n φ_osc(t)) exp(−i ℓ ω_b t),
+A(t) = [(2E_k − 2μB) ∇·ξ⊥ + (2E_k − 3μB) δB/B] evaluated at (ψ(t), θ(t)),
 
-The modes δB/B and ∇·ξ_⊥ are the code's `dbob_m(ψ)` and `divx_m(ψ)` summed over poloidal mode numbers at θ(t), with ψ(t) varying along the orbit; this is the only place the new path reads a field, and it reads exactly what the old path reads, at a different ψ.
+up to a constant fixed by the ZOW limit (M2 check 1), with E_k = E − ZeΦ(ψ(t))
+the local kinetic energy. This is −(μ δB_L + m v∥² κ·ξ) with the Lagrangian
+identity δB_L/B = −(∇·ξ⊥ + κ·ξ), which holds at any β; the code builds δB/B
+from exactly that identity with p′ inside κ (`KineticForcesStructs.jl`
+`jbb_dbob`, `Fourfit.jl` `build_kinetic_metric_matrices`). It is Park 2011
+Eq. 13 and Logan 2013 Eq. 16. (v0 had the ∇·ξ⊥ term a factor 2 too large
+relative to δB/B; the dt-versus-dl Jacobian multiplies both terms alike and
+cannot cause that.)
 
-The resonance operator is unchanged in form with the orbit's own frequencies:
+The modes δB/B and ∇·ξ⊥ are the code's `dbob_m(ψ)` and `divx_m(ψ)` summed
+over m at θ(t), read at ψ(t).
 
-iΩ − ν,   Ω = ℓ ω_b(E, μ, P_φ) + n ⟨ζ̇⟩(E, μ, P_φ).
+Resonance operator: iΩ − ν with Ω = ℓ ω_b + n⟨φ̇⟩ from the orbit. Ω no longer
+has the analytic √x, x form, so (M2) ω_b, ⟨φ̇⟩ and |δJ_ℓ|² are tabulated on a
+√x grid at fixed (λ, ψ₀) (λ is energy-independent, so at Δ_b → 0 the grid is
+today's (ψ, λ, x) grid), splined in √x, and the Sokhotski–Plemelj add-back is
+reused with the pole from a root solve on the interpolated Ω(x).
 
-Consequence for the energy integral: Ω no longer has the analytic √x, x dependence, so the pole-location-and-residue machinery in `EnergyIntegration.jl` cannot be reused as is. The plan (M2) is to tabulate ω_b, ⟨ζ̇⟩ and |δJ_ℓ|² on a grid in √x at fixed (μ/E, P_φ) [VERIFY: the natural fixed labels at varying E — the code's λ = μB₀/E is energy-independent for a given pitch, so a grid in (λ, P_φ, √x) keeps the ZOW structure and makes the limit test trivial], interpolate with cubic splines in √x, and reuse the Sokhotski–Plemelj add-back with the pole found by a root solve on the interpolated Ω(x). The collisionless limit then has the same analytic regular part.
-
-Torque: T_φ = Re T and δW_K = Im T/(2n) with the same `tnorm`, the λ integral replaced by the (λ, P_φ) integral with its Jacobian [VERIFY: the phase-space measure in (E, μ, P_φ) per unit ψ; in ZOW the P_φ integral at fixed (E, μ) collapses to the ψ integral with dP_φ = −Z e psio dψ, which fixes the normalization: the new path's ∫dP_φ must reproduce `tnorm`∫dψ in the limit].
+Phase-space measure: Gorelenkov 1999 Eq. 22 (check the denominator against
+the PDF in M2), normalized so the new path's integral reproduces
+`tnorm`∫dψ in the ZOW limit.
 
 ## 4. The drive and the electric potential
 
-For a static perturbation (ω = 0) the drive in the perturbed distribution is n ∂f₀/∂P_φ at fixed (E, μ) [VERIFY: Park 2011 / Gorelenkov 1999 form: δf ∝ (ω ∂f₀/∂E − n ∂f₀/∂P_φ)/(ω − ℓω_b − n⟨ζ̇⟩ + iν); with ω → 0 only the P_φ term survives].
+Static perturbation (ω = 0): the drive is n ∂f₀/∂P_φ at fixed (E, μ)
+(Gorelenkov 1999 Eqs. 25–28 with ω → 0).
 
-Equilibrium distribution: f₀ = f_M(E; n(ψ̄), T(ψ̄)) with ψ̄ a flux label of the orbit. The choice of ψ̄ is a modeling decision:
+Equilibrium distribution: f₀ is a function of the constants of motion through
+E and ψ̄ = ⟨ψ⟩. For a Maxwellian
 
-- ψ̄ = ⟨ψ⟩, the orbit-averaged flux (recommended; reduces to ψ in ZOW; makes ∂f₀/∂P_φ = (∂f_M/∂ψ̄)(∂⟨ψ⟩/∂P_φ) with ∂⟨ψ⟩/∂P_φ computed numerically on the grid and equal to −1/(Z e psio) in ZOW);
-- ψ̄ = ψ at the outboard midplane crossing (what orbit codes often use).
+f₀ = n(ψ̄) (m/2πT(ψ̄))^{3/2} exp(−(E − ZeΦ(ψ̄))/T(ψ̄)),
 
-[VERIFY: which; the first is the default in PLAN.md M3.]
+so ∂f₀/∂ψ̄ at fixed total energy carries −ZeΦ′/T next to n′/n and T′/T, which
+gives the ω_E + ω_*n + ω_*T(x − 3/2) numerator in the ZOW limit (Logan 2013
+Eq. 18, "taken at constant total energy"). ∂⟨ψ⟩/∂P_φ is computed on the grid
+and is −1/(Z e s psio) in ZOW.
 
-The electric potential Φ(ψ) with ω_E = −(2π/chi1) Φ′/... [VERIFY: the code's `omegaE_spline` is the E×B toroidal angular frequency ω_E = −Φ′(ψ)/(ψ′ ...) — fix the exact definition from `KineticProfiles.jl`]. In the ZOW code ω_E enters as n ω_E in Ω and in N(x). In the orbit path it enters through the orbit average: the E×B toroidal rotation is part of ζ̇, so ⟨ζ̇⟩ contains ⟨ω_E(ψ(t))⟩ along the orbit rather than ω_E(ψ) on one surface. This is the mechanism by which the edge peak where ω_E → 0 is bounded: an orbit that straddles the zero sees a non-zero average. Whether E also includes Z e Φ in the orbit solve (electrostatic drift modifying the orbit) is second order in Φ/T for thermal ions and negligible for alphas; it is not included [VERIFY: agree].
-
-Reduction: with ψ̄ = ⟨ψ⟩ and ZOW, n ∂f₀/∂P_φ reproduces the Maxwellian numerator (ω_E + ω_*n + ω_*T(x − 3/2)) x^{5/2} e^{−x} up to the constant absorbed in `tnorm` [VERIFY: by M3 check 2, numerically; and analytically once in the sign-off].
+Φ(ψ) is built from the input E×B frequency: dΦ/dψ_N = −psio ω_E (from
+φ̇ = ∂H/∂P_φ ⊃ ZeΦ′ ∂ψ/∂P_φ), integrated from the axis. Φ is in the orbit
+(the Hamiltonian above), so the E×B drift is part of ⟨φ̇⟩ along the orbit and
+an orbit that straddles an ω_E zero sees its average, which is the mechanism
+behind the edge part of KR2. The ordering is the usual drift-kinetic one:
+E×B speed small against the thermal speed (no centrifugal or Coriolis
+terms). Φ is a switch (`orbit_potential`, default on); off reproduces the v0
+orbit.
 
 ## 5. Lost orbits
 
-Orbits that reach `psilim` are excluded from δW_K (they carry no steady perturbed distribution) and counted: the lost fraction L(ψ̄) is written to HDF5 and is the bound on the edge contribution in KR2. The alternative — a loss-cone correction to f₀ — is out of scope. [VERIFY: agree that exclusion is the right first treatment; the ZOW code has no equivalent and instead relies on the axis envelope and `psilims`.]
+Orbits that reach `psilim` are excluded from δW_K and counted: the lost
+fraction L(ψ̄) goes to HDF5 and bounds the edge contribution in KR2. A
+loss-cone correction to f₀ is out of scope.
 
-## 6. The slowing-down alpha distribution
+## 6. Slowing-down distributions (alphas and beams)
 
-Isotropic, from a fusion source S(ψ) (m⁻³ s⁻¹) at birth speed v_α (E_α = 3.5 MeV):
+One family covers fusion alphas and neutral-beam ions: the MARS-K model of
+Liu 2014 Eqs. 6–7,
 
-f_α(v, ψ) = S(ψ) τ_s(ψ) / (4π (v³ + v_c(ψ)³)),  v < v_α;  0 otherwise,
+f₀ = C(ψ̄)/(E^{3/2} + E_c^{3/2}) · (2√π δζ)⁻¹ Σ_i C_i exp[−(ζ − ζ_i)²/δζ²],  E < E_b,
+δζ² = δζ₀² − ⅓ ln[E^{3/2}(1 + E_c^{3/2}/E_b^{3/2}) / (E^{3/2} + E_c^{3/2})],
 
-with the Spitzer slowing-down time τ_s = 3 (2π)^{3/2} ε₀² m_α T_e^{3/2} / (Z_α² e⁴ m_e^{1/2} n_e ln Λ) and the critical speed v_c = (3√π m_e / (4 m_α) Σ_i n_i Z_i² m_α/(n_e m_i))^{1/3} v_te with v_te = √(2T_e/m_e) [VERIFY: constants and the Σ_i Z_i² n_i/(n_e) · (m_α/m_i) form; these are first-principles, not fitted; source: standard (Stix 1972; Helander & Sigmar §3.6) — cite the one Nik prefers].
+with E_b the birth (injection) energy, E_c the critical energy, δζ = δζ₀ at
+birth and widening as E falls. The pitch label must be a constant of motion,
+so ζ is defined from λ at the reference field, ζ = σ√(1 − λ) (v∥/v where
+B = B₀); passing orbits keep σ, trapped orbits are symmetric in ζ by
+construction (Liu's trapped coefficient sets). The image terms (C_i, ζ_i)
+follow Liu 2014 (co-tangential: C = {2, 2, −1, −1}, ζ_i = {ζ₀, 2 − ζ₀,
+2ζ₊ − ζ₀, 2ζ₊ − 2 + ζ₀} for co-passing, etc.).
 
-Derivatives (analytic): ∂f_α/∂E = (1/(m_α v)) ∂f_α/∂v with ∂f_α/∂v = −3 v² f_α/(v³ + v_c³); ∂f_α/∂ψ̄ = f_α [S′/S + τ_s′/τ_s − 3 v_c² v_c′/(v³ + v_c³)], primes being d/dψ̄. The P_φ drive follows §4 with ψ̄ = ⟨ψ⟩. The birth-energy edge is a step in f_α; the energy integral is cut at x_α = E_α/T_ref with T_ref a reference temperature chosen so the √x grid resolves v_c and v_α [VERIFY: fine with cutting at E_α rather than including the birth-edge delta-function contribution to ∂f/∂E, which does not enter a static drive].
+- Alphas: δζ₀ → ∞ (isotropic), E_b = 3.5 MeV, C(ψ) from the fusion source
+  S τ_s/4π with S = n_D n_T ⟨σv⟩ (Bosch & Hale 1992) or a user S(ψ).
+- Beams: ζ₀ and δζ₀ from the injection geometry (Wang 2022 averaged the
+  injection pitch for DIII-D), E_b the beam energy, C(ψ) and E_b(ψ) from the
+  fast-ion density and pressure profiles (NUBEAM) by Liu's inverse solve, or C
+  given directly.
 
-Source profile S(ψ): from n_D n_T ⟨σv⟩_DT(T_i) on the kinetic profiles, with ⟨σv⟩ from the Bosch–Hale parameterization (fitted constants, Bosch & Hale, Nucl. Fusion 32, 611 (1992)) [VERIFY: acceptable; alternative is a user-supplied S(ψ) column in the kinetic file]. For the OFT ARC-class and SPARC cases, n_D = n_T = n_e/2 unless profiles say otherwise.
+E_c = 14.8 A T_e (Σ_j n_j Z_j²/(n_e A_j))^{2/3} (the textbook form; the v0
+expressions for τ_s and v_c give the same E_c = 37 T_e for pure D). Source to
+cite: Stix 1972 unless Nik names another.
 
-Validity: isotropic (no NBI-like anisotropy), no finite-Larmor-radius correction (ρ_α/Δ_b ~ √ε/q ≈ 0.2, so the orbit width dominates), collisional slowing on electrons and ions in the standard form, no energy diffusion. These bound what the paper may claim.
+Derivatives are analytic. With λ = μB₀/E, ∂f₀/∂E at fixed μ is
+∂f₀/∂E|_λ − (λ/E) ∂f₀/∂λ; ∂f₀/∂P_φ goes through ψ̄ as in §4. The birth-energy
+edge is a cut, with no delta-function term (∂f/∂E does not enter a static
+drive).
+
+Validity: the GPEC equilibrium has an isotropic pressure while an
+anisotropic beam pressure does not; as in MARS-K (Liu 2014 §II A) the result
+holds when the anisotropic fast-ion pressure is a modest fraction of the
+total. No FLR, no energy diffusion beyond the δζ(E) form.
 
 ## 7. Symbols → code names
 
@@ -153,11 +232,11 @@ Validity: isotropic (no NBI-like anisotropy), no finite-Larmor-radius correction
 | δB/B, ∇·ξ_⊥ | perturbation modes | `intr.dbob_m`, `intr.divx_m` | same, read at ψ(t) |
 | δJ_ℓ | action variation | `bj_integral` → `dJdJ` | `orbit_dJdJ` |
 | Ω, ν | resonance, collisions | `_energy_integrand_real` | same operator with tabulated Ω(x) |
-| f₀, ∂f₀/∂P_φ | distribution, drive | `f0type`, `_energy_numerator` | `f0type = "slowingdown"` added; `drive_pphi` |
+| f₀, ∂f₀/∂P_φ | distribution, drive | `f0type`, `_energy_numerator` | `f0type = "slowingdown"` (alphas and beams, §6) added; `drive_pphi` |
 | T_φ, δW_K | torque, energy | `MethodResult.total_torque` | same struct, method name `ogar` (orbit GAR) in `METHOD_REGISTRY` |
 | L(ψ̄) | lost fraction | — | HDF5 `KineticForces/ogar/lost_fraction` |
 
-Method name `ogar` and the HDF5 group follow the registry convention in `KineticForcesStructs.jl:13` and `docs/development/hdf5-conventions.md`; the deck key is `ogar_flag`, default `false`. [VERIFY: name.]
+Method name `ogar` and the HDF5 group follow the registry convention in `KineticForcesStructs.jl:13` and `docs/development/hdf5-conventions.md`; the deck key is `ogar_flag`, default `false`.
 
 ## 8. Validity limits of the new path
 
@@ -165,6 +244,7 @@ Method name `ogar` and the HDF5 group follow the registry convention in `Kinetic
 - Guiding-center (no FLR): ρ/Δ_b ~ √ε/q.
 - Collisions: the same Krook-harmonic model as the existing path, applied with the orbit's ω_b; no collisional orbit-width broadening beyond that.
 - Orbits computed in the axisymmetric equilibrium of the GPEC run; the TokaMaker field scan must keep that equilibrium's q and β (M4 check 1).
+- Electrostatic potential in the orbit with the drift-kinetic ordering (E×B speed ≪ thermal speed); no centrifugal or Coriolis terms.
 - Near the axis, potato orbits are resolved only as far as the (λ, P_φ) grid allows; the paper does not claim axis behavior.
 
 ## 9. Where sources disagree
