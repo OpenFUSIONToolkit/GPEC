@@ -1,0 +1,173 @@
+# PerturbedEquilibrium figures: resonant coupling per rational surface, response spectrograms and the summary.
+
+const PE = A.PerturbedEquilibrium
+
+# Quantities spanning more than two decades go on a log axis; the rest are scaled by a power of ten.
+function _magnitude_row(v, name, unit)
+    positive = filter(>(0), v)
+    if !isempty(positive) && maximum(positive) / minimum(positive) > 100
+        return (v, rich(name, " (", unit, ")"), log10)
+    end
+    scaled, scale = _decade(v)
+    return (scaled, rich(name, _unit(scale, unit)), identity)
+end
+
+# Each coupling row: values, label, y scale and reference line (nothing for none).
+function _coupling_row(d, key)
+    key === :field && return (_magnitude_row(abs.(d.field), rich("|b̄", subscript("res"), "|"), "T")..., nothing)
+    key === :current && return (_magnitude_row(abs.(d.current), rich("|I", subscript("res"), "|"), "A")..., nothing)
+    key === :island_hw && return (d.island_hw, rich("w/2 (", PSIN, ")"), identity, nothing)
+    key === :chirikov && return (d.chirikov, "effective island-overlap\nChirikov parameter", identity, 1.0)
+    return (real.(d.delta_prime), "driven Re Δ′", identity, 0.0)
+end
+
+const _ROW_TITLES = Dict(
+    :field => "Resonant field at each rational surface",
+    :current => "Resonant current at each rational surface",
+    :island_hw => "Island half-width at each rational surface",
+    :delta_prime => "Forcing-driven Δ′ at each rational surface"
+)
+
+function _coupling_title(d, keys)
+    :chirikov in keys || return _ROW_TITLES[only(keys)]
+    k = count(>=(1), d.chirikov)
+    return k == 0 ? "Resonant coupling: Chirikov parameter < 1 on every surface" : "Resonant coupling: islands overlap on $k of $(length(d.chirikov)) surfaces"
+end
+
+# Rows of stems and dots sharing a categorical q = m/n axis, one colour per toroidal mode number.
+function _coupling_rows!(gl, d, keys)
+    labels = ["$m/$n" for (m, n) in zip(d.m, d.n)]
+    x = 1:length(labels)
+    ns = unique(d.n)
+    colors = [WONG[findfirst(==(n), ns)] for n in d.n]
+    axes = Axis[]
+    for (r, key) in enumerate(keys)
+        y, ylabel, yscale, ref = _coupling_row(d, key)
+        last = r == length(keys)
+        ax = Axis(gl[r, 1]; ylabel, yscale, xticks=(x, labels), limits=((0.4, length(x) + 0.6), nothing), xlabel=last ? "rational surface q = m/n" : "",
+            xticklabelsvisible=last, ylabelsize=14, title=r == 1 ? _coupling_title(d, keys) : "")
+        ref === nothing || hlines!(ax, ref; color=:black, linewidth=1, linestyle=ref == 1.0 ? :dash : :solid)
+        positive = filter(>(0), y)
+        base = yscale === log10 ? minimum(positive) / 3 : 0.0
+        yscale === identity && ref === nothing && !isempty(positive) && ylims!(ax, 0, 1.12 * maximum(positive))
+        rangebars!(ax, x, fill(base, length(y)), y; color=[(c, 0.35) for c in colors], whiskerwidth=0, linewidth=2)
+        scatter!(ax, x, y; color=colors, markersize=11)
+        if r == 1 && length(ns) > 1
+            axislegend(ax, [MarkerElement(; color=WONG[k], marker=:circle) for k in eachindex(ns)], ["n = $n" for n in ns]; position=:rt)
+        end
+        push!(axes, ax)
+    end
+    linkxaxes!(axes...)
+    rowgap!(gl, 6)
+    return axes
+end
+
+function PE._plot_resonant_coupling(d, keys)
+    return themed() do
+        fig = Figure(; size=length(keys) == 1 ? (720, 400) : (620, 150 * length(keys) + 70))
+        gl = fig[1, 1] = GridLayout()
+        _coupling_rows!(gl, d, keys)
+        fig
+    end
+end
+
+const _COMPONENT_STYLE = Dict(
+    :xi_psi => ("Plasma displacement", rich("ξ", superscript("ψ")), ""),
+    :b_psi => ("Area-weighted normal field", rich("b̄", superscript("ψ")), "T"),
+    :Jb_theta => ("Poloidal field", rich("J b", superscript("θ")), "T m²"),
+    :Jb_zeta => ("Toroidal field", rich("J b", superscript("ζ")), "T m²")
+)
+
+# Piecewise-linear interpolation of (xs, ys) at x, held at the end values outside xs.
+function _lerp(xs, ys, x)
+    k = clamp(searchsortedlast(xs, x), 1, length(xs) - 1)
+    t = clamp((x - xs[k]) / (xs[k+1] - xs[k]), 0.0, 1.0)
+    return (1 - t) * ys[k] + t * ys[k+1]
+end
+
+# |harmonic| of the first toroidal mode number on a uniform ψ grid: the response grid holds the integrator's steps,
+# which CairoMakie would draw as slanted cells.
+function _uniform_harmonics(d)
+    mpert = d.mhigh - d.mlow + 1
+    order = sortperm(d.psi)
+    psi, z = d.psi[order], abs.(d.data[order, 1:mpert])
+    keep = [true; diff(psi) .> 0]
+    psi, z = psi[keep], z[keep, :]
+    pu = collect(range(psi[1], psi[end]; length=600))
+    zu = [_lerp(psi, view(z, :, j), p) for p in pu, j in 1:mpert]
+    return collect(d.mlow:d.mhigh), psi, z, pu, zu
+end
+
+function _spectrogram!(gl, d, component; style=:log_heatmap)
+    name, glyph, unit = _COMPONENT_STYLE[component]
+    ms, psi, z, pu, zu = _uniform_harmonics(d)
+    amp = rich("|", glyph, subscript("m"), "|")
+    if style === :lines
+        top = sort(sortperm(vec(maximum(z; dims=1)); rev=true)[1:min(8, length(ms))])
+        zl, scale = _decade(z[:, top])
+        ax = Axis(gl[1, 1]; xlabel=PSIN, ylabel=rich(amp, _unit(scale, unit)), title=rich(name, " ", amp, ", largest harmonics"),
+            limits=((0, 1), (0, nothing)))
+        isempty(d.rational_psi) || vlines!(ax, d.rational_psi; color=(:black, 0.15), linewidth=1)
+        colors = Makie.resample_cmap(:viridis, length(top) + 1)
+        for (k, j) in enumerate(top)
+            lines!(ax, psi, zl[:, k]; color=colors[k], linewidth=1.8, label="m = $(ms[j])")
+        end
+        axislegend(ax; position=:lt, nbanks=2)
+        return ax
+    end
+    ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel=PSIN, title=rich(name, " ", amp), limits=((ms[1] - 0.5, ms[end] + 0.5), (0, 1)))
+    zmax = max(maximum(zu), floatmin())
+    if style === :log_heatmap
+        hm = heatmap!(ax, ms, pu, permutedims(zu); colormap=:viridis, colorscale=log10, colorrange=(1e-4zmax, zmax), lowclip=Makie.to_colormap(:viridis)[1])
+        label = rich(amp, _unit("", unit))
+    else
+        zs, scale = _decade(zu)
+        hm = heatmap!(ax, ms, pu, permutedims(zs); colormap=:viridis, colorrange=(0, maximum(zs)))
+        label = rich(amp, _unit(scale, unit))
+    end
+    isempty(d.rational_psi) || hlines!(ax, d.rational_psi; color=(:white, 0.4), linewidth=1)
+    lines!(ax, [d.nhigh * _lerp(d.q_psi, d.q, p) for p in pu], pu; color=:white, linewidth=1.5, linestyle=:dash, label="m = n q(ψ)")
+    axislegend(ax; position=:lb)
+    Colorbar(gl[1, 2], hm; label)
+    return ax
+end
+
+function PE._plot_mode_spectrogram(d, component; style=:log_heatmap)
+    return themed() do
+        fig = Figure(; size=style === :lines ? (820, 480) : (900, 560))
+        gl = fig[1, 1] = GridLayout()
+        _spectrogram!(gl, d, component; style)
+        fig
+    end
+end
+
+# |b̄^ψ_m| at the outermost surface as a step line, with the resonant harmonics marked.
+function _edge_spectrum!(gl, d)
+    mpert = d.mhigh - d.mlow + 1
+    ms = collect(d.mlow:d.mhigh)
+    v, scale = _decade(abs.(d.data[end, 1:mpert]))
+    ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel=rich("|b̄", superscript("ψ"), subscript("m"), "| at the edge", _unit(scale, "T")),
+        title="Edge field spectrum", limits=(nothing, (0, nothing)))
+    isempty(d.rational_m) || vlines!(ax, d.rational_m; color=(:black, 0.15), linewidth=1)
+    stairs!(ax, vcat(ms[1] - 1, ms, ms[end] + 1), vcat(0.0, v, 0.0); step=:center, color=WONG[1], linewidth=2)
+    return ax
+end
+
+function PE._plot_perturbed_equilibrium_summary(coupling, edge, xi)
+    return themed() do
+        top = Any[]
+        coupling === nothing || push!(top, gl -> _coupling_rows!(gl, coupling, (:field,)))
+        edge === nothing || push!(top, gl -> _edge_spectrum!(gl, edge))
+        fig = Figure(; size=(1150, isempty(top) || xi === nothing ? 480 : 820))
+        for (c, draw!) in enumerate(top)
+            gl = fig[1, c] = GridLayout()
+            draw!(gl)
+        end
+        if xi !== nothing
+            gl = fig[isempty(top) ? 1 : 2, 1:max(1, length(top))] = GridLayout()
+            _spectrogram!(gl, xi, :xi_psi)
+            isempty(top) || rowsize!(fig.layout, 1, Relative(0.38))
+        end
+        fig
+    end
+end

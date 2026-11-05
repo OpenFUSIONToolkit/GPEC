@@ -93,6 +93,8 @@ using TOML
                 @test _drawn(A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component))
             end
             @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(h5; component=:b_theta)
+            @test A.PerturbedEquilibrium.plot_mode_spectrogram(h5; style=:lines) isa Figure
+            @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; style=:contour)
 
             # The catalog lists a Forward run's absent products with what to change, for a result, a path and main's tuple.
             listing = repr(MIME"text/plain"(), available_plots(ret.ffs))

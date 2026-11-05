@@ -249,7 +249,10 @@ function _ballooning_verdict(alpha, alpha_crit)
     return nu == 0 ? "Infinite-n ballooning: stable on every surface" : "Infinite-n ballooning: unstable on $nu of $(count(ok)) surfaces"
 end
 
-_alpha_top(curves...) = 1.3 * maximum(filter(isfinite, reduce(vcat, curves)); init=1.0)
+function _alpha_top(curves...)
+    finite = filter(isfinite, reduce(vcat, curves))
+    return isempty(finite) ? 1.0 : 1.3 * maximum(finite)
+end
 
 function FFS._plot_ballooning_alpha_boundary(d; psi_min=0.0)
     return themed() do
@@ -296,7 +299,8 @@ function FFS._plot_ballooning_alpha_boundaries(bnd, dpmap; psi_min=0.0)
             title=_ballooning_verdict(bnd.alpha, bnd.alpha_critical1))
         if dpmap !== nothing
             psi, alpha, z = _signed_delta_prime_map(dpmap)
-            lim = maximum(abs, filter(isfinite, z); init=1.0)
+            finite = filter(isfinite, z)
+            lim = isempty(finite) ? 1.0 : maximum(abs, finite)
             hm = heatmap!(ax, psi, alpha, z; colormap=:RdBu, colorrange=(-lim, lim), colorscale=Makie.Symlog10(1e-3lim), nan_color=:transparent)
             contour!(ax, psi, alpha, z; levels=[0.0], color=:black, linewidth=1)
             Colorbar(fig[1, 2], hm; label=rich("Δ′ · sign(Δ′", subscript("α=0"), ")   (> 0 stable)"))
