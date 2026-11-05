@@ -21,12 +21,19 @@ themed(f) = with_theme(f, GPEC_THEME)
 const SUPERSCRIPTS = Dict(zip("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹"))
 _sup(n::Integer) = join(SUPERSCRIPTS[c] for c in string(n))
 
-# Scale `v` by a power of ten when its magnitude is outside [1e-2, 1e3), returning the factor's label for the axis.
-function _decade(v)
-    m = maximum(abs, filter(isfinite, v); init=0.0)
-    (m == 0 || 1e-2 <= m < 1e3) && return v, ""
+# The power of ten to divide `v` by when its magnitude is outside [1e-2, 1e3), and that factor's axis label.
+function _power(v)
+    finite = filter(isfinite, v)
+    m = isempty(finite) ? 0.0 : maximum(abs, finite)
+    (m == 0 || 1e-2 <= m < 1e3) && return 1.0, ""
     k = floor(Int, log10(m))
-    return v ./ 10.0^k, "10$(_sup(k))"
+    return 10.0^k, "10$(_sup(k))"
+end
+
+# `v` divided by its power of ten, and that factor's axis label.
+function _decade(v)
+    factor, label = _power(v)
+    return v ./ factor, label
 end
 
 # Axis-label unit suffix, e.g. " (10⁻⁴ T)".

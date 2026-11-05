@@ -1,243 +1,15 @@
 """
     CoilForcing
 
-Visualization functions for coil geometry and the resulting normal field
-perturbations on the plasma boundary.
-
-Two 3D entry points cover the common cases: [`plot_coil_geometry_3d`](@ref) draws the coils
-alone, and [`plot_surface_3d`](@ref) draws the plasma boundary surface — optionally coloured by
-any control-surface field (via [`control_surface_scalar`](@ref)) and/or with coils overlaid —
-the Julia analog of GPEC's `plot_control_3d`. The `:RdBu` colour scale is shared, so a blue
-(positive-current) coil and a blue (positive) field read identically.
-
-All functions return `Plots.jl` plot objects and accept an optional `save_path`
-keyword argument to write the figure to disk.
+Coil geometry and fields on the plasma control surface: the coils in 3D and in (R, Z), the forcing spectrum, normal
+field maps in (φ, θ), and the 3D boundary coloured by any control-surface field. Coils are coloured on the same
+diverging map as the normal field they drive, so a positive current reads as positive b_n beneath the coil.
 """
 module CoilForcing
 
-using Plots
 import ...Utilities.FourierTransforms: FourierTransform, inverse
 import ...PerturbedEquilibrium: PerturbedEquilibriumState
-using ..Analysis: register!, _require
-
-"""
-    plot_coil_geometry_3d(coil_sets; save_path=nothing, kwargs...)
-
-Plot the 3D wire geometry of all coil sets.
-
-Each coil set is shown with a distinct color; individual conductors are plotted
-as lines in Cartesian (X, Y, Z) space in meters.
-
-### Arguments
-
-  - `coil_sets`: `Vector{CoilSet}` from `ForcingTerms.load_coil_sets`
-
-### Keyword arguments
-
-  - `save_path`: file path to save the figure (default: `nothing`)
-  - Any extra kwargs are forwarded to `Plots.plot`
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_coil_geometry_3d(coil_sets; save_path=nothing, kwargs...)
-    clim = _current_clim(coil_sets)
-
-    p = plot(; xlabel="X [m]", ylabel="Y [m]", zlabel="Z [m]",
-        title="Coil geometry (3D)", legend=false,
-        camera=(30, 20), kwargs...)
-
-    _overlay_coils!(p, coil_sets; clim=clim)
-
-    # Invisible scatter spanning the current range to force the colorbar to appear
-    scatter!(p, [NaN], [NaN], [NaN];
-        zcolor=[0.0], clims=(-clim, clim), color=:RdBu,
-        colorbar_title="I [A]", markersize=0)
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-# Symmetric current colour-limit (centred at zero) for a set of coils.
-function _current_clim(coil_sets)
-    all_currents = [I for cs in coil_sets for I in cs.currents]
-    return isempty(all_currents) ? 1.0 : max(maximum(abs, all_currents), eps())
-end
-
-"""
-    _overlay_coils!(p, coil_sets; clim=nothing)
-
-Draw each conductor of every coil set onto plot `p` as a 3D `path3d` curve, coloured on a
-symmetric `:RdBu` scale by its current (positive = blue, negative = red — the same mapping
-used for surface fields, so a blue coil and a blue field read identically).
-"""
-function _overlay_coils!(p, coil_sets; clim=nothing)
-    cl = isnothing(clim) ? _current_clim(coil_sets) : clim
-    for cs in coil_sets
-        for j in 1:cs.ncoil
-            t = clamp((cs.currents[j] + cl) / (2cl), 0.0, 1.0)
-            col = get(cgrad(:RdBu), t)
-            for k in 1:cs.s
-                plot!(p, view(cs.x, j, k, :), view(cs.y, j, k, :), view(cs.z, j, k, :);
-                    seriestype=:path3d, color=col, lw=2, linestyle=:solid, label="")
-            end
-        end
-    end
-    return p
-end
-
-"""
-    plot_coil_geometry_rz(coil_sets; equil=nothing, psi=nothing, save_path=nothing, kwargs...)
-
-Plot coil cross-sections in the (R, Z) meridional plane.
-
-Each coil strand is shown as a closed curve in `(R, Z) = (√(X²+Y²), Z)` space.
-If `equil` is provided, the plasma boundary is overplotted for reference.
-
-### Arguments
-
-  - `coil_sets`: `Vector{CoilSet}` from `ForcingTerms.load_coil_sets`
-
-### Keyword arguments
-
-  - `equil`: optional `PlasmaEquilibrium`; if given, overlays the plasma boundary
-  - `psi`: flux surface to trace (default: `equil.rzphi_xs[end]`, the outermost grid point)
-  - `save_path`: file path to save the figure (default: `nothing`)
-  - Any extra kwargs are forwarded to `Plots.plot`
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_coil_geometry_rz(coil_sets; equil=nothing, psi=nothing, save_path=nothing, kwargs...)
-    p = plot(; xlabel="R [m]", ylabel="Z [m]",
-        title="Coil cross-sections (R, Z)", legend=:topright,
-        aspect_ratio=:equal, kwargs...)
-
-    colors = [:blue, :red, :green, :orange, :purple, :brown, :cyan, :magenta]
-    for (ci, cs) in enumerate(coil_sets)
-        col = colors[mod1(ci, length(colors))]
-        for j in 1:cs.ncoil
-            for k in 1:cs.s
-                R_strand = sqrt.(view(cs.x, j, k, :) .^ 2 .+ view(cs.y, j, k, :) .^ 2)
-                Z_strand = view(cs.z, j, k, :)
-                label = (j == 1 && k == 1) ? cs.name : ""
-                plot!(p, R_strand, Z_strand; label=label, color=col, lw=1.5)
-            end
-        end
-    end
-
-    if !isnothing(equil)
-        psi_bnd = isnothing(psi) ? equil.rzphi_xs[end] : Float64(psi)
-        mtheta_boundary = length(equil.rzphi_ys)
-        hint2d = (Ref(1), Ref(1))
-        R_bnd = zeros(mtheta_boundary)
-        Z_bnd = zeros(mtheta_boundary)
-        for (i, θ_sfl) in enumerate(equil.rzphi_ys)
-            r_minor = sqrt(equil.rzphi_rsquared((psi_bnd, θ_sfl); hint=hint2d))
-            θ_cyl = 2π * (θ_sfl + equil.rzphi_offset((psi_bnd, θ_sfl); hint=hint2d))
-            R_bnd[i] = equil.ro + r_minor * cos(θ_cyl)
-            Z_bnd[i] = equil.zo + r_minor * sin(θ_cyl)
-        end
-        plot!(p, [R_bnd; R_bnd[1]], [Z_bnd; Z_bnd[1]];
-            label="plasma boundary (ψ=$(round(psi_bnd; digits=3)))", color=:black, lw=2)
-    end
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-"""
-    plot_bn_contour(bn, mtheta, nzeta; n=nothing, save_path=nothing, kwargs...)
-
-Plot the normal magnetic field `bn(θ, ζ)` on the plasma boundary as a 2D heatmap.
-
-Expects the raw Biot-Savart B·n̂ field in Tesla (before `project_normal_flux!`
-converts to flux). If plotting post-projection data, note units are T·m² not T.
-
-### Arguments
-
-  - `bn`: normal field matrix `[mtheta, nzeta]` — typically B·n̂ in Tesla
-  - `mtheta`: number of poloidal grid points
-  - `nzeta`: number of toroidal grid points
-
-### Keyword arguments
-
-  - `n`: toroidal mode number (used for axis label only)
-  - `save_path`: file path to save the figure (default: `nothing`)
-  - Any extra kwargs are forwarded to `Plots.heatmap`
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_bn_contour(bn::Matrix{Float64}, mtheta::Int, nzeta::Int;
-    n=nothing, save_path=nothing, kwargs...)
-    # Shift rows so θ=0 (outboard midplane) is centred on the y-axis at 0°
-    bn_wrapped = circshift(bn, (mtheta ÷ 2, 0))
-    theta_deg = range(-180; step=360.0 / mtheta, length=mtheta)
-    zeta_deg = range(0; step=360.0 / nzeta, length=nzeta)
-
-    n_label = isnothing(n) ? "" : " (n=$n)"
-    p = heatmap(zeta_deg, theta_deg, bn_wrapped;
-        xlabel="zeta [deg]", ylabel="theta [deg]",
-        ylims=(-180, 180),
-        title="Normal field bₙ(θ, ζ)$n_label [T]",
-        color=:RdBu, kwargs...)
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-"""
-    plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_path=nothing, kwargs...)
-
-Plot the Fourier mode spectrum `|bmn|` vs poloidal mode number m as a step line, grouped by n.
-
-### Arguments
-
-  - `forcing_modes`: `Vector{ForcingMode}` from `compute_coil_forcing_modes!`
-
-### Keyword arguments
-
-  - `mlow`, `mhigh`: poloidal mode range for the x-axis (e.g. from ForceFreeStates config);
-    if provided, sets xlims to span the full stability range even if some modes are zero
-  - `save_path`: file path to save the figure (default: `nothing`)
-  - Any extra kwargs are forwarded to `Plots.plot`
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_path=nothing, kwargs...)
-    n_vals = sort(unique(m.n for m in forcing_modes))
-    colors = [:blue, :red, :green, :orange, :purple, :brown]
-
-    p = plot(; xlabel="Poloidal mode m", ylabel="|Φ_x(m,n)| [unit-norm]",
-        title="Coil forcing mode spectrum",
-        legend=:topright, kwargs...)
-
-    for (ni, n) in enumerate(n_vals)
-        modes_n = filter(m -> m.n == n, forcing_modes)
-        sort!(modes_n; by=m -> m.m)
-        m_vals = [m.m for m in modes_n]
-        amps = abs.([m.amplitude for m in modes_n])
-        col = colors[mod1(ni, length(colors))]
-        m_ext = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
-        amp_ext = [0.0; amps; 0.0]
-        plot!(p, m_ext, amp_ext; label="n=$n", color=col, lw=2, seriestype=:steppre)
-    end
-
-    ylims!(p, (0, Inf))
-    if !isnothing(mlow) && !isnothing(mhigh)
-        # zero endpoints are at mlow-1 and mhigh+1; add ±1 so they're visible with whitespace
-        xlims!(p, mlow - 2, mhigh + 2)
-    end
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
+using ..Analysis: register!, _require, _draw
 
 # Helicity = sign(Bt)·sign(Ip); the SFL→machine toroidal-angle handedness.
 _equil_helicity(equil) = equil.params.bt_sign * equil.params.ip_sign
@@ -276,9 +48,9 @@ exponential into the `ν` correction times `e^{i n·hel·φ}`.
 
     The reconstruction tracks the source coil **toroidally** (the field lobe sits at the coil's φ),
     carried by `helicity = sign(Bt)·sign(Ip)` in `e^{i n·hel·φ}` (`equil.rzphi_nu`/`equil.params`).
-    The leading `-` is a display orientation so that **a positive (blue) coil current reads as a
-    positive (blue) `b_n_x` lobe beneath it** — GPEC's outward-normal flux is intrinsically negative
-    there, so the overall sign is the blue-coil↔blue-surface convention while the spatial structure
+    The leading `-` is a display orientation so that **a positive coil current reads as a
+    positive `b_n_x` lobe beneath it** — GPEC's outward-normal flux is intrinsically negative
+    there, so the overall sign is the coil↔surface colour convention while the spatial structure
     and magnitude are physical. Pass `helicity` to override `sign(Bt)·sign(Ip)` if the toroidal
     tracking is wrong for your machine.
 
@@ -312,12 +84,8 @@ function control_surface_scalar(equil, modes, n::Int; mtheta::Int=180, nphi::Int
     ft = FourierTransform(mtheta, mpert, m_low)
     f = inverse(ft, vec)
 
-    # SFL→machine toroidal-angle correction e^{i n ν(ψ,θ)}. The modes are decomposed on the SFL
-    # grid against e^{-i(m θ - n ζ)}, with the machine angle φ = -hel(2π ζ + ν) (see CoilFourier
-    # `sample_boundary_grid`). Substituting 2π ζ = -hel φ - ν into the inverse turns the ζ
-    # exponential into e^{i n ν(θ)} e^{i n hel φ}: the per-θ ν enters the field, hel sets the
-    # toroidal handedness, and the real field reconstructs faithfully — so a positive (blue) coil
-    # current yields positive (blue) b_n_x directly beneath the coil with no extra sign flip.
+    # SFL→machine toroidal-angle correction e^{i n ν(ψ,θ)}: substituting 2π ζ = -hel φ - ν into the inverse turns the
+    # ζ exponential into e^{i n ν(θ)} e^{i n hel φ}.
     hel = isnothing(helicity) ? _equil_helicity(equil) : helicity
     hint = (Ref(1), Ref(1))
     for i in 1:mtheta
@@ -326,13 +94,7 @@ function control_surface_scalar(equil, modes, n::Int; mtheta::Int=180, nphi::Int
         f[i] *= exp(im * n * ν)
     end
 
-    # θ→φ extension in the machine angle: c(θ,φ) = -Re[ f(θ) e^{i n hel φ} ]. The reconstruction
-    # tracks the source coil toroidally (the lobe sits at the coil's φ); the leading − is a display
-    # orientation that makes a positive (blue) coil current read as a positive (blue) b_n_x lobe
-    # beneath it. GPEC's outward-normal flux is intrinsically negative there, so this overall sign
-    # is the blue-coil↔blue-surface convention — the spatial structure and magnitude are physical.
-    # It is a constant flip (not helicity-dependent): the normal-projection sign is set by geometry,
-    # while hel only carries the toroidal handedness, already in the exponential.
+    # θ→φ extension in the machine angle; the leading − makes a positive coil current read as positive b_n beneath it.
     c = zeros(Float64, mtheta, nphi)
     for k in 1:nphi
         ph = exp(im * n * hel * (k - 1) * 2π / nphi)
@@ -343,21 +105,25 @@ function control_surface_scalar(equil, modes, n::Int; mtheta::Int=180, nphi::Int
     return c
 end
 
+# The boundary (or flux surface `psi`) in (R, Z) at `mtheta` SFL angles θ = (i-1)/mtheta.
+function _surface_rz(equil, mtheta::Int, psi)
+    psi_b = isnothing(psi) ? equil.rzphi_xs[end] : Float64(psi)
+    hint = (Ref(1), Ref(1))
+    R, Z = zeros(mtheta), zeros(mtheta)
+    for i in 1:mtheta
+        θ = (i - 1) / mtheta
+        r = sqrt(max(0.0, equil.rzphi_rsquared((psi_b, θ); hint=hint)))
+        η = 2π * (θ + equil.rzphi_offset((psi_b, θ); hint=hint))
+        R[i] = equil.ro + r * cos(η)
+        Z[i] = equil.zo + r * sin(η)
+    end
+    return R, Z
+end
+
 # Build the closed (θ,φ)→(x,y,z) boundary surface from the equilibrium splines.
 # Returns X, Y, Z each [mtheta+1, nphi+1] (wrapped so the torus closes seamlessly).
 function _boundary_surface_xyz(equil, mtheta::Int, nphi::Int, psi)
-    psi_b = isnothing(psi) ? equil.rzphi_xs[end] : Float64(psi)
-    hint = (Ref(1), Ref(1))
-    R = zeros(mtheta)
-    Z = zeros(mtheta)
-    for i in 1:mtheta
-        θ = (i - 1) / mtheta
-        r_minor = sqrt(equil.rzphi_rsquared((psi_b, θ); hint=hint))
-        θ_cyl = 2π * (θ + equil.rzphi_offset((psi_b, θ); hint=hint))
-        R[i] = equil.ro + r_minor * cos(θ_cyl)
-        Z[i] = equil.zo + r_minor * sin(θ_cyl)
-    end
-
+    R, Z = _surface_rz(equil, mtheta, psi)
     X = zeros(mtheta + 1, nphi + 1)
     Y = zeros(mtheta + 1, nphi + 1)
     Zs = zeros(mtheta + 1, nphi + 1)
@@ -375,115 +141,270 @@ function _boundary_surface_xyz(equil, mtheta::Int, nphi::Int, psi)
 end
 
 # Wrap a [mtheta, nphi] field to [mtheta+1, nphi+1] to match the closed surface mesh.
-_wrap_field(c) = [c[i <= size(c, 1) ? i : 1, k <= size(c, 2) ? k : 1]
-                  for i in 1:(size(c, 1)+1), k in 1:(size(c, 2)+1)]
+_wrap_field(c) = [c[i <= size(c, 1) ? i : 1, k <= size(c, 2) ? k : 1] for i in 1:(size(c, 1)+1), k in 1:(size(c, 2)+1)]
+
+# A real control-surface field with θ shifted so the outboard midplane is at 0: φ, θ in degrees and the field [θ, φ].
+function _surface_map(c)
+    mtheta, nphi = size(c)
+    θ = collect(range(-180, 180; length=mtheta + 1)[1:mtheta])
+    φ = collect(range(0, 360; length=nphi + 1)[1:nphi])
+    return (; phi=φ, theta=θ, field=circshift(c, (mtheta ÷ 2, 0)))
+end
+
+# Each conductor of `coil_sets` projected onto the control-surface map: machine φ = atan(y, x), and the boundary θ (SFL,
+# outboard midplane at 0) whose point has the same geometric poloidal angle about the magnetic axis. Returns
+# (φ, θ, current) per conductor, in degrees.
+function _coils_on_surface(equil, coil_sets; ntheta=2048)
+    psi_b = equil.rzphi_xs[end]
+    hint = (Ref(1), Ref(1))
+    θs = range(0, 1; length=ntheta + 1)[1:ntheta]
+    geometric = [mod(2π * (θ + equil.rzphi_offset((psi_b, θ); hint=hint)), 2π) for θ in θs]
+    order = sortperm(geometric)
+    sorted = geometric[order]
+    sfl(η) = θs[order[clamp(searchsortedfirst(sorted, mod(η, 2π)), 1, ntheta)]]
+    lines = Tuple{Vector{Float64},Vector{Float64},Float64}[]
+    for cs in coil_sets, j in 1:cs.ncoil, k in 1:cs.s
+        x, y, z = cs.x[j, k, :], cs.y[j, k, :], cs.z[j, k, :]
+        φ = mod.(rad2deg.(atan.(y, x)), 360)
+        θ = [mod(360 * sfl(atan(zz - equil.zo, hypot(xx, yy) - equil.ro)) + 180, 360) - 180 for (xx, yy, zz) in zip(x, y, z)]
+        push!(lines, (φ, θ, cs.currents[j]))
+    end
+    return lines
+end
+
+const _WEIGHTINGS = (:root_area, :area, :bare)
+
+# A control-surface spectrum in any weighting, converted to the bare normal field b (T): b = (S·√A)⁻¹·b̃, b̃ = S⁻¹·b̄.
+function _to_bare(resp, v, weighting)
+    weighting in _WEIGHTINGS || throw(ArgumentError("weighting must be :root_area, :area or :bare"))
+    S, A = resp.rootarea_to_area_weight, resp.surface_area
+    btilde = weighting === :root_area ? v : weighting === :area ? S \ v : (S .* sqrt(A)) * v
+    return (S .* sqrt(A)) \ btilde
+end
+
+# The bare normal field of spectrum `v` on the control surface for toroidal mode `n`, mapped to (φ, θ).
+function _control_surface_data(pe::PerturbedEquilibriumState, v; weighting=:root_area, n=nothing, coils=false, mtheta=256, nphi=180)
+    resp = pe.response
+    equil = resp.ffs.equil
+    nn = isnothing(n) ? first(resp.n_modes) : n
+    sel = resp.n_modes .== nn
+    any(sel) || throw(ArgumentError("plot_control_surface: no harmonics with n = $nn"))
+    b = _to_bare(resp, v, weighting)
+    c = control_surface_scalar(equil, (resp.m_modes[sel], b[sel]), nn; mtheta, nphi)
+    return (; _surface_map(c)..., n=nn, coils=coils ? _coils_on_surface(equil, pe.coil_sets) : nothing)
+end
+
+# Drawing functions, defined by the GPECMakieExt extension.
+function _plot_coils_3d end
+function _plot_coils_rz end
+function _plot_surface_map end
+function _plot_forcing_spectrum end
 
 """
-    plot_surface_3d(equil; color_by=nothing, coil_sets=nothing, mtheta=180, nphi=180,
-                    psi=nothing, clim=nothing, colorbar_title="", title="Plasma boundary",
-                    camera=(35, 25), save_path=nothing, kwargs...)
+    plot_coil_geometry_3d(coil_sets; equil=nothing, save_path=nothing)
+    plot_coil_geometry_3d(pe; save_path=nothing)
 
-Plot the 3D plasma boundary surface, optionally coloured by a control-surface field and/or with
-coils overlaid — the Julia analog of GPEC's `plot_control_3d`.
+Plot the coil conductors in 3D at equal data aspect, coloured by current, with the plasma boundary as an opaque surface
+when an equilibrium is given. Use GLMakie to rotate it.
 
-!!! note "Backend for coloured surfaces"
+### Arguments
 
-    Scalar colouring of the closed surface requires a PlotlyJS-style backend (`plotlyjs()`,
-    already a GPEC dependency); the default GR backend cannot colour a parametric surface by an
-    independent array and will draw an **uncoloured** surface with a warning. Call `plotlyjs()`
-    before requesting `color_by`. Coil overlay and uncoloured surfaces work on any backend.
+  - `coil_sets`: `Vector{CoilSet}` from `ForcingTerms.load_coil_sets`
+  - `pe`: A `PerturbedEquilibriumState` forced by coils, drawn with its boundary
 
 ### Keyword arguments
 
-  - `color_by`: optional real-space `[mtheta, nphi]` scalar (any control-surface output — e.g. from
-    [`control_surface_scalar`](@ref)). Coloured on a symmetric `:RdBu` scale centred at zero
-    (positive = blue), matching the coil-current colours. `nothing` draws an uncoloured surface.
-  - `coil_sets`: optional `Vector{CoilSet}` overlaid as 3D curves (see [`plot_coil_geometry_3d`](@ref)).
-  - `mtheta`, `nphi`, `psi`: surface grid resolution and flux surface (must match `color_by`).
-  - `clim`: symmetric colour limit (default `maximum(abs, color_by)`).
-  - `save_path`: file path to save the figure; extra `kwargs` forward to `Plots.surface`.
+  - `equil`: A `PlasmaEquilibrium` whose boundary is drawn (default: `nothing`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
-A `Plots.jl` plot object.
-
-    plot_surface_3d(equil, modes, n; coil_sets=nothing, colorbar_title="", kwargs...)
-
-Convenience method: colour the surface by [`control_surface_scalar(equil, modes, n; …)`](@ref).
+A Makie `Figure`.
 """
-function plot_surface_3d(equil; color_by=nothing, coil_sets=nothing, mtheta::Int=180,
-    nphi::Int=180, psi=nothing, clim=nothing, colorbar_title="",
-    title="Plasma boundary", camera=(35, 25), save_path=nothing, kwargs...)
-    X, Y, Z = _boundary_surface_xyz(equil, mtheta, nphi, psi)
-
-    common = (; xlabel="X [m]", ylabel="Y [m]", zlabel="Z [m]", title=title,
-        legend=false, aspect_ratio=:equal, camera=camera)
-
-    want_color = !isnothing(color_by)
-    if want_color
-        size(color_by) == (mtheta, nphi) ||
-            error("color_by must be [mtheta, nphi] = ($mtheta, $nphi), got $(size(color_by))")
-        # Only PlotlyJS-style backends honour `fill_z` on a closed/parametric surface; GR silently
-        # colours by Z instead, so warn and degrade rather than show a misleading figure.
-        if !(backend_name() in (:plotlyjs, :pythonplot, :pyplot))
-            @warn "plot_surface_3d: the active Plots backend ($(backend_name())) cannot colour a " *
-                  "parametric 3D surface by a scalar — call `plotlyjs()` first for field-coloured " *
-                  "surfaces. Drawing an uncoloured surface." maxlog = 1
-            want_color = false
-        end
-    end
-
-    if want_color
-        cl = isnothing(clim) ? max(maximum(abs, color_by), eps()) : clim
-        cw = _wrap_field(color_by)
-        p = surface(X, Y, Z; fill_z=cw, color=:RdBu, clims=(-cl, cl),
-            colorbar_title=colorbar_title, common..., kwargs...)
-    else
-        p = surface(X, Y, Z; color=:grays, alpha=0.5, colorbar=false, common..., kwargs...)
-    end
-
-    isnothing(coil_sets) || _overlay_coils!(p, coil_sets)
-    isnothing(save_path) || savefig(p, save_path)
-    return p
+function plot_coil_geometry_3d(coil_sets; equil=nothing, save_path=nothing)
+    surface = isnothing(equil) ? nothing : _boundary_surface_xyz(equil, 120, 160, nothing)
+    return _draw(_plot_coils_3d, coil_sets, surface, nothing; save_path)
 end
 
-function plot_surface_3d(equil, modes, n::Int; coil_sets=nothing, mtheta::Int=180,
-    nphi::Int=180, psi=nothing, helicity=nothing,
-    colorbar_title="", save_path=nothing, kwargs...)
-    c = control_surface_scalar(equil, modes, n; mtheta=mtheta, nphi=nphi, psi=psi, helicity=helicity)
-    return plot_surface_3d(equil; color_by=c, coil_sets=coil_sets, mtheta=mtheta, nphi=nphi,
-        psi=psi, colorbar_title=colorbar_title, save_path=save_path, kwargs...)
-end
-
-"""
-    plot_coil_geometry_3d(pe::PerturbedEquilibriumState; kwargs...)
-    plot_coil_geometry_rz(pe::PerturbedEquilibriumState; kwargs...)
-    plot_mode_spectrum(pe::PerturbedEquilibriumState; kwargs...)
-
-The coil plots of the coil sets a perturbed equilibrium was forced by: the (R, Z) cross-sections over its plasma
-boundary, and the forcing spectrum across its poloidal mode range.
-"""
-function plot_coil_geometry_3d(pe::PerturbedEquilibriumState; kwargs...)
+function plot_coil_geometry_3d(pe::PerturbedEquilibriumState; save_path=nothing)
     _require(plot_coil_geometry_3d, pe)
-    return plot_coil_geometry_3d(pe.coil_sets; kwargs...)
+    return plot_coil_geometry_3d(pe.coil_sets; equil=pe.response.ffs.equil, save_path)
 end
 
-function plot_coil_geometry_rz(pe::PerturbedEquilibriumState; kwargs...)
+"""
+    plot_coil_geometry_rz(coil_sets; equil=nothing, psi=nothing, save_path=nothing)
+    plot_coil_geometry_rz(pe; save_path=nothing)
+
+Plot the coils in the (R, Z) plane, each set labelled beside itself, over the plasma boundary when an equilibrium is
+given. A single toroidal loop is a point in (R, Z) and is drawn as a marker.
+
+### Arguments
+
+  - `coil_sets`: `Vector{CoilSet}` from `ForcingTerms.load_coil_sets`
+  - `pe`: A `PerturbedEquilibriumState` forced by coils, drawn with its boundary
+
+### Keyword arguments
+
+  - `equil`: A `PlasmaEquilibrium` whose boundary is drawn (default: `nothing`)
+  - `psi`: The flux surface drawn as the boundary (default: the outermost grid surface)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_coil_geometry_rz(coil_sets; equil=nothing, psi=nothing, save_path=nothing)
+    boundary = isnothing(equil) ? nothing : _surface_rz(equil, 256, psi)
+    return _draw(_plot_coils_rz, coil_sets, boundary; save_path)
+end
+
+function plot_coil_geometry_rz(pe::PerturbedEquilibriumState; save_path=nothing)
     _require(plot_coil_geometry_rz, pe)
-    return plot_coil_geometry_rz(pe.coil_sets; equil=pe.response.ffs.equil, kwargs...)
+    return plot_coil_geometry_rz(pe.coil_sets; equil=pe.response.ffs.equil, save_path)
 end
 
-function plot_mode_spectrum(pe::PerturbedEquilibriumState; kwargs...)
+"""
+    plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, rational_m=Int[], save_path=nothing)
+    plot_mode_spectrum(pe; save_path=nothing)
+
+Plot the forcing spectrum |Φ_x(m, n)| against poloidal harmonic m as step lines, one per toroidal mode number.
+
+### Arguments
+
+  - `forcing_modes`: `Vector{ForcingMode}` from `compute_coil_forcing_modes!`
+  - `pe`: A `PerturbedEquilibriumState`, drawn across its poloidal range with its resonant harmonics marked
+
+### Keyword arguments
+
+  - `mlow`, `mhigh`: Poloidal range of the x axis (default: the modes' own range)
+  - `rational_m`: Resonant harmonics to mark (default: none)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, rational_m=Int[], save_path=nothing)
+    return _draw(_plot_forcing_spectrum, forcing_modes, mlow, mhigh, rational_m; save_path)
+end
+
+function plot_mode_spectrum(pe::PerturbedEquilibriumState; save_path=nothing)
     _require(plot_mode_spectrum, pe)
-    return plot_mode_spectrum(pe.forcing_modes; mlow=pe.response.ffs.mlow, mhigh=pe.response.ffs.mhigh, kwargs...)
+    ffs = pe.response.ffs
+    return plot_mode_spectrum(pe.forcing_modes; mlow=ffs.mlow, mhigh=ffs.mhigh, rational_m=pe.response.rational_m_res, save_path)
 end
 
-register!(plot_coil_geometry_3d, (PerturbedEquilibriumState,), (:coil_sets,), "3D coil conductors")
-register!(plot_coil_geometry_rz, (PerturbedEquilibriumState,), (:coil_sets,), "coil cross-sections over the plasma boundary")
+"""
+    plot_control_surface(pe, v; weighting=:root_area, n=nothing, label="the given spectrum", arb=false, coils=false,
+                         save_path=nothing)
+
+Plot any control-surface spectrum, such as a forcing, a response or an eigenvector, as the bare normal field b_n on the
+control surface: toroidal angle φ against poloidal angle θ (0 at the outboard midplane).
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` supplying the control-surface operators and geometry
+  - `v`: The spectrum, one entry per control-surface harmonic
+
+### Keyword arguments
+
+  - `weighting`: How `v` is stored: `:root_area` (b̃, default), `:area` (b̄) or `:bare` (b)
+  - `n`: Toroidal mode number drawn (default: the first)
+  - `label`: The source named in the title, e.g. `"the applied forcing"`
+  - `arb`: Label the colour scale in arbitrary units, for a normalized vector (default: `false`, tesla)
+  - `coils`: Draw the coil conductors projected onto the map (default: `false`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_control_surface(pe::PerturbedEquilibriumState, v::AbstractVector; weighting=:root_area, n=nothing, label="the given spectrum",
+    arb=false, coils=false, save_path=nothing)
+    coils && isempty(pe.coil_sets) && throw(ArgumentError("plot_control_surface: coils = true needs a coil-forced run"))
+    d = _control_surface_data(pe, v; weighting, n, coils)
+    return _draw(_plot_surface_map, d; title="Normal field on the control surface from $label", arb, save_path)
+end
+
+"""
+    plot_bn_contour(pe; coils=false, save_path=nothing)
+    plot_bn_contour(bn, mtheta, nzeta; n=nothing, save_path=nothing)
+
+Plot the applied normal field b_n on the control surface, toroidal angle φ against poloidal angle θ (0 at the outboard
+midplane), optionally with the coil conductors projected onto it; or a raw Biot–Savart B·n̂ grid in tesla.
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` with a forcing
+  - `bn`: Normal field `[mtheta, nzeta]` on the boundary grid
+
+### Keyword arguments
+
+  - `coils`: Draw the coil conductors projected onto the map (default: `false`)
+  - `n`: Toroidal mode number named in the title (default: `nothing`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_bn_contour(pe::PerturbedEquilibriumState; coils=false, save_path=nothing)
+    _require(plot_bn_contour, pe)
+    return plot_control_surface(pe, pe.forcing_b; weighting=:bare, label="the applied forcing", coils, save_path)
+end
+
+function plot_bn_contour(bn::Matrix{Float64}, mtheta::Int, nzeta::Int; n=nothing, save_path=nothing)
+    size(bn) == (mtheta, nzeta) || throw(ArgumentError("bn must be [mtheta, nzeta] = ($mtheta, $nzeta), got $(size(bn))"))
+    d = (; _surface_map(bn)..., n, coils=nothing)
+    title = "Normal field B·n̂ on the boundary" * (isnothing(n) ? "" : ", n = $n")
+    return _draw(_plot_surface_map, d; title, arb=false, save_path)
+end
+
+"""
+    plot_surface_3d(equil; color_by=nothing, coil_sets=nothing, mtheta=180, nphi=180, psi=nothing, clim=nothing,
+                    label="", title="Plasma boundary", save_path=nothing)
+    plot_surface_3d(equil, modes, n; coil_sets=nothing, mtheta=180, nphi=180, psi=nothing, helicity=nothing,
+                    label="", save_path=nothing)
+
+Plot the 3D plasma boundary at equal data aspect, unlit and coloured by a control-surface field on a diverging map,
+with coils coloured by current on the same map. Use GLMakie to rotate it. The second form colours the surface by
+[`control_surface_scalar`](@ref).
+
+### Keyword arguments
+
+  - `color_by`: A real `[mtheta, nphi]` field on the surface (default: `nothing`, an uncoloured surface)
+  - `coil_sets`: Coils drawn with the surface (default: `nothing`)
+  - `mtheta`, `nphi`, `psi`: Surface grid and flux surface; must match `color_by`
+  - `clim`: Symmetric colour limit (default: the field's largest magnitude)
+  - `label`: Colour-bar label of the field
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_surface_3d(equil; color_by=nothing, coil_sets=nothing, mtheta::Int=180, nphi::Int=180, psi=nothing, clim=nothing, label="",
+    title="Plasma boundary", save_path=nothing)
+    isnothing(color_by) || size(color_by) == (mtheta, nphi) ||
+        throw(ArgumentError("color_by must be [mtheta, nphi] = ($mtheta, $nphi), got $(size(color_by))"))
+    surface = _boundary_surface_xyz(equil, mtheta, nphi, psi)
+    field = isnothing(color_by) ? nothing : (; values=_wrap_field(color_by), clim, label)
+    return _draw(_plot_coils_3d, isnothing(coil_sets) ? [] : coil_sets, surface, field; title, save_path)
+end
+
+function plot_surface_3d(equil, modes, n::Int; coil_sets=nothing, mtheta::Int=180, nphi::Int=180, psi=nothing, helicity=nothing, label="",
+    save_path=nothing)
+    c = control_surface_scalar(equil, modes, n; mtheta, nphi, psi, helicity)
+    return plot_surface_3d(equil; color_by=c, coil_sets, mtheta, nphi, psi, label, save_path)
+end
+
+register!(plot_bn_contour, (PerturbedEquilibriumState,), (:forcing_modes,), "applied b_n on the control surface (coils = true for the coils)")
+register!(plot_coil_geometry_3d, (PerturbedEquilibriumState,), (:coil_sets,), "3D coils and plasma boundary")
+register!(plot_coil_geometry_rz, (PerturbedEquilibriumState,), (:coil_sets,), "coils over the plasma boundary in (R, Z)")
 register!(plot_mode_spectrum, (PerturbedEquilibriumState,), (:forcing_modes,), "|Φ_x(m, n)| forcing spectrum")
 
 export plot_coil_geometry_3d, plot_coil_geometry_rz
-export plot_bn_contour, plot_mode_spectrum
+export plot_bn_contour, plot_mode_spectrum, plot_control_surface
 export plot_surface_3d, control_surface_scalar
 
 end # module CoilForcing

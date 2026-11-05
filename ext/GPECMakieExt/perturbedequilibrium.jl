@@ -171,3 +171,78 @@ function PE._plot_perturbed_equilibrium_summary(coupling, edge, xi)
         fig
     end
 end
+
+const _NORMAL_STYLE = Dict(:b_n => (rich("b", subscript("n")), "T"), :xi_n => (rich("ξ", subscript("n")), "m"))
+
+# Outward unit normals of a closed counter-clockwise outline, from central differences.
+function _outward_normals(R, Z)
+    dR = circshift(R, -1) .- circshift(R, 1)
+    dZ = circshift(Z, -1) .- circshift(Z, 1)
+    dR[1] = dR[end] = R[2] - R[end-1]
+    dZ[1] = dZ[end] = Z[2] - Z[end-1]
+    L = hypot.(dR, dZ)
+    return dZ ./ L, -dR ./ L
+end
+
+# A displacement scale rounded down to one significant figure, so the largest displacement is `frac` of the minor radius.
+function _display_scale(R, xi; frac=0.05)
+    s = frac * (maximum(R) - minimum(R)) / 2 / max(maximum(abs, xi), floatmin())
+    p = 10.0^floor(log10(s))
+    return max(1, round(Int, floor(s / p) * p))
+end
+
+function PE._plot_perturbed_field_rz(d, component, boundary)
+    return themed() do
+        glyph, unit = _NORMAL_STYLE[component]
+        values, scale = _decade(d.values)
+        fig = Figure(; size=(560, boundary === nothing ? 680 : 720))
+        title =
+            boundary === nothing ? rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°") :
+            rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°: largest boundary |ξ", subscript("n"), "| = ", _num(1e3 * maximum(abs, boundary.xi)), " mm")
+        ax = Axis(fig[1, 1]; title)
+        hm = _poloidal_slice!(ax, d.R, d.Z, values; outlines=d.outlines)
+        Colorbar(fig[1, 2], hm; label=rich(glyph, _unit(scale, unit)))
+        if boundary !== nothing
+            nR, nZ = _outward_normals(boundary.R, boundary.Z)
+            s = _display_scale(boundary.R, boundary.xi)
+            lines!(ax, boundary.R, boundary.Z; color=(:black, 0.45), linestyle=:dash, linewidth=1.2, label="equilibrium")
+            lines!(ax, boundary.R .+ s .* boundary.xi .* nR, boundary.Z .+ s .* boundary.xi .* nZ; color=:black, linewidth=2,
+                label=rich("displaced, ξ", subscript("n"), " × $s"))
+            Legend(fig[2, 1:2], ax; orientation=:horizontal, framevisible=false)
+            rowgap!(fig.layout, 4)
+        end
+        fig
+    end
+end
+
+function PE._plot_islands(d, name)
+    return themed() do
+        chains = d.chains
+        isempty(chains) && throw(ArgumentError("no island has a nonzero half-width"))
+        colors = Makie.resample_cmap(:viridis, length(chains) + 2)
+        fig = Figure(; size=(1250, 640))
+        # (θ, ψ_N): the chains in flux coordinates, the outboard midplane central.
+        bottom = max(0.0, minimum(c.psis - 1.5c.w for c in chains) - 0.03)
+        a = Axis(fig[1, 1]; xlabel="poloidal angle θ (deg)", ylabel=PSIN, xticks=-180:90:180, limits=((-180, 180), (bottom, 1.02)),
+            title="$name at φ = $(_num(rad2deg(d.phi)))°")
+        for (k, c) in enumerate(chains)
+            shift = circshift(1:length(c.theta), length(c.theta) ÷ 2)
+            band!(a, sort(c.theta), c.lo[shift], c.hi[shift]; color=(colors[k+1], 0.6))
+            hlines!(a, c.psis; color=(colors[k+1], 0.9), linewidth=0.8, linestyle=:dash)
+            text!(a, -178, c.psis; text=c.label, align=(:left, :center), fontsize=11)
+        end
+        # (R, Z): the same chains on the poloidal plane.
+        b = Axis(fig[1, 2]; aspect=DataAspect(), xlabel="R (m)", ylabel="Z (m)", title="On the poloidal plane")
+        for s in d.surfaces[1:(end-1)]
+            lines!(b, s...; color=(:black, 0.15), linewidth=0.8)
+        end
+        for (k, c) in enumerate(chains)
+            poly!(b, Point2f.(c.polygon); color=(colors[k+1], 0.7), strokewidth=0)
+        end
+        lines!(b, d.surfaces[end]...; color=:black, linewidth=1.5)
+        Legend(fig[1, 3], [PolyElement(; color=(colors[k+1], 0.7)) for k in eachindex(chains)], ["$(c.label):  $(_num(c.w))" for c in chains],
+            rich("w/2 (", PSIN, ")"); framevisible=false)
+        colsize!(fig.layout, 1, Relative(0.5))
+        fig
+    end
+end

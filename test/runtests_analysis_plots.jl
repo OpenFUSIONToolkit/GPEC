@@ -96,6 +96,15 @@ using TOML
             @test A.PerturbedEquilibrium.plot_mode_spectrogram(h5; style=:lines) isa Figure
             @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; style=:contour)
 
+            # Field views that take more than the result: any control-surface spectrum, the displaced boundary, the 3D surface.
+            CF = A.CoilForcing
+            @test CF.plot_control_surface(ret.pe, ret.pe.forcing_b_rootarea; label="the applied forcing", coils=true) isa Figure
+            @test CF.plot_control_surface(ret.pe, ret.pe.forcing_b_rootarea ./ maximum(abs, ret.pe.forcing_b_rootarea); arb=true) isa Figure
+            @test_throws ArgumentError CF.plot_control_surface(ret.pe, ret.pe.forcing_b; weighting=:flux)
+            @test A.PerturbedEquilibrium.plot_perturbed_field_rz(ret.pe; component=:xi_n, deform=true) isa Figure
+            @test CF.plot_surface_3d(ret.equil, ret.pe.forcing_modes, 1; coil_sets=ret.pe.coil_sets, mtheta=60, nphi=60) isa Figure
+            @test CF.plot_bn_contour(randn(32, 16), 32, 16; n=1) isa Figure
+
             # The catalog lists a Forward run's absent products with what to change, for a result, a path and main's tuple.
             listing = repr(MIME"text/plain"(), available_plots(ret.ffs))
             @test occursin("✓ ForceFreeStates.plot_mode_displacement", listing)

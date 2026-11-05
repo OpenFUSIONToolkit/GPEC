@@ -244,6 +244,160 @@ function plot_perturbed_equilibrium_summary(src::Source; save_path=nothing)
     return _draw(_plot_perturbed_equilibrium_summary, coupling, edge, xi; save_path)
 end
 
+# (R, Z) of the flux surface ψ at SFL angle θ ∈ [0, 1).
+function _rz(equil, psi, theta, hint)
+    r = sqrt(max(0.0, equil.rzphi_rsquared((psi, theta); hint)))
+    eta = 2π * (theta + equil.rzphi_offset((psi, theta); hint))
+    return equil.ro + r * cos(eta), equil.zo + r * sin(eta)
+end
+
+# A closed flux-surface outline in (R, Z).
+function _outline(equil, psi; ntheta=256)
+    hint = (Ref(1), Ref(1))
+    pts = [_rz(equil, psi, θ, hint) for θ in range(0, 1; length=ntheta + 1)]
+    return first.(pts), last.(pts)
+end
+
+const _NORMAL = Dict(:b_n => :b_n_modes, :xi_n => :xi_n_modes)
+
+# The stored normal field or displacement summed over harmonics into real space on the poloidal plane at toroidal angle
+# φ, on the flux-surface grid (every `every`-th ψ), with outlines of the rational surfaces and the boundary.
+function _poloidal_data(pe::PerturbedEquilibriumState, component; phi=0.0, ntheta=256, every=4)
+    haskey(_NORMAL, component) || throw(ArgumentError("component must be :b_n or :xi_n"))
+    X = getfield(pe, _NORMAL[component])
+    resp = pe.response
+    equil = resp.ffs.equil
+    rows = 1:every:length(pe.psi_grid)
+    θs = range(0, 1; length=ntheta + 1)
+    R, Z, V = (zeros(length(rows), length(θs)) for _ in 1:3)
+    hint = (Ref(1), Ref(1))
+    for (a, i) in enumerate(rows), (b, θ) in enumerate(θs)
+        psi = pe.psi_grid[i]
+        R[a, b], Z[a, b] = _rz(equil, psi, θ, hint)
+        ν = equil.rzphi_nu((psi, θ); hint)
+        V[a, b] = real(sum(X[i, k] * cis(2π * resp.m_modes[k] * θ + resp.n_modes[k] * (ν - phi)) for k in axes(X, 2)))
+    end
+    outlines = [_outline(equil, psi) for psi in vcat(resp.rational_psi, pe.psi_grid[end])]
+    return (; R, Z, values=V, outlines, phi)
+end
+
+# The boundary in (R, Z) at toroidal angle φ with its normal displacement ξ_n there.
+function _boundary_displacement(pe::PerturbedEquilibriumState; phi=0.0, ntheta=720)
+    resp = pe.response
+    equil = resp.ffs.equil
+    psi = pe.psi_grid[end]
+    X = pe.xi_n_modes[end, :]
+    hint = (Ref(1), Ref(1))
+    θs = range(0, 1; length=ntheta + 1)
+    pts = [_rz(equil, psi, θ, hint) for θ in θs]
+    xi = [real(sum(X[k] * cis(2π * resp.m_modes[k] * θ + resp.n_modes[k] * (equil.rzphi_nu((psi, θ); hint) - phi)) for k in eachindex(X))) for θ in θs]
+    return (; R=first.(pts), Z=last.(pts), xi)
+end
+
+# Island chains at toroidal angle φ between ψ_s ∓ (w/2)|cos(ξ/2)|, ξ = 2π m θ + n (ν − φ) + α with α the phase of the
+# surface's resonant field, in (θ, ψ_N) and as (R, Z) polygons; ψ is clipped to the last flux surface.
+function _island_chains(pe::PerturbedEquilibriumState, halfwidth; phi=0.0, ntheta=1440)
+    resp = pe.response
+    equil = resp.ffs.equil
+    psimax = pe.psi_grid[end]
+    hint = (Ref(1), Ref(1))
+    θs = collect(range(0, 1; length=ntheta + 1))
+    chains = NamedTuple[]
+    for row in eachindex(resp.rational_psi)
+        psis, m, n, w = resp.rational_psi[row], resp.rational_m_res[row], resp.rational_n[row], halfwidth[row]
+        w > 0 || continue
+        α = angle(pe.resonant_area_weighted_field[row])
+        half = [w * abs(cos((2π * m * θ + n * (equil.rzphi_nu((psis, θ); hint) - phi) + α) / 2)) for θ in θs]
+        lo, hi = clamp.(psis .- half, 0.0, psimax), clamp.(psis .+ half, 0.0, psimax)
+        outer = [_rz(equil, p, θ, hint) for (p, θ) in zip(hi, θs)]
+        inner = [_rz(equil, p, θ, hint) for (p, θ) in zip(lo, θs)]
+        push!(chains, (; label="$m/$n", psis, w, theta=360 .* θs .- 180, lo, hi, polygon=vcat(outer, reverse(inner))))
+    end
+    return (; chains, phi, surfaces=[_outline(equil, p * psimax) for p in range(0.1, 1; length=10)])
+end
+
+# Drawing functions, defined by the GPECMakieExt extension.
+function _plot_perturbed_field_rz end
+function _plot_islands end
+
+"""
+    plot_perturbed_field_rz(pe; component=:b_n, phi=0.0, deform=false, save_path=nothing)
+
+Plot the perturbed normal field b_n or normal displacement ξ_n on the poloidal plane at toroidal angle φ, drawn on the
+flux-surface grid with the rational surfaces outlined; with `deform`, also the boundary displaced along its normal by
+a scaled ξ_n over the equilibrium outline.
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` with the stored normal field and displacement
+
+### Keyword arguments
+
+  - `component`: `:b_n` (T, default) or `:xi_n` (m)
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `deform`: Draw the displaced boundary, scaled so its largest displacement is 5 % of the minor radius (default: `false`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_perturbed_field_rz(pe::PerturbedEquilibriumState; component=:b_n, phi=0.0, deform=false, save_path=nothing)
+    _require(plot_perturbed_field_rz, pe)
+    d = _poloidal_data(pe, component; phi)
+    boundary = deform ? _boundary_displacement(pe; phi) : nothing
+    return _draw(_plot_perturbed_field_rz, d, component, boundary; save_path)
+end
+
+"""
+    plot_effective_islands(pe; phi=0.0, save_path=nothing)
+
+Plot the island chains the effective resonant flux would open, in (θ, ψ_N) and on the poloidal plane at toroidal angle
+φ, with each chain's half-width w/2 (in ψ_N) listed.
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` with the singular coupling
+
+### Keyword arguments
+
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_effective_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
+    _require(plot_effective_islands, pe)
+    return _draw(_plot_islands, _island_chains(pe, pe.island_half_width; phi), "Effective islands"; save_path)
+end
+
+"""
+    plot_islands(pe; phi=0.0, save_path=nothing)
+
+Plot the island chains of the penetrated field in (θ, ψ_N) and on the poloidal plane at toroidal angle φ. The
+half-width scales from the effective one as w² ∝ |b̄|: w_pen = w_eff √(|b̄_pen| / |b̄_res|).
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` from a matched run, which carries a penetrated field
+
+### Keyword arguments
+
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
+    _require(plot_islands, pe)
+    ratio = abs.(pe.penetrated_area_weighted_field) ./ max.(abs.(pe.resonant_area_weighted_field), floatmin())
+    return _draw(_plot_islands, _island_chains(pe, pe.island_half_width .* sqrt.(ratio); phi), "Penetrated islands"; save_path)
+end
+
 const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
 register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum and ξ^ψ spectrogram")
 register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,), "resonant coupling rows per rational surface")
@@ -252,5 +406,8 @@ register!(plot_island_widths, _PE_SOURCES, (:singular_coupling,), "island half-w
 register!(plot_chirikov_parameter, _PE_SOURCES, (:singular_coupling,), "effective island-overlap Chirikov parameter per rational surface")
 register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ′ per rational surface")
 register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
+register!(plot_perturbed_field_rz, (PerturbedEquilibriumState,), (:response_n,), "b_n or ξ_n on the poloidal plane (deform = true for the displaced boundary)")
+register!(plot_effective_islands, (PerturbedEquilibriumState,), (:singular_coupling,), "island chains from the effective resonant flux")
+register!(plot_islands, (PerturbedEquilibriumState,), (:penetrated_field,), "island chains from the penetrated field")
 
 end # module PerturbedEquilibrium

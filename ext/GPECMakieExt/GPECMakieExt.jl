@@ -10,9 +10,11 @@ using Makie
 import GeneralizedPerturbedEquilibrium.Analysis as A
 
 include("theme.jl")
+include("fields.jl")
 include("equilibrium.jl")
 include("forcefreestates.jl")
 include("perturbedequilibrium.jl")
+include("coilforcing.jl")
 
 # Save `fig` to `path` with the loaded backend; GLMakie writes raster images only.
 function A._save(fig::Figure, path::AbstractString)

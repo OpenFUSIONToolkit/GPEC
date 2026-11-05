@@ -50,6 +50,8 @@ const REASONS = Dict{Symbol,String}(
     :ballooning_scan => "needs the ballooning scan: add a [LocalStability] section",
     :singular_coupling => "needs the singular coupling: run PerturbedEquilibrium with compute_singular_coupling = true",
     :response_xi => "needs the reconstructed displacement ξ: run PerturbedEquilibrium on a Forward free-boundary result",
+    :response_n => "needs the stored normal field and displacement: run PerturbedEquilibrium on a Forward free-boundary result",
+    :penetrated_field => "needs a penetrated field: ideal runs have none; it comes from a matched (resistive) run",
     :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a Forward free-boundary result",
     :coil_sets => "needs coil forcing: give ForcingTerms coil sets (forcing_data_format = \"coil\")",
     :forcing_modes => "needs forcing modes: give ForcingTerms a forcing",
@@ -94,6 +96,8 @@ function capabilities(s::PerturbedEquilibriumState)
     isempty(s.resonant_area_weighted_field) || push!(caps, :singular_coupling)
     s.xi_modes === nothing || push!(caps, :response_xi)
     s.b_modes === nothing || push!(caps, :response_b)
+    s.b_n_modes === nothing || s.xi_n_modes === nothing || push!(caps, :response_n)
+    any(!iszero, s.penetrated_area_weighted_field) && push!(caps, :penetrated_field)
     isempty(s.coil_sets) || push!(caps, :coil_sets)
     isempty(s.forcing_modes) || push!(caps, :forcing_modes)
     return caps
