@@ -18,6 +18,29 @@ lists the plots for a result, a path, or the named tuple `main` returns.
 """
 module Analysis
 
+# The plots draw with Makie through the GPECMakieExt extension, which sets this when a backend loads.
+const _BACKEND = Ref(false)
+
+"""
+    _draw(plotter, args...; save_path=nothing, kwargs...)
+
+Draw a figure with `plotter`, a drawing function the GPECMakieExt extension defines, and save it when `save_path`
+is given. Throws an `ArgumentError` when no Makie backend is loaded.
+"""
+function _draw(plotter, args...; save_path=nothing, kwargs...)
+    _BACKEND[] || throw(ArgumentError("plotting needs a Makie backend: `using CairoMakie` for files or `using GLMakie` for interactive windows"))
+    fig = plotter(args...; kwargs...)
+    isnothing(save_path) || _save(fig, save_path)
+    return fig
+end
+
+"""
+    _save(fig, path)
+
+Save a figure with the loaded Makie backend; defined by the GPECMakieExt extension.
+"""
+function _save end
+
 include("Registry.jl")
 include("ForceFreeStates.jl")
 include("Equilibrium.jl")
