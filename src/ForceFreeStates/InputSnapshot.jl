@@ -13,3 +13,16 @@ function save_equilibrium_ingest!(out_h5, equil)
     end
     return nothing
 end
+
+"""
+    save_input_files!(out_h5, equil, wall_settings)
+
+Record the external files a run read, so a rerun and `equilibrium_from_h5` replay them without the originals:
+the equilibrium's kinetic profiles under `Input/RawInputs/Kinetic/` (the kinetic HDF5 schema; the composition is
+restated by the deck) and a file wall's text as `Input/RawInputs/Wall/wall_file_raw`.
+"""
+function save_input_files!(out_h5, equil, wall_settings)
+    equil.kinetic === nothing || Equilibrium.write_kinetic_group!(create_group(out_h5, "Input/RawInputs/Kinetic"), equil.kinetic)
+    wall_settings isa Vacuum.FileWall && (out_h5["Input/RawInputs/Wall/wall_file_raw"] = read(wall_settings.file, String))
+    return nothing
+end

@@ -43,10 +43,10 @@ using HDF5
 using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 
-const REPO            = normpath(joinpath(@__DIR__, ".."))
-const JULIA_FIXTURE   = joinpath(REPO, "test", "test_data", "regression_solovev_kinetic_calculated")
-const FORTRAN_DCON    = get(ENV, "GPEC_FORTRAN_DCON", "")
-const FORTRAN_SOLDIR  = get(ENV, "GPEC_FORTRAN_SOLDIR", "")
+const REPO = normpath(joinpath(@__DIR__, ".."))
+const JULIA_FIXTURE = joinpath(REPO, "test", "test_data", "regression_solovev_kinetic_calculated")
+const FORTRAN_DCON = get(ENV, "GPEC_FORTRAN_DCON", "")
+const FORTRAN_SOLDIR = get(ENV, "GPEC_FORTRAN_SOLDIR", "")
 
 _p(args...) = (println(stderr, args...); flush(stderr))
 
@@ -90,35 +90,35 @@ function build_matched_fortran_deck(workdir::String)
     end
 
     gpec = TOML.parsefile(joinpath(JULIA_FIXTURE, "gpec.toml"))
-    eq   = gpec["Equilibrium"]
-    ffs  = gpec["ForceFreeStates"]
-    kf   = get(gpec, "KineticForces", Dict{String,Any}())
+    eq = gpec["Equilibrium"]
+    ffs = gpec["ForceFreeStates"]
+    kf = get(gpec, "KineticForces", Dict{String,Any}())
 
     # equil.in — grid + coordinate settings to match the Julia [Equilibrium] block.
     eqin = joinpath(workdir, "equil.in")
-    replace_namelist_value!(eqin, "psilow",  string(eq["psilow"]))
+    replace_namelist_value!(eqin, "psilow", string(eq["psilow"]))
     replace_namelist_value!(eqin, "psihigh", string(eq["psihigh"]))
-    replace_namelist_value!(eqin, "mpsi",    string(eq["mpsi"]))
-    replace_namelist_value!(eqin, "mtheta",  string(eq["mtheta"]))
+    replace_namelist_value!(eqin, "mpsi", string(eq["mpsi"]))
+    replace_namelist_value!(eqin, "mtheta", string(eq["mtheta"]))
 
     # dcon.in — kinetic flags already match; align mode band, edge truncation, n.
     dconin = joinpath(workdir, "dcon.in")
-    replace_namelist_value!(dconin, "nn",          string(first(ffs["nn"])))
-    replace_namelist_value!(dconin, "delta_mlow",  string(get(ffs, "delta_mlow", 0)))
+    replace_namelist_value!(dconin, "nn", string(first(ffs["nn"])))
+    replace_namelist_value!(dconin, "delta_mlow", string(get(ffs, "delta_mlow", 0)))
     replace_namelist_value!(dconin, "delta_mhigh", string(get(ffs, "delta_mhigh", 0)))
-    replace_namelist_value!(dconin, "qlow",        string(ffs["qlow"]))
-    replace_namelist_value!(dconin, "qhigh",       string(ffs["qhigh"]))
+    replace_namelist_value!(dconin, "qlow", string(ffs["qlow"]))
+    replace_namelist_value!(dconin, "qhigh", string(ffs["qhigh"]))
     replace_namelist_value!(dconin, "singfac_min", string(ffs["singfac_min"]))
     # Julia truncate_at_rational_offset defaults true (sas_flag) with rational_offset_fraction 0.2.
     replace_namelist_value!(dconin, "sas_flag", "t")
-    replace_namelist_value!(dconin, "dmlim",    "0.2")
+    replace_namelist_value!(dconin, "dmlim", "0.2")
 
     # pentrc.in — bounce harmonics + species; defaults mirror KineticForcesControl.
     pentin = joinpath(workdir, "pentrc.in")
-    replace_namelist_value!(pentin, "nl",     string(get(kf, "nl", 1)))
+    replace_namelist_value!(pentin, "nl", string(get(kf, "nl", 1)))
     replace_namelist_value!(pentin, "nutype", "\"" * string(get(kf, "nutype", "harmonic")) * "\"")
     replace_namelist_value!(pentin, "f0type", "\"" * string(get(kf, "f0type", "maxwellian")) * "\"")
-    replace_namelist_value!(pentin, "nufac",  string(get(kf, "collisionality_factor", 1)))
+    replace_namelist_value!(pentin, "nufac", string(get(kf, "collisionality_factor", 1)))
     replace_namelist_value!(pentin, "kinetic_file", "\"kinetic.txt\"")
 
     # kinetic.txt — Fortran readtable wants a title line then numeric rows; the
@@ -161,9 +161,9 @@ function run_julia_reference()
 end
 
 function run_benchmark()
-    _p("=" ^ 70)
+    _p("="^70)
     _p("  Solovev Kinetic-DCON Benchmark: Julia KF→FFS vs Fortran DCON")
-    _p("=" ^ 70)
+    _p("="^70)
 
     workdir = mktempdir(; prefix="solovev_kinetic_fortran_")
     build_matched_fortran_deck(workdir)
@@ -178,15 +178,15 @@ function run_benchmark()
     re_err = abs(jul_re - fort_re) / abs(fort_re) * 100
     im_err = abs(jul_im - fort_im) / abs(fort_im) * 100
 
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     _p("  Least-stable total-energy eigenvalue (mpert matched)")
-    _p("=" ^ 70)
+    _p("="^70)
     _p(@sprintf("  Re(et[1]):  Julia = %12.6f  Fortran = %12.6f  err = %6.2f%%", jul_re, fort_re, re_err))
     _p(@sprintf("  Im(et[1]):  Julia = %12.6f  Fortran = %12.6f  err = %6.2f%%", jul_im, fort_im, im_err))
 
     re_pass = re_err <= 5.0
     im_pass = im_err <= 20.0
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     if re_pass && im_pass
         _p("  PASS — Re within 5 %, Im within 20 %")
     else
@@ -194,7 +194,7 @@ function run_benchmark()
         re_pass || _p(@sprintf("    Re err %.2f%% > 5%%", re_err))
         im_pass || _p(@sprintf("    Im err %.2f%% > 20%%", im_err))
     end
-    _p("=" ^ 70)
+    _p("="^70)
 
     return (; jul_re, jul_im, fort_re, fort_im, re_err, im_err, wall)
 end

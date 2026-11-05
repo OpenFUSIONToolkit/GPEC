@@ -1,212 +1,33 @@
-# Tearing Module
+# Tearing
 
-The `Tearing` module groups the resistive tearing-mode analysis stack:
-`InnerLayer` (per-surface inner-layer matching data Δ(Q) for the GGJ and
-SLAYER models), `Dispersion` (physics-agnostic complex-plane scan and
-contour-intersection root extraction), `CriticalResonantField` (torque-balance
-error-field penetration threshold), and the tearing solve itself,
-`solve(TearingProblem(ffs; ...), model; config=TearingConfig(...))`, with its
-`TearingResult` and HDF5 output.
+`Tearing` solves the resistive tearing stability of each rational surface by matching the outer-region Δ′ of the force-free states to the response of a resistive inner layer.
+The outer region, ideal MHD everywhere except at the rational surfaces, gives the tearing drive Δ′; the inner layer, where resistivity, two-fluid effects and rotation act, gives the response Δ(Q) as a function of the complex mode frequency; the roots of Δ′ = Δ(Q) are the tearing modes, with their growth rates and real frequencies.
 
-## Tearing solve and layer inputs
+## What it computes
 
-```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.Tearing]
-```
+Two layer models are available, selected by `[Tearing] inner_model`:
 
-The module provides an abstract [`InnerLayerModel`](@ref InnerLayer.InnerLayerModel) interface and two
-concrete models: the **GGJ (Glasser–Greene–Johnson)** layer documented below, with three
-interchangeable solver backends, and the pressureless **SLAYER** Fitzpatrick Riccati layer.
-Further inner-layer models (kinetic layers) plug in through the same interface.
+- `"SLAYER"`, the two-fluid drift-MHD slab layer equations of Cole and Fitzpatrick (2006), in the form Park's SLAYER solver takes them with a few terms dropped ([Park (2022)](citations.md#Tearing), [Burgess et al. (2026)](citations.md#Tearing)), with resistivity, perpendicular and toroidal transport, diamagnetic drifts and E×B rotation taken from the kinetic profiles of the equilibrium; its options are in `[SLAYER]`.
+- `"GGJ"`, the toroidal resistive-MHD layer of Glasser, Greene and Johnson ([Glasser, Wang and Park (2016)](citations.md#Tearing), [Glasser and Wang (2020)](citations.md#Tearing)), whose coefficients E, F, G, H, K are the flux-surface averages stored under `SingularSurfaces/`; its solver options are in `[GGJ]`.
 
-Two papers define the equations and the asymptotic construction; the code and this page cite
-them by equation number rather than restating them:
+For each surface the `Dispersion` search scans the complex frequency plane, extracts the roots of the dispersion relation and classifies them, and `[Tearing.search]` sets the scan.
+With `[Tearing.CriticalResonantField]` the stage also computes, for the `SLAYER` layer, the resonant field at which a static error field overcomes the layer's shielding: the error-field penetration threshold.
 
-- **GWP2016** — A. H. Glasser, Z. R. Wang and J.-K. Park, *Computation of
-  resistive instabilities by matched asymptotic expansions*, Phys. Plasmas
-  **23**, 112506 (2016).
-- **GW2020** — A. H. Glasser and Z. R. Wang, *Asymptotic solutions and
-  convergence studies of the resistive inner region equations*, Phys. Plasmas
-  **27**, 012506 (2020).
+The same GGJ layer serves the `[Match]` stage of the [Workflow](workflow.md), which does the complementary job: instead of finding the free modes it imposes the layer response on the driven force-free states and writes the matched solution to `SingularSurfaces/Match/`.
 
-## Equations and matching data
+## Governing equations
 
-The GGJ layer equations (GWP2016 Eq. 11 ≡ GW2020 Eq. 1) couple the perturbed flux ``\Psi`` and
-the layer variables ``\Xi``, ``\Upsilon`` in the scaled distance ``x`` from the rational surface.
-Their equilibrium coefficients ``E, F, G, H, K`` (GWP2016 Eq. A8) are held in
-[`GGJParameters`](@ref InnerLayer.GGJParameters). A physical growth rate ``\gamma`` maps to the
-scaled ``Q`` by [`inner_Q`](@ref InnerLayer.inner_Q) (GWP2016 Eqs. A11, A14–A16), and
-[`rescale_delta`](@ref InnerLayer.rescale_delta) returns the matching data to physical units. The
-model requires Mercier stability, ``D_I < 0`` ([`mercier_di`](@ref InnerLayer.mercier_di),
-GWP2016 Eq. A9), so that at large ``x`` the solutions include two power laws (GW2020 Eq. 49).
+The GGJ layer equations couple the perturbed flux ``\Psi`` and the layer variables ``\Xi``, ``\Upsilon`` in the scaled distance ``x`` from the rational surface (Glasser, Wang and Park (2016), Eq. 11).
+A physical growth rate ``\gamma`` maps to the scaled frequency ``Q`` by [`inner_Q`](@ref InnerLayer.inner_Q), the model requires Mercier stability ``D_I < 0`` ([`mercier_di`](@ref InnerLayer.mercier_di)), and at large ``x`` the solutions contain the two power laws of the outer region.
+The matching datum ``\Delta`` is the ratio of the large to the small power-law coefficient; imposing the two parities at ``x = 0`` gives the pair ``(\Delta_+, \Delta_-)``: ``\Delta_+`` even in the displacement ``\Xi``, the **interchange** channel, ``\Delta_-`` odd, the **tearing** channel.
+Positional pairs are always ordered ``(\Delta_+, \Delta_-)``, and `InnerLayerResponse` names them `interchange` and `tearing`.
+The dispersion relation of a surface is then ``\Delta'_s = \Delta_-(Q)`` with ``\Delta'_s`` the surface's diagonal of `SingularSurfaces/Delta_prime_matrix` converted to the layer's normalization (`PerSurface/Delta_prime_norm`); `coupling_mode = "coupled"` solves the determinant of the full matrix over up to `msing_max` surfaces instead.
 
-The matching datum ``\Delta`` is the ratio of the large to the small power-law coefficient.
-Imposing the two parities at ``x = 0`` gives the pair ``(\Delta_+, \Delta_-)`` of GWP2016
-Eqs. (34)–(35). Parity is that of the displacement ``\Xi`` (GWP2016 Eq. 34; Pletzer, Bondeson &
-Dewar, J. Comput. Phys. **115**, 530 (1994), Eqs. 32–33): ``\Delta_+`` is even,
-``\Psi(0)=\Xi'(0)=\Upsilon'(0)=0``, the **interchange** channel; ``\Delta_-`` is odd,
-``\Psi'(0)=\Xi(0)=\Upsilon(0)=0``, the **tearing** channel. Positional pairs, such as `deltar` in
-the matching and `RaySolveResult.Δ`, are always ordered ``(\Delta_+, \Delta_-)``, like the
-unknowns ``d_\pm`` of GWP2016 Eq. (38) and Pletzer, Bondeson & Dewar Eqs. 83, 85;
-`InnerLayerResponse` names them `interchange` and `tearing`.
+The SLAYER layer is a slab with the Lundquist number ``S``, the temperature ratio ``\tau = T_i/T_e``, the compressibility ``c_\beta``, the perpendicular and toroidal Prandtl numbers ``P_\perp``, ``P_\mathrm{tor}`` and the diamagnetic frequencies ``Q_e``, ``Q_i`` of each surface (all stored under `Tearing/PerSurface/`), solved by a Riccati integration across the layer; its layer thickness ``\delta_s`` is written to `Tearing/LayerWidths/` and feeds the layer-overlap cap of [Stability](stability.md).
 
-## Numerical method
+### Critical resonant field
 
-!!! note "Benchmark surface used in the figures"
-    The figures use the ``q = 4`` DIII-D-like surface of
-    [`q4_surface_benchmark`](@ref InnerLayer.GGJ.q4_surface_benchmark)
-    (``S \approx 4.6\times10^{6}``, ``D_I \approx -0.31``).
-
-### Solver backends
-
-The `GGJ` model exposes three solvers through the `solver` type parameter of
-[`GGJModel`](@ref InnerLayer.GGJModel); all use the same large-``x`` asymptotic basis and return
-``\Delta`` in the same convention:
-
-| backend | method | robust regime |
-|:--------|:-------|:--------------|
-| `:shooting` | backward stable shoot from ``X_\mathrm{max}\to 0`` | ``\lvert Q\rvert \ll 1`` |
-| `:galerkin` | Hermite-cubic finite-element (real axis) | surface- and ``\arg Q``-dependent; see [Choosing a backend](@ref) |
-| `:ray` (default) | rotated contour: inward-marched far-field condition + Hermite-cubic BVP | ``\lvert Q\rvert \sim 500`` on/near the imaginary axis |
-
-Rotation and resistivity scans live on the imaginary-``Q`` axis, where the pseudo-resonance at
-``x^2 = -Q^2(G+KF)`` sits on the real-``x`` path. On the ``q = 4`` surface there `:shooting` and
-`:galerkin` lose accuracy beyond ``|Q| \sim 1`` and ``|Q| \sim 4`` respectively (the poles of ``\Delta(Q)``
-themselves lie near the real-``Q`` axis):
-
-![Relative error of the :shooting and :galerkin backends against the :ray reference along the imaginary-Q axis, on the q=4 benchmark surface. Each curve's crossing of the 1% line marks that method's practical reach.](figures/inner_layer/backend_regime_map.png)
-
-### The rotated ray
-
-`:ray` writes the layer equations as ``dv/dx = M(x)\,v`` in the plain state
-``v = (\Psi, \Xi, \Upsilon, \Psi', \Xi', \Upsilon')``. ``M`` is polynomial in ``x``, so
-``x = 0`` is an ordinary point and the system continues analytically onto the ray
-
-```math
-x = e^{i\theta}\, s, \qquad s \in [0, S], \qquad \theta = \tfrac14\arg Q .
-```
-
-This angle makes the parabolic-cylinder exponent of the outer solutions real and lifts the
-pseudo-resonance off the contour; ``\theta = 0`` is a real-axis solve.
-
-![The rotated integration ray in the complex layer-coordinate plane at Q = 500i. The real-axis contour runs through the pseudo-resonance x² = −Q²(G+KF); the ray at θ = arg(Q)/4 = 22.5° clears it.](figures/inner_layer/rotated_ray_contour.png)
-
-### Hermite-Galerkin BVP
-
-On ``[0, s_m]`` the system is solved with the `:galerkin` backend's Hermite-cubic assembly
-(GWP2016 Eq. 32) written on the ray, ``A u_{ss} + e^{i\theta}B u_s + e^{2i\theta}C u = 0``,
-with the parity conditions at ``s = 0``. The far end carries the point condition
-
-```math
-v(s_m) = U_s + \Delta\, U_b + c_1 E_1 + c_2 E_2 ,
-```
-
-where ``U_s, U_b`` are the small and large power-like solutions and ``E_{1,2}`` the
-forward-decaying exponential pair; ``\Delta, c_1, c_2`` replace the last node's six unknowns.
-Each cell resolves the local WKB rate, with a minimum cell count for small ``|Q|``.
-
-### Far-field boundary and the inward march
-
-The boundary data come from the same `inps` Wasow basis as the other backends (GW2020
-Eqs. 3–53), evaluated at the radius ``S`` where its residual is below tolerance
-([`pick_smax`](@ref InnerLayer.pick_smax)). At large ``|Q|``, ``S`` lies far beyond ``s_m``, and
-the power pair is marched inward by 2-stage Radau IIA modulo the decaying pair, the subspace in
-which ``\Delta`` is defined. The decaying pair grows under backward integration at a rate
-``\sim\rho s``. Radau's stability function decays as ``2/z``, so steps with every growing mode at
-``z > 8`` damp those directions while the slowly varying power pair stays resolved; the step count
-grows only like ``\ln(S/s_m)``. Nearer ``s_m`` the march resolves the growing directions, carries
-the decaying frame, and projects it out periodically. The damped zone runs in `Complex{Double64}`
-because its ill-conditioned implicit solves mix the power pair at a level ``\sim\epsilon\rho S^2``.
-
-On the real axis with imaginary ``Q`` the switch to resolved steps lands on the
-pseudo-resonance, a turning point where the decaying directions cannot be identified; the
-default ``\theta = \arg(Q)/4`` keeps it off the contour.
-
-For matching, `solve_inner_profile` returns ``\Delta`` and the layer-center fields
-``\Psi(0), \Xi(0)`` from the rotated solve; ``x = 0`` lies on every contour, so these are the
-real-axis values. Fields across the layer on the real ``\psi`` axis are an opt-in diagnostic
-(`GGJModel(; real_profiles=true)`, not exposed in the deck): they come from an extra ``\theta = 0``
-solve, while the ``x = 0`` values, and so the penetrated field, stay those of the rotated solve.
-The ``\theta = 0`` solve's ``\Delta_\pm`` are checked against the rotated ones (`certΔ`, which
-warns on disagreement, as can happen at large ``|Q|`` near the imaginary axis).
-
-![Inner-layer fields Ψ, Ξ, Υ on the rotated ray for the q=4 surface at Q = 2i. The BVP solution (solid) joins the asymptotic representation (dashed) seamlessly at the match point S = s_m.](figures/inner_layer/solution_profiles.png)
-
-## Validation and benchmarks
-
-**Cross-check against the Fortran `rmatch` solver.** At the Glasser & Wang
-(2020) Eq. (55) operating point ``Q = 0.1234`` (real) the `:galerkin` backend
-reproduces the Fortran `rmatch deltac` solver to ``\sim 10^{-8}``:
-
-| quantity | `:galerkin` (= Fortran to ``10^{-8}``) | `:ray` |
-|:---------|:---------------------------------------|:-------|
-| ``\Delta_+`` (interchange) | ``3.698368\times 10^{4}`` | ``3.69789\times 10^{4}`` |
-| ``\Delta_-`` (tearing) | ``14.759721`` | ``14.759715`` |
-
-This point sits near a pole of ``\Delta_+(Q)``, which amplifies every solver's error; hence the
-``1.3\times10^{-4}`` `:galerkin`↔`:ray` difference in ``\Delta_+`` against ``4\times10^{-7}`` in ``\Delta_-``.
-
-**Physical benchmark on the imaginary axis.** On the ``q=4`` rational-surface
-benchmark ([`q4_surface_benchmark`](@ref InnerLayer.GGJ.q4_surface_benchmark), ``S \approx 4.58\times10^6``,
-``D_I \approx -0.312``) the `:ray` backend is pinned at ``Q = 500i``, a regime
-entirely beyond `:galerkin`:
-
-| quantity | value at ``Q = 500i`` |
-|:---------|:----------------------|
-| ``\Delta_+`` (interchange) | ``2.4720 + 13.3540\,i`` |
-| ``\Delta_-`` (tearing) | ``0.13750 + 0.74275\,i`` |
-
-**Convergence and contour invariance.** ``\Delta`` does not depend on the contour angle, so
-re-solving with each numerical knob perturbed in turn
-([`delta_convergence`](@ref InnerLayer.delta_convergence)) gives an error bar: at ``Q = 500i`` the
-worst case is ``\sim 5\times10^{-6}`` for ``\Delta_+`` and ``\sim 6\times10^{-7}`` for ``\Delta_-``.
-Across machines and BLAS builds the values reproduce to ``\sim 10^{-5}`` relative, hence the five
-significant figures above.
-
-![Relative change of Δ at Q = 500i under independent perturbations of each numerical knob (contour angle, mesh resolution, series order/radius, march tolerance, BVP edge s_m, decaying-pair separation). The worst-case spread is the reported error bar.](figures/inner_layer/convergence_Sinvariance.png)
-
-## Choosing a backend
-
-`:ray` is the **default** — `GGJModel()` constructs `GGJModel{:ray}()` — and the recommended
-backend for every ``Q``. It uses the same Hermite-cubic weak form as `:galerkin`; they differ in
-where and how the far-field condition is imposed. `:galerkin` imposes it on the real axis through
-resonant and extension cells at the radius where the series residual reaches ``10^{-7}``, on a
-fixed `nx`-cell grid. `:ray` takes the series data where the residual reaches `smax_tol` =
-``10^{-9}`` ([`pick_smax`](@ref InnerLayer.pick_smax)), marches them inward to ``s_m``, where every
-exponential family has decayed 45 e-folds from the origin, and resolves the local WKB rate in
-every cell on ``[0, s_m]``. Both radii are computed per solve; `S`, `smax_tol` and `sm_fac`
-override them, and [`delta_convergence`](@ref InnerLayer.delta_convergence) perturbs them to give
-an error bar.
-
-`:galerkin` takes a few milliseconds per solve, 3–60 times less than `:ray`, but its accuracy
-depends on the surface and on ``\arg Q`` even at small ``|Q|``. Against a tightened `:ray`
-reference, on the GW2020 Eq. (55) surface it errs by ``7\times10^{-5}`` at ``Q = 0.1`` and
-``3\times10^{-3}`` at ``Q = 0.3``; near ``\arg Q = 157.5^\circ`` it errs by order unity at
-``|Q| = 0.1`` on that surface and by 0.4 at ``|Q| = 0.3`` on the ``q = 4`` surface. `:ray` held
-``2\times10^{-6}`` on all three surfaces tested, for ``|Q|`` from 0.01 to 1.
-
-The backends take disjoint numerical-knob keywords: pass `GGJModel(solver=:galerkin)` explicitly
-when supplying the Galerkin `nx`/`xfac` knobs; passing them to `:ray` throws a `MethodError`.
-
-```julia
-using GeneralizedPerturbedEquilibrium.InnerLayer
-
-p = GGJ.q4_surface_benchmark()      # GGJParameters for the q=4 benchmark surface
-γ = 500im * GGJ.q0(p)               # physical rate placing Q on the imaginary axis at 500i
-
-Δ = solve_inner(GGJModel(), p, γ)   # Δ.interchange, Δ.tearing with the default :ray backend
-
-# Full result (raw Δ, contour, mesh, nodal solution, boundary conditioning) via solve_ray:
-res = solve_ray(p, GGJ.inner_Q(p, γ))
-res.Δ, res.breaks, res.bc_cond      # res.Δ = (Δ₊, Δ₋) = (interchange, tearing)
-```
-
-## Critical resonant field
-
-With a `[Tearing.CriticalResonantField]` section (`TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl())`), each SLAYER surface also gets the
-critical resonant field for error-field penetration, from the steady-state torque balance of
-Cole and Fitzpatrick, Phys. Plasmas **13**, 032503 (2006). The electromagnetic torque on the
-layer balances the viscous restoring torque when (Cole Eq. 61)
+With `[Tearing.CriticalResonantField]` each `SLAYER` surface gets the critical resonant field for error-field penetration, from the steady-state torque balance of Cole and Fitzpatrick (2006): the electromagnetic torque on the layer balances the viscous restoring torque when
 
 ```math
 \frac{\operatorname{Im}\hat\Delta(Q)}{|\alpha + \hat\Delta(Q)|^2}
@@ -215,68 +36,115 @@ layer balances the viscous restoring torque when (Cole Eq. 61)
 \hat\kappa = \left[\frac{2}{s}\right]^2 \int_{r_s}^{a} \frac{\mu(r_s)}{\mu(r)}\,\frac{dr}{r},
 ```
 
-and balance is lost above (Cole Eq. 62)
+and balance is lost above
 
 ```math
 \left(\frac{b_r}{B_\phi}\right)^2_\mathrm{crit}
   = \max_Q \frac{2P\,(Q_0 - Q)}{S\hat\kappa\,\operatorname{Im}[-1/(\alpha + \hat\Delta(Q))]} .
 ```
 
-- **Inputs.** P is each layer's `P_tor` (so χ_φ from the kinetic file, or the scalar
-  `chi_tor`), S its Lundquist number, and Q0 = τ_k·n·ω_E the natural E×B rotation of the
-  m/n mode (Cole's ω0; the diamagnetic drifts enter through Q_e and Q_i in Δ̂). Ω_E is the
-  kinetic file's `omega_E` or the `omega_E_kHz` override; the analysis needs it, and a surface
-  without one is skipped.
-- **Approximations.** As in Fortran `gslayer.f`, the viscosity integral is taken as 1/2
-  (κ̂ = 2/s²).
-- **Stability α.** Each surface uses its own α = S^(−1/3)(Δ_crit − r_s Δ'), so α + Δ̂ is the
-  dispersion relation's residual and the torque balance shares its poles with SLAYER's free
-  modes (Fortran fixes α = 10⁻²). Cole and Fitzpatrick have no Δ_crit; including it treats the
-  curvature offset as independent of frequency. It is zero unless `D_c_type` is set. Cole's
-  threshold needs a tearing-stable surface, so a surface with α ≤ 0 is skipped with a warning.
-- **Q axis.** Q is on Cole's axis, with the diamagnetic poles at Q_e and Q_i; it runs opposite to the dispersion
-  scans' Re Q, so the scan uses the layer response at −Q.
-- **Threshold.** Penetration is associated with a saddle-node bifurcation (Fitzpatrick, Nucl. Fusion 33, 1049 (1993), Sec. 7.4):
-  as the field grows, Q moves from Q0 toward the electron fluid at Q_e, where the torque
-  vanishes, and the threshold is the first resolved saddle-node bifurcation on that path, above
-  which the shielded branch followed from Q0 no longer exists. Both the rise to and fall from
-  an interior maximum must exceed 0.1 % of its value within a contiguous retained interval.
-  This excludes monotonic clipped windows and small numerical extrema; excluded samples do
-  not connect separate intervals. A later, higher maximum does not replace the first resolved
-  saddle-node bifurcation. Points where |Δ̂| ≤ α, the
-  unshielded zone next to Q_e, are not candidates, so the balance spike there is never taken.
-  With no resolved saddle-node bifurcation no discrete threshold is reported (NaN). Fortran takes the global maximum on a
-  window instead, which picks that spike. The search assumes Q_i ≤ 0 ≤ Q_e; a surface where
-  that fails is skipped with a warning.
+``P`` is the layer's `P_tor`, ``S`` its Lundquist number, ``Q_0 = \tau_k n \omega_E`` the natural E×B rotation of the mode (from the kinetic file's `omega_E` or the `omega_E_kHz` override, a `[Tearing]` table keyed by surface such as `omega_E_kHz = { "2/1" = 3.0 }`; a surface without one is skipped), and the viscosity integral is taken as 1/2, so ``\hat\kappa = 2/s^2``.
+Each surface uses its own stability parameter ``\alpha = S^{-1/3}(\Delta_\mathrm{crit} - r_s\Delta')``, so the torque balance shares its poles with the free modes; the threshold needs a tearing-stable surface, and one with ``\alpha \le 0`` is skipped with a warning.
+Penetration is the first resolved saddle-node bifurcation on the path from ``Q_0`` toward the electron fluid at ``Q_e``, above which the shielded branch no longer exists; small numerical extrema and the unshielded zone next to ``Q_e`` are excluded, and a surface without a resolved bifurcation reports NaN.
+`br_crit` is normalized by the toroidal field, and `br_crit_tesla = br_crit·|B0|` is the quantity to compare with `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, the total resonant field of the ideal response; the comparison is approximate, since the theory's ``b_r`` is a cylindrical field at the layer.
 
-Outputs go to `Tearing/CriticalResonantField/` (`br_crit` = b_r/B_φ, `br_crit_tesla`, `Q_peak`, `Q0`, with P in
-`PerSurface/P_tor`, and with `store_scan` the per-surface `Scan/Surface_<k>/{Q, balance, Delta}`).
+## Running it
 
-`br_crit` is normalized by the toroidal field, as in Cole and Fitzpatrick (2006, Eqs. 61–68) and
-Fitzpatrick, Phys. Plasmas **30**, 092512 (2023), Eq. 120. `br_crit_tesla` = `br_crit`·|B0|, with
-the layer's B0, is for comparison with `SingularCoupling/resonant_area_weighted_field`, the total
-resonant field with the ideal plasma response, which Park et al., Phys. Rev. Lett. **99**, 195003
-(2007) identify as the field that opens islands. The comparison is approximate: the theory's b_r is
-a cylindrical field at the layer, and no reference maps it onto the area-weighted toroidal field.
-`penetrated_area_weighted_field` already includes the layer response and is not the matching quantity.
+From `examples/DIIID-like_SLAYER_example/gpec.toml`, after a `[ForceFreeStates]` solve with `integrator = "Riccati"` and `vac_flag = true` (or `"Galerkin"` with `rpec_flag = true`), which provides the Δ′ matrix, and with a kinetic file on the equilibrium:
 
-### Benchmark against Fortran
+```toml
+[Tearing]
+inner_model = "SLAYER"            # or "GGJ"
+coupling_mode = "uncoupled"       # one dispersion relation per surface; "coupled" uses the full Δ′ matrix
 
-On the DIII-D-like example (2/1–6/1, n = 1, P = 1, κ̂ = 2/s², Q ∈ [−5, 5] with 20001
-points), both codes were given Fortran's normalized inputs and Fortran's fixed α = 10⁻².
+[Tearing.search]
+scan_mode = "amr"                 # adaptively refined scan of the complex Q plane
+Q_re_range = [-2.0, 2.0]
+Q_im_range = [-0.5, 3.0]
+nre = 41
+nim = 31
+pole_threshold_adaptive = true
+filter_above_poles = true
+filter_outside_re = true
+polish_roots = true
+store_scan = false                # true: write Tearing/Scan/Surface_<k>/
 
-- **Torque balance.** Fed Fortran's own Δ(Q) table, the Julia routine reproduces Fortran's
-  balance to all printed digits on every surface, so the thresholds differ only through the
-  selection rule above.
-- **Layer model.** Fortran solves Park's drift-MHD layer and Julia Fitzpatrick's, so Δ(Q)
-  differs by a median 24–78 % between Q_i and Q_e on 2/1, 3/1, 4/1 and 6/1 (7 % on 5/1).
+[Tearing.CriticalResonantField]
+n = 2000                          # Q samples of the torque balance
+store_scan = false
 
-The dots in the figure mark each code's balance maximum between Q_e and Q0 at that fixed α,
-not the fold threshold above.
+[SLAYER]
+D_c_type = "none"                 # critical-Δ offset from parallel transport ("none": zero)
+P_perp_model = "D_perp"           # how the perpendicular Prandtl number is built (below)
+```
 
-![Fortran vs Julia inner-layer Δ(Q) and torque balance](assets/crf_fortran_benchmark.png)
+In a script, `solve(TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl()), SLAYERModel(); config=TearingConfig(...))` runs the same stage, and `solve_inner(GGJModel(), p, γ)` evaluates one GGJ layer at a growth rate ``\gamma``.
+GGJ's η and ρ default from the kinetic data (η by the resistivity closure SLAYER uses, ρ = μ·m_p·n_e); pass `eta` and `rho` to `TearingProblem` to override them.
 
-## API Reference
+### SLAYER inputs: perpendicular diffusivities
+
+The layer widths and the critical island width of `SLAYER` take perpendicular diffusivities from the kinetic file (`chi_e`, `chi_i`, `chi_phi` profiles in m²/s).
+Two formulas want different quantities: the layer width goes through `P_perp`, the diffusion of the total pressure, while the critical island width ``W_d \propto (\chi_\perp/\chi_\parallel)^{1/4}`` is set by the electron heat transport that flattens the electron temperature across the island.
+`[SLAYER] P_perp_model` selects how `P_perp` is built: from the perpendicular particle diffusivity ``D_\perp`` that weights the electron and ion channels by their share of the pressure gradient (`"D_perp"`, the default), from `chi_e` alone (`"chi_perp_e"`, the single-χ convention of Fitzpatrick's TJ code), from `chi_i`, from the toroidal Prandtl number, from its ``c_\beta^2`` floor, or from a whole-plasma confinement time (`"tau_E"`, for a plasma without χ profiles).
+`[SLAYER] chi_perp_Dc` sets the electron diffusivity of the critical island width alone, one value for every surface, for a run in which one χ⊥,e cannot serve both formulas; where an interpretive power balance cannot separate the species, treat it as a modeling choice and scan it.
+Since the widths scale as ``\chi^{1/4}``, a factor-two change in χ moves them by about 19%, which can be enough to move the resistive-layer overlap cut of [Stability](stability.md) by one surface.
+The DIII-D-like kinetic file of the examples carries analytic χ profiles of the order of power-balance values for DIII-D H-modes; they are not fits to a measured discharge, do not resolve the pedestal transport barrier, and `chi_e` is raised by a factor of two so that the default deck exercises the layer-overlap cut.
+
+## Outputs
+
+| Dataset | Meaning |
+|---|---|
+| `Tearing/PerSurface/rational_psi`, `rational_q`, `m`, `n` | the analyzed surfaces |
+| `Tearing/PerSurface/S`, `tau`, `c_beta`, `P_perp`, `P_tor`, `Q_e`, `Q_i`, `tau_k`, `tau_R`, `eta`, `rs`, … | the layer parameters of each surface (SLAYER); `E`, `F`, `G`, `H`, `K`, `M`, `tau_A` and `tau_R` for GGJ |
+| `Tearing/PerSurface/Delta_prime_raw` and `Delta_prime_matrix_rs` (SLAYER) or `Delta_prime_matrix` (GGJ) | the outer matrix each layer was matched to |
+| `Tearing/PerSurface/Delta_prime_norm`, `delta_prime_conversion` | the Δ′ normalization of the SLAYER layer |
+| `Tearing/Roots/Q_root`, `omega`, `gamma`, `no_root` | the dispersion root of each surface in the lab frame (`frequency_frame` attribute), its real frequency and growth rate, and the flag of a surface with no usable root |
+| `Tearing/LayerWidths/delta_s`, `delta_s_abs`, `d_beta` | the complex resistive layer thickness, its magnitude in metres, and the ion drift scale |
+| `Tearing/Diagnostics/ValidRoots`, `Poles`, `FilteredRoots` | the root classification of the scan |
+| `Tearing/Scan/Surface_<k>/` | the scanned Δ(Q) with `store_scan = true` |
+| `Tearing/CriticalResonantField/br_crit`, `br_crit_tesla`, `Q_peak`, `Q0` | the penetration threshold as ``b_r/B_\phi`` and in tesla, the Q of the balance maximum and the natural rotation |
+
+## Numerical notes
+
+The `GGJ` model exposes three solvers through the `solver` type parameter of [`GGJModel`](@ref InnerLayer.GGJModel), all returning ``\Delta`` in the same convention:
+
+| backend | method | robust regime |
+|:--------|:-------|:--------------|
+| `:shooting` | backward stable shoot from ``X_\mathrm{max}\to 0`` | ``\lvert Q\rvert \ll 1`` |
+| `:galerkin` | Hermite-cubic finite-element solve on the real axis | surface- and ``\arg Q``-dependent; see [Choosing a backend](@ref) |
+| `:ray` (default) | rotated contour: inward-marched far-field condition and a Hermite-cubic BVP | ``\lvert Q\rvert \sim 500`` on or near the imaginary axis |
+
+`:ray` continues the layer equations analytically onto the ray ``x = e^{i\theta}s`` with ``\theta = \arg(Q)/4``, which makes the exponent of the outer solutions real and lifts the pseudo-resonance at ``x^2 = -Q^2(G + KF)`` off the contour; it takes the far-field data from the asymptotic series where its residual is below tolerance ([`pick_smax`](@ref InnerLayer.pick_smax)), marches the power pair inward by an implicit Radau scheme that damps the growing exponential directions, and solves the Hermite-cubic boundary-value problem with the parity conditions at ``s = 0``.
+``\Delta`` does not depend on the contour angle, so [`delta_convergence`](@ref InnerLayer.delta_convergence) re-solves with each numerical knob perturbed and reports the spread as an error bar.
+
+![Relative error of the :shooting and :galerkin backends against the :ray reference along the imaginary-Q axis, on the q = 4 DIII-D-like benchmark surface; each curve's crossing of the 1% line marks that method's practical reach.](figures/inner_layer/backend_regime_map.png)
+
+Validation: at the real operating point ``Q = 0.1234`` of Glasser and Wang (2020) the `:galerkin` backend reproduces the Fortran `rmatch` solver to ``\sim 10^{-8}`` and `:ray` agrees to ``4\times10^{-7}`` in ``\Delta_-`` (``1.3\times10^{-4}`` in ``\Delta_+``, which sits near a pole); on the ``q = 4`` benchmark surface ([`q4_surface_benchmark`](@ref InnerLayer.GGJ.q4_surface_benchmark), ``S \approx 4.6\times10^6``, ``D_I \approx -0.31``) `:ray` is pinned at ``Q = 500i`` to ``\Delta_+ = 2.4720 + 13.3540\,i``, ``\Delta_- = 0.13750 + 0.74275\,i``, with a knob-perturbation error bar of ``\sim 5\times10^{-6}`` and ``6\times10^{-7}``.
+The critical-field torque balance reproduces the Fortran SLAYER's balance to all printed digits when fed the same Δ(Q) table; the thresholds differ through the layer model (Park's reduced form of the layer equations against Cole and Fitzpatrick's full ones) and the selection rule above.
+
+![Fortran and Julia inner-layer Δ(Q) and torque balance on the DIII-D-like example.](assets/crf_fortran_benchmark.png)
+
+### Choosing a backend
+
+`:ray` is the default and the recommended backend for every ``Q``: it resolves the local WKB rate in every cell and holds ``\sim 2\times10^{-6}`` for ``|Q|`` from 0.01 to 1 on every surface tested.
+`:galerkin` takes a few milliseconds per solve, 3–60 times less than `:ray`, but its accuracy depends on the surface and on ``\arg Q`` even at small ``|Q|``, erring by order unity near ``\arg Q = 157.5^\circ``.
+The backends take disjoint numerical keywords: pass `GGJModel(solver=:galerkin)` explicitly when supplying its `nx`/`xfac` knobs.
+
+```julia
+using GeneralizedPerturbedEquilibrium.InnerLayer
+
+p = GGJ.q4_surface_benchmark()      # GGJParameters for the q = 4 benchmark surface
+γ = 500im * GGJ.q0(p)               # physical rate placing Q on the imaginary axis at 500i
+Δ = solve_inner(GGJModel(), p, γ)   # Δ.interchange, Δ.tearing with the default :ray backend
+```
+
+## API reference
+
+### Tearing
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing]
+```
 
 ### InnerLayer
 
@@ -290,19 +158,19 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer]
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.GGJ]
 ```
 
-## SLAYER
+### SLAYER
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
 ```
 
-## Dispersion
+### Dispersion
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.Dispersion]
 ```
 
-## CriticalResonantField
+### CriticalResonantField
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]

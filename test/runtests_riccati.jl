@@ -28,8 +28,8 @@ end
             0.0 1.2+0.1im 0.0im 0.2;
             0.1+0.1im 0.0 0.9+0.3im 0.1im;
             0.0im 0.2 0.0 1.1+0.2im]
-        U1 = rng .+ 0.5*I(N)
-        U2 = 0.5*rng .+ I(N)  # near-identity to ensure invertibility
+        U1 = rng .+ 0.5 * I(N)
+        U2 = 0.5 * rng .+ I(N)  # near-identity to ensure invertibility
 
         u = zeros(ComplexF64, N, N, 2)
         u[:, :, 1] .= U1
@@ -40,7 +40,7 @@ end
         FFS.renormalize_riccati_inplace!(u, N)
 
         @test u[:, :, 2] ≈ I(N)
-        @test u[:, :, 1] ≈ S_expected rtol=1e-12
+        @test u[:, :, 1] ≈ S_expected rtol = 1e-12
     end
 
     @testset "renormalize_riccati_inplace! idempotent" begin
@@ -56,7 +56,7 @@ end
         FFS.renormalize_riccati_inplace!(u, N)
 
         @test u[:, :, 2] ≈ I(N)
-        @test u[:, :, 1] ≈ S rtol=1e-12
+        @test u[:, :, 1] ≈ S rtol = 1e-12
     end
 
     @testset "renormalize_riccati! (OdeState)" begin
@@ -64,8 +64,8 @@ end
         rng = [1.0+0.5im 0.2im 0.1;
             0.0im 1.2+0.1im 0.0;
             0.1+0.1im 0.0 0.9+0.3im]
-        U1 = rng .+ 0.5*I(N)
-        U2 = 0.2*rng .+ I(N)
+        U1 = rng .+ 0.5 * I(N)
+        U2 = 0.2 * rng .+ I(N)
 
         odet = FFS.OdeState(N, 10, 5, 1)
         odet.u[:, :, 1] .= U1
@@ -77,7 +77,7 @@ end
         FFS.renormalize_riccati!(odet, intr)
 
         @test odet.u[:, :, 2] ≈ I(N)
-        @test odet.u[:, :, 1] ≈ S_expected rtol=1e-12
+        @test odet.u[:, :, 1] ≈ S_expected rtol = 1e-12
     end
 
     # ── Shared Solovev setup ──────────────────────────────────────────────────
@@ -134,7 +134,7 @@ end
     @testset "Riccati end state has U₂ ≈ I" begin
         # The outer-region re-integration that closes riccati_eulerlagrange_integration
         # leaves odet.u[:,:,2] as the identity (canonical Riccati convention after final renorm)
-        @test odet_ric.u[:, :, 2] ≈ I(N) rtol=1e-10
+        @test odet_ric.u[:, :, 2] ≈ I(N) rtol = 1e-10
     end
 
     @testset "riccati_der! formula — Glasser 2018 Eq. 19" begin

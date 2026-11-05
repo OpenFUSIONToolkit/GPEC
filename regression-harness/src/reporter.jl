@@ -116,11 +116,11 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
 
     if info1 === nothing
         println("ERROR: No results for ref 1 ($(ref1.name))")
-        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
+        return (n_ok=0, n_changed=0, n_missing=0, n_new=0, n_failed=1)
     end
     if info2 === nothing
         println("ERROR: No results for ref 2 ($(ref2.name))")
-        return (n_ok=0, n_changed=0, n_missing=0, n_failed=1)
+        return (n_ok=0, n_changed=0, n_missing=0, n_new=0, n_failed=1)
     end
 
     failed1 = !info1.success
@@ -137,6 +137,7 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     n_ok = 0
     n_changed = 0
     n_missing = 0
+    n_new = 0
 
     # Helper: pick the value-cell text for one ref/quantity, accounting for
     # whole-ref failure (which should render as "FAILED" rather than "N/A").
@@ -181,14 +182,16 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
         q1 = q1_all[qname]
         q2 = q2_all[qname]
         abs_diff, rel_diff, status = compare_values(q1, q2)
-        st = status == "CHANGED" ? "** CHANGED **" : status
+        st = startswith(status, "CHANGED") ? "** $status **" : status
         push!(rows, [spec.label, format_value(q1), format_value(q2),
             format_diff(abs_diff, rel_diff, status, q1.value_type), st])
 
         if status == "OK"
             n_ok += 1
-        elseif contains(status, "CHANGED")
+        elseif startswith(status, "CHANGED")
             n_changed += 1
+        elseif status == "NEW"
+            n_new += 1
         else
             n_missing += 1
         end
@@ -233,10 +236,11 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     parts = String[]
     n_changed > 0 && push!(parts, "$n_changed changed")
     n_ok > 0 && push!(parts, "$n_ok unchanged")
+    n_new > 0 && push!(parts, "$n_new new")
     n_missing > 0 && push!(parts, "$n_missing missing/N/A")
     println("Summary: ", join(parts, ", "))
     println()
-    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
+    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing, n_new=n_new,
         n_failed=count(identity, (failed1, failed2)))
 end
 
@@ -271,6 +275,7 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
     n_ok = 0
     n_changed = 0
     n_missing = 0
+    n_new = 0
 
     for spec in case_spec.quantities
         qname = spec.name
@@ -318,13 +323,15 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
             q_prev = haskey(all_qs[end-1], qname) ? all_qs[end-1][qname] : nothing
             if q_last !== nothing && q_prev !== nothing
                 abs_diff, rel_diff, status = compare_values(q_prev, q_last)
-                st = status == "CHANGED" ? "** CHANGED **" : status
+                st = startswith(status, "CHANGED") ? "** $status **" : status
                 push!(row, format_diff(abs_diff, rel_diff, status, q_prev.value_type))
                 push!(row, st)
                 if status == "OK"
                     n_ok += 1
-                elseif contains(status, "CHANGED")
+                elseif startswith(status, "CHANGED")
                     n_changed += 1
+                elseif status == "NEW"
+                    n_new += 1
                 else
                     n_missing += 1
                 end
@@ -386,11 +393,12 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
         parts = String[]
         n_changed > 0 && push!(parts, "$n_changed changed")
         n_ok > 0 && push!(parts, "$n_ok unchanged")
+        n_new > 0 && push!(parts, "$n_new new")
         n_missing > 0 && push!(parts, "$n_missing missing/N/A")
         println("Summary (last vs prev): ", join(parts, ", "))
     end
     println()
-    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing,
+    return (n_ok=n_ok, n_changed=n_changed, n_missing=n_missing, n_new=n_new,
         n_failed=count(identity, failed_mask))
 end
 
@@ -436,7 +444,7 @@ function show_quantity_history(db::SQLite.DB, case_name::String, qty_name::Strin
         else
             abs_diff, rel_diff, status = compare_values(prev_q, q)
             diff_str = format_diff(abs_diff, rel_diff, status, q.value_type)
-            st = status == "CHANGED" ? "** CHANGED **" : status
+            st = startswith(status, "CHANGED") ? "** $status **" : status
             push!(rows, [short, date_str, val_str, diff_str, st])
         end
         prev_q = q

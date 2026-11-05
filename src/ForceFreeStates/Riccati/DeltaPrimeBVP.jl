@@ -367,7 +367,7 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
         if j < msing
             # Midpoint matching between consecutive surfaces
             M[junc_rows, _col_right(j, N)] .= -uShootR[j]
-            M[junc_rows, _col_left(j+1, N)] .= uShootL[j+1]
+            M[junc_rows, _col_left(j + 1, N)] .= uShootL[j+1]
         else
             # Edge junction
             M[junc_rows, _col_right(msing, N)] .= uShootR[msing]
@@ -431,12 +431,12 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
     M[1:2N, (N+1):(N+2N)] .= Phi_L_mats[1]
     M[1:2N, col_axis] .= -view(Phi_R_mats[1], :, (N+1):2N)
 
-    row_drive_base = 2N + (4N-2)*msing
+    row_drive_base = 2N + (4N - 2) * msing
     for j in 1:msing
         ipert_j = ipert_all[j]
         cl = _col_left(j, N)
         cr = _col_right(j, N)
-        row_cont = 2N + (4N-2)*(j-1)
+        row_cont = 2N + (4N - 2) * (j - 1)
         for i in 1:2N
             if i != ipert_j && i != ipert_j + N
                 row_cont += 1
@@ -447,7 +447,7 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
         junc_rows = (row_cont+1):(2N+(4N-2)*j)
         if j < msing
             M[junc_rows, cr] .= Phi_R_mats[j+1]
-            M[junc_rows, _col_left(j+1, N)] .= -Phi_L_mats[j+1]
+            M[junc_rows, _col_left(j + 1, N)] .= -Phi_L_mats[j+1]
         else
             M[junc_rows, cr] .= Phi_R_mats[msing+1]
             if wv !== nothing
@@ -487,7 +487,7 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     for jsing in 1:msing, side in 1:2
         dRow = 2jsing - (2 - side)
         fill!(b, 0)
-        drive_row = use_S_axis ? (nMat - s2 + dRow) : (2N + (4N-2)*msing + dRow)
+        drive_row = use_S_axis ? (nMat - s2 + dRow) : (2N + (4N - 2) * msing + dRow)
         b[drive_row] = 1
         x = use_lu ? (M_lu \ b) : (M_pinv * b)
 

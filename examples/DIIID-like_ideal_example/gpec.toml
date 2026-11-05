@@ -1,7 +1,8 @@
 # DIII-D-like H-mode equilibrium — n=1 ideal stability + perturbed equilibrium.
 # Free-boundary (nowall) external-kink analysis with DIII-D C-coil forcing applied
-# via Biot-Savart from 3D coil wires. This is the canonical Δ'-matrix regression
-# fixture (stable, clean BVP Δ') and the default benchmark case.
+# via Biot-Savart from 3D coil wires. This is the canonical ideal free-boundary and
+# perturbed-equilibrium regression fixture (diiid_n1) and the default benchmark case;
+# the Δ'-matrix fixture is the sibling DIIID-like_riccati_deltaprime_example.
 
 [Run]
 verbose = true                 # Log each stage's progress
@@ -17,7 +18,7 @@ psihigh = 0.995                # Upper limit of normalized poloidal flux (captur
 mpsi = 0                       # Number of radial grid intervals (0 = two-pass auto grid from psi_accuracy)
 psi_accuracy = 0.001           # Target relative accuracy of splined profile derivatives for the auto grid
 mtheta = 256                   # Number of poloidal grid points
-newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value, -1 = flip axis extrapolation)
+newq0 = 0                      # Target on-axis safety factor q(0) (0 = use input value; q is positive, so negative values are rejected)
 flux_surface_rtol = 1e-10      # Relative tolerance of the ODE solves that trace each flux surface
 impurity_charge = 6                     # Impurity charge (carbon)
 impurity_mass = 12                      # Impurity mass [proton masses]

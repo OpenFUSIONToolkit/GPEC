@@ -1,10 +1,10 @@
 # Citations
 
-The papers below provide the theoretical foundations for GPEC's algorithms. When working with specific modules, refer to the relevant papers for derivations, equation numbering, and physical context. PDFs are available locally in `docs/resources/`.
+The papers below provide the theoretical foundations for GPEC's algorithms; refer to them for derivations, equation numbering and physical context. PDFs of most of them are in `docs/resources/` of the repository.
 
 ---
 
-## Vacuum Module
+## Vacuum
 
 > M. S. Chance, "Vacuum calculations in azimuthally symmetric geometry,"
 > *Physics of Plasmas* **4**, 2161 (1997).
@@ -50,7 +50,7 @@ Applies the scheme to the singular surface integrals of magnetic fusion (exterio
 
 ---
 
-## ForceFreeStates Module
+## ForceFreeStates
 
 > A. H. Glasser, "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma,"
 > *Physics of Plasmas* **23**, 072505 (2016).
@@ -64,11 +64,11 @@ The primary reference for the `ForceFreeStates` module. Derives the Euler-Lagran
 > *Physics of Plasmas* **25**, 032507 (2018).
 > DOI: [10.1063/1.5007042](https://doi.org/10.1063/1.5007042)
 
-Reformulates the DCON eigenvalue problem as a Riccati matrix ODE, enabling parallel integration across singular surfaces and faster computation. Implemented in `src/ForceFreeStates/Riccati/` and enabled via `integrator = "riccati"` in `[ForceFreeStates]`.
+Reformulates the DCON eigenvalue problem as a Riccati matrix ODE, enabling parallel integration across singular surfaces and faster computation. Implemented in `src/ForceFreeStates/Riccati/` and enabled via `integrator = "Riccati"` in `[ForceFreeStates]`.
 
 ---
 
-## PerturbedEquilibrium Module
+## PerturbedEquilibrium
 
 > J.-K. Park, A. H. Boozer, and A. H. Glasser, "Computation of three-dimensional tokamak and spherical torus equilibria,"
 > *Physics of Plasmas* **14**, 052110 (2007).
@@ -110,7 +110,23 @@ Establishes the area weightings that make flux-surface Fourier spectra of pertur
 
 ---
 
-## InnerLayer Module
+## LocalStability
+
+> A. H. Glasser, J. M. Greene, and J. L. Johnson, "Resistive instabilities in general toroidal plasma configurations,"
+> *Physics of Fluids* **18**, 875 (1975).
+
+The resistive interchange criterion ``D_R`` and the layer coefficients E, F, G, H, K, M of each rational surface, evaluated by `LocalStability` and stored under `SingularSurfaces/`.
+
+---
+
+> J. W. Connor, R. J. Hastie, and J. B. Taylor, "Shear, periodicity, and plasma ballooning modes,"
+> *Physical Review Letters* **40**, 396 (1978).
+
+The ballooning representation on the covering space and the marginal ballooning equation that `LocalStability` integrates along the field line.
+
+---
+
+## Tearing
 
 > A. H. Glasser, Z. R. Wang, and J.-K. Park, "Computation of resistive instabilities by matched asymptotic expansions,"
 > *Physics of Plasmas* **23**, 112506 (2016).
@@ -148,7 +164,7 @@ Demonstrates asymptotic matching for resistive plasma response in realistic toro
 > *Physics of Plasmas* **29**, 072506 (2022).
 > DOI: [10.1063/5.0093079](https://doi.org/10.1063/5.0093079)
 
-The basis for the presently implemented in Fortran SLAYER code which computes the inner layer response in a two-fluid slab layer model.
+The SLAYER solver implemented in `InnerLayer.SLAYER`: the two-fluid slab layer equations of Cole and Fitzpatrick (2006) with a few terms dropped, solved for the inner-layer response of each rational surface.
 
 ---
 
@@ -156,7 +172,7 @@ The basis for the presently implemented in Fortran SLAYER code which computes th
 > *Physics of Plasmas* **13**, 032503 (2006).
 > DOI: [10.1063/1.2178167](https://doi.org/10.1063/1.2178167)
 
-The torque-balance error-field penetration threshold (Eqs. 61–62) behind the critical resonant field computed in `Tearing.CriticalResonantField`.
+The two-fluid drift-MHD layer equations that SLAYER solves in reduced form, and the torque-balance error-field penetration threshold (Eqs. 61–62) behind the critical resonant field computed in `Tearing.CriticalResonantField`.
 
 ---
 
@@ -169,10 +185,10 @@ Combines the toroidal outer-region calculation with the two-fluid slab layer mod
 ---
 
 > R. Fitzpatrick, "Response of a magnetically diverted tokamak plasma to a resonant magnetic perturbation,"
-> *Nuclear Fusion* (2025).
+> *Nuclear Fusion* **66**, 046025 (2026).
 > DOI: [10.1088/1741-4326/ae4fdd](https://doi.org/10.1088/1741-4326/ae4fdd) (open access: arXiv:2511.07666)
 
-Gives the diffusive-resistive layer width (Eq. 100) and, in Sect. 5.9, restricts the response calculation to the region inside the point where adjacent resonant layers first overlap. Both are implemented by the layer-overlap scan in `src/Tearing/LayerOverlap.jl`, which feeds the `psilim_from_layer_overlap` cap described in [Integration domain truncation](@ref).
+Gives the diffusive-resistive layer width (Eq. 100) and, in Sect. 5.9, restricts the response calculation to the region inside the point where adjacent resonant layers first overlap. Both are implemented by the layer-overlap scan in `src/Tearing/LayerOverlap.jl`, which feeds the `psilim_from_layer_overlap` cap described in [Integration domain](@ref).
 
 ---
 
@@ -191,7 +207,7 @@ The toroidal (Eq. 59) and large-aspect-ratio (Eq. 61) critical-Δ offsets from f
 
 ---
 
-## ErrorFields Module
+## ErrorFields
 
 > N. C. Logan et al., "Robustness of the tokamak error field correction tolerance scaling,"
 > *Plasma Physics and Controlled Fusion* **62**, 084001 (2020).
@@ -223,7 +239,23 @@ module computes (Eqs. 1–5).
 
 ---
 
-## Kinetic Forces
+> N. C. Logan et al., "SPARC tokamak error field expectations and physics-based correction coil design,"
+> *Nuclear Fusion* **66**, 066003 (2026).
+> DOI: [10.1088/1741-4326/ae6086](https://doi.org/10.1088/1741-4326/ae6086)
+
+The NTV-limited error-field correction model of `ErrorFields.NTV`: the correction current is capped by the torque budget the non-resonant field of the correction array spends.
+
+---
+
+> N. Leuthold et al., "ARC physics basis–magnetohydrodynamics,"
+> *Journal of Plasma Physics* **92**, E49 (2026).
+> DOI: [10.1017/S0022377826101421](https://doi.org/10.1017/S0022377826101421)
+
+The same model applied to ARC, with the zero-rotation `torque_only` limit reported beside the residual-torque one.
+
+---
+
+## KineticForces
 
 The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical TRansport Code) formalism.
 

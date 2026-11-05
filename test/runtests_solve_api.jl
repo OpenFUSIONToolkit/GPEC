@@ -98,6 +98,7 @@ using HDF5
         ideal = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
 
         @test scaled.mats.kinetic !== nothing && ideal.mats.kinetic === nothing
+        @test scaled.closure === :regular && ideal.closure === :ideal && iszero(scaled.bpen)
         @test !isapprox(scaled.free_boundary.et[1], ideal.free_boundary.et[1]; rtol=1e-6)
         @test factored.free_boundary.et[1] ≈ scaled.free_boundary.et[1] rtol = 1e-10
         @test factored.kinetic.kmsing == scaled.kinetic.kmsing
@@ -199,8 +200,11 @@ using HDF5
             @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
             @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
 
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"),
-                extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))]).ffs
+            reference =
+                GPEC.main([
+                    _stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"),
+                        extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))
+                ]).ffs
             @test reference.galerkin.msing == msing
             @test dp.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
             @test dp.raw ≈ reference.delta_prime.raw rtol = 1e-12
@@ -287,7 +291,7 @@ using HDF5
         @test d.terms[2].scale == 1.0 + 0.0im
         @test (im * a).scale == im
         @test (a * 3).scale == 3.0 + 0.0im
-        @test (a - b).terms[2].scale == -0.5 + 0.0im
+        @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
     end
 
@@ -383,6 +387,11 @@ using HDF5
         @test prob.eta == GPEC.InnerLayer.layer_eta(kgal.equil, kgal.surfaces) && all(>(0), prob.eta)
         @test prob.rho ≈ fill(2 * GPEC.Utilities.M_P * 5e19, n)
         @test prob.rotation ≈ fill(1e3, n)
+        # A supplied Coulomb logarithm feeds only the NTV collision model; η keeps its own closure.
+        keq = deepcopy(kgal.equil)
+        attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3), T_i=flat(1e3),
+            omega_E=flat(2π * 1e3), lnLambda=flat(30.0)))
+        @test GPEC.InnerLayer.layer_eta(keq, kgal.surfaces) == prob.eta
         # Explicit values override each default on its own.
         given = MatchProblem(kgal; eta=1e-7, rotation=fill(3.0, n))
         @test given.eta == fill(1e-7, n) && given.rho == prob.rho && given.rotation == fill(3.0, n)
@@ -551,14 +560,39 @@ using HDF5
             end
         end
 
+        @testset "kinetic_format" begin
+            # A rates-v1 kinetic file read through the deck's [Equilibrium] keys and through the API keyword.
+            mktempdir() do dir
+                psi = range(0.0, 1.0; length=11)
+                open(joinpath(dir, "rates.kin"), "w") do io
+                    for x in psi
+                        println(io, join((x, 5e19, 5e19, 1e3, 1e3, 1e3, 16.0 + x, 1e3 * exp(x), 1e5 * exp(-x)), " "))
+                    end
+                end
+                eq_overrides = Dict{String,Any}("kinetic_file" => "rates.kin", "kinetic_format" => "rates-v1")
+                deck_dir = _stage_deck(dir; eq_overrides=eq_overrides)
+                from_deck = GPEC.Equilibrium.configured_kinetic_profiles(GPEC.equilibrium_config(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir))
+                from_api = attach_kinetic_profiles!(deepcopy(equil), joinpath(dir, "rates.kin"); format="rates-v1").kinetic
+                @test from_deck.nu_i == from_api.nu_i && from_deck.lnLambda == from_api.lnLambda && from_deck.nu_e == from_api.nu_e
+            end
+        end
+
         @testset "deck kinetic source names" begin
             # A deck selects only the KineticForces model; test matrices and the retired key stop the parse.
-            parsed(overrides) = mktempdir() do dir
-                GPEC.parse_deck(TOML.parsefile(joinpath(_stage_deck(dir; ffs_overrides=overrides), "gpec.toml")), dir)
-            end
+            parsed(overrides) =
+                mktempdir() do dir
+                    GPEC.parse_deck(TOML.parsefile(joinpath(_stage_deck(dir; ffs_overrides=overrides), "gpec.toml")), dir)
+                end
             @test_throws "script-only" parsed(Dict{String,Any}("kinetic" => "TestKineticMatrices"))
             @test_throws "not a kinetic source" parsed(Dict{String,Any}("kinetic" => "fixed"))
             @test_throws "no longer a key" parsed(Dict{String,Any}("kinetic_source" => "fixed"))
+            # The removed large-aspect-ratio torque methods stop the parse whatever their value.
+            for key in ("rlar_flag", "clar_flag"), value in (true, false)
+                mktempdir() do dir
+                    deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("KineticForces" => Dict{String,Any}(key => value)))
+                    @test_throws "large-aspect-ratio methods are not ported" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+                end
+            end
         end
 
         @testset "kinetic torque" begin

@@ -6,6 +6,19 @@ kinetic-resonance surface locator built on it.
 """
 
 """
+    check_inner_quadrature(I, E, atol, rtol, what)
+
+Warn once per integral kind `what` and Julia session when the error estimate `E` exceeds `max(atol, rtol·‖I‖)`,
+i.e. QuadGK stopped short of its tolerance (evaluation cap or endpoint roundoff), or when `I` or `E` is not finite.
+"""
+function check_inner_quadrature(I, E, atol, rtol, what::String)
+    nI = norm(I)
+    (isfinite(nI) && isfinite(E) && E <= max(atol, rtol * nI)) ||
+        @warn "KineticForces $what integral did not converge: error estimate $E vs |I| = $nI" maxlog = 1 _id = Symbol(what)
+    return nothing
+end
+
+"""
     find_sign_change_roots(f, grid) → Vector{Float64}
 
 Locate the zeros of a callable `f` by scanning consecutive `grid` nodes for strict sign
@@ -56,7 +69,7 @@ density peaks (Logan & Park, Phys. Plasmas 20, 122507 (2013), §IV–V). `xeval`
 peak of the Maxwellian-weighted drive `x^2.5·e^−x`. The ℓ = 0 node is the ω_d-shifted ExB
 (superbanana-plateau) resonance.
 
-The frequencies are the cheap large-aspect-ratio closed forms of the `rlar` method,
+The frequencies are the cheap large-aspect-ratio closed forms
 `ω_b = (π/4)·√(ε/2)·wtran` and `ω_d = q·T_s/(2·ε·R₀²·Z·e·B₀)·wdfac`, with ε = ⟨r⟩/⟨R⟩ clamped
 away from the axis; no bounce averaging, which is enough for panel placement.
 """
@@ -136,7 +149,7 @@ function kinetic_axis_validity_psi(kinetic_profiles::Equilibrium.KineticProfileS
         end
     end
     psi_outer > 0 && @warn "kinetic_axis_validity_psi: orbit widths also reach ⟨r⟩ out to ψ=$(round(psi_outer; sigdigits=3)), " *
-                           "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed" maxlog = 1
+          "outside the axis-contiguous region ending at ψ_c=$(round(psi_c; sigdigits=3)); only the latter is suppressed" maxlog = 1
     return psi_c
 end
 
@@ -354,9 +367,12 @@ function resonance_grid_nodes(ctrl, kf_ctrl::KineticForcesControl, kinetic_profi
     (ForceFreeStates.kinetic_source(ctrl.kinetic) isa KineticForcesControl && kinetic_profiles !== nothing) || return nodes
     for n_res in intr.nlow:intr.nhigh
         n_res == 0 && continue
-        append!(nodes, kinetic_resonance_psi_nodes(kinetic_profiles, equil;
-            n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=main_ion(equil)[1], mi=main_ion(equil)[2],
-            electron=kf_ctrl.electron, wdfac=kf_ctrl.magnetic_drift_factor))
+        append!(
+            nodes,
+            kinetic_resonance_psi_nodes(kinetic_profiles, equil;
+                n=n_res, nl=kf_ctrl.bounce_harmonic_max, zi=main_ion(equil)[1], mi=main_ion(equil)[2],
+                electron=kf_ctrl.electron, wdfac=kf_ctrl.magnetic_drift_factor)
+        )
     end
     psi_c = axis_validity_boundary(kf_ctrl, species, kinetic_profiles, equil, rationals)
     psi_c > 0 && filter!(p -> p > psi_c, nodes)

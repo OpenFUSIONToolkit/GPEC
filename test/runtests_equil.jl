@@ -116,7 +116,7 @@ using TOML
 
     @testset "newq0 q-profile revision" begin
         # newq0 is a target q(0), not an index: non-integer requests must survive the config,
-        # and neither the -1 sentinel nor an explicit target may write back to the frozen config.
+        # and q is positive, so a negative target is rejected.
         newq0_config(newq0) = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
@@ -128,15 +128,7 @@ using TOML
             newq0=newq0
         )
 
-        base_config = newq0_config(0)
-        eq_base = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(base_config)
-
-        # -1 means "flip the sign of the axis extrapolation": f0fac vanishes, so ffac is
-        # exactly -1 and the revised q-profile is the negated baseline.
-        flip_config = newq0_config(-1)
-        eq_flip = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(flip_config)
-        @test flip_config.newq0 == -1.0
-        @test eq_flip.profiles.q_spline.y == -eq_base.profiles.q_spline.y
+        @test_throws ErrorException newq0_config(-1)
 
         # A non-integer target used to throw InexactError at construction (newq0 was ::Int)
         target_config = newq0_config(1.05)
@@ -148,6 +140,17 @@ using TOML
         xs = eq_target.profiles.xs
         q_axis = eq_target.profiles.q_spline.y[1] - eq_target.profiles.q_deriv(xs[1]; hint=Ref(1)) * xs[1]
         @test isapprox(q_axis, 1.05; rtol=0.02)
+
+        # The inverse path rescales F to meet the target too.
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+        eq_inv = Eq.PlasmaEquilibrium(
+            Eq.EquilibriumConfig(; eq_type="chease_binary", eq_filename=joinpath(data_dir, "INP1_binary"),
+                jac_type="boozer", mpsi=16, psilow=0.01, psihigh=0.99, r0_norm=6.8, b0_norm=7.4, newq0=1.5)
+        )
+        xs = eq_inv.profiles.xs
+        @test isapprox(eq_inv.profiles.q_spline.y[1] - eq_inv.profiles.q_deriv(xs[1]; hint=Ref(1)) * xs[1], 1.5; rtol=0.02)
+        # CHEASE supplies q directly, so a non-positive q stops the read.
+        @test_throws r"GPEC requires q > 0" Eq._chease_q([1.2, -0.1], (; eq_filename="INP1"))
     end
 
     @testset "flux_surface_rtol must be positive and finite" begin
@@ -238,8 +241,12 @@ using TOML
         @test_throws r"set kinetic_file in \[Equilibrium\]" GPEC.parse_deck(with(d -> d["ForceFreeStates"]["kinetic"] = "KineticForces"), template)
         # Values take their field types: an array becomes a range or a tuple, a string a Symbol.
         @test GPEC.parse_deck(with(d -> d["ForceFreeStates"]["nn"] = [1, 2]), template).force_balance.keywords[:nn] == 1:2
-        tearing = GPEC.tearing_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("inner_model" => "SLAYER", "coupling_mode" => "coupled",
-            "search" => Dict{String,Any}("Q_re_range" => [-2, 2]), "CriticalResonantField" => Dict{String,Any}("n" => 500))))
+        tearing = GPEC.tearing_from_deck(
+            Dict{String,Any}(
+                "Tearing" => Dict{String,Any}("inner_model" => "SLAYER", "coupling_mode" => "coupled",
+                    "search" => Dict{String,Any}("Q_re_range" => [-2, 2]), "CriticalResonantField" => Dict{String,Any}("n" => 500))
+            )
+        )
         @test tearing.problem[:coupling_mode] === :coupled
         @test tearing.config.Q_re_range === (-2.0, 2.0)
         @test tearing.problem[:critical_resonant_field].n == 500

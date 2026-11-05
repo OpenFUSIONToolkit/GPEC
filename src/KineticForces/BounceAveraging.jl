@@ -834,8 +834,8 @@ bounce point, so a monotone interval between stationary points of B contains one
 `bo/λ` lies strictly between its endpoint B values; the crossing is then solved from the
 cell's cubic, with `hints` carrying each interval's cell over from the previous λ.
 
-Returns roots sorted descending, the order the deepest-well and marginally-trapped logic
-downstream assumes; fewer than two roots signals a degenerate λ and sends the caller to
+Returns roots sorted ascending, as Fortran `spline_roots`, so the deepest-well search pairs neighbouring
+roots; fewer than two roots signals a degenerate λ and sends the caller to
 the fallback. `hints` is sized `length(bf.theta) + 1`, the extra slot being the far half
 of the interval that wraps through the seam.
 """
@@ -870,7 +870,7 @@ function _bounce_points_at_lambda!(
         push!(bpts, mod(root, 1.0))
     end
 
-    sort!(bpts; rev=true)
+    sort!(bpts)
     return bpts
 end
 
@@ -885,14 +885,14 @@ function _find_bounce_points_and_grid(
     ntheta::Int, bf::SurfaceBField, bpts_buf::Vector{Float64}, hints::Vector{Int}
 )
     if sigma == 0  # trapped
-        # Bounce points: roots of v_par(θ) in (0,1), sorted descending as the well logic below assumes.
+        # Bounce points: roots of v_par(θ) in (0,1), sorted ascending so neighbours bound one well or barrier.
         bpts = _bounce_points_at_lambda!(bpts_buf, hints, bf, lmda, bo)
 
         if length(bpts) < 2
             # Degenerate λ (v_par tangent to zero at an extremum, or < 2 stationary points of B): rare,
             # so fall back to an adaptive whole-interval root scan.
             vpar_fn = θ -> _vpar_from_spline(B_vpar, lmda, bo, θ)
-            bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0); rev=true)
+            bpts = sort!(Roots.find_zeros(vpar_fn, 0.0, 1.0))
         end
 
         nbpts = length(bpts)
@@ -1023,10 +1023,8 @@ function _bounce_samples!(
                 continue
             else
                 # After midpoint: hold the previous sample to the end of the grid.
-                # The wd slot is deliberately held from the wb integrand (g_wb),
-                # reproducing the Fortran behavior for parity.
                 fill!(view(g_wb, i:ntheta), g_wb[i-1])
-                fill!(view(g_wd, i:ntheta), g_wb[i-1])
+                fill!(view(g_wd, i:ntheta), g_wd[i-1])
                 fill!(view(jvtheta, i:ntheta), jvtheta[i-1])
                 break
             end

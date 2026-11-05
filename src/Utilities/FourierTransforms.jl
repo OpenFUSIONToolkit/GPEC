@@ -33,7 +33,7 @@ function compute_fourier_coefficients(mtheta::Int, m_modes::AbstractVector{<:Int
 
     @assert length(ζ) == mtheta "ζ must have length mtheta"
 
-    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
+    θ_grid = range(; start=0, length=mtheta, step=2π / mtheta)
     arg = m_modes' .* θ_grid .- n .* ζ
     return transpose(exp.(-im .* arg))
 end
@@ -67,8 +67,8 @@ function compute_fourier_coefficients(
 )
     @assert nzeta % nfp == 0 "nzeta ($nzeta) must be divisible by nfp ($nfp)"
 
-    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    ζ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+    θ_grid = range(; start=0, length=mtheta, step=2π / mtheta)
+    ζ_grid = range(; start=0, length=nzeta, step=2π / nzeta)
     nzeta_out = nzeta ÷ nfp
 
     mpert = length(m_modes)

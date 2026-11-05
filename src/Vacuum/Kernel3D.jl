@@ -163,22 +163,27 @@ end
 
 # Cached singular quadrature; rebuilt if PATCH_RAD / RAD_DIM / INTERP_ORDER change
 const SINGULAR_QUAD_CACHE = Ref{Union{Nothing,SingularQuadratureData}}(nothing)
+const _SINGULAR_QUAD_LOCK = ReentrantLock()
 
 """
     get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
 
-Return the cached [`SingularQuadratureData`](@ref), rebuilding it if the parameters changed.
+Return the cached [`SingularQuadratureData`](@ref), rebuilding it if the parameters changed. Takes a lock,
+so concurrent solves on different grids each get the data for their own parameters.
 """
 function get_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
-    cached = SINGULAR_QUAD_CACHE[]
-    if !isnothing(cached) &&
-       cached.PATCH_RAD == PATCH_RAD &&
-       cached.RAD_DIM == RAD_DIM &&
-       cached.INTERP_ORDER == INTERP_ORDER
-        return cached
+    @lock _SINGULAR_QUAD_LOCK begin
+        cached = SINGULAR_QUAD_CACHE[]
+        if !isnothing(cached) &&
+           cached.PATCH_RAD == PATCH_RAD &&
+           cached.RAD_DIM == RAD_DIM &&
+           cached.INTERP_ORDER == INTERP_ORDER
+            return cached
+        end
+        data = SingularQuadratureData(PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        SINGULAR_QUAD_CACHE[] = data
+        return data
     end
-    SINGULAR_QUAD_CACHE[] = SingularQuadratureData(PATCH_RAD, RAD_DIM, INTERP_ORDER)
-    return SINGULAR_QUAD_CACHE[]
 end
 
 """
@@ -194,12 +199,12 @@ Fused Laplace kernels: `single = 1/r`, `double = (Δx·n)/r³`. Shares `√(r²)
     dx = ox - sx
     dy = oy - sy
     dz = oz - sz
-    r2 = dx*dx + dy*dy + dz*dz
+    r2 = dx * dx + dy * dy + dz * dz
     r2 < 1e-30 && return (0.0, 0.0)
     rinv = inv(sqrt(r2))
     single = rinv
     r3inv = rinv * rinv * rinv
-    double = (dx*nx + dy*ny + dz*nz) * r3inv
+    double = (dx * nx + dy * ny + dz * nz) * r3inv
     return (single, double)
 end
 

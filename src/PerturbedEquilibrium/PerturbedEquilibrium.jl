@@ -58,8 +58,10 @@ surface inductance is free-space, and the response needs Λ from the same no-wal
 function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::Bool=true, compute_torque_response::Bool=false,
     verbose::Bool=false)::PlasmaResponse
     ffs.wall_settings === nothing ||
-        error("plasma_response needs a force-free-states solve without a wall: its surface inductance L is free-space, " *
-              "so Λ from a wall run would mix two vacuum models. Solve with wall=nothing (no [Wall] section).")
+        error(
+            "plasma_response needs a force-free-states solve without a wall: its surface inductance L is free-space, " *
+            "so Λ from a wall run would mix two vacuum models. Solve with wall=nothing (no [Wall] section)."
+        )
     # Galerkin and matched results publish no plasma edge response wp, so no operator could be built.
     if ffs.free_boundary === nothing && (ffs.integrator === :galerkin || ffs.closure === :matched)
         error("plasma_response needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *

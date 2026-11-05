@@ -355,7 +355,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
 
     local Us, Ub, E, bc_cond, Sbvp
     if s_m < 0.98 * Sv
-            UsS, UbS = handoff === nothing ? _power_states(cache, cis(θ) * Sv) : handoff
+        UsS, UbS = handoff === nothing ? _power_states(cache, cis(θ) * Sv) : handoff
         Us, Ub, E = march_boundary(params, Q, θ, Sv, s_m, UsS, UbS;
             rtol=march_rtol, growth=growth, seed=seed,
             ztrk=ztrk, purge_budget=purge_budget, dp_res=dp_res)
@@ -370,7 +370,9 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     bc_cond < 1e12 || @warn "boundary basis poorly conditioned (cond ≈ $bc_cond)"
 
     breaks = ray_breaks(params, Q, θ, Sbvp; cfl=cfl, min_cells=min_cells)
-    length(breaks) - 1 > warn_cells && @warn "GGJ ray: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells, so the solve is slow; the grid follows cfl = $cfl, min_cells = $min_cells and the local rates at this Q" Q maxlog = 1 _id = (:ggj_ray_cells, warn_cells)
+    length(breaks) - 1 > warn_cells &&
+        @warn "GGJ ray: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells, so the solve is slow; the grid follows cfl = $cfl, min_cells = $min_cells and the local rates at this Q" Q maxlog =
+            1 _id = (:ggj_ray_cells, warn_cells)
     ws = _galerkin_workspace(breaks, fill(CT_NONE, length(breaks) - 1))
     Δraw, cexp = _assemble_and_solve_point!(ws, params, Q, θ, Us, Ub, E; nq=nq)
     verbose && @printf("  BVP: %d Hermite cells on [0, %.4g], Δraw[1] = %.6e %+.6eim\n",

@@ -273,7 +273,7 @@ using TOML
                 for btarget in range(blo, bhi; length=400)[2:end-1]
                     lmda = bo / btarget
                     roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf2, lmda, bo))
-                    ref = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(Bv2, lmda, bo, θ), 0.0, 1.0); rev=true)
+                    ref = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(Bv2, lmda, bo, θ), 0.0, 1.0))
                     @test length(roots) == length(ref)
                     # The crossing inside the shared cell lies strictly between the two
                     # stationary points that bound it.
@@ -295,13 +295,13 @@ using TOML
             hints = ones(Int, length(bf.theta) + 1)
             for lmda in range(lmdatpb * (1 + 1e-6), lmdamax * (1 - 1e-6); length=200)
                 new_roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf, lmda, bo))
-                ref_roots = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(B_vpar, lmda, bo, θ), 0.0, 1.0); rev=true)
+                ref_roots = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(B_vpar, lmda, bo, θ), 0.0, 1.0))
                 @test length(new_roots) == length(ref_roots)
                 if length(new_roots) == length(ref_roots)
                     @test all(abs.(new_roots .- ref_roots) .< 1e-9)
                 end
-                # Roots are returned in the descending order downstream assumes.
-                @test issorted(new_roots; rev=true)
+                # Roots are returned ascending, as Fortran spline_roots, so the well search pairs neighbours.
+                @test issorted(new_roots)
                 # v_par vanishes at each root.
                 for θ in new_roots
                     # Solved directly from the cell's cubic, so v_par vanishes to
@@ -309,6 +309,44 @@ using TOML
                     @test abs(KF._vpar_from_spline(B_vpar, lmda, bo, θ)) < 1e-13
                 end
             end
+        end
+
+        @testset "deepest well of a four-root surface lies between neighbouring roots" begin
+            # Two B minima give four bounce points at λ between the minima's B values; every well must be a
+            # neighbouring pair, so the chosen window holds no other root and v_par > 0 at its midpoint.
+            xs4 = collect(range(0.0, 1.0; length=257))
+            B4 = @. (1 + 0.1cos(4pi * xs4 + 1.1)) / (1 + 0.05cos(2pi * xs4))
+            B4[end] = B4[1]
+            Bv4 = cubic_interp(xs4, B4; bc=PeriodicBC())
+            bf4 = KF._surface_b_field(Bv4)
+            buf = Float64[]
+            hints = ones(Int, length(bf4.theta) + 1)
+            nfour = 0
+            for lmda in range(1 / maximum(B4), 1 / minimum(B4); length=200)[2:end-1]
+                roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf4, lmda, 1.0))
+                length(roots) == 4 || continue
+                nfour += 1
+                t1, t2 = KF._find_deepest_well(roots, Bv4, lmda, 1.0)
+                @test !any(r -> t1 < r < t2 || t1 < r + 1 < t2, roots)
+                @test KF._vpar_from_spline(Bv4, lmda, 1.0, mod(0.5 * (t1 + t2), 1.0)) > 0
+            end
+            @test nfour > 0
+        end
+
+        @testset "past the midpoint the drift integrand holds its own last value" begin
+            # v_par turns negative at θ = 0.75: the bounce and drift integrands each hold their own previous sample.
+            ntheta = 32
+            pts = collect(range(0.0, 1.0; length=ntheta))
+            wts = fill(1 / (ntheta - 1), ntheta)
+            tspl = (out, θ) -> (out[1] = 1.0; out[2] = 0.5; out[4] = 1.0; out[5] = 0.3; out)
+            Bstep = θ -> θ < 0.75 ? 1.0 : 3.0
+            scr = KF.BounceScratch(ntheta, 1)
+            KF._bounce_samples!(zeros(ntheta), zeros(ComplexF64, ntheta), nothing, nothing, pts, wts, 0.5, 1, 1.0, 1.0, tspl, Bstep, 1.0,
+                [1], [0.0im], [0.0im], 1.0, false, 1, scr)
+            k = findfirst(>=(0.75), pts)
+            @test scr.g_wd[end] == scr.g_wd[k-1] != 0
+            @test scr.g_wb[end] == scr.g_wb[k-1]
+            @test scr.g_wd[end] != scr.g_wb[end]
         end
 
         @testset "resolves the pair straddling an extremum" begin
@@ -712,6 +750,16 @@ using TOML
         # Nonzero atol_psi dominating a small torque: the silent-garbage scenario
         ctrl_atol = KF.KineticForcesControl(; atol_psi=1e-2)
         @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl_atol, "fgar")
+        # A NaN torque fails every tolerance comparison, so it must error instead of passing silently
+        @test_throws ErrorException KF.check_psi_quadrature_convergence(complex(NaN), NaN, ctrl, "fgar")
+        @test_throws ErrorException KF.check_psi_quadrature_convergence(total, NaN, ctrl, "fgar")
+    end
+
+    @testset "check_inner_quadrature" begin
+        # An error estimate above tolerance (QuadGK stopped short) or a NaN must not pass silently
+        @test_logs KF.check_inner_quadrature(1.0 + 0im, 1e-6, 0.0, 1e-5, "test converged")
+        @test_logs (:warn, r"did not converge") KF.check_inner_quadrature(1.0 + 0im, 1e-3, 0.0, 1e-5, "test capped")
+        @test_logs (:warn, r"did not converge") KF.check_inner_quadrature([1.0 + 0im, NaN], 0.0, 0.0, 1e-5, "test nan")
     end
 
     @testset "METHOD_REGISTRY" begin
@@ -722,7 +770,7 @@ using TOML
         for entry in KF.METHOD_REGISTRY
             @test entry.flag in fieldnames(KF.KineticForcesControl)
             @test endswith(string(entry.flag), "_flag")
-            @test entry.kind in (:gar, :fcgl, :rlar, :clar)
+            @test entry.kind in (:gar, :fcgl)
             @test KF.method_kind(entry.name) == entry.kind
         end
     end
@@ -807,7 +855,10 @@ using TOML
             deck = TOML.parsefile(joinpath(template, "gpec.toml"))
             sol = GeneralizedPerturbedEquilibrium.analytic_config(deck)
             # A relative kinetic_file resolves against the deck directory, like eq_filename.
-            config = GeneralizedPerturbedEquilibrium.equilibrium_config(merge(deck, Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))))), template)
+            config = GeneralizedPerturbedEquilibrium.equilibrium_config(
+                merge(deck, Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))))),
+                template
+            )
             @test config.kinetic_file == normpath(h5)
             raw = E.read_kinetic_file(h5)
             equil = E.PlasmaEquilibrium(config, sol)

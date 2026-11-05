@@ -74,7 +74,7 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
     end
 
     # Interpolate the original (x, z) at equal arc-length targets
-    arc_length_targets = range(; start=0, length=mtheta, step=arc_length[end]/mtheta)
+    arc_length_targets = range(; start=0, length=mtheta, step=arc_length[end] / mtheta)
     # arc_length is an uneven grid so we have to specify the period explicitly
     periodic_bc = PeriodicBC(; endpoint=:exclusive, period=arc_length[end])
     xout = cubic_interp(arc_length[1:(end-1)], xin, arc_length_targets; bc=periodic_bc)
@@ -108,8 +108,8 @@ Write the cross product of rows `idx` of the `(N, 3)` matrices `a` and `b` into 
         b2 = b[idx, 2]
         b3 = b[idx, 3]
 
-        c[idx, 1] = a2*b3 - a3*b2
-        c[idx, 2] = a3*b1 - a1*b3
-        c[idx, 3] = a1*b2 - a2*b1
+        c[idx, 1] = a2 * b3 - a3 * b2
+        c[idx, 2] = a3 * b1 - a1 * b3
+        c[idx, 3] = a1 * b2 - a2 * b1
     end
 end

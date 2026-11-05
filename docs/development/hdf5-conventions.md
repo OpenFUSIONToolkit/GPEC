@@ -29,7 +29,7 @@ These rules govern `gpec.h5` (and any future GPEC-produced HDF5 output); harness
 
 ## Inputs live only under `Input/`
 
-`Input/gpec_toml_raw` stores the deck that reproduces the run: each result's save adds the sections stating the problem, algorithm and controls it was computed with (`Utilities.record_inputs!`), so a deck run and a script run of the same workflow record the same deck. `Input/RawInputs/` stores the raw equilibrium/forcing/coil data and tolerance file — together they make `gpec.h5` a self-contained rerun snapshot (`Rerun.jl` reconstructs every control struct from them; the writer and rerun reader carry cross-reference comments marking the mirrored path pair). **Never echo TOML flags or control-struct values into any other group** — every group outside `Input/` is derived output. (The former `kinetic/` and `slayer/settings/` echoes were removed under this rule.)
+`Input/gpec_toml_raw` stores the deck that reproduces the run: each result's save adds the sections stating the problem, algorithm and controls it was computed with (`Utilities.record_inputs!`), so a deck run and a script run of the same workflow record the same deck. `Input/RawInputs/` stores the raw equilibrium/forcing/coil data, the kinetic profiles, the wall file and the tolerance file — together they make `gpec.h5` a self-contained rerun snapshot (`Rerun.jl` reconstructs every control struct from them; the writer and rerun reader carry cross-reference comments marking the mirrored path pair). **Never echo TOML flags or control-struct values into any other group** — every group outside `Input/` is derived output. (The former `kinetic/` and `slayer/settings/` echoes were removed under this rule.)
 
 ## Schema
 
@@ -38,7 +38,7 @@ Top level (11 groups):
 | Group | Contents |
 |---|---|
 | `Info/` | Run metadata: `git_version`, mode-number ranges (`mpert`, `mlow`, …, `mn_index`), `psilim`, `qlim`, `Runtimes/` (per-stage wall-clock seconds) |
-| `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>}` |
+| `Input/` | Rerun snapshot: `gpec_toml_raw`, `RawInputs/{Equilibrium, ForcingTerms, Coils/<name>, Kinetic, Wall, ErrorFields}` |
 | `Equilibrium/` | Scalars (`beta_N`, `q_axis`, `q_95`, `I_p`, …) plus `Profiles/` (1-D on `psi`: 2piF, mu0p, dVdpsi, q) and `Geometry/` (2-D on `psi`×`theta`: rcoords, offset, nu, jac) |
 | `ForceFreeStates/` | `Solutions/ForwardIntegration/` (u-solutions), `Solutions/GalerkinIntegration/` (closed ξ profiles in the shared layout, the gal surface list, `gal_basis_output`-gated `Basis/`), `write_el_matrices`-gated `EulerLagrangeMatrices/{Ideal,Kinetic}`, `FreeBoundaryStability/`, `EdgeScan/` |
 | `LocalStability/` | Mercier `D_I`, resistive interchange `D_R`, `ballooning_Delta_prime` on `psi`; the ballooning α boundary on `ballooning_psi` |

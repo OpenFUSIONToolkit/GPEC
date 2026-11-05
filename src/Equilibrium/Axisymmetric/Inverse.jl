@@ -83,7 +83,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
 
     twopi = 2 * π
 
-    deta = zeros(Float64, mx+1, my+1)
+    deta = zeros(Float64, mx + 1, my + 1)
     for ipsi in 0:mx, itheta in 0:my
         if r2[ipsi+1, itheta+1] == 0.0
             deta[ipsi+1, itheta+1] = 0.0
@@ -149,7 +149,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         if mpsi == 0
             mpsi = 128
         end
-        sq_xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi+1) .* (π/2))) .^ 2
+        sq_xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi + 1) .* (π / 2))) .^ 2
     elseif grid_type == "pow1"
         if mpsi == 0
             mpsi = 128
@@ -180,7 +180,7 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         sq_xs = enforce_min_spacing(sq_xs, MIN_KNOT_SPACING)
         mpsi = length(sq_xs) - 1
     end
-    sq_fs = zeros(Float64, mpsi+1, 4)
+    sq_fs = zeros(Float64, mpsi + 1, 4)
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
 
     # Coordinate grids
@@ -188,21 +188,21 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
         mtheta = my
     end
 
-    theta_range = range(0.0, 1.0; length=mtheta+1)
+    theta_range = range(0.0, 1.0; length=mtheta + 1)
 
     # rzphi components: r², deta, dphi, jac
-    rzphi_fs = zeros(Float64, mpsi+1, mtheta+1, 4)
+    rzphi_fs = zeros(Float64, mpsi + 1, mtheta + 1, 4)
     rzphi_xs = copy(sq_xs)
     # Vector copy stored in PlasmaEquilibrium; interpolants use the faster Range theta_range (equal to machine precision).
     rzphi_ys = collect(theta_range)
 
     # eqfun components: |B|, metric1, metric2
-    eqfun_fs = zeros(Float64, mpsi+1, mtheta+1, 3)
+    eqfun_fs = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     eqfun_xs = copy(sq_xs)
 
     # Preallocate arrays for periodic spline fitting in the loop
-    spl_xs = zeros(Float64, mtheta+1)
-    spl_fs = zeros(Float64, mtheta+1, 5)
+    spl_xs = zeros(Float64, mtheta + 1)
+    spl_fs = zeros(Float64, mtheta + 1, 5)
     spl_post_buf = Vector{Float64}(undef, 5)   # scratch for post-SFL spline evaluation
 
     # q: i-files use the field-line integral, as Fortran `inverse_run`; a tabulated q splined in ψ is
@@ -234,11 +234,11 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
             rfac = sqrt(f_rsq)
             r = ro + rfac * cos(twopi * (theta + f_deta))
             jacfac = fx_rsq * (1 + fy_deta) - fy_rsq * fx_deta
-            w11 = (1 + fy_deta) * twopi ^ 2 * rfac / jacfac
+            w11 = (1 + fy_deta) * twopi^2 * rfac / jacfac
             w12 = -fy_rsq * pi / (rfac * jacfac)
-            bp = psio * sqrt(w11*w11 + w12*w12) / r
+            bp = psio * sqrt(w11 * w11 + w12 * w12) / r
             bt = f_sq_in_buf[1] / r
-            b = sqrt(bp*bp + bt*bt)
+            b = sqrt(bp * bp + bt * bt)
 
             spl_fs[itheta+1, 1] = f_rsq
             spl_fs[itheta+1, 2] = f_deta
@@ -283,16 +283,13 @@ function equilibrium_solver(input::InverseRunInput; override_psi_nodes::Union{No
     f1_sq_lo = sq_deriv(sq_xs[1])
     f1_sq_hi = sq_deriv(sq_xs[end])
     q0 = f_sq[1, 4] - f1_sq_lo[4] * sq_xs[1]
-    if newq0 == -1
-        newq0 = -q0
-    end
 
     if newq0 != 0
-        f0 = f_sq[1, 2] - f1_sq_lo[2] * sq_xs[1]
+        f0 = f_sq[1, 1] - f1_sq_lo[1] * sq_xs[1]
         f0fac = f0^2 * ((newq0 / q0)^2 - 1)
         q0 = newq0
         for ipsi in 0:mpsi
-            ffac = sqrt(1 + f0fac / f_sq[ipsi+1, 1]^2) * sign(newq0)
+            ffac = sqrt(1 + f0fac / f_sq[ipsi+1, 1]^2)
             sq_fs[ipsi+1, 1] *= ffac
             sq_fs[ipsi+1, 4] *= ffac
             rzphi_fs[ipsi+1, :, 3] *= ffac

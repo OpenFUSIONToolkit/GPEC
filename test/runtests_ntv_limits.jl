@@ -35,6 +35,10 @@ using HDF5
         @test EF.correction_current(3δt, c; delta_threshold=δt, torque_budget=T0, safety_factor=2.0, ntv=false) ≈ δt / c.delta_per_kat
         c0 = EF.EFCCoupling("x", c.delta_per_kat, 40.0, 0.05, 0.0)
         @test EF.correction_current(3δt, c0; delta_threshold=δt, torque_budget=T0) ≈ 2δt / c.delta_per_kat
+        # A residual torque too weak to resolve in C² − 4a·excess still gives the linear current, not zero.
+        cw = EF.EFCCoupling("w", c.delta_per_kat, 40.0, 0.05, 1.0e-20)
+        @test EF.correction_current(3δt, cw; delta_threshold=δt, torque_budget=T0) ≈ 2δt / c.delta_per_kat rtol = 1e-10
+        @test EF.correction_current_upper(3δt, cw; delta_threshold=δt, torque_budget=T0) ≈ 4δt / c.delta_per_kat rtol = 1e-10
         # Beyond the correctable limit there is no valid root.
         lim = EF.max_correctable_overlap(c; delta_threshold=δt, torque_budget=T0)
         @test isnan(EF.correction_current(1.01 * lim.with_ntv, c; delta_threshold=δt, torque_budget=T0))

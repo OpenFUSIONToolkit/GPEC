@@ -137,6 +137,12 @@ using Statistics
         @test isapprox(s25, 2 / 3; rtol=0.05)
         @test isnan(EF.allowable_tolerance(scan, 99.0))     # never reached within the scan
         @test_throws ArgumentError EF.allowable_tolerance(scan, 0.0)
+        # A scan from scale 0 (the as-designed risk) interpolates that interval linearly and returns sampled points exactly.
+        z = fill(0.0, 3)
+        scan0 = EF.ToleranceScan([0.0, 1.0, 2.0], [0.5, 2.0, 10.0], [0.5, 2.0, 10.0], z, z, 0.5)
+        @test EF.allowable_tolerance(scan0, 0.5) == 0.0
+        @test EF.allowable_tolerance(scan0, 2.0) == 1.0
+        @test EF.allowable_tolerance(scan0, 1.0) ≈ 0.5
         @test_throws ArgumentError EF.tolerance_scan(table, ts, sets, mc_ctrl, sharp, scen; scales=Float64[])
     end
 

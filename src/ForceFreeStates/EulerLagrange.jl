@@ -706,8 +706,10 @@ Errors when the solver stops short of the interval's end (e.g. the step size und
 function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
     sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
     SciMLBase.successful_retcode(sol) ||
-        error("Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
-              "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor.")
+        error(
+            "Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
+            "(retcode $(sol.retcode)). Loosen eulerlagrange_tolerance or refine the ψ grid; for kinetic runs, lower kinetic_factor."
+        )
     return sol
 end
 
@@ -777,15 +779,15 @@ end
     compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
 Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
-growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, or when `sing_flag` is set.
-The first call after a reduction only records reference norms. Errors if any norm is zero.
-Port of Fortran `ode_unorm`.
+growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
+The first call after a reduction records reference norms; if `sing_flag` forces a reduction there, it keeps
+the previous reduction's pivot order. Errors if any norm is zero. Port of Fortran `ode_unorm`.
 
 ### Arguments
 
   - `u` - Solution array, updated in place (the integrator state, to avoid copies)
   - `sing_flag` - Whether this call is at a singular surface
-  - `resonant_rows` - Resonant rows at an ideal crossing; when given, the reduction always runs and pivots on them
+  - `resonant_rows` - Resonant rows at an ideal crossing, pivoted on first
 """
 function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool;
     resonant_rows=Int[])
@@ -796,21 +798,21 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
     end
 
-    # The first call after a reduction records the reference norms; an ideal crossing reduces regardless
-    at_ideal_crossing = !isempty(resonant_rows)
-    if odet.new && !at_ideal_crossing
+    # A singular surface always reduces; otherwise reduce when the growth since the last reduction is too uneven
+    fix_required = sing_flag
+    if odet.new
         odet.new = false
         odet.unorm0 .= odet.unorm
-        return
-    end
-
-    # Growth since the last reduction (raw norms if a crossing comes right after one)
-    if !odet.new
+        # A forced reduction right after another keeps that reduction's pivot order (none to keep before the first)
+        if sing_flag && odet.ifix > 0
+            @views odet.unorm[odet.index[:, odet.ifix]] .= (intr.numpert_total-1):-1:0
+        end
+    else
         odet.unorm ./= odet.unorm0
+        fix_required |= maximum(odet.unorm) / minimum(odet.unorm) > ctrl.algorithm.renorm_threshold
     end
-    uratio = maximum(odet.unorm) / minimum(odet.unorm)
 
-    if uratio > ctrl.algorithm.renorm_threshold || sing_flag
+    if fix_required
         if odet.ifix < ctrl.algorithm.numunorms_init
             odet.ifix += 1
         else
@@ -962,7 +964,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
+            mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
         # Drop the resonant solutions zeroed at an ideal crossing
@@ -976,7 +978,7 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # Region i lies between fixups i-1 and i; its transform is the product of all later reductions
     transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        mul!(view(transforms,:,:,ifix), view(gauss,:,:,ifix), view(transforms,:,:,(ifix+1)))
+        mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, (ifix + 1)))
     end
 
     jfix = 1

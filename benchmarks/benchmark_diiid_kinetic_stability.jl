@@ -36,7 +36,9 @@ using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 const AnalysisFFS = GPE.Analysis.ForceFreeStates
 
-"Fortran GPEC DIII-D kinetic example run directory, from the environment (no on-disk default)."
+"""
+Fortran GPEC DIII-D kinetic example run directory, from the environment (no on-disk default).
+"""
 default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID_DCON, or pass the Fortran run directory as the first argument"),
     ENV, "GPEC_FORTRAN_DIIID_DCON")
 
@@ -167,10 +169,10 @@ _p(args...) = (println(stderr, args...); flush(stderr))
 _pf(fmt, args...) = (print(stderr, Printf.format(Printf.Format(fmt), args...)); flush(stderr))
 
 function run_benchmark(fortran_dir::String=default_fortran_dir())
-    _p("=" ^ 70)
+    _p("="^70)
     _p("  DIIID Kinetic-DCON Benchmark: Julia KF→FFS vs Fortran DCON")
     _p("  Fortran example: $fortran_dir")
-    _p("=" ^ 70)
+    _p("="^70)
 
     inputs = discover_inputs(fortran_dir)
     ref = read_dcon_reference(inputs.dcon_nc)
@@ -204,9 +206,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     re_err = abs(julia_re - ref.W_t_re) / abs(ref.W_t_re) * 100
     im_err = abs(julia_im - ref.W_t_im) / abs(ref.W_t_im) * 100
 
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     _p("  Results Comparison (kinetic-DCON least-stable eigenvalue)")
-    _p("=" ^ 70)
+    _p("="^70)
     _pf("  Re(et[1]):  Julia = %12.6f  Fortran = %12.6f  err = %6.2f%%\n",
         julia_re, ref.W_t_re, re_err)
     _pf("  Im(et[1]):  Julia = %12.6f  Fortran = %12.6f  err = %6.2f%%\n",
@@ -220,7 +222,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     im_pass = im_err <= 20.0
     im_stretch = im_err <= 5.0
 
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     if re_pass && im_pass
         _p("  PASS — Re within 5 %, Im within 20 %" *
            (im_stretch ? " (stretch: Im within 5 %)" : ""))
@@ -229,7 +231,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
         re_pass || _pf("    Re err %.2f%% > 5%%\n", re_err)
         im_pass || _pf("    Im err %.2f%% > 20%%\n", im_err)
     end
-    _p("=" ^ 70)
+    _p("="^70)
 
     # cond(F̄) vs ψ diagnostic — shows whether kinetic singular surfaces
     # (det(F̄)=0) were found and why peaks were/weren't accepted.

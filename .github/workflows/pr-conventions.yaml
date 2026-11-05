@@ -18,6 +18,8 @@ on:
       - unassigned
       - review_requested
       - review_request_removed
+    branches-ignore:
+      - main
 
 permissions:
   contents: read
