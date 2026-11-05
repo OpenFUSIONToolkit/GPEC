@@ -1,0 +1,27 @@
+direction: down
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  new: {style: {fill: "#e4e4e4"; stroke: "#111111"; stroke-dash: 4; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+}
+eq: "Equilibrium\nB(ψ,θ), q, F" {class: n}
+pe: "PerturbedEquilibrium\nδB/B, ∇·ξ⊥ with response" {class: n}
+kf: KineticForces {
+  direction: right
+  style: {fill: "#fafafa"; stroke: "#777777"; font-size: 14}
+  ba: "BounceAveraging (now)\norbit = flux surface ψ\nbounce, precession, |δJ|²" {class: n}
+  orb: "Orbits (new, M1–M2)\nψ(θ) at fixed (E, μ, Pᵩ)\nbounce, ⟨ζ̇⟩, |δJ|² on orbit" {class: new}
+  res: "resonance\niΩ − ν" {class: n}
+  dr: "drive\n∂f/∂ψ → ∂f/∂Pᵩ (M3)" {class: n}
+  en: "energy integral\n∫dx N(x) e⁻ˣ / (iΩ − ν)" {class: n}
+  tq: "torque\nTᵩ = Re T,  δWₖ = Im T / 2n" {class: n}
+  ba -> res {style.stroke: "#333333"}
+  orb -> res {style: {stroke: "#111111"; stroke-dash: 4}}
+  dr -> en {style.stroke: "#333333"}
+  res -> en {style.stroke: "#333333"}
+  en -> tq {style.stroke: "#333333"}
+}
+eq -> pe {style.stroke: "#333333"}
+pe -> kf.ba {style.stroke: "#333333"}
+pe -> kf.orb {style: {stroke: "#111111"; stroke-dash: 4}}
+eq -> kf.orb {style: {stroke: "#111111"; stroke-dash: 4}}

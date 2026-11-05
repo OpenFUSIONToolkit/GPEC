@@ -1,0 +1,406 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Built by m0_build.py from M0.template.html; edit the template, not M0.html. -->
+<title>M0 - Plan, pipeline and current behavior</title>
+<style>
+  :root { color-scheme: light; }
+  body { max-width: 50em; margin: 2em auto; padding: 0 1.5em;
+         font: 15px/1.6 Georgia, serif; color: #111; background: #fff; }
+  h1 { font-size: 1.5em; margin-bottom: .2em; }
+  .meta { color: #555; font-size: .85em; margin-bottom: 1em; }
+  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em;
+       border-bottom: 1px solid #ccc; padding-bottom: .3em; margin-top: 2.2em; }
+  figure { margin: 1.5em 0; }
+  figcaption { font-size: .85em; color: #444; margin-top: .5em; }
+  svg, img { max-width: 100%; height: auto; }
+  .note { border-left: 3px solid #999; padding-left: 1em; color: #333; }
+  /* status strip */
+  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center;
+           border: 1px solid #ccc; padding: .6em 1em; font-size: .9em;
+           font-family: system-ui, sans-serif; }
+  .strip b { font-weight: 600; }
+  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; }
+  .state.green { background: #2e7d32; } .state.amber { background: #b26a00; }
+  .state.red { background: #b71c1c; }
+  /* decision cards */
+  .card { border: 1px solid #bbb; border-left: 5px solid #333; padding: 1em 1.2em;
+          margin: 1.4em 0; font-family: system-ui, sans-serif; font-size: .95em; }
+  .card h3 { margin: 0 0 .4em; font-size: 1.05em; }
+  .card .ctx { color: #333; }
+  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .4em; }
+  .card dd { margin: 0 0 0 1.2em; }
+  .card label { display: block; margin: .3em 0; }
+  .card .rec { background: #f3f3f3; padding: .5em .8em; margin: .6em 0; }
+  .card textarea { width: 100%; min-height: 3em; font: inherit; }
+  .card .defs { font-size: .85em; color: #555; margin-top: .6em; }
+  .copy { font: inherit; padding: .4em 1em; margin-top: 1em; cursor: pointer; }
+  table.checks { border-collapse: collapse; width: 100%; font-size: .9em;
+                 font-family: system-ui, sans-serif; }
+  table.checks th, table.checks td { border-bottom: 1px solid #ccc; padding: .4em .6em;
+                                     text-align: left; vertical-align: top; }
+  #pipeline svg { display: block; max-width: 22em; margin: 0 auto; }
+  table.verify { font-size: .82em; }
+  table.verify td:first-child { white-space: nowrap; }
+  @media print { body { margin: 0; font-size: 11pt; } h2, .card { page-break-inside: avoid; }
+                 .copy { display: none; } }
+</style>
+
+<h1>M0 - Plan, pipeline and current behavior</h1>
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}}
+(runs at develop 4376e717 + packet only) &middot; no PR (report milestone) &middot; 2026-11-05</div>
+
+<div class="strip">
+  <span class="state green">GREEN</span>
+  <span><b>Sessions</b> 1 of 15 (M0: 1 of 1)</span>
+  <span><b>Checks</b> none (report milestone); current-behavior premise: shown, with a caveat</span>
+  <span><b>Tests</b> not run (no code change)</span>
+  <span><b>Key run</b> 67 s n = 1, 89 s n = 3 (KineticForces 23 s of the n = 1 run); first run</span>
+  <span><b>Decisions</b> 3 open</span>
+  <span><b>Oldest open question</b> none</span>
+</div>
+
+<h2>Question</h2>
+<p>Before any code is written: is the plan sound, does the existing zero-orbit-width
+(surface-local) torque in GPEC show the rational-surface and edge structure that key
+result 2 says orbit averaging removes, and is <code>physics.md</code> ready to be signed?
+This report carries the background, the pipeline, the current-behavior figure (the
+"before" of key result 2) and the three decisions that gate milestone M1.</p>
+
+<h2>Background</h2>
+<p>GPEC's <code>KineticForces</code> module computes the kinetic energy δW<sub>K</sub>
+and the neoclassical toroidal viscosity (NTV) torque T<sub>φ</sub> from the action
+variation δJ of each particle class, in the action-angle form of Park (2011) as
+implemented in PENT (Logan 2013). The bounce average that produces δJ is taken
+along a flux surface: a particle's orbit is assumed to stay on the surface ψ that
+labels it. This is the zero-orbit-width (ZOW) approximation. For thermal ions in
+present devices the trapped-orbit width Δ<sub>b</sub> is a few percent of the minor
+radius a; for a 3.5 MeV alpha in a reactor-scale tokamak it is 0.1–0.2 a
+(table below), comparable with the scale of the 3D field it averages.</p>
+<p>The project adds a second evaluation of δJ, along the guiding-center orbit in the
+constants of motion (E, μ, P<sub>φ</sub>), feeding the existing resonance operator,
+energy integral and torque identity, and reducing to the present path as
+Δ<sub>b</sub> → 0. The paper is a Letter with two results: the alpha torque in ARC,
+ITER and SPARC versus orbit width (KR1), and the thermal-ion torque density in
+DIII-D with and without the rational-surface and edge peaks of the ZOW calculation
+(KR2). A methods figure (KR3) shows the ZOW limit.</p>
+
+<table class="checks" style="width:auto">
+<tr><th>Device</th><th>R<sub>0</sub> (m)</th><th>a (m)</th><th>B<sub>0</sub> (T)</th>
+<th>Δ<sub>b</sub>/a, 3.5 MeV α</th><th>Δ<sub>b</sub>/a, 2 keV D</th></tr>
+<tr><td>DIII-D</td><td>1.67</td><td>0.60</td><td>2.0</td><td>(&gt; 1, unconfined)</td><td>0.043</td></tr>
+<tr><td>ITER</td><td>6.2</td><td>2.0</td><td>5.3</td><td>0.15</td><td>0.005</td></tr>
+<tr><td>SPARC</td><td>1.85</td><td>0.57</td><td>12.2</td><td>0.23</td><td>0.008</td></tr>
+<tr><td>ARC V3A (OFT example)</td><td>4.62</td><td>1.18</td><td>11.4</td><td>0.13</td><td>0.005</td></tr>
+<tr><td>ARC (Sorbom 2015)</td><td>3.3</td><td>1.13</td><td>9.2</td><td>0.15</td><td>0.005</td></tr>
+</table>
+<p style="font-size:.85em;color:#444">Estimate Δ<sub>b</sub> = qρ/√ε at r/a = 0.8, q = 3,
+ε = r/R<sub>0</sub>, ρ the gyroradius at the full particle speed. ARC V3A parameters from
+Hillesheim et al., J. Plasma Phys. (2026), §1; the others are nominal design values.
+Order-of-magnitude only; M1 computes the widths from the orbits.</p>
+
+<h2>What changed</h2>
+<p>No code changed in this milestone. The diagram shows where the new path enters.
+The orbit node (dashed, shaded) is new in M1–M2; it reads the same equilibrium
+and the same δB/B and ∇·ξ<sub>⊥</sub> modes as <code>BounceAveraging</code>, at the
+orbit's (ψ(t), θ(t)) instead of on one surface, and supplies the bounce frequency,
+the secular toroidal rate ⟨ζ̇⟩ and |δJ|² to the existing resonance operator. The drive
+changes from ∂f/∂ψ to ∂f/∂P<sub>φ</sub> in M3.</p>
+<figure id="pipeline">{{PIPELINE_SVG}}
+<figcaption>Pipeline. Solid: today's path. Dashed: the orbit path added in M1–M2.
+Ω is the resonance frequency (bounce harmonic times bounce frequency plus n times
+the toroidal precession, including E×B), ν the collision frequency, N(x) the drive,
+x = E/T.</figcaption></figure>
+
+<h2>Checks</h2>
+<p>M0 has no physics checks (no code). PLAN.md requires one premise check on the
+current-behavior plot:</p>
+<table class="checks">
+  <tr><th>Expected behavior</th><th>Seen</th><th>Result</th></tr>
+  <tr><td>The ZOW torque density peaks at the q = m/n surfaces (KR2 premise).</td>
+      <td>At the shipped regularization σ = 0.05 the n = 1 profile has steps and notches at 2/1,
+      3/1 and 4/1 (a drop of about 10× across each surface) and a peak at 6/1; the n = 3 profile has
+      small bumps at the core rationals and spikes at every edge rational. At σ = 0.005 a spike appears
+      at every rational surface in both n (dashed curves).</td><td>shown, σ-dependent</td></tr>
+  <tr><td>The ZOW torque density rises toward the edge.</td>
+      <td>84% (n = 1) and 77% (n = 3) of the total comes from ψ<sub>N</sub> &gt; 0.9 at σ = 0.05; the
+      largest n = 1 peak off a rational surface (ψ<sub>N</sub> = 0.920) sits at a kinetic resonance
+      surface next to the ω<sub>E</sub> = 0 crossing at ψ<sub>N</sub> = 0.914.</td><td>shown</td></tr>
+  <tr><td>The peaks are narrower than the local thermal-ion orbit width (what orbit averaging can remove).</td>
+      <td>Every peak identified has a full width at half maximum (FWHM) of 0.0003–0.015 in ψ<sub>N</sub> at
+      σ = 0.05 and 0.00005–0.0015 at σ = 0.005, against a local banana width of 0.016–0.032 (grey bands).
+      The smallest widths are at the resolution of the adaptive ψ quadrature.</td><td>shown</td></tr>
+</table>
+
+<h2>Figure</h2>
+<figure id="fig1">{{FIG_SVG}}
+<figcaption><b>Figure 1.</b> Today's zero-orbit-width torque on the DIII-D-like example
+(<code>examples/DIIID-like_ideal_example</code>: TokaMaker DIII-D-like H-mode, deuterium ions, harmonic
+collisions, Maxwellian, bounce harmonics ℓ = −6…6, ideal plasma response), method <code>fgar</code>.
+Left: n = 1, the example's C-coil forcing (1 kA peak). Right: n = 3, both I-coil rows at ±1 kA,
+even parity (written for this report; not a shipped example). Top: |dT<sub>φ</sub>/dψ<sub>N</sub>|, log
+scale. Bottom: cumulative T<sub>φ</sub>(ψ<sub>N</sub>). Solid: PerturbedEquilibrium
+<code>regularization_width</code> σ = 0.05 (the example's value); dashed: σ = 0.005. Dotted lines:
+rational surfaces q = m/n (labels for a subset). Light grey bands: ± the thermal-ion banana width
+qρ<sub>i</sub>/√ε at each rational surface, in ψ<sub>N</sub>. Dark grey: the axis region
+ψ<sub>N</sub> &lt; ψ<sub>c</sub> = 0.04 where the kinetic terms are suppressed. Triangles: kinetic
+resonance surfaces used as quadrature breakpoints (Ω<sub>ℓ</sub> = 0 at x = 2.5).</figcaption></figure>
+<table class="checks" style="width:auto">
+<tr><th>Case</th><th>σ</th><th>T<sub>φ</sub> (N m)</th><th>δW<sub>K</sub> (J)</th><th>share from ψ<sub>N</sub> &gt; 0.9</th></tr>
+<tr><td>n = 1, C-coil</td><td>0.05</td><td>0.554</td><td>0.082</td><td>84%</td></tr>
+<tr><td>n = 1, C-coil</td><td>0.005</td><td>1.663</td><td>0.097</td><td>92%</td></tr>
+<tr><td>n = 3, I-coil</td><td>0.05</td><td>0.037</td><td>−0.004</td><td>77%</td></tr>
+<tr><td>n = 3, I-coil</td><td>0.005</td><td>0.081</td><td>−0.011</td><td>86%</td></tr>
+</table>
+
+<h2>Reading</h2>
+<p>The figure shows the two features KR2 is about. Spikes at rational surfaces are present
+when the hand regularization is small, and the torque is concentrated at the edge, where the
+largest structures sit within a banana width of a rational or a kinetic resonance surface, or both.
+Each spike is one to two orders of magnitude narrower than the local thermal-ion banana width. An
+orbit average over that width would therefore change the profile's shape, which is the premise of
+KR2.</p>
+<p>The figure also shows something the tracker does not state. At the regularization the example
+ships with (σ = 0.05), the core rational spikes are already gone, replaced by steps and notches, so
+"the ZOW profile has spikes at rational surfaces" is true of the method, not of the default run. The
+integrated ZOW torque depends on σ: reducing σ tenfold raises it 3.0× for n = 1 and 2.2× for
+n = 3, almost all of it from ψ<sub>N</sub> &gt; 0.9. KR2's acceptance criterion compares the
+orbit-averaged integrated torque with the ZOW one to within 30%. With the ZOW number moving by a
+factor of 2–3 over one decade of σ, that comparison needs a stated σ for the ZOW reference. The
+σ-scan panel of KR2 already tests σ-independence of the orbit-averaged result; the 30% criterion is
+the part that is underspecified. It is recorded in the journal for a card before M5. It is not a
+card now, because it does not affect M1–M4.</p>
+<p>What the figure does not settle: (i) whether the edge structure is physical or an artifact of
+ψ<sub>N</sub> → 0.995 truncation and the ideal response near the separatrix; the orbit path's
+lost-orbit fraction (M3) is the bound PLAN.md names for it. (ii) Whether the narrowest widths are
+resolved: the ψ quadrature is adaptive (300–1320 evaluations), and the widths below 10<sup>−3</sup>
+are at its node spacing. Either way they are far below the banana width. (iii) Any comparison with
+DIII-D 145117 (Kim 2014: measured ≈ 3 N m). This equilibrium, its profiles and the 1 kA coil
+current are not that discharge, so the magnitudes here are not a test of anything. The fallback
+for KR2 remains this example unless Nik supplies the kinetic EFIT (QUESTIONS.md Q1).</p>
+<p>The orbit-width table in the Background shows that the reactor alpha widths, 0.13–0.23 a, are
+well beyond the "few percent" at which KR1 expects the departure to begin. Reaching the
+small-width end of the KR1 scan by raising B<sub>0</sub> and I<sub>p</sub> would need a factor of
+about 10 in field, so in practice the small-width end will come from the artificial energy scan
+that PLAN.md already lists as KR1's cross-check. PLAN.md M4 now says so (ladder change; the key
+results are unchanged).</p>
+
+<h2>Decisions</h2>
+<p>Choose an option in each card, add notes if needed, then press
+<i>Copy answers</i> and paste the block into <code>QUESTIONS.md</code>.
+Card Q4 gates everything after M0.</p>
+
+<div class="card" data-q="Q4">
+  <h3>Q4 - Sign off physics.md, with the proposed resolution of each [VERIFY] item</h3>
+  <p class="ctx"><b>What was found.</b> <code>physics.md</code> v0 has 18 items marked
+  [VERIFY]. The agent checked each against the code and the reference notes
+  (<code>refs/notes/</code>, made from full text). Sixteen have a proposed resolution
+  that does not change the physics. Two are inconsistencies in the text as written:</p>
+  <ol class="ctx">
+    <li><b>§3, the δJ integrand A(t).</b> physics.md writes
+    A(t) = v<sub>∥</sub>∇·ξ<sub>⊥</sub> + (δB/B)(2E − 3μB)/(2mv<sub>∥</sub>), integrated in time.
+    The code's integrand (<code>jvtheta</code>, <code>BounceAveraging.jl:1054</code>) is
+    JB dθ [∇·ξ<sub>⊥</sub>(v<sub>∥</sub>/v) + (δB/B)(1 − 3μB/2E)/(v<sub>∥</sub>/v)], and with
+    dt ∝ JB dθ/v<sub>∥</sub> this is ∮dt [(2E − 2μB)∇·ξ<sub>⊥</sub> + (2E − 3μB)δB/B]/(2E/v) ·
+    const, which is also the bracket of Park 2011 Eq. 13. The physics.md form differs from
+    this by a factor that varies along the orbit (m v<sub>∥</sub> on the ∇·ξ<sub>⊥</sub>
+    term, 2mv<sub>∥</sub> on the δB/B term), so it would not reproduce the ZOW limit.
+    Proposed: A(t) = (2E − 2μB)∇·ξ<sub>⊥</sub> + (2E − 3μB)δB/B, with the constant fixed by
+    the ZOW limit (M2 check 1).</li>
+    <li><b>§4, ω<sub>E</sub> in the drive.</b> physics.md sets
+    f<sub>0</sub> = f<sub>M</sub>(E; n(ψ̄), T(ψ̄)) with E the kinetic energy and Φ left out of the
+    orbit, then states that n∂f<sub>0</sub>/∂P<sub>φ</sub> reproduces the numerator
+    (ω<sub>E</sub> + ω<sub>*n</sub> + ω<sub>*T</sub>(x − 3/2)). Without Φ in f<sub>0</sub> the
+    ω<sub>E</sub> term does not appear: in the code it comes from the derivative at fixed
+    <i>total</i> energy (Logan 2013 Eq. 18 states fixed total energy). Proposed: f<sub>0</sub>
+    a function of E + ZeΦ(ψ̄), so ∂f<sub>0</sub>/∂ψ̄ carries −ZeΦ′/T and the ω<sub>E</sub>
+    term; the orbit itself is still computed without Φ (as physics.md proposes).</li>
+  </ol>
+  <p class="ctx">The full list with the proposed resolution of each item:</p>
+  <table class="checks verify">
+  <tr><th>§</th><th>[VERIFY] item</th><th>Proposed resolution and evidence</th></tr>
+  <tr><td>1(c)</td><td>T<sub>φ</sub> = Re T, δW<sub>K</sub> = Im T/2n holds for general orbits</td>
+  <td>Accept for a single toroidal harmonic n: δW<sub>K</sub> and T<sub>φ</sub> are the same
+  quadratic form in δJ with the real and imaginary parts of one resonance operator (Park 2011
+  Eqs. 8–9, 14–15); the orbit enters only through δJ and the frequencies. Park 2011 does not
+  state it for finite-width orbits (refs/notes/park2011.md §3); the paper says so.</td></tr>
+  <tr><td>2</td><td>sign of the Zeψ term in P<sub>φ</sub> with the code's ψ, <code>ip_sign</code>, <code>bt_sign</code></td>
+  <td>White &amp; Chance 1984 Eq. 16 and Antonenas 2021 Eq. 2.3 agree (P<sub>ζ</sub> = gρ<sub>∥</sub> − ψ<sub>p</sub>);
+  Gorelenkov 1999 Eq. 1 is the same up to overall sign. Fix the relative sign in M1 by a physical
+  test added to M1 check 3: co-current passing ions are displaced outward in major radius,
+  counter-current inward.</td></tr>
+  <tr><td>2</td><td>B<sup>θ</sup> = chi1/(2πJ), 2π factors</td>
+  <td>Fixed numerically by M1 check 2: the orbit period at Δ<sub>b</sub> → 0 must equal
+  the code's <code>total_wb</code> on the same surface.</td></tr>
+  <tr><td>2</td><td>drift: keep the ∇p correction to curvature or not</td>
+  <td>Low-β form, as the existing <code>g_wd</code> integrand uses, so the ZOW limit is exact.
+  The β correction is a later option, not in the Letter.</td></tr>
+  <tr><td>2</td><td>which Antonenas equations</td>
+  <td>Eqs. 4.6–4.7 (pendulum ω<sub>b</sub>, ω<sub>t</sub>, complete K) and 4.11–4.12 (Π form).
+  They hold for a large-aspect-ratio circular equilibrium only, so M1 check 1 runs on the LAR
+  example, not on the DIII-D-like one; on DIII-D-like the reference is <code>BounceAveraging</code>
+  (M1 check 2).</td></tr>
+  <tr><td>3</td><td>A(t) is the time-domain form of <code>jvtheta</code></td>
+  <td>It is not as written; finding 1 above.</td></tr>
+  <tr><td>3</td><td>grid labels (λ, P<sub>φ</sub>, √x)</td>
+  <td>Accept: λ = μB<sub>0</sub>/E is energy-independent, so at Δ<sub>b</sub> → 0 the grid
+  collapses onto today's (ψ, λ, x) grid.</td></tr>
+  <tr><td>3</td><td>phase-space measure in (E, μ, P<sub>φ</sub>)</td>
+  <td>Take the form of Gorelenkov 1999 Eq. 22 (checked against the PDF in M2; the note marks
+  its denominator as garbled) and fix the constant by reproducing <code>tnorm</code>∫dψ in the
+  ZOW limit (M2 check 1).</td></tr>
+  <tr><td>4</td><td>static drive n∂f<sub>0</sub>/∂P<sub>φ</sub></td>
+  <td>Accept (Gorelenkov 1999 Eqs. 25–28 with ω → 0).</td></tr>
+  <tr><td>4</td><td>ψ̄ = ⟨ψ⟩ or ψ at the outboard midplane</td>
+  <td>⟨ψ⟩ (reduces to ψ in ZOW; physics.md's recommendation).</td></tr>
+  <tr><td>4</td><td>exact definition of ω<sub>E</sub> in the code</td>
+  <td><code>omega_E</code> is an input profile (rad/s) read from the kinetic file
+  (<code>KineticProfiles.jl:278</code>), not derived from Φ in the code. The orbit path
+  uses Φ′ = −(chi1/2π)ω<sub>E</sub> with the sign fixed by reproducing the numerator in ZOW
+  (M3 check 2).</td></tr>
+  <tr><td>4</td><td>Φ left out of the orbit solve</td>
+  <td>Accept for alphas and core thermal ions; in a pedestal with strong E<sub>r</sub>,
+  ZeΦ/T is not small across a thermal orbit, so the Letter states the edge result as
+  without the electrostatic orbit modification.</td></tr>
+  <tr><td>4</td><td>reduction to the Maxwellian numerator</td>
+  <td>Holds once finding 2 is adopted; checked numerically in M3.</td></tr>
+  <tr><td>5</td><td>exclude lost orbits</td><td>Accept as the first treatment.</td></tr>
+  <tr><td>6</td><td>τ<sub>s</sub>, v<sub>c</sub> constants</td>
+  <td>The physics.md forms give E<sub>c</sub> = ½m<sub>α</sub>v<sub>c</sub><sup>2</sup> = 37 T<sub>e</sub>
+  for a pure D plasma, which matches the standard 14.8 A<sub>α</sub>T<sub>e</sub>(Σ n<sub>j</sub>Z<sub>j</sub><sup>2</sup>/(n<sub>e</sub>A<sub>j</sub>))<sup>2/3</sup>
+  (agent's check from the textbook form; Stix 1972 is not in <code>refs/</code>). Nik names the
+  source to cite.</td></tr>
+  <tr><td>6</td><td>cut at E<sub>α</sub>, no birth-edge term</td>
+  <td>Accept: ∂f/∂E does not enter a static (ω = 0) drive.</td></tr>
+  <tr><td>6</td><td>Bosch–Hale source</td><td>Accept, with an optional user-supplied S(ψ).</td></tr>
+  <tr><td>7</td><td>method name <code>ogar</code>, deck key <code>ogar_flag</code></td><td>Accept.</td></tr>
+  </table>
+  <p class="ctx"><b>Why this is yours to decide.</b> physics.md is the authority for the
+  equations and changes only through a Decisions card; the two findings change its text.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q4" value="A"> A - sign with all proposed resolutions, including findings 1 and 2</label></dt>
+    <dd>The agent edits physics.md to v1 (the two corrections, the resolutions written in place of each [VERIFY]) as the first commit of M1, and M1 starts.</dd>
+    <dt><label><input type="radio" name="Q4" value="B"> B - sign with exceptions listed in the note</label></dt>
+    <dd>As A, with the listed items changed as the note says; M1 starts unless an exception touches §2 (the orbit), in which case M1 waits for the corrected text.</dd>
+    <dt><label><input type="radio" name="Q4" value="C"> C - do not sign yet</label></dt>
+    <dd>Nothing after M0 starts (stop rule); the next session only revises physics.md.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation:</b> A. Fairly sure of finding 1 (it is a
+  comparison of two written expressions); moderately sure of finding 2 (it rests on the
+  fixed-total-energy convention of Logan 2013 Eq. 18, not on a derivation in this
+  project).</div>
+  <textarea name="Q4-note" placeholder="Notes, or a different answer"></textarea>
+  <p class="defs"><b>Terms:</b> ZOW - zero orbit width, today's surface-local path;
+  δJ - action variation of a particle class; A(t) - its integrand along the orbit;
+  E, μ, P<sub>φ</sub> - kinetic energy, magnetic moment, canonical toroidal momentum;
+  ψ̄, ⟨ψ⟩ - flux label of an orbit, its time average; Φ - electrostatic potential;
+  ω<sub>E</sub>, ω<sub>*n</sub>, ω<sub>*T</sub> - E×B and diamagnetic frequencies;
+  <code>jvtheta</code>, <code>total_wb</code>, <code>g_wd</code>, <code>tnorm</code> - the δJ
+  integrand, bounce action, precession integrand and torque normalization in today's code;
+  chi1 = 2π × poloidal flux; LAR - large aspect ratio; τ<sub>s</sub>, v<sub>c</sub>,
+  E<sub>c</sub> - slowing-down time, critical speed and energy.</p>
+</div>
+
+<div class="card" data-q="Q5">
+  <h3>Q5 - Which ARC equilibrium is "ARC" in key result 1?</h3>
+  <p class="ctx"><b>What was found.</b> The OpenFUSIONToolkit (OFT) TokaMaker "ARC" example
+  is ARC V3A from Hillesheim et al., J. Plasma Phys. (2026): B<sub>0</sub> = 11.4 T,
+  I<sub>p</sub> = 12.0 MA, R<sub>0</sub> = 4.62 m, a = 1.18 m (§1 of that paper). Its notebook
+  downloads the gEQDSK and an <code>input.gacode</code> profile file from Zenodo record
+  19498373, which is reachable from feynman. The tracker's orbit-width figure used the older
+  Sorbom 2015 ARC (R<sub>0</sub> 3.3 m, 9.2 T). The alpha orbit widths differ little (0.13 a vs
+  0.15 a, Background table), so the choice is about which machine the paper names.</p>
+  <p class="ctx"><b>Why this is yours to decide.</b> It fixes the device named in the
+  abstract, and only Nik knows whether a CFS-provided equilibrium is available or preferred.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q5" value="A"> A - ARC V3A from the OFT example and its Zenodo files</label></dt>
+    <dd>Public, reproducible, comes with kinetic profiles for the alpha source; the paper says "ARC V3A (Hillesheim 2026)".</dd>
+    <dt><label><input type="radio" name="Q5" value="B"> B - a CFS ARC gEQDSK and profiles from Nik</label></dt>
+    <dd>Depends on delivery before M4; the field scan still uses TokaMaker, so the shape must be rebuilt there.</dd>
+    <dt><label><input type="radio" name="Q5" value="C"> C - rebuild the Sorbom 2015 ARC in TokaMaker</label></dt>
+    <dd>Matches the tracker's figure; an older design, and its profiles would have to be invented.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation:</b> A, fairly sure - it is public, current, has
+  profiles, and the orbit-width physics does not distinguish the two designs.</div>
+  <textarea name="Q5-note" placeholder="Notes, or a different answer"></textarea>
+  <p class="defs"><b>Terms:</b> OFT - OpenFUSIONToolkit; TokaMaker - its free-boundary
+  Grad-Shafranov solver; gEQDSK - the standard EFIT equilibrium file; Zenodo - public data
+  archive; KR1 - key result 1, alpha torque versus orbit width; CFS - Commonwealth Fusion
+  Systems.</p>
+</div>
+
+<div class="card" data-q="Q6">
+  <h3>Q6 - Regression target for the zero-orbit-width limit, and the ignored torque keys</h3>
+  <p class="ctx"><b>What was found.</b> M2's first check compares the new path against
+  today's path at vanishing orbit width. Two choices fix that comparison. (i) The case:
+  the DIII-D-like example (deuterium, n = 1 C-coil, the case in the <a href="#fig1">figure
+  above</a>; 67 s for the full run) or the analytic TJ example
+  (<code>TJ_kinetic_NTV_example</code>, circular, fast). (ii) The post-PerturbedEquilibrium
+  torque path ignores three <code>[KineticForces]</code> keys: <code>nutype</code>,
+  <code>f0type</code> and <code>collisionality_factor</code> are never passed to
+  <code>calculate_gar</code> (<code>Compute.jl:142–147</code>,
+  <code>Torque.jl:177–186</code>), so every torque today runs with the harmonic collision
+  model and a Maxwellian whatever the deck says. The new path needs <code>f0type</code> to
+  select the slowing-down alphas (M3), and a ZOW comparison is only meaningful if both paths
+  see the same keys.</p>
+  <p class="ctx"><b>Why this is yours to decide.</b> Fixing (ii) changes results for any
+  user deck that sets a non-default value of those keys, which is a change to
+  <code>develop</code> outside this project's scope.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q6" value="A"> A - TJ for unit tests, DIII-D-like (D only, n = 1) for the ZOW figure; fix the forwarding in a separate small bugfix PR to develop before M3</label></dt>
+    <dd>Both paths read the same keys; the bugfix PR moves results only for decks with non-default values (the shipped examples use the defaults), and needs its own human review.</dd>
+    <dt><label><input type="radio" name="Q6" value="B"> B - same cases; the new path reads the keys itself, the old path is left as is</label></dt>
+    <dd>No change to develop; the ZOW comparison is valid only at the default keys, and the known defect stays.</dd>
+    <dt><label><input type="radio" name="Q6" value="C"> C - TJ only, both for tests and the figure; fix as in A</label></dt>
+    <dd>Cheapest, but the KR3 figure would be on a circular equilibrium unrelated to the KR2 case.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation:</b> A, fairly sure - the defect is real and small to
+  fix, and using the KR2 equilibrium for the ZOW figure ties the methods figure to the
+  result it supports.</div>
+  <textarea name="Q6-note" placeholder="Notes, or a different answer (e.g. a different species set)"></textarea>
+  <p class="defs"><b>Terms:</b> ZOW - zero orbit width; KR2, KR3 - key results 2 (DIII-D
+  torque density) and 3 (ZOW-limit methods figure); <code>nutype</code> - collision model
+  key; <code>f0type</code> - equilibrium distribution key; <code>calculate_gar</code> - the
+  function that evaluates the torque on one surface; develop - GPEC's integration branch.</p>
+</div>
+
+<button class="copy" onclick="copyAnswers()">Copy answers</button>
+<pre id="answers" hidden></pre>
+
+<h2>Paper</h2>
+<p><b>Abstract:</b> unchanged (v0). <b>Key results:</b> list and claims unchanged; KR2 now
+records that its "before" figure is in this report. <b>Figures promoted:</b> none. <b>PLAN.md
+ladder edits</b> (allowed at a milestone boundary, changelog v0.2): M1 check 1 runs the Antonenas
+comparison on a large-aspect-ratio circular equilibrium, where those formulas apply; M1 check 3
+adds the sign test for P<sub>φ</sub> (co-current passing ions displaced outward); M4 notes that the
+small-width end of the KR1 scan comes from the energy scan.</p>
+<p><b>Coherence check</b> (template, applied to the v0 abstract and plan): the abstract states a
+two-result story that matches KR1 and KR2. The introduction is not yet written. The Methods outline
+covers what M1–M3 build. The one place where results and claims may not line up is the KR2 phrase
+"the integrated thermal torque is unchanged within [X]": the ZOW integrated torque itself moves by
+2–3× with σ (Figure 1), so "unchanged" needs a reference σ. This is flagged for a card before M5,
+not changed here. Every planned figure (KR1–KR3) has an acceptance criterion and a "wrong would
+look like".</p>
+
+<h2>Next</h2>
+<p>M1 - constants-of-motion orbits, diagnostic only (2 sessions), once Q4 is answered.
+Q6 is needed by M2 and Q5 by M4; neither blocks M1, but under the stop rules a card
+unanswered through all of M1 stops the project at the end of M1. If Q4 is answered
+C, the next session revises physics.md and nothing else.</p>
+
+<script>
+function copyAnswers() {
+  const date = new Date().toISOString().slice(0, 10);
+  const lines = [`## Answers to M0 (${date})`, ''];
+  document.querySelectorAll('.card').forEach(c => {
+    const q = c.dataset.q;
+    const sel = c.querySelector(`input[name="${q}"]:checked`);
+    const note = c.querySelector(`textarea[name="${q}-note"]`).value.trim();
+    const label = sel ? sel.parentElement.textContent.trim() : '(no option chosen)';
+    lines.push(`- **${q}**: ${label}` + (note ? `\n  - ${note}` : ''));
+  });
+  const text = lines.join('\n');
+  const pre = document.getElementById('answers');
+  pre.textContent = text; pre.hidden = false;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});  // the block is shown either way
+}
+</script>
