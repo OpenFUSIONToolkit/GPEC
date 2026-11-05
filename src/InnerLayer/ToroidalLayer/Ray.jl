@@ -1,25 +1,25 @@
 # Ray.jl
 #
-# Rotated-contour backend (`GGJModel{:ray}`): the GGJ equations continued onto x = e^{iθ}s,
-# θ = arg(Q)/4. Far-field series data at the radius S are marched inward to s_m modulo the
+# Rotated-contour solver: the layer equations continued onto x = e^{iθ}s, θ from the model's
+# `default_ray_angle` (arg(Q)/4 for GGJ). Far-field series data at the radius S are marched inward to s_m modulo the
 # decaying exponential pair, then the Galerkin.jl Hermite assembly solves [0, s_m] with
 # v(s_m) = Us + Δ·Ub + c₁E₁ + c₂E₂. Method and rationale: docs/src/inner_layer.md.
 
 """
-    ode_matrix([CT,] p::GGJParameters, Q, x) -> SMatrix{6,6,CT}
+    ode_matrix([CT,] p::ToroidalLayerParameters, Q, x) -> SMatrix{6,6,CT}
 
-Coefficient matrix `M(x)` of GWP2016 Eq. 11 as `dv/dx = M v`, `v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ')`, for
-real or complex `x`. `M` is polynomial in `x`, so x = 0 is an ordinary point and the system
-continues analytically to complex `x`. `CT` selects the element type (default `ComplexF64`;
+Coefficient matrix `M(x)` of the layer equations (GWP2016 Eq. 11 for GGJ) as `dv/dx = M v`,
+`v = (Ψ, Ξ, Υ, Ψ', Ξ', Υ')`, for real or complex `x`, built from the model's [`layer_rows`](@ref). `M` is
+polynomial in `x`, so x = 0 is an ordinary point and the system continues analytically to complex `x`. `CT` selects the element type (default `ComplexF64`;
 `Complex{Double64}` for the extended-precision march).
 """
-ode_matrix(p::GGJParameters, Q::ComplexF64, x::Number) =
+ode_matrix(p::ToroidalLayerParameters, Q::ComplexF64, x::Number) =
     ode_matrix(ComplexF64, p, Q, x)
 
-function ode_matrix(::Type{CT}, p::GGJParameters, Q::Number, x::Number) where {CT<:Complex}
-    Ũ, Ṽ = ggj_rows(CT, p, Q, CT(x))
+function ode_matrix(::Type{CT}, p::ToroidalLayerParameters, Q::Number, x::Number) where {CT<:Complex}
+    Ũ, Ṽ = layer_rows(CT, p, Q, CT(x))
     m = zeros(MMatrix{6,6,CT})
-    # rows 1–3: (Ψ, Ξ, Υ)' = (Ψ', Ξ', Υ'); rows 4–6: GWP2016 Eq. 11
+    # rows 1–3: (Ψ, Ξ, Υ)' = (Ψ', Ξ', Υ'); rows 4–6: the layer equations
     m[1, 4] = 1
     m[2, 5] = 1
     m[3, 6] = 1
@@ -31,18 +31,17 @@ end
 """
     ray_breaks(params, Q, θ, S; cfl=0.2, min_cells=1024) -> Vector{Float64}
 
-Cell boundaries `0 = s₀ < s₁ < … = S` for the Hermite BVP: each cell resolves the full
-local WKB rate μ + ρs (fast Ohm and Υ-family pair μ = |√Q| + √(|Q|·|G+KF|), parabolic pair
-ρ = Re(e^{2iθ}/√Q)) whether or not the mode is present, since unresolved dormant modes
-alias into spurious discrete ones. `min_cells` floors the resolution where the local rates
+Cell boundaries `0 = s₀ < s₁ < … = S` for the Hermite BVP: each cell resolves the full local WKB rate
+μ + ρs, the model's [`fast_rates`](@ref) μ (for GGJ the Ohm and Υ-family pairs |√Q| + √(|Q|·|G+KF|)) and
+its [`parabolic_rate`](@ref) ρ (Re(e^{2iθ}/√Q) for GGJ), whether or not the mode is present, since
+unresolved dormant modes alias into spurious discrete ones. `min_cells` floors the resolution where the local rates
 are small (|Q| ≪ 1).
 """
-function ray_breaks(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Float64;
+function ray_breaks(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64, S::Float64;
     cfl::Float64=0.2, min_cells::Int=1024)
-    sq = sqrt(Q)
-    ρ = real(cis(2θ) / sq)
-    ρ > 0 || throw(ArgumentError("contour angle θ=$θ gives non-decaying parabolic pair (ρ=$ρ ≤ 0); use θ ≈ arg(Q)/4"))
-    μ = abs(sq) + sqrt(abs(Q) * abs(params.G + params.K * params.F))
+    ρ = parabolic_rate(params, Q, θ)
+    ρ > 0 || throw(ArgumentError("contour angle θ=$θ gives non-decaying parabolic pair (ρ=$ρ ≤ 0); use θ ≈ default_ray_angle(params, Q)"))
+    μ = fast_rates(params, Q)
     hmax = S / min_cells
     breaks = [0.0]
     while breaks[end] < S
@@ -75,10 +74,9 @@ Orthonormal basis of the forward-decaying pair at s = S on the ray: random
 seeds integrated backward over [S, S+ΔS] with fully-resolved RK4, ΔS sized so
 the pair separates from everything else by ≈ `growth` e-folds.
 """
-function decaying_pair(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Float64;
+function decaying_pair(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64, S::Float64;
     growth::Float64=30.0, seed::Int=20260707, dp_res::Float64=20.0)
-    sq = sqrt(Q)
-    ρ = real(cis(2θ) / sq)
+    ρ = parabolic_rate(params, Q, θ)
     ρ > 0 || throw(ArgumentError("θ=$θ gives ρ=$ρ ≤ 0; decaying pair undefined"))
     ph = cis(θ)
     # Window ΔS: the slowest backward grower separates from the power pair by `growth` e-folds.
@@ -96,7 +94,7 @@ function decaying_pair(params::GGJParameters, Q::ComplexF64, θ::Float64, S::Flo
     for λ in eigvals(Matrix(ph * ode_matrix(params, Q, ph * (S + ΔS))))
         gmax_loc = max(gmax_loc, abs(real(λ)))
     end
-    rate = max(ρ * (S + ΔS) + abs(sq), gmax_loc)
+    rate = max(ρ * (S + ΔS) + ohm_rate(params, Q), gmax_loc)
     nsteps = clamp(ceil(Int, dp_res * rate * ΔS), 200, 2_000_000)
     h = -ΔS / nsteps
 
@@ -132,7 +130,7 @@ which Δ is defined): 2-stage Radau IIA with purges against a carried decaying f
 `rtol` sets the step factor c = (rtol/100)^{1/3}; `ztrk` caps resolved-band steps at ztrk/g_max;
 `purge_budget` is the e-folds between purges; `growth`, `seed`, `dp_res` go to [`decaying_pair`](@ref).
 """
-function march_boundary(params::GGJParameters, Q::ComplexF64, θ::Float64,
+function march_boundary(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64,
     S::Float64, s_m::Float64, Us::Vector{ComplexF64}, Ub::Vector{ComplexF64};
     rtol::Float64=1e-9, growth::Float64=30.0, seed::Int=20260707,
     ztrk::Float64=0.3, purge_budget::Float64=2.5, dp_res::Float64=20.0)
@@ -255,7 +253,7 @@ Boundary data at s = S taken directly from the inps series, used when the BVP ed
 normalization, `E` the numerically generated decaying pair, `cond_est` the condition number of the
 column-normalized basis.
 """
-function boundary_basis(params::GGJParameters, Q::ComplexF64,
+function boundary_basis(params::ToroidalLayerParameters, Q::ComplexF64,
     cache::InnerAsymptoticsCache, θ::Float64, S::Float64;
     growth::Float64=30.0, seed::Int=20260707, dp_res::Float64=20.0)
     Us, Ub = _power_states(cache, cis(θ) * S)
@@ -300,10 +298,10 @@ struct RaySolveResult
 end
 
 """
-    solve_ray(params::GGJParameters, Q; θ=angle(Q)/4, kmax=12, S=nothing, smax_tol=1e-9,
+    solve_ray(params, Q; θ=default_ray_angle(params, Q), kmax=12, S=nothing, smax_tol=1e-9,
               cfl=0.2, min_cells=1024, warn_cells=6000, nq=6, verbose=false, …) -> RaySolveResult
 
-Solve the GGJ inner-layer problem on the rotated ray x = e^{iθ}s. `Δ` is the rescaled pair
+Solve the inner-layer problem of `params`' model on the rotated ray x = e^{iθ}s. `Δ` is the rescaled pair
 (Δ₊, Δ₋) = (interchange, tearing), directly comparable to the `:galerkin` backend; θ = 0 is a
 real-axis solve.
 
@@ -316,8 +314,8 @@ no error estimate is returned (at small |Q| Δ is good to about 1e-8–2e-7 rela
 `march_rtol` is [`march_boundary`](@ref)'s `rtol`; `growth`, `seed`, `ztrk`, `purge_budget`, `dp_res`
 go to `march_boundary`/[`decaying_pair`](@ref); `handoff` (diagnostic) supplies (Us, Ub) at S.
 """
-function solve_ray(params::GGJParameters, Q::ComplexF64;
-    θ::Float64=angle(Q) / 4, kmax::Int=12,
+function solve_ray(params::ToroidalLayerParameters, Q::ComplexF64;
+    θ::Float64=default_ray_angle(params, Q), kmax::Int=12,
     S::Union{Nothing,Float64}=nothing, smax_tol::Float64=1e-9,
     growth::Float64=30.0, march_rtol::Float64=1e-9, sm_fac::Float64=1.0,
     cfl::Float64=0.2, min_cells::Int=1024, warn_cells::Int=6000, nq::Int=6, seed::Int=20260707,
@@ -371,7 +369,7 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
 
     breaks = ray_breaks(params, Q, θ, Sbvp; cfl=cfl, min_cells=min_cells)
     length(breaks) - 1 > warn_cells &&
-        @warn "GGJ ray: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells, so the solve is slow; the grid follows cfl = $cfl, min_cells = $min_cells and the local rates at this Q" Q maxlog =
+        @warn "Ray solver: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells, so the solve is slow; the grid follows cfl = $cfl, min_cells = $min_cells and the local rates at this Q" Q maxlog =
             1 _id = (:ggj_ray_cells, warn_cells)
     ws = _galerkin_workspace(breaks, fill(CT_NONE, length(breaks) - 1))
     Δraw, cexp = _assemble_and_solve_point!(ws, params, Q, θ, Us, Ub, E; nq=nq)
@@ -383,55 +381,8 @@ function solve_ray(params::GGJParameters, Q::ComplexF64;
     return RaySolveResult(Δ, Δraw, cexp, Q, θ, Sv, series_ok, bc_cond, breaks, cfl, min_cells, ws)
 end
 
-solve_ray(params::GGJParameters, Q::Number; kwargs...) =
+solve_ray(params::ToroidalLayerParameters, Q::Number; kwargs...) =
     solve_ray(params, ComplexF64(Q); kwargs...)
-
-"""
-    solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs...)
-        -> InnerLayerResponse
-
-Rotated-ray backend: converts γ via `inner_Q`, forwards keywords to
-[`solve_ray`](@ref), and returns the parity-projected matching data (Δ₊, Δ₋) as the
-`interchange` and `tearing` fields of [`InnerLayerResponse`](@ref).
-Preferred for |Q| ≳ 1 and near the imaginary axis; use `solve_ray` directly
-when the full [`RaySolveResult`](@ref) is wanted. `real_profiles`, `npc` and `certify_rtol` are
-profile-only model options (see `solve_inner_profile`) and are ignored here.
-"""
-function solve_inner(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
-    real_profiles=nothing, npc=nothing, certify_rtol=nothing, kwargs...)
-    res = solve_ray(params, inner_Q(params, γ); kwargs...)
-    return InnerLayerResponse(; interchange=res.Δ[1], tearing=res.Δ[2])
-end
-
-"""
-    solve_inner_profile(::GGJModel{:ray}, params::GGJParameters, γ::Number;
-                        real_profiles=false, npc=8, certify_rtol=1e-3, kwargs...)
-        -> (; Δ, x, Ψ, Ξ, dψdx, rescale, certΔ)
-
-Rotated-ray implementation of the [`solve_inner_profile`](@ref) interface. `Δ` and the
-layer-center fields come from the solve at θ = arg(Q)/4; x = 0 lies on every contour, so
-Ψ(0), Ξ(0) are the real-axis values, and by default only they are returned (`x = [0.0]`,
-`certΔ = NaN`). With `real_profiles = true` the fields across the layer (x > 0) come from an
-extra θ = 0 solve (`npc` points per cell), a diagnostic; the x = 0 row stays the rotated
-solve's, and `certΔ` is the largest relative difference of the two solves' Δ₊, Δ₋, warned
-above `certify_rtol`. Other keywords forward to [`solve_ray`](@ref), except θ.
-"""
-function solve_inner_profile(::_BareGGJ{:ray}, params::GGJParameters, γ::Number;
-    real_profiles::Bool=false, npc::Int=8, certify_rtol::Float64=1e-3, kwargs...)
-    Q = inner_Q(params, γ)
-    rr = solve_ray(params, Q; kwargs...)             # Δ and layer-center fields (optimal θ)
-    c = solution_profile(rr; npc=1)                  # first point is s = 0
-    if !real_profiles
-        return (; Δ=rr.Δ, x=[0.0], Ψ=c.Ψ[1:1, :], Ξ=c.Ξ[1:1, :], _profile_conversions(params)..., certΔ=NaN)
-    end
-    r0 = solve_ray(params, Q; θ=0.0, kwargs...)      # real-axis profile solve
-    certΔ = maximum(abs.(r0.Δ .- rr.Δ) ./ max.(abs.(rr.Δ), 1e-300))
-    certΔ > certify_rtol && @warn "GGJ ray: θ=0 profile solve disagrees with certified Δ" ising = params.ising Q certΔ
-    prof = solution_profile(r0; npc=npc)
-    prof.Ψ[1, :] .= c.Ψ[1, :]                        # x = 0 from the rotated solve, as without profiles
-    prof.Ξ[1, :] .= c.Ξ[1, :]
-    return (; Δ=rr.Δ, x=prof.s, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)..., certΔ=certΔ)
-end
 
 """
     solution_profile(res::RaySolveResult; npc=8) -> (; s, x, Ψ, Ξ, Υ)
@@ -452,7 +403,7 @@ Evaluate the analytic representation `u_small + Δ·u_big` on the ray for
 `s ≥ res.S`; concatenated with [`solution_profile`](@ref) it should join
 the numeric solution seamlessly across the march zone.
 """
-function asymptotic_profile(params::GGJParameters, res::RaySolveResult,
+function asymptotic_profile(params::ToroidalLayerParameters, res::RaySolveResult,
     srange::AbstractVector{<:Real})
     cache = build_asymptotics(params, res.Q; kmax=12)
     n = length(srange)
@@ -479,7 +430,7 @@ angle, mesh, series order and radius, march tolerance, BVP edge s_m, decaying-pa
 report the relative change of (Δ₊, Δ₋); `spread` is the worst case per parity. θ moves outward
 only, away from the pseudo-resonance x² = −Q²(G+KF).
 """
-function delta_convergence(params::GGJParameters, Q::ComplexF64; verbose::Bool=true, kwargs...)
+function delta_convergence(params::ToroidalLayerParameters, Q::ComplexF64; verbose::Bool=true, kwargs...)
     base = solve_ray(params, Q; kwargs...)
     variations = [
         ("θ → 1.2θ", (; θ=(base.θ == 0 ? 0.1 : 1.2 * base.θ))),
@@ -507,5 +458,5 @@ function delta_convergence(params::GGJParameters, Q::ComplexF64; verbose::Bool=t
     return (; Δ=base.Δ, spread=SVector(spread), base=base, table=table)
 end
 
-delta_convergence(params::GGJParameters, Q::Number; kwargs...) =
+delta_convergence(params::ToroidalLayerParameters, Q::Number; kwargs...) =
     delta_convergence(params, ComplexF64(Q); kwargs...)

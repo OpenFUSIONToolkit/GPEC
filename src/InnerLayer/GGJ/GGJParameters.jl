@@ -30,7 +30,7 @@ GWP2016 Eq. (A8); E, F, G, H, K enter the inner-region equations (Eq. 11).
 
 The growth rate `γ` is not stored here; it is a separate argument to `solve_inner`.
 """
-Base.@kwdef struct GGJParameters <: InnerLayerParameters
+Base.@kwdef struct GGJParameters <: ToroidalLayerParameters
     E::Float64
     F::Float64
     G::Float64
@@ -111,6 +111,9 @@ function rescale_delta(Δ::AbstractVector, p::GGJParameters)
     return SVector{2,ComplexF64}(Δ[1] * fac, Δ[2] * fac)
 end
 
-# Profile conversions for solve_inner_profile: δψ per unit inner coordinate (X = v₁·δψ/X₀) and the
-# large-solution amplitude rescale (v₁/X₀)^(1/2+p₁) to the outer δψ normalization.
-_profile_conversions(p::GGJParameters) = (; dψdx=x0(p) / p.v1, rescale=(p.v1 / x0(p))^(0.5 + p1(p)))
+# δψ per unit inner coordinate (X = v₁·δψ/X₀) and the large-solution amplitude rescale (v₁/X₀)^(1/2+p₁)
+# to the outer δψ normalization.
+profile_conversions(p::GGJParameters) = (; dψdx=x0(p) / p.v1, rescale=(p.v1 / x0(p))^(0.5 + p1(p)))
+
+# Mercier Frobenius exponents r± = 3/2 ± √(−D_I) — GW2020 Eq. (49).
+power_exponents(p::GGJParameters) = (p1v = p1(p); SVector{2,Float64}(p1v + 1.5, -p1v + 1.5))
