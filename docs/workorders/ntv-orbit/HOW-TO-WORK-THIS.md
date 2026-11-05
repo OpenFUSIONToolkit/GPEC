@@ -17,7 +17,7 @@ level above this repo. Do not go looking for context elsewhere.
    rules.
 3. `physics.md` - the cleared equations. **Authoritative.** A human signed this
    off before this branch existed.
-4. `../../../JOURNAL.md` - where the last session stopped, and the parked list.
+4. `../../../JOURNAL.md` - where work last stopped, and the parked list.
 5. `../../../QUESTIONS.md` - what is open and what has been answered.
 
 **Never re-derive what physics.md states.** If physics.md is silent, ambiguous,
@@ -49,10 +49,13 @@ which were not; do not promote an unverified claim into the paper.
 5. Update `../../../JOURNAL.md`: one entry per finding, tagged with the paper
    section or key result it serves; anything that serves none goes to the
    parked list, not into PLAN.md.
-6. Commit the packet and the paper repo, push both, and stop. One milestone,
+6. Commit the packet and the paper repo and push both. Stop only if the
+   report has a gating Decisions card; otherwise continue to the next
+   milestone. One milestone,
    one PR, target under ~400 lines of diff.
 
-Start each milestone in a fresh session, from JOURNAL.md. Use `git worktree`
+Start each milestone, in the same session or a new one, by re-reading
+JOURNAL.md and the answers in QUESTIONS.md. Use `git worktree`
 off `gpec/` for trial branches and delete them when done; keep
 `feature/ntv-orbit` clean.
 
@@ -69,7 +72,7 @@ greyscale-safe, printable as a fallback, opened from the pulled checkout
 Sections, in order:
 
 - **Status strip** - one row at the top: milestone state (green / amber /
-  red, as the skeleton defines them), sessions used of budget, tests
+  red, as the skeleton defines them), attempts used of budget, tests
   (pass/fail counts), cost (wall time of the key run this milestone and last),
   number of decisions below. Readable in five seconds.
 - **Question** - what this milestone set out to answer, in two sentences.
@@ -159,7 +162,7 @@ These are deliberately the opposite of "never stall, switch to the next
 unblocked task". That protocol produces months of lateral motion.
 
 - The budget is in `README.md` and `PLAN.md`. It is a real limit, not a target.
-- **A milestone that is not green after two sessions: write to QUESTIONS.md and
+- **A milestone that is not green after two attempts (each ends in a report): write to QUESTIONS.md and
   STOP.** Do not start the next milestone. Do not open a new line of attack.
 - **Blocked on anything a human must decide: write the Decisions card, record
   it in QUESTIONS.md, write the report, and STOP that milestone.** Do not work

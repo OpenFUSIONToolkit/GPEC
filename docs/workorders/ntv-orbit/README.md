@@ -47,11 +47,11 @@ See PLAN.md for the full ladder with physics checks. Code-side summary:
 
 ## Budget
 
-8 milestones, 15 sessions. This is a limit.
+8 milestones, 15 attempts. This is a limit.
 
 ## Stop rules (this project's numbers)
 
-- A milestone not green after **2 sessions** (M4: 3): write the Decisions
+- A milestone not green after **2 attempts** (M4: 3): write the Decisions
   card, the report, and stop. Do not start the next milestone.
 - Blocked on a human decision: card it, report, stop that milestone.
 - A card unanswered for one whole milestone is a stop; say so in the next
@@ -59,7 +59,7 @@ See PLAN.md for the full ladder with physics checks. Code-side summary:
 - The physics sign-off card from M0 unanswered: nothing after M0 starts.
 - The DIII-D kinetic EFIT and the ASCOT package are external dependencies,
   not blockers; use the fallbacks in PLAN.md and say so in the report.
-- If the ZOW limit (M2 check 1) cannot be made green in two sessions, the
+- If the ZOW limit (M2 check 1) cannot be made green in two attempts, the
   premise that the new path is a strict generalization is in question; say
   that in the report rather than widening the tolerance.
 - Never more than three Decisions cards in a report.
