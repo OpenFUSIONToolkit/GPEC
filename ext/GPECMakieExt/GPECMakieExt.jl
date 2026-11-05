@@ -15,6 +15,7 @@ include("equilibrium.jl")
 include("forcefreestates.jl")
 include("perturbedequilibrium.jl")
 include("coilforcing.jl")
+include("errorfields.jl")
 
 # Save `fig` to `path` with the loaded backend; GLMakie writes raster images only.
 function A._save(fig::Figure, path::AbstractString)

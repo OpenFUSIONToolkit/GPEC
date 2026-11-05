@@ -32,6 +32,7 @@ const TEST_SUITES = [
     "runtests_resist_eval.jl" => "core",
     "runtests_localstability.jl" => "core",
     "runtests_analysis_plots.jl" => "plots",
+    "runtests_error_fields_plots.jl" => "plots",
     "runtests_slayer_params.jl" => "errorfields",
     "runtests_slayer_riccati.jl" => "errorfields",
     "runtests_slayer_inputs.jl" => "errorfields",
