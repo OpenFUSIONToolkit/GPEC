@@ -201,7 +201,7 @@ Card Q4 gates everything after M0.</p>
     The code's integrand (<code>jvtheta</code>, <code>BounceAveraging.jl:1054</code>) is
     JB dθ [∇·ξ<sub>⊥</sub>(v<sub>∥</sub>/v) + (δB/B)(1 − 3μB/2E)/(v<sub>∥</sub>/v)], and with
     dt ∝ JB dθ/v<sub>∥</sub> this is ∮dt [(2E − 2μB)∇·ξ<sub>⊥</sub> + (2E − 3μB)δB/B]/(2E/v) ·
-    const, which is also the bracket of Park 2011 Eq. 13. The physics.md form differs from
+    const, which is also the bracket of Park 2011 Eq. 13 and of Logan 2013 Eq. 16. The physics.md form differs from
     this by a factor that varies along the orbit (m v<sub>∥</sub> on the ∇·ξ<sub>⊥</sub>
     term, 2mv<sub>∥</sub> on the δB/B term), so it would not reproduce the ZOW limit.
     Proposed: A(t) = (2E − 2μB)∇·ξ<sub>⊥</sub> + (2E − 3μB)δB/B, with the constant fixed by
@@ -211,7 +211,8 @@ Card Q4 gates everything after M0.</p>
     orbit, then states that n∂f<sub>0</sub>/∂P<sub>φ</sub> reproduces the numerator
     (ω<sub>E</sub> + ω<sub>*n</sub> + ω<sub>*T</sub>(x − 3/2)). Without Φ in f<sub>0</sub> the
     ω<sub>E</sub> term does not appear: in the code it comes from the derivative at fixed
-    <i>total</i> energy (Logan 2013 Eq. 18 states fixed total energy). Proposed: f<sub>0</sub>
+    <i>total</i> energy (Logan 2013 Eq. 18: "taken at constant total energy", which yields
+    ω<sub>E</sub> + ω<sub>*N</sub> + ω<sub>*T</sub>(E/T − 3/2)). Proposed: f<sub>0</sub>
     a function of E + ZeΦ(ψ̄), so ∂f<sub>0</sub>/∂ψ̄ carries −ZeΦ′/T and the ω<sub>E</sub>
     term; the orbit itself is still computed without Φ (as physics.md proposes).</li>
   </ol>
@@ -222,7 +223,10 @@ Card Q4 gates everything after M0.</p>
   <td>Accept for a single toroidal harmonic n: δW<sub>K</sub> and T<sub>φ</sub> are the same
   quadratic form in δJ with the real and imaginary parts of one resonance operator (Park 2011
   Eqs. 8–9, 14–15); the orbit enters only through δJ and the frequencies. Park 2011 does not
-  state it for finite-width orbits (refs/notes/park2011.md §3); the paper says so.</td></tr>
+  state it for finite-width orbits (refs/notes/park2011.md §3), and the text of Park 2009
+  (PRL 102, 065002; full text checked) contains no statement relating T<sub>φ</sub> to
+  δW<sub>K</sub>, so it is not the source for this identity. The paper says the general-orbit
+  case is not shown in the literature.</td></tr>
   <tr><td>2</td><td>sign of the Zeψ term in P<sub>φ</sub> with the code's ψ, <code>ip_sign</code>, <code>bt_sign</code></td>
   <td>White &amp; Chance 1984 Eq. 16 and Antonenas 2021 Eq. 2.3 agree (P<sub>ζ</sub> = gρ<sub>∥</sub> − ψ<sub>p</sub>);
   Gorelenkov 1999 Eq. 1 is the same up to overall sign. Fix the relative sign in M1 by a physical
