@@ -1,0 +1,127 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Report skeleton: copy to M<k>.html and fill. Do not redesign. Rules in ../HOW-TO-WORK-THIS.md. -->
+<title>M2 - Δ′ from the perturbed eigenfunction</title>
+<style>
+  :root { color-scheme: light; }
+  body { max-width: 50em; margin: 2em auto; padding: 0 1.5em;
+         font: 15px/1.6 Georgia, serif; color: #111; background: #fff; }
+  h1 { font-size: 1.5em; margin-bottom: .2em; }
+  .meta { color: #555; font-size: .85em; margin-bottom: 1em; }
+  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em;
+       border-bottom: 1px solid #ccc; padding-bottom: .3em; margin-top: 2.2em; }
+  figure { margin: 1.5em 0; }
+  figcaption { font-size: .85em; color: #444; margin-top: .5em; }
+  svg, img { max-width: 100%; height: auto; }
+  .note { border-left: 3px solid #999; padding-left: 1em; color: #333; }
+  /* status strip */
+  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center;
+           border: 1px solid #ccc; padding: .6em 1em; font-size: .9em;
+           font-family: system-ui, sans-serif; }
+  .strip b { font-weight: 600; }
+  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; }
+  .state.green { background: #2e7d32; } .state.amber { background: #b26a00; }
+  .state.red { background: #b71c1c; }
+  /* decision cards */
+  .card { border: 1px solid #bbb; border-left: 5px solid #333; padding: 1em 1.2em;
+          margin: 1.4em 0; font-family: system-ui, sans-serif; font-size: .95em; }
+  .card h3 { margin: 0 0 .4em; font-size: 1.05em; }
+  .card .ctx { color: #333; }
+  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .4em; }
+  .card dd { margin: 0 0 0 1.2em; }
+  .card label { display: block; margin: .3em 0; }
+  .card .rec { background: #f3f3f3; padding: .5em .8em; margin: .6em 0; }
+  .card textarea { width: 100%; min-height: 3em; font: inherit; }
+  .card .defs { font-size: .85em; color: #555; margin-top: .6em; }
+  .copy { font: inherit; padding: .4em 1em; margin-top: 1em; cursor: pointer; }
+  table.checks { border-collapse: collapse; width: 100%; font-size: .9em;
+                 font-family: system-ui, sans-serif; }
+  table.checks th, table.checks td { border-bottom: 1px solid #ccc; padding: .4em .6em;
+                                     text-align: left; vertical-align: top; }
+  @media print { body { margin: 0; font-size: 11pt; } h2, .card { page-break-inside: avoid; }
+                 .copy { display: none; } }
+</style>
+
+<h1>M2 - <short milestone title></h1>
+<div class="meta">Project &lt;slug&gt; &middot; branch &lt;branch&gt; &middot;
+PR #&lt;n&gt; &middot; &lt;date&gt;</div>
+
+<div class="strip">
+  <span class="state amber">AMBER</span>
+  <span><b>Sessions</b> 2 of 8</span>
+  <span><b>Checks</b> 2 pass, 1 not settled</span>
+  <span><b>Tests</b> 41 pass, 0 fail</span>
+  <span><b>Key run</b> 38 s (M1: 31 s)</span>
+  <span><b>Decisions</b> 2 open</span>
+  <span><b>Oldest open question</b> none</span>
+</div>
+
+<h2>Question</h2>       ... two sentences ...
+<h2>What changed</h2>   ... pipeline SVG with the changed node marked + one paragraph ...
+<h2>Checks</h2>
+<table class="checks">
+  <tr><th>Expected behavior</th><th>Seen</th><th>Result</th></tr>
+  <tr><td>Orbit width → 0 reproduces BounceAveraging torque</td>
+      <td>agrees to 1e-6 at E = 1 keV (panel a)</td><td>pass</td></tr>
+  <tr><td>Bounce frequency scales as √E at low E</td>
+      <td>fitted exponent 0.49 (panel b)</td><td>pass</td></tr>
+  <tr><td>Torque converges with the (E, μ, P<sub>φ</sub>) grid</td>
+      <td>3% change at the finest grid tried</td><td>not settled</td></tr>
+</table>
+<figure> ... small panels a, b, c ... </figure>
+<h2>Figure</h2>         ... plot, reference overlay, caption ...
+<h2>Reading</h2>        ... what it shows and what it does not settle ...
+
+<h2>Decisions</h2>
+<p>Choose an option in each card, add notes if needed, then press
+<i>Copy answers</i> and paste the block into <code>QUESTIONS.md</code>.</p>
+
+<div class="card" data-q="Q3">
+  <h3>Q3 - Which side of the rational surface anchors the matching?</h3>
+  <p class="ctx"><b>What was found.</b> One or two sentences, with the number
+  or the figure it rests on (<a href="#fig2">Fig. 2</a>), embedded as a
+  thumbnail if the main figure does not show it.</p>
+  <p class="ctx"><b>Why this is yours to decide.</b> One sentence: a physics
+  convention, a scope change, or a cost trade the plan does not settle.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q3" value="A"> A - inner side</label></dt>
+    <dd>Consequence in one line.</dd>
+    <dt><label><input type="radio" name="Q3" value="B"> B - outer side</label></dt>
+    <dd>Consequence in one line.</dd>
+    <dt><label><input type="radio" name="Q3" value="C"> C - average, flag both</label></dt>
+    <dd>Consequence in one line.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation:</b> B, moderately sure - reason in one
+  sentence.</div>
+  <textarea name="Q3-note" placeholder="Notes, or a different answer"></textarea>
+  <p class="defs"><b>Terms:</b> Δ′ - tearing stability index; rational
+  surface - where q = m/n; <code>Tearing.match</code> - the function that ...</p>
+</div>
+
+<!-- second and third cards as needed; never a fourth -->
+
+<button class="copy" onclick="copyAnswers()">Copy answers</button>
+<pre id="answers" hidden></pre>
+
+<h2>Cost</h2>           ... only if performance changed: profile plot, grid, before/after ...
+<h2>Paper</h2>          ... abstract diff, key-results diff, figures promoted,
+                            coherence check ...
+<h2>Next</h2>           ... next milestone or the blocker ...
+
+<script>
+function copyAnswers() {
+  const date = new Date().toISOString().slice(0, 10);
+  const lines = [`## Answers to M<k> (${date})`, ''];
+  document.querySelectorAll('.card').forEach(c => {
+    const q = c.dataset.q;
+    const sel = c.querySelector(`input[name="${q}"]:checked`);
+    const note = c.querySelector(`textarea[name="${q}-note"]`).value.trim();
+    const label = sel ? sel.parentElement.textContent.trim() : '(no option chosen)';
+    lines.push(`- **${q}**: ${label}` + (note ? `\n  - ${note}` : ''));
+  });
+  const text = lines.join('\n');
+  const pre = document.getElementById('answers');
+  pre.textContent = text; pre.hidden = false;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});  // the block is shown either way
+}
+</script>
