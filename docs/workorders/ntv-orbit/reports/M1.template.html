@@ -1,0 +1,252 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Built by m1_build.py from M1.template.html; edit the template, not M1.html. -->
+<title>M1 - Guiding-center orbits</title>
+<style>
+  :root { color-scheme: light; }
+  body { max-width: 50em; margin: 2em auto; padding: 0 1.5em;
+         font: 15px/1.6 Georgia, serif; color: #111; background: #fff; }
+  h1 { font-size: 1.5em; margin-bottom: .2em; }
+  .meta { color: #555; font-size: .85em; margin-bottom: 1em; }
+  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em;
+       border-bottom: 1px solid #ccc; padding-bottom: .3em; margin-top: 2.2em; }
+  figure { margin: 1.5em 0; }
+  figcaption { font-size: .85em; color: #444; margin-top: .5em; }
+  svg, img { max-width: 100%; height: auto; }
+  .note { border-left: 3px solid #999; padding-left: 1em; color: #333; }
+  /* status strip */
+  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center;
+           border: 1px solid #ccc; padding: .6em 1em; font-size: .9em;
+           font-family: system-ui, sans-serif; }
+  .strip b { font-weight: 600; }
+  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; }
+  .state.green { background: #2e7d32; } .state.amber { background: #b26a00; }
+  .state.red { background: #b71c1c; }
+  /* decision cards */
+  .card { border: 1px solid #bbb; border-left: 5px solid #333; padding: 1em 1.2em;
+          margin: 1.4em 0; font-family: system-ui, sans-serif; font-size: .95em; }
+  .card h3 { margin: 0 0 .4em; font-size: 1.05em; }
+  .card .ctx { color: #333; }
+  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .4em; }
+  .card dd { margin: 0 0 0 1.2em; }
+  .card label { display: block; margin: .3em 0; }
+  .card .rec { background: #f3f3f3; padding: .5em .8em; margin: .6em 0; }
+  .card textarea { width: 100%; min-height: 3em; font: inherit; }
+  .card .defs { font-size: .85em; color: #555; margin-top: .6em; }
+  .copy { font: inherit; padding: .4em 1em; margin-top: 1em; cursor: pointer; }
+  table.checks { border-collapse: collapse; width: 100%; font-size: .9em;
+                 font-family: system-ui, sans-serif; }
+  table.checks th, table.checks td { border-bottom: 1px solid #ccc; padding: .4em .6em;
+                                     text-align: left; vertical-align: top; }
+  #pipeline svg { display: block; max-width: 22em; margin: 0 auto; }
+  table.verify { font-size: .82em; }
+  table.verify td:first-child { white-space: nowrap; }
+  @media print { body { margin: 0; font-size: 11pt; } h2, .card { page-break-inside: avoid; }
+                 .copy { display: none; } }
+</style>
+
+<h1>M1 - Guiding-center orbits in the constants of motion</h1>
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}}
+&middot; diagnostic only, behind <code>orbit_diagnostic</code> (default off) &middot; 2026-11-05</div>
+
+<div class="strip">
+  <span class="state green">GREEN</span>
+  <span><b>Attempts</b> 2 of 15 (M1: 1 of 2)</span>
+  <span><b>Checks</b> 6 of 6 pass (two added by physics.md v1)</span>
+  <span><b>Tests</b> {{TESTS}}</span>
+  <span><b>Key run</b> 270 orbits in 8 s; ~3 ms per thermal orbit (M0: 67 s full n = 1 run)</span>
+  <span><b>Decisions</b> 1 open, not gating</span>
+  <span><b>Oldest open question</b> Q1 (DIII-D data, by M5)</span>
+</div>
+
+<h2>Question</h2>
+<p>Can GPEC compute the real guiding-center orbit of an ion in constants of motion (energy E,
+magnetic moment μ, canonical toroidal momentum P<sub>φ</sub>), classify it, and give its bounce
+frequency, toroidal rate and orbit-averaged flux, such that at vanishing orbit width it reproduces
+what today's surface-local (zero-orbit-width, ZOW) bounce average uses? And does it keep the two
+pieces of physics Nik asked for in the Q4 sign-off: finite β (∇p) and the electrostatic potential Φ?</p>
+
+<h2>What changed</h2>
+<p>A new file <code>src/KineticForces/Orbits.jl</code> (diagnostic only; no torque changes).
+It integrates Littlejohn's guiding-center equations with H = ½mv<sub>∥</sub>² + μB + ZeΦ(ψ) in time,
+in (ψ<sub>N</sub>, θ, φ) with θ the equilibrium's straight-field-line angle and φ the geometric
+toroidal angle. ∇×b comes from the covariant b<sub>i</sub> of the equilibrium metric, so curvature,
+its ∇p part and the parallel current enter as the equilibrium has them; there is no low-β drift
+formula. Φ is built from the kinetic file's ω<sub>E</sub>. With <code>orbit_diagnostic = true</code>,
+the run writes <code>KineticForces/Orbits</code> (class, ω<sub>b</sub>, toroidal rate, ⟨ψ⟩ on a
+(ψ, λ, x, σ) sample). physics.md is now v1 (signed with Nik's two exceptions resolved, the A(t)
+correction, and the beam distribution of Q7).</p>
+<figure id="pipeline"><svg viewBox="0 0 560 120" xmlns="http://www.w3.org/2000/svg" font-family="Georgia, serif" font-size="13">
+  <g fill="none" stroke="#333" stroke-width="1.2">
+    <rect x="10" y="40" width="120" height="40" rx="4"/>
+    <rect x="200" y="10" width="150" height="40" rx="4" stroke-dasharray="5 3" fill="#eee"/>
+    <rect x="200" y="70" width="150" height="40" rx="4"/>
+    <rect x="420" y="10" width="130" height="40" rx="4" stroke-dasharray="5 3"/>
+    <rect x="420" y="70" width="130" height="40" rx="4"/>
+    <path d="M130 55 L200 30 M130 65 L200 90 M350 30 L420 30 M350 90 L420 90" />
+    <path d="M350 38 L420 82" stroke-dasharray="2 3"/>
+  </g>
+  <g fill="#111" text-anchor="middle">
+    <text x="70" y="65">Equilibrium</text>
+    <text x="275" y="35">Orbits.jl (new)</text>
+    <text x="275" y="95">BounceAveraging</text>
+    <text x="485" y="35">KineticForces/Orbits</text>
+    <text x="485" y="95">resonance, torque</text>
+  </g>
+  <text x="370" y="66" font-size="10" fill="#555">M2</text>
+</svg>
+<figcaption>Where M1 sits. The orbit node (dashed, shaded) reads the same equilibrium as
+BounceAveraging and, in M1, writes only a diagnostic group. M2 feeds its δJ and frequencies to the
+existing resonance operator (dotted).</figcaption></figure>
+
+<h2>Checks</h2>
+<table class="checks">
+  <tr><th>Expected behavior</th><th>Seen</th><th>Result</th></tr>
+  <tr><td>1. On a large-aspect-ratio circular equilibrium (TJ analytic, ε<sub>a</sub> = 0.05), ω<sub>b</sub>
+      matches the pendulum forms of Antonenas 2021 Eqs. 4.6–4.7 to O(ε); the fitted ω<sub>b</sub> ∝ E<sup>p</sup>
+      exponent at low energy is p = 0.5 within 5%.</td>
+      <td>Within 2.5% at local ε = 0.013–0.031 (right panel of Figure 2), the difference largest at the
+      trapped/passing separatrix where both forms have a logarithm and at deep trapping where the pendulum's
+      sinusoidal B is an O(ε) approximation. Fitted p = 0.5007, 0.5001, 0.4999 at ψ = 0.1, 0.3, 0.5.</td><td>pass</td></tr>
+  <tr><td>2. At low energy the trapped/passing boundary coincides with BounceAveraging's split λ = B₀/B<sub>max</sub>.</td>
+      <td>DIII-D-like, ψ = 0.5, x = 10<sup>−4</sup>: orbit boundary at λ = 0.77562 (σ = +1) and 0.77586 (σ = −1),
+      code 0.77574 (±1.6×10<sup>−4</sup>). At x = 1 the two legs split to 0.763 and 0.788, as finite width should.
+      Also: ω<sub>b</sub> agrees with BounceAveraging with an error that falls as x<sup>1/2</sup> and is odd in σ,
+      so the σ-average falls as x (left panel of Figure 2).</td><td>pass</td></tr>
+  <tr><td>3. Up–down symmetry: ⟨ψ⟩ and the frequencies unchanged under reflection of the start θ; co-current
+      passing ions displaced outward in R (fixes the relative sign of the two terms in P<sub>φ</sub>).</td>
+      <td>Reflection (θ₀ = 0.03 vs 0.97, LAR): largest relative difference 2.7×10<sup>−11</sup>.
+      Co-current (v<sub>∥</sub>F s &gt; 0): mean R 4.6 mm outward of the flux surface; counter-current 5.0 mm
+      inward (thermal D, ψ = 0.5).</td><td>pass</td></tr>
+  <tr><td>4. Convergence: frequencies change by &lt; 1% when the ODE tolerance is halved (time integration
+      replaces the θ quadrature of physics.md v0).</td>
+      <td>rtol 10<sup>−10</sup> → 5×10<sup>−12</sup>: largest change in ω<sub>b</sub>, ⟨φ̇⟩, ⟨ψ⟩ is 1.0×10<sup>−9</sup>.</td><td>pass</td></tr>
+  <tr><td>5. (added) E and P<sub>φ</sub> are conserved along the orbit to the integration tolerance.</td>
+      <td>Largest relative drift 2.3×10<sup>−9</sup> over 270 orbits (x = 10<sup>−4</sup>–1, three surfaces).</td><td>pass</td></tr>
+  <tr><td>6. (added) With Φ in the orbit, the trapped ⟨φ̇⟩ shifts by s·ω<sub>E</sub>, the same sign map as the
+      precession (⟨φ̇⟩ = s·ω<sub>D</sub>x), so ω<sub>E</sub> and ω<sub>D</sub> enter Ω together as in today's code.</td>
+      <td>At 0.1×ω<sub>E</sub> (v<sub>E</sub>/v ≤ 0.03): ratio 0.993–1.012 on three surfaces and two energies.
+      At the example's full ω<sub>E</sub>: 1.000–1.014 where the orbit stays trapped; see Reading for the
+      orbits that do not.</td><td>pass</td></tr>
+</table>
+
+<h2>Figures</h2>
+<figure id="fig1">{{FIG_ORBITS}}
+<figcaption>Figure 1. Deuterium guiding-center orbits on the DIII-D-like example, started at the outboard
+midplane of ψ<sub>N</sub> = 0.5 at x = E/T<sub>i</sub> = 1, 10, 40 (2, 21 and 86 keV; the last is
+a beam-ion energy). Solid: trapped, λ = 0.95. Dashed and dotted: passing, λ = 0.3, the two signs of
+v<sub>∥</sub>. Grey: the ψ<sub>N</sub> = 0.5 surface and the boundary. Φ off. The co-current orbit sits
+outward, the counter-current orbit inward; the banana widens as √E.</figcaption></figure>
+<figure id="fig2">{{FIG_ZOW}}
+<figcaption>Figure 2. Left and centre: the orbit against BounceAveraging at ψ<sub>N</sub> = 0.5, five pitches,
+x from 10<sup>−4</sup> to 1, Φ off. Black: σ = +1; grey: the average over σ = ±1. The error is first order
+in orbit width (∝ x<sup>1/2</sup>, dotted) and odd in σ, so the σ-average is second order. Centre: the
+trapped toroidal rate against s·ω<sub>D</sub>·x from today's precession integrand. Right: the large-aspect-ratio
+check against the pendulum forms.</figcaption></figure>
+
+<h2>Reading</h2>
+<p><b>The ZOW limit holds for the frequencies, and the old precession is not low-β.</b> For trapped ions the
+orbit's toroidal rate matches today's ω<sub>D</sub> to 3×10<sup>−4</sup> at x = 10<sup>−4</sup> (3×10<sup>−6</sup>
+after averaging σ). The orbit uses the full ∇×b of the equilibrium (including ∇p), and today's precession
+integrand (<code>g_wd</code>) is the ψ-derivative of the bounce action, which does not assume low β. A
+low-β drift would differ by O(β<sub>p</sub>), a few percent here. The M0 card said the old path used the
+low-β form; that was wrong, and physics.md v1 says so. Nik's ∇p exception is therefore met by the orbit as
+written. The δJ bracket keeps ∇p too: the code builds δB/B from the Lagrangian identity with p′ inside κ.</p>
+<p><b>Sign conventions, now fixed numerically.</b> Inside GPEC's equilibrium representation F &gt; 0 and the
+poloidal field sign s = −1, so B<sub>t</sub> is antiparallel to I<sub>p</sub> and "co-current" is
+v<sub>∥</sub>F s &gt; 0, i.e. v<sub>∥</sub> &lt; 0 here. Today's ω<sub>D</sub> and ω<sub>E</sub> both map
+to the geometric toroidal rate with the factor s. The new path will use that map in M2.</p>
+<p><b>The passing-ion precession is not separable at its own order.</b> For passing ions ω<sub>b</sub>
+converges as for trapped ones, but ⟨φ̇⟩ − q ω<sub>b</sub> does not converge to today's ω<sub>D</sub>x: it
+differs by a factor of order one. The difference scales as x, like ω<sub>D</sub> itself, and is the same for
+both signs of v<sub>∥</sub>. It depends on which flux label carries the q: the time average ⟨ψ⟩, the
+θ-average, or the field line followed along the orbit each give a different answer. The parallel advance
+q ω<sub>b</sub> is about 10<sup>3</sup> times the precession, so a first-order shift of the q-label
+(Δψ ~ ρ) is the same size as the precession. Physically, the passing resonance ℓ + nq ≈ 0 sits off the
+rational surface by about an orbit width. This is the effect key result 2 is about, not a defect.
+Liu 2014 drops a magnetic-shear term for passing particles at this order. Consequence: M2's ZOW-limit
+check should test passing particles on the ψ-integrated torque (where a label shift integrates out),
+not surface by surface. The trapped part can be tested surface by surface.</p>
+<p><b>The electric field in this example is strong.</b> At the example's full ω<sub>E</sub> (4–6×10<sup>4</sup>
+rad/s in the core), the E×B speed is 15–35% of the thermal speed at x = 0.3–1. A λ = 0.97 ion at
+ψ<sub>N</sub> = 0.3 that is deeply trapped without Φ becomes passing with it. The potential changes the
+local kinetic energy by a sizable fraction of T across one orbit. This is outside the ordering the old
+path assumes (E×B speed ≪ thermal), and it is where Nik's second exception matters. Including Φ changes
+the thermal orbit topology, not just its frequency. Where the orbit stays trapped, the rate shift is
+s·ω<sub>E</sub> to 1.4%. This bears on KR2: the edge part of the profile will depend on whether Φ is in
+the orbit, which is the subject of card Q8.</p>
+<p><b>Cost.</b> About 3 ms per thermal orbit (Vern9, rtol 10<sup>−10</sup>, a few hundred steps); 270
+orbits took 8 s including compilation. The M2 grid (about 100 ψ × 64 λ × 20 x × 2 σ, 2.6×10<sup>5</sup>
+orbits) is then of order 10 minutes single-threaded before δJ, so threading over ψ will be needed. That
+is within the M0 budget estimate, so no grid-cost card is expected.</p>
+
+<h2>Decisions</h2>
+<div class="card" data-q="Q8">
+  <h3>Q8 - The potential in the orbit: default for the paper's thermal-ion results</h3>
+  <p class="ctx"><b>What was found.</b> Your Q4 exceptions are met as follows. ∇p: the orbit uses the full
+  equilibrium curvature, and the old precession is already β-exact (Reading). Φ: the orbit carries ZeΦ(ψ) in
+  its Hamiltonian, built from the kinetic file's ω<sub>E</sub>. The constant-of-motion form makes this almost
+  free, and f₀(E − ZeΦ(ψ̄)) then supplies the ω<sub>E</sub> drive term (physics.md v1 §4). In the DIII-D-like
+  example, ω<sub>E</sub> is large enough (v<sub>E</sub>/v up to 0.35) that Φ changes which thermal orbits are
+  trapped. KR2's orbit-averaged edge profile will therefore differ between Φ on and Φ off, and the paper has
+  to say which is the result.</p>
+  <p class="ctx"><b>Also on this card.</b> physics.md v1 §2 states the ZOW limit as ⟨φ̇⟩ → ±qω<sub>b</sub> + ω<sub>D</sub>x + ω<sub>E</sub>. M1 shows the correct trapped form is s·(ω<sub>D</sub>x + ω<sub>E</sub>), and that the passing form is label-dependent at first order (Reading). Any answer to Q8 also approves this wording correction to physics.md, with no change to the method. A note in the textbox can withhold it.</p>
+  <p class="ctx"><b>Why this is yours to decide.</b> It sets what key result 2 claims for the edge. Φ on is
+  the more complete model, but it also moves the result further from the ZOW reference, which has Φ only as a
+  frequency.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q8" value="A"> A - Φ on by default; Φ off shown as a comparison panel in KR2</label></dt>
+    <dd>KR2 states the orbit-averaged result with the electrostatic orbit modification and shows how much of
+    the change comes from Φ. One extra run per KR2 case.</dd>
+    <dt><label><input type="radio" name="Q8" value="B"> B - Φ off by default (as physics.md v0); Φ on as a sensitivity remark</label></dt>
+    <dd>Cleaner separation of the orbit-width effect from the E<sub>r</sub> effect, but the headline edge
+    result omits physics the example shows to be first order.</dd>
+    <dt><label><input type="radio" name="Q8" value="C"> C - Φ on only, no comparison</label></dt>
+    <dd>Simplest figure, but a reviewer cannot tell orbit width from E<sub>r</sub>.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation:</b> A, fairly sure. The switch exists
+  (<code>orbit_potential</code>), the cost is one run, and showing both answers the reviewer question in
+  advance. <b>Not gating:</b> M2 runs Φ off for its ZOW-limit check either way. The answer is needed by M5.</div>
+  <textarea name="Q8-note" placeholder="Notes, or a different answer"></textarea>
+  <p class="defs"><b>Terms:</b> Φ - electrostatic potential; ω<sub>E</sub> - E×B toroidal frequency;
+  v<sub>E</sub>/v - E×B speed over particle speed; f₀ - equilibrium distribution; ψ̄ - orbit-averaged flux;
+  KR2 - key result 2 (DIII-D torque density); ZOW - zero orbit width.</p>
+</div>
+
+<button class="copy" onclick="copyAnswers()">Copy answers</button>
+<pre id="answers" hidden></pre>
+
+<h2>Paper</h2>
+<p><b>Abstract and key results:</b> unchanged. <b>Methods</b> gains its orbit paragraph: exact guiding-center
+motion with the potential in the Hamiltonian, conserved E and P<sub>φ</sub> to 10<sup>−9</sup>, and the
+frequency ZOW limit (Figure 2, left and centre, a candidate panel for the KR3 methods figure). <b>New for
+the discussion:</b> (i) the old ZOW precession is β-exact; (ii) for passing ions the precession is
+label-dependent at first order in orbit width, so near rational surfaces the resonance moves by an orbit
+width. This is the mechanism behind KR2, and the paper can state it from these numbers. <b>PLAN.md</b> (v0.4,
+at M1 start): checks 5 and 6 added, check 4 restated for time integration, and M3 covers beams (Q7 B).</p>
+
+<h2>Next</h2>
+<p>M2 - δJ along the orbit and the zero-orbit-width limit of the torque (2 attempts). It runs directly after
+this report, since no card gates it. Plan: tabulate the M1 orbits on the (λ, ψ₀, √x) grid, accumulate δJ<sub>ℓ</sub>
+with the corrected A(t) on a fixed time grid from the dense solution, and use the s sign map for Ω. Check 1
+is evaluated on trapped particles surface by surface and on the ψ-integrated torque for all particles (this
+report, Reading). If the 10<sup>−4</sup> target is not reachable with an x<sup>1/2</sup> convergence, the
+power-law fit is the check. Changing the stated target would need a card at M2.</p>
+
+<script>
+function copyAnswers() {
+  const date = new Date().toISOString().slice(0, 10);
+  const lines = [`## Answers to M1 (${date})`, ''];
+  document.querySelectorAll('.card').forEach(c => {
+    const q = c.dataset.q;
+    const sel = c.querySelector(`input[name="${q}"]:checked`);
+    const note = c.querySelector(`textarea[name="${q}-note"]`).value.trim();
+    const label = sel ? sel.parentElement.textContent.trim() : '(no option chosen)';
+    lines.push(`- **${q}**: ${label}` + (note ? `\n  - ${note}` : ''));
+  });
+  const text = lines.join('\n');
+  const pre = document.getElementById('answers');
+  pre.textContent = text; pre.hidden = false;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});  // the block is shown either way
+}
+</script>
