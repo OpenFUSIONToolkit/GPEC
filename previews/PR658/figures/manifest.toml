@@ -5,25 +5,25 @@
 
 
 [analysis.coils_3d]
-commit = "72746b7b9-dirty"
+commit = "b22862c60"
 date = "2026-11-06"
 depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
 script = "make_highlights.jl"
 
 [analysis.equilibrium_summary]
-commit = "72746b7b9-dirty"
+commit = "b22862c60"
 date = "2026-11-06"
 depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
 script = "make_highlights.jl"
 
 [analysis.ffs_summary]
-commit = "72746b7b9-dirty"
+commit = "b22862c60"
 date = "2026-11-06"
 depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
 script = "make_highlights.jl"
 
 [analysis.pe_summary]
-commit = "72746b7b9-dirty"
+commit = "b22862c60"
 date = "2026-11-06"
 depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
 script = "make_highlights.jl"
