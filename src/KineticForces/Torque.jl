@@ -525,7 +525,8 @@ function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method:
 
     orbit = if n !== nothing && kind == :orbit
         orbit_surface_table(intr.orbit_field, geometry, intr, psi, state.theta_bmin, state.q, state.welec, state.mass, state.chrg, state.T_s, n;
-            divxfac, lmax=intr.orbit_lmax, nenergy=intr.orbit_nenergy, potential=intr.orbit_potential)
+            divxfac, lmax=intr.orbit_lmax, nenergy=intr.orbit_nenergy, potential=intr.orbit_potential, umax=intr.orbit_umax,
+            energy_tol=intr.orbit_energy_tol)
     else
         nothing
     end
