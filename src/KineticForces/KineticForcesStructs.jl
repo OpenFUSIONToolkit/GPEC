@@ -7,7 +7,7 @@ Single source of truth for the NTV calculation methods. Each entry is a NamedTup
   - `name`  — short method identifier used as the HDF5 group key and in `intr.method`
   - `flag`  — the `KineticForcesControl` field symbol that enables the method
   - `kind`  — dispatch routing tag consumed by `method_kind` / `Torque.jl`
-    (`:gar` for the GAR/matrix family, `:fcgl` for the fluid CGL method)
+    (`:gar` for the GAR/matrix family, `:fcgl` for the fluid CGL method, `:orbit` for the orbit-averaged GAR)
   - `doc`   — one-line description printed in verbose output
 
 To add a method: append an entry here and add the matching `*_flag` field
@@ -29,12 +29,13 @@ const METHOD_REGISTRY = (
     (name="pkmm", flag=:pkmm_flag, kind=:gar, doc="Passing MXM Euler–Lagrange energy matrix norm calculation"),
     (name="frmm", flag=:frmm_flag, kind=:gar, doc="Full MXM Euler–Lagrange torque matrix norm calculation"),
     (name="trmm", flag=:trmm_flag, kind=:gar, doc="Trapped MXM Euler–Lagrange torque matrix norm calculation"),
-    (name="prmm", flag=:prmm_flag, kind=:gar, doc="Passing MXM Euler–Lagrange torque matrix norm calculation"))
+    (name="prmm", flag=:prmm_flag, kind=:gar, doc="Passing MXM Euler–Lagrange torque matrix norm calculation"),
+    (name="forb", flag=:forb_flag, kind=:orbit, doc="Full calculation along guiding-center orbits"))
 
 """
     method_kind(name) -> Symbol
 
-Return the dispatch routing tag (`:gar` or `:fcgl`) for the NTV
+Return the dispatch routing tag (`:gar`, `:fcgl` or `:orbit`) for the NTV
 method `name`, looked up from [`METHOD_REGISTRY`]. Errors on an unknown method.
 """
 function method_kind(name::AbstractString)
@@ -76,6 +77,11 @@ Immutable: vary a field by building a new control.
     `KineticForces/Orbits` (see [`write_orbits!`](@ref)). Diagnostic only; nothing else changes. Default `false`.
   - `orbit_potential::Bool` - Include the electrostatic potential built from the kinetic `omega_E` in the orbit
     Hamiltonian (dΦ/dψ_N = −psio·ω_E), so the E×B drift is part of the orbit. Default `true`.
+  - `forb_flag::Bool` - Run the `forb` method: the full GAR torque with ω_b, the toroidal precession and |δJ_ℓ|²
+    taken along guiding-center orbits started on each ψ (see [`orbit_surface_table`](@ref)). Scalar torque only.
+    Default `false`.
+  - `orbit_nlambda::Int`, `orbit_nenergy::Int` - Pitch and √x nodes of the per-surface orbit table of `forb`.
+    Defaults 128 (the surface path's pitch grid) and 12.
 """
 @kwdef struct KineticForcesControl
     # Method flags (which methods to calculate)
@@ -95,6 +101,7 @@ Immutable: vary a field by building a new control.
     frmm_flag::Bool = false         # Full MXM E-L torque matrix norm
     trmm_flag::Bool = false         # Trapped MXM E-L torque matrix norm
     prmm_flag::Bool = false         # Passing MXM E-L torque matrix norm
+    forb_flag::Bool = false         # Full GAR along guiding-center orbits
 
     # Species summed in the NTV; the composition itself is the equilibrium's (`equil.kinetic`)
     electron::Bool = false          # Add electron NTV in addition to the ion species
@@ -139,6 +146,8 @@ Immutable: vary a field by building a new control.
     # Guiding-center orbit diagnostic
     orbit_diagnostic::Bool = false  # Write main-ion orbit frequencies to KineticForces/Orbits
     orbit_potential::Bool = true    # Include the potential from omega_E in the orbit Hamiltonian
+    orbit_nlambda::Int = 128        # Pitch nodes of the forb orbit table
+    orbit_nenergy::Int = 12         # √x nodes of the forb orbit table
 end
 
 """
@@ -184,6 +193,9 @@ perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles
   - `dbob_m`, `divx_m`: Perturbation mode interpolants
   - `sing_psis`: Sorted rational-surface ψ locations, used as panel boundaries of the outer ψ torque
     quadrature so resonant peaks fall on interval endpoints
+  - `orbit_field`: the [`GuidingCenterField`](@ref) of the `forb` method, built once per run; `nothing` otherwise
+  - `orbit_lmax`, `orbit_nlambda`, `orbit_nenergy`: bounce harmonics and table size of the `forb` orbit tables
+  - `orbit_potential`: whether `orbit_field` carries the potential
 """
 @kwdef mutable struct KineticForcesInternal
     # Equilibrium-derived quantities
@@ -211,6 +223,13 @@ perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles
 
     # Rational-surface ψ locations for ψ-quadrature paneling (see docstring).
     sing_psis::Vector{Float64} = Float64[]
+
+    # Orbit-averaged (forb) method
+    orbit_field::Any = nothing
+    orbit_lmax::Int = 1
+    orbit_nlambda::Int = 128
+    orbit_nenergy::Int = 12
+    orbit_potential::Bool = false
 
     # θ knot grid (length mthsurf+1) read by the per-surface setup; never written after construction.
     tpsi_xs::Vector{Float64} = Float64[]

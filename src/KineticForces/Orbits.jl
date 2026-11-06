@@ -19,6 +19,7 @@ Equilibrium field tabulated for guiding-center orbits on the `rzphi` grid of (ψ
   - `bcov_psi`, `bcov_theta`: covariant b_ψ = g_ψθ B^θ/B and b_θ = g_θθ B^θ/B (m per unit ψ_N, θ)
   - `jac`: signed Jacobian 𝒥 = R(R_θ Z_ψ − R_ψ Z_θ) of (ψ_N, θ, φ) in m³
   - `R`, `Z`: cylindrical coordinates in m
+  - `nu`: toroidal offset ν in φ = 2πζ + ν(ψ_N, θ), ζ the straight-field-line toroidal angle in turns
   - `F`, `dFdpsi`: R B_φ in T·m and its ψ_N derivative
   - `phi`: electrostatic potential Φ(ψ_N) in V, or `nothing` for no potential
   - `s`: sign in B^θ = s psio/𝒥, chosen so that q > 0
@@ -32,6 +33,7 @@ struct GuidingCenterField{I,S,D,P}
     jac::I
     R::I
     Z::I
+    nu::I
     F::S
     dFdpsi::D
     phi::P
@@ -54,7 +56,7 @@ function guiding_center_field(equil; omegaE=nothing)
     nx, ny = length(xs), length(ys)
     F(ψ) = equil.profiles.F_spline(ψ) / twopi
     dF(ψ) = equil.profiles.F_deriv(ψ) / twopi
-    jac, R, Z, gpt, gtt = (zeros(nx, ny) for _ in 1:5)
+    jac, R, Z, nu, gpt, gtt = (zeros(nx, ny) for _ in 1:6)
     for (j, θ) in enumerate(ys), (i, ψ) in enumerate(xs)
         pt = (ψ, θ)
         rsq = equil.rzphi_rsquared(pt)
@@ -71,6 +73,7 @@ function guiding_center_field(equil; omegaE=nothing)
         R_x, Z_x = r_x * cα - r * sα * a_x, r_x * sα + r * cα * a_x
         R_y, Z_y = r_y * cα - r * sα * a_y, r_y * sα + r * cα * a_y
         R[i, j] = equil.ro + r * cα
+        nu[i, j] = equil.rzphi_nu(pt)
         Z[i, j] = equil.zo + r * sα
         jac[i, j] = R[i, j] * (R_y * Z_x - R_x * Z_y)
         gpt[i, j] = R_x * R_y + Z_x * Z_y
@@ -83,7 +86,7 @@ function guiding_center_field(equil; omegaE=nothing)
     Btheta = s * equil.psio ./ jac
     bpsi = gpt .* Btheta ./ Bt
     btheta = gtt .* Btheta ./ Bt
-    for A in (jac, R, Z, bpsi, btheta, Bt)
+    for A in (jac, R, Z, nu, bpsi, btheta, Bt)
         A[:, end] .= A[:, 1]
     end
     opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
@@ -93,7 +96,7 @@ function guiding_center_field(equil; omegaE=nothing)
         dphi = [-equil.psio * omegaE(ψ) for ψ in xs]
         phi = cubic_interp(xs, FastInterpolations.cumulative_integrate(cubic_interp(xs, dphi)); extrap=ExtendExtrap())
     end
-    return GuidingCenterField(itp(Bt), itp(bpsi), itp(btheta), itp(jac), itp(R), itp(Z),
+    return GuidingCenterField(itp(Bt), itp(bpsi), itp(btheta), itp(jac), itp(R), itp(Z), itp(nu),
         F, dF, phi, s, equil.psio, abs(F(0.0)) / equil.ro, equil.ro, first(xs), last(xs))
 end
 

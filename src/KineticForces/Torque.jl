@@ -66,6 +66,10 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac,
             n_s, T_s, equil, intr)
 
+    elseif kind == :orbit
+        tpsi_var[] = calculate_orbit(surf.orbit, n, l, q, epsr, wdian, wdiat, welec, nuk, intr.bo, bmax, n_s, T_s;
+            chi1=intr.chi1, ro=intr.ro, energy_atol=atol_energy, energy_rtol=rtol_energy, pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
+
     else  # :gar — fgar/tgar/pgar + all *mm matrix methods
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
             nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
@@ -466,7 +470,7 @@ function _setup_surface_state(
 
     return (;
         chrg, mass,
-        tspl, B_vpar, bf, bmax, bmin, theta_bmax,
+        tspl, B_vpar, bf, bmax, bmin, theta_bmax, theta_bmin,
         q, n_s, T_s, welec,
         wdian, wdiat, nuk,
         epsr
@@ -508,16 +512,25 @@ function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method:
         smat_f = tmat_f = xmat_f = ymat_f = zmat_f = nothing
     end
 
-    geometry = if n !== nothing && method_kind(method) == :gar
+    kind = method_kind(method)
+    geometry = if n !== nothing && kind in (:gar, :orbit)
         compute_bounce_geometry(psi, n, state.q, intr.bo, state.bmax, state.bmin, state.theta_bmax,
             state.tspl, state.B_vpar, intr.mfac, intr.chi1, intr.ro, dbob_m_f, divx_m_f, divxfac, wdfac,
             state.mass, state.chrg, state.T_s, method;
+            nlmda=kind == :orbit ? intr.orbit_nlambda : 128,
             do_matrices=need_matrices && !isnothing(smat_f), surface_field=state.bf)
     else
         nothing
     end
 
-    return (; state..., dbob_m_f, divx_m_f, smat_f, tmat_f, xmat_f, ymat_f, zmat_f, geometry)
+    orbit = if n !== nothing && kind == :orbit
+        orbit_surface_table(intr.orbit_field, geometry, intr, psi, state.theta_bmin, state.q, state.welec, state.mass, state.chrg, state.T_s, n;
+            divxfac, lmax=intr.orbit_lmax, nenergy=intr.orbit_nenergy, potential=intr.orbit_potential)
+    else
+        nothing
+    end
+
+    return (; state..., dbob_m_f, divx_m_f, smat_f, tmat_f, xmat_f, ymat_f, zmat_f, geometry, orbit)
 end
 
 """
