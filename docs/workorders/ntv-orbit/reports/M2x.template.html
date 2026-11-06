@@ -32,12 +32,48 @@
   .two > * { min-width: 0; }
   .tag { font: 600 .72em var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
   a { color: var(--accent); }
+  .gloss { margin: 1.2em 0; font: .88em/1.45 var(--sans); }
+  .gloss summary { cursor: pointer; font-weight: 600; }
+  .gloss td:first-child { white-space: nowrap; font-weight: 600; }
 </style>
 <main>
 <h1>M2 explainer: the charge scan, the grids and the layer fill</h1>
 <div class="meta">Project ntv-orbit &middot; companion to the <a href="https://claude.ai/artifact/D3JLSctS5tCSH5vpH6BJn6">M2 attempt 1 report</a>
 &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} &middot; DIII-D-like example, n = 1, thermal deuterium, Φ off
-&middot; data from job 139196 &middot; 2026-11-06</div>
+&middot; data from jobs 139196 (classes, boundaries, new orbits) and 139116 (table values) &middot; 2026-11-06</div>
+
+<details class="gloss" open><summary>Symbols and acronyms used in this report</summary>
+<div class="tbl"><table>
+<tr><td>NTV</td><td>neoclassical toroidal viscosity: the torque a non-axisymmetric field δB exerts on the plasma through kinetic resonances</td></tr>
+<tr><td><code>fgar</code></td><td>GPEC's existing surface path: the particle is held on its flux surface ψ₀; its bounce average runs along the field line on ψ₀</td></tr>
+<tr><td><code>forb</code></td><td>the new orbit path: the same average taken along the real guiding-center orbit, which drifts off ψ₀</td></tr>
+<tr><td>ZOW / FOW</td><td>zero / finite orbit width. <code>forb</code> must reduce to <code>fgar</code> in the ZOW limit</td></tr>
+<tr><td>ψ<sub>N</sub>, ψ₀</td><td>normalized poloidal flux (0 axis, 1 edge); ψ₀ the surface where an orbit starts</td></tr>
+<tr><td>LCFS, a</td><td>last closed flux surface (ψ<sub>N</sub> = 1); a the minor radius</td></tr>
+<tr><td>Δ<sub>b</sub></td><td>orbit width: the ψ range an orbit spans, converted to minor radius</td></tr>
+<tr><td>Z</td><td>species charge number <code>zi</code> (charge Z·e). Not the height, which is written z</td></tr>
+<tr><td>x, u</td><td>x = E/T, kinetic energy over temperature; u = √x, the table's energy coordinate</td></tr>
+<tr><td>λ</td><td>pitch, λ = μB₀/E (μ magnetic moment, B₀ reference field). Fixed along an orbit. v∥² ∝ 1 − λB/B₀</td></tr>
+<tr><td>λ<sub>tp</sub>, λ<sub>max</sub></td><td>surface trapped–passing boundary B₀/B<sub>max</sub>; largest pitch reachable at the start point, B₀/B<sub>min</sub></td></tr>
+<tr><td>λ<sub>c</sub></td><td>the orbit's own trapped–passing boundary at given u and σ; differs from λ<sub>tp</sub> because the orbit drifts</td></tr>
+<tr><td>σ</td><td>sign of v∥ at the start (+1 or −1). For trapped orbits the two signs are different bananas</td></tr>
+<tr><td>θ, θ<sub>Bmin</sub></td><td>poloidal angle (in turns); the angle of minimum B on the surface, where orbits start</td></tr>
+<tr><td>ω<sub>b</sub>, ω<sub>D</sub></td><td>bounce (or transit) frequency; toroidal precession (magnetic drift) frequency</td></tr>
+<tr><td>ω<sub>E</sub>, ω<sub>*</sub></td><td>E×B rotation frequency; diamagnetic frequencies ω<sub>*n</sub>, ω<sub>*T</sub> from density and temperature gradients</td></tr>
+<tr><td>ν</td><td>collision frequency in the Krook operator</td></tr>
+<tr><td>n, ℓ</td><td>toroidal mode number of δB; bounce harmonic. Resonance where ℓω<sub>b</sub> − n(ω<sub>D</sub> + ω<sub>E</sub>) ≈ 0</td></tr>
+<tr><td>δJ<sub>ℓ</sub></td><td>bounce-harmonic action: the orbit average of the perturbation (δB/B and ∇·ξ⊥, ξ the displacement) at harmonic ℓ</td></tr>
+<tr><td>T, δW<sub>K</sub></td><td>complex torque; Re T is the torque (N·m), Im T = 2n·δW<sub>K</sub>, the kinetic energy of the perturbation</td></tr>
+<tr><td>Φ</td><td>electrostatic potential; off in all M2 runs</td></tr>
+<tr><td>τ<sub>max</sub></td><td>the orbit integrator's time limit; an orbit not closed by then is "unclosed"</td></tr>
+<tr><td>layer fill</td><td>the M2 step that writes surface values into a pitch band around λ<sub>tp</sub> (Section 3)</td></tr>
+</table></div></details>
+
+<figure><div class="plate">{{FIG_SCHEMATIC}}</div>
+<figcaption>Figure 0. The setting. (a) Pitch on a model surface: the dashed level B₀/λ sets where v∥ vanishes, so whether a
+particle bounces (trapped) or circulates (passing) depends on λ against λ<sub>tp</sub>. (b) The two averages, on a real
+thermal-deuterium orbit from ψ<sub>N</sub> = 0.5 at x = 1 (DIII-D-like case): <code>fgar</code> samples the perturbation only on ψ₀,
+<code>forb</code> samples it along the orbit across Δ<sub>b</sub>.</figcaption></figure>
 
 <p class="note">Answers to three questions on the M2 report: what Z is and why the scan goes to Z = 4096; what the grids and the
 layer fill are; and what the proposed fixes change. One new finding: the attempt-2 plan as written in Q9 option A

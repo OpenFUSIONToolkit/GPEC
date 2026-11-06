@@ -266,7 +266,39 @@ def fig_fix():
     save(fig, "fig_m2x_fix")
 
 
+def fig_schematic():
+    """Schematic (model field, not the equilibrium): what λ means, and what each path averages over."""
+    o = read(DEV / "explain_orbits.csv")
+    fig, ax = plt.subplots(1, 2, figsize=(7.4, 2.7))
+    th = np.linspace(-0.5, 0.5, 400)
+    eps = 0.3
+    B = 1 / (1 + eps * np.cos(2 * np.pi * th))
+    bmin, bmax = B.min(), B.max()
+    ax[0].plot(th, B, color=INK, lw=1.2)
+    for lev, col, lab in ((1.6, ORANGE, "passing: B₀/λ above B_max, never bounces"), (bmax, INK, "λ = λtp = B₀/B_max: the trapped–passing edge"), (1.12, BLUE, "trapped: bounces where B = B₀/λ (dots)")):
+        ax[0].axhline(lev, color=col, lw=0.8, ls="--" if col != INK else ":")
+        ax[0].annotate(lab, (-0.49, lev), textcoords="offset points", xytext=(0, 3), fontsize=6, color=col if col != INK else MUTED)
+    tb = np.arccos((1 / 1.12 - 1) / eps) / (2 * np.pi)
+    ax[0].fill_between(th, B, 1.12, where=np.abs(th) < tb, color=BLUE, alpha=0.15, lw=0)
+    ax[0].plot([-tb, tb], [1.12, 1.12], "o", color=BLUE, ms=3)
+    ax[0].set_ylim(0.7, 1.75)
+    ax[0].set_xlabel("poloidal angle θ (turns), outboard midplane at 0")
+    ax[0].set_ylabel("B(θ)/B₀ (curve), B₀/λ (dashed)")
+    ax[0].set_title("(a) model surface, ε = 0.3: v∥² ∝ 1 − λB/B₀", fontsize=7.5)
+    m = (o["case"] == "mid") & (o["zi"] == 1)
+    ax[1].axvline(0.5, color=ORANGE, lw=1.6, label="surface path (fgar): stays on ψ₀")
+    ax[1].plot(o["psi"][m], o["Z"][m], color=BLUE, lw=1.2, label="orbit path (forb): real guiding-center orbit")
+    ax[1].axvspan(o["psi"][m].min(), o["psi"][m].max(), color=BLUE, alpha=0.10, lw=0, label="orbit width Δ_b")
+    ax[1].set_xlabel("ψ_N (normalized poloidal flux)")
+    ax[1].set_ylabel("height z (m)")
+    ax[1].set_title("(b) what each path averages δB/B and ∇·ξ⊥ over", fontsize=7.5)
+    ax[1].legend(fontsize=6, frameon=False, loc="lower right")
+    fig.tight_layout()
+    save(fig, "fig_m2x_schematic")
+
+
 if __name__ == "__main__":
+    fig_schematic()
     fig_charge()
     fig_grids()
     fig_layer()

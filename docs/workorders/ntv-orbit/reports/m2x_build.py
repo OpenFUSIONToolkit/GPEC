@@ -28,6 +28,7 @@ def main():
     html = html.replace("<!-- Built by m2x_build.py from M2x.template.html; edit the template, not M2x.html. -->\n", "")
     fields = {
         "GPEC_COMMIT": commit,
+        "FIG_SCHEMATIC": png("fig_m2x_schematic", "pitch and orbit schematic"),
         "FIG_CHARGE": png("fig_m2x_charge", "orbit width and surface torque against charge"),
         "FIG_GRIDS": png("fig_m2x_grids", "pitch, energy and psi grids"),
         "FIG_LAYER": png("fig_m2x_layer", "orbit class maps with the layer band"),
