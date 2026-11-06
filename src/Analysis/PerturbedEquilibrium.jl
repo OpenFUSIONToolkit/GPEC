@@ -17,16 +17,21 @@ const Source = Union{AbstractString,PerturbedEquilibriumState}
 const _COUPLING = "PerturbedEquilibrium/SingularCoupling/"
 const _RESPONSE = "PerturbedEquilibrium/Response/"
 
+# The penetrated field when the run carries a nonzero one (matched runs), otherwise `nothing`.
+_penetrated(v) = isempty(v) || all(iszero, v) ? nothing : v
+
 function _coupling_data(s::PerturbedEquilibriumState)
     r = s.response
-    return (; field=s.resonant_area_weighted_field, current=s.resonant_current, island_hw=s.island_half_width, chirikov=s.chirikov_parameter,
+    return (; field=s.resonant_area_weighted_field, penetrated=_penetrated(s.penetrated_area_weighted_field), current=s.resonant_current, island_hw=s.island_half_width,
+        chirikov=s.chirikov_parameter,
         delta_prime=s.delta_prime, psi=r.rational_psi, q=r.rational_q, m=r.rational_m_res, n=r.rational_n)
 end
 
 function _coupling_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
         rd(name) = read(fid[_COUPLING*name])
-        (; field=rd("resonant_area_weighted_field"), current=rd("resonant_current"), island_hw=rd("island_half_width"), chirikov=rd("chirikov_parameter"),
+        pen = haskey(fid, _COUPLING * "penetrated_area_weighted_field") ? _penetrated(rd("penetrated_area_weighted_field")) : nothing
+        (; field=rd("resonant_area_weighted_field"), penetrated=pen, current=rd("resonant_current"), island_hw=rd("island_half_width"), chirikov=rd("chirikov_parameter"),
             delta_prime=rd("Delta_prime"), psi=rd("rational_psi"), q=rd("rational_q"), m=rd("rational_m"), n=rd("rational_n"))
     end
 end
@@ -101,7 +106,8 @@ end
 """
     plot_resonant_area_weighted_field_amplitude(src; save_path=nothing)
 
-Plot the resonant area-weighted field |b̄_res| = |Φ_res|/A at each rational surface [Pharr 2026], in tesla.
+Plot the resonant area-weighted field |b̄_res| = |Φ_res|/A at each rational surface [Pharr 2026], in tesla, beside the
+penetrated field |b̄_pen| when the run carries one.
 
 ### Arguments
 
@@ -219,8 +225,8 @@ end
 """
     plot_perturbed_equilibrium_summary(src; save_path=nothing)
 
-Plot the panels the source supplies: the resonant field at each rational surface, the edge b̄^ψ spectrum, and the
-ξ^ψ spectrogram.
+Plot the panels the source supplies: the resonant field at each rational surface, the edge b̄^ψ spectrum, the
+ξ^ψ spectrogram and, from a state in memory, b_n on the poloidal plane at φ = 0.
 
 ### Arguments
 
@@ -239,9 +245,10 @@ function plot_perturbed_equilibrium_summary(src::Source; save_path=nothing)
     coupling = _can(plot_resonant_area_weighted_field_amplitude, caps) ? _coupling_data(src) : nothing
     edge = :response_b in caps ? _response_data(src, :b_psi) : nothing
     xi = _can(plot_mode_spectrogram, caps) ? _response_data(src, :xi_psi) : nothing
-    coupling === nothing && edge === nothing && xi === nothing &&
+    rz = src isa PerturbedEquilibriumState && _can(plot_perturbed_field_rz, caps) ? _poloidal_data(src, :b_n) : nothing
+    coupling === nothing && edge === nothing && xi === nothing && rz === nothing &&
         throw(ArgumentError("plot_perturbed_equilibrium_summary: no panel can be drawn: $(REASONS[:singular_coupling]); $(REASONS[:response_xi])"))
-    return _draw(_plot_perturbed_equilibrium_summary, coupling, edge, xi; save_path)
+    return _draw(_plot_perturbed_equilibrium_summary, coupling, edge, xi, rz; save_path)
 end
 
 # (R, Z) of the flux surface ψ at SFL angle θ ∈ [0, 1).
@@ -399,7 +406,7 @@ function plot_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
 end
 
 const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
-register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum and ξ^ψ spectrogram")
+register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum, ξ^ψ spectrogram and b_n on the poloidal plane")
 register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,), "resonant coupling rows per rational surface")
 register!(plot_resonant_area_weighted_field_amplitude, _PE_SOURCES, (:singular_coupling,), "|b̄_res| per rational surface")
 register!(plot_island_widths, _PE_SOURCES, (:singular_coupling,), "island half-width per rational surface")

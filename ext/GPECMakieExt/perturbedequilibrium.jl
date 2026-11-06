@@ -22,6 +22,7 @@ function _coupling_row(d, key)
 end
 
 const _ROW_TITLES = Dict(
+    :field_pen => "Resonant and penetrated field at each rational surface",
     :field => "Resonant field at each rational surface",
     :current => "Resonant current at each rational surface",
     :island_hw => "Island half-width at each rational surface",
@@ -29,9 +30,26 @@ const _ROW_TITLES = Dict(
 )
 
 function _coupling_title(d, keys)
-    :chirikov in keys || return _ROW_TITLES[only(keys)]
+    :chirikov in keys || return _ROW_TITLES[only(keys) === :field && d.penetrated !== nothing ? :field_pen : only(keys)]
     k = count(>=(1), d.chirikov)
     return k == 0 ? "Resonant coupling: Chirikov parameter < 1 on every surface" : "Resonant coupling: islands overlap on $k of $(length(d.chirikov)) surfaces"
+end
+
+# The field row with the penetrated field: b̄_res and b̄_pen as paired stems on one shared scale.
+function _field_pair!(ax, d, x)
+    v, ylabel, yscale = _magnitude_row(vcat(abs.(d.field), abs.(d.penetrated)), rich("|b̄|"), "T")
+    k = length(x)
+    ax.ylabel, ax.yscale = ylabel, yscale
+    positive = filter(>(0), v)
+    base = yscale === log10 ? minimum(positive) / 3 : 0.0
+    yscale === identity && ylims!(ax, 0, 1.12 * maximum(positive))
+    for (j, (y, name)) in enumerate(((v[1:k], "res"), (v[(k+1):end], "pen")))
+        xs = x .+ (j - 1.5) * 0.24
+        rangebars!(ax, xs, fill(base, k), y; color=(WONG[j], 0.35), whiskerwidth=0, linewidth=2)
+        scatter!(ax, xs, y; color=WONG[j], markersize=11, label=rich("|b̄", subscript(name), "|"))
+    end
+    axislegend(ax; position=:lt)
+    return ax
 end
 
 # Rows of stems and dots sharing a categorical q = m/n axis, one colour per toroidal mode number.
@@ -46,6 +64,10 @@ function _coupling_rows!(gl, d, keys)
         last = r == length(keys)
         ax = Axis(gl[r, 1]; ylabel, yscale, xticks=(x, labels), limits=((0.4, length(x) + 0.6), nothing), xlabel=last ? "rational surface q = m/n" : "",
             xticklabelsvisible=last, ylabelsize=14, title=r == 1 ? _coupling_title(d, keys) : "")
+        if key === :field && d.penetrated !== nothing
+            push!(axes, _field_pair!(ax, d, x))
+            continue
+        end
         ref === nothing || hlines!(ax, ref; color=:black, linewidth=1, linestyle=ref == 1.0 ? :dash : :solid)
         positive = filter(>(0), y)
         base = yscale === log10 ? minimum(positive) / 3 : 0.0
@@ -153,25 +175,6 @@ function _edge_spectrum!(gl, d)
     return ax
 end
 
-function PE._plot_perturbed_equilibrium_summary(coupling, edge, xi)
-    return themed() do
-        top = Any[]
-        coupling === nothing || push!(top, gl -> _coupling_rows!(gl, coupling, (:field,)))
-        edge === nothing || push!(top, gl -> _edge_spectrum!(gl, edge))
-        fig = Figure(; size=(1150, isempty(top) || xi === nothing ? 480 : 820))
-        for (c, draw!) in enumerate(top)
-            gl = fig[1, c] = GridLayout()
-            draw!(gl)
-        end
-        if xi !== nothing
-            gl = fig[isempty(top) ? 1 : 2, 1:max(1, length(top))] = GridLayout()
-            _spectrogram!(gl, xi, :xi_psi)
-            isempty(top) || rowsize!(fig.layout, 1, Relative(0.38))
-        end
-        fig
-    end
-end
-
 const _NORMAL_STYLE = Dict(:b_n => (rich("b", subscript("n")), "T"), :xi_n => (rich("ξ", subscript("n")), "m"))
 
 # Outward unit normals of a closed counter-clockwise outline, from central differences.
@@ -191,25 +194,60 @@ function _display_scale(R, xi; frac=0.05)
     return max(1, round(Int, floor(s / p) * p))
 end
 
+# b_n or ξ_n on the poloidal plane in `gl`, with its colourbar, and the displaced boundary when given.
+function _field_rz_panel!(gl, d, component, boundary)
+    glyph, unit = _NORMAL_STYLE[component]
+    values, scale = _decade(d.values)
+    title =
+        boundary === nothing ? rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°") :
+        rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°: largest boundary |ξ", subscript("n"), "| = ", _num(1e3 * maximum(abs, boundary.xi)), " mm")
+    ax = Axis(gl[1, 1]; title)
+    hm = _poloidal_slice!(ax, d.R, d.Z, values; outlines=d.outlines)
+    Colorbar(gl[1, 2], hm; label=rich(glyph, _unit(scale, unit)))
+    # The column takes the plasma's own width-to-height ratio, so the panel leaves no empty band beside it.
+    colsize!(gl, 1, Aspect(1, (maximum(d.R) - minimum(d.R)) / (maximum(d.Z) - minimum(d.Z))))
+    if boundary !== nothing
+        nR, nZ = _outward_normals(boundary.R, boundary.Z)
+        s = _display_scale(boundary.R, boundary.xi)
+        lines!(ax, boundary.R, boundary.Z; color=(:black, 0.45), linestyle=:dash, linewidth=1.2, label="equilibrium")
+        lines!(ax, boundary.R .+ s .* boundary.xi .* nR, boundary.Z .+ s .* boundary.xi .* nZ; color=:black, linewidth=2,
+            label=rich("displaced, ξ", subscript("n"), " × $s"))
+        Legend(gl[2, 1:2], ax; orientation=:horizontal, framevisible=false)
+        rowgap!(gl, 4)
+    end
+    return ax
+end
+
 function PE._plot_perturbed_field_rz(d, component, boundary)
     return themed() do
-        glyph, unit = _NORMAL_STYLE[component]
-        values, scale = _decade(d.values)
         fig = Figure(; size=(560, boundary === nothing ? 680 : 720))
-        title =
-            boundary === nothing ? rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°") :
-            rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°: largest boundary |ξ", subscript("n"), "| = ", _num(1e3 * maximum(abs, boundary.xi)), " mm")
-        ax = Axis(fig[1, 1]; title)
-        hm = _poloidal_slice!(ax, d.R, d.Z, values; outlines=d.outlines)
-        Colorbar(fig[1, 2], hm; label=rich(glyph, _unit(scale, unit)))
-        if boundary !== nothing
-            nR, nZ = _outward_normals(boundary.R, boundary.Z)
-            s = _display_scale(boundary.R, boundary.xi)
-            lines!(ax, boundary.R, boundary.Z; color=(:black, 0.45), linestyle=:dash, linewidth=1.2, label="equilibrium")
-            lines!(ax, boundary.R .+ s .* boundary.xi .* nR, boundary.Z .+ s .* boundary.xi .* nZ; color=:black, linewidth=2,
-                label=rich("displaced, ξ", subscript("n"), " × $s"))
-            Legend(fig[2, 1:2], ax; orientation=:horizontal, framevisible=false)
-            rowgap!(fig.layout, 4)
+        gl = fig[1, 1] = GridLayout()
+        _field_rz_panel!(gl, d, component, boundary)
+        fig
+    end
+end
+
+function PE._plot_perturbed_equilibrium_summary(coupling, edge, xi, rz)
+    return themed() do
+        top = Any[]
+        coupling === nothing || push!(top, gl -> _coupling_rows!(gl, coupling, (:field,)))
+        edge === nothing || push!(top, gl -> _edge_spectrum!(gl, edge))
+        rows = (isempty(top) ? 0 : 1) + (xi === nothing ? 0 : 1)
+        ncol = max(1, length(top))
+        fig = Figure(; size=(1150 + (rz === nothing ? 0 : 480), rows < 2 ? 560 : 820))
+        for (c, draw!) in enumerate(top)
+            gl = fig[1, c] = GridLayout()
+            draw!(gl)
+        end
+        if xi !== nothing
+            gl = fig[isempty(top) ? 1 : 2, 1:ncol] = GridLayout()
+            _spectrogram!(gl, xi, :xi_psi)
+            isempty(top) || rowsize!(fig.layout, 1, Relative(0.38))
+        end
+        # b_n on the poloidal plane, a column spanning the other panels' height.
+        if rz !== nothing
+            gl = fig[1:max(1, rows), rows == 0 ? 1 : ncol + 1] = GridLayout()
+            _field_rz_panel!(gl, rz, :b_n, nothing)
         end
         fig
     end
