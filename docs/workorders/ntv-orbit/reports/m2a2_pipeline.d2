@@ -1,0 +1,17 @@
+direction: down
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  new: {style: {fill: "#e4ece4"; stroke: "#2f6b3a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+}
+geo: "pitch nodes λᵢ\n(surface path's grid)" {class: n}
+scan: "scan u = √x, each sign of v∥\n24 orbits: class at each u" {class: new}
+bis: "bisect each class change\nto Δu < 10⁻³ u_max" {class: new}
+seg: "segments [u_a, u_b]\ntrapped or passing" {class: new}
+ref: "sample each segment\nrefine until spline fits" {class: new}
+grp: "group nodes with the\nsame segment sequence" {class: new}
+lam: "pitch quadrature: inputs\nsplined in λ within a group" {class: new}
+en: "energy integral at each λ\n(poles exact, shared)" {class: n}
+tq: "torque T(ψ₀)" {class: n}
+geo -> scan -> bis -> seg -> ref -> grp -> lam -> en -> tq
+(* -> *)[*].style: {stroke: "#333333"; stroke-width: 2}
