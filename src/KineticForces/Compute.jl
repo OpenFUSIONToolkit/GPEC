@@ -350,6 +350,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         intr.orbit_potential = ctrl.orbit_potential
         intr.orbit_field = guiding_center_field(equil; omegaE=ctrl.orbit_potential ? kinetic_profiles.omegaE_spline : nothing)
         intr.orbit_lmax, intr.orbit_nlambda, intr.orbit_nenergy = ctrl.bounce_harmonic_max, ctrl.orbit_nlambda, ctrl.orbit_nenergy
+        intr.orbit_energy_tol, intr.orbit_umax = ctrl.orbit_energy_tol, ctrl.orbit_umax
     end
 
     for entry in METHOD_REGISTRY

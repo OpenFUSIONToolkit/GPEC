@@ -86,30 +86,45 @@ using HDF5
         divx = ComplexF64[ψ * (1 - ψ) * (m == 3 ? 1e-3im : 1e-4) for ψ in ψg, m in 1:4]
         intr.dbob_m = cubic_interp(ψg, Series(dbob); extrap=ExtendExtrap())
         intr.divx_m = cubic_interp(ψg, Series(divx); extrap=ExtendExtrap())
-        intr.orbit_field, intr.orbit_lmax, intr.orbit_nenergy = g, 1, 6
+        intr.orbit_field, intr.orbit_lmax, intr.orbit_nenergy, intr.orbit_nlambda = g, 1, 6, 32
         ψ, n = 0.5, 1
         torque(surf, zi, method) = sum(l -> (r = Ref{ComplexF64}(0); KF.tpsi!(r, ψ, n, l, zi, 2, 1.0, 1.0, false, method, equil, intr, prof; surface=surf); r[]), -1:1)
 
-        # Surface values in the orbit table reproduce fgar to roundoff.
-        sf = KF._torque_surface(ψ, 1, 2, false, "fgar", equil, intr, prof; n)
-        so = KF._torque_surface(ψ, 1, 2, false, "forb", equil, intr, prof; n)
-        geo = so.geometry
-        tab = so.orbit
-        sdj = reduce(hcat, [KF.bounce_harmonic(geo, l, n, sf.q, intr.ro, intr.mpert).dJdJ for l in -1:1])
-        dJ = zeros(size(tab.dJdJ))
-        for k in eachindex(tab.u), s in 1:2
-            dJ[:, k, s, :] .= sdj
+        # Surface values in the orbit table, one full-range segment per pitch and sign, reproduce fgar on the same
+        # pitch grid; they differ only in splitting the pitch spline at bo/bmax, which vanishes as the grid is refined.
+        function replay_table(sf, geo)
+            sdj = reduce(hcat, [KF.bounce_harmonic(geo, l, n, sf.q, intr.ro, intr.mpert).dJdJ for l in -1:1])
+            us = [0.5, 1.0, 2.0, 4.0]
+            segs = map(1:geo.nlmda) do il
+                geo.valid[il] || return KF.OrbitSegment[]
+                passing = geo.sigma[il] != 0
+                [
+                    KF.OrbitSegment(passing, dir, 0.0, sqrt(KF.X_ENERGY_MAX), us, fill(geo.wb[il], 4), fill(geo.wd[il], 4), repeat(sdj[il:il, :], 4))
+                    for dir in (passing ? (-1, 1) : (0, 0))
+                ]
+            end
+            return KF.OrbitSurfaceTable(geo.lambda[1:geo.nlmda], segs, 1, zeros(Int, 6))
         end
-        replay = KF.OrbitSurfaceTable(tab.lambda, tab.trapped, tab.u, repeat(geo.wb, 1, length(tab.u), 2), repeat(geo.wd, 1, length(tab.u), 2), dJ,
-            trues(size(tab.valid)), 1, zeros(Int, 6))
-        replayed = sum(l -> KF.calculate_orbit(replay, n, l, sf.q, sf.epsr, sf.wdian, sf.wdiat, sf.welec, sf.nuk, intr.bo, sf.bmax, sf.n_s, sf.T_s;
-            chi1=intr.chi1, ro=intr.ro, energy_atol=1e-11, energy_rtol=1e-8), -1:1)
-        @test replayed ≈ torque(sf, 1, "fgar") rtol = 1e-12
+        orbit_torque(tab, sf; classes=:all) = sum(
+            l -> KF.calculate_orbit(tab, n, l, sf.q, sf.epsr, sf.wdian, sf.wdiat, sf.welec, sf.nuk,
+                intr.bo, sf.bmax, sf.n_s, sf.T_s; chi1=intr.chi1, ro=intr.ro, energy_atol=1e-11, energy_rtol=1e-8, classes), -1:1)
+        sf = KF._torque_surface(ψ, 1, 2, false, "fgar", equil, intr, prof; n)
+        geo512 = KF.compute_bounce_geometry(ψ, n, sf.q, intr.bo, sf.bmax, sf.bmin, sf.theta_bmax, sf.tspl, sf.B_vpar, intr.mfac,
+            intr.chi1, intr.ro, sf.dbob_m_f, sf.divx_m_f, 1.0, 1.0, sf.mass, sf.chrg, sf.T_s, "fgar"; nlmda=512, surface_field=sf.bf)
+        sf512 = merge(sf, (; geometry=geo512))
+        @test orbit_torque(replay_table(sf512, geo512), sf512) ≈ torque(sf512, 1, "fgar") rtol = 1e-4
 
-        # Orbit width ∝ 1/Z: the difference from fgar vanishes with it.
-        err(zi) = abs(torque(KF._torque_surface(ψ, zi, 2, false, "forb", equil, intr, prof; n), zi, "forb") /
-                      torque(KF._torque_surface(ψ, zi, 2, false, "fgar", equil, intr, prof; n), zi, "fgar") - 1)
-        e1, e2 = err(4), err(1024)
+        # At small width each orbit class carries the surface path's share, so the class bookkeeping keys off the orbit.
+        # Passing orbits carry their own ⟨φ̇⟩ − qω_θ, which differs from the surface ω_D at O(ω_D), hence the wider band.
+        surfaces(zi) = (KF._torque_surface(ψ, zi, 2, false, "fgar", equil, intr, prof; n), KF._torque_surface(ψ, zi, 2, false, "forb", equil, intr, prof; n))
+        sf, so = surfaces(1024)
+        replay = replay_table(sf, so.geometry)
+        @test orbit_torque(so.orbit, sf; classes=:passing) ≈ orbit_torque(replay, sf; classes=:passing) rtol = 5e-2
+        @test orbit_torque(so.orbit, sf; classes=:trapped) ≈ orbit_torque(replay, sf; classes=:trapped) rtol = 1e-3
+
+        # Orbit width ∝ 1/Z: the difference from the surface values on the same pitch grid vanishes with it.
+        err(zi, sf, so) = abs(orbit_torque(so.orbit, sf) / orbit_torque(replay_table(sf, so.geometry), sf) - 1)
+        e1, e2 = err(4, surfaces(4)...), err(1024, sf, so)
         @test e2 < 1e-4
         @test e2 < e1 / 10
     end

@@ -608,7 +608,10 @@ using HDF5
                 ntv_deck["Run"]["verbose"] = false
                 ntv_deck["KineticForces"]["orbit_diagnostic"] = true
                 # forb on a coarse orbit table over a narrow ψ window keeps the case fast.
-                merge!(ntv_deck["KineticForces"], Dict("forb_flag" => true, "orbit_nlambda" => 32, "orbit_nenergy" => 4, "psilims" => [0.45, 0.55]))
+                merge!(
+                    ntv_deck["KineticForces"],
+                    Dict("forb_flag" => true, "orbit_nlambda" => 4, "orbit_nenergy" => 6, "orbit_energy_tol" => 5e-2, "orbit_umax" => 5.0, "psilims" => [0.49, 0.51])
+                )
                 open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
                 @test reference.kinetic isa KineticForcesResult && reference.kinetic.pe === reference.pe

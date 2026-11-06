@@ -223,15 +223,17 @@ function _orbit_event!(integ, idx, up::Bool)
 end
 
 """
-    guiding_center_orbit(g, psi0, lambda, energy, sigma; mass, chrg, theta0=0.0, rtol=1e-10, tau_max=2e4)
+    guiding_center_orbit(g, psi0, lambda, energy, sigma; mass, chrg, theta0=0.0, rtol=1e-10, tau_max=2e4, dense=true)
         → GuidingCenterOrbit
 
 Integrate the orbit through (`psi0`, `theta0`) with kinetic energy `energy` (J) there, pitch
 `lambda` = μB₀/E and sign `sigma` of v∥, until it closes, is lost, reaches the axis grid edge, or
 `tau_max` (in R₀/v) passes. Returns `nothing` if the start point is forbidden (λB > B₀).
+With `dense=false` only the end state is saved: the status, period and frequencies are kept, but the ψ range
+holds the end points only and the solution cannot be sampled along the orbit.
 """
 function guiding_center_orbit(g::GuidingCenterField, psi0::Real, lambda::Real, energy::Real, sigma::Real;
-    mass::Real, chrg::Real, theta0::Real=0.0, rtol::Real=1e-10, tau_max::Real=2e4)
+    mass::Real, chrg::Real, theta0::Real=0.0, rtol::Real=1e-10, tau_max::Real=2e4, dense::Bool=true)
     B0 = g.B((psi0, theta0))
     w2 = 1 - lambda * B0 / g.bo
     w2 < 0 && return nothing
@@ -246,7 +248,7 @@ function guiding_center_orbit(g::GuidingCenterField, psi0::Real, lambda::Real, e
     cb = VectorContinuousCallback(_orbit_condition!, (i, idx) -> _orbit_event!(i, idx, true),
         (i, idx) -> _orbit_event!(i, idx, false), 6; save_positions=(false, false))
     prob = ODEProblem(_gc_rhs!, u0, (0.0, Float64(tau_max)), p)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=rtol * 1e-2, callback=cb, dense=true)
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=rtol * 1e-2, callback=cb, dense, save_everystep=dense)
     uend, τn = sol.u[end], sol.t[end]
     tau = τn * g.ro / v
     psis = [u[1] for u in sol.u]

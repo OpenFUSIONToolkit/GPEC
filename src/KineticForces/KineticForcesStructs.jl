@@ -80,7 +80,10 @@ Immutable: vary a field by building a new control.
   - `forb_flag::Bool` - Run the `forb` method: the full GAR torque with ω_b, the toroidal precession and |δJ_ℓ|²
     taken along guiding-center orbits started on each ψ (see [`orbit_surface_table`](@ref)). Scalar torque only.
     Default `false`.
-  - `orbit_nlambda::Int`, `orbit_nenergy::Int` - Pitch and √x nodes of the per-surface orbit table of `forb`.
+  - `orbit_nlambda::Int` - Pitch nodes of the per-surface orbit table of `forb`.
+  - `orbit_nenergy::Int` - Starting √x nodes on each orbit-class segment of a `forb` pitch node and sign of v∥.
+  - `orbit_energy_tol::Float64` - Relative error to which the `forb` segment samples are refined in √x.
+  - `orbit_umax::Float64` - Top of the `forb` energy range in √x = √(E/T).
     Defaults 128 (the surface path's pitch grid) and 12.
 """
 @kwdef struct KineticForcesControl
@@ -147,7 +150,9 @@ Immutable: vary a field by building a new control.
     orbit_diagnostic::Bool = false  # Write main-ion orbit frequencies to KineticForces/Orbits
     orbit_potential::Bool = true    # Include the potential from omega_E in the orbit Hamiltonian
     orbit_nlambda::Int = 128        # Pitch nodes of the forb orbit table
-    orbit_nenergy::Int = 12         # √x nodes of the forb orbit table
+    orbit_nenergy::Int = 12         # Starting √x nodes per orbit-class segment of forb
+    orbit_energy_tol::Float64 = 1e-2 # Relative refinement tolerance of the forb √x samples
+    orbit_umax::Float64 = 6.5       # Top of the forb energy range in √x
 end
 
 """
@@ -194,7 +199,8 @@ perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles
   - `sing_psis`: Sorted rational-surface ψ locations, used as panel boundaries of the outer ψ torque
     quadrature so resonant peaks fall on interval endpoints
   - `orbit_field`: the [`GuidingCenterField`](@ref) of the `forb` method, built once per run; `nothing` otherwise
-  - `orbit_lmax`, `orbit_nlambda`, `orbit_nenergy`: bounce harmonics and table size of the `forb` orbit tables
+  - `orbit_lmax`, `orbit_nlambda`, `orbit_nenergy`, `orbit_energy_tol`, `orbit_umax`: bounce harmonics, pitch nodes and
+    √x sampling of the `forb` orbit tables
   - `orbit_potential`: whether `orbit_field` carries the potential
 """
 @kwdef mutable struct KineticForcesInternal
@@ -229,6 +235,8 @@ perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles
     orbit_lmax::Int = 1
     orbit_nlambda::Int = 128
     orbit_nenergy::Int = 12
+    orbit_energy_tol::Float64 = 1e-2
+    orbit_umax::Float64 = 6.5
     orbit_potential::Bool = false
 
     # θ knot grid (length mthsurf+1) read by the per-surface setup; never written after construction.
