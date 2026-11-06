@@ -78,7 +78,7 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
     dJdJ = zeros(nl, nu, 2, nh)
     valid = falses(nl, nu, 2)
     nstatus = zeros(Int, 6)
-    buf = (dbob=zeros(ComplexF64, intr.mpert), divx=zeros(ComplexF64, intr.mpert), A=zeros(ComplexF64, nsample))
+    buf = (dbob=zeros(ComplexF64, intr.mpert), divx=zeros(ComplexF64, intr.mpert), A=zeros(ComplexF64, nsample), u=zeros(6))
     surface_dJdJ = reduce(hcat, [bounce_harmonic(geo, l, n, q, intr.ro, intr.mpert).dJdJ for l in -lmax:lmax])
     mismatch = falses(nl, nu)
     for il in 1:nl, (k, u) in enumerate(us)
@@ -145,7 +145,7 @@ function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr,
     m1 = first(intr.mfac)
     for k in 1:N
         τ = (k - 1) * dτ
-        u = sol(τ)
+        u = sol(buf.u, τ)
         ψ, θ, w = u[1], u[2], u[4]
         intr.dbob_m(buf.dbob, ψ)
         intr.divx_m(buf.divx, ψ)
@@ -206,10 +206,9 @@ function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, eps
         for s in 1:2
             Dk = col(vals, 3, s)
             all(iszero, Dk) && continue
-            spl(y) = cubic_interp(tab.u, collect(y); bc=CubicFit())
+            spl = cubic_interp(tab.u, Series(hcat(col(vals, 1, s), col(vals, 2, s), Dk)); bc=CubicFit())
             sgn = circ && s == 2 ? -1.0 : 1.0
-            xint = _integrate_energy_orbit(p, leff, sgn, spl(col(vals, 1, s)), spl(col(vals, 2, s)), spl(Dk), tab.u,
-                energy_atol, energy_rtol, segbuf)
+            xint = _integrate_energy_orbit(p, leff, sgn, spl, tab.u, energy_atol, energy_rtol, segbuf)
             total += circ ? xint : 0.5 * xint
         end
         return total
@@ -224,32 +223,39 @@ function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, eps
 end
 
 """
-    _integrate_energy_orbit(p, leff, sgn, Wb, Wd, D, u, atol, rtol, segbuf) → ComplexF64
+    _integrate_energy_orbit(p, leff, sgn, spl, u, atol, rtol, segbuf) → ComplexF64
 
-∫₀^{X_ENERGY_MAX} N(x)e^{−x}D(√x)/(iΩ − ν) dx with Ω(u) = leff·sgn·Wb(u)·u + n(ω_E + Wd(u)·u²), Wb, Wd, D
-splines on the √x nodes `u` held at the end nodes outside them. The poles are the sign changes of Ω on
+∫₀^{X_ENERGY_MAX} N(x)e^{−x}D(√x)/(iΩ − ν) dx with Ω(u) = leff·sgn·Wb(u)·u + n(ω_E + Wd(u)·u²), where `spl`
+splines [Wb, Wd, D] on the √x nodes `u` and is held at the end nodes outside them. The poles are the sign changes of Ω on
 a fine √x grid, removed by principal value and residue as in [`_integrate_energy_resonant`](@ref), to
 which this reduces when Wb, Wd and D are constant.
 """
-function _integrate_energy_orbit(p::EnergyParams, leff::Float64, sgn::Float64, Wb, Wd, D, u::Vector{Float64},
+function _integrate_energy_orbit(p::EnergyParams, leff::Float64, sgn::Float64, spl, u::Vector{Float64},
     atol::Float64, rtol::Float64, segbuf)::ComplexF64
     n = p.n
     u1, uK = first(u), last(u)
+    y, dy = zeros(3), zeros(3)
     cl(s) = clamp(s, u1, uK)
-    Ω(s) = leff * sgn * Wb(cl(s)) * s + n * (p.we + Wd(cl(s)) * s^2)
-    function dΩ(s)
-        c, inside = cl(s), u1 < s < uK
-        dWb = inside ? Wb(c; deriv=DerivOp(1)) : 0.0
-        dWd = inside ? Wd(c; deriv=DerivOp(1)) : 0.0
-        return leff * sgn * (Wb(c) + s * dWb) + n * (2s * Wd(c) + s^2 * dWd)
+    function Ω(s)
+        spl(y, cl(s))
+        return leff * sgn * y[1] * s + n * (p.we + y[2] * s^2)
     end
-    h(x) = _energy_numerator(x, p) * exp(-x) * D(cl(sqrt(x)))
+    function dΩ(s)
+        c = cl(s)
+        spl(y, c)
+        u1 < s < uK ? spl(dy, c; deriv=DerivOp(1)) : fill!(dy, 0.0)
+        return leff * sgn * (y[1] + s * dy[1]) + n * (2s * y[2] + s^2 * dy[2])
+    end
+    function h(x)
+        spl(y, cl(sqrt(x)))
+        return _energy_numerator(x, p) * exp(-x) * y[3]
+    end
     u_max = sqrt(X_ENERGY_MAX)
 
     x_poles = ComplexF64[]
     residues = ComplexF64[]
     pole_contribution = zero(ComplexF64)
-    grid = range(0.0, u_max, 801)
+    grid = range(0.0, u_max, 401)
     Ωa = Ω(grid[1])
     for j in 2:length(grid)
         Ωb = Ω(grid[j])
