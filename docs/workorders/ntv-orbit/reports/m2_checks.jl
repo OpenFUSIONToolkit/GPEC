@@ -107,7 +107,7 @@ if mode == "scan"
         end
     end
 elseif mode == "layers"
-    # Separatrix-layer width at one charge on the scan nodes: does the layer set the ZOW-limit slope?
+    # Separatrix-layer width at one charge on the 3-point (36-node) set: does the layer set the ZOW-limit slope?
     zi = parse(Int, ARGS[4])
     factors = (3.0, 10.0, 30.0)
     tf = zeros(ComplexF64, length(nodes))

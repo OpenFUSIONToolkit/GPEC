@@ -45,14 +45,14 @@
 </style>
 
 <h1>M2 - The torque along the orbit and its zero-orbit-width limit</h1>
-<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ f2e0cda77
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ d2e06a843
 (runs at 9b390f5a5, same <code>src/</code>) &middot; new method <code>forb</code>, behind <code>forb_flag</code>
 (default off) &middot; attempt 1 of 2 &middot; 2026-11-06</div>
 
 <div class="strip">
   <span class="state amber">NOT GREEN</span>
   <span><b>Attempts</b> 3 of 15 (M2: 1 of 2)</span>
-  <span><b>Checks</b> 1 of 4 pass as written: 1 half passes, 2 cannot be run, 3 passes as a substitute check, 4 fails on the boundary layer</span>
+  <span><b>Checks</b> 0 of 4 pass as written: half of 1 passes, 2 cannot be run, 3 passes only as a substitute check, 4 fails on the boundary layer</span>
   <span><b>Tests</b> 251/251 pass (job 139103)</span>
   <span><b>Key run</b> 7-point charge scan, 72 ψ surfaces, n = 1, ℓ = −6…6, thermal D: 50 min at Z = 1, 13 min per smaller width, on 16 CPUs (jobs 139101, 139102, 139115)</span>
   <span><b>Decisions</b> 2 open; Q9 gates M2 attempt 2</span>
@@ -2267,7 +2267,7 @@ the charge Z (width ∝ 1/Z) on the same equilibrium, perturbation and ψ nodes 
 the ψ quadrature error is common to both). The x axis is the width of a mid-trapped orbit at ψ = 0.5 and x = 1;
 the energy integral reaches x = 36, where orbits are 6× wider. Black: complex T (torque and kinetic energy).
 Grey: torque only. Points with Z &lt; 16 are left out of the fit because the reference torque itself changes sign
-between Z = 4 and Z = 16, and because at Z ≤ 4 the boundary layer, not the orbit, sets the value (check 4).</figcaption></figure>
+between Z = 4 and Z = 16. Also, at Z = 1 the boundary layer, not the orbit, sets the value (check 4).</figcaption></figure>
 <figure id="fig2"><svg xmlns:xlink="http://www.w3.org/1999/xlink" width="518.4pt" height="194.4pt" viewBox="0 0 518.4 194.4" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -4219,16 +4219,20 @@ boundary moves off λ = B₀/B<sub>max</sub> by an amount that grows with energy
 of v<sub>∥</sub>. Near it, |δJ|² changes like 1/(λ − λ<sub>c</sub>), and on the fixed λ grid this gave a
 10<sup>−3</sup> floor that did not fall with width. The fill I chose (surface values within 10× the bisected
 shift) removes the floor, and it disappears at small width as intended. At Z = 16 the layer factor changes the
-answer by under 0.4 points out of 5.7%. At Z = 1 it does not work. On the edge surface ψ<sub>N</sub> = 0.96, the
-layer at factor 10 already covers 26% of the pitch × v<sub>∥</sub>-sign entries at the lowest energy node and
-80–95% for √x ≥ 2.4. At factor 30 it covers all of them. The physical-width <code>forb</code> torque is then
-mostly the surface torque, mixed in by an unphysical parameter: 0.26, 0.36 and 0.50 N·m for factors 3, 10 and
-30, with <code>fgar</code> at 0.53. Doubling λ cannot detect this, because <code>fgar</code>'s λ grid is
-clustered at λ<sub>tp</sub>, not at the orbit's own boundary λ<sub>c</sub>(E, σ).
+answer by under 0.4 points out of 5.7%. At Z = 1 it does not work. On the edge surface ψ<sub>N</sub> = 0.96, 34% of all table entries are
+lost orbits, mostly at high energy. For √x ≥ 2.4, 80–95% of entries hold no orbit value (lost, unclosed,
+class-mismatched or in the layer). The layer factor alone moves that share at the top energy node from 76% (factor 3)
+to 94% (10) to 100% (30). The fill also writes surface values over lost orbits, which otherwise count zero.
+So the factor mixes two things: how much of the boundary region is surface-valued, and whether lost orbits stay
+at zero. The physical-width <code>forb</code> torque follows it: 0.26, 0.36 and 0.50 N·m for factors 3, 10 and
+30, with <code>fgar</code> at 0.53. Doubling λ cannot detect this. The λ grid is <code>fgar</code>'s, clustered
+quadratically at λ<sub>tp</sub> (spacing 10<sup>−5</sup> there against a median of 10<sup>−2</sup>), not at the
+orbit's own boundary λ<sub>c</sub>(E, σ), so doubling it refines the wrong place.
 <b>What attempt 2 does (inference, not yet tested):</b> drop the fill and tabulate on a per-class pitch
 coordinate normalized to the bisected boundary, t = (λ − λ<sub>c</sub>)/(λ<sub>max</sub> − λ<sub>c</sub>) for
 trapped and λ/λ<sub>c</sub> for passing. The table then lives on a fixed (t, √x) grid, the energy spline at
-fixed t is smooth, and λ<sub>c</sub> enters only through dλ/dt. The existing energy integral and pole handling are
+fixed t is smooth, and λ<sub>c</sub> enters only through dλ/dt. Lost orbits stay at zero (until M3's loss
+boundary replaces that). The existing energy integral and pole handling are
 unchanged. Green would mean the layer factor is gone, and the Z = 1 torque changes by &lt; 5% on doubling the t
 grid.</p>
 
