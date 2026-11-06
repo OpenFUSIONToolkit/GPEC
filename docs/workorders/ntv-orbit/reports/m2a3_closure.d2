@@ -1,0 +1,25 @@
+direction: down
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  new: {style: {fill: "#e4ece4"; stroke: "#2f6b3a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+  q: {shape: diamond; style: {fill: "#ffffff"; stroke: "#333333"; font-size: 14}}
+}
+fld: "orbit field: B, F, Φ\nJacobian from rzphi_jac" {class: new}
+lau: "launch at θ_bmin\n(ψ₀, λ, u, σ)" {class: n}
+int: "integrate (ψ, θ, φ, v∥, χ)\nχ: angle off the ψ₀ field line" {class: new}
+sec: "crossing θ ≡ θ₀ (mod 1)" {class: new}
+ret: "start direction\nand ψ = ψ₀?" {class: q}
+k: "net winding k" {class: new}
+tr: "k = 0: trapped\n(banana or E×B-trapped)" {class: n}
+pa: "k = ±1: passing\n(incl. carried by E×B)" {class: n}
+out: "ω_b = 2π/τ, ⟨φ̇⟩ = (Δχ + 2πqk)/τ\n|δJ_ℓ|² along the orbit" {class: n}
+fld -> int
+lau -> int -> sec -> ret
+ret -> int: "no: count it, go on"
+ret -> k: "yes"
+k -> tr
+k -> pa
+tr -> out
+pa -> out
+(* -> *)[*].style: {stroke: "#333333"; stroke-width: 2}
