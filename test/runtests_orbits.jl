@@ -69,6 +69,14 @@ using HDF5
         end
     end
 
+    @testset "resonance roots per spline cell" begin
+        # Two roots 1e-5 apart (a near-tangent resonance) are both found; a quadratic that misses zero has none.
+        r = KF._cell_roots(s -> (s - 0.3) * (s - 0.30001) * (s - 1.7) * (s^2 + 1), 0.0, 2.0, 5)
+        @test length(r) == 3 && isapprox(r, [0.3, 0.30001, 1.7]; atol=1e-10)
+        @test isempty(KF._cell_roots(s -> (s - 0.5)^2 + 1e-6, 0.0, 1.0, 2))
+        @test isempty(KF._cell_roots(s -> 2.0, 0.0, 1.0, 5))
+    end
+
     @testset "orbit-averaged torque reduces to the surface path" begin
         # Synthetic two-mode perturbation: the torque reads only the δB/B and ∇·ξ⊥ Fourier modes.
         intr = KF.KineticForcesInternal(equil)
