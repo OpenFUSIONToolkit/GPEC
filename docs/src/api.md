@@ -48,7 +48,7 @@ ForceFreeStatesResult  Riccati, ideal closure
   Modes              n = 1, m = -4:3 (8 total)
   Domain             ψ ∈ [0.0001, 0.9995], q_lim = 3.262
   Surfaces           2: 2/1 @ ψ = 0.1221, 3/1 @ ψ = 0.8804
-  Fixed boundary     stable (no zero crossings of the critical determinant)
+  Fixed boundary     not reported (the Riccati (S, I) history cannot show crossings)
   Free boundary      stable: et₁ = 16.4, ep₁ = 14.04, ev₁ = 2.365, vacuum λ = 2.315
   Δ′_ii (ψ_N)        2/1: 0.1781, 3/1: -215.7
   Solution           not computed (Riccati stores no ξ profiles)

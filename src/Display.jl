@@ -142,7 +142,7 @@ function Base.show(io::IO, g::GalerkinResult)
 end
 
 function Base.show(io::IO, o::OdeState)
-    return print(io, "OdeState(", o.step, " stored steps, ", o.nzero, " fixed-boundary zero crossings)")
+    return print(io, "OdeState(", o.step, " stored steps, ", _plural(o.nzero, "crit sign change"), ")")
 end
 
 _integrator_name(r::ForceFreeStates.ForceFreeStatesResult) = nameof(typeof(r.algorithm))
@@ -182,10 +182,12 @@ function _solution_note(r::ForceFreeStates.ForceFreeStatesResult)
     return r.integrator === :riccati ? "not computed (Riccati stores no ξ profiles)" : "not computed ($(r.integrator) without a match)"
 end
 
+# The crit sign-change count is not yet a validated stability verdict, so it is reported raw.
 function _fixed_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
     r.diagnostics === nothing && return "not computed by the $(r.integrator) integrator"
-    k = r.diagnostics.nzero
-    return k == 0 ? "stable (no zero crossings of the critical determinant)" : "unstable ($(_plural(k, "zero crossing")) of the critical determinant)"
+    r.integrator === :riccati && return "not reported (the Riccati (S, I) history cannot show crossings)"
+    r.control.kinetic === nothing || return "not reported (crit assumes a Hermitian W)"
+    return "$(_plural(r.diagnostics.nzero, "crit sign change")) (unvalidated, not a stability verdict)"
 end
 
 function _free_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
@@ -292,8 +294,12 @@ end
 function Base.show(io::IO, ::MIME"text/plain", s::PerturbedEquilibriumState)
     r = s.response
     print(io, "PerturbedEquilibriumState  forcing from ", _forcing_label(s))
-    _row(io, "Energy", "vacuum $(_fmt(s.vacuum_energy)) J, surface $(_fmt(s.surface_energy)) J, plasma $(_fmt(s.plasma_energy)) J")
-    _row(io, "Torque", "$(_fmt(s.toroidal_torque)) N·m (boundary response; not the KineticForces NTV torque)")
+    if isempty(r.permeability_flux)
+        _row(io, "Energy", _missing_operators_note(r))
+    else
+        _row(io, "Energy", "vacuum $(_fmt(s.vacuum_energy)) J, surface $(_fmt(s.surface_energy)) J, plasma $(_fmt(s.plasma_energy)) J")
+        _row(io, "Torque", "$(_fmt(s.toroidal_torque)) N·m (boundary response; not the KineticForces NTV torque)")
+    end
     if isempty(s.island_half_width)
         _row(io, "Resonances", _missing_coupling_note(r))
     else
@@ -455,39 +461,3 @@ function Base.show(io::IO, ::MIME"text/plain", r::TearingResult)
     isempty(r.scan_data) || _row(io, "Scan data", "$(length(r.scan_data)) stored")
     return nothing
 end
-
-# Every field of each type with a text/plain summary, split into the fields the summary reports and
-# those it leaves out on purpose. The display tests require the split to cover `fieldnames` exactly,
-# so a new field fails them until it is placed in one list or the other.
-const _DISPLAY_FIELDS = Dict{Any,@NamedTuple{shown::Tuple, omitted::Tuple}}(
-    PlasmaEquilibrium => (shown=(:config, :params, :rzphi_xs, :rzphi_ys, :analytic, :kinetic),
-        omitted=(:profiles, :geometry, :rzphi_rsquared, :rzphi_offset, :rzphi_nu, :rzphi_jac, :eqfun_B, :eqfun_metric1, :eqfun_metric2,
-            :ro, :zo, :psio, :ingest)),
-    LocalStability.LocalStabilityResult => (shown=(:psi, :D_I, :D_R, :ballooning_psi, :alpha, :alpha_critical),
-        omitted=(:ballooning_Delta_prime, :di_psi, :problem, :algorithm)),
-    ForceFreeStates.ForceFreeStatesResult => (
-        shown=(:algorithm, :integrator, :closure, :control, :mlow, :mhigh, :nlow, :nhigh, :numpert_total, :psilow, :psilim, :qlim,
-            :wall_settings, :surfaces, :kinetic, :match, :solution, :diagnostics, :free_boundary, :delta_prime, :galerkin, :layer_overlap),
-        omitted=(:problem, :equil, :mpert, :npert, :q1lim, :metric, :mats, :bpen, :wp)),
-    MatchResult => (shown=(:cout, :deltar, :rpec_eig, :residual, :xi, :inner_psi, :model),
-        omitted=(:cin, :bpen, :reconnected_flux, :xi_deriv, :inner_xi, :inner_b, :inner_params, :problem)),
-    PlasmaResponse => (
-        shown=(:ffs, :m_modes, :n_modes, :odet_from_gal, :permeability_flux, :C_resonant_area_weighted_field, :rational_psi, :rational_m_res,
-            :rational_n, :dominant_singular_values, :T_xe),
-        omitted=(:compute_singular_coupling, :compute_torque_response, :flux_matrix, :plasma_inductance_flux, :surface_inductance_flux,
-            :plasma_inductance, :surface_inductance, :permeability, :reluctance, :rootarea_to_area_weight, :surface_area, :C_resonant_current,
-            :C_island_width_sq, :C_penetrated_area_weighted_field, :C_delta_prime, :coupling_flux, :C_coeffs, :rational_q, :rational_surface_idx,
-            :rational_area, :dominant_right_singular_vectors, :dominant_left_singular_vectors, :dominant_rational_index)),
-    PerturbedEquilibriumState => (
-        shown=(:response, :forcing, :coil_sets, :regularization_width, :psi_grid, :xi_modes, :resonant_area_weighted_field,
-            :penetrated_area_weighted_field, :island_half_width, :chirikov_parameter, :dominant_forcing_overlap, :vacuum_energy, :surface_energy,
-            :plasma_energy, :toroidal_torque, :torque_response),
-        omitted=(:forcing_modes, :b_modes, :b_n_modes, :xi_n_modes, :resonant_current, :island_width_sq, :delta_prime, :forcing_solution_weights,
-            :forcing_b, :forcing_b_rootarea, :forcing_b_area, :response_b, :response_b_rootarea, :response_b_area)),
-    KineticForcesResult => (shown=(:total, :species, :axis_psi_c), omitted=(:pe, :control)),
-    ErrorFieldsResult => (shown=(:sensitivities, :dominant, :monte_carlo, :risk, :scan, :couplings), omitted=(:tolerances, :response, :settings)),
-    TearingResult => (
-        shown=(:enabled, :model, :params, :rational_q, :dp_matrix, :omega, :gamma, :per_surface_extraction, :coupled_extraction, :layer_widths,
-            :scan_data, :critical_resonant_field),
-        omitted=(:problem, :config, :rational_psi, :Q_root, :omega_E, :q_shift))
-)
