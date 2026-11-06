@@ -118,7 +118,7 @@ reference field. λ stays fixed along an orbit, and v<sub>∥</sub>² ∝ 1 − 
 
 <figure id="fig1"><div class="plate">{{FIG_SCHEMATIC}}</div>
 <figcaption>Figure 1. The two averages. (a) Pitch on a model flux surface. The particle stops where B = B₀/λ (dashed levels), so a
-particle with λ above λ<sub>tp</sub> = B₀/B<sub>max</sub> bounces (trapped) and one below it circulates (passing). λ<sub>tp</sub>
+particle with λ above λ<sub>tp</sub> = B₀/B<sub>max</sub> (B<sub>max</sub> the largest field on the surface) bounces (trapped) and one below it circulates (passing). λ<sub>tp</sub>
 is the surface's trapped–passing boundary. (b) A real thermal-deuterium orbit in the DIII-D-like case, started at normalized
 poloidal flux ψ<sub>N</sub> = 0.5 (0 on the axis, 1 at the edge) with x = 1. <code>fgar</code> samples the perturbation only on
 the start surface ψ₀. <code>forb</code> samples it along the orbit, across the orbit width Δ<sub>b</sub>, the ψ range the orbit
@@ -154,7 +154,7 @@ which rebuild the energy spline at every pitch they evaluate (the cost problem, 
 <figure id="fig4"><div class="plate">{{FIG_GRIDS}}</div>
 <figcaption>Figure 4. The three grids. (a) Pitch: <code>fgar</code>'s own 128 nodes, 64 passing and 64 trapped, packed
 quadratically toward λ<sub>tp</sub> (spacing 1.2×10⁻⁵ there, median 10⁻²). The same nodes serve every energy row and both σ.
-λ<sub>max</sub> = B₀/B<sub>min</sub> is the largest pitch that can start at θ<sub>Bmin</sub>. (b) The 12 energy nodes in u
+λ<sub>max</sub> = B₀/B<sub>min</sub>, with B<sub>min</sub> the smallest field on the surface, is the largest pitch that can start at θ<sub>Bmin</sub>. (b) The 12 energy nodes in u
 against the energy weight x<sup>5/2</sup>e<sup>−x</sup>. (c) ψ nodes: Gauss–Legendre points on panels whose edges sit at
 rational surfaces. The scan uses 6 per panel (72 nodes), the layer test 3 (36).</figcaption></figure>
 
@@ -205,7 +205,7 @@ mid-trapped orbit at ψ<sub>N</sub> = 0.5 and x = 1; the energy integral reaches
 T. Grey: real part (torque) only. The fit uses Z ≥ 16, because at Z = 4 the reference torque is near its zero crossing.</figcaption></figure>
 
 <p><b>What it shows.</b> The difference falls from 4.5% at Δ<sub>b</sub>/a = 3×10⁻³ to 6×10⁻⁵ at 1.1×10⁻⁵, with no plateau.
-The fitted slope is 1.18 for complex T and 1.37 for the torque alone. Because the reference changes with Z, the slope assumes
+The fitted slope is 1.18 for complex T and 1.37 for the torque alone. The same orbit table with the surface values put in reproduces <code>fgar</code> to roundoff (Section 4), and M1's toroidal sign map and phase convention agree with <code>fgar</code> for every ℓ. All of this is for one sign s of the poloidal field component B<sup>θ</sup>, s = −1, which both test equilibria have; s = +1 is first exercised in M4, on the ARC V3A reactor-design equilibrium. Because the reference changes with Z, the slope assumes
 the error's prefactor changes little along the scan. The slopes between neighbouring points show no drift:</p>
 <div class="tbl"><table>
 <tr><th>Z pair</th><th>16→64</th><th>64→256</th><th>256→1024</th><th>1024→4096</th></tr>
@@ -380,7 +380,7 @@ direct table build) give bit-identical tables and torques, serial and threaded.<
   on a given perturbation, with no self-consistent kinetic response.</p>
   <dl>
     <dt><label><input type="radio" name="Q10" value="A"> A - The methods figure shows torque and total δW<sub>K</sub>; checks 2–3 are retired; the orbit path computes torque on a given perturbation only</label></dt>
-    <dd>Matches what the Letter needs, since both headline results are torques on a given perturbation. One line of PLAN
+    <dd>Matches what the Letter (the planned short paper) needs, since both headline results are torques on a given perturbation. One line of PLAN
     changes; no new work.</dd>
     <dt><label><input type="radio" name="Q10" value="B"> B - Add the ψ–ψ′ kernel as a later milestone</label></dt>
     <dd>Opens self-consistent finite-orbit kinetic response, but needs a non-local ODE closure GPEC does not have. That is a
@@ -406,7 +406,7 @@ are drawn to be reused in a longer Nuclear Fusion paper and in talks (PDFs besid
 <h2>Next</h2>
 <p>M2 attempt 2, after Q9a and Q9b. Under A and A: plot the integrand against u at fixed t on ψ<sub>N</sub> = 0.96; build the
 class-edge pitch grid with no layer; compute the energy integral once per pitch node; rerun check 4 at Z = 1 and the scan with
-more edge ψ nodes, plus the scan with ω<sub>E</sub> and ν divided by Z. Separately, as answered in Q6, a small bugfix PR to
+more edge ψ nodes, plus the scan with ω<sub>E</sub> and ν divided by Z. Separately, as you chose in Q6 (an M0 card), a small bugfix PR to
 <code>develop</code> forwards <code>nutype</code>, <code>f0type</code> and <code>collisionality_factor</code> to the
 post-response torque path before M3. It touches no orbit code, so I can open it now as a draft. It will not be merged without
 human review.</p>
