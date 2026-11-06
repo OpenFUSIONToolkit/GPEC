@@ -31,7 +31,7 @@ The summary figures of a DIII-D-like run (`examples/DIIID-like_ideal_example`):
 
 ![Stability summary: critical determinant, free-boundary energies and the least stable eigenmodes](figures/analysis/ffs_summary.png)
 
-![Perturbed-equilibrium summary: resonant field, edge spectrum and plasma displacement](figures/analysis/pe_summary.png)
+![Perturbed-equilibrium summary: resonant field, edge spectrum, plasma displacement and b_n on the poloidal plane](figures/analysis/pe_summary.png)
 
 ![The C-coil set around the plasma boundary](figures/analysis/coils_3d.png)
 
