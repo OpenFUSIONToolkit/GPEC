@@ -79,6 +79,11 @@ function guiding_center_field(equil; omegaE=nothing)
         gpt[i, j] = R_x * R_y + Z_x * Z_y
         gtt[i, j] = R_y^2 + Z_y^2
     end
+    # The equilibrium's own Jacobian, as the surface path uses; the one rebuilt from R, Z derivatives is rough near the edge.
+    jeq = [equil.rzphi_jac((ψ, θ)) / twopi for ψ in xs, θ in ys]
+    ratio = sum(jac[2:end, :] ./ jeq[2:end, :]) / length(jeq[2:end, :])
+    abs(abs(ratio) - 1) < 1e-3 || error("guiding_center_field: rzphi_jac/2π and the R, Z Jacobian differ by $(ratio)")
+    jac .= sign(ratio) .* jeq
     # q = (1/2π)∮ B^φ/B^θ dθ > 0 fixes the sign of the poloidal field relative to F.
     imid = nx ÷ 2
     s = sign(F(xs[imid]) * sum(jac[imid, 1:end-1] ./ R[imid, 1:end-1] .^ 2) / equil.psio)
@@ -113,14 +118,20 @@ mutable struct _OrbitParams{G}
     mu::Float64
     v::Float64
     theta0::Float64
+    psi0::Float64
     dir0::Float64
-    nflip::Int
+    ncross::Int
+    winding::Int
     status::Symbol
 end
 
+# Field-line pitch B^φ/B^θ on the start surface ψ₀ at θ.
+_pitch0(g, p, θ) = (pt = (p.psi0, θ); g.F(p.psi0) * g.jac(pt) / (g.s * g.psio * g.R(pt)^2))
+
 """
-Right-hand side in normalized time τ = t v/R₀; state (ψ, θ, φ, v∥/v, ∫ψ dτ, φ_field), with φ_field the
-toroidal advance of the field line followed along the orbit's (ψ, θ) path, ∫ θ̇ B^φ/B^θ dτ.
+Right-hand side in normalized time τ = t v/R₀; state (ψ, θ, φ, v∥/v, ∫ψ dτ, χ), with χ = φ − ∫ (B^φ/B^θ)(ψ₀, θ) dθ the
+toroidal angle relative to the field line of the start surface. Its rate is formed with the parallel streaming already
+cancelled, so the precession of a trapped orbit is not the small remainder of two large toroidal legs.
 """
 function _gc_rhs!(du, u, p::_OrbitParams, t)
     g = p.g
@@ -151,7 +162,8 @@ function _gc_rhs!(du, u, p::_OrbitParams, t)
     du[3] = sc * (vpar * Bsφ + (bψ * Hy - bθ * Hx) / (J * p.chrg)) / Bspar
     du[4] = -sc * (Bsψ * Hx + Bsθ * Hy) / (p.mass * Bspar * p.v)
     du[5] = ψ
-    du[6] = du[2] * Bφ / Bθ
+    f0 = _pitch0(g, p, θ)
+    du[6] = sc * (vpar * (Bφ - Bθ * f0 + k * (cφ - cθ * f0)) + (bψ * Hy - (bθ + f0 * bφ) * Hx) / (J * p.chrg)) / Bspar
     return nothing
 end
 
@@ -165,13 +177,15 @@ One closed (or lost) guiding-center orbit.
   - `status`: `:trapped`, `:passing`, `:lost` (reached `psi_max`), `:axis` (reached `psi_min`) or `:unclosed`
   - `tau`: period (full bounce for trapped, one poloidal transit for passing) in s
   - `wb`: 2π/τ in rad/s
-  - `wphi`: secular toroidal rate Δφ/τ in rad/s (parallel advance, precession and E×B)
-  - `wdrift`: toroidal rate relative to the field line along the orbit, (Δφ − Δφ_field)/τ in rad/s
+  - `wphi`: secular toroidal rate Δφ/τ in rad/s (parallel advance, precession and E×B), from Δχ plus k turns of the
+    start surface's field line, k the net winding
+  - `wdrift`: toroidal rate relative to the field line of the start surface, Δχ/τ in rad/s
   - `psibar`: time-averaged ψ_N over the period
   - `psi_range`: (min, max) of ψ_N along the orbit
-  - `dir_theta`: sign of dθ/dt at the start
+  - `dir_theta`: poloidal direction: the net winding (±1) of a passing orbit, the sign of dθ/dt at the start otherwise
+  - `ncross`: crossings of the start section θ ≡ θ₀ (mod 1) per period (2 for a banana, 1 for a passing orbit)
   - `energy_error`, `pphi_error`: relative drift of H and P_φ over the integration
-  - `sol`: the ODE solution (dense), state (ψ, θ, φ, v∥/v, ∫ψ dτ, φ_field) in τ = t v/R₀
+  - `sol`: the ODE solution (dense), state (ψ, θ, φ, v∥/v, ∫ψ dτ, χ) in τ = t v/R₀
 """
 struct GuidingCenterOrbit{S}
     status::Symbol
@@ -182,6 +196,7 @@ struct GuidingCenterOrbit{S}
     psibar::Float64
     psi_range::Tuple{Float64,Float64}
     dir_theta::Float64
+    ncross::Int
     energy_error::Float64
     pphi_error::Float64
     sol::S
@@ -190,32 +205,34 @@ end
 _energy(g, p, u) = 0.5 * p.mass * (p.v * u[4])^2 + p.mu * g.B((u[1], u[2])) + p.chrg * _phi(g, u[1])
 _pphi(g, p, u) = p.mass * p.v * u[4] * g.F(u[1]) / g.B((u[1], u[2])) - p.chrg * g.s * g.psio * u[1]
 
+# E, μ, P_φ fix v∥ at each (ψ, θ), so an orbit closes on its first return to θ ≡ θ₀ (mod 1) at ψ₀ in the starting
+# direction; its net winding is the class (0 trapped, ±1 passing), whether or not v∥ reverses (E×B-modified orbits).
+const ORBIT_CLOSE_PSI_TOL = 1e-6
+
 function _orbit_condition!(out, u, t, integ)
     p = integ.p
-    out[1] = u[2] - p.theta0
-    out[2] = u[2] - p.theta0 - 1
-    out[3] = u[2] - p.theta0 + 1
-    out[4] = u[4]
-    out[5] = u[1] - p.g.psi_max
-    out[6] = u[1] - p.g.psi_min
+    out[1] = sinpi(u[2] - p.theta0)
+    out[2] = u[1] - p.g.psi_max
+    out[3] = u[1] - p.g.psi_min
     return nothing
 end
 
 function _orbit_event!(integ, idx, up::Bool)
     p = integ.p
-    tmin = 1e-6 * max(integ.t, 1.0)
-    if idx == 4
-        p.nflip += 1
-    elseif idx == 1 && p.nflip >= 2 && (up ? 1.0 : -1.0) == p.dir0 && integ.t > tmin
-        p.status = :trapped
-        terminate!(integ)
-    elseif (idx == 2 || idx == 3) && p.nflip == 0
-        p.status = :passing
-        terminate!(integ)
-    elseif idx == 5 && up
+    if idx == 1 && integ.t > 1e-6
+        k = round(Int, integ.u[2] - p.theta0)
+        # d/dt sinpi(θ − θ₀) = π(−1)^k θ̇ at the section, so the crossing direction follows from `up` and k.
+        dir = (up ? 1.0 : -1.0) * (isodd(k) ? -1.0 : 1.0)
+        p.ncross += 1
+        if dir == p.dir0 && abs(integ.u[1] - p.psi0) < ORBIT_CLOSE_PSI_TOL
+            p.winding = k
+            p.status = k == 0 ? :trapped : abs(k) == 1 ? :passing : :unclosed
+            terminate!(integ)
+        end
+    elseif idx == 2 && up
         p.status = :lost
         terminate!(integ)
-    elseif idx == 6 && !up
+    elseif idx == 3 && !up
         p.status = :axis
         terminate!(integ)
     end
@@ -240,21 +257,22 @@ function guiding_center_orbit(g::GuidingCenterField, psi0::Real, lambda::Real, e
     v = sqrt(2 * energy / mass)
     mu = lambda * energy / g.bo
     u0 = [Float64(psi0), Float64(theta0), 0.0, sign(sigma) * sqrt(w2), 0.0, 0.0]
-    p = _OrbitParams(g, Float64(mass), Float64(chrg), mu, v, Float64(theta0), 0.0, 0, :unclosed)
+    p = _OrbitParams(g, Float64(mass), Float64(chrg), mu, v, Float64(theta0), Float64(psi0), 0.0, 0, 0, :unclosed)
     du = similar(u0)
     _gc_rhs!(du, u0, p, 0.0)
     p.dir0 = sign(du[2])
     H0, P0 = _energy(g, p, u0), _pphi(g, p, u0)
     cb = VectorContinuousCallback(_orbit_condition!, (i, idx) -> _orbit_event!(i, idx, true),
-        (i, idx) -> _orbit_event!(i, idx, false), 6; save_positions=(false, false))
+        (i, idx) -> _orbit_event!(i, idx, false), 3; save_positions=(false, false))
     prob = ODEProblem(_gc_rhs!, u0, (0.0, Float64(tau_max)), p)
     sol = solve(prob, Vern9(); reltol=rtol, abstol=rtol * 1e-2, callback=cb, dense, save_everystep=dense)
     uend, τn = sol.u[end], sol.t[end]
     tau = τn * g.ro / v
     psis = [u[1] for u in sol.u]
     Pscale = abs(chrg * g.psio)
-    return GuidingCenterOrbit(p.status, tau, twopi / tau, uend[3] / tau, (uend[3] - uend[6]) / tau, uend[5] / τn, (minimum(psis), maximum(psis)),
-        p.dir0, abs(_energy(g, p, uend) / H0 - 1), abs(_pphi(g, p, uend) - P0) / Pscale, sol)
+    turn = p.winding == 0 ? 0.0 : p.winding * sum(θ -> _pitch0(g, p, θ), range(0, 1; length=513)[1:end-1]) / 512
+    return GuidingCenterOrbit(p.status, tau, twopi / tau, (uend[6] + turn) / tau, uend[6] / tau, uend[5] / τn, (minimum(psis), maximum(psis)),
+        p.status == :passing ? Float64(p.winding) : p.dir0, p.ncross, abs(_energy(g, p, uend) / H0 - 1), abs(_pphi(g, p, uend) - P0) / Pscale, sol)
 end
 
 const ORBIT_STATUS_CODES = Dict(:unclosed => Int8(0), :trapped => Int8(1), :passing => Int8(2), :lost => Int8(3), :axis => Int8(4))
