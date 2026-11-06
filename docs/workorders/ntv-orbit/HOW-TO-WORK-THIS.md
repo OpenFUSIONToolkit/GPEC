@@ -139,13 +139,20 @@ of every term must be its definition (check this before publishing, and
 keep the status strip and nav free of undefined terms). Captions may
 define a term the figure introduces.
 
-**Figures and schematics: as many as help, at paper quality.** Schematics
-of the approach, workflow diagrams (D2), grids and before/after views of a
-fix are as important as result plots. Draw them to be reused in a long
-Nuclear Fusion paper and in talks: one script per figure family, written
-to `results/<run>/` as SVG, PNG and PDF, with short labels and the
-project's palette. In the HTML, put figures on white plates so they read
-in both themes, and keep any diagram's text readable at the column width.
+**Figures and schematics: as many as help, ready for slides and papers.**
+Schematics of the approach, workflow diagrams (D2), grids and before/after
+views of a fix are as important as result plots, and Nik reuses them in
+talks, so every figure follows his global figure rules (`~/.claude/CLAUDE.md`,
+"Figures"): design at true print size (3.4 in single column by default,
+5.0 or 7.0 in when needed, same 10 pt fonts), bold serif text, short
+legends, panel letters, explanations in the caption, few colors. In
+matplotlib, `reports/ntvstyle.py` holds the project palette (trapped,
+passing, lost, unclosed; surface vs orbit path), the widths, `panel()` and
+`save()` (PDF, 300 dpi PNG, SVG for the HTML); never override the rc fonts,
+sizes or weights. Render D2 with `reports/d2render.sh` (bold serif, SVG,
+PDF, PNG); keep diagrams to ~12 nodes, one node shape, dark edges, and
+color only the changed or failing nodes. Figures made before 2026-11-06
+predate these rules and are not redone.
 
 Rules for questions:
 
