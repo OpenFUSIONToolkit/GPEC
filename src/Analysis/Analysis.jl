@@ -5,7 +5,8 @@ Post-processing and visualization utilities for GPEC simulation outputs.
 
 Every registered plot takes a result in memory or the path of the `gpec.h5` it was saved to, and throws an
 `ArgumentError` naming what to change in the run when that source lacks the data it draws. `available_plots(src)`
-lists the plots for a result, a path, or the named tuple `main` returns.
+lists the plots for a result, a path, or the named tuple `main` returns. Every plot is exported here and from the
+package, so `plot_qprofile(eq)` needs no module prefix.
 
 ## Submodules
 
@@ -48,6 +49,14 @@ include("CoilForcing.jl")
 include("PerturbedEquilibrium.jl")
 include("PerturbedEquilibriumModes.jl")
 include("ErrorFields.jl")
+
+# Every public plot of the submodules, callable as `plot_x` without its module; two modules defining one name is an error.
+for m in (ForceFreeStates, Equilibrium, CoilForcing, PerturbedEquilibrium, ErrorFields), name in names(m; all=true)
+    startswith(string(name), "plot_") || continue
+    isdefined(@__MODULE__, name) && error("Analysis: $name is defined by $(nameof(m)) and another plot module")
+    @eval using .$(nameof(m)): $name
+    @eval export $name
+end
 
 export available_plots
 

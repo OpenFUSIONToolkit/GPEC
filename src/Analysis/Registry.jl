@@ -215,19 +215,22 @@ end
 
 Base.length(c::PlotCatalog) = sum(length(rows) for (_, rows) in c.sections; init=0)
 
-_qualified(e::PlotEntry) = string(nameof(parentmodule(e.fn)), ".", nameof(e.fn))
-
 function Base.show(io::IO, ::MIME"text/plain", c::PlotCatalog)
     isempty(c.sections) && return print(io, "PlotCatalog: no registered plots accept this source")
     for (i, (label, rows)) in enumerate(c.sections)
-        i > 1 && print(io, "\n")
+        i > 1 && print(io, "\n\n")
         ok = count(r -> isempty(r[2]), rows)
         print(io, "Plots for ", label, ": ", ok, " of ", length(rows), " available")
-        width = maximum((length(_qualified(e)) for (e, _) in rows); init=0)
-        for (e, missing) in rows
-            mark = isempty(missing) ? "✓" : "✗"
-            note = isempty(missing) ? e.description : _why(missing)
-            print(io, "\n  ", mark, " ", rpad(_qualified(e), width), "  ", note)
+        # One group per Analysis submodule, in registration order, each aligned on its own longest name.
+        for mod in unique(parentmodule(e.fn) for (e, _) in rows)
+            group = [(e, missing) for (e, missing) in rows if parentmodule(e.fn) === mod]
+            width = maximum(length(string(nameof(e.fn))) for (e, _) in group)
+            print(io, "\n\n", nameof(mod))
+            for (e, missing) in group
+                mark = isempty(missing) ? "✓" : "✗"
+                note = isempty(missing) ? e.description : _why(missing)
+                print(io, "\n  ", mark, " ", rpad(string(nameof(e.fn)), width), "  ", note)
+            end
         end
     end
     return nothing

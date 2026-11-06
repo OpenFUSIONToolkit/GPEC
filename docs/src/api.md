@@ -65,17 +65,19 @@ Every plot in [`Analysis`](analysis.md) takes the result in memory or the path o
 ```julia-repl
 julia> available_plots(ffs)
 Plots for ForceFreeStatesResult (riccati): 13 of 15 available
-  ✓ ForceFreeStates.plot_ffs_summary                         the stability panels the run supplies
-  ✗ ForceFreeStates.plot_mode_displacement                   needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)
-  ✓ ForceFreeStates.plot_critical_determinant                critical determinant against ψ_N
+
+ForceFreeStates
+  ✓ plot_ffs_summary           the stability panels the run supplies
+  ✗ plot_mode_displacement     needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)
+  ✓ plot_critical_determinant  critical determinant against ψ_N
   ⋮
 ```
 
 A plot the source cannot draw throws an `ArgumentError` with the same reason, and a summary leaves out the panels it cannot draw:
 
 ```julia
-Analysis.ForceFreeStates.plot_ffs_summary(ffs)         # the result in memory
-Analysis.ForceFreeStates.plot_ffs_summary("gpec.h5")   # or the file to which it was saved
+plot_ffs_summary(ffs)         # the result in memory
+plot_ffs_summary("gpec.h5")   # or the file to which it was saved
 ```
 
 ## Saving and rerunning

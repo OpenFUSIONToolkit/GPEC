@@ -102,8 +102,8 @@ using TOML
 
             # The catalog lists a Forward run's absent products with what to change, for a result, a path and main's tuple.
             listing = repr(MIME"text/plain"(), available_plots(ret.ffs))
-            @test occursin("✓ ForceFreeStates.plot_mode_displacement", listing)
-            @test occursin("✗ ForceFreeStates.plot_delta_prime", listing) && occursin(A.REASONS[:delta_prime], listing)
+            @test occursin(r"\nForceFreeStates\n", listing) && occursin("✓ plot_mode_displacement", listing)
+            @test occursin("✗ plot_delta_prime ", listing) && occursin(A.REASONS[:delta_prime], listing)
             @test length(available_plots(ret).sections) == count(x -> x !== nothing && any(e -> A._accepts(e, x), A.PLOTS), unique(values(ret)))
             @test A.plot_counts(ret.ffs) == (11, 15)
 
@@ -130,7 +130,7 @@ using TOML
             _check_sources(ret.ffs, h5)
             @test :delta_prime in A.capabilities(ret.ffs) && :solution_profiles ∉ A.capabilities(ret.ffs)
             @test_throws A.REASONS[:solution_profiles] A.ForceFreeStates.plot_mode_displacement(ret.ffs)
-            @test occursin("✗ ForceFreeStates.plot_mode_displacement", repr(MIME"text/plain"(), available_plots(ret.ffs)))
+            @test occursin("✗ plot_mode_displacement", repr(MIME"text/plain"(), available_plots(ret.ffs)))
             # The summary leaves out the ξ panel rather than failing, keeping the other four.
             caps = A.capabilities(ret.ffs)
             @test count(((f, _),) -> A._can(f, caps), A.ForceFreeStates._ffs_panels(ret.ffs)) == 4
