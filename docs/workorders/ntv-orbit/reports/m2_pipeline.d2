@@ -1,0 +1,26 @@
+direction: down
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  new: {style: {fill: "#e4ece4"; stroke: "#2f6b3a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+  bad: {style: {fill: "#f3e0dc"; stroke: "#a33b2a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+}
+eq: "Equilibrium\nB(ψ, θ), q" {class: n}
+pe: "PerturbedEquilibrium\nδB/B, ∇·ξ⊥ with plasma response" {class: n}
+fgar: "fgar (existing)\nbounce average on surface ψ₀" {class: n}
+orb: "orbit from (ψ₀, θ_Bmin)\nM1 integrator" {class: n}
+tab: "orbit table (M2)\nω_b, ⟨φ̇⟩, |δJ_ℓ|² on (λ, u, σ)" {class: new}
+layer: "class rules + layer fill (M2)" {class: bad}
+dr: "drive ∂f/∂ψ at ψ₀\n(exact drive: M3)" {class: n}
+res: "resonance operator\n(shared, unchanged)" {class: n}
+en: "energy and pitch integrals\n(shared, unchanged)" {class: n}
+tq: "torque T(ψ₀), then ∫dψ₀" {class: n}
+eq -> pe
+pe -> fgar
+pe -> orb
+eq -> orb
+orb -> tab -> layer -> res
+fgar -> res
+res -> en
+dr -> en
+en -> tq

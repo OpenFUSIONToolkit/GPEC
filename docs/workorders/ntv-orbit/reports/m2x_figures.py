@@ -1,7 +1,7 @@
-"""M2 explainer figures: what the charge scan changes, the three grids, the separatrix-layer fill and the proposed fix.
+"""M2 report figures: the setting, the charge scan, the three grids, the layer fill, the proposed fix and the δW_K kernel.
 
 Reads results/m2_dev/explain_*.csv (m2x_diag.jl), results/m2_dev/layer_diag_psi96.csv and results/m2_zow/zow_scan.csv;
-writes results/m2_zow/fig_m2x_{charge,grids,layer,dj,fix}.{svg,png}.
+writes results/m2_zow/fig_m2x_{schematic,charge,grids,layer,dj,fix,kernel}.{svg,png,pdf}.
 """
 
 from pathlib import Path
@@ -29,7 +29,7 @@ def read(path):
 
 
 def save(fig, name):
-    for ext in ("svg", "png"):
+    for ext in ("svg", "png", "pdf"):
         fig.savefig(OUT / f"{name}.{ext}", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
@@ -297,6 +297,28 @@ def fig_schematic():
     save(fig, "fig_m2x_schematic")
 
 
+def fig_kernel():
+    """Schematic (model widths, not computed): δW_K is local on the surface path and a ψ–ψ′ band on the orbit path."""
+    psi = np.linspace(0.0, 1.0, 400)
+    P, Q = np.meshgrid(psi, psi)
+    width = 0.012 + 0.06 * psi**2
+    fig, ax = plt.subplots(1, 2, figsize=(6.4, 3.0), sharey=True)
+    local = np.exp(-0.5 * ((P - Q) / 0.004) ** 2)
+    band = np.exp(-0.5 * ((P - Q) / np.maximum(width[None, :], width[:, None])) ** 2)
+    for a, k, title in ((ax[0], local, "(a) fgar: δW_K local in ψ\nan m×m′ matrix on each surface"),
+                        (ax[1], band, "(b) forb: orbit from ψ₀ reads ξ at ψ′ ≠ ψ₀\na kernel K(ψ₀, ψ′), band width ≈ $\\Delta_b$(ψ₀)")):
+        a.imshow(k, origin="lower", extent=(0, 1, 0, 1), cmap="Blues", vmin=0, vmax=1.15, aspect="equal")
+        a.set_xlabel("ψ₀ (start surface)")
+        a.set_title(title, fontsize=7.5)
+    ax[0].set_ylabel("ψ′ (where ξ is read)")
+    ax[1].annotate("wider at the edge,\nwhere orbits are wider", (0.86, 0.80), xytext=(0.30, 0.86), fontsize=6.5,
+                   arrowprops={"arrowstyle": "->", "lw": 0.6, "color": INK})
+    ax[0].annotate("feeds the ForceFreeStates\nkinetic ODE surface by surface", (0.5, 0.5), xytext=(0.36, 0.12), fontsize=6.5,
+                   arrowprops={"arrowstyle": "->", "lw": 0.6, "color": INK})
+    fig.tight_layout()
+    save(fig, "fig_m2x_kernel")
+
+
 if __name__ == "__main__":
     fig_schematic()
     fig_charge()
@@ -304,3 +326,4 @@ if __name__ == "__main__":
     fig_layer()
     fig_dj()
     fig_fix()
+    fig_kernel()

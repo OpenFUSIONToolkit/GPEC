@@ -1,310 +1,416 @@
-<!doctype html>
 <meta charset="utf-8">
+<title>M2 Orbit Torque</title>
+<meta name="claude:viewport-fit-sides" content="cover">
 <!-- Built by m2_build.py from M2.template.html; edit the template, not M2.html. -->
-<title>M2 - Orbit-averaged torque</title>
 <style>
-  :root { color-scheme: light; }
-  body { max-width: 50em; margin: 2em auto; padding: 0 1.5em;
-         font: 15px/1.6 Georgia, serif; color: #111; background: #fff; }
-  h1 { font-size: 1.5em; margin-bottom: .2em; }
-  .meta { color: #555; font-size: .85em; margin-bottom: 1em; }
-  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em;
-       border-bottom: 1px solid #ccc; padding-bottom: .3em; margin-top: 2.2em; }
+  /* One reading column; figures sit on white plates so they read in both themes. */
+  :root { --bg: #fff; --fg: #111; --muted: #555; --rule: #ccc; --plate: #fff; --panel: #f3f3f2; --accent: #2a78d6; --warn: #a33b2a;
+          --ok: #2e7d32; --amber: #b26a00; --card: #fafaf8; --serif: Georgia, "Times New Roman", serif;
+          --sans: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38;
+          --plate: #fff; --panel: #222220; --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38; --plate: #fff; --panel: #222220;
+          --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--serif); }
+  main { max-width: 52em; margin: 0 auto; padding-block: 2em; padding-left: max(16px, env(safe-area-inset-left, 0px));
+         padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  h1 { font-size: 1.5em; margin: 0 0 .2em; text-wrap: balance; }
+  .meta { color: var(--muted); font-size: .85em; margin-bottom: 1em; }
+  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--rule);
+       padding-bottom: .3em; margin-top: 2.6em; text-wrap: balance; }
+  h3 { font-size: 1em; margin: 1.6em 0 .3em; }
+  p, li { max-width: 70ch; }
   figure { margin: 1.5em 0; }
-  figcaption { font-size: .85em; color: #444; margin-top: .5em; }
-  svg, img { max-width: 100%; height: auto; }
-  .note { border-left: 3px solid #999; padding-left: 1em; color: #333; }
+  figure .plate { background: var(--plate); padding: .5em; border-radius: 3px; overflow-x: auto; }
+  figure img, figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figure.d2 .plate { max-width: 36em; margin: 0 auto; }
+  figure.narrow img { max-width: min(100%, 32em); }
+  .side { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.2em; align-items: start; }
+  @media (max-width: 40em) { .side { grid-template-columns: 1fr; } }
+  figcaption { font-size: .85em; color: var(--muted); margin-top: .5em; }
+  .lede { font-size: 1.02em; }
+  .open { border-left: 3px solid var(--warn); padding-left: 1em; }
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; font: .88em/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--rule); padding: .35em .7em; text-align: left; vertical-align: top; }
+  th { font-weight: 600; }
+  code { font-size: .9em; }
+  a { color: var(--accent); }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(17em, 1fr)); gap: 1em; align-items: start; }
+  .two > * { min-width: 0; }
   /* status strip */
-  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center;
-           border: 1px solid #ccc; padding: .6em 1em; font-size: .9em;
-           font-family: system-ui, sans-serif; }
+  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center; border: 1px solid var(--rule);
+           padding: .6em 1em; font: .9em/1.5 var(--sans); }
   .strip b { font-weight: 600; }
-  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; }
-  .state.green { background: #2e7d32; } .state.amber { background: #b26a00; }
-  .state.red { background: #b71c1c; }
+  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; background: var(--amber); }
+  /* map of the decisions */
+  .map { font: .92em/1.5 var(--sans); background: var(--panel); padding: .7em 1.1em; border-radius: 3px; }
+  .map ol { margin: .3em 0; padding-left: 1.3em; } .map li { margin: .2em 0; }
   /* decision cards */
-  .card { border: 1px solid #bbb; border-left: 5px solid #333; padding: 1em 1.2em;
-          margin: 1.4em 0; font-family: system-ui, sans-serif; font-size: .95em; }
+  .card { border: 1px solid var(--rule); border-left: 5px solid var(--fg); background: var(--card); padding: 1em 1.2em;
+          margin: 1.6em 0 2em; font: .95em/1.55 var(--sans); }
   .card h3 { margin: 0 0 .4em; font-size: 1.05em; }
-  .card .ctx { color: #333; }
-  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .4em; }
-  .card dd { margin: 0 0 0 1.2em; }
-  .card label { display: block; margin: .3em 0; }
-  .card .rec { background: #f3f3f3; padding: .5em .8em; margin: .6em 0; }
-  .card textarea { width: 100%; min-height: 3em; font: inherit; }
-  .card .defs { font-size: .85em; color: #555; margin-top: .6em; }
+  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .5em; }
+  .card dd { margin: 0 0 0 1.6em; }
+  .card label { display: block; cursor: pointer; }
+  .card .rec { background: var(--panel); padding: .5em .8em; margin: .6em 0; }
+  .card textarea { width: 100%; box-sizing: border-box; min-height: 3em; font: inherit; background: var(--bg); color: var(--fg); }
+  .result-pass { color: var(--ok); font-weight: 600; } .result-fail { color: var(--warn); font-weight: 600; }
   .copy { font: inherit; padding: .4em 1em; margin-top: 1em; cursor: pointer; }
-  table.checks { border-collapse: collapse; width: 100%; font-size: .9em;
-                 font-family: system-ui, sans-serif; }
-  table.checks th, table.checks td { border-bottom: 1px solid #ccc; padding: .4em .6em;
-                                     text-align: left; vertical-align: top; }
-  #pipeline svg { display: block; max-width: 22em; margin: 0 auto; }
-  table.verify { font-size: .82em; }
-  table.verify td:first-child { white-space: nowrap; }
-  .gloss { margin: 1em 0; font: .85em/1.45 system-ui, sans-serif; } .gloss summary { cursor: pointer; font-weight: 600; }
-  .gloss table { border-collapse: collapse; } .gloss td { border-bottom: 1px solid #ddd; padding: .25em .6em; vertical-align: top; }
-  .gloss td:first-child { white-space: nowrap; font-weight: 600; } .tbl { overflow-x: auto; }
-  @media print { body { margin: 0; font-size: 11pt; } h2, .card { page-break-inside: avoid; }
-                 .copy { display: none; } }
+  #answers { white-space: pre-wrap; background: var(--panel); padding: .6em; }
+  @media print { h2, .card, figure { page-break-inside: avoid; } .copy { display: none; } }
 </style>
-
+<main>
 <h1>M2 - The torque along the orbit and its zero-orbit-width limit</h1>
-<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}}
-(runs at 9b390f5a5, same <code>src/</code>) &middot; new method <code>forb</code>, behind <code>forb_flag</code>
-(default off) &middot; attempt 1 of 2 &middot; 2026-11-06</div>
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} (runs at 9b390f5a5, same
+<code>src/</code>) &middot; attempt 1 of 2 &middot; DIII-D-like example, toroidal mode number n = 1, thermal deuterium &middot;
+2026-11-06 (version 5: decisions placed beside their evidence)</div>
 
 <div class="strip">
-  <span class="state amber">NOT GREEN</span>
+  <span class="state">NOT GREEN</span>
   <span><b>Attempts</b> 3 of 15 (M2: 1 of 2)</span>
-  <span><b>Checks</b> 0 of 4 pass as written: half of 1 passes, 2 cannot be run, 3 passes only as a substitute check, 4 fails on the boundary layer</span>
+  <span><b>Checks</b> none of 4 passes as written (<a href="#checks">table</a>)</span>
   <span><b>Tests</b> {{TESTS}}</span>
-  <span><b>Key run</b> 7-point charge scan, 72 ψ surfaces, n = 1, ℓ = −6…6, thermal D: 50 min at Z = 1, 13 min per smaller width, on 16 CPUs (jobs 139101, 139102, 139115)</span>
-  <span><b>Decisions</b> 2 open; Q9 gates M2 attempt 2</span>
+  <span><b>Key run</b> 7-point orbit-width scan, 72 flux surfaces: 50 min at physical width, 13 min per narrower point, 16 CPUs (jobs 139101, 139102, 139115)</span>
+  <span><b>Decisions</b> 3 open; two gate attempt 2</span>
   <span><b>Oldest open question</b> Q1 (DIII-D data, by M5)</span>
 </div>
-<details class="gloss" open><summary>Symbols and acronyms used in this report (figures and schematics in the <a href="https://claude.ai/artifact/EY4ztU9iaukkdMKkhWMr5a">M2 explainer</a>)</summary>
-<div class="tbl"><table>
-<tr><td>NTV</td><td>neoclassical toroidal viscosity: the torque a non-axisymmetric field δB exerts on the plasma through kinetic resonances</td></tr>
-<tr><td><code>fgar</code></td><td>GPEC's existing surface path: the particle is held on its flux surface ψ₀; its bounce average runs along the field line on ψ₀</td></tr>
-<tr><td><code>forb</code></td><td>the new orbit path: the same average taken along the real guiding-center orbit, which drifts off ψ₀</td></tr>
-<tr><td>ZOW / FOW</td><td>zero / finite orbit width. <code>forb</code> must reduce to <code>fgar</code> in the ZOW limit</td></tr>
-<tr><td>ψ<sub>N</sub>, ψ₀</td><td>normalized poloidal flux (0 axis, 1 edge); ψ₀ the surface where an orbit starts</td></tr>
-<tr><td>LCFS, a</td><td>last closed flux surface (ψ<sub>N</sub> = 1); a the minor radius</td></tr>
-<tr><td>Δ<sub>b</sub></td><td>orbit width: the ψ range an orbit spans, converted to minor radius</td></tr>
-<tr><td>Z</td><td>species charge number <code>zi</code> (charge Z·e). Not the height, which is written z</td></tr>
-<tr><td>x, u</td><td>x = E/T, kinetic energy over temperature; u = √x, the table's energy coordinate</td></tr>
-<tr><td>λ</td><td>pitch, λ = μB₀/E (μ magnetic moment, B₀ reference field). Fixed along an orbit. v∥² ∝ 1 − λB/B₀</td></tr>
-<tr><td>λ<sub>tp</sub>, λ<sub>max</sub></td><td>surface trapped–passing boundary B₀/B<sub>max</sub>; largest pitch reachable at the start point, B₀/B<sub>min</sub></td></tr>
-<tr><td>λ<sub>c</sub></td><td>the orbit's own trapped–passing boundary at given u and σ; differs from λ<sub>tp</sub> because the orbit drifts</td></tr>
-<tr><td>σ</td><td>sign of v∥ at the start (+1 or −1). For trapped orbits the two signs are different bananas</td></tr>
-<tr><td>θ, θ<sub>Bmin</sub></td><td>poloidal angle (in turns); the angle of minimum B on the surface, where orbits start</td></tr>
-<tr><td>ω<sub>b</sub>, ω<sub>D</sub></td><td>bounce (or transit) frequency; toroidal precession (magnetic drift) frequency</td></tr>
-<tr><td>ω<sub>E</sub>, ω<sub>*</sub></td><td>E×B rotation frequency; diamagnetic frequencies ω<sub>*n</sub>, ω<sub>*T</sub> from density and temperature gradients</td></tr>
-<tr><td>ν</td><td>collision frequency in the Krook operator</td></tr>
-<tr><td>n, ℓ</td><td>toroidal mode number of δB; bounce harmonic. Resonance where ℓω<sub>b</sub> − n(ω<sub>D</sub> + ω<sub>E</sub>) ≈ 0</td></tr>
-<tr><td>δJ<sub>ℓ</sub></td><td>bounce-harmonic action: the orbit average of the perturbation (δB/B and ∇·ξ⊥, ξ the displacement) at harmonic ℓ</td></tr>
-<tr><td>T, δW<sub>K</sub></td><td>complex torque; Re T is the torque (N·m), Im T = 2n·δW<sub>K</sub>, the kinetic energy of the perturbation</td></tr>
-<tr><td>Φ</td><td>electrostatic potential; off in all M2 runs</td></tr>
-<tr><td>τ<sub>max</sub></td><td>the orbit integrator's time limit; an orbit not closed by then is "unclosed"</td></tr>
-<tr><td>layer fill</td><td>the M2 step that writes surface values into a pitch band around λ<sub>tp</sub> (M2 explainer, Section 3)</td></tr>
-<tr><td>KR1–KR3</td><td>the paper's key results: KR1 alpha torque against orbit width (ARC-class, ITER, SPARC); KR2 DIII-D thermal-ion torque density; KR3 (methods) <code>forb</code> reduces to <code>fgar</code> as Δ<sub>b</sub> → 0</td></tr>
-<tr><td>TJ</td><td>GPEC's <code>TJ_kinetic_NTV_example</code> equilibrium, used for unit tests</td></tr>
-<tr><td>ARC</td><td>the ARC V3A design equilibrium from OpenFUSIONToolkit</td></tr>
-</table></div></details>
 
-<p class="note">The zero-orbit-width limit works: the orbit torque converges to the surface torque with no floor.
-At physical width the result is not determined. The boundary between trapped and passing orbits is handled by
-filling a layer with surface values, and that layer covers most of the table at high energy, so a
-parameter with no physical value moves the Z = 1 torque by −29% to +39%. Attempt 2 has to replace the layer.
-Card Q9 sets its scope and what green means. Attempt 2 is the last M2 attempt under the stop rules, so I stop
-here for the answer.</p>
+<p class="lede">GPEC computes the neoclassical toroidal viscosity (NTV) torque, the torque a non-axisymmetric field perturbation
+δB exerts on the plasma through kinetic resonances. Today it averages δB over each particle's bounce motion while holding the
+particle on one flux surface. This milestone (M2) adds a second method that takes the same average along the particle's real
+guiding-center orbit, which drifts off the surface. In GPEC's <code>KineticForces</code> module the existing surface method is
+called <code>fgar</code> and the new orbit method <code>forb</code>; this report uses those names. <code>forb</code> must reduce
+to <code>fgar</code> as the orbit width goes to zero, the zero-orbit-width (ZOW) limit. At finite orbit width (FOW) it is the new
+physics this project is for.</p>
 
-<h2>Question</h2>
-<p>When the action variation δJ is computed along the real guiding-center orbit (M1) instead of on a flux
-surface, and fed through today's resonance operator and energy integral with the orbit's own bounce and
-toroidal frequencies, does the torque go back to today's surface-local (zero-orbit-width, ZOW) torque as the
-orbit width goes to zero? How fast? And is the finite-width answer converged?</p>
+<p><b>In brief.</b> The ZOW limit works: the difference between the two methods falls as a power law in orbit width with no
+floor. It falls more slowly than the plan's target assumed. At the physical orbit width the torque is not determined, because
+a numerical patch at the trapped–passing boundary, the "layer fill" described in Section 1, sets it rather than the orbits. I propose a fix. Attempt 2 is the last M2 attempt
+under the stop rules, so I stop here for your answers.</p>
 
-<h2>What changed</h2>
-<p>A new method <code>forb</code> in <code>KineticForces</code>, in a new file <code>OrbitTorque.jl</code>. For each
-ψ surface it tabulates, on the existing pitch grid λ and on 12 energy nodes in √x and both signs of v<sub>∥</sub>,
-the orbit's ω<sub>b</sub>, its toroidal rate ⟨φ̇⟩, and |δJ<sub>ℓ</sub>|² for ℓ = −L…L. δJ<sub>ℓ</sub> integrates
-the same bracket BounceAveraging uses (∇·ξ<sub>⊥</sub> and δB/B, read at the orbit's (ψ, θ)) with the
-perturbation's toroidal phase e<sup>−in(2πζ − Δζ τ/τ<sub>b</sub>)</sup> along the orbit, where ζ is GPEC's
-toroidal angle (φ = 2πζ + ν). The table goes into the existing resonance operator and energy integral, splined in
-√x, with the same pole handling as <code>fgar</code>. Lost orbits count zero. Unclosed orbits, orbits whose class
-differs from the surface's at that pitch, and pitches within a layer around the trapped–passing boundary take the
-surface value. The layer's half-width is 10× the bisected shift of the orbit's own boundary, set per energy node.
-New deck keys: <code>forb_flag</code>, <code>orbit_nlambda</code> (128), <code>orbit_nenergy</code> (12), each with
-a deck/API parity case. Out of scope here, as planned: the drive is still ∂f/∂ψ at the start surface ψ₀, and the
-measure is the ZOW one (dP<sub>φ</sub> ≈ Ze dψ₀). M3 replaces both.</p>
+<nav class="map"><b>Where the decisions are.</b> Section 1 explains what the code does; read it first. Each later section ends
+in its decision card.
+<ol>
+<li value="2"><a href="#zow">The zero-orbit-width limit</a> &rarr; <a href="#q9a">Q9a</a>: what counts as passing the limit test (gates attempt 2)</li>
+<li><a href="#layer">Physical width and the layer fill</a> &rarr; <a href="#q9b">Q9b</a>: what attempt 2 changes (gates attempt 2)</li>
+<li><a href="#dwk">The kinetic energy on the orbit path</a> &rarr; <a href="#q10">Q10</a>: what replaces checks 2 and 3 (not gating)</li>
+</ol>
+Q9 in the earlier versions mixed the first two topics; it is split in two so each half sits beside its evidence. The options
+are the same.</nav>
 
-<h2>Checks</h2>
-<table class="checks">
-  <tr><th>Expected behavior (PLAN M2)</th><th>Seen</th><th>Result</th></tr>
-  <tr><td>1. At Δ<sub>b</sub>/a &lt; 10<sup>−3</sup> the new path's torque and δW<sub>K</sub> agree with
-      BounceAveraging to 10<sup>−4</sup>; the difference falls with Δ<sub>b</sub> as a power law.</td>
-      <td>Power law with no floor over 3.5 decades of width (Figure 1). Fitted slope 1.18 for the complex T
-      (torque and energy together) and 1.37 for the torque alone, over Z ≥ 16. At Δ<sub>b</sub>/a = 7×10<sup>−4</sup>
-      the difference is 8.3×10<sup>−3</sup>. 10<sup>−4</sup> is reached near Δ<sub>b</sub>/a ≈ 2×10<sup>−5</sup>
-      (6×10<sup>−5</sup> at 1.1×10<sup>−5</sup>, still falling).</td>
-      <td>power law: pass<br>10<sup>−4</sup> target: fails by 80× (Q9)</td></tr>
-  <tr><td>2. Conjugation: the n → −n δW<sub>K</sub> matrices are complex conjugates.</td>
-      <td>No per-surface matrix exists on this path. An orbit started at ψ₀ samples ξ over its whole width, so
-      δW<sub>K</sub> becomes a kernel in (ψ, ψ′), not an m×m′ matrix on each surface.</td><td>cannot be run (Q10)</td></tr>
-  <tr><td>3. Torque identity: T<sub>φ</sub> = 2n Im δW<sub>K</sub> for the new δW<sub>K</sub>, to roundoff.</td>
-      <td>For the scalar it holds by construction: <code>forb</code> returns the same complex T = T<sub>φ</sub> +
-      i·2nδW<sub>K</sub> from the same operator. What can be tested is that the operator is the same: replaying
-      the surface values through the <code>forb</code> energy and pitch integrals gives <code>fgar</code> to
-      {{VAR_REPLAY}} on every ψ node at physical width (10<sup>−16</sup> in the unit test as well).
-      Two code paths (the ψ-quadrature call and a direct table build) give bit-identical tables and torques,
-      serial and threaded.</td><td>scalar: pass (a substitute check)</td></tr>
-  <tr><td>4. Grid convergence at alpha-relevant widths: torque changes by &lt; 5% on doubling.</td>
-      <td>Thermal D at Z = 1 (Δ<sub>b</sub>/a = 0.047 at x = 1, 0.28 at x = 36, the top of the energy grid; alphas in
-      KR1 are at 0.13–0.23). Doubling λ (128 → 256): 4.8% (torque 2.5%). Doubling energy nodes (12 → 24): 2.9%
-      (torque 0.7%). <b>But the boundary layer at 3× and 30× the boundary shift, instead of 10×, gives a torque of
-      0.259 and 0.504 N·m against 0.364</b> (fgar: 0.534). At Z = 16 the same change moves the difference from
-      fgar only between 5.5% and 5.9%.</td>
-      <td>doubling: pass<br>layer: <b>fails</b> at physical width</td></tr>
-</table>
+<!-- ============================================================ -->
+<h2 id="what">1. What M2 computes</h2>
 
-<h2>Figures</h2>
-<figure id="fig1">{{FIG_ZOW}}
-<figcaption>Figure 1 (the KR3 figure, draft). Relative difference between <code>forb</code> and <code>fgar</code>
-in the ψ-integrated torque, DIII-D-like example, n = 1, thermal deuterium, Φ off. Z is the species charge number: a
-deuteron of charge Z·e, with T, n, ν and ω<sub>E</sub> unchanged, so width, ω<sub>D</sub> and ω<sub>*</sub> all scale as 1/Z
-and only Z = 1 is physical (see the <a href="https://claude.ai/artifact/EY4ztU9iaukkdMKkhWMr5a">M2 explainer</a>). The orbit width is scaled by
-the charge on the same equilibrium, perturbation and ψ nodes (72 fixed Gauss–Legendre nodes, so
-the ψ quadrature error is common to both). The x axis is the width of a mid-trapped orbit at ψ = 0.5 and x = 1;
-the energy integral reaches x = 36, where orbits are 6× wider. Black: complex T (torque and kinetic energy).
-Grey: torque only. Points with Z &lt; 16 are left out of the fit because the reference torque itself changes sign
-between Z = 4 and Z = 16. Also, at Z = 1 the boundary layer, not the orbit, sets the value (check 4).</figcaption></figure>
-<figure id="fig2">{{FIG_PROFILE}}
-<figcaption>Figure 2. Torque density on the 72 ψ nodes, ψ<sub>N</sub> &gt; 0.8 (both paths are near zero inside).
-Right: Z = 1024, where the two coincide. Left: physical width (Z = 1), layer factor 10; <code>fgar</code>'s peak at
-ψ<sub>N</sub> = 0.993 is clipped. <b>The left panel is not a result.</b> Its integral moves from 0.26 to 0.50 N·m
-with the layer factor, and it keeps the other M2 simplifications (drive at ψ₀, the ZOW measure, lost orbits set to
-zero). It is shown only to locate where the paths differ.</figcaption></figure>
+<p><b>The question.</b> When the bounce average is taken along the real orbit instead of on a flux surface, and fed through
+GPEC's existing resonance operator and energy integral, does the torque return to the surface torque as the orbit width goes
+to zero, and how fast? Is the finite-width answer converged?</p>
 
-<h2>Reading</h2>
-<p><b>The orbit path converges to the surface path, with no floor.</b> The difference falls from 4.5% at
-Δ<sub>b</sub>/a = 3×10<sup>−3</sup> to 6×10<sup>−5</sup> at 10<sup>−5</sup>. There is no plateau that a wrong
-phase, Jacobian or sign would leave. The same orbit table, with surface values put in, reproduces
-<code>fgar</code> to roundoff. The M1 sign map (⟨φ̇⟩ = s·ω<sub>D</sub>x) and the toroidal phase convention
-(ζ, with ν) are confirmed against BounceAveraging for every ℓ. All of this is on the s = −1 sign of
-B<sup>θ</sup> (both test equilibria have it); s = +1 is first exercised on ARC in M4.</p>
+<p><b>The torque in one paragraph.</b> A particle resonates with the perturbation when ℓω<sub>b</sub> − n(ω<sub>D</sub> +
+ω<sub>E</sub>) ≈ 0. Here ω<sub>b</sub> is its bounce frequency (the transit frequency if it circulates), ℓ an integer bounce
+harmonic, ω<sub>D</sub> its toroidal precession from magnetic drifts and ω<sub>E</sub> the E×B rotation frequency. The strength
+of each resonance is |δJ<sub>ℓ</sub>|², the ℓ-th bounce harmonic of the perturbation averaged along the particle's path.
+δJ<sub>ℓ</sub> is built from δB/B and ∇·ξ<sub>⊥</sub>, where ξ is the plasma displacement. Collisions enter as a Krook
+frequency ν. GPEC returns a complex T whose real part is the torque (N·m) and whose imaginary part is 2n δW<sub>K</sub>, with
+δW<sub>K</sub> the kinetic energy of the perturbation. Particles are labelled by x = E/T, the kinetic energy over the
+temperature (u = √x is used as the table coordinate), and by the pitch λ = μB₀/E, with μ the magnetic moment and B₀ a
+reference field. λ stays fixed along an orbit, and v<sub>∥</sub>² ∝ 1 − λB/B₀, with v<sub>∥</sub> the velocity along the field.</p>
 
-<p><b>At physical width, the boundary layer decides the answer.</b> At finite width the orbit's trapped–passing
-boundary moves off λ = B₀/B<sub>max</sub> by an amount that grows with energy and differs between the two signs
-of v<sub>∥</sub>. Near it, |δJ|² changes like 1/(λ − λ<sub>c</sub>), and on the fixed λ grid this gave a
-10<sup>−3</sup> floor that did not fall with width. The fill I chose (surface values within 10× the bisected
-shift) removes the floor, and it disappears at small width as intended. At Z = 16 the layer factor changes the
-answer by under 0.4 points out of 5.7%. At Z = 1 it does not work. On the edge surface ψ<sub>N</sub> = 0.96, 34% of all table entries are
-lost orbits, mostly at high energy. For √x ≥ 2.4, 80–95% of entries hold no orbit value (lost, unclosed,
-class-mismatched or in the layer). The layer factor alone moves that share at the top energy node from 76% (factor 3)
-to 94% (10) to 100% (30). The fill also writes surface values over lost orbits, which otherwise count zero.
-So the factor mixes two things: how much of the boundary region is surface-valued, and whether lost orbits stay
-at zero. The physical-width <code>forb</code> torque follows it: 0.26, 0.36 and 0.50 N·m for factors 3, 10 and
-30, with <code>fgar</code> at 0.53. Doubling λ cannot detect this. The λ grid is <code>fgar</code>'s, clustered
-quadratically at λ<sub>tp</sub> (spacing 10<sup>−5</sup> there against a median of 10<sup>−2</sup>), not at the
-orbit's own boundary λ<sub>c</sub>(E, σ), so doubling it refines the wrong place.
-<b>What attempt 2 does (inference, not yet tested):</b> drop the fill and tabulate on a per-class pitch
-coordinate normalized to the bisected boundary, t = (λ − λ<sub>c</sub>)/(λ<sub>max</sub> − λ<sub>c</sub>) for
-trapped and λ/λ<sub>c</sub> for passing. The table then lives on a fixed (t, √x) grid, the energy spline at
-fixed t is smooth, and λ<sub>c</sub> enters only through dλ/dt. Lost orbits stay at zero (until M3's loss
-boundary replaces that). The existing energy integral and pole handling are
-unchanged. Green would mean the layer factor is gone, and the Z = 1 torque changes by &lt; 5% on doubling the t
-grid.</p>
+<figure id="fig1"><div class="plate">{{FIG_SCHEMATIC}}</div>
+<figcaption>Figure 1. The two averages. (a) Pitch on a model flux surface. The particle stops where B = B₀/λ (dashed levels), so a
+particle with λ above λ<sub>tp</sub> = B₀/B<sub>max</sub> bounces (trapped) and one below it circulates (passing). λ<sub>tp</sub>
+is the surface's trapped–passing boundary. (b) A real thermal-deuterium orbit in the DIII-D-like case, started at normalized
+poloidal flux ψ<sub>N</sub> = 0.5 (0 on the axis, 1 at the edge) with x = 1. <code>fgar</code> samples the perturbation only on
+the start surface ψ₀. <code>forb</code> samples it along the orbit, across the orbit width Δ<sub>b</sub>, the ψ range the orbit
+spans. Widths below are quoted as Δ<sub>b</sub>/a, with a the minor radius.</figcaption></figure>
 
-<p><b>Why the convergence is first order, not second.</b> M1 showed the frequency errors are odd in the sign of
-v<sub>∥</sub>, so they cancel to second order when both signs are summed. A first-order residual needs a
-first-order source, and M2 has four by design:
-(i) the drive ∂f/∂ψ at ψ₀, not at the orbit's mean ψ;
-(ii) the measure dP<sub>φ</sub> ≈ Ze dψ₀;
-(iii) lost orbits set to zero, whose share of the table falls with width (24% of entries at Z = 1, 5.5% at
-Z = 16, 0.2% at Z = 1024, mostly on the edge surfaces where the torque is);
-(iv) the boundary layer. The Z = 16 layer run rules out (iv) as the source of the slope. Which of (i)–(iii)
-dominates is untested. I infer that (i) and (ii) set it, and the test is to repeat the scan after M3, when both
-are exact. A slope near 2 there would mean the orbit average itself is second order, as Liu 2014 finds for the
-precession resonance. A slope near 1 would mean a real first-order effect, such as the passing-ion label shift M1
-found. Either is a result for the paper.</p>
+<p><b>What changed in the code.</b> Figure 2 shows where <code>forb</code> sits. It is a new file, <code>OrbitTorque.jl</code>,
+switched on by the deck key <code>forb_flag</code> (default off); <code>orbit_nlambda</code> (128) and <code>orbit_nenergy</code>
+(12) set its table size. The orbits come from the integrator built in M1, the previous milestone. Each key has a case in the test that runs the same problem from an input deck and from the scripting
+API and checks they agree. Two things stay at their ZOW form until M3, the next milestone, as planned: the drive ∂f/∂ψ (f the equilibrium
+distribution) is read at the start surface ψ₀, and the phase-space volume element uses ψ₀ in place of the canonical toroidal
+momentum P<sub>φ</sub>.</p>
 
-<p><b>Two details of the scan.</b> Z changes the resonances as well as the width (ω<sub>D</sub> and ω<sub>*</sub>
-scale as 1/Z), so the ZOW reference moves: Re T<sub>fgar</sub> = +0.554, +0.012, −0.112, −0.151 N·m at Z = 1, 4,
-16, 64. Its zero crossing makes the Z = 4 relative difference meaningless as a convergence point. Also, the
-relative difference depends on the ψ nodes. On 36 nodes instead of 72 it is 5.7% instead of 4.5% at Z = 16,
-because the difference lives in narrow edge features. Each comparison uses common nodes, so the slope stands,
-but the absolute values in Figure 1 carry about this much ψ-quadrature uncertainty. The KR3 version of the figure
-should use more nodes at the edge.</p>
+<figure id="fig2" class="d2"><div class="plate">{{D2_PIPELINE}}</div>
+<figcaption>Figure 2. Where M2 sits. Green: new in M2. Red: the step that fails at physical width (Section 3). The resonance
+operator and the energy and pitch integrals are shared with <code>fgar</code>, unchanged. θ<sub>Bmin</sub> is the poloidal
+angle of minimum B on the start surface, where every orbit starts; σ is the sign of v<sub>∥</sub> at the start. ⟨φ̇⟩ is the
+orbit's mean toroidal rate, which replaces ω<sub>D</sub> + ω<sub>E</sub>.</figcaption></figure>
 
-<p><b>Cost.</b> The orbit tables take about 130 core-seconds per ψ surface, 180 at Z = 1. That is 15–20× M1's
-10-minute estimate for the whole grid. Per orbit it is 40–60 ms, against M1's 3 ms for the orbit alone, so δJ
-sampling (256 points × 13 harmonics × all m) dominates the table. On 16 threads, Z ≥ 4 runs at 73% efficiency.
-Z = 1 runs at 27%, because a few edge surfaces with many lost and unclosed orbits take longest. The solve-API parity
-case is the bigger problem. On the TJ deck it takes 22 min per run on 2 threads, against 45 s without
-<code>forb</code>. A profile of one surface puts the table at 5.7 s, of which 1.2 s is orbits. So nearly all
-the time is in the energy and pitch integrals of the table: each pitch evaluation rebuilds the √x spline and scans
-401 points for poles. A test that slow cannot stay in the suite. Making these integrals fast belongs in attempt 2
-either way, so it is in Next, not a card.</p>
-
-<h2>Decisions</h2>
-<div class="card" data-q="Q9">
-  <h3>Q9 - Scope of M2 attempt 2, and what green means (gates attempt 2)</h3>
-  <p class="ctx"><b>What was found.</b> Two things. (1) The ZOW limit converges as a power law with no floor, at
-  slope 1.2–1.4, so PLAN's "10<sup>−4</sup> at Δ<sub>b</sub>/a &lt; 10<sup>−3</sup>" fails by 80×. Three of M2's
-  first-order simplifications (drive at ψ₀, ZOW measure, lost orbits zeroed) are M3's to remove. (2) At physical
-  width the trapped–passing boundary layer sets the torque to ±40% (check 4). That is a numerical defect in M2
-  itself and needs a fix (Reading).</p>
-  <p class="ctx"><b>Why this is yours to decide.</b> Attempt 2 is the last M2 attempt: if it ends not green, the
-  project stops. The 10<sup>−4</sup> target is in PLAN, and the project rules don't let me redefine a check after
-  seeing the numbers.</p>
-  <dl>
-    <dt><label><input type="radio" name="Q9" value="A"> A - Attempt 2 replaces the layer with a pitch grid clustered at every orbit class edge (trapped, passing and lost; see the explainer, Section 4), keeps lost orbits at zero, and speeds up the integrals; check 1 becomes "power law with no floor", with the slope re-measured after M3</label></dt>
-    <dd>Green for attempt 2: no layer parameter left; the Z = 1 torque changes by &lt; 5% on doubling the pitch and
-    energy grids; the scan still shows a power law with no floor; the parity test runs in under 2 min. M3's
-    "ZOW limit still holds" check becomes the same scan on the M3 code, and its slope is reported.</dd>
-    <dt><label><input type="radio" name="Q9" value="B"> B - As A, and also move the drive at ⟨ψ⟩ and the exact Jacobian into attempt 2, keeping 10<sup>−4</sup></label></dt>
-    <dd>This pulls most of M3's measure work into M2's last attempt. If the true orbit average is first order (the
-    passing-ion label shift), 10<sup>−4</sup> still fails and the project stops.</dd>
-    <dt><label><input type="radio" name="Q9" value="C"> C - Restate check 1 as in A, and move the boundary fix into M3 alongside the loss boundary</label></dt>
-    <dd>M2 is green now with a known open defect. Every M3 check that compares against M2 ("thermal torque sign
-    unchanged") would then inherit a ±40% baseline at physical width.</dd>
-  </dl>
-  <div class="rec"><b>Recommendation:</b> A, fairly sure. The power law with no floor is what catches a wrong phase,
-  Jacobian or sign, which is check 1's purpose, and the 10<sup>−4</sup> number assumed a second-order difference
-  that M2's planned simplifications rule out. The layer is M2's own defect and belongs in M2. The fix keeps the
-  energy integral and the operator as they are. <b>Gating:</b> attempt 2 waits for this answer.</div>
-  <textarea name="Q9-note" placeholder="Notes, or a different answer"></textarea>
-  <p class="defs"><b>Terms:</b> ZOW - zero orbit width; Δ<sub>b</sub>/a - orbit width over minor radius; ψ₀ - the
-  surface the orbit starts on; ⟨ψ⟩ - the orbit's mean ψ; slope - exponent p in difference ∝
-  (Δ<sub>b</sub>/a)<sup>p</sup>; λ<sub>c</sub> - the orbit's own trapped–passing pitch at a given energy and sign of
-  v<sub>∥</sub>; layer - pitches near λ<sub>c</sub> given surface values.</p>
+<div class="side">
+<div><p><b>How the orbit table is built.</b> On each flux surface ψ₀, <code>forb</code> launches one orbit for every pitch node, every
+energy node and both signs σ, and records ω<sub>b</sub>, ⟨φ̇⟩ and |δJ<sub>ℓ</sub>|² for ℓ = −6…6. Figure 3 gives the rules.
+An orbit is <i>trapped</i> or <i>passing</i>; <i>lost</i> if it leaves the plasma or reaches the magnetic axis grid; or
+<i>unclosed</i> if it has not returned by the integrator's time limit τ<sub>max</sub>. The last step, the <b>layer fill</b>,
+overwrites every entry with |λ − λ<sub>tp</sub>| &lt; 10·|λ<sub>c</sub> − λ<sub>tp</sub>| with the surface value. Here
+λ<sub>c</sub> is the orbit's own trapped–passing boundary on that energy row, found by bisection. It differs from λ<sub>tp</sub>
+because the orbit drifts off ψ₀. I added the layer to avoid the poorly resolved strip between λ<sub>c</sub> and λ<sub>tp</sub>.
+The factor 10 has no physical meaning.</p></div>
+<figure id="fig3" class="d2"><div class="plate">{{D2_NOW}}</div>
+<figcaption>Figure 3. The table build in attempt 1. Red: the two steps that fail, the layer fill (Section 3) and the integrals,
+which rebuild the energy spline at every pitch they evaluate (the cost problem, Section 3).</figcaption></figure>
 </div>
 
-<div class="card" data-q="Q10">
-  <h3>Q10 - δW<sub>K</sub> as a scalar on the orbit path (not gating)</h3>
-  <p class="ctx"><b>What was found.</b> Today's path builds an m×m′ δW<sub>K</sub> matrix on each surface from ξ on
-  that surface. An orbit started at ψ₀ reads ξ over its whole radial excursion, so its δW<sub>K</sub> is a kernel
-  coupling ψ and ψ′, with no per-surface matrix form. The kinetic ForceFreeStates ODE needs a local matrix, so the
-  orbit path cannot feed it. PLAN's KR3 figure ("the dominant δW<sub>K</sub> matrix element") and checks 2–3 assume
-  it can. What the path does give is the total kinetic energy δW<sub>K</sub> = Im T/2n and the torque, for a given
-  perturbation.</p>
-  <p class="ctx"><b>Why this is yours to decide.</b> It changes the KR3 figure's y axis in PLAN, and it keeps the
-  orbit path to post-response torque and energy, with no self-consistent kinetic response.</p>
+<figure id="fig4"><div class="plate">{{FIG_GRIDS}}</div>
+<figcaption>Figure 4. The three grids. (a) Pitch: <code>fgar</code>'s own 128 nodes, 64 passing and 64 trapped, packed
+quadratically toward λ<sub>tp</sub> (spacing 1.2×10⁻⁵ there, median 10⁻²). The same nodes serve every energy row and both σ.
+λ<sub>max</sub> = B₀/B<sub>min</sub> is the largest pitch that can start at θ<sub>Bmin</sub>. (b) The 12 energy nodes in u
+against the energy weight x<sup>5/2</sup>e<sup>−x</sup>. (c) ψ nodes: Gauss–Legendre points on panels whose edges sit at
+rational surfaces. The scan uses 6 per panel (72 nodes), the layer test 3 (36).</figcaption></figure>
+
+<h3 id="checks">The four checks from the plan, at a glance</h3>
+<div class="tbl"><table>
+<tr><th>Check, from PLAN.md (the project plan)</th><th>Seen</th><th>Result</th><th>Where</th></tr>
+<tr><td>1. ZOW limit: at Δ<sub>b</sub>/a &lt; 10⁻³ the methods agree to 10⁻⁴, and the difference falls as a power law</td>
+    <td>power law, no floor, slope 1.2–1.4; 8.3×10⁻³ at Δ<sub>b</sub>/a = 7×10⁻⁴</td>
+    <td><span class="result-pass">power law: pass</span><br><span class="result-fail">10⁻⁴: fails by 80×</span></td><td><a href="#zow">§2, Q9a</a></td></tr>
+<tr><td>2. The n → −n δW<sub>K</sub> matrices are complex conjugates</td><td>there is no per-surface matrix on this path</td>
+    <td>cannot be run</td><td><a href="#dwk">§4, Q10</a></td></tr>
+<tr><td>3. Torque identity: torque = 2n Im δW<sub>K</sub> to roundoff</td><td>holds by construction; the substitute check (same operator) passes to {{VAR_REPLAY_SHORT}}</td>
+    <td>substitute: pass</td><td><a href="#dwk">§4, Q10</a></td></tr>
+<tr><td>4. At physical width the torque changes &lt; 5% when grids are doubled</td><td>doubling: 4.8% (pitch), 2.9% (energy).
+    The layer factor alone moves it −29% to +39%</td>
+    <td><span class="result-pass">doubling: pass</span><br><span class="result-fail">layer: fails</span></td><td><a href="#layer">§3, Q9b</a></td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="zow">2. The zero-orbit-width limit (check 1)</h2>
+
+<p><b>How the width is scanned.</b> The scan changes Z, the species charge number (GPEC's <code>zi</code>; the particle carries
+charge Z·e). Everything else stays: the particle is still a deuteron, and temperature, density, ν and ω<sub>E</sub> come from
+the same profiles at every Z. Only Z = 1 is a real plasma. Higher Z makes the orbit narrower without touching the equilibrium,
+the perturbation or the ψ grid, so the ZOW limit can be approached under control.</p>
+
+<div class="tbl"><table>
+<tr><th>quantity</th><th>scaling with Z</th><th>where in the code</th></tr>
+<tr><td>orbit width Δ<sub>b</sub> (poloidal gyroradius)</td><td>∝ 1/Z</td><td><code>guiding_center_orbit(…; chrg)</code></td></tr>
+<tr><td>precession ω<sub>D</sub></td><td>∝ 1/Z</td><td><code>dhat = (T_s / chrg) / (bo·ro²)</code></td></tr>
+<tr><td>diamagnetic frequencies ω<sub>*n</sub>, ω<sub>*T</sub> (from the density and temperature gradients)</td><td>∝ 1/Z</td><td><code>wdian</code>, <code>wdiat</code> divide by <code>chrg</code></td></tr>
+<tr><td>ω<sub>b</sub>, ω<sub>E</sub>, ν, the distribution f</td><td>unchanged</td><td>ν from <code>nui_spline</code>, no Z⁴ factor</td></tr>
+</table></div>
+
+<p>The physical width at ψ<sub>N</sub> = 0.5 is Δ<sub>b</sub>/a = 0.047. Each factor of 4 in Z divides it by 4, so Z = 4096 reaches
+1.1×10⁻⁵. Seven points over 3.5 decades are what it takes to tell a power law from a floor. A wrong phase, Jacobian or sign
+would leave a floor.</p>
+
+<figure id="fig5"><div class="plate">{{FIG_CHARGE}}</div>
+<figcaption>Figure 5. What Z does. (a) The same trapped orbit (ψ<sub>N</sub> = 0.5, x = 1) for four charges. (b) Width against Z
+from the scan: exactly 1/Z. (c) The <code>fgar</code> torque at each Z is not fixed: ω<sub>D</sub> and ω<sub>*</sub> shrink
+with Z while ω<sub>E</sub> and ν do not, so the resonances change, and its real part changes sign between Z = 4 and 16.</figcaption></figure>
+
+<figure id="fig6" class="narrow"><div class="plate">{{FIG_ZOW}}</div>
+<figcaption>Figure 6 (draft of the methods figure). Relative difference between <code>forb</code> and <code>fgar</code> in the
+total torque, on the same 72 ψ nodes at every Z, so ψ-quadrature error is common to both. The x axis is the width of a
+mid-trapped orbit at ψ<sub>N</sub> = 0.5 and x = 1; the energy integral reaches x = 36, where orbits are 6× wider. Black: complex
+T. Grey: real part (torque) only. The fit uses Z ≥ 16, because at Z = 4 the reference torque is near its zero crossing.</figcaption></figure>
+
+<p><b>What it shows.</b> The difference falls from 4.5% at Δ<sub>b</sub>/a = 3×10⁻³ to 6×10⁻⁵ at 1.1×10⁻⁵, with no plateau.
+The fitted slope is 1.18 for complex T and 1.37 for the torque alone. Because the reference changes with Z, the slope assumes
+the error's prefactor changes little along the scan. The slopes between neighbouring points show no drift:</p>
+<div class="tbl"><table>
+<tr><th>Z pair</th><th>16→64</th><th>64→256</th><th>256→1024</th><th>1024→4096</th></tr>
+<tr><td>slope, complex T</td><td>1.21</td><td>1.26</td><td>0.98</td><td>1.32</td></tr>
+<tr><td>slope, torque</td><td>1.27</td><td>1.48</td><td>1.32</td><td>1.37</td></tr>
+</table></div>
+<p>The absolute values carry ψ-quadrature uncertainty: on 36 nodes instead of 72 the Z = 16 difference is 5.7%, not 4.5%,
+because the difference lives in narrow edge features. A cleaner scan would also divide ω<sub>E</sub> and ν by Z, so every
+low frequency keeps its ratio to ω<sub>D</sub> and the reference stays nearly fixed. That is my inference, untested, and a
+script-only change.</p>
+
+<p><b>Why first order, and why the 10⁻⁴ target fails.</b> The PLAN.md target assumed the difference would be second order in
+width. M1 showed the orbit-frequency errors are odd in σ, so they cancel to second order when both signs are summed. A
+first-order residual needs a first-order source, and M2 has four by design: (i) the drive read at ψ₀ instead of the orbit's
+mean ψ, written ⟨ψ⟩; (ii) the ZOW phase-space volume; (iii) lost orbits counted as zero, whose share falls with width (24% of
+entries at Z = 1, 5.5% at Z = 16, 0.2% at Z = 1024, mostly on the edge surfaces where the torque is); (iv) the layer fill. A
+run at Z = 16 with the layer factor varied rules out (iv). Which of (i)–(iii) dominates is untested; I infer (i) and (ii),
+which M3 makes exact. A slope near 2 after M3 would mean the orbit average itself is second order, as Liu 2014 finds for
+the precession resonance. A slope near 1 would mean a real first-order effect, such as the passing-particle label shift M1
+found. Either is a result for the paper.</p>
+
+<div class="card" id="q9a" data-q="Q9a">
+  <h3>Q9a - What counts as passing the ZOW limit test (gates attempt 2)</h3>
+  <p><b>Found.</b> The difference falls as a power law with no floor, slope 1.2–1.4 (Figure 6), so the method is consistent.
+  The plan's "10⁻⁴ at Δ<sub>b</sub>/a &lt; 10⁻³" fails by 80×, and M2 by design keeps first-order simplifications (i)–(iii)
+  above that M3 removes.</p>
+  <p><b>Why it is yours.</b> The 10⁻⁴ number is in PLAN, and the project rules do not let me redefine a check after seeing
+  the result.</p>
   <dl>
-    <dt><label><input type="radio" name="Q10" value="A"> A - KR3 shows torque and total δW<sub>K</sub>; checks 2–3 retired; the orbit path stays post-response</label></dt>
-    <dd>Matches what the Letter needs, since both key results are torques on a given perturbation. PLAN's KR3
-    figure text changes; no new work.</dd>
-    <dt><label><input type="radio" name="Q10" value="B"> B - Add the ψ–ψ′ kernel as a later milestone</label></dt>
-    <dd>Opens self-consistent finite-orbit kinetic response, but needs a non-local ODE closure that GPEC does not
-    have. That is a project on its own, beyond the 8-milestone budget.</dd>
+    <dt><label><input type="radio" name="Q9a" value="A"> A - Check 1 becomes "power law with no floor over at least 3 decades"; the slope is re-measured after M3; attempt 2 also reruns the scan with ω<sub>E</sub> and ν divided by Z</label></dt>
+    <dd>Attempt 2 is judged on the layer fix (Q9b). M3's "ZOW limit still holds" check becomes this scan on the M3 code, with
+    its slope reported. The extra scan costs about 2 h of queue time and no code.</dd>
+    <dt><label><input type="radio" name="Q9a" value="B"> B - Keep 10⁻⁴, and move the drive at ⟨ψ⟩ and the exact phase-space volume into attempt 2</label></dt>
+    <dd>Pulls most of M3 into M2's last attempt. If the true orbit average is first order (the passing label shift),
+    10⁻⁴ still fails and the project stops.</dd>
   </dl>
-  <div class="rec"><b>Recommendation:</b> A, sure. B is a separate project (a Feature Add idea, not this Letter).
-  <b>Not gating.</b></div>
+  <div class="rec"><b>Recommendation: A</b>, fairly sure. A floor is what catches a wrong phase, Jacobian or sign, which is
+  what check 1 is for. The 10⁻⁴ number assumed a second-order difference that M2's planned simplifications rule out.</div>
+  <textarea name="Q9a-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="layer">3. Physical width and the layer fill (check 4)</h2>
+
+<p><b>The result.</b> At Z = 1, doubling the pitch grid (128 → 256) changes the <code>forb</code> torque by 2.5% and doubling
+the energy grid (12 → 24) by 0.7%, so the grids look converged. But the layer factor, which should not matter, moves it a
+lot:</p>
+<div class="tbl"><table>
+<tr><th>Z = 1, 36 ψ nodes</th><th>layer factor 3</th><th>10 (default)</th><th>30</th><th><code>fgar</code></th></tr>
+<tr><td>torque (N·m)</td><td>0.259</td><td>0.364</td><td>0.504</td><td>0.534</td></tr>
+</table></div>
+<p>At Z = 16 the same change moves the difference from <code>fgar</code> only between 5.5% and 5.9%. Figure 7 shows where the
+two methods differ at physical width. It is not a result; it only locates the problem at the edge.</p>
+
+<figure id="fig7"><div class="plate">{{FIG_PROFILE}}</div>
+<figcaption>Figure 7. Torque density on the 72 ψ nodes, ψ<sub>N</sub> &gt; 0.8 (both methods are near zero inside). Left: Z = 1,
+layer factor 10; <code>fgar</code>'s peak at ψ<sub>N</sub> = 0.993 is clipped. Its integral moves from 0.26 to 0.50 N·m with
+the layer factor. Right: Z = 1024, where the two coincide.</figcaption></figure>
+
+<p><b>Why the layer decides it.</b> Figure 8 maps the orbit class on one edge surface, ψ<sub>N</sub> = 0.96, with the layer band
+drawn on top. At Z = 1 the band is wide, and it also covers lost orbits, so it turns zeros into surface values. Of the 3072
+table entries on this surface, 1040 (34%) are lost.</p>
+
+<figure id="fig8"><div class="plate">{{FIG_LAYER}}</div>
+<figcaption>Figure 8. Orbit class at ψ<sub>N</sub> = 0.96 on a fine pitch scan (400 points per energy row). Ticks under the axis are
+the 128 table nodes. Hatched, washed-out band: what the layer fill overwrites. White circles: λ<sub>c</sub>. (a) Z = 1, σ = +1:
+above u ≈ 1 the orbits near λ<sub>tp</sub> are lost (dark) and there is no λ<sub>c</sub> at all; the band, set by the other
+sign, covers most of the lost region. (b) Z = 1, σ = −1: λ<sub>c</sub> moves away from λ<sub>tp</sub> as energy rises, and the
+band grows with it. (c) Z = 16: nothing is lost and the band is a sliver, which is why the layer did not affect the scan.</figcaption></figure>
+
+<div class="tbl"><table>
+<tr><th>ψ<sub>N</sub> = 0.96, Z = 1</th><th>u = 0.05</th><th>0.57</th><th>1.86</th><th>3.58</th><th>5.63</th></tr>
+<tr><td>|λ<sub>c</sub> − λ<sub>tp</sub>|, larger of the two σ</td><td>0.0005</td><td>0.0054</td><td>0.017</td><td>0.032</td><td>0.049</td></tr>
+<tr><td>share of the 128 pitch nodes overwritten</td><td>14%</td><td>35%</td><td>55%</td><td>72%</td><td>88%</td></tr>
+</table></div>
+<p>Even at the lowest energy the band covers 14% of the nodes, because the grid packs them at λ<sub>tp</sub> (Figure 4a). The
+same packing is why doubling the pitch grid could not detect the problem: it refines λ<sub>tp</sub>, not λ<sub>c</sub> or the
+lost edges.</p>
+
+<figure id="fig9"><div class="plate">{{FIG_DJ}}</div>
+<figcaption>Figure 9. What the layer hides. Σ<sub>ℓ</sub>|δJ<sub>ℓ</sub>|² against pitch on two energy rows, σ = −1,
+ψ<sub>N</sub> = 0.96, Z = 1. Dashed: the surface value, which the layer writes into the hatched band. Black: orbit values on table
+nodes outside the band. Coloured: 48 new orbits per row, packed toward λ<sub>c</sub> (job 139196). The orbit values are
+continuous across λ<sub>c</sub> and dip toward zero right at it; the closest few are unclosed (yellow), because the bounce period
+diverges at the boundary.</figcaption></figure>
+
+<p><b>Reading.</b> Evidence: on this surface, outside the band, the orbit's own Σ|δJ|² is 0.27–0.38 of the surface value for
+passing orbits and 0.13–0.18 for trapped ones, so the layer pastes in values 3–8 times larger, and pastes them over the lost
+zeros too. That matches the direction of the table above: the Z = 1 torque moves toward <code>fgar</code> as the band widens.
+Inference, from one surface and two energy rows: the true Z = 1 <code>forb</code> torque at M2's level of physics is below the
+layer-10 value of 0.36 N·m; the data do not say by how much. The integrand near λ<sub>c</sub> is smooth enough that nodes
+packed there resolve it, so the layer is not needed.</p>
+
+<h3>The proposed fix</h3>
+<div class="two">
+<figure id="fig10a"><div class="plate">{{D2_NOW}}</div>
+<figcaption>Figure 10a. Attempt 1 (Figure 3 again).</figcaption></figure>
+<figure id="fig10b"><div class="plate" style="max-width: 63%; margin: 0 auto">{{D2_FIX}}</div>
+<figcaption>Figure 10b. Proposed for attempt 2. Green: new steps. No layer, and lost orbits stay zero.</figcaption></figure>
+</div>
+<figure id="fig11"><div class="plate">{{FIG_FIX}}</div>
+<figcaption>Figure 11. Pitch nodes on each energy row, ψ<sub>N</sub> = 0.96, Z = 1, σ = +1. (a) Attempt 1: the same 128 nodes on
+every row, packed at λ<sub>tp</sub>, where above u ≈ 1 there are only lost orbits. (b) Proposed: on each row, bisect the class
+edges (passing, trapped, lost) and pack nodes at both ends of each passing or trapped segment. Lost segments get no nodes. At
+high energy all nodes go into the trapped strip near λ<sub>max</sub>, the only part with closed orbits.</figcaption></figure>
+<ol>
+<li><b>Pitch grid from the orbit's class edges</b> (Figures 10b, 11b), replacing the layer. Lost orbits stay zero until M3 brings the
+loss boundary. The first version of this card said "pack at λ<sub>c</sub>"; Figure 8a shows that is not enough, because for
+σ = +1 the edges that matter are passing–lost and trapped–lost.</li>
+<li><b>Energy integral done once per pitch node.</b> The integrals rebuild the energy spline and re-scan 401 points for poles
+at every pitch they evaluate. On the small TJ test equilibrium (GPEC's <code>TJ_kinetic_NTV_example</code>), the deck-and-API
+test with <code>forb</code> on takes 22 min on 2 threads, against 45 s without; a profile of one surface puts the orbits at
+1.2 s of 5.7 s. A test that slow cannot stay in the suite. The orbit tables themselves cost 130 core-seconds per surface (180
+at Z = 1), about 40–60 ms per orbit, mostly in sampling δJ.</li>
+<li><b>Rerun check 4 at Z = 1, and the scan</b>, with more ψ nodes at the edge.</li>
+</ol>
+<p class="open"><b>Open design question.</b> Per-row pitch grids do not line up across energy rows, but the energy integral needs
+values at a fixed pitch coordinate. The plan is a coordinate t ∈ (0, 1) inside each class segment, with nodes at fixed t. That
+works while each class is one interval whose ends move smoothly with u. Figure 8a breaks this: for σ = +1 the passing class
+ends between u = 1.4 and 1.9, so at fixed t the energy integrand has a step there. The energy integral then also needs the u
+at which each class ends, found by bisection like λ<sub>c</sub>. The first step of attempt 2 is to plot the integrand against u
+at fixed t on this surface, before writing code.</p>
+
+<div class="card" id="q9b" data-q="Q9b">
+  <h3>Q9b - What attempt 2 changes (gates attempt 2)</h3>
+  <p><b>Found.</b> At physical width the layer fill, a parameter with no physical meaning, moves the torque from 0.26 to 0.50
+  N·m (table above). It overwrites 14–88% of the pitch nodes on an edge surface and turns lost-orbit zeros into surface values
+  (Figures 8, 9). This is M2's own numerical defect.</p>
+  <p><b>Why it is yours.</b> Attempt 2 is the last M2 attempt: if it ends not green, the project stops. Its scope and its
+  green criterion should be fixed before it starts.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q9b" value="A"> A - Attempt 2 replaces the layer with a pitch grid packed at every orbit class edge, keeps lost orbits at zero, and computes the energy integral once per pitch node (Figures 10, 11)</label></dt>
+    <dd>Green means: no layer parameter left; the Z = 1 torque changes &lt; 5% when the pitch and energy grids are doubled;
+    the ZOW scan still meets check 1 as settled in Q9a; the deck-and-API test runs in under 2 min. The open design question
+    above is settled first.</dd>
+    <dt><label><input type="radio" name="Q9b" value="B"> B - M2 is declared done with the defect recorded, and the boundary fix moves into M3 alongside the loss boundary</label></dt>
+    <dd>Saves the attempt now. Every M3 check that compares against M2 ("thermal torque sign unchanged") then inherits a ±40%
+    baseline at physical width, and the slow test stays in the suite until M3.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, fairly sure. The defect is M2's own and belongs in M2. The fix keeps the resonance
+  operator and the energy integral as they are. The risk is the open design question; if the step in u cannot be handled
+  cleanly, attempt 2 ends not green.</div>
+  <textarea name="Q9b-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="dwk">4. The kinetic energy on the orbit path (checks 2 and 3)</h2>
+
+<p>On the surface path, δW<sub>K</sub> on each surface is an m×m′ matrix over poloidal harmonics m, m′, built from ξ on that
+surface. The kinetic version of GPEC's ideal-stability solver, <code>ForceFreeStates</code>, integrates an ordinary differential
+equation (ODE) surface by surface and needs that local matrix. An orbit started at ψ₀ reads ξ across its whole width, so on the
+orbit path δW<sub>K</sub> couples ψ₀ to every ψ′ the orbit visits (Figure 12): it is a kernel, not a matrix on each surface.
+Check 2 (the n → −n matrices are conjugate) therefore has nothing to act on.</p>
+
+<figure id="fig12"><div class="plate">{{FIG_KERNEL}}</div>
+<figcaption>Figure 12. Schematic, with model widths: where δW<sub>K</sub> lives. (a) <code>fgar</code>: only on the diagonal
+ψ′ = ψ₀, so it is an m×m′ matrix on each surface. (b) <code>forb</code>: a band of width about Δ<sub>b</sub>(ψ₀), widening toward
+the edge.</figcaption></figure>
+
+<p>What the path does give is the total δW<sub>K</sub> = Im T/2n and the torque for a given perturbation. Check 3 (torque =
+2n Im δW<sub>K</sub>) holds by construction for these scalars, since both come from the same complex T. What can be tested
+is that the operator is unchanged: feeding the surface values through <code>forb</code>'s energy and pitch integrals
+reproduces <code>fgar</code> to {{VAR_REPLAY}} on every ψ node at physical width. Two code paths (the ψ-quadrature call and a
+direct table build) give bit-identical tables and torques, serial and threaded.</p>
+
+<div class="card" id="q10" data-q="Q10">
+  <h3>Q10 - δW<sub>K</sub> as a scalar on the orbit path (not gating)</h3>
+  <p><b>Found.</b> On the orbit path δW<sub>K</sub> is a ψ–ψ′ kernel with no per-surface matrix (Figure 12), so it cannot feed
+  the <code>ForceFreeStates</code> kinetic ODE. PLAN's methods figure ("the dominant δW<sub>K</sub> matrix element") and checks
+  2–3 assume it can.</p>
+  <p><b>Why it is yours.</b> It changes the y axis of a figure in PLAN, and it keeps the orbit path to torque and energy
+  on a given perturbation, with no self-consistent kinetic response.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q10" value="A"> A - The methods figure shows torque and total δW<sub>K</sub>; checks 2–3 are retired; the orbit path computes torque on a given perturbation only</label></dt>
+    <dd>Matches what the Letter needs, since both headline results are torques on a given perturbation. One line of PLAN
+    changes; no new work.</dd>
+    <dt><label><input type="radio" name="Q10" value="B"> B - Add the ψ–ψ′ kernel as a later milestone</label></dt>
+    <dd>Opens self-consistent finite-orbit kinetic response, but needs a non-local ODE closure GPEC does not have. That is a
+    project of its own, beyond the 8-milestone budget.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, sure. B is a separate project, better filed as a GPEC feature idea.</div>
   <textarea name="Q10-note" placeholder="Notes, or a different answer"></textarea>
-  <p class="defs"><b>Terms:</b> δW<sub>K</sub> - kinetic energy of the perturbation; T = T<sub>φ</sub> +
-  i·2nδW<sub>K</sub> - GPEC's complex torque; m, m′ - poloidal harmonics; KR3 - the methods result (ZOW limit).</p>
 </div>
 
 <button class="copy" onclick="copyAnswers()">Copy answers</button>
 <pre id="answers" hidden></pre>
 
+<!-- ============================================================ -->
 <h2>Paper</h2>
-<p><b>Abstract and key results:</b> unchanged. <b>KR3</b> has its figure in draft form (Figure 1). Its y axis
-becomes torque and total δW<sub>K</sub> if Q10 is A, and its slope is re-measured after M3 under Q9 A.
-<b>Methods</b> gains a paragraph: δJ along the orbit in GPEC's ζ phase, and the replay identity showing the
-operator is unchanged. The trapped–passing boundary treatment is the paragraph that attempt 2 writes.
-<b>KR2:</b> nothing yet. Figure 2's left panel is not evidence for or against the hypothesis.</p>
+<p>The Letter has three key results: KR1, the alpha-particle torque against orbit width in an ARC-class, ITER and SPARC
+equilibrium; KR2, the DIII-D thermal-ion torque density; KR3 (methods), <code>forb</code> reducing to <code>fgar</code> in the
+ZOW limit. <b>Abstract and key results:</b> unchanged. <b>KR3</b> has its figure in draft (Figure 6); its y axis becomes torque
+and total δW<sub>K</sub> under Q10 A, and its slope is re-measured after M3 under Q9a A. <b>Methods</b> gains a paragraph on δJ
+along the orbit and the replay check. The class-edge pitch grid is the paragraph attempt 2 writes. Figures 1, 2, 8, 11 and 12
+are drawn to be reused in a longer Nuclear Fusion paper and in talks (PDFs beside the PNGs in <code>results/m2_zow/</code>).
+<b>KR2:</b> nothing yet; Figure 7's left panel is not evidence either way.</p>
 
 <h2>Next</h2>
-<p>M2 attempt 2, after Q9. Under A: (1) on one edge surface, plot the integrand against λ near λ<sub>c</sub> for the
-current table and for the boundary-normalized grid, to confirm the mechanism before changing the code;
-(2) tabulate on the normalized pitch coordinate and remove the layer; (3) precompute the energy integral per
-table pitch node, so the pitch quadrature no longer rebuilds splines; (4) rerun check 4 at Z = 1 and the charge
-scan on 72 nodes with more nodes at the edge. Before M3, as Q6 A asked, a separate small bugfix PR to
-<code>develop</code> forwards <code>nutype</code>, <code>f0type</code> and <code>collisionality_factor</code> to
-the post-response torque path. It touches no orbit code, so I can prepare it now as a draft. It will not be
-merged without human review.</p>
+<p>M2 attempt 2, after Q9a and Q9b. Under A and A: plot the integrand against u at fixed t on ψ<sub>N</sub> = 0.96; build the
+class-edge pitch grid with no layer; compute the energy integral once per pitch node; rerun check 4 at Z = 1 and the scan with
+more edge ψ nodes, plus the scan with ω<sub>E</sub> and ν divided by Z. Separately, as answered in Q6, a small bugfix PR to
+<code>develop</code> forwards <code>nutype</code>, <code>f0type</code> and <code>collisionality_factor</code> to the
+post-response torque path before M3. It touches no orbit code, so I can open it now as a draft. It will not be merged without
+human review.</p>
+</main>
 
 <script>
 function copyAnswers() {
@@ -314,7 +420,7 @@ function copyAnswers() {
     const q = c.dataset.q;
     const sel = c.querySelector(`input[name="${q}"]:checked`);
     const note = c.querySelector(`textarea[name="${q}-note"]`).value.trim();
-    const label = sel ? sel.parentElement.textContent.trim() : '(no option chosen)';
+    const label = sel ? sel.parentElement.textContent.trim().replace(/\s+/g, ' ') : '(no option chosen)';
     lines.push(`- **${q}**: ${label}` + (note ? `\n  - ${note}` : ''));
   });
   const text = lines.join('\n');

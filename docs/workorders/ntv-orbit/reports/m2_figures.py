@@ -39,7 +39,7 @@ def fig_zow():
     ax.set_ylabel("relative difference in total torque")
     ax.legend(fontsize=6, frameon=False, loc="upper left")
     fig.tight_layout()
-    for ext in ("svg", "png"):
+    for ext in ("svg", "png", "pdf"):
         fig.savefig(OUT / f"fig_m2_zow.{ext}", dpi=150)
     return p
 
@@ -67,7 +67,7 @@ def fig_profile():
         a.set_xlabel("ψ_N")
         a.axhline(0, color="0.8", lw=0.5)
     fig.tight_layout()
-    for ext in ("svg", "png"):
+    for ext in ("svg", "png", "pdf"):
         fig.savefig(OUT / f"fig_m2_profile.{ext}", dpi=150)
 
 

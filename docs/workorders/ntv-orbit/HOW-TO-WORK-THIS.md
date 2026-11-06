@@ -45,7 +45,8 @@ which were not; do not promote an unverified claim into the paper.
    the milestone is not green, whatever the key figure looks like. Then
    regenerate the figure and compare against the key result's *qualitative*
    acceptance criterion.
-4. Write `reports/M<k>.html`, including its Checks and Paper sections.
+4. Write `reports/M<k>.html` from the skeleton: orientation, then one
+   section per decision with its card at the end, then Paper and Next.
 5. Update `../../../JOURNAL.md`: one entry per finding, tagged with the paper
    section or key result it serves; anything that serves none goes to the
    parked list, not into PLAN.md.
@@ -69,37 +70,51 @@ HTML (no CDN, no external images - inline the SVG or embed a data: URI),
 greyscale-safe, printable as a fallback, opened from the pulled checkout
 (GitHub shows the source, not the page).
 
+Nik does not read the code. The report is how he learns what the code now
+does, what it found and what is proposed, well enough to decide. Write it
+as a guided explanation, not a results dump followed by a quiz. Nik
+(2026-11-06): "I want to understand what's being done, the result, and the
+proposed fix all right next to the relevant question so I can think about
+it and answer it with the appropriate context right there in front of me."
+
 Sections, in order:
 
 - **Status strip** - one row at the top: milestone state (green / amber /
   red, as the skeleton defines them), attempts used of budget, tests
   (pass/fail counts), cost (wall time of the key run this milestone and last),
-  number of decisions below. Readable in five seconds.
-- **Question** - what this milestone set out to answer, in two sentences.
-- **What changed** - a small diagram of where in the pipeline this sits, what
-  feeds it and what it feeds, with the changed node marked. Inline SVG.
-- **Checks** - the milestone's physics checks from PLAN.md, one row each:
-  what behavior was expected, what was seen, pass / fail / not settled, and a
-  small panel (a limit recovered, a scaling exponent fitted, a sign, a
-  convergence curve). This section is what makes the figure below
-  trustworthy; a reader should be able to stop here and know whether the
-  physics is working.
-- **Figure** - the plot, with the reference overlay where PLAN.md calls for
-  one.
-- **Reading** - what the figure shows, including what it does *not* settle.
-- **Decisions** - zero to three cards, one per question Nik must answer. Each
-  card is self-contained: what was found and where (the figure or number it
-  rests on, embedded or linked by anchor); why the agent cannot decide it
-  alone; the options, each with its consequence in one line; the agent's
-  recommendation and how sure it is; a radio button per option plus a
-  free-text box; a definition for every symbol, acronym and code name the
-  card uses. A "Copy answers" button assembles the chosen answers into the
-  QUESTIONS.md block Nik pastes and commits. No decisions: the section says
-  so in one line.
+  number of decisions below. Plain words only: readable in five seconds.
+- **Lede** - what the milestone is for, in plain language, defining the
+  first acronyms and code names it needs; then "in brief", the result in
+  three or four sentences; then a short map: which section holds which
+  decision card, and which cards gate the next attempt or milestone.
+- **1. What this milestone computes** - the orientation every later section
+  relies on: the question (two sentences), the physics in one paragraph,
+  a schematic of the idea, a workflow diagram (D2) of where the change sits
+  in the pipeline with the new node marked, and diagrams of any numerical
+  scheme the milestone builds (grids, tables, fill rules). Then the physics
+  checks from PLAN.md as a short table, one row each (expected, seen,
+  pass / fail / not settled), each row linking down to the section that
+  holds its evidence.
+- **2 ... k. One section per decision**, in reading order, each built as:
+  what is being done (schematic or workflow), the result (the figure and
+  the numbers), why (diagnostic figures), the proposed fix (a figure of the
+  fix itself, e.g. the new grid or the new workflow beside the old), open
+  questions, and then **the Decisions card at the end of that section**.
+  Every figure a card rests on sits in that card's section, never in a
+  shared Figures section above. A finding with no decision gets a section
+  only if a check rests on it; otherwise it goes in Reading, Paper or Next.
+  If one card needs evidence from two topics, split it into two cards (the
+  limit of three still holds).
+- **Each card** is short because its section did the explaining: what was
+  found (one or two sentences, pointing at figures by number); why the
+  agent cannot decide it alone; the options, each with its consequence in
+  one line and, for an attempt, what green means; the recommendation and
+  how sure; a radio button per option plus a free-text box. One "Copy
+  answers" button after the last card assembles the QUESTIONS.md block.
+  No decisions: a one-line section says so.
 - **Cost** - only when the milestone touched performance or a run exceeded
-  its previous wall time by more than a factor of two: a profile plot (time
-  per function, before/after) and the grid or resolution it was taken at.
-  Otherwise the status-strip number is enough.
+  its previous wall time by more than a factor of two, and then inside the
+  section whose decision it affects.
 - **Paper** - what changed in PLAN.md: abstract diff, key-results diff,
   figures promoted from "evidence in a report" to "promoted to the paper",
   and the coherence check from the template (abstract states the final
@@ -108,6 +123,29 @@ Sections, in order:
   Any change to the abstract claims or the key-results list is a Decisions
   card, not a unilateral edit.
 - **Next** - the following milestone, or the blocker.
+
+One report per milestone attempt. Never a separate "explainer" page: if Nik
+asks for more context, fold it into the report and republish it at the same
+link.
+
+**Definitions, journal style.** Define every acronym, symbol and code name
+in running text at its first occurrence in the report, the way a journal
+paper does: "the finite orbit width (FOW) limit", "the orbit width
+Δ<sub>b</sub>, the ψ range the orbit spans", "`forb`, the new orbit
+method". Afterwards use it bare. Every report starts fresh, even if an
+earlier report defined the term. No symbols table or glossary block: Nik
+finds a definition with Ctrl+F on its first occurrence, so the first hit
+of every term must be its definition (check this before publishing, and
+keep the status strip and nav free of undefined terms). Captions may
+define a term the figure introduces.
+
+**Figures and schematics: as many as help, at paper quality.** Schematics
+of the approach, workflow diagrams (D2), grids and before/after views of a
+fix are as important as result plots. Draw them to be reused in a long
+Nuclear Fusion paper and in talks: one script per figure family, written
+to `results/<run>/` as SVG, PNG and PDF, with short labels and the
+project's palette. In the HTML, put figures on white plates so they read
+in both themes, and keep any diagram's text readable at the column width.
 
 Rules for questions:
 
@@ -119,10 +157,9 @@ Rules for questions:
 - **Three cards per milestone at most.** A fourth means the milestone is
   scoped wrong: stop, and make the one card "how to split this milestone",
   with the agent's proposed split as the recommended option.
-- **A card is written for someone who has not seen the terminal.** No
-  acronym or code name undefined, no reference to "the earlier run" without
-  the figure or number itself, no option whose consequence is not stated.
-  Nik should be able to answer every card from the card alone.
+- **A card is answerable from its section.** No acronym or code name
+  undefined upstream, no reference to "the earlier run" without the figure
+  or number itself, no option whose consequence is not stated.
 - **Every card has a recommendation.** "Either is fine" is not a card; make
   the choice and record it in the journal.
 
