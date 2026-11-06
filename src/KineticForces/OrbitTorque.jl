@@ -242,12 +242,51 @@ function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, eps
 end
 
 """
+    _cell_roots(f, a, b, deg) → Vector{Float64}
+
+Real roots in [a, b) of `f`, which is a polynomial of degree ≤ `deg` on [a, b]: its Chebyshev-node interpolant gives the
+coefficients exactly, the companion-matrix eigenvalues give the roots, and each real one is polished by Newton steps on `f`.
+"""
+function _cell_roots(f, a::Float64, b::Float64, deg::Int)
+    mid, half = (a + b) / 2, (b - a) / 2
+    t = [cos(π * (j - 0.5) / (deg + 1)) for j in 1:deg+1]
+    c = [ti^k for ti in t, k in 0:deg] \ [f(mid + half * ti) for ti in t]
+    scale = maximum(abs, c)
+    roots = Float64[]
+    scale > 0 || return roots
+    d = findlast(ck -> abs(ck) > 1e-13 * scale, c) - 1
+    d >= 1 || return roots
+    C = zeros(d, d)
+    for i in 2:d
+        C[i, i-1] = 1.0
+    end
+    C[:, d] .= -c[1:d] ./ c[d+1]
+    for z in eigvals(C)
+        abs(imag(z)) < 1e-7 && -1 - 1e-9 <= real(z) < 1 + 1e-9 || continue
+        s = clamp(mid + half * real(z), a, b)
+        h = 1e-7 * max(half, abs(s))
+        for _ in 1:3
+            fs = f(s)
+            dfs = (f(s + h) - f(s - h)) / 2h
+            dfs == 0 && break
+            snew = clamp(s - fs / dfs, a, b)
+            abs(f(snew)) < abs(fs) || break
+            s = snew
+        end
+        a <= s < b && push!(roots, s)
+    end
+    sort!(roots)
+    return unique!(r -> round(r / (1e-9 * half); digits=0), roots)
+end
+
+"""
     _integrate_energy_orbit(p, leff, sgn, spl, u, atol, rtol, segbuf) → ComplexF64
 
 ∫₀^{X_ENERGY_MAX} N(x)e^{−x}D(√x)/(iΩ − ν) dx with Ω(u) = leff·sgn·Wb(u)·u + n(ω_E + Wd(u)·u²), where `spl`
-splines [Wb, Wd, D] on the √x nodes `u` and is held at the end nodes outside them. The poles are the sign changes of Ω on
-a fine √x grid, removed by principal value and residue as in [`_integrate_energy_resonant`](@ref), to
-which this reduces when Wb, Wd and D are constant.
+splines [Wb, Wd, D] on the √x nodes `u` and is held at the end nodes outside them. On each spline cell Ω is a
+polynomial of degree ≤ 5 in √x, so its real roots are found exactly (see [`_cell_roots`](@ref)) and removed by principal
+value and residue as in [`_integrate_energy_resonant`](@ref), to which this reduces when Wb, Wd and D are constant. The
+stationary points of Ω are breakpoints, so a near-tangent resonance that does not cross zero is still resolved.
 """
 function _integrate_energy_orbit(p::EnergyParams, leff::Float64, sgn::Float64, spl, u::Vector{Float64},
     atol::Float64, rtol::Float64, segbuf)::ComplexF64
@@ -274,26 +313,24 @@ function _integrate_energy_orbit(p::EnergyParams, leff::Float64, sgn::Float64, s
     x_poles = ComplexF64[]
     residues = ComplexF64[]
     pole_contribution = zero(ComplexF64)
-    grid = range(0.0, u_max, 401)
-    Ωa = Ω(grid[1])
-    for j in 2:length(grid)
-        Ωb = Ω(grid[j])
-        if Ωa * Ωb < 0
-            ur = find_zero(Ω, (grid[j-1], grid[j]), Bisection())
+    cells = unique!(vcat(0.0, filter(s -> 0 < s < u_max, u), u_max))
+    extrema_u = Float64[]
+    for j in 1:length(cells)-1
+        a, b = cells[j], cells[j+1]
+        append!(extrema_u, _cell_roots(dΩ, a, b, 4))
+        for ur in _cell_roots(Ω, a, b, 5)
+            ur > 0 || continue
             xr = ur^2
             op = dΩ(ur) / (2ur)
-            if abs(op) >= SINGULAR_EPS
-                offset = _energy_collision_frequency(xr, p) / op
-                if isfinite(offset)
-                    x_pole = complex(xr, -offset)
-                    R = h(xr) / (im * op)
-                    pole_contribution += R * (log(X_ENERGY_MAX - x_pole) - log(-x_pole))
-                    push!(x_poles, x_pole)
-                    push!(residues, R)
-                end
-            end
+            abs(op) >= SINGULAR_EPS || continue
+            offset = _energy_collision_frequency(xr, p) / op
+            isfinite(offset) || continue
+            x_pole = complex(xr, -offset)
+            R = h(xr) / (im * op)
+            pole_contribution += R * (log(X_ENERGY_MAX - x_pole) - log(-x_pole))
+            push!(x_poles, x_pole)
+            push!(residues, R)
         end
-        Ωa = Ωb
     end
 
     function integrand_u(s)
@@ -305,7 +342,7 @@ function _integrate_energy_orbit(p::EnergyParams, leff::Float64, sgn::Float64, s
         return isfinite(val) ? 2s * val : zero(ComplexF64)
     end
 
-    pts = [0.0, u_max]
+    pts = vcat(0.0, u_max, extrema_u)
     for xp in x_poles
         xr = real(xp)
         push!(pts, sqrt(xr))
