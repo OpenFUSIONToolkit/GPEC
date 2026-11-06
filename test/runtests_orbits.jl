@@ -35,6 +35,23 @@ using HDF5
             @test o.pphi_error < 1e-8
         end
         @test KF.guiding_center_orbit(g, 0.5, 1.1 * lam_max, T, 1; mass, chrg) === nothing
+        @test (trapped.ncross, passing.ncross) == (2, 1)
+        # Narrow orbits: the precession is integrated relative to the field line, so it keeps the ODE tolerance.
+        narrow(rtol) = KF.guiding_center_orbit(g, 0.5, 0.99 * lam_max, T, 1; mass, chrg=4096chrg, rtol).wphi
+        @test narrow(1e-8) ≈ narrow(1e-11) rtol = 1e-5
+    end
+
+    @testset "orbits trapped by E×B close as trapped" begin
+        # R₀ω_E ≈ v_t: counter-going ions are trapped about v∥ ≈ −R ω_E without v∥ reversing (θ̇ reverses instead).
+        vt = sqrt(2T / mass)
+        gE = KF.guiding_center_field(equil; omegaE=ψ -> vt / g.ro)
+        for sv in (-1, 1)
+            o = KF.guiding_center_orbit(gE, 0.5, 0.2, T, sv; mass, chrg)
+            ws = [o.sol(τ)[4] for τ in range(0, o.sol.t[end]; length=401)]
+            @test o.status in (:trapped, :passing)
+            @test o.energy_error < 1e-8
+            o.status == :trapped && @test (o.ncross, all(<(0), ws) || all(>(0), ws)) == (2, true)
+        end
     end
 
     @testset "start-point reflection on an up-down symmetric equilibrium" begin
