@@ -1,6 +1,6 @@
 # M2 checks: forb (orbit-averaged) against fgar (surface) on the DIII-D-like n = 1 case.
 # Both paths are evaluated on the same fixed Gauss–Legendre ψ nodes, so the ψ quadrature error is common.
-# Usage (from gpec/): julia --project=. -t 16 docs/workorders/ntv-orbit/reports/m2_checks.jl <run_dir> <out_dir> scan|variants
+# Usage (from gpec/): julia --project=. -t 16 docs/workorders/ntv-orbit/reports/m2_checks.jl <run_dir> <out_dir> scan|variants|layers [zi]
 # scan: the charge scan on 6-point Gauss–Legendre nodes; variants: zi = 1 replay, grid doubling and layer width on 3-point nodes.
 using GeneralizedPerturbedEquilibrium, Serialization, Printf, QuadGK
 const GPEC = GeneralizedPerturbedEquilibrium
@@ -104,6 +104,32 @@ if mode == "scan"
                 join((nodes[j], weights[j], real(scan[1].tf[j]), imag(scan[1].tf[j]), real(scan[1].to[j]), imag(scan[1].to[j]),
                         real(scan[1024].tf[j]), real(scan[1024].to[j])), ",")
             )
+        end
+    end
+elseif mode == "layers"
+    # Separatrix-layer width at one charge on the scan nodes: does the layer set the ZOW-limit slope?
+    zi = parse(Int, ARGS[4])
+    factors = (3.0, 10.0, 30.0)
+    tf = zeros(ComplexF64, length(nodes))
+    tl = Dict(f => zeros(ComplexF64, length(nodes)) for f in factors)
+    Threads.@threads :dynamic for j in eachindex(nodes)
+        ψ = nodes[j]
+        sf = KF._torque_surface(ψ, zi, mi, false, "fgar", equil, intr, prof; n)
+        tf[j] = sumℓ(sf, ψ, zi, "fgar") * env[j]
+        gm = KF.compute_bounce_geometry(ψ, n, sf.q, intr.bo, sf.bmax, sf.bmin, sf.theta_bmax, sf.tspl, sf.B_vpar, intr.mfac,
+            intr.chi1, intr.ro, sf.dbob_m_f, sf.divx_m_f, 1.0, 1.0, sf.mass, sf.chrg, sf.T_s, "forb"; nlmda=128, surface_field=sf.bf)
+        for f in factors
+            tab = KF.orbit_surface_table(g, gm, intr, ψ, sf.theta_bmin, sf.q, sf.welec, sf.mass, sf.chrg, sf.T_s, n; lmax=L, layer_factor=f)
+            tl[f][j] = orbit_total(tab, sf) * env[j]
+        end
+    end
+    Tf = sum(weights .* tf)
+    open(joinpath(out, "layers_z$zi.csv"), "w") do io
+        println(io, "layer_factor,T_re,T_im,rel,rel_re")
+        for f in factors
+            T = sum(weights .* tl[f])
+            @printf("zi=%d layer %4.0f  T=%+.6e%+.6ei  |rel|=%.3e  rel(Re)=%.3e\n", zi, f, real(T), imag(T), abs(T / Tf - 1), abs(real(T) / real(Tf) - 1))
+            println(io, join((f, real(T), imag(T), abs(T / Tf - 1), abs(real(T) / real(Tf) - 1)), ","))
         end
     end
 else

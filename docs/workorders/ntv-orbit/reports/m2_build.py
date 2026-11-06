@@ -21,25 +21,9 @@ def inline_svg(path):
 
 
 def variant_fields():
-    """Check-3 and check-4 text from variants.csv (m2_checks.jl variants)."""
+    """Check-3 text from variants.csv (m2_checks.jl variants); check 4 is written by hand in the template."""
     rows = {r[0]: r[1:] for r in (line.split(",") for line in (FIGS / "variants.csv").read_text().splitlines()[1:])}
-    change = {v: float(rows[v][2]) for v in ("lam256", "en24", "layer3", "layer30")}
-    pct = {v: f"{100 * c:.2f}%" for v, c in change.items()}
-    grid_ok = change["lam256"] < 0.05 and change["en24"] < 0.05
-    room = max(change["lam256"], change["en24"]) < 0.01
-    return {
-        "VAR_REPLAY": f"{float(rows['replay_max_node_dev'][0]):.1e} (largest node difference over the largest node value)",
-        "VAR_LAM256": f"torque changes by {pct['lam256']}",
-        "VAR_EN24": pct["en24"],
-        "VAR_LAYER3": pct["layer3"],
-        "VAR_LAYER30": pct["layer30"],
-        "VAR_CHECK4": "pass" if grid_ok else "fails (&gt; 5%)",
-        "VAR_COARSEN": (
-            "Doubling changed the torque by under 1%, so halving one of the grids is worth testing."
-            if room
-            else "Doubling changed the torque by 1% or more, so there is no room to coarsen."
-        ),
-    }
+    return {"VAR_REPLAY": f"{float(rows['replay_max_node_dev'][0]):.1e} (largest node difference over the largest node value)"}
 
 
 def main():
@@ -50,7 +34,6 @@ def main():
     html = html.replace("{{FIG_ZOW}}", inline_svg(FIGS / "fig_m2_zow.svg"))
     html = html.replace("{{FIG_PROFILE}}", inline_svg(FIGS / "fig_m2_profile.svg"))
     html = html.replace("{{TESTS}}", sys.argv[1] if len(sys.argv) > 1 else "not run")
-    html = html.replace("{{PARITY_TIME}}", sys.argv[2] if len(sys.argv) > 2 else "(not timed)")
     for key, val in variant_fields().items():
         html = html.replace("{{" + key + "}}", val)
     assert "{{" not in html, re.findall(r"\{\{\w+\}\}", html)
