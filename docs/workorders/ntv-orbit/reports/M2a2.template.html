@@ -71,7 +71,7 @@ deuterium &middot; 2026-11-06</div>
   <span><b>Attempts</b> 4 of 15 (M2: 2 of 2, the last)</span>
   <span><b>Checks</b> check 4: 2 of 3 parts pass; check 1 fails in both variants, both floors traced (<a href="#checks">table</a>)</span>
   <span><b>Tests</b> {{TESTS}}</span>
-  <span><b>Key run</b> 8-charge orbit-width scan, 54 flux surfaces each, 1 CPU per job: 5.1 h of table time at Z = 1, 2–15 min per surface narrower (jobs 139236–139275)</span>
+  <span><b>Key run</b> 8-charge orbit-width scan, 54 flux surfaces each, 1 CPU per job: 5.1 h of table time at Z = 1, 1–2 min per surface (table and integrals) for Z ≥ 16 (jobs 139236–139275)</span>
   <span><b>Decisions</b> 3 open; Q13 decides whether the project continues</span>
   <span><b>Oldest open question</b> Q1 (DIII-D data, by M5)</span>
 </div>
@@ -230,12 +230,12 @@ variant A.</p>
 <tr><td>ψ = 0.918</td><td>256</td><td>B, trapped</td><td>5.8×10⁻²</td><td><b>1.8×10⁻⁴</b></td><td>5.8×10⁻²</td><td>-</td></tr>
 <tr><td>ψ = 0.918</td><td>1024</td><td>B, trapped</td><td>5.8×10⁻²</td><td><b>1.4×10⁻⁴</b></td><td>5.8×10⁻²</td><td>-</td></tr>
 <tr><td>ψ = 0.921</td><td>16384</td><td>B, trapped</td><td>4.4×10⁻²</td><td><b>1.2×10⁻³</b></td><td>4.4×10⁻²</td><td>4.4×10⁻²</td></tr>
-<tr><td>ψ = 0.929</td><td>16384</td><td>B, trapped</td><td>1.5×10⁻²</td><td><b>3.6×10⁻⁴</b></td><td>1.5×10⁻²</td><td>1.5×10⁻²</td></tr>
+<tr><td>ψ = 0.929*</td><td>16384</td><td>B, trapped</td><td>1.5×10⁻²</td><td><b>3.6×10⁻⁴</b></td><td>1.5×10⁻²</td><td>1.5×10⁻²</td></tr>
 <tr><td>ψ = 0.921</td><td>16384</td><td>A, trapped</td><td>1.2×10⁻³</td><td>1.2×10⁻³</td><td>1.1×10⁻³</td><td><b>6.8×10⁻⁶</b></td></tr>
-<tr><td>ψ = 0.929</td><td>16384</td><td>A, trapped</td><td>8.2×10⁻⁴</td><td>8.2×10⁻⁴</td><td>7.7×10⁻⁴</td><td><b>5.0×10⁻⁵</b></td></tr>
+<tr><td>ψ = 0.929*</td><td>16384</td><td>A, trapped</td><td>8.2×10⁻⁴</td><td>8.2×10⁻⁴</td><td>7.7×10⁻⁴</td><td><b>5.0×10⁻⁵</b></td></tr>
 </table></div>
 <p class="meta">Table 1. |T/T<sub>replay</sub> − 1| for one class at one node, with one orbit quantity replaced by its surface
-value (bold: the swap that removes the difference). Jobs 139282, 139283, 139285; <code>reports/m2a2_swap.jl</code>, <code>results/m2a2_dev/floor_swap*.csv</code>.</p>
+value (bold: the swap that removes the difference). *A surface at ψ = 0.9289, next to the scan node 0.92890…, not the node itself. Jobs 139282, 139283, 139285; <code>reports/m2a2_swap.jl</code>, <code>results/m2a2_dev/floor_swap*.csv</code>.</p>
 
 <ul>
 <li><b>Variant B: the trapped precession.</b> ψ = 0.918–0.925 is where ω<sub>E</sub> crosses zero (ψ = 0.914) next to a
@@ -344,8 +344,8 @@ TJ's ω<sub>E</sub> is 23 times its precession scale at ψ = 0.5 (10⁴ against 
 radial field adds a poloidal E×B drift that competes with v<sub>∥</sub>b<sub>θ</sub> for slow particles. The classifier knows
 "v<sub>∥</sub> changes sign and θ returns" (trapped) and "θ advances monotonically" (passing); an orbit carried around poloidally
 by the drift while v<sub>∥</sub> reverses may fit neither. Plotting a handful of unclosed TJ orbits would decide it in an hour.
-M1's Φ checks (energy and P<sub>φ</sub> conservation, the ω<sub>E</sub> shift of ⟨φ̇⟩) passed on orbits that close, and say
-nothing about how many do.</p>
+M1's Φ checks (energy and P<sub>φ</sub> conservation, the ω<sub>E</sub> shift of ⟨φ̇⟩) were measured on orbits that close;
+neither the M1 report nor <code>runtests_orbits.jl</code> counts the unclosed share.</p>
 
 <div class="card" id="q12" data-q="Q12">
   <h3>Q12 - The parity test, and trapped orbits with Φ on (feeds Q13)</h3>
