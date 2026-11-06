@@ -8,7 +8,7 @@ diverging map as the normal field they drive, so a positive current reads as pos
 module CoilForcing
 
 import ...Utilities.FourierTransforms: FourierTransform, inverse
-import ...PerturbedEquilibrium: PerturbedEquilibriumState
+import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
 using ..Analysis: register!, _require, _draw
 
 # Helicity = sign(Bt)·sign(Ip); the SFL→machine toroidal-angle handedness.
@@ -182,16 +182,16 @@ function _to_bare(resp, v, weighting)
     return (S .* sqrt(A)) \ btilde
 end
 
-# The bare normal field of spectrum `v` on the control surface for toroidal mode `n`, mapped to (φ, θ).
-function _control_surface_data(pe::PerturbedEquilibriumState, v; weighting=:root_area, n=nothing, coils=false, mtheta=256, nphi=180)
-    resp = pe.response
+# The bare normal field of spectrum `v` on the control surface for toroidal mode `n`, mapped to (φ, θ), with the
+# conductors of `coil_sets` projected onto it when given.
+function _control_surface_data(resp::PlasmaResponse, v; weighting=:root_area, n=nothing, coil_sets=nothing, mtheta=256, nphi=180)
     equil = resp.ffs.equil
     nn = isnothing(n) ? first(resp.n_modes) : n
     sel = resp.n_modes .== nn
     any(sel) || throw(ArgumentError("plot_control_surface: no harmonics with n = $nn"))
     b = _to_bare(resp, v, weighting)
     c = control_surface_scalar(equil, (resp.m_modes[sel], b[sel]), nn; mtheta, nphi)
-    return (; _surface_map(c)..., n=nn, coils=coils ? _coils_on_surface(equil, pe.coil_sets) : nothing)
+    return (; _surface_map(c)..., n=nn, coils=coil_sets === nothing ? nothing : _coils_on_surface(equil, coil_sets))
 end
 
 # Drawing functions, defined by the GPECMakieExt extension.
@@ -295,7 +295,7 @@ function plot_mode_spectrum(pe::PerturbedEquilibriumState; save_path=nothing)
 end
 
 """
-    plot_control_surface(pe, v; weighting=:root_area, n=nothing, label="the given spectrum", arb=false, coils=false,
+    plot_control_surface(src, v; weighting=:root_area, n=nothing, label="the given spectrum", arb=false, coils=false,
                          save_path=nothing)
 
 Plot any control-surface spectrum, such as a forcing, a response or an eigenvector, as the bare normal field b_n on the
@@ -303,7 +303,8 @@ control surface: toroidal angle φ against poloidal angle θ (0 at the outboard 
 
 ### Arguments
 
-  - `pe`: A `PerturbedEquilibriumState` supplying the control-surface operators and geometry
+  - `src`: A `PlasmaResponse` supplying the control-surface operators and geometry, or a `PerturbedEquilibriumState`,
+    whose coils can also be drawn
   - `v`: The spectrum, one entry per control-surface harmonic
 
 ### Keyword arguments
@@ -319,12 +320,20 @@ control surface: toroidal angle φ against poloidal angle θ (0 at the outboard 
 
 A Makie `Figure`.
 """
+function plot_control_surface(resp::PlasmaResponse, v::AbstractVector; weighting=:root_area, n=nothing, label="the given spectrum", arb=false,
+    coils=false, save_path=nothing)
+    coils && throw(ArgumentError("plot_control_surface: coils = true needs the coil-forced PerturbedEquilibriumState, not its PlasmaResponse"))
+    d = _control_surface_data(resp, v; weighting, n)
+    return _draw(_plot_surface_map, d; title="Normal field on the control surface from $label", arb, save_path)
+end
+
 function plot_control_surface(pe::PerturbedEquilibriumState, v::AbstractVector; weighting=:root_area, n=nothing, label="the given spectrum",
     arb=false, coils=false, save_path=nothing)
     coils && isempty(pe.coil_sets) && throw(ArgumentError("plot_control_surface: coils = true needs a coil-forced run"))
-    d = _control_surface_data(pe, v; weighting, n, coils)
+    d = _control_surface_data(pe.response, v; weighting, n, coil_sets=coils ? pe.coil_sets : nothing)
     return _draw(_plot_surface_map, d; title="Normal field on the control surface from $label", arb, save_path)
 end
+
 
 """
     plot_bn_contour(pe; coils=false, save_path=nothing)

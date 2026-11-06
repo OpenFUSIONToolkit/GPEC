@@ -7,7 +7,7 @@ using HDF5
 import ..Equilibrium: PlasmaEquilibrium
 import ..LocalStability: LocalStabilityResult
 import ..ForceFreeStates: ForceFreeStatesResult
-import ..PerturbedEquilibrium: PerturbedEquilibriumState
+import ..PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
 import ..ErrorFields as EF
 
 """
@@ -21,18 +21,21 @@ A registered plot.
   - `sources::Tuple` - The types it accepts as its first argument; `AbstractString` means a `gpec.h5` path.
   - `needs::Tuple{Vararg{Symbol}}` - The capabilities (see [`capabilities`](@ref)) a source must have for it to draw.
   - `description::String` - One line on what it draws.
+  - `any_of::Tuple` - For a summary, the capabilities of each of its panels: it draws when a source has every capability
+    of at least one panel, and is empty for a single plot.
 """
 struct PlotEntry
     fn::Function
     sources::Tuple
     needs::Tuple{Vararg{Symbol}}
     description::String
+    any_of::Tuple
 end
 
 const PLOTS = PlotEntry[]
 
 # Add a plot to the registry; called by each plotting submodule as it loads.
-register!(fn, sources, needs, description) = (push!(PLOTS, PlotEntry(fn, Tuple(sources), Tuple(needs), description)); fn)
+register!(fn, sources, needs, description; any_of=()) = (push!(PLOTS, PlotEntry(fn, Tuple(sources), Tuple(needs), description, Tuple(any_of))); fn)
 
 """
 What each capability needs, worded as what to change in the run to get it.
@@ -57,6 +60,7 @@ const REASONS = Dict{Symbol,String}(
     :forcing_modes => "needs forcing modes: give ForcingTerms a forcing",
     :ef_sensitivities => "needs the coil sensitivities: add an [ErrorFields] section",
     :dominant_mode => "needs the dominant resonant-coupling mode: run PerturbedEquilibrium with compute_singular_coupling = true",
+    :coupling_matrices => "needs the resonant coupling matrices: run plasma_response with compute_singular_coupling = true",
     :ef_monte_carlo => "needs the tolerance Monte Carlo: give ErrorFields a tolerance file",
     :ef_risk => "needs the locking risk: give ErrorFields a tolerance file and a scenario",
     :ef_scan => "needs the tolerance scan: set RiskControl scan_scales"
@@ -91,8 +95,16 @@ end
 
 capabilities(r::LocalStabilityResult) = isempty(r.alpha) ? Set{Symbol}() : Set([:ballooning_scan])
 
-function capabilities(s::PerturbedEquilibriumState)
+function capabilities(r::PlasmaResponse)
     caps = Set{Symbol}()
+    isempty(r.C_resonant_area_weighted_field) || push!(caps, :coupling_matrices)
+    isempty(r.dominant_singular_values) || push!(caps, :dominant_mode)
+    return caps
+end
+
+# A perturbed equilibrium holds its response's capabilities as well as those of its own drive.
+function capabilities(s::PerturbedEquilibriumState)
+    caps = capabilities(s.response)
     isempty(s.resonant_area_weighted_field) || push!(caps, :singular_coupling)
     s.xi_modes === nothing || push!(caps, :response_xi)
     s.b_modes === nothing || push!(caps, :response_b)
@@ -154,7 +166,12 @@ function _entry(fn)
 end
 
 _accepts(e::PlotEntry, src) = any(T -> src isa T, e.sources)
-_missing(e::PlotEntry, caps) = [k for k in e.needs if k ∉ caps]
+# The capabilities `caps` lacks for plot `e`; for a summary, every panel's when no panel can be drawn.
+function _missing(e::PlotEntry, caps)
+    own = [k for k in e.needs if k ∉ caps]
+    panels = [[k for k in panel if k ∉ caps] for panel in e.any_of]
+    return isempty(panels) || any(isempty, panels) ? own : unique(vcat(own, panels...))
+end
 _why(missing) = join((REASONS[k] for k in missing), "; ")
 
 """
@@ -228,7 +245,8 @@ function Base.show(io::IO, ::MIME"text/plain", c::PlotCatalog)
             print(io, "\n\n", nameof(mod))
             for (e, missing) in group
                 mark = isempty(missing) ? "✓" : "✗"
-                note = isempty(missing) ? e.description : _why(missing)
+                # A summary's reasons are its panels', listed on their own rows.
+                note = isempty(missing) ? e.description : isempty(e.any_of) ? _why(missing) : "no panel can be drawn: see the reasons of the plots it combines"
                 print(io, "\n  ", mark, " ", rpad(string(nameof(e.fn)), width), "  ", note)
             end
         end

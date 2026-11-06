@@ -79,7 +79,7 @@ using TOML
                             "currents" => [2.0e3], "tiltx" => [3.0])]),
                     "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
             )
-            for x in (ret.equil, ret.ffs, ret.pe)
+            for x in (ret.equil, ret.ffs, ret.resp, ret.pe)
                 _check_sources(x, h5)
             end
             ret.local_stability === nothing || _check_sources(ret.local_stability, h5)
@@ -99,6 +99,15 @@ using TOML
             @test A.PerturbedEquilibrium.plot_perturbed_field_rz(ret.pe; component=:xi_n, deform=true) isa Figure
             @test CF.plot_surface_3d(ret.equil, ret.pe.forcing_modes, 1; coil_sets=ret.pe.coil_sets, mtheta=60, nphi=60) isa Figure
             @test CF.plot_bn_contour(randn(32, 16), 32, 16; n=1) isa Figure
+
+            # The response alone draws its dominant modes, with no forcing; a perturbed equilibrium inherits them.
+            @test A.capabilities(ret.resp) ⊆ A.capabilities(ret.pe)
+            @test plot_dominant_mode_surface(ret.resp; mode=2) isa Figure
+            @test_throws "mode must be 1 to" plot_dominant_mode_surface(ret.resp; mode=99)
+            @test_throws "coils = true needs" CF.plot_control_surface(ret.resp, ret.resp.dominant_right_singular_vectors[:, 1]; coils=true)
+            # A summary none of whose panels this run supplies is listed as unavailable, and says so when called.
+            @test occursin("✗ plot_error_field_summary", repr(MIME"text/plain"(), available_plots(h5)))
+            @test_throws A.REASONS[:ef_sensitivities] plot_error_field_summary(h5)
 
             # The catalog lists a Forward run's absent products with what to change, for a result, a path and main's tuple.
             listing = repr(MIME"text/plain"(), available_plots(ret.ffs))

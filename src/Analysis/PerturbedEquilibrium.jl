@@ -10,7 +10,8 @@ module PerturbedEquilibrium
 using HDF5
 
 using ..Analysis: register!, _require, _can, capabilities, REASONS, _draw
-import ...PerturbedEquilibrium: PerturbedEquilibriumState
+import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
+import ..CoilForcing: plot_control_surface
 
 const Source = Union{AbstractString,PerturbedEquilibriumState}
 
@@ -241,13 +242,12 @@ Plot the panels the source supplies: the resonant field at each rational surface
 A Makie `Figure`. Throws an `ArgumentError` when no panel can be drawn.
 """
 function plot_perturbed_equilibrium_summary(src::Source; save_path=nothing)
+    _require(plot_perturbed_equilibrium_summary, src)
     caps = capabilities(src)
     coupling = _can(plot_resonant_area_weighted_field_amplitude, caps) ? _coupling_data(src) : nothing
     edge = :response_b in caps ? _response_data(src, :b_psi) : nothing
     xi = _can(plot_mode_spectrogram, caps) ? _response_data(src, :xi_psi) : nothing
     rz = src isa PerturbedEquilibriumState && _can(plot_perturbed_field_rz, caps) ? _poloidal_data(src, :b_n) : nothing
-    coupling === nothing && edge === nothing && xi === nothing && rz === nothing &&
-        throw(ArgumentError("plot_perturbed_equilibrium_summary: no panel can be drawn: $(REASONS[:singular_coupling]); $(REASONS[:response_xi])"))
     return _draw(_plot_perturbed_equilibrium_summary, coupling, edge, xi, rz; save_path)
 end
 
@@ -405,14 +405,48 @@ function plot_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
     return _draw(_plot_islands, _island_chains(pe, pe.island_half_width .* sqrt.(ratio); phi), "Penetrated islands"; save_path)
 end
 
+"""
+    plot_dominant_mode_surface(src; mode=1, n=nothing, save_path=nothing)
+
+Plot dominant resonant-coupling mode `mode`, the right singular vector of the resonant coupling matrix, as the normal
+field it represents on the control surface: toroidal angle φ against poloidal angle θ, in arbitrary units (the vector
+has unit norm).
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's modes)
+
+### Keyword arguments
+
+  - `mode`: Which dominant mode, 1 the strongest (default: `1`)
+  - `n`: Toroidal mode number drawn (default: the first)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_dominant_mode_surface(src::Union{PlasmaResponse,PerturbedEquilibriumState}; mode::Int=1, n=nothing, save_path=nothing)
+    _require(plot_dominant_mode_surface, src)
+    resp = src isa PlasmaResponse ? src : src.response
+    1 <= mode <= length(resp.dominant_singular_values) ||
+        throw(ArgumentError("plot_dominant_mode_surface: mode must be 1 to $(length(resp.dominant_singular_values))"))
+    σ = resp.dominant_singular_values[mode]
+    return plot_control_surface(resp, resp.dominant_right_singular_vectors[:, mode]; n, arb=true, label="dominant mode $mode (σ = $(round(σ; sigdigits=3)))",
+        save_path)
+end
+
 const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
-register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum, ξ^ψ spectrogram and b_n on the poloidal plane")
+register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum, ξ^ψ spectrogram and b_n on the poloidal plane";
+    any_of=((:singular_coupling,), (:response_b,), (:response_xi,), (:response_n,)))
 register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,), "resonant coupling rows per rational surface")
 register!(plot_resonant_area_weighted_field_amplitude, _PE_SOURCES, (:singular_coupling,), "|b̄_res| per rational surface")
 register!(plot_island_widths, _PE_SOURCES, (:singular_coupling,), "island half-width per rational surface")
 register!(plot_chirikov_parameter, _PE_SOURCES, (:singular_coupling,), "effective island-overlap Chirikov parameter per rational surface")
 register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ′ per rational surface")
 register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
+register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
+    "a dominant resonant-coupling mode as b_n on the control surface")
 register!(plot_perturbed_field_rz, (PerturbedEquilibriumState,), (:response_n,), "b_n or ξ_n on the poloidal plane (deform = true for the displaced boundary)")
 register!(plot_effective_islands, (PerturbedEquilibriumState,), (:singular_coupling,), "island chains from the effective resonant flux")
 register!(plot_islands, (PerturbedEquilibriumState,), (:penetrated_field,), "island chains from the penetrated field")

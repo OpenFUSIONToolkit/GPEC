@@ -421,16 +421,14 @@ the least stable mode's displacement, Δ′_ii at each rational surface, and the
 A Makie `Figure`. Throws an `ArgumentError` naming every missing capability when no panel can be drawn.
 """
 function plot_ffs_summary(src::Source; save_path=nothing)
+    _require(plot_ffs_summary, src)
     caps = capabilities(src)
     panels = [data() for (panel_fn, data) in _ffs_panels(src) if _can(panel_fn, caps)]
-    if isempty(panels)
-        missing = unique(reduce(vcat, (_missing(_entry(panel_fn), caps) for (panel_fn, _) in _ffs_panels(src))))
-        throw(ArgumentError("plot_ffs_summary: no panel can be drawn: $(_why(missing))"))
-    end
     return _draw(_plot_ffs_summary, panels; save_path)
 end
 
-register!(plot_ffs_summary, (ForceFreeStatesResult, AbstractString), (), "the stability panels the run supplies")
+register!(plot_ffs_summary, (ForceFreeStatesResult, AbstractString), (), "the stability panels the run supplies";
+    any_of=((:fixed_boundary_criterion,), (:free_boundary,), (:solution_profiles,), (:delta_prime,)))
 register!(plot_critical_determinant, (ForceFreeStatesResult, AbstractString), (:fixed_boundary_criterion,), "critical determinant against ψ_N")
 register!(plot_eigenvalues, (ForceFreeStatesResult, AbstractString), (:free_boundary,), "free-boundary energy eigenvalues")
 register!(plot_mode_displacement, (ForceFreeStatesResult, AbstractString), (:solution_profiles,), "|ξ^ψ_m| of the least stable mode")

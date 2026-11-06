@@ -30,7 +30,8 @@ const Sources = AbstractVector{<:Pair{String,<:Any}}
 """
 A single unlabelled source: a `gpec.h5` path, or one in-memory result.
 """
-const SingleSource = Union{AbstractString,EF.ErrorFieldsResult,EF.SensitivityTable,EF.CoilSensitivities,EF.MonteCarloResult,EF.RiskResult,AbstractVector{EF.CoilOverlap}}
+const SingleSource = Union{AbstractString,EF.ErrorFieldsResult,EF.SensitivityTable,EF.CoilSensitivities,EF.MonteCarloResult,EF.RiskResult,
+    AbstractVector{EF.CoilOverlap},PE.PlasmaResponse,PE.PerturbedEquilibriumState}
 
 _sources(source) = [_default_label(source) => source]
 # A single source is drawn without a label; several are told apart by theirs.
@@ -79,11 +80,17 @@ rather than separately, which would leave each half unable to find the other.
 _load(pair::Tuple{EF.MonteCarloResult,EF.RiskResult}) =
     _load(merge(_present(_load(pair[1])), _present(_load(pair[2]))))
 
+# The (m, n) of each control-surface harmonic, as the writer records them in Info/mn_index.
+_mn_index(ffs) = hcat([(i - 1) % ffs.mpert + ffs.mlow for i in 1:ffs.numpert_total], [(i - 1) ÷ ffs.mpert + ffs.nlow for i in 1:ffs.numpert_total])
+
+# The dominant resonant-coupling modes of a plasma response, or of the response a perturbed equilibrium was driven on.
+_dominant(resp::PE.PlasmaResponse) = (; mn_index=_mn_index(resp.ffs), dominant_v=isempty(resp.dominant_singular_values) ? nothing : resp.dominant_right_singular_vectors,
+    singular_values=isempty(resp.dominant_singular_values) ? nothing : resp.dominant_singular_values)
+_load(resp::PE.PlasmaResponse) = _load(_present(_dominant(resp)))
+_load(s::PE.PerturbedEquilibriumState) = _load(s.response)
+
 # The whole assessment: the dominant-mode table and mode labels as the writer records them, from the plasma response it was made on.
 function _load(r::EF.ErrorFieldsResult)
-    resp = r.response
-    ffs = resp.ffs
-    mn_index = hcat([(i - 1) % ffs.mpert + ffs.mlow for i in 1:ffs.numpert_total], [(i - 1) ÷ ffs.mpert + ffs.nlow for i in 1:ffs.numpert_total])
     # The dominant-mode table's shift and tilt sensitivities replace the full per-mode arrays, as in the file.
     parts = Any[_present(_load(r.sensitivities)), _present(_load(EF.sensitivity_table(r.sensitivities, r.dominant; mode=1)))]
     r.monte_carlo === nothing || push!(parts, _present(_load(r.monte_carlo)))
@@ -96,9 +103,7 @@ function _load(r::EF.ErrorFieldsResult)
     ctrl = r.settings.ctrl
     push!(
         parts,
-        _present((; tolerances=r.tolerances, fd_step_shift_m=ctrl.fd_step_shift_m, fd_step_tilt_deg=ctrl.fd_step_tilt_deg, mn_index,
-            dominant_v=isempty(resp.dominant_singular_values) ? nothing : resp.dominant_right_singular_vectors,
-            singular_values=isempty(resp.dominant_singular_values) ? nothing : resp.dominant_singular_values))
+        _present((; tolerances=r.tolerances, fd_step_shift_m=ctrl.fd_step_shift_m, fd_step_tilt_deg=ctrl.fd_step_tilt_deg, _dominant(r.response)...))
     )
     return _load(merge(parts...))
 end
@@ -221,7 +226,7 @@ end
 _centers(edges) = (edges[1:end-1] .+ edges[2:end]) ./ 2
 
 # A registered source (a path or the assessment) must hold the data a single-source plot draws; other in-memory sources are what they are.
-_check(fn, src::Union{AbstractString,EF.ErrorFieldsResult}) = _require(fn, src)
+_check(fn, src::Union{AbstractString,EF.ErrorFieldsResult,PE.PlasmaResponse,PE.PerturbedEquilibriumState}) = _require(fn, src)
 _check(fn, src) = nothing
 
 # Below this fraction of the largest value, a per-coil value is roundoff (an axisymmetric coil has no n ≠ 0 field).
@@ -647,13 +652,9 @@ risk; and the coil sets' shift sensitivity. `src` is an `ErrorFields.ErrorFields
 was saved to.
 """
 function plot_error_field_summary(source::Union{AbstractString,EF.ErrorFieldsResult}; save_path=nothing)
+    _require(plot_error_field_summary, source)
     caps = capabilities(source)
-    panels = (plot_threshold_scaling, plot_locking_risk, plot_coil_sensitivities)
-    shown = [fn for fn in panels if _can(fn, caps)]
-    if isempty(shown)
-        missing = unique(reduce(vcat, (_missing(_entry(fn), caps) for fn in panels)))
-        throw(ArgumentError("plot_error_field_summary: no panel can be drawn: $(_why(missing))"))
-    end
+    shown = [fn for fn in (plot_threshold_scaling, plot_locking_risk, plot_coil_sensitivities) if _can(fn, caps)]
     d = _load(source)
     threshold = plot_threshold_scaling in shown ? _threshold_samples(source) : nothing
     keep = plot_coil_sensitivities in shown ? [nm ∉ _efc_names(source) for nm in d.coil_names] : nothing
@@ -661,11 +662,13 @@ function plot_error_field_summary(source::Union{AbstractString,EF.ErrorFieldsRes
 end
 
 const _EF_SOURCES = (EF.ErrorFieldsResult, AbstractString)
-register!(plot_error_field_summary, _EF_SOURCES, (), "overlap against the threshold, locking risk and coil sensitivities")
+register!(plot_error_field_summary, _EF_SOURCES, (), "overlap against the threshold, locking risk and coil sensitivities";
+    any_of=((:ef_monte_carlo, :ef_risk), (:ef_scan,), (:ef_sensitivities,)))
 register!(plot_coil_sensitivities, _EF_SOURCES, (:ef_sensitivities,), "per-coil dominant-mode sensitivities")
 register!(plot_overlap_phasors, _EF_SOURCES, (:ef_sensitivities,), "as-designed overlap δ of each coil set in the complex plane")
 register!(plot_linearity_residuals, _EF_SOURCES, (:ef_sensitivities,), "linearity residuals of the coil sensitivities")
-register!(plot_dominant_mode_spectrum, _EF_SOURCES, (:dominant_mode,), "spectra of the dominant resonant-coupling modes")
+register!(plot_dominant_mode_spectrum, (_EF_SOURCES..., PE.PlasmaResponse, PE.PerturbedEquilibriumState), (:dominant_mode,),
+    "spectra of the dominant resonant-coupling modes")
 register!(plot_tolerance_pdf, _EF_SOURCES, (:ef_monte_carlo,), "Monte Carlo distribution of |δ|")
 register!(plot_threshold_scaling, _EF_SOURCES, (:ef_monte_carlo, :ef_risk), "|δ| distribution against the threshold's CDF")
 register!(plot_locking_risk, _EF_SOURCES, (:ef_scan,), "locking risk against tolerance scale")

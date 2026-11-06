@@ -275,6 +275,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::PlasmaResponse)
     isempty(r.dominant_singular_values) || _row(io, "Dominant σ", _list(_fmt.(r.dominant_singular_values); max=3))
     _row(io, "Torque resp.", isempty(r.T_xe) ? "not computed" : "T_xe $(_shape(r.T_xe))")
     r.odet_from_gal && _row(io, "Basis", "Galerkin-native solution")
+    _plots_row(io, r)
     return nothing
 end
 
