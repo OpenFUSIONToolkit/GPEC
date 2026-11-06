@@ -37,7 +37,7 @@ A `[Match]` section matches the inner layer to its Δ′ and replaces them with 
 | Dataset | Meaning |
 |---|---|
 | `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, on the same path as the Riccati result, so downstream stages never branch on which formalism ran; free-boundary with `vac_flag = true` (with `error_field_response = true` a second factorization re-solves the big-solution columns with the vacuum edge, so the EF columns never enter it; `free_boundary_delta_prime = false` skips it for matching-only scans, leaving no tearing Δ′) and fixed-boundary otherwise |
-| `SingularSurfaces/Delta_prime_raw_freeboundary`, `Delta_prime_raw_fixedboundary`, `Delta_EF` | the side-major matching matrices with the vacuum and the fixed edge, and the error-field (EF) response (`error_field_response = true`) |
+| `SingularSurfaces/Delta_prime_raw_freeboundary`, `Delta_prime_raw_fixedboundary`, `Delta_EF`, `edge_response` | the side-major matching matrices with the vacuum and the fixed edge, the error-field (EF) response (`error_field_response = true`), and the edge momentum of each fixed-edge big-solution column |
 | `SingularSurfaces/pest3_A`, `pest3_B`, `pest3_Gamma` (and `_fixedboundary`) | the PEST-3 interchange and mixed blocks ``A'``, ``B'``, ``\Gamma'`` |
 | `ForceFreeStates/Solutions/GalerkinIntegration/` | the closed ``\xi`` profiles on the Galerkin grid, the surface list, the factorization used (`solver`) and, with `basis_output = true`, the `Basis/` group |
 | `ForceFreeStates/FreeBoundaryStability/` | `W_plasma`, the plasma energy matrix ``W_P`` of the closed solution (`error_field_response = true`), and with `vac_flag = true` the vacuum and free-boundary energies and eigenmodes as for a `"Forward"` solve |

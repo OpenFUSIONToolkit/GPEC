@@ -31,9 +31,9 @@ end
         end
         return ComplexF64.(raw)
     end
-    default = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], nothing, nothing, false)
-    extended = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(), false)
-    ordinary = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; algorithm=Riccati(; extended_precision_bvp=false)), false)
+    default = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], 6:6, nothing, false)[1]
+    extended = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], 6:6, FFS.ForceFreeStatesControl(), false)[1]
+    ordinary = FFS._solve_bvp_raw(M, 1, 1, 6, false, [1], 6:6, FFS.ForceFreeStatesControl(; algorithm=Riccati(; extended_precision_bvp=false)), false)[1]
     @test default == reference
     @test extended == reference
     @test ordinary != reference

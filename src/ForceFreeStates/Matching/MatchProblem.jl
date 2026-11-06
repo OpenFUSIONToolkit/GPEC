@@ -91,10 +91,9 @@ closure_capable(::InnerLayer.SLAYERModel) = false
     solve(prob::MatchProblem, model) -> ForceFreeStatesResult
 
 Match `prob.ffs` to the inner layer of `model`. The result has `closure = :matched`, `bpen`, the
-[`MatchResult`](@ref) in `result.match` and, for a Galerkin solve, the matched ξ, its edge response
-`wp` (see [`ForceFreeStatesResult`](@ref)) and, when the solve had `vac_flag`, the free-boundary energies
-of that response. A Riccati-fed match drops `wp` and `free_boundary`, so PerturbedEquilibrium refuses
-it rather than mixing ideal and matched physics.
+[`MatchResult`](@ref) in `result.match`, the matched edge response `wp` (see [`ForceFreeStatesResult`](@ref))
+and, when the solve had `vac_flag`, the free-boundary energies of that response. A Galerkin solve also gives
+the matched ξ.
 """
 function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel)
     closure_capable(model) ||
@@ -262,11 +261,15 @@ end
 function _matched_result(ffs::ForceFreeStatesResult, match::MatchResult)
     gal = ffs.galerkin
     solution = nothing
-    wp = nothing
-    free_boundary = nothing
     if gal !== nothing && gal.solution !== nothing && !isempty(match.xi)
         solution = _gal_profiles(gal.solution, match.xi, match.xi_deriv, ffs.mats, ffs)
-        wp = gal_wp(gal, ffs.equil.psio; cout=match.cout)
+    end
+    # Matched edge momentum: the ideal EF response plus the big-solution columns weighted by cout.
+    wp = nothing
+    free_boundary = nothing
+    dp = ffs.delta_prime
+    if ffs.wp !== nothing && !isempty(dp.edge_response)
+        wp = ffs.wp + dp.edge_response * match.cout ./ ffs.equil.psio^2
         ffs.free_boundary === nothing || (free_boundary = free_run(wp, ffs.control, ffs.equil, ffs.mats, ffs))
     end
     return _with(ffs; closure=:matched, bpen=match.bpen, match=match, solution=solution, wp=wp, free_boundary=free_boundary)

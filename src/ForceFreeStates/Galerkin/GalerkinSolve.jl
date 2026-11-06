@@ -204,7 +204,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
         # wv is singfac-scaled at qlim; the Galerkin edge term is wv·ψ₀².
         raw_free = gal_small_coefficients(ws, gal_vacuum_edge_solve(ws, edge_mat, Matrix{ComplexF64}(wv .* equil.psio^2), mpert))
     end
-    dp = DeltaPrimeData(raw_free, raw_fixed, ef)
+    dp = DeltaPrimeData(raw_free, raw_fixed, ef, edge_response[:, 1:(2msing)])
 
     sing_psi = [s.psifac for s in sings]
     sing_q = [s.q for s in sings]

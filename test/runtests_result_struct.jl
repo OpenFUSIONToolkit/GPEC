@@ -112,6 +112,7 @@ include("h5_metadata_check.jl")
                 @test blocks.A ≈ ref.A && blocks.B ≈ ref.B && blocks.Gamma ≈ ref.Gamma && blocks.Delta ≈ ref.Delta
             end
             @test size(dp.ef) == (2 * length(ffs.surfaces), ffs.numpert_total)
+            @test size(dp.edge_response) == (ffs.numpert_total, 2 * length(ffs.surfaces)) && !iszero(dp.edge_response)
             @test ffs.free_boundary !== nothing
         end
     end
@@ -190,6 +191,7 @@ include("h5_metadata_check.jl")
                     # The EF block is normalized to the Riccati orientation at pack time.
                     @test size(dp.ef) == (2msing, ffs.numpert_total)
                     @test !iszero(dp.ef)
+                    @test dp.edge_response == ffs.galerkin.edge_response[:, 1:(2msing)]
 
                     # Without a match the EF columns are the ideal closure, with a Hermitian δW.
                     if ideal

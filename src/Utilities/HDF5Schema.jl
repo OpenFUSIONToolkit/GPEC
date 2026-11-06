@@ -251,6 +251,9 @@ const MAIN_H5_ANNOTATIONS = [
             dims=("surface_side_row", "surface_side_col")),
     "SingularSurfaces/Delta_EF" =>
         (; long_name="error-field response Δ_EF: small-solution coefficient per unit edge displacement (edge mode × surface-side)", dims=("mode", "surface_side")),
+    "SingularSurfaces/edge_response" =>
+        (; long_name="edge momentum Fξ′+Kξ of the fixed-edge solution with a unit big-solution coefficient on each surface side (edge mode × surface-side)",
+            dims=("mode", "surface_side")),
     "SingularSurfaces/Delta_prime_matrix" => (; long_name="free-boundary Δ' matrix (PEST-3 tearing↔tearing block)", dims=("surface_row", "surface_col")),
     "SingularSurfaces/pest3_A" => (; long_name="free-boundary PEST-3 block A' (interchange↔interchange)", dims=("surface_row", "surface_col")),
     "SingularSurfaces/pest3_B" => (; long_name="free-boundary PEST-3 block B' (interchange↔tearing)", dims=("surface_row", "surface_col")),

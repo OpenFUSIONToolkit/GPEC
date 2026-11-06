@@ -185,6 +185,7 @@ function save_to_hdf5(
         isempty(dp.raw_fixedboundary) || (out_h5["$ss/Delta_prime_raw_fixedboundary"] = dp.raw_fixedboundary)
         # Δ_EF stored (edge mode × surface-side) so H5Web heatmaps read x = edge mode.
         isempty(dp.ef) || (out_h5["$ss/Delta_EF"] = permutedims(dp.ef))
+        isempty(dp.edge_response) || (out_h5["$ss/edge_response"] = dp.edge_response)
         for (blocks, suffix) in ((dp.freeboundary, ""), (dp.fixedboundary, "_fixedboundary"))
             blocks === nothing && continue
             out_h5["$ss/Delta_prime_matrix$suffix"] = blocks.Delta

@@ -429,17 +429,21 @@ using HDF5
         end
     end
 
-    @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
+    @testset "a Riccati match keeps its coefficients and publishes its matched edge response" begin
         mktempdir() do dir
             ric = solve(equil, riccati; nn=1, ffs_kwargs...)
             @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.ef)
             matched = solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             @test matched.closure === :matched
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
-            @test matched.wp === nothing && matched.free_boundary === nothing
             @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
-            # It carries no ideal δW, so no plasma response can be built from it.
-            @test_throws ErrorException plasma_response(matched)
+            # The edge response is W_P plus the big-solution edge momenta weighted by cout; the layers make it non-Hermitian.
+            ψ₀² = ric.equil.psio^2
+            @test matched.wp ≈ ric.wp + ric.delta_prime.edge_response * matched.match.cout / ψ₀² rtol = 1e-12
+            @test norm(matched.wp - matched.wp') > 1e-8 * norm(matched.wp)
+            @test matched.free_boundary.wt0 ≈ matched.wp + ric.free_boundary.wv rtol = 1e-12
+            # The singular coupling of a matched solution is not defined yet.
+            @test_throws "matched" plasma_response(matched)
             # A matched result is a new solution, not an outer solve to match again.
             @test_throws ErrorException MatchProblem(matched; eta=1e-7, rho=1e-7, rotation=1.0)
         end

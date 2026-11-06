@@ -100,7 +100,7 @@ bpens = [solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=f), GGJModel()).bp
 ```
 
 A scalar applies to every surface and a vector gives one value per entry of `ffs.surfaces`, core to edge.
-The problem needs a Δ′ payload with error-field (EF) columns, so it accepts Galerkin and Riccati results with `error_field_response=true` (the default; Riccati also needs `vac_flag=true`); a Riccati-fed match fills `bpen` and the resonant data but keeps `solution === nothing`.
+The problem needs a Δ′ payload with error-field (EF) columns, so it accepts Galerkin and Riccati results with `error_field_response=true` (the default; Riccati also needs `vac_flag=true`); a Riccati-fed match fills `bpen`, the resonant data and the matched `wp` but keeps `solution === nothing`.
 `GGJModel()` is the closure-capable model; `SLAYERModel()` is slab-only and drives the tearing solve instead.
 
 ## Tearing stability

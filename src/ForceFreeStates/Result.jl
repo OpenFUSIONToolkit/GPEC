@@ -59,7 +59,7 @@ is ideal-closed by its EF columns (`error_field_response`), and is unclosed with
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
   - `closure::Symbol` - How the basis is closed at the rationals: `:ideal` (the ideal jump
     condition was imposed) or `:matched` (an inner-layer solution was matched in). A matched
-    Galerkin result carries the matched edge response as `wp`; a matched Riccati result none.
+    result carries the matched edge response as `wp`.
   - `bpen::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated resonant field from the
     inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` closure.
   - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
@@ -150,13 +150,8 @@ end
 # Columns of the Galerkin error-field (EF) drives (error_field_response).
 gal_ef_columns(gal::GalerkinResult) = (2gal.msing+1):size(gal.edge_response, 2)
 
-# Plasma energy matrix W_P of the ideal (no `cout`) or matched Galerkin solution, in the units of `(U₂·U₁⁻¹)/ψ₀²`.
-function gal_wp(gal::GalerkinResult, psio::Float64; cout::Union{Nothing,Matrix{ComplexF64}}=nothing)
-    F = gal.edge_response
-    W = F[:, gal_ef_columns(gal)]
-    cout === nothing || mul!(W, @view(F[:, 1:(2gal.msing)]), cout, true, true)
-    return W ./ psio^2
-end
+# Plasma energy matrix W_P of the Galerkin EF columns, in the units of `(U₂·U₁⁻¹)/ψ₀²`.
+gal_wp(gal::GalerkinResult, psio::Float64) = gal.edge_response[:, gal_ef_columns(gal)] ./ psio^2
 
 # `SolutionProfiles` of closed Galerkin columns `xi`, `xi_deriv` (npert, ngrid, ncol) on the grid of `sol`, without on-surface points.
 function _gal_profiles(sol::GalerkinSolution, xi::AbstractArray{ComplexF64,3}, xi_deriv::AbstractArray{ComplexF64,3}, mats::MatrixSplines,
@@ -232,7 +227,7 @@ function build_result(
     delta_prime = if gal_dp !== nothing
         gal_dp
     elseif !isempty(intr.delta_prime_raw_freeboundary) || !isempty(intr.delta_prime_raw_fixedboundary)
-        DeltaPrimeData(intr.delta_prime_raw_freeboundary, intr.delta_prime_raw_fixedboundary, intr.delta_ef)
+        DeltaPrimeData(intr.delta_prime_raw_freeboundary, intr.delta_prime_raw_fixedboundary, intr.delta_ef, intr.delta_prime_edge_response)
     else
         nothing
     end

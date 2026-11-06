@@ -101,15 +101,18 @@ function compute_delta_prime_matrix!(
         @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
     end
 
-    raw = _solve_bvp_raw(M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+    # With a conducting-wall edge the edge unknowns are U₂(edge) of each big-solution drive.
+    raw, edge = _solve_bvp_raw(M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
     if wv === nothing
         intr.delta_prime_raw_fixedboundary = raw
+        intr.delta_prime_edge_response = edge
     else
         intr.delta_prime_raw_freeboundary = raw
         # The fixed edge and the EF block need the S-axis row layout of the edge rows.
         if use_S_axis
             Mc = _fixed_edge_bvp(M, msing, N, col_edge)
-            intr.delta_prime_raw_fixedboundary = _solve_bvp_raw(Mc, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
+            intr.delta_prime_raw_fixedboundary, intr.delta_prime_edge_response =
+                _solve_bvp_raw(Mc, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
             (ctrl === nothing || ctrl.algorithm.error_field_response) && (intr.delta_ef = _solve_bvp_edge_ef(Mc, msing, N, ipert_all))
         end
     end
@@ -388,14 +391,15 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
-# The S-axis BVP matrix `M` with its Eq. (38) vacuum-edge rows [Glasser-Kolemen 2018 PoP 25, 032501] replaced by a
-# Dirichlet edge, whose edge coefficients equal the right-hand side (0 for the fixed-boundary D′).
+# The S-axis BVP matrix `M` with its Eq. (38) vacuum-edge rows [Glasser-Kolemen 2018 PoP 25, 032501] replaced by the
+# conducting-wall edge of the `wv = nothing` assembly: U₁(edge) equals the right-hand side of the first N edge rows
+# (0 for the fixed-boundary D′) and the edge unknowns hold U₂(edge).
 function _fixed_edge_bvp(M::Matrix{ComplexF64}, msing::Int, N::Int, col_edge)
     nMat = size(M, 1)
-    bot = (nMat-2msing-N+1):(nMat-2msing)
+    edge_rows = (nMat-2msing-2N+1):(nMat-2msing)
     Mc = copy(M)
-    Mc[bot, :] .= 0
-    Mc[bot, col_edge] .= I(N)
+    Mc[edge_rows, col_edge] .= 0
+    Mc[edge_rows[(N+1):end], col_edge] .= -I(N)
     return Mc
 end
 
@@ -403,9 +407,9 @@ end
 # unit edge displacement in each poloidal mode.
 function _solve_bvp_edge_ef(Mc::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int})
     nMat = size(Mc, 1)
-    bot = (nMat-2msing-N+1):(nMat-2msing)
+    u1_rows = (nMat-2msing-2N+1):(nMat-2msing-N)
     B = zeros(ComplexF64, nMat, N)
-    B[bot, :] .= I(N)                       # unit drive, one column per edge poloidal mode
+    B[u1_rows, :] .= I(N)                   # unit edge displacement, one column per edge poloidal mode
     X = lu(Mc) \ B
     delta_ef = zeros(ComplexF64, 2msing, N)
     for j in 1:msing
@@ -470,7 +474,7 @@ function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
     return M, nMat, col_edge
 end
 
-# Solve the BVP for the raw side-major D′ (2·msing × 2·msing).
+# Solve the BVP for the raw side-major D′ (2·msing × 2·msing) and the edge unknowns of each drive (N × 2·msing).
 function _solve_bvp_raw(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
     use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
     ctrl, debug::Bool)
@@ -485,6 +489,7 @@ function _solve_bvp_raw(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
     end
 
     dp_raw = zeros(Tc, s2, s2)
+    edge = zeros(Tc, N, s2)
     b = zeros(Tc, nMat)
     for jsing in 1:msing, side in 1:2
         dRow = 2jsing - (2 - side)
@@ -501,10 +506,11 @@ function _solve_bvp_raw(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
             dp_raw[dRow, 2ksing-1] = x[_col_left(ksing, N)[ipert_k+N]]
             dp_raw[dRow, 2ksing] = x[_col_right(ksing, N)[ipert_k+N]]
         end
+        edge[:, dRow] .= x[col_edge]
     end
 
     debug && _log_bvp_pest3(dp_raw, pest3_decompose(ComplexF64.(dp_raw)).Delta, s2, msing)
-    return ComplexF64.(dp_raw)
+    return ComplexF64.(dp_raw), ComplexF64.(edge)
 end
 
 # Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
