@@ -64,6 +64,8 @@ function _warn_env_difference(fp1::EnvFingerprint, fp2::EnvFingerprint)
     fp1.blas_threads != fp2.blas_threads && push!(differences, "$(fp1.blas_threads) vs $(fp2.blas_threads) BLAS threads")
     fp1.build_mode != fp2.build_mode && !isempty(fp1.build_mode) && !isempty(fp2.build_mode) &&
         push!(differences, "$(fp1.build_mode) vs $(fp2.build_mode) build (precompile workload); results differ between build modes")
+    fp1.run_mode != fp2.run_mode && !isempty(fp1.run_mode) && !isempty(fp2.run_mode) &&
+        push!(differences, "$(fp1.run_mode) vs $(fp2.run_mode) runs; runtimes are not comparable")
     isempty(differences) && return
     println()
     println("!! ENVIRONMENTS DIFFER — source code is not the only variable in this comparison:")

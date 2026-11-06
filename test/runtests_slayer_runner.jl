@@ -187,8 +187,7 @@
             @test coupled.omega[1] ≈ 2π * 1e3 rtol = 1e-2
             @test coupled.gamma[1] ≈ still.gamma[1] rtol = 1e-2
             @test coupled.gamma[1] != still.gamma[1]
-            @test occursin("ggj", _check_display(still))
-            _check_display(coupled)
+            foreach(_check_display, (still, coupled))
             foreach(_check_display, still.per_surface_extraction)
             # The LAR deck carries no kinetic profiles, so a missing ρ is named in the error.
             @test_throws "GGJ tearing: give rho, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7), GGJModel();

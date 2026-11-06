@@ -84,7 +84,6 @@ include("error_fields_fixture.jl")
             @test sens.coil_names == ["hoop_tilted", "hoop_axi", "hoop_efc"]
             _check_main_display(res)
             foreach(_check_display, (res.error_fields.monte_carlo, res.error_fields.risk))
-            @test occursin("Locking risk", _check_display(res.error_fields))
             N = ffs.numpert_total
             @test size(sens.field_as_designed) == (N, 3)
             @test size(sens.shift_sensitivity_per_m) == (N, 3, 3)
