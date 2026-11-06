@@ -12,7 +12,28 @@
 - `ErrorFields`: coil sensitivities, tolerance distributions, locking risk and correction limits (see [Error Fields](error_fields.md))
 
 `examples/DIIID-like_ideal_example/analyze_example.jl`, `examples/Solovev_ideal_example/analyze_example.jl` and `examples/DIIID-like_error_field_example/analyze_example.jl` are worked examples of each; the s–α maps of local stability use `salpha_reference`, `compute_ballooning_stability!` and `scan_delta_prime_map`.
-Figure conventions for spectrum plots are in `docs/development/plotting.md` of the repository, and `write_imas` on the [Utilities](utilities.md) page exports results to an IMAS data dictionary.
+`write_imas` on the [Utilities](utilities.md) page exports results to an IMAS data dictionary.
+
+## Drawing
+
+The plots are drawn with [Makie](https://docs.makie.org), which GPEC loads only when a session loads a Makie backend. Load one alongside GPEC, from your own or the global environment:
+
+```julia
+using GeneralizedPerturbedEquilibrium, CairoMakie   # files: PNG, PDF, SVG
+using GeneralizedPerturbedEquilibrium, GLMakie      # interactive windows that zoom, pan and rotate
+```
+
+Every plot returns a Makie `Figure`, and `save_path` saves it with the loaded backend (GLMakie writes PNG only). Without a backend a plot throws an `ArgumentError` saying which to load.
+
+The summary figures of a DIII-D-like run (`examples/DIIID-like_ideal_example`):
+
+![Equilibrium summary: flux surfaces and the q, μ₀p and 2πF profiles](figures/analysis/equilibrium_summary.png)
+
+![Stability summary: critical determinant, free-boundary energies and the least stable eigenmodes](figures/analysis/ffs_summary.png)
+
+![Perturbed-equilibrium summary: resonant field, edge spectrum and plasma displacement](figures/analysis/pe_summary.png)
+
+![The C-coil set around the plasma boundary](figures/analysis/coils_3d.png)
 
 ```@docs
 GeneralizedPerturbedEquilibrium.Analysis

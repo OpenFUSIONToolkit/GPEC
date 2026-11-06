@@ -60,7 +60,7 @@ The fields themselves are documented in each type's docstring.
 
 ## Plotting a result
 
-Every plot in [`Analysis`](analysis.md) takes the result in memory or the path of the `gpec.h5` it was saved to. `available_plots` lists the plots for a result, a path, or the named tuple `main` returns, and for each one the run cannot draw, what to change:
+Every plot in [`Analysis`](analysis.md) takes the result in memory or the path of the `gpec.h5` it was saved to, and draws with the Makie backend the session has loaded (`using CairoMakie` or `using GLMakie`). `available_plots` lists the plots for a result, a path, or the named tuple `main` returns, and for each one the run cannot draw, what to change:
 
 ```julia-repl
 julia> available_plots(ffs)

@@ -1,12 +1,10 @@
 using CairoMakie
 using HDF5
-using Plots
 using TOML
 
 # Every registered plot against real writer output, from the result in memory and from the gpec.h5 it was saved to:
 # both sources must supply the same data, draw the same plots, and refuse the same ones with the registry's reason.
 @testset "Analysis plots from a result or gpec.h5" begin
-    ENV["GKSwstype"] = "100"
     GPEC = GeneralizedPerturbedEquilibrium
     A = GPEC.Analysis
 
@@ -36,9 +34,6 @@ using TOML
     _same(a::Number, b::Number) = isapprox(a, b; rtol=1e-12)
     _same(a, b) = isequal(a, b)
 
-    # Ported plots return a Makie figure, the rest still a Plots.jl plot.
-    _drawn(p) = p isa Figure || p isa Plots.Plot
-
     # Every plot registered for `x` has a method for each source it lists, draws from `x` and from `h5` when the
     # capabilities allow, and otherwise throws the registry's reason from both.
     function _check_sources(x, h5)
@@ -55,7 +50,7 @@ using TOML
             sources = A._accepts(e, h5) ? (x, h5) : (x,)
             if A._can(e.fn, caps)
                 for src in sources
-                    @test _drawn(e.fn(src))
+                    @test e.fn(src) isa Figure
                 end
             else
                 reason = A._why(A._missing(e, caps))
@@ -90,7 +85,7 @@ using TOML
             ret.local_stability === nothing || _check_sources(ret.local_stability, h5)
             for component in (:xi_psi, :b_psi, :Jb_theta, :Jb_zeta)
                 @test _same(A.PerturbedEquilibrium._response_data(ret.pe, component), A.PerturbedEquilibrium._response_data(h5, component))
-                @test _drawn(A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component))
+                @test A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component) isa Figure
             end
             @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(h5; component=:b_theta)
             @test A.PerturbedEquilibrium.plot_mode_spectrogram(h5; style=:lines) isa Figure
@@ -158,7 +153,7 @@ using TOML
             h5 = joinpath(dir, "gpec.h5")
             save_to_hdf5(h5, ffs)
             _check_sources(ffs, h5)
-            @test _drawn(A.ForceFreeStates.plot_cond_fbar(ffs))
+            @test A.ForceFreeStates.plot_cond_fbar(ffs) isa Figure
         end
     end
 end
