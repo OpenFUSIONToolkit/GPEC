@@ -100,10 +100,12 @@ same (ψ, λ) direct.
 ⟨ψ⟩ = (1/τ)∫ψ dt, ψ_min and ψ_max, the class, and the relative drift of E and
 P_φ.
 
-Zero-orbit-width limit: ω_b → the code's `wb`·√x; for passing,
-⟨φ̇⟩ → ±q ω_b + ω_D x + ω_E; for trapped, ⟨φ̇⟩ → ω_D x + ω_E. The relative
-sign between the code's ω_D and the physical toroidal direction is fixed by
-this comparison in M1 and recorded in code_map.md.
+Zero-orbit-width limit (measured in M1): ω_b → the code's `wb`·√x; for
+trapped, ⟨φ̇⟩ → s·(ω_D x + ω_E), with s the sign in B^θ = s psio/𝒥 (code_map.md).
+For passing, ⟨φ̇⟩ − q ω_b depends on which flux label carries q at first order
+in orbit width (the q-advance is ~10³ times the precession), so its ZOW limit
+is tested on the ψ-integrated torque, not surface by surface. In the toroidal
+phase e^{−in·2πζ}, ζ = (φ − ν)/2π, the resonance is Ω = ℓω_b − n⟨φ̇⟩ (M2).
 
 Analytic reference for the frequencies: Antonenas 2021 Eqs. 4.6–4.7 (pendulum
 ω_b, ω_t with the complete K) on a large-aspect-ratio circular equilibrium,
@@ -161,8 +163,8 @@ and is −1/(Z e s psio) in ZOW.
 an orbit that straddles an ω_E zero sees its average, which is the mechanism
 behind the edge part of KR2. The ordering is the usual drift-kinetic one:
 E×B speed small against the thermal speed (no centrifugal or Coriolis
-terms). Φ is a switch (`orbit_potential`, default on); off reproduces the v0
-orbit.
+terms). Φ is a switch (`orbit_potential`, default on; Q8 A: KR2 shows Φ on, with Φ off as a
+comparison panel); off reproduces the v0 orbit.
 
 ## 5. Lost orbits
 
