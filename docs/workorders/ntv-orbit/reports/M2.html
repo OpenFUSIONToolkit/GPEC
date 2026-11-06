@@ -45,7 +45,7 @@
 </style>
 
 <h1>M2 - The torque along the orbit and its zero-orbit-width limit</h1>
-<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ d2e06a843
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ ee0893922
 (runs at 9b390f5a5, same <code>src/</code>) &middot; new method <code>forb</code>, behind <code>forb_flag</code>
 (default off) &middot; attempt 1 of 2 &middot; 2026-11-06</div>
 
@@ -2262,8 +2262,10 @@ z
  </defs>
 </svg>
 <figcaption>Figure 1 (the KR3 figure, draft). Relative difference between <code>forb</code> and <code>fgar</code>
-in the ψ-integrated torque, DIII-D-like example, n = 1, thermal deuterium, Φ off. The orbit width is scaled by
-the charge Z (width ∝ 1/Z) on the same equilibrium, perturbation and ψ nodes (72 fixed Gauss–Legendre nodes, so
+in the ψ-integrated torque, DIII-D-like example, n = 1, thermal deuterium, Φ off. Z is the species charge number: a
+deuteron of charge Z·e, with T, n, ν and ω<sub>E</sub> unchanged, so width, ω<sub>D</sub> and ω<sub>*</sub> all scale as 1/Z
+and only Z = 1 is physical (see the <a href="https://claude.ai/artifact/EY4ztU9iaukkdMKkhWMr5a">M2 explainer</a>). The orbit width is scaled by
+the charge on the same equilibrium, perturbation and ψ nodes (72 fixed Gauss–Legendre nodes, so
 the ψ quadrature error is common to both). The x axis is the width of a mid-trapped orbit at ψ = 0.5 and x = 1;
 the energy integral reaches x = 36, where orbits are 6× wider. Black: complex T (torque and kinetic energy).
 Grey: torque only. Points with Z &lt; 16 are left out of the fit because the reference torque itself changes sign

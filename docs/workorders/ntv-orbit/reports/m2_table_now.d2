@@ -1,0 +1,23 @@
+direction: down
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  bad: {style: {fill: "#f3e0dc"; stroke: "#a33b2a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+}
+grid: "surface pitch grid λ_i\n128 nodes, clustered at λtp = B₀/Bmax(ψ)" {class: n}
+orb: "orbit through (ψ, θ_Bmin)\nat each (λ_i, √x_k, σ)" {class: n}
+cls: "orbit class vs surface class" {class: n; shape: diamond}
+ok: "same class\norbit ω_b, ω_D, |δJ|²" {class: n}
+lost: "lost / axis\nzero" {class: n}
+mis: "unclosed or class differs\nsurface value" {class: n}
+layer: "layer fill: |λ_i − λtp| < 10·|λc − λtp|\nsurface value, overwrites all three" {class: bad}
+int: "pitch × energy integrals\nspline rebuilt at every λ evaluation" {class: bad}
+T: "T_forb(ψ)" {class: n}
+grid -> orb -> cls
+cls -> ok
+cls -> lost
+cls -> mis
+ok -> layer
+lost -> layer
+mis -> layer
+layer -> int -> T

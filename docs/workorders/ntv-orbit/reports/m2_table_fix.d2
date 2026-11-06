@@ -1,0 +1,21 @@
+direction: down
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  new: {style: {fill: "#e4ece4"; stroke: "#2f6b3a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+}
+bis: "per (√x_k, σ): bisect the orbit's\nown trapped–passing boundary λc" {class: new}
+grid: "pitch grid per class, clustered at λc\nt = (λ − λc)/(λmax − λc),  t = λ/λc" {class: new}
+orb: "orbit through (ψ, θ_Bmin)" {class: n}
+cls: "orbit class" {class: n; shape: diamond}
+ok: "trapped / passing\norbit ω_b, ω_D, |δJ|²" {class: n}
+lost: "lost / axis\nzero (kept)" {class: n}
+pre: "energy integral done once\nper pitch node" {class: new}
+int: "pitch quadrature\non the per-class grid" {class: n}
+T: "T_forb(ψ)" {class: n}
+bis -> grid -> orb -> cls
+cls -> ok
+cls -> lost
+ok -> pre
+lost -> pre
+pre -> int -> T
