@@ -68,4 +68,41 @@ using HDF5
             end
         end
     end
+
+    @testset "orbit-averaged torque reduces to the surface path" begin
+        # Synthetic two-mode perturbation: the torque reads only the δB/B and ∇·ξ⊥ Fourier modes.
+        intr = KF.KineticForcesInternal(equil)
+        intr.mfac, intr.mpert = collect(1:4), 4
+        ψg = collect(range(0.0, 1.0, 65))
+        dbob = ComplexF64[ψ * (1 - ψ) * (m == 2 ? 1e-3 : 2e-4) for ψ in ψg, m in 1:4]
+        divx = ComplexF64[ψ * (1 - ψ) * (m == 3 ? 1e-3im : 1e-4) for ψ in ψg, m in 1:4]
+        intr.dbob_m = cubic_interp(ψg, Series(dbob); extrap=ExtendExtrap())
+        intr.divx_m = cubic_interp(ψg, Series(divx); extrap=ExtendExtrap())
+        intr.orbit_field, intr.orbit_lmax, intr.orbit_nenergy = g, 1, 6
+        ψ, n = 0.5, 1
+        torque(surf, zi, method) = sum(l -> (r = Ref{ComplexF64}(0); KF.tpsi!(r, ψ, n, l, zi, 2, 1.0, 1.0, false, method, equil, intr, prof; surface=surf); r[]), -1:1)
+
+        # Surface values in the orbit table reproduce fgar to roundoff.
+        sf = KF._torque_surface(ψ, 1, 2, false, "fgar", equil, intr, prof; n)
+        so = KF._torque_surface(ψ, 1, 2, false, "forb", equil, intr, prof; n)
+        geo = so.geometry
+        tab = so.orbit
+        sdj = reduce(hcat, [KF.bounce_harmonic(geo, l, n, sf.q, intr.ro, intr.mpert).dJdJ for l in -1:1])
+        dJ = zeros(size(tab.dJdJ))
+        for k in eachindex(tab.u), s in 1:2
+            dJ[:, k, s, :] .= sdj
+        end
+        replay = KF.OrbitSurfaceTable(tab.lambda, tab.trapped, tab.u, repeat(geo.wb, 1, length(tab.u), 2), repeat(geo.wd, 1, length(tab.u), 2), dJ,
+            trues(size(tab.valid)), 1, zeros(Int, 6))
+        replayed = sum(l -> KF.calculate_orbit(replay, n, l, sf.q, sf.epsr, sf.wdian, sf.wdiat, sf.welec, sf.nuk, intr.bo, sf.bmax, sf.n_s, sf.T_s;
+            chi1=intr.chi1, ro=intr.ro, energy_atol=1e-11, energy_rtol=1e-8), -1:1)
+        @test replayed ≈ torque(sf, 1, "fgar") rtol = 1e-12
+
+        # Orbit width ∝ 1/Z: the difference from fgar vanishes with it.
+        err(zi) = abs(torque(KF._torque_surface(ψ, zi, 2, false, "forb", equil, intr, prof; n), zi, "forb") /
+                      torque(KF._torque_surface(ψ, zi, 2, false, "fgar", equil, intr, prof; n), zi, "fgar") - 1)
+        e1, e2 = err(4), err(1024)
+        @test e2 < 1e-4
+        @test e2 < e1 / 10
+    end
 end

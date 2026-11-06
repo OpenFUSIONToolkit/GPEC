@@ -9,7 +9,7 @@ surface itself. Off the zero-orbit-width limit these depend on energy, so each p
 const ORBIT_U_MAX = 6.0
 # Uniform time samples per orbit period for δJ_ℓ (the integrand is periodic, so the trapezoid is spectral).
 const ORBIT_NSAMPLE = 256
-# Half-width of the trapped–passing layer taken at zero width, in units of the widest class change seen at that energy.
+# Half-width of the trapped–passing layer taken at zero width, in units of the orbits' boundary shift at that energy.
 const ORBIT_LAYER_FACTOR = 10.0
 
 """
@@ -29,8 +29,9 @@ Slot 1 is σ = +1 (trapped) or the orbit paired with `+wb` (passing, θ decreasi
   - `dJdJ`: |δJ_ℓ|² as `BounceData.dJdJ`, size (nλ, nu, 2, 2lmax+1), indexed by the surface path's ℓ
   - `valid`: the node carries its orbit's values. Lost and axis orbits carry zero |δJ|². Unclosed orbits,
     forbidden starts and the trapped–passing layer carry the surface ω_b, ω_D and |δJ|²: the layer is the
-    pitches within `ORBIT_LAYER_FACTOR` times the widest class change at that energy of the surface boundary,
-    where the orbit-width expansion fails (the error there grows as width over distance to the separatrix)
+    pitches within `ORBIT_LAYER_FACTOR` times the shift of the orbits' own trapped–passing boundary at that energy
+    of the surface boundary, where the orbit-width expansion fails (the error grows as width over distance to the
+    separatrix)
   - `lmax`: bounce harmonics ℓ = -lmax:lmax
   - `nstatus`: orbit counts by class (`ORBIT_STATUS_CODES` order 0–4) and, last, closed orbits of the other class
 """
@@ -80,7 +81,7 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
     nstatus = zeros(Int, 6)
     buf = (dbob=zeros(ComplexF64, intr.mpert), divx=zeros(ComplexF64, intr.mpert), A=zeros(ComplexF64, nsample), u=zeros(6))
     surface_dJdJ = reduce(hcat, [bounce_harmonic(geo, l, n, q, intr.ro, intr.mpert).dJdJ for l in -lmax:lmax])
-    mismatch = falses(nl, nu)
+    cls = zeros(Int8, nl, nu, 2)
     for il in 1:nl, (k, u) in enumerate(us)
         wb[il, k, :] .= geo.wb[il]
         wd[il, k, :] .= geo.wd[il]
@@ -91,10 +92,8 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
             o === nothing || (nstatus[ORBIT_STATUS_CODES[o.status]+1] += 1)
             o !== nothing && o.status in (:lost, :axis) && continue
             closed = o !== nothing && o.status in (:trapped, :passing)
-            if closed && (o.status == :trapped) != trapped[il]
-                nstatus[6] += 1
-                mismatch[il, k] = true
-            end
+            closed && (cls[il, k, islot] = o.status == :trapped ? 1 : 2)
+            closed && (o.status == :trapped) != trapped[il] && (nstatus[6] += 1)
             if !closed || (o.status == :trapped) != trapped[il]
                 dJdJ[il, k, islot, :] .= view(surface_dJdJ, il, :)
                 continue
@@ -107,18 +106,37 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
             valid[il, k, slot] = true
         end
     end
-    _fill_separatrix_layer!(wb, wd, dJdJ, valid, mismatch, geo, trapped, surface_dJdJ, layer_factor)
+    function orbit_class(lam, k, s)
+        o = guiding_center_orbit(g, psi, lam, us[k]^2 * T_s, s == 1 ? 1 : -1; mass, chrg, theta0)
+        return o === nothing ? Int8(0) : o.status == :trapped ? Int8(1) : o.status == :passing ? Int8(2) : Int8(0)
+    end
+    _fill_separatrix_layer!(wb, wd, dJdJ, valid, cls, geo, trapped, surface_dJdJ, layer_factor, orbit_class)
     return OrbitSurfaceTable(geo.lambda[1:nl], trapped, us, wb, wd, dJdJ, valid, lmax, nstatus)
 end
 
-# Surface values on the trapped–passing layer (see `OrbitSurfaceTable`), per energy node.
-function _fill_separatrix_layer!(wb, wd, dJdJ, valid, mismatch, geo, trapped, surface_dJdJ, layer_factor)
+# Surface values on the trapped–passing layer (see `OrbitSurfaceTable`), per energy node: the layer half-width is
+# `layer_factor` times the largest shift of the orbit's own boundary from the surface one, bisected between the
+# grid pitches where the orbit class changes, so it does not depend on the pitch grid.
+function _fill_separatrix_layer!(wb, wd, dJdJ, valid, cls, geo, trapped, surface_dJdJ, layer_factor, orbit_class)
     (any(trapped) && !all(trapped)) || return nothing
     λtp = (maximum(geo.lambda[.!trapped]) + minimum(geo.lambda[trapped])) / 2
     dist = abs.(geo.lambda .- λtp)
-    for k in axes(mismatch, 2)
-        any(view(mismatch, :, k)) || continue
-        width = layer_factor * maximum(dist[view(mismatch, :, k)])
+    for k in axes(cls, 2)
+        shift = 0.0
+        for s in 1:2
+            pairs = [il for il in 1:length(dist)-1 if cls[il, k, s] != 0 && cls[il+1, k, s] != 0 && cls[il, k, s] != cls[il+1, k, s]]
+            isempty(pairs) && continue
+            il = pairs[argmin([abs(geo.lambda[i] + geo.lambda[i+1] - 2λtp) for i in pairs])]
+            lo, hi, clo = geo.lambda[il], geo.lambda[il+1], cls[il, k, s]
+            for _ in 1:30
+                mid = (lo + hi) / 2
+                c = orbit_class(mid, k, s)
+                c == 0 && break
+                c == clo ? (lo = mid) : (hi = mid)
+            end
+            shift = max(shift, abs((lo + hi) / 2 - λtp))
+        end
+        width = layer_factor * shift
         for il in eachindex(dist)
             dist[il] < width || continue
             wb[il, k, :] .= geo.wb[il]
@@ -189,8 +207,9 @@ function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, eps
     nl == 0 && return ComplexF64(0.0)
     ih = l + tab.lmax + 1
     D = tab.dJdJ[:, :, :, ih]
-    med = median(abs.(D[tab.valid]))
-    dnorm = (isfinite(med) && med > 0) ? 1 / med : 1.0
+    nz = filter(!iszero, abs.(D))
+    isempty(nz) && return ComplexF64(0.0)
+    dnorm = 1 / median(nz)
     data = hcat(reshape(tab.wb, nl, :), reshape(tab.wd, nl, :), reshape(D .* dnorm, nl, :))
     fb = cubic_interp(tab.lambda, Series(data); bc=CubicFit())
     vals = zeros(3 * nu * 2)
