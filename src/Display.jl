@@ -155,8 +155,8 @@ function _physics_label(r::ForceFreeStates.ForceFreeStatesResult)
 end
 _nrange(r) = r.nlow == r.nhigh ? "n = $(r.nlow)" : "n = $(r.nlow):$(r.nhigh)"
 
-# Kinetic energies are complex; an ideal result's imaginary parts are round-off.
-_complex_energies(r::ForceFreeStates.ForceFreeStatesResult) = r.control.kinetic !== nothing
+# Kinetic and matched energies are complex; an ideal result's imaginary parts are round-off.
+_complex_energies(r::ForceFreeStates.ForceFreeStatesResult) = r.control.kinetic !== nothing || r.closure === :matched
 _energy(r::ForceFreeStates.ForceFreeStatesResult, z) = _complex_energies(r) ? _fmt(z) : _fmt(real(z))
 
 function Base.show(io::IO, r::ForceFreeStates.ForceFreeStatesResult)
