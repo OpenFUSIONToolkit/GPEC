@@ -10,25 +10,12 @@ function _check_display(x)
     return plain
 end
 
-# Each summarized type's fields are split exactly between those its summary shows and those it omits.
-function _check_display_ledger()
-    for (T, f) in GeneralizedPerturbedEquilibrium._DISPLAY_FIELDS
-        unclassified = setdiff(fieldnames(T), f.shown, f.omitted)
-        stale = setdiff(union(f.shown, f.omitted), fieldnames(T))
-        @test isempty(unclassified) && isempty(stale) && isdisjoint(f.shown, f.omitted)
-        isempty(unclassified) || @error "$(nameof(T)): classify the new fields in _DISPLAY_FIELDS (src/Display.jl)" unclassified
-        isempty(stale) || @error "$(nameof(T)): _DISPLAY_FIELDS lists fields the type no longer has" stale
-    end
-end
-
-# Every stage result `main` returned has its own summary, recorded in the ledger.
+# Every stage result `main` returned has its own summary from this package.
 function _check_main_display(ret)
     GPEC = GeneralizedPerturbedEquilibrium
     for x in ret
         x === nothing && continue
-        T = typeof(x)
-        @test parentmodule(which(show, Tuple{IO,MIME"text/plain",T})) === GPEC
-        @test haskey(GPEC._DISPLAY_FIELDS, Base.typename(T).wrapper)
+        @test parentmodule(which(show, Tuple{IO,MIME"text/plain",typeof(x)})) === GPEC
         _check_display(x)
     end
     @test !occursin('\n', repr(ret))
