@@ -346,6 +346,12 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
     kinetic_profiles::Equilibrium.KineticProfileSplines;
     axis_psi_c::Float64=0.0, z::Int=main_ion(equil)[1], m::Int=main_ion(equil)[2], electron::Bool=ctrl.electron)
 
+    if ctrl.forb_flag && intr.orbit_field === nothing
+        intr.orbit_potential = ctrl.orbit_potential
+        intr.orbit_field = guiding_center_field(equil; omegaE=ctrl.orbit_potential ? kinetic_profiles.omegaE_spline : nothing)
+        intr.orbit_lmax, intr.orbit_nlambda, intr.orbit_nenergy = ctrl.bounce_harmonic_max, ctrl.orbit_nlambda, ctrl.orbit_nenergy
+    end
+
     for entry in METHOD_REGISTRY
         getfield(ctrl, entry.flag) || continue
 

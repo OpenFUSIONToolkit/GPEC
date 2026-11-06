@@ -35,6 +35,7 @@ include("Torque.jl")
 include("EnergyIntegration.jl")
 include("PitchIntegration.jl")
 include("Orbits.jl")
+include("OrbitTorque.jl")
 
 # High-level computation functions
 include("Compute.jl")
