@@ -118,9 +118,9 @@ Calibration (check, not a fit): Sauter 2010 Eq. 1, Δτ<sub>E</sub>/τ<sub>E</su
 |---|---|---|---|
 | k<sub>1</sub> | 1.7 | 1.0–2.5 [D3] | Benjamin p. 5 (footnote: value not important); Leuthold |
 | c<sub>wd</sub> | 1 | 1 to 2√2 [D7] | Benjamin Eq. 14; Leuthold Eq. 4.2; Fitzpatrick Eq. 27 (Sauter 1997 uses 5.1 in its own normalization) |
-| χ<sub>⊥</sub> | kinetic profile | ×0.3 to ×3 [D3] | — |
+| χ<sub>⊥</sub> | flat per machine [M1-D2]: SPARC κ<sub>a</sub>a²/(6τ<sub>E</sub>) = 0.123 m²/s (H-mode, τ<sub>E</sub> 0.77 s) and 0.215 m²/s (L-mode, τ<sub>E</sub> 0.44 s), with a = 0.57 m, κ<sub>a</sub> = 1.75; ARC 1.07 m²/s, the TORAX χ<sub>e</sub> at q = 2 of the Columbia TokaMaker+TORAX V3A run; a kinetic χ<sub>e</sub> profile overrides | ×0.3 to ×3 [D3] | Benjamin p. 4; Creely et al. JPP 2020 Table 1 and p. 13; Burgess `v3a_for_daniel.nc` slice 16 (t = 475 s) |
 | c<sub>pol</sub> / C<sub>pol</sub> | 1 / 1.9 | C<sub>pol</sub> 0.5–1.9 | Callen report p. 23; La Haye 2006 |
-| ω | ARC-basis E<sub>r</sub> model (§7) | 0.5×, 1×, 2×, plus stalled ω = 0 | Leuthold JPP 2026 §2; Rice NF 2007; Zimmermann PoP 2024 |
+| ω̂ = ω/ω<sub>\*i</sub> | ω<sub>\*e</sub>(1 + η<sub>e</sub>/4)/ω<sub>\*i</sub> [M1-D1] | scan −1 to 1, plus stalled ω = 0 | Wilson 1996 Eq. 124; Benjamin App. C |
 | Δ′<sub>mn</sub> | Riccati, vacuum on | none [M0-D2]: Riccati and Galerkin agree to 10<sup>−3</sup> (M0); the conducting-wall case is not swept | M0 report |
 | f<sub>t</sub> | Sauter-2002 form (Benjamin, Fortran) [D2] | Lin-Liu & Miller as alternative | `mercier.f`; Benjamin ref. 25; `NeoclassicalResistivity.jl` |
 
@@ -131,7 +131,7 @@ Follows the ARC MHD basis (Leuthold JPP 2026 §2, "Rotation estimates", read fro
 - Edge: the E<sub>r</sub> well from the main-ion diamagnetic term (Viezzer et al. 2013, as cited by Leuthold), with the zero crossing at ψ<sub>N</sub> = 0.93 and E<sub>r</sub> = 0 at the separatrix.
 - Range: 0.5× and 2× the model (Leuthold Fig. 2e). Cross-check: the turbulent momentum-transport workflow of Zimmermann et al. 2024 with zero edge rotation gives 3–9 krad/s at q = 2 for ARC, at or below the 1× case (Leuthold p. 5). Intrinsic torque for ARC 5–20 N m (Rice et al. 2021 gives 8 N m).
 - If the SPARC and ARC kinetic files on feynman already carry `omega_E` built this way (the ARC files from the MHD-basis work should), those are used and the multiplier is applied to them; otherwise the agent builds the profile from the recipe above and records it in a report.
-- Island frequency: ω = ω<sub>E</sub> at the surface for the 0.5×/1×/2× cases; the stalled island, ω = 0, is a separate bounding case because a seed event can drop the island to the E<sub>r</sub> = 0 frame (La Haye NF 2022).
+- Island frequency [M1-D1, 2026-11-07]: ω in Δ<sub>pol</sub> is the island frequency relative to the E<sub>r</sub> = 0 frame (§1d), not the bulk E×B rotation. Nominal ω = ω<sub>\*e</sub>(1 + η<sub>e</sub>/4), Wilson 1996's collisionless propagation in the electron direction, entered as ω̂ = ω/ω<sub>\*i</sub>; scanned over ω̂ ∈ [−1, 1] as in Benjamin App. C; the stalled island ω = 0 (Δ<sub>pol</sub> = 0) bounds it. ω = n ω<sub>E</sub> stays available as a lab-frame option only. The ω<sub>E</sub> profiles of this section still set the E×B frame of the SLAYER gate (§4).
 
 ## Decisions (signed 2026-11-06)
 
@@ -146,6 +146,8 @@ Follows the ARC MHD basis (Leuthold JPP 2026 §2, "Rotation estimates", read fro
 ## Decisions from milestone reports
 
 - M0-D2 (2026-11-07, Nik: option c). Δ′ is computed with the vacuum only; the Riccati–Galerkin spread (about 10<sup>−3</sup>) is the recorded Δ′ formalism uncertainty and the wall case is dropped from the sweeps.
+- M1-D1 (2026-11-07, Nik: option a). Polarization island frequency prescribed relative to the diamagnetic frequency (§7, §6); ω = ω<sub>E</sub> mixed frames (M1 report §5).
+- M1-D2 (2026-11-07, Nik: option a, with TORAX χ where available). Nominal χ<sub>⊥</sub> per machine (§6). Expected to be replaced by co-author transport runs after draft 1.
 - M0-D3 (2026-11-07, Nik). The linear tearing gate reuses the existing tearing module instead of Leuthold Eq. 4.1. Revised the same day: SLAYER inner layer with the toroidal critical-Δ (`D_c_type = :toroidal`) as nominal; `CCCModel` (PR #654) as a cross-check when merged; §4 amended.
 
 ## [VERIFY] items remaining
