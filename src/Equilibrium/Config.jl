@@ -243,11 +243,11 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `kappa::Union{Nothing,Float64}` - Plasma elongation
   - `delta1::Union{Nothing,Float64}` - Upper triangularity
   - `delta2::Union{Nothing,Float64}` - Lower triangularity
-  - `bt0::Union{Nothing,Float64}` - Toroidal field at axis [T]
-  - `crnt::Union{Nothing,Float64}` - Plasma current [A], always positive
+  - `bt0::Union{Nothing,Float64}` - Vacuum toroidal field at the mean major radius, F_edge/R_mean, in T
+  - `crnt::Union{Nothing,Float64}` - Plasma current in MA, always positive
   - `bt_sign::Int` - Sign of the toroidal field (+1 or -1; `bt0` is always positive)
   - `ip_sign::Int` - Sign of the plasma current as the source file states it (+1 or -1)
-  - `bwall::Union{Nothing,Float64}` - Toroidal field at wall [T]
+  - `bwall::Union{Nothing,Float64}` - Poloidal field scale μ₀I_p/(2π a) at the mean minor radius, in T
   - `verbose::Bool` - Enable verbose output
   - `diagnose_src::Bool` - Enable source data diagnostics
   - `diagnose_maxima::Bool` - Enable extrema diagnostics
