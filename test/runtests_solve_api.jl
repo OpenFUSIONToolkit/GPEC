@@ -560,6 +560,43 @@ using HDF5
             end
         end
 
+        @testset "modified Rutherford under [Tearing.ModifiedRutherford]" begin
+            # The MRE alone: a [Tearing] holding only the sub-table runs no layer solve, and its deck replays.
+            settings = (; polarization=true, omega_factor=0.5, nw=40)
+            mktempdir() do dir
+                psi = collect(range(0.0, 1.0; length=101))
+                h5open(joinpath(dir, "kinetic.h5"), "w") do f
+                    f["psi"] = psi
+                    f["n_e"] = f["n_i"] = 5e19 .* (1 .- 0.8 .* psi)
+                    f["T_e"] = f["T_i"] = 2e3 .* (1 .- 0.9 .* psi)
+                    f["omega_E"] = 1e4 .* (1 .- psi)
+                end
+                ric = solve(attach_kinetic_profiles!(deepcopy(equil), joinpath(dir, "kinetic.h5")), riccati; nn=1, wall=wall, ffs_kwargs...)
+                api = solve(ModifiedRutherfordProblem(ric; settings...))
+                deck_dir = _stage_deck(dir; eq_overrides=Dict{String,Any}("kinetic_file" => "kinetic.h5"),
+                    ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
+                    extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}(String(k) => v for (k, v) in pairs(settings)))))
+                reference = GPEC.main([deck_dir])
+
+                @test reference.tearing === nothing
+                @test api.F ≈ reference.modified_rutherford.F rtol = 1e-10
+                @test api.polarization ≈ reference.modified_rutherford.polarization rtol = 1e-10
+                @test all(<(0), api.D_R) && all(isfinite, api.F)
+                h5open(joinpath(dir, "gpec.h5")) do f
+                    @test read(f["Tearing/ModifiedRutherford/Terms/F"]) ≈ api.F rtol = 1e-12
+                    recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))
+                    @test recorded["Tearing"] == Dict{String,Any}("ModifiedRutherford" => recorded["Tearing"]["ModifiedRutherford"])
+                    @test recorded["Tearing"]["ModifiedRutherford"]["omega_factor"] == 0.5
+                end
+            end
+
+            # A forward solve has no Δ′, so the deck stops at parse time.
+            mktempdir() do dir
+                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}())))
+                @test_throws "needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+        end
+
         @testset "kinetic_format" begin
             # A rates-v1 kinetic file read through the deck's [Equilibrium] keys and through the API keyword.
             mktempdir() do dir
