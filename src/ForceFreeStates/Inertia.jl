@@ -81,7 +81,7 @@ function inertia_kinetic_matrices(src::PerpendicularInertia, equil::Equilibrium.
 end
 
 """
-    GrowthRateResult
+    IdealGrowthRateResult
 
 The outcome of [`growth_rate`](@ref).
 
@@ -93,7 +93,7 @@ The outcome of [`growth_rate`](@ref).
   - `result::Union{Nothing,ForceFreeStatesResult}` - The solve at `gamma_sq`, carrying the eigenmode; `nothing` when stable.
   - `history::Vector` - Every (γ², λ_min, nzero) evaluated, in order, with λ_min the least-stable free-boundary energy at that γ².
 """
-struct GrowthRateResult
+struct IdealGrowthRateResult
     gamma::Float64
     gamma_sq::Float64
     marginal::ForceFreeStatesResult
@@ -103,7 +103,7 @@ end
 
 """
     growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia, gamma_sq_init=1e9, gamma_sq_min=1e4, gamma_sq_max=1e16,
-                rtol=1e-3, ftol=1e-6, maxiter=30, verbose=false) -> GrowthRateResult
+                rtol=1e-3, ftol=1e-6, maxiter=30, verbose=false) -> IdealGrowthRateResult
 
 Growth rate of the least-stable free-boundary mode of `prob` with the perpendicular inertia `inertia`
 (a [`PerpendicularInertia`](@ref)), ELITE's eigenvalue problem solved by shooting: the ideal solve
@@ -130,7 +130,7 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
     marginal.free_boundary === nothing && error("growth_rate needs the free-boundary energies: set vac_flag=true")
     push!(history, (gamma_sq=0.0, lambda=lambda_min(marginal), nzero=marginal.diagnostics.nzero))
     verbose && @info @sprintf("growth_rate: marginal λ_min = %.6e (nzero = %d)", history[end].lambda, history[end].nzero)
-    history[end].lambda < 0 || return GrowthRateResult(0.0, 0.0, marginal, nothing, history)
+    history[end].lambda < 0 || return IdealGrowthRateResult(0.0, 0.0, marginal, nothing, history)
 
     kwargs = copy(prob.ctrl_kwargs)
     haskey(kwargs, :singfac_min) || (kwargs[:singfac_min] = 0.0)
@@ -157,7 +157,7 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
     lam = lambda_at(hi)
     while lam > 0
         hi /= 10
-        hi < gamma_sq_min && return GrowthRateResult(sqrt(hi), hi, marginal, last[], history)
+        hi < gamma_sq_min && return IdealGrowthRateResult(sqrt(hi), hi, marginal, last[], history)
         lam = lambda_at(hi)
     end
     lo = hi
@@ -186,5 +186,5 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         end
         hi - lo <= rtol * hi && break
     end
-    return GrowthRateResult(sqrt(gamma_sq), gamma_sq, marginal, last[], history)
+    return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, marginal, last[], history)
 end
