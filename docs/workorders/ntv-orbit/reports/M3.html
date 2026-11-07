@@ -62,7 +62,7 @@
 </style>
 <main>
 <h1>M3 attempt 1 - The orbit drive, slowing-down alphas, and a first ARC alpha torque</h1>
-<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ 417d4df65 &middot; attempt 1 of 2 &middot;
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ c92bc87f5 &middot; attempt 1 of 2 &middot;
 DIII-D-like example (thermal deuterium) and ARC V3A (D–T fuel and fusion alphas), toroidal mode number n = 1 &middot; 2026-11-07</div>
 
 <div class="strip">
@@ -86,8 +86,8 @@ methods, and it excludes lost orbits and counts them. This report also gives the
 slope 0.96, with no floor, once a floor that I first missed was fixed (Section 2). The thermal-ion torque keeps its sign; it
 grows from 0.119 to 0.147 N m with the potential on.
 The alpha distribution reproduces its analytic density and pressure moments, and its fusion source matches the ARC
-transport file's to 0.5%. On ARC, with q = 1 kept out of the response, the alpha torque is about 1.5 N m on both
-methods. The difference is in its shape: the orbit average removes the surface method's peak between the q = 3 and q = 4
+transport file's to 0.5%. On ARC, with q = 1 kept out of the response, the alpha torque is 1.35 N m on the surface
+method and 1.49 N m on the orbit method. The difference is in its shape: the orbit average removes the surface method's peak between the q = 3 and q = 4
 surfaces. Two problems surfaced. On the way I found a develop bug that integrated the torque over a region with no plasma
 response; it is fixed in a draft PR. With q = 1 inside the response, the orbit method shows a negative energy band about one
 alpha orbit wide around q = 1, which I have not resolved. Three cards: the lost-fraction check (Q16), when and how to add
@@ -287,8 +287,8 @@ With the measure and the drive in, both fall with no floor (Figure 2): A as Δ<s
 finished files say otherwise: B goes flat at 2×10⁻⁵ from Z = 4096 on. I cannot reproduce the journal's numbers from them.
 Most likely I read the files before every task had finished; that is inference. The rows each task writes last, the
 surfaces nearest ψ<sub>lim</sub>, carry the whole floor: without the last two, B falls to 6.7×10⁻⁷. At those surfaces the
-outward neighbour at ψ₀ + h leaves the response, and 24 samples per surface were dropped at every Z, so the inward one failed
-too. My reading, not checked sample by sample, is that at fixed λ the inward neighbour sees a different field at θ₀, and the
+outward neighbour at ψ₀ + h leaves the response, and 24 samples per surface were dropped at Z = 4096 and above, so the inward one
+failed too. My reading, not checked sample by sample, is that at fixed λ the inward neighbour sees a different field at θ₀, and the
 pitch rows next to the trapped–passing boundary change class there. Retrying a failed side at h/8 and h/64
 (gpec 417d4df65) removes the floor: no sample is dropped from Z = 4096 on. Elsewhere it changes the integrated torque by at
 most 2×10⁻³ (at Z = 16) and by under 10⁻⁵ from Z = 64 on.</p>
@@ -405,7 +405,8 @@ showing up for alphas. Near the inner edge of the response, <code>forb</code> ri
 orbit's width in ψ there is a few hundredths, so orbits launched from the first surfaces reach below 0.343, onto perturbation
 data that is extrapolated again. The first ~0.03 in ψ is not trustworthy.</p>
 
-<p><b>Resolution.</b> I reran half of the surfaces at 128 pitch × 16 energy nodes. The torque on them changes by 2%. The
+<p><b>Resolution.</b> I reran half of the surfaces at 128 pitch × 16 energy nodes, against the same 64 × 12 run; both
+predate the step fix of Section 2, which moves the ARC totals by under 2%. The torque on them changes by 2%. The
 energy term rises by 7%, by about the same amount on every surface (5–20%, most at the edge). The 8% gap between the methods'
 energy terms is the same size, so it is not a result yet. The torque difference in shape is well above both changes. M4's
 scans will use 128 × 16 and check one point at 192 × 24.</p>
@@ -434,7 +435,7 @@ internal kink that sets the size of the jump. For KR1 this is a question of whic
 <figcaption>Figure 7. ARC V3A alpha torque density with q = 1 (dotted, ψ = 0.313) inside the response, (a) real and (b)
 imaginary part. Grey: <code>fgar</code>. Light blue dashed: <code>forb</code> at 32 pitch × 8 energy nodes. Black:
 <code>forb</code> at 64 × 12. Totals: <code>fgar</code> 5.24 + 20.6i; <code>forb</code> 6.05 − 5.51i (32×8) and
-6.83 + 10.0i (64×12) N m.</figcaption></figure>
+6.83 + 10.0i (64×12) N m. Both <code>forb</code> runs predate the step fix of Section 2.</figcaption></figure>
 
 <div class="card" id="q18" data-q="Q18">
   <h3>Q18 - q &lt; 1 in the M4 equilibria (gates M4)</h3>
@@ -523,7 +524,7 @@ assigned to you, with harness reports, and need a named reviewer. <b>Neither is 
 <li>Parked: the q = 1 band (Section 5); <code>forb</code> orbits from the first and last surfaces sample perturbation data beyond
 the response, so the outermost ~0.03 in ψ of each end is unreliable; the 8.4% one-sided g share with Φ on (Section 2).</li>
 </ul>
-<p>Everything here is committed and pushed: gpec <code>feature/ntv-orbit</code> @ 417d4df65 (report scripts
+<p>Everything here is committed and pushed: gpec <code>feature/ntv-orbit</code> @ c92bc87f5 (report scripts
 <code>docs/workorders/ntv-orbit/reports/m3_*</code>), runs in <code>results/m3_zow/</code>, <code>results/m3_z1phi/</code>,
 <code>results/m3_arc/</code> (<code>run/</code> is the invalid qlow = 1.02 run before the fix, kept; <code>run_fix/</code> and
 <code>run_qlow/</code> are the two in this report), <code>results/m3_dev/</code>; logs in <code>/mnt/scratch/ncl2128/claude-jobs/</code>
