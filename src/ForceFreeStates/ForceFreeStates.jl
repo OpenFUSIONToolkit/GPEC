@@ -72,6 +72,7 @@ include("InputSnapshot.jl")
 include("Output.jl")
 include("Run.jl")
 include("ForceBalance.jl")
+include("Inertia.jl")
 
 # Small tolerance and root-finder iteration cap used throughout ForceFreeStates
 global eps = 1e-10
