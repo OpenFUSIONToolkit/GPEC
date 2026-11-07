@@ -76,18 +76,18 @@ include("display_check.jl")
             @test api.solution === nothing
             @test api.delta_prime !== nothing
             msing = length(api.surfaces)
-            @test size(api.delta_prime.matrix) == (msing, msing)
-            @test api.delta_prime.matrix ≈ FFS.pest3_decompose(api.delta_prime.raw).Δ
+            @test size(api.delta_prime.freeboundary.Delta) == (msing, msing)
+            @test api.delta_prime.freeboundary.Delta ≈ FFS.pest3_decompose(api.delta_prime.raw_freeboundary).Delta
 
             # Chunking is a decomposition of the same problem, so Δ′ tracks the TOML run.
-            @test size(reference.delta_prime.matrix) == size(api.delta_prime.matrix)
-            @test api.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-6
+            @test size(reference.delta_prime.freeboundary.Delta) == size(api.delta_prime.freeboundary.Delta)
+            @test api.delta_prime.freeboundary.Delta ≈ reference.delta_prime.freeboundary.Delta rtol = 1e-6
 
             # With the deck's own (auto) chunking the two runs are the same computation.
             same = solve(prob, riccati)
-            @test same.delta_prime.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
-            @test same.delta_prime.raw ≈ reference.delta_prime.raw rtol = 1e-12
-            @test same.delta_prime.coil ≈ reference.delta_prime.coil rtol = 1e-12
+            @test same.delta_prime.freeboundary.Delta ≈ reference.delta_prime.freeboundary.Delta rtol = 1e-12
+            @test same.delta_prime.raw_freeboundary ≈ reference.delta_prime.raw_freeboundary rtol = 1e-12
+            @test same.delta_prime.ef ≈ reference.delta_prime.ef rtol = 1e-12
         end
     end
 
@@ -193,13 +193,13 @@ include("display_check.jl")
             @test api.integrator === :galerkin
             @test api.control.algorithm.nx == 32
             @test api.galerkin !== nothing
-            @test api.free_boundary === nothing        # galerkin computes no free-boundary energies
+            # By default the EF columns and the vacuum give the ideal solution and its free-boundary energies.
+            @test api.control.algorithm.error_field_response && api.free_boundary !== nothing
             dp = api.delta_prime
             @test dp !== nothing
             msing = api.galerkin.msing
-            @test size(dp.matrix) == (msing, msing)
-            @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
-            @test dp.A !== nothing                     # the parity blocks the galerkin solve persists
+            @test size(dp.fixedboundary.Delta) == (msing, msing)
+            @test dp.fixedboundary.Delta ≈ FFS.pest3_decompose(dp.raw_fixedboundary).Delta
 
             reference =
                 GPEC.main([
@@ -207,10 +207,13 @@ include("display_check.jl")
                         extra_sections=Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32)))
                 ]).ffs
             @test reference.galerkin.msing == msing
-            @test dp.matrix ≈ reference.delta_prime.matrix rtol = 1e-12
-            @test dp.raw ≈ reference.delta_prime.raw rtol = 1e-12
-            # With no free-boundary δW, no plasma response can be built from it.
-            @test_throws ErrorException plasma_response(api)
+            @test dp.raw_fixedboundary ≈ reference.delta_prime.raw_fixedboundary rtol = 1e-12
+            @test dp.raw_freeboundary ≈ reference.delta_prime.raw_freeboundary rtol = 1e-12
+            # Without the EF columns there is no free-boundary δW to build a plasma response from.
+            noef = solve(equil, Galerkin(; nx=32, error_field_response=false); nn=1, wall=wall, ffs_kwargs...)
+            @test noef.free_boundary === nothing && noef.solution === nothing && isempty(noef.delta_prime.ef)
+            @test noef.delta_prime.raw_freeboundary == dp.raw_freeboundary
+            @test_throws ErrorException plasma_response(noef)
         end
     end
 
@@ -279,10 +282,19 @@ include("display_check.jl")
         end
     end
 
+    # A forcing-mode table and its HDF5 twin, for the construction checks.
+    forcing_dir = mktempdir()
+    table = joinpath(forcing_dir, "forcing.dat")
+    write(table, "# normalization: normal_field_T\n1 2 1e-4 0.0\n1 3 5e-5 0.0\n")
+    table_h5 = joinpath(forcing_dir, "forcing.h5")
+    h5open(table_h5, "w") do f
+        f["n"], f["m"], f["amplitude_real"], f["amplitude_imag"] = [1, 1], [2, 3], [1e-4, 5e-5], [0.0, 0.0]
+    end
+
     @testset "RMPField algebra is lazy and flattens" begin
-        a = RMPField("a.dat")
-        b = RMPField("b.dat"; scale=0.5)
-        c = RMPField("c.dat")
+        a = RMPField(table)
+        b = RMPField(table; scale=0.5)
+        c = RMPField(table_h5)
         s = a + b
         @test s isa GPEC.ForcingTerms.RMPFieldSum
         @test length(s.terms) == 2
@@ -294,18 +306,37 @@ include("display_check.jl")
         @test (a * 3).scale == 3.0 + 0.0im
         @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
+        @test repr(a) == "RMPField(forcing.dat (ascii))" && repr(3 * a) == "RMPField(3 × forcing.dat (ascii))"
+        @test occursin("-0.5im × forcing.h5 (hdf5)", repr(MIME"text/plain"(), a - 0.5im * c))
     end
 
     @testset "RMPField infers its format and carries its scale" begin
-        @test RMPField("forcing.dat").ctrl.forcing_data_format == "ascii"
-        @test RMPField("forcing.h5").ctrl.forcing_data_format == "hdf5"
-        @test RMPField("forcing.dat"; format="hdf5").ctrl.forcing_data_format == "hdf5"
-        @test isabspath(RMPField("forcing.dat").ctrl.forcing_data_file)
-        @test RMPField("forcing.dat"; scale=3.0).scale == 3.0
-        coil_field = RMPField(Dict{String,Any}[Dict{String,Any}("name" => "iu")]; machine="d3d")
+        @test RMPField(table).ctrl.forcing_data_format == "ascii"
+        @test RMPField(table_h5).ctrl.forcing_data_format == "hdf5"
+        @test isabspath(RMPField(table).ctrl.forcing_data_file)
+        @test RMPField(table; scale=3.0).scale == 3.0
+        # One coil set or several, as NamedTuples or Dicts with the [[ForcingTerms.coil_set]] keys.
+        c_coil = (name="c", currents=[1e3, 500, -500, -1e3, -500, 500])
+        coil_field = RMPField(c_coil; machine="d3d")
         @test coil_field.ctrl.forcing_data_format == "coil"
         @test coil_field.ctrl.machine == "d3d"
-        @test length(coil_field.ctrl.coil_sets_raw) == 1
+        @test coil_field.ctrl.coil_sets_raw == [Dict{String,Any}("name" => "c", "currents" => c_coil.currents)]
+        @test length(RMPField([c_coil, Dict("name" => "iu", "currents" => fill(1e3, 6))]; machine="d3d").ctrl.coil_sets_raw) == 2
+        @test repr(coil_field) == "RMPField(d3d coils c)"
+    end
+
+    @testset "RMPField checks its source when built" begin
+        @test_throws "no forcing file" RMPField(joinpath(forcing_dir, "missing.dat"))
+        geometry = joinpath(pkgdir(GPEC), "src", "ForcingTerms", "coil_geometries", "d3d_c.dat")
+        @test_throws "is not a forcing-mode table" RMPField(geometry)
+        @test_throws "is not a forcing-mode table" RMPField(table; format="hdf5")
+        @test_throws "is not \"ascii\", \"hdf5\" or \"coil\"" RMPField(table; format="csv")
+        @test_throws "has no currents" RMPField((name="c",); machine="d3d")
+        @test_throws "currents for its 6 conductors" RMPField((name="c", currents=ones(7)); machine="d3d")
+        @test_throws "pass machine" RMPField((name="c", currents=ones(6)))
+        @test_throws "unknown keys" RMPField((name="c", curents=ones(6)); machine="d3d")
+        @test_throws "a coil set is a Dict or NamedTuple" RMPField([1, 2])
+        @test_throws "at least one forcing mode" RMPField(GPEC.ForcingTerms.ForcingMode[])
     end
 
     @testset "rejected keyword combinations" begin
@@ -357,7 +388,7 @@ include("display_check.jl")
     @testset "solves leave their inputs untouched" begin
         snap = deepcopy(equil)
         mktempdir() do dir
-            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
+            gal = solve(equil, Galerkin(; nx=32, error_field_response=true, cut_solution=true); nn=1, ffs_kwargs...)
             @test first_diff(equil, snap) === nothing
             # Matching reuses the outer solve: repeated match solves must not alter it.
             gal_snap = deepcopy(gal)
@@ -372,7 +403,7 @@ include("display_check.jl")
     end
 
     @testset "MatchProblem defaults its layer inputs from the kinetic data" begin
-        gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
+        gal = solve(equil, Galerkin(; nx=32, error_field_response=true, cut_solution=true); nn=1, ffs_kwargs...)
         # Without kinetic data the error names exactly the inputs still to give.
         @test_throws "MatchProblem: give eta, rho and rotation, or load kinetic profiles" MatchProblem(gal)
         @test_throws "MatchProblem: give rho, or load kinetic profiles" MatchProblem(gal; eta=1e-7, rotation=1.0)
@@ -407,7 +438,7 @@ include("display_check.jl")
 
     @testset "matched inner profiles: opt-in, and parity columns agree across inner models" begin
         mktempdir() do dir
-            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
+            gal = solve(equil, Galerkin(; nx=32, error_field_response=true, cut_solution=true); nn=1, ffs_kwargs...)
             prob = MatchProblem(gal; eta=1e-7, rho=1e-7, rotation=1.0)
             center = solve(prob, GGJModel()).match
             ray = solve(prob, GGJModel(; real_profiles=true)).match
@@ -428,19 +459,23 @@ include("display_check.jl")
         end
     end
 
-    @testset "a resistive match keeps its coefficients and drops the ideal δW" begin
+    @testset "a Riccati match keeps its coefficients and publishes its matched edge response" begin
         mktempdir() do dir
             ric = solve(equil, riccati; nn=1, ffs_kwargs...)
-            @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.coil)
+            @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.ef)
             matched = solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             @test matched.closure === :matched
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
-            @test matched.wp === nothing && matched.free_boundary === nothing
             @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
-            # It carries no ideal δW, so no plasma response can be built from it.
-            @test_throws ErrorException plasma_response(matched)
+            # The edge response is W_P plus the big-solution edge momenta weighted by cout; the layers make it non-Hermitian.
+            ψ₀² = ric.equil.psio^2
+            @test matched.wp ≈ ric.wp + ric.delta_prime.edge_response * matched.match.cout / ψ₀² rtol = 1e-12
+            @test norm(matched.wp - matched.wp') > 1e-8 * norm(matched.wp)
+            @test matched.free_boundary.wt0 ≈ matched.wp + ric.free_boundary.wv rtol = 1e-12
+            # The singular coupling of a matched solution is not defined yet.
+            @test_throws "matched" plasma_response(matched)
             # A matched result is a new solution, not an outer solve to match again.
-            @test_throws ErrorException MatchProblem(matched; ideal=true)
+            @test_throws ErrorException MatchProblem(matched; eta=1e-7, rho=1e-7, rotation=1.0)
         end
     end
 
@@ -448,24 +483,62 @@ include("display_check.jl")
         mktempdir() do dir
             # A Forward result carries no Δ′ payload, so the problem is unconstructible.
             fwd = solve(equil, forward; nn=1, ffs_kwargs...)
-            @test_throws ErrorException MatchProblem(fwd; ideal=true)
+            @test_throws ErrorException MatchProblem(fwd; eta=1e-7, rho=1e-7, rotation=1.0)
             # A slab model can never close a matched solution.
-            gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, ffs_kwargs...)
-            prob = MatchProblem(gal; ideal=true)
+            gal = solve(equil, Galerkin(; nx=32, error_field_response=true); nn=1, ffs_kwargs...)
+            prob = MatchProblem(gal; eta=1e-7, rho=1e-7, rotation=1.0)
             @test_throws ErrorException solve(prob, SLAYERModel())
             # A resistive match needs every layer input.
             @test_throws "give rho and rotation" MatchProblem(gal; eta=1e-7)
             @test_throws ErrorException MatchProblem(gal; eta=fill(1e-7, length(gal.surfaces) + 1), rho=1e-7, rotation=1.0)
             # The tearing model is the solve argument, never a TearingProblem keyword.
             @test_throws MethodError TearingProblem(gal; inner_model=:ggj_ray)
-            # The ideal reference match keeps the ideal closure and replaces the solution with
-            # the bare coil columns in the identity-at-edge basis.
+            # The Galerkin solve is itself ideal-closed: its EF columns, identity at the edge, with their δW.
+            @test gal.closure === :ideal
+            @test gal.solution !== nothing && gal.solution.basis === :gal_native
+            N = gal.numpert_total
+            @test gal.solution.u_store[:, :, 1, end] ≈ Matrix{ComplexF64}(I, N, N) atol = 1e-10
+            @test size(gal.wp) == (N, N) && norm(gal.wp - gal.wp') <= 1e-8 * norm(gal.wp)
+            # A matched Galerkin result keeps the identity-at-edge basis and publishes its complex edge response.
             matched = solve(prob, GGJModel())
-            @test matched.closure === :ideal
-            @test matched.match !== nothing
-            # The ideal reference keeps the ideal δW (only a :matched closure drops it).
-            @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
-            @test matched.solution !== nothing && matched.solution.basis === :gal_native
+            @test matched.closure === :matched
+            @test matched.solution.u_store[:, :, 1, end] ≈ Matrix{ComplexF64}(I, N, N) atol = 1e-10
+            ψ₀² = gal.equil.psio^2
+            F = gal.galerkin.edge_response
+            @test matched.wp ≈ gal.wp + F[:, 1:(2length(gal.surfaces))] * matched.match.cout / ψ₀² rtol = 1e-12
+            # Its free-boundary energies use the matched response with the solve's own vacuum.
+            @test matched.free_boundary.wt0 ≈ matched.wp + gal.free_boundary.wv rtol = 1e-12
+            # The singular coupling of a matched solution is not defined yet.
+            @test_throws "matched" plasma_response(matched)
+            # The EF columns do not change either Δ′: both equal those of a solve without them.
+            plain = solve(equil, Galerkin(; nx=32, error_field_response=false); nn=1, ffs_kwargs...)
+            @test gal.delta_prime.raw_freeboundary == plain.delta_prime.raw_freeboundary
+            @test gal.delta_prime.raw_fixedboundary == plain.delta_prime.raw_fixedboundary
+            @test gal.delta_prime.raw_fixedboundary != gal.delta_prime.raw_freeboundary
+            # Skipping the free-boundary solve leaves only the fixed-boundary Δ′: matching is unchanged, and tearing
+            # runs on the fixed boundary only when asked to.
+            nofree = solve(equil, Galerkin(; nx=32, error_field_response=true, free_boundary_delta_prime=false); nn=1, ffs_kwargs...)
+            @test isempty(nofree.delta_prime.raw_freeboundary) && nofree.delta_prime.freeboundary === nothing
+            @test nofree.delta_prime.raw_fixedboundary == gal.delta_prime.raw_fixedboundary && nofree.delta_prime.ef == gal.delta_prime.ef
+            @test solve(MatchProblem(nofree; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel()).match.cout == matched.match.cout
+            @test_throws "free-boundary Δ′" solve(TearingProblem(nofree), SLAYERModel())
+        end
+    end
+
+    @testset "a Galerkin solve drives the plasma response like a forward solve" begin
+        mktempdir() do dir
+            fwd = solve(equil, forward; nn=1, ffs_kwargs...)
+            gal = solve(equil, Galerkin(; nx=32, error_field_response=true); nn=1, ffs_kwargs...)
+            @test gal.psilim == fwd.psilim
+            @test gal.wp ≈ fwd.wp rtol = 1e-5
+            @test gal.free_boundary.wt0 ≈ gal.wp + gal.free_boundary.wv rtol = 1e-12
+            @test gal.free_boundary.et[1] ≈ fwd.free_boundary.et[1] rtol = 1e-5
+            # The edge permeability P = Λ·L⁻¹ does not depend on the solution basis.
+            @test plasma_response(gal).permeability_flux ≈ plasma_response(fwd).permeability_flux rtol = 5e-4
+            # Without the vacuum there is no free-boundary δW to build Λ from.
+            novac = solve(equil, Galerkin(; nx=32, error_field_response=true); nn=1, merge(ffs_kwargs, Dict{Symbol,Any}(:vac_flag => false))...)
+            @test novac.wp !== nothing && novac.free_boundary === nothing
+            @test_throws "vac_flag=true" plasma_response(novac)
         end
     end
 
@@ -518,11 +591,11 @@ include("display_check.jl")
                 "Match" => Dict{String,Any}("eta" => fill(layer.eta, n), "rho" => fill(layer.rho, n), "rotation" => fill(layer.rotation, n)))
 
             mktempdir() do dir
-                gal = solve(equil, Galerkin(; nx=32, rpec_flag=true); nn=1, wall=wall, ffs_kwargs...)
+                gal = solve(equil, Galerkin(; nx=32, error_field_response=true); nn=1, wall=wall, ffs_kwargs...)
                 # The galerkin inner model returns real-ψ profiles, so the inner profiles are compared too.
                 api = solve(MatchProblem(gal; layer...), GGJModel(; solver=:galerkin))
                 n = length(gal.surfaces)
-                sections = merge(Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32, "rpec_flag" => true)), match_sections(n, "galerkin"))
+                sections = merge(Dict{String,Any}("Galerkin" => Dict{String,Any}("nx" => 32, "error_field_response" => true)), match_sections(n, "galerkin"))
                 reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Galerkin"), extra_sections=sections)]).ffs
 
                 @test reference.closure === api.closure === :matched
@@ -531,7 +604,7 @@ include("display_check.jl")
                 @test api.match.xi ≈ reference.match.xi rtol = 1e-12
                 # The composite inner profiles need the cut solution, which Galerkin keeps only on request.
                 @test isempty(reference.match.inner_xi) && isempty(api.match.inner_xi)
-                cut = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, wall=wall, ffs_kwargs...)
+                cut = solve(equil, Galerkin(; nx=32, error_field_response=true, cut_solution=true); nn=1, wall=wall, ffs_kwargs...)
                 @test length(solve(MatchProblem(cut; layer...), GGJModel(; solver=:galerkin)).match.inner_xi) == n
             end
 
@@ -548,7 +621,7 @@ include("display_check.jl")
 
             # A forward solve has no Δ′ to match against, so the deck stops at parse time instead of after the solve.
             mktempdir() do dir
-                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("ideal" => true)))
+                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("eta" => 1e-7, "rho" => 1e-7, "rotation" => 1.0)))
                 @test_throws "[Match] needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
 

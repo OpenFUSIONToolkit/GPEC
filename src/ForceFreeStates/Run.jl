@@ -56,8 +56,8 @@ function run_force_free_states(
     nstring = _mode_range_label(intr)
 
     # The three formalisms are exclusive. Galerkin solves the same Euler-Lagrange system
-    # variationally rather than by radial ODE integration, so it replaces both the integration
-    # and the free-boundary energies, and supplies its own vacuum response at psilim.
+    # variationally rather than by radial ODE integration, and supplies its own vacuum response at
+    # psilim; its EF columns (error_field_response) give the plasma response the free-boundary energies need.
     odet = nothing
     free_energies = nothing
     gal_data = nothing
@@ -70,6 +70,9 @@ function run_force_free_states(
         gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
         gal_dt = time() - gal_start
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
+        if ctrl.vac_flag && gal_data.solution !== nothing && !isempty(gal_ef_columns(gal_data))
+            free_energies = free_run(gal_wp(gal_data, equil.psio), ctrl, equil, mats, intr; verbose=intr.verbose)
+        end
     else
         if intr.verbose
             @info "Integrating Euler-Lagrange equation"
@@ -84,7 +87,7 @@ function run_force_free_states(
                 wall_desc = intr.wall_settings === nothing ? "no wall" : nameof(typeof(intr.wall_settings))
                 @info "Computing free boundary energies ($wall_desc)"
             end
-            free_energies = free_run(odet, ctrl, equil, mats, intr)
+            free_energies = free_run((odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2, ctrl, equil, mats, intr; verbose=intr.verbose)
             normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
             if real(free_energies.et[1]) < 0
                 if intr.verbose

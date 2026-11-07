@@ -1,7 +1,8 @@
 # Concise REPL display for the published result types: a one-line `show(io, x)` used inside
 # containers (the named tuple `main` returns, nested fields) and a short labelled `text/plain`
 # summary. Arrays are summarized by shape or range and never printed. Absent products read
-# "not computed" (not requested or not producible) or "none" (computed, but empty).
+# "not computed" (not requested or not producible) or "none" (computed, but empty). Results with
+# registered plots end with how many of them they can draw.
 #
 # Included directly into the GeneralizedPerturbedEquilibrium module, after every submodule.
 
@@ -10,6 +11,7 @@ using .PerturbedEquilibrium: PerturbedEquilibriumState
 using .KineticForces: MethodResult, KineticForcesState
 using .ErrorFields: MonteCarloResult, RiskResult, EFCCoupling
 using .Tearing: GrowthRateResult
+using .ForcingTerms: RMPSource, RMPSpectrum, RMPFieldSum
 
 _fmt(x::Real) = @sprintf("%.4g", x)
 _fmt(::Nothing) = "—"
@@ -33,6 +35,13 @@ function _list(items; max::Int=6)
 end
 
 _row(io, label, value) = print(io, "\n  ", rpad(label, 19), value)
+
+# How many registered plots `x` can draw, pointing at the catalog that names them.
+function _plots_row(io, x)
+    ok, n = Analysis.plot_counts(x)
+    n == 0 || _row(io, "Plots", "$ok of $n available (see available_plots)")
+    return nothing
+end
 
 # Range of `ψ` where `mask` holds, as "k/N points, ψ ∈ [a, b]"; "none" when nowhere.
 function _where(psi, mask)
@@ -72,6 +81,7 @@ function Base.show(io::IO, ::MIME"text/plain", eq::PlasmaEquilibrium)
     _row(io, "Shape", "R = $(_fmt(p.rmean)) m, a = $(_fmt(p.amean)) m, κ = $(_fmt(p.kappa)), δ_upper = $(_fmt(p.delta1)), δ_lower = $(_fmt(p.delta2))")
     _row(io, "Grid", "$(length(eq.rzphi_xs)) ψ × $(length(eq.rzphi_ys)) θ, ψ ∈ $(_span(eq.rzphi_xs)), $(eq.config.jac_type) coordinates")
     _row(io, "Kinetic", eq.kinetic === nothing ? "none attached" : _list(_kinetic_names(eq.kinetic); max=14))
+    _plots_row(io, eq)
     return nothing
 end
 
@@ -103,6 +113,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::LocalStability.LocalStabilityR
     _row(io, "Mercier", "D_I > 0 (unstable): " * _where(r.psi, r.D_I .> 0))
     _row(io, "Resistive", "D_R > 0 (unstable): " * _where(r.psi, r.D_R .> 0))
     _row(io, "Ballooning", _ballooning_note(r))
+    _plots_row(io, r)
     return nothing
 end
 
@@ -123,8 +134,9 @@ function Base.show(io::IO, fb::FreeBoundaryResult)
 end
 
 function Base.show(io::IO, d::DeltaPrimeData)
-    source = d.A === nothing ? "Riccati" : "Galerkin"
-    return print(io, "DeltaPrimeData(", source, ", ", _shape(d.matrix), ")")
+    boundaries = join([b for (b, blocks) in (("free", d.freeboundary), ("fixed", d.fixedboundary)) if blocks !== nothing], " + ")
+    msing = size(something(d.freeboundary, d.fixedboundary).Delta, 1)
+    return print(io, "DeltaPrimeData(", boundaries, " boundary, ", _plural(msing, "surface"), isempty(d.ef) ? "" : ", Δ_EF", ")")
 end
 
 function Base.show(io::IO, g::GalerkinResult)
@@ -193,7 +205,7 @@ end
 
 # m/n of each row of the Δ′ matrix: Galerkin solves across its in-band subset of the surfaces.
 function _delta_prime_labels(r::ForceFreeStates.ForceFreeStatesResult)
-    k = minimum(size(r.delta_prime.matrix))
+    k = size(something(r.delta_prime.freeboundary, r.delta_prime.fixedboundary).Delta, 1)
     g = r.galerkin
     g !== nothing && length(g.sing_m) == k && return ["$(m)/$(n)" for (m, n) in zip(g.sing_m, g.sing_n)]
     length(r.surfaces) == k && return _surface_label.(r.surfaces)
@@ -210,14 +222,16 @@ function Base.show(io::IO, ::MIME"text/plain", r::ForceFreeStates.ForceFreeState
     _row(io, "Fixed boundary", _fixed_boundary_note(r))
     _row(io, "Free boundary", _free_boundary_note(r))
     if r.delta_prime !== nothing
-        dp = r.delta_prime.matrix
-        _row(io, "Δ′_ii (ψ_N)", _list(["$l: $(_fmt(real(dp[i, i])))" for (i, l) in enumerate(_delta_prime_labels(r))]; max=4))
+        free = r.delta_prime.freeboundary !== nothing
+        dp = something(r.delta_prime.freeboundary, r.delta_prime.fixedboundary).Delta
+        _row(io, free ? "Δ′_ii (ψ_N)" : "Δ′_ii fixed boundary (ψ_N)", _list(["$l: $(_fmt(real(dp[i, i])))" for (i, l) in enumerate(_delta_prime_labels(r))]; max=4))
     end
     _row(io, "Solution", _solution_note(r))
     r.galerkin === nothing || _row(io, "Galerkin", "$(_plural(r.galerkin.msing, "surface")), $(r.galerkin.solver) factorization")
     r.match === nothing || _row(io, "Match", sprint(show, r.match))
     r.kinetic.kmsing > 0 && _row(io, "Kinetic", "$(_plural(r.kinetic.kmsing, "kinetic singular surface"))")
     _row(io, "Wall", _wall_label(r.wall_settings))
+    _plots_row(io, r)
     return nothing
 end
 
@@ -229,7 +243,7 @@ function Base.show(io::IO, ::MIME"text/plain", m::MatchResult)
     print(io, "MatchResult  ", InnerLayer.model_name(m.model))
     _row(io, "Surfaces", "$(size(m.deltar, 1)) matched, $(size(m.cout, 2)) edge drives")
     _row(io, "Residual", _fmt(m.residual))
-    _row(io, "Forced γ [rad/s]", isempty(m.rpec_eig) ? "none" : _list(_fmt.(m.rpec_eig); max=3))
+    _row(io, "Forced γ [rad/s]", isempty(m.forced_eigenvalue) ? "none" : _list(_fmt.(m.forced_eigenvalue); max=3))
     outer = isempty(m.xi) ? "not computed" : "$(_shape(m.xi)) (one column per edge drive)"
     _row(io, "Stored", "matched outer ξ $outer, inner profiles $(isempty(m.inner_psi) ? "not computed" : "on $(length(m.inner_psi)) surfaces")")
     return nothing
@@ -265,13 +279,37 @@ function Base.show(io::IO, ::MIME"text/plain", r::PlasmaResponse)
     isempty(r.dominant_singular_values) || _row(io, "Dominant σ", _list(_fmt.(r.dominant_singular_values); max=3))
     _row(io, "Torque resp.", isempty(r.T_xe) ? "not computed" : "T_xe $(_shape(r.T_xe))")
     r.odet_from_gal && _row(io, "Basis", "Galerkin-native solution")
+    _plots_row(io, r)
+    return nothing
+end
+
+# Forcing sources: the source, and its weight when it is not 1 (always in a sum, where the weights are the point).
+
+_weight(w) = string(iszero(real(w)) && !iszero(imag(w)) ? _fmt(imag(w)) * "im" : _fmt(w), " × ")
+
+function _rmp_label(f::RMPSource)
+    c = f.ctrl
+    c.forcing_data_format == "coil" || return string(basename(c.forcing_data_file), " (", c.forcing_data_format, ")")
+    sets = [isempty(get(d, "name", "")) ? get(d, "source", "coil set") : d["name"] for d in c.coil_sets_raw]
+    return string(isempty(c.machine) ? "" : c.machine * " ", "coils ", _list(sets))
+end
+_rmp_label(f::RMPSpectrum) = string("spectrum of ", _plural(length(f.modes), "mode"), ", n = ", _irange([m.n for m in f.modes]))
+
+Base.show(io::IO, f::Union{RMPSource,RMPSpectrum}) = print(io, "RMPField(", f.scale == 1 ? "" : _weight(f.scale), _rmp_label(f), ")")
+Base.show(io::IO, f::RMPFieldSum) = print(io, "RMPField(sum of ", _plural(length(f.terms), "term"), ")")
+
+function Base.show(io::IO, ::MIME"text/plain", f::RMPFieldSum)
+    print(io, "RMPField  sum of ", _plural(length(f.terms), "term"))
+    for t in f.terms
+        print(io, "\n  ", _weight(t.scale), _rmp_label(t))
+    end
     return nothing
 end
 
 function _forcing_label(s::PerturbedEquilibriumState)
     isempty(s.coil_sets) || return "coils: " * _list([c.name for c in s.coil_sets])
     s.forcing === nothing && return "none"
-    return string(nameof(typeof(s.forcing)))
+    return sprint(show, s.forcing)
 end
 
 function Base.show(io::IO, s::PerturbedEquilibriumState)
@@ -302,6 +340,7 @@ function Base.show(io::IO, ::MIME"text/plain", s::PerturbedEquilibriumState)
     _row(io, "Profiles", s.xi_modes === nothing ? "not computed" : "ξ, b on $(length(s.psi_grid)) ψ nodes")
     s.torque_response === nothing || _row(io, "Torque resp.", "computed")
     iszero(s.regularization_width) || _row(io, "Regularized", "width $(_fmt(s.regularization_width))")
+    _plots_row(io, s)
     return nothing
 end
 
@@ -381,6 +420,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::ErrorFieldsResult)
     end
     r.scan === nothing || _row(io, "Tolerance scan", "$(length(r.scan.tolerance_scale)) points, $(_in("scale", r.scan.tolerance_scale))")
     r.couplings === nothing || _row(io, "EFC coils", _list([c.coil_name for c in r.couplings]))
+    _plots_row(io, r)
     return nothing
 end
 

@@ -41,6 +41,8 @@ Chunked Riccati integration and the singular-surface boundary-value solve.
   - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.
   - `nchunks::Int` - Target chunk count; zero derives the count from the singular surfaces.
   - `extended_precision_bvp::Bool` - Use Complex{Double64} for the Delta-prime BVP and PEST3 combination to reduce cancellation error.
+  - `error_field_response::Bool` - Compute `Delta_EF`, the response to a unit edge displacement per mode (needs `vac_flag`).
+    Required by `MatchProblem`.
 """
 @kwdef struct Riccati <: AbstractIntegrator
     eulerlagrange_tolerance::Float64 = 1e-8
@@ -50,6 +52,7 @@ Chunked Riccati integration and the singular-surface boundary-value solve.
     save_interval::Int = 1
     nchunks::Int = 0
     extended_precision_bvp::Bool = true
+    error_field_response::Bool = true
 end
 
 """
@@ -73,7 +76,10 @@ corresponding discretization setting. Factorization is selected automatically.
   - `gnstep::Int` - Maximum resonant-quadrature evaluations.
   - `dx1dx2_flag::Bool` - Enable the special dx1/dx2 treatment of resonant and extension elements.
   - `frobenius_order_ceiling::Bool` - Auto-raise the order per surface for a high Mercier index.
-  - `rpec_flag::Bool` - Append the mpert coil-response columns to the Δ′ solve. Required for a later `MatchProblem` solve on the result.
+  - `error_field_response::Bool` - Add the error-field (EF) columns, a unit edge displacement per mode: gives `Delta_EF`, the ideal solution
+    and `wp`. Required by `MatchProblem`.
+  - `free_boundary_delta_prime::Bool` - With `error_field_response` and `vac_flag`, compute the free-boundary (tearing) Δ′ by a second solve
+    (about a quarter of the solve time). Off: no tearing Δ′.
   - `edge_onesided::Bool` - Pack the two end intervals one-sided toward their single rational end instead of the Fortran symmetric pack.
   - `basis_output::Bool` - Save the raw Galerkin basis for development diagnostics.
   - `cut_solution::Bool` - Also keep the cut solution, for a later `MatchProblem`'s composite inner profiles.
@@ -90,7 +96,8 @@ corresponding discretization setting. Factorization is selected automatically.
     gnstep::Int = 20000
     dx1dx2_flag::Bool = true
     frobenius_order_ceiling::Bool = true
-    rpec_flag::Bool = false
+    error_field_response::Bool = true
+    free_boundary_delta_prime::Bool = true
     edge_onesided::Bool = false
     cut_solution::Bool = false
     basis_output::Bool = false

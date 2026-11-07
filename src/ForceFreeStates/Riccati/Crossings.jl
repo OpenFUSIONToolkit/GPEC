@@ -106,7 +106,7 @@ function _capture_right_crossing_data!(odet::OdeState, singp::SingType, sing_asy
 end
 
 # STUB: per-surface ca-based Δ' (not physically valid; see SingType.delta_prime docstring).
-# The canonical Δ' is intr.delta_prime_matrix from compute_delta_prime_matrix!.
+# The canonical Δ' is the BVP Δ' (`DeltaPrimeData`) from compute_delta_prime_matrix!.
 function _stash_per_surface_delta_prime_stub!(odet::OdeState, intr::ForceFreeStatesInternal,
     ising::Int, ipert_res, sing_asymp_right,
     equil::Equilibrium.PlasmaEquilibrium,

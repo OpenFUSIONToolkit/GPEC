@@ -4,18 +4,25 @@
 # determinant (Dispersion.ggj_growth_rates), each surface on its own when uncoupled,
 # the leading `msing_max` surfaces together when coupled.
 
-# The raw side-major Δ′ the determinant needs, after checking it is aligned with ordered surfaces.
-function _ggj_delta_prime_raw(ffs)
+# The raw side-major Δ′ of the problem's boundary that the determinant needs, aligned with ordered surfaces.
+function _ggj_delta_prime_raw(prob::TearingProblem)
+    ffs = prob.ffs
     ffs.npert == 1 || throw(ArgumentError("GGJ tearing is single-n; the result spans n = $(ffs.nlow):$(ffs.nhigh)"))
     surfaces = ffs.surfaces
     psi = Float64[s.psifac for s in surfaces]
     issorted(psi; lt=<=) || throw(ArgumentError("GGJ tearing needs distinct surfaces ordered core to edge; got ψ = $psi"))
     dp = ffs.delta_prime
-    dp === nothing && throw(ArgumentError("GGJ tearing needs the raw Δ′ matrix; solve with Riccati() and vac_flag=true, or Galerkin(; rpec_flag=true)"))
-    size(dp.raw) == (2length(surfaces), 2length(surfaces)) ||
-        throw(ArgumentError("GGJ tearing: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $(length(surfaces)) surfaces"))
-    all(isfinite, dp.raw) || throw(ArgumentError("GGJ tearing: the raw Δ′ matrix has non-finite entries"))
-    return dp.raw
+    dp === nothing && throw(ArgumentError("GGJ tearing needs the raw Δ′ matrix; solve with Riccati() or Galerkin()"))
+    raw = prob.fixed_boundary ? dp.raw_fixedboundary : dp.raw_freeboundary
+    size(raw) == (2length(surfaces), 2length(surfaces)) ||
+        throw(
+            ArgumentError(
+                "GGJ tearing: the $(prob.fixed_boundary ? "fixed" : "free")-boundary Δ′ raw block is " *
+                "$(size(raw, 1))×$(size(raw, 2)) but the result carries $(length(surfaces)) surfaces"
+            )
+        )
+    all(isfinite, raw) || throw(ArgumentError("GGJ tearing: the raw Δ′ matrix has non-finite entries"))
+    return raw
 end
 
 # η and ρ given on the problem, as MatchProblem takes them: a scalar or one value per surface, core to edge.
@@ -70,7 +77,7 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
     ffs = prob.ffs
     surfaces = ffs.surfaces
     isempty(surfaces) && return empty_tearing_result(prob, config, model)
-    raw = _ggj_delta_prime_raw(ffs)
+    raw = _ggj_delta_prime_raw(prob)
     count = length(surfaces)
     eta, rho = _ggj_layer_inputs(prob)
     params = [ggj_parameters(s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k) for (k, s) in enumerate(surfaces)]
@@ -118,7 +125,8 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
         end
     end
     return TearingResult(prob, true, config, model, params,
-        Float64[s.psifac for s in surfaces], Float64[s.q for s in surfaces], Matrix{ComplexF64}(ffs.delta_prime.matrix),
+        Float64[s.psifac for s in surfaces], Float64[s.q for s in surfaces],
+        Matrix{ComplexF64}((prob.fixed_boundary ? ffs.delta_prime.fixedboundary : ffs.delta_prime.freeboundary).Delta),
         Q_root, omega, Float64[e.gamma for e in extractions],
         coupled ? GrowthRateResult[] : extractions, coupled ? only(extractions) : nothing,
         LayerWidths[], Ω_E, zeros(count), scans, empty_critical_resonant_field_result())
