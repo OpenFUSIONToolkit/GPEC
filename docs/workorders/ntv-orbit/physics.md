@@ -1,13 +1,15 @@
 # physics.md — orbit-averaged kinetic energy and NTV torque
 
-**Status: v2 (Q14 answer A, 2026-11-07); v1 signed (Q4 answer B, 2026-11-05).** v0 was written at hand-off;
+**Status: v3 (Q16 A, Q17 A, 2026-11-07); v2 (Q14 answer A, 2026-11-07); v1 signed (Q4 answer B, 2026-11-05).** v0 was written at hand-off;
 its [VERIFY] items were resolved in the M0 card Q4 and Nik signed with two
 exceptions, both resolved here: the finite-β (∇p) physics is kept (§2, §3) and
 the electrostatic potential is in the orbit (§2, §4). The beam distribution of
 card Q7 (answer B) is in §6. From here this file changes only through a
 Decisions card. v2 (Q14 answer A, 2026-11-07): the Jacobian from `rzphi_jac`
 and the closure by poloidal winding (§2), the phase-space measure as M3's
-first task (§3), the E×B ordering as Rω_E ≪ v_t (§4).
+first task (§3), the E×B ordering as Rω_E ≪ v_t (§4). v3 (Q16 A, Q17 A,
+2026-11-07): the lost fraction per launch surface (§5), the beam pitch label at
+the orbit's field minimum (§6), the method name `forb` (§7).
 
 Equations are transcribed in the code's conventions where the code has one
 (see `code_map.md`): ψ is the normalized poloidal flux ψ_N ∈ [0, 1] with
@@ -184,7 +186,11 @@ comparison panel); off reproduces the v0 orbit.
 ## 5. Lost orbits
 
 Orbits that reach `psilim` are excluded from δW_K and counted: the lost
-fraction L(ψ̄) goes to HDF5 and bounds the edge contribution in KR2. A
+fraction L(ψ₀), the density-weighted share of the launch phase space of
+surface ψ₀ whose orbits are lost, goes to HDF5 and bounds the edge
+contribution in KR2. It is monotone in ψ₀ and tends to ½ at `psilim`: a launch
+at θ_bmin is an extremum of ψ along the orbit, the outermost point for one sign
+of v∥ and the innermost for the other (Q16 A). A
 loss-cone correction to f₀ is out of scope.
 
 ## 6. Slowing-down distributions (alphas and beams)
@@ -197,8 +203,9 @@ f₀ = C(ψ̄)/(E^{3/2} + E_c^{3/2}) · (2√π δζ)⁻¹ Σ_i C_i exp[−(ζ �
 
 with E_b the birth (injection) energy, E_c the critical energy, δζ = δζ₀ at
 birth and widening as E falls. The pitch label must be a constant of motion,
-so ζ is defined from λ at the reference field, ζ = σ√(1 − λ) (v∥/v where
-B = B₀); passing orbits keep σ, trapped orbits are symmetric in ζ by
+so ζ is v∥/v at the orbit's own field minimum, ζ² = 1 − λB_min(ψ̄)/B₀ with
+sign σ, defined for every confined orbit including λ > 1, and Liu's
+ζ = σ√(1 − λ) on the axis (Q17 A); passing orbits keep σ, trapped orbits are symmetric in ζ by
 construction (Liu's trapped coefficient sets). The image terms (C_i, ζ_i)
 follow Liu 2014 (co-tangential: C = {2, 2, −1, −1}, ζ_i = {ζ₀, 2 − ζ₀,
 2ζ₊ − ζ₀, 2ζ₊ − 2 + ζ₀} for co-passing, etc.).
@@ -250,10 +257,10 @@ total. No FLR, no energy diffusion beyond the δζ(E) form.
 | δJ_ℓ | action variation | `bj_integral` → `dJdJ` | `orbit_dJdJ` |
 | Ω, ν | resonance, collisions | `_energy_integrand_real` | same operator with tabulated Ω(x) |
 | f₀, ∂f₀/∂P_φ | distribution, drive | `f0type`, `_energy_numerator` | `f0type = "slowingdown"` (alphas and beams, §6) added; `drive_pphi` |
-| T_φ, δW_K | torque, energy | `MethodResult.total_torque` | same struct, method name `ogar` (orbit GAR) in `METHOD_REGISTRY` |
-| L(ψ̄) | lost fraction | — | HDF5 `KineticForces/ogar/lost_fraction` |
+| T_φ, δW_K | torque, energy | `MethodResult.total_torque` | same struct, method name `forb` (orbit GAR) in `METHOD_REGISTRY` |
+| L(ψ₀) | lost fraction | — | HDF5 `KineticForces/forb/lost_fraction` |
 
-Method name `ogar` and the HDF5 group follow the registry convention in `KineticForcesStructs.jl:13` and `docs/development/hdf5-conventions.md`; the deck key is `ogar_flag`, default `false`.
+Method name `forb` and the HDF5 group follow the registry convention in `KineticForcesStructs.jl:13` and `docs/development/hdf5-conventions.md`; the deck key is `forb_flag`, default `false`.
 
 ## 8. Validity limits of the new path
 
