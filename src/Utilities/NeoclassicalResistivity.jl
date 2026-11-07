@@ -27,7 +27,9 @@ physics when the same `NeoResistivityModel` is selected.
 | `eta_spitzer`          | Sauter 18a Spitzer resistivity [Ω·m]                   |
 | `tau_ee_spitzer_harm`  | electron-electron collision time τ_ee [s]              |
 | `eta_spitzer_harm`     | Fitzpatrick/TJ Spitzer-Härm resistivity 1/σ_∥ [Ω·m]    |
-| `trapped_fraction`     | Lin-Liu & Miller 1995 f_t from ⟨B⟩, ⟨B²⟩, B_min, B_max |
+| `trapped_fraction`     | exact pitch-angle integral f_t from ⟨B²⟩/B_max² and ⟨√(1 − λB/B_max)⟩ |
+| `trapped_fraction_nodes` | Gauss-Legendre pitch-angle nodes λ and weights for `trapped_fraction` |
+| `trapped_fraction_lin_liu_miller` | Lin-Liu & Miller 1995 f_t (OMFIT `fluxSurfaces` form)  |
 | `trapped_fraction_eps` | simple ε-only f_t fallback                             |
 | `nu_star_e`            | Sauter 18b electron collisionality                     |
 | `eta_neoclassical`     | dispatched: Spitzer(-Härm) or F_33 · Spitzer           |
@@ -35,10 +37,11 @@ physics when the same `NeoResistivityModel` is selected.
 module NeoclassicalResistivity
 
 using ..PhysicalConstants: EPS_0, M_E, E_CHG
+using FastGaussQuadrature: gausslegendre
 
 export NeoResistivityModel, SpitzerModel, SpitzerHarmModel, SauterNeoModel, RedlNeoModel
 export coulomb_log_e, eta_spitzer, tau_ee_spitzer_harm, eta_spitzer_harm
-export trapped_fraction, trapped_fraction_eps
+export trapped_fraction, trapped_fraction_nodes, trapped_fraction_lin_liu_miller, trapped_fraction_eps
 export nu_star_e, eta_neoclassical
 
 """
@@ -176,24 +179,58 @@ end
 # Trapped fraction
 
 """
-    trapped_fraction(avg_B, avg_Bsq, B_min, B_max) -> Float64
+    trapped_fraction_nodes(n=16) -> (lambda, weight)
 
-Lin-Liu & Miller 1995, Phys. Plasmas **2**, 1666, Eq. (6):
-
-```
-f_t = 1 − ⟨B⟩² / ⟨B²⟩ · (1 − √(1 − h) · (1 + h/2)),   h = B_min / B_max
-```
-
-Arguments are flux-surface averages and extrema of |B| on the surface.
+Pitch-angle nodes for [`trapped_fraction`](@ref): `n`-point Gauss-Legendre in x ∈ [0, 1] with λ = 1 − x², so that
+∫₀¹ λ g(λ) dλ ≈ Σₖ weight[k] g(lambda[k]). The x map removes the √ edge behavior at λ → 1; 16 nodes give f_t to ~1e-9.
 """
-function trapped_fraction(avg_B::Real, avg_Bsq::Real,
-    B_min::Real, B_max::Real)
-    B_max > 0 || throw(ArgumentError("trapped_fraction: B_max must be > 0"))
-    avg_Bsq > 0 || throw(ArgumentError("trapped_fraction: avg_Bsq must be > 0"))
-    h = clamp(B_min / B_max, 0.0, 1.0)
-    factor = 1.0 - sqrt(1.0 - h) * (1.0 + 0.5 * h)
-    ft = 1.0 - (avg_B^2 / avg_Bsq) * factor
-    return clamp(ft, 0.0, 1.0)
+function trapped_fraction_nodes(n::Integer=16)
+    x, w = gausslegendre(n)
+    x = 0.5 .* (x .+ 1.0)
+    w = 0.5 .* w
+    return 1.0 .- x .^ 2, w .* 2.0 .* x .* (1.0 .- x .^ 2)
+end
+
+"""
+    trapped_fraction(avg_h2, avg_sqrt, weight) -> Float64
+
+Exact trapped-particle fraction (Hirshman & Sigmar 1981, Nucl. Fusion **21**, 1079, Eq. 4.54):
+
+```
+f_t = 1 − ¾ ⟨h²⟩ ∫₀¹ λ dλ / ⟨√(1 − λh)⟩,   h = B/B_max
+```
+
+`avg_h2` = ⟨B²⟩/B_max², `avg_sqrt[k]` = ⟨√(1 − λₖ h)⟩ at the nodes of [`trapped_fraction_nodes`](@ref), whose weights
+are `weight`.
+"""
+function trapped_fraction(avg_h2::Real, avg_sqrt::AbstractVector{<:Real}, weight::AbstractVector{<:Real})
+    length(avg_sqrt) == length(weight) || throw(ArgumentError("trapped_fraction: avg_sqrt and weight lengths differ"))
+    all(>(0), avg_sqrt) || throw(ArgumentError("trapped_fraction: ⟨√(1 − λh)⟩ must be > 0"))
+    return clamp(1.0 - 0.75 * avg_h2 * sum(weight ./ avg_sqrt), 0.0, 1.0)
+end
+
+"""
+    trapped_fraction_lin_liu_miller(avg_B, avg_Bsq, B_max, avg_hf) -> Float64
+
+Lin-Liu & Miller 1995, Phys. Plasmas **2**, 1666: the weighted mean (Eqs. 18-19) of the upper (Eq. 4) and
+lower (Eq. 7) bounds,
+
+```
+f_tu = 1 − ⟨h²⟩/h̄² · (1 − √(1 − h̄) · (1 + h̄/2)),   h̄ = ⟨B⟩/B_max,   ⟨h²⟩ = ⟨B²⟩/B_max²
+f_tl = 1 − ⟨h²⟩ · ⟨(1 − √(1 − h) · (1 + h/2)) / h²⟩,   h = B/B_max
+f_t  = 0.75 f_tu + 0.25 f_tl
+```
+
+`avg_hf` is ⟨(1 − √(1 − h)(1 + h/2)) / h²⟩. Same form as OMFIT `fluxSurfaces`; within ~1e-3 of [`trapped_fraction`](@ref).
+"""
+function trapped_fraction_lin_liu_miller(avg_B::Real, avg_Bsq::Real, B_max::Real, avg_hf::Real)
+    B_max > 0 || throw(ArgumentError("trapped_fraction_lin_liu_miller: B_max must be > 0"))
+    avg_B > 0 || throw(ArgumentError("trapped_fraction_lin_liu_miller: avg_B must be > 0"))
+    h = clamp(avg_B / B_max, 0.0, 1.0)
+    h2 = avg_Bsq / B_max^2
+    f_tu = 1.0 - h2 / h^2 * (1.0 - sqrt(1.0 - h) * (1.0 + 0.5 * h))
+    f_tl = 1.0 - h2 * avg_hf
+    return clamp(0.75 * f_tu + 0.25 * f_tl, 0.0, 1.0)
 end
 
 """

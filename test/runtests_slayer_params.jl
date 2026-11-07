@@ -301,4 +301,23 @@
         @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=0.0)
         @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=Inf)
     end
+
+    @testset "trapped_fraction: exact pitch-angle integral and Lin-Liu & Miller" begin
+        using GeneralizedPerturbedEquilibrium.Utilities.NeoclassicalResistivity: trapped_fraction,
+            trapped_fraction_nodes, trapped_fraction_lin_liu_miller
+        # Model surface |B| = 1/(1 + ε cos θ), uniform θ average; reference f_t from a 400-node Gauss-Legendre integral.
+        theta = range(0, 2π; length=4097)[1:end-1]
+        avg(f) = sum(f) / length(f)
+        lambda, weight = trapped_fraction_nodes()
+        @test sum(weight) ≈ 0.5 atol = 1e-12          # ∫₀¹ λ dλ
+        for (eps, ft_ref) in ((0.05, 0.318778), (0.124, 0.482295), (0.27, 0.659837), (0.36, 0.729882), (0.6, 0.852351))
+            B = @. 1 / (1 + eps * cos(theta))
+            B_max = maximum(B)
+            h = B ./ B_max
+            ft = trapped_fraction(avg(h .^ 2), [avg(@. sqrt(1 - l * h)) for l in lambda], weight)
+            @test isapprox(ft, ft_ref; atol=2e-6)
+            avg_hf = avg(@. (1 - sqrt(1 - h) * (1 + h / 2)) / h^2)
+            @test isapprox(trapped_fraction_lin_liu_miller(avg(B), avg(B .^ 2), B_max, avg_hf), ft; atol=1e-3)
+        end
+    end
 end

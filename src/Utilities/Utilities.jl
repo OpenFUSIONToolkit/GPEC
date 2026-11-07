@@ -53,7 +53,7 @@ using .NeoclassicalResistivity
 export NeoclassicalResistivity
 export NeoResistivityModel, SpitzerModel, SpitzerHarmModel, SauterNeoModel, RedlNeoModel
 export coulomb_log_e, eta_spitzer, tau_ee_spitzer_harm, eta_spitzer_harm
-export trapped_fraction, trapped_fraction_eps
+export trapped_fraction, trapped_fraction_nodes, trapped_fraction_lin_liu_miller, trapped_fraction_eps
 export nu_star_e, eta_neoclassical
 
 end # module Utilities
