@@ -135,7 +135,9 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
     kwargs[:kinetic] = inertia
     matrices = Ref{Any}(nothing)   # the inertia bands, evaluated once and reused at every γ²
     last = Ref{Any}(nothing)
+    seen = Dict{Float64,Float64}()   # Brent re-evaluates its bracket ends; each γ² is one solve
     function lambda_at(gamma_sq)
+        haskey(seen, gamma_sq) && return seen[gamma_sq]
         kw = copy(kwargs)
         matrices[] === nothing || (kw[:kinetic] = matrices[])
         kw[:kinetic_factor] = gamma_sq
@@ -145,7 +147,7 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         last[] = r
         push!(history, (gamma_sq=Float64(gamma_sq), lambda=lambda_min(r), nzero=r.diagnostics.nzero))
         verbose && @info @sprintf("growth_rate: γ² = %.4e  λ_min = %.6e  nzero = %d", gamma_sq, history[end].lambda, history[end].nzero)
-        return history[end].lambda
+        return seen[Float64(gamma_sq)] = history[end].lambda
     end
 
     # Bracket by decades: down while already positive, up while still negative
