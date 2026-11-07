@@ -66,7 +66,7 @@ file = joinpath(out, @sprintf("zow_z%05d_c%02d%s.csv", zi, chunk, per_class ? "_
 open(file, "w") do io
     println(
         io,
-        "zi,psi,weight,envelope,forb_re,forb_im,replay_re,replay_im,fgar_re,fgar_im,forbB_re,forbB_im,replayB_re,replayB_im,table_s,integrals_s,segments,nstatus" *
+        "zi,psi,weight,envelope,forb_re,forb_im,replay_re,replay_im,fgar_re,fgar_im,forbB_re,forbB_im,replayB_re,replayB_im,table_s,integrals_s,segments,nstatus,samples" *
         (per_class ? ",cls" * join(("_$(m)$(v)_$(c)_$(p)" for m in ("forb", "replay") for v in ("", "B") for c in ("passing", "trapped") for p in ("re", "im")), ",cls") : "")
     )
     for j in mine
@@ -92,7 +92,7 @@ open(file, "w") do io
             io,
             join(
                 (zi, ψ, weights[j], env, real(To), imag(To), real(Tr), imag(Tr), real(Tf), imag(Tf), real(ToB), imag(ToB), real(TrB), imag(TrB),
-                    round(tb; digits=1), round(ti; digits=1), sum(length, so.orbit.segments), join(so.orbit.nstatus, ";"), (x for c in cls for x in (real(c), imag(c)))...), ",")
+                    round(tb; digits=1), round(ti; digits=1), sum(length, so.orbit.segments), join(so.orbit.nstatus, ";"), sum(s -> length(s.u), Iterators.flatten(so.orbit.segments); init=0), (x for c in cls for x in (real(c), imag(c)))...), ",")
         )
         flush(io)
         @printf("zi=%d ψ=%.4f table %.0f s, integrals %.0f s, |forb/replay−1| = %.2e\n", zi, ψ, tb, ti, abs(To / Tr - 1))
