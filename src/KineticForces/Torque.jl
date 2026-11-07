@@ -28,6 +28,8 @@ Toroidal torque from nonambipolar transport at one ψ and bounce harmonic `l`, w
   - `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
   - `surface`: Per-surface bundle from `_torque_surface`, shared across the bounce harmonics of
     one ψ; built here when not given
+  - `nutype`, `f0type`, `nufac`: Collision operator, equilibrium distribution and collisionality
+    factor passed to `calculate_gar` (the `[KineticForces]` keys `nutype`, `f0type`, `collisionality_factor`)
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
@@ -35,6 +37,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
     op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
     surface::Union{Nothing,NamedTuple}=nothing,
+    nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
     rex_override::Union{Nothing,Float64}=nothing,
     imx_override::Union{Nothing,Float64}=nothing,
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
@@ -80,6 +83,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
             B_vpar=surf.B_vpar, surface_field=surf.bf,
             smat=surf.smat_f, tmat=surf.tmat_f, xmat=surf.xmat_f,
             ymat=surf.ymat_f, zmat=surf.zmat_f,
+            nutype, f0type, nufac,
             energy_atol=atol_energy, energy_rtol=rtol_energy,
             pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
             rex_override=rex_override, imx_override=imx_override,
