@@ -24,6 +24,8 @@ const ORBIT_TAU_RETRY = 10.0
 const ORBIT_RTOL = 1e-8
 # ψ_N step of the central difference ∂ψ̄/∂ψ₀ at fixed (E, μ): ψ̄ noise ~1e-8 at ORBIT_RTOL, so the error is ~1e-5.
 const ORBIT_DPSI = 1e-3
+# Fallback steps for a neighbour that changes class or leaves the domain; noise in ∂ψ̄/∂ψ₀ grows to ~6e-4 at the last.
+const ORBIT_DPSI_STEPS = ORBIT_DPSI .* (1.0, 1 / 8, 1 / 64)
 
 """
     OrbitSegment
@@ -186,8 +188,8 @@ through every other node reproduces the rest to `energy_tol` of each quantity's 
 δJ_ℓ = R₀∮dτ [w²∇·ξ⊥ + (w² − ½λB/B₀)δB/B] e^{−in(2πζ − ⟨φ̇⟩t)} e^{−iℓω_b t}, with w = v∥/v and ζ = (φ − ν)/2π the
 straight-field-line toroidal angle, so the resonance is Ω = ℓω_b − n⟨φ̇⟩. With `potential`, `g` carries Φ and ω_E is
 part of ⟨φ̇⟩, so it is taken out of `wd`. Lost and axis segments carry nothing. Each sample also carries ψ̄, the drive
-factor ∂ψ̄/∂ψ₀ at fixed (E, μ) from two status-only orbits at ψ₀ ± `ORBIT_DPSI`, and the launch measure (see
-[`OrbitSegment`](@ref)). A finite `ebirth` (J) caps the energy range at the birth energy, √x ≤ √(ebirth/T_s).
+factor ∂ψ̄/∂ψ₀ at fixed (E, μ) from status-only orbits at ψ₀ ± `ORBIT_DPSI` (shorter steps where one changes class),
+and the launch measure (see [`OrbitSegment`](@ref)). A finite `ebirth` (J) caps the energy range at the birth energy, √x ≤ √(ebirth/T_s).
 """
 function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, psi::Float64, theta0::Float64,
     q::Float64, welec::Float64, mass::Float64, chrg::Float64, T_s::Float64, n::Int;
@@ -282,11 +284,20 @@ function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, 
         dj = zeros(nh)
         _orbit_action!(dj, o, g, intr, lam, n, lmax, divxfac, passing && o.dir_theta > 0, buf)
         wd = (-o.wphi + (passing ? o.dir_theta * q * o.wb : 0.0) - (potential ? welec : 0.0)) / x
-        # ∂ψ̄/∂ψ₀ at fixed (E, μ): central where both neighbours keep the class, else one-sided, else the sample is dropped.
+        # ∂ψ̄/∂ψ₀ at fixed (E, μ): each side takes the largest step of ORBIT_DPSI_STEPS whose neighbour keeps the class; a
+        # three-point difference where both sides do, else one-sided, else the sample is dropped.
         ψb(on) = on !== nothing && on.status == cls ? on.psibar : NaN
-        hp, hm = ψb(neighbour(u, ORBIT_DPSI)), ψb(neighbour(u, -ORBIT_DPSI))
-        dψ = !isnan(hp) && !isnan(hm) ? (hp - hm) / (2 * ORBIT_DPSI) : !isnan(hp) ? (hp - o.psibar) / ORBIT_DPSI :
-             !isnan(hm) ? (o.psibar - hm) / ORBIT_DPSI : NaN
+        function side(s)
+            for h in ORBIT_DPSI_STEPS
+                v = ψb(neighbour(u, s * h))
+                isnan(v) || return v, h
+            end
+            return NaN, NaN
+        end
+        (hp, sp), (hm, sm) = side(1), side(-1)
+        dψ =
+            !isnan(hp) && !isnan(hm) ? (sm^2 * (hp - o.psibar) + sp^2 * (o.psibar - hm)) / (sp * sm * (sp + sm)) :
+            !isnan(hp) ? (hp - o.psibar) / sp : !isnan(hm) ? (o.psibar - hm) / sm : NaN
         if isnan(dψ)
             nstatus[6] += 1
             return nothing
