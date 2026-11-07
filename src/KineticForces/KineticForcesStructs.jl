@@ -84,6 +84,10 @@ Immutable: vary a field by building a new control.
   - `orbit_nenergy::Int` - Starting √x nodes on each orbit-class segment of a `forb` pitch node and sign of v∥.
   - `orbit_energy_tol::Float64` - Relative error to which the `forb` segment samples are refined in √x.
   - `orbit_umax::Float64` - Top of the `forb` energy range in √x = √(E/T).
+  - `alpha::Bool` - Add the fusion alphas to the species sum: an isotropic slowing-down distribution whose source is the
+    D–T fusion rate of the D (z = 1, m = 2) and T (z = 1, m = 3) entries of `ion_species` (see [`alpha_species`](@ref)).
+    Torque methods only (fgar, forb and their variants); not in the calculated kinetic matrices. Default `false`.
+  - `alpha_birth_energy::Float64` - Birth energy of the alphas in eV. Default 3.52 MeV.
     Defaults 128 (the surface path's pitch grid) and 12.
 """
 @kwdef struct KineticForcesControl
@@ -153,6 +157,10 @@ Immutable: vary a field by building a new control.
     orbit_nenergy::Int = 12         # Starting √x nodes per orbit-class segment of forb
     orbit_energy_tol::Float64 = 1e-2 # Relative refinement tolerance of the forb √x samples
     orbit_umax::Float64 = 6.5       # Top of the forb energy range in √x
+
+    # Fusion alphas
+    alpha::Bool = false             # Add the D-T fusion-alpha NTV (isotropic slowing-down distribution)
+    alpha_birth_energy::Float64 = 3.52e6 # Alpha birth energy [eV]
 end
 
 """
@@ -453,6 +461,8 @@ Results for one NTV computation method across all flux surfaces.
     # ψ-quadrature panel boundaries and the located kinetic-resonance surfaces (first n)
     panel_psis::Vector{Float64} = Float64[]
     resonance_psis::Vector{Float64} = Float64[]
+    # forb only: lost share of the launch phase space at each `psi_grid` point (see `OrbitSurfaceTable`)
+    lost_fraction::Vector{Float64} = Float64[]
 end
 
 """

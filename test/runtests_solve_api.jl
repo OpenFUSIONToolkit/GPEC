@@ -643,5 +643,29 @@ using HDF5
                 end
             end
         end
+
+        @testset "alpha torque" begin
+            # The alpha species of a D-T deck, on both torque paths; a low birth energy keeps the TJ orbits confined and the case fast.
+            mi_dir = joinpath(@__DIR__, "..", "examples", "TJ_kinetic_multiion_example")
+            mktempdir() do dir
+                for name in readdir(mi_dir)
+                    cp(joinpath(mi_dir, name), joinpath(dir, name))
+                end
+                deck = TOML.parsefile(joinpath(dir, "gpec.toml"))
+                foreach(k -> delete!(deck, k), ("LocalStability", "Ballooning"))
+                deck["Run"]["verbose"] = false
+                deck["KineticForces"] = Dict{String,Any}("alpha" => true, "alpha_birth_energy" => 1e5, "forb_flag" => true, "orbit_nlambda" => 4,
+                    "orbit_nenergy" => 6, "orbit_energy_tol" => 5e-2, "psilims" => [0.49, 0.51])
+                open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
+                reference = GPEC.main([dir])
+                kf = kinetic_torque(reference.pe, GPEC.kinetic_forces_control(deck))
+                ref_alpha = Dict(reference.kinetic.species)["alpha"].method_results
+                for (method, r) in Dict(kf.species)["alpha"].method_results
+                    @test r.total_torque == ref_alpha[method].total_torque
+                    @test isfinite(r.total_torque) && r.total_torque != 0
+                end
+                @test !isempty(ref_alpha["forb"].lost_fraction)
+            end
+        end
     end
 end
