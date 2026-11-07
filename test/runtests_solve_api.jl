@@ -621,6 +621,13 @@ using HDF5
                 for (method, r) in kf.total.method_results
                     @test r.total_torque == reference.kinetic.total.method_results[method].total_torque
                 end
+
+                # The collision keys reach the torque path: a zero collisionality factor is the collisionless operator.
+                kf_with(kw...) =
+                    kinetic_torque(reference.pe, GPEC.kinetic_forces_control(merge(ntv_deck, Dict("KineticForces" => merge(ntv_deck["KineticForces"], Dict{String,Any}(kw...))))))
+                t_zero = kf_with("nutype" => "zero").total.method_results["fgar"].total_torque
+                @test t_zero != reference.kinetic.total.method_results["fgar"].total_torque
+                @test t_zero ≈ kf_with("collisionality_factor" => 0.0).total.method_results["fgar"].total_torque rtol = 1e-6
                 @test kf.axis_psi_c == reference.kinetic.axis_psi_c
 
                 api_file = joinpath(dir, "api.h5")
