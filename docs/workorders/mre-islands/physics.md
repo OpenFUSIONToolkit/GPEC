@@ -16,7 +16,7 @@ Steady form; the time prefactor does not change the roots and is not implemented
 
   F(w) = s<sub>Δ</sub> Δ′(w) + s<sub>nc</sub> Δ<sub>nc</sub>(w) + s<sub>GGJ</sub> Δ<sub>GGJ</sub>(w) + s<sub>pol</sub> Δ<sub>pol</sub>(w; ω) + s<sub>vac</sub> Δ<sub>vac</sub>(w)
 
-s<sub>i</sub> ∈ {0, 1} are deck switches; each term has the coefficients listed with it, all exposed in `[Tearing.ModifiedRutherford]`. Source: benjaminMacroscopicTrendsNeoclassical2026 Eq. 7 (p. 4) and Leuthold JPP 2026 Eq. 4.6, which agree; Δ<sub>pol</sub> from Benjamin App. C; Δ<sub>vac</sub> from Callen 2016 and Sweeney 2020 §2.2.
+s<sub>i</sub> ∈ {0, 1} are deck switches; each term has the coefficients listed with it, all exposed in `[Tearing.ModifiedRutherford]`. Source: benjaminMacroscopicTrendsNeoclassical2026a Eq. 7 (p. 4) and Leuthold JPP 2026 Eq. 4.6, which agree; Δ<sub>pol</sub> from Benjamin App. C; Δ<sub>vac</sub> from Callen 2016 and Sweeney 2020 §2.2.
 
 ### 1a. Classical term with finite-pressure correction
 
