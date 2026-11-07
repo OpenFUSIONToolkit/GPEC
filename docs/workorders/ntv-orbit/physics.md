@@ -1,11 +1,13 @@
 # physics.md — orbit-averaged kinetic energy and NTV torque
 
-**Status: v1, signed (Q4 answer B, 2026-11-05).** v0 was written at hand-off;
+**Status: v2 (Q14 answer A, 2026-11-07); v1 signed (Q4 answer B, 2026-11-05).** v0 was written at hand-off;
 its [VERIFY] items were resolved in the M0 card Q4 and Nik signed with two
 exceptions, both resolved here: the finite-β (∇p) physics is kept (§2, §3) and
 the electrostatic potential is in the orbit (§2, §4). The beam distribution of
 card Q7 (answer B) is in §6. From here this file changes only through a
-Decisions card.
+Decisions card. v2 (Q14 answer A, 2026-11-07): the Jacobian from `rzphi_jac`
+and the closure by poloidal winding (§2), the phase-space measure as M3's
+first task (§3), the E×B ordering as Rω_E ≪ v_t (§4).
 
 Equations are transcribed in the code's conventions where the code has one
 (see `code_map.md`): ψ is the normalized poloidal flux ψ_N ∈ [0, 1] with
@@ -62,9 +64,11 @@ White & Chance 1984 Eq. 16 and Antonenas 2021 Eq. 2.3 have the same form.
 
 Coordinates are (ψ_N, θ, φ) with θ the equilibrium's straight-field-line
 angle on [0, 1) and φ the geometric toroidal angle (so g_ψφ = g_θφ = 0 and the
-ν offset never enters). The metric, the Jacobian 𝒥 = R(R_θ Z_ψ − R_ψ Z_θ) and
-the covariant b_i = B_i/B come from R(ψ, θ), Z(ψ, θ) (`rzphi_rsquared`,
-`rzphi_offset`); B^θ = s psio/𝒥, B^φ = F/R², B_ψ = g_ψθ B^θ, B_θ = g_θθ B^θ.
+ν offset never enters). The metric and the covariant b_i = B_i/B come from
+R(ψ, θ), Z(ψ, θ) (`rzphi_rsquared`, `rzphi_offset`); the Jacobian 𝒥 comes from
+`rzphi_jac`, as on the surface path (v2, Q14 A: 𝒥 rebuilt as
+R(R_θ Z_ψ − R_ψ Z_θ) from the R, Z map is rough in θ near the edge and caused
+the M2 attempt-2 floors; the sign is fixed by the rebuilt form); B^θ = s psio/𝒥, B^φ = F/R², B_ψ = g_ψθ B^θ, B_θ = g_θθ B^θ.
 ∇×b is taken numerically from the covariant b_i, so the curvature, the ∇p
 part of it and the parallel current all enter as the equilibrium has them.
 There is no low-β drift formula anywhere in the orbit.
@@ -88,10 +92,17 @@ with (ψ₀, λ, x, σ): kinetic energy E_k = x T at ψ₀, μ = λ E_k/B₀, v�
 √(1 − λB/B₀). This fixes (E, μ, P_φ) and makes the ZOW comparison at the
 same (ψ, λ) direct.
 
-**Classification.**
-- trapped: v∥ changes sign along the orbit; the period is the return to θ₀
-  in the starting direction,
-- passing: θ advances by ±1 with no sign change of v∥,
+**Classification** (v2, Q14 A). An orbit is closed at its first return to
+θ ≡ θ₀ (mod 1) at ψ₀ in the start direction; τ is that return time. Its class
+is the net poloidal winding k over one period:
+- trapped: k = 0, weight ½ in the launch-section sum,
+- passing: k = ±1, weight 1,
+
+which equals 1/(crossings of the start section per period) for every orbit
+seen so far; the code records the crossings and the general weight is part of
+the measure (§3). This covers the E×B-modified orbits (trapped about
+v∥ ≈ −Rω_E without v∥ reversal, and magnetically trapped orbits carried round
+in θ by E×B), potato and stagnation orbits, which a v∥-reversal test misplaces.
 - lost: ψ reaches `psilim`,
 - axis: ψ reaches the innermost grid surface (flux coordinates are singular
   there); counted, not used; their share is reported.
@@ -139,8 +150,10 @@ today's (ψ, λ, x) grid), splined in √x, and the Sokhotski–Plemelj add-back
 reused with the pole from a root solve on the interpolated Ω(x).
 
 Phase-space measure: Gorelenkov 1999 Eq. 22 (check the denominator against
-the PDF in M2), normalized so the new path's integral reproduces
-`tnorm`∫dψ in the ZOW limit.
+the PDF), normalized so the new path's integral reproduces `tnorm`∫dψ in the
+ZOW limit. v2 (Q14 A): the factor |∂P_φ/∂ψ₀| per orbit at fixed (E, μ),
+analytic at the launch point, is M3's first task, with the M3 check that it
+goes to 1 at zero orbit width.
 
 ## 4. The drive and the electric potential
 
@@ -161,9 +174,11 @@ and is −1/(Z e s psio) in ZOW.
 φ̇ = ∂H/∂P_φ ⊃ ZeΦ′ ∂ψ/∂P_φ), integrated from the axis. Φ is in the orbit
 (the Hamiltonian above), so the E×B drift is part of ⟨φ̇⟩ along the orbit and
 an orbit that straddles an ω_E zero sees its average, which is the mechanism
-behind the edge part of KR2. The ordering is the usual drift-kinetic one:
-E×B speed small against the thermal speed (no centrifugal or Coriolis
-terms). Φ is a switch (`orbit_potential`, default on; Q8 A: KR2 shows Φ on, with Φ off as a
+behind the edge part of KR2. The ordering is the usual drift-kinetic one
+(no centrifugal or Coriolis terms), stated as Rω_E ≪ v_t, the toroidal E×B
+speed against the thermal speed, which is what sets the orbit topology (v2,
+Q14 A). The TJ test case rotates at Rω_E ≈ v_t, so TJ with Φ on is a
+classifier test only, not a zero-orbit-width comparison. Φ is a switch (`orbit_potential`, default on; Q8 A: KR2 shows Φ on, with Φ off as a
 comparison panel); off reproduces the v0 orbit.
 
 ## 5. Lost orbits
@@ -246,7 +261,7 @@ Method name `ogar` and the HDF5 group follow the registry convention in `Kinetic
 - Guiding-center (no FLR): ρ/Δ_b ~ √ε/q.
 - Collisions: the same Krook-harmonic model as the existing path, applied with the orbit's ω_b; no collisional orbit-width broadening beyond that.
 - Orbits computed in the axisymmetric equilibrium of the GPEC run; the TokaMaker field scan must keep that equilibrium's q and β (M4 check 1).
-- Electrostatic potential in the orbit with the drift-kinetic ordering (E×B speed ≪ thermal speed); no centrifugal or Coriolis terms.
+- Electrostatic potential in the orbit with the drift-kinetic ordering (Rω_E ≪ v_t); no centrifugal or Coriolis terms.
 - Near the axis, potato orbits are resolved only as far as the (λ, P_φ) grid allows; the paper does not claim axis behavior.
 
 ## 9. Where sources disagree
