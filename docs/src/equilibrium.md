@@ -88,7 +88,7 @@ The group is written once `[ForceFreeStates]` has run, on the grid of the solve.
 | Dataset | Meaning | Units |
 |---|---|---|
 | `Equilibrium/R_axis`, `Z_axis`, `B_T_axis`, `R_mean`, `a_mean`, `aspect_ratio`, `kappa`, `delta_upper`, `delta_lower` | axis position and field, mean radii and shape parameters | m, T |
-| `Equilibrium/I_p`, `volume` | plasma current and volume | A, m³ |
+| `Equilibrium/I_p`, `volume` | plasma current and volume | MA, m³ |
 | `Equilibrium/beta_N`, `beta_t`, `beta_p_1`, `l_i_1`, … | normalized, toroidal and poloidal beta and internal inductance | |
 | `Equilibrium/q_axis`, `q_95`, `q_edge`, `q_min`, `q_max`, `q_extrema_psi` | the safety factor at the axis, the 95% surface and the edge, and its extrema | |
 | `Equilibrium/psi_boundary`, `psi_total`, `I_p_sign`, `B_T_sign` | the flux normalization and the sign conventions of the file | |

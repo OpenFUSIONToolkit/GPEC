@@ -81,9 +81,16 @@ using .ForcingTerms: RMPField
 using .PerturbedEquilibrium: plasma_response, perturbed_equilibrium, PlasmaResponse
 using .KineticForces: kinetic_torque, KineticForcesControl, KineticForcesResult
 using .ErrorFields: error_fields, ErrorFieldsResult
+# The plots and `available_plots`, so one `using` reaches every figure.
+for name in names(Analysis)
+    name === :Analysis && continue
+    @eval using .Analysis: $name
+    @eval export $name
+end
 
 using .ForceFreeStates: ForceBalanceProblem, kinetic_matrices, _prepare_solve, maybe_reform_equilibrium, ForceFreeStatesControl, kinetic_source
 include("Deck.jl")
+include("Display.jl")
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Every input source builds a ready `(inputs, eq_config, additional_input)` and hands it to
@@ -191,7 +198,9 @@ function main_from_inputs(
 
     if deck.perturbed_equilibrium !== nothing
         pe = _timed_stage(runtimes, "perturbed_equilibrium", "Perturbed Equilibrium") do
-            perturbed_equilibrium(plasma_response(ffs; verbose, deck.perturbed_equilibrium.response...), RMPField(deck.forcing);
+            # A replay from stored coil geometry skips the source checks: the geometry files they read may be gone.
+            rmp = preloaded_coil_sets === nothing ? RMPField(deck.forcing) : ForcingTerms.RMPSource(deck.forcing, 1)
+            perturbed_equilibrium(plasma_response(ffs; verbose, deck.perturbed_equilibrium.response...), rmp;
                 coil_sets=preloaded_coil_sets, verbose, deck.perturbed_equilibrium.drive...)
         end
         resp = pe.response
@@ -307,6 +316,7 @@ export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestK
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
+export available_plots
 
 include("Precompile.jl")
 

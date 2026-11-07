@@ -11,9 +11,10 @@
 #
 # Figure scripts run MANUALLY in the root project, never at docs-build time:
 #     julia --project=. docs/src/figures/<module>/make_<name>.jl
-# so the Documenter build stays fast and Plots-free.
+# with CairoMakie in the global environment, so the Documenter build stays fast
+# and free of plotting packages.
 
-using Plots
+using CairoMakie
 using Dates
 using TOML
 
@@ -46,50 +47,41 @@ function figure_provenance()
 end
 
 """
-    stamp!(p; commit, date, subplot=length(p.subplots))
+    stamp!(fig; commit, date)
 
-Annotate a small `GPEC <commit> · <date>` provenance mark in the bottom-right
-corner of subplot `subplot` (default: the last panel), so the figure's age is
-visible when browsing the rendered docs. Works on linear or log axes
-(positions in data coordinates). Never throws: a plotting hiccup warns and
-leaves the figure unstamped rather than losing the plot.
+Add a small `GPEC <commit> · <date>` provenance mark in a row below the figure's
+layout, right-aligned, so the figure's age is visible when browsing the rendered
+docs. Never throws: a layout hiccup warns and leaves the figure unstamped rather
+than losing the plot.
 """
-function stamp!(p::Plots.Plot; commit::AbstractString, date::AbstractString,
-    subplot::Int=length(p.subplots))
+function stamp!(fig::Figure; commit::AbstractString, date::AbstractString)
     try
-        sp = p[subplot]
-        xl = Plots.xlims(sp)
-        yl = Plots.ylims(sp)
-        xpos = xl[2]                                          # right edge (data coords)
-        ypos = yl[1]                                          # bottom edge
-        txt = Plots.text("GPEC $(commit) · $(date)", 6, RGBA(0.5, 0.5, 0.5, 0.9),
-            :right, :bottom)
-        annotate!(sp, xpos, ypos, txt)
+        Label(fig[end+1, :], "GPEC $(commit) · $(date)"; fontsize=9, color=(:gray50, 0.9), halign=:right, tellwidth=false)
     catch err
         @warn "stamp! failed; saving figure without provenance mark" exception = err
     end
-    return p
+    return fig
 end
 
 """
-    save_doc_figure(p, mod, name; script, depends, npx...) -> String
+    save_doc_figure(fig, mod, name; script, depends) -> String
 
-Stamp `p` with the current git provenance, save it to
+Stamp `fig` with the current git provenance, save it to
 `docs/src/figures/<mod>/<name>.png`, and upsert its `manifest.toml` entry
 (`script`, `commit`, `date`, `depends`). `depends` lists the repo-relative
 source files whose numbers the figure visualizes — the regeneration policy in
 `docs/DOC_STANDARD.md` keys off them. Returns the absolute PNG path (printed
-so it can be opened directly). Extra keyword args are forwarded to `savefig`.
+so it can be opened directly).
 """
-function save_doc_figure(p::Plots.Plot, mod::AbstractString, name::AbstractString;
+function save_doc_figure(fig::Figure, mod::AbstractString, name::AbstractString;
     script::AbstractString, depends::AbstractVector{<:AbstractString}=String[])
     prov = figure_provenance()
-    stamp!(p; commit=prov.commit, date=prov.date)
+    stamp!(fig; commit=prov.commit, date=prov.date)
 
     outdir = joinpath(FIGURES_ROOT, mod)
     mkpath(outdir)
     outpath = joinpath(outdir, name * ".png")
-    savefig(p, outpath)
+    save(outpath, fig)
 
     _update_manifest!(mod, name; script=String(script), commit=prov.commit,
         date=prov.date, depends=String.(depends))

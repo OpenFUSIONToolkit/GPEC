@@ -40,8 +40,9 @@ Optional fields are `Union{Nothing,T}` and follow a presence-equals-capability r
 consumer that needs one gates on [`require`](@ref) (or [`require_solution`](@ref) for the
 ξ profiles) and warns-and-skips rather than erroring, so a result from an integrator that
 cannot supply a given product still flows through the pipeline. PerturbedEquilibrium refuses
-Galerkin and `:matched` results instead, since they publish no `free_boundary` yet.
+`:matched` results, whose singular coupling is not defined yet, and Galerkin results without `free_boundary`.
 
+Every final result records how its basis crosses the rational surfaces, so bpen and closure are always present.
 A Forward or Riccati solve applies the ideal jump condition at the rationals; a Galerkin solve
 is ideal-closed by its EF columns (`error_field_response`), and is unclosed without them.
 
@@ -57,11 +58,11 @@ is ideal-closed by its EF columns (`error_field_response`), and is unclosed with
   - `metric::MetricData`, `mats::MatrixSplines` - Metric data and Euler-Lagrange matrix interpolants.
   - `surfaces::Vector{SingType}` - Ideal singular surfaces in the integration domain, with asymptotic bases and GGJ coefficients.
   - `kinetic::NamedTuple` - Kinetic singular-surface scan (`kmsing`, `kinsing`, `scan_psi`, `scan_cond`, `scan_threshold`); empty unless the finder ran.
-  - `closure::Symbol` - How the basis is closed at the rationals: `:ideal` (the ideal jump
-    condition was imposed) or `:matched` (an inner-layer solution was matched in). A matched
-    result carries the matched edge response as `wp`.
+  - `closure::Symbol` - How the basis crosses the rationals: `:ideal` (the ideal jump
+    condition was imposed), `:regular` (kinetic terms regularize the force balance equations so no closure is needed) or
+    `:matched` (an inner-layer solution was matched in). A `:matched` result carries the matched edge response as `wp`.
   - `bpen::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated resonant field from the
-    inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` closure.
+    inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` and `:regular` closure.
   - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
     formalism produced none (Riccati, and Galerkin without `error_field_response`).
@@ -187,9 +188,9 @@ end
     build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
         -> ForceFreeStatesResult
 
-Assemble the published result once the solve is finished, with the ideal closure (a `MatchProblem`
-solve transforms it afterwards). Materializes the forward path's derivative stores, packs the Galerkin
-EF columns as the solution, and forms `W_p` when the free-boundary stage did not run; everything else
+Assemble the published result once the solve is finished, with the ideal or regular closure (a
+`MatchProblem` solve transforms it afterwards). Materializes the forward path's derivative stores, packs the
+Galerkin EF columns as the solution, and forms `W_p` when the free-boundary stage did not run; everything else
 is copied or aliased.
 
 `odet` is the ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` are the Galerkin internals and
@@ -234,7 +235,7 @@ function build_result(
     kinetic = (kmsing=intr.kmsing, kinsing=intr.kinsing, scan_psi=intr.kinsing_scan_psi,
         scan_cond=intr.kinsing_scan_cond, scan_threshold=intr.kinsing_scan_threshold)
 
-    closure = :ideal
+    closure = ctrl.kinetic === nothing ? :ideal : :regular
     bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
 
     # Fixed-boundary plasma energy matrix at the edge; free of any vacuum dependence, so a

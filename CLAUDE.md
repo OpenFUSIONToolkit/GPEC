@@ -121,7 +121,9 @@ Roster, the recommended review pipeline (physics fidelity → readability → pe
 - **Default output**: `gpec.h5` (previously `euler.h5` in older versions)
 
 ### Plotting
-Spectrum-plot (`seriestype=:steppre` / `step_series`) and figure-saving conventions are in **[`docs/development/plotting.md`](docs/development/plotting.md)** — read before writing any plotting code.
+Figures are drawn with Makie through the package extension `ext/GPECMakieExt/`. Read **[`docs/development/plotting.md`](docs/development/plotting.md)** before writing any plotting code: it has the figure conventions and the guide to adding an Analysis plot. In short, Analysis plots are added sparingly (frequent everyday-workflow figures only, approved by a human), and each is registered, follows the shared theme, carries little text, and throws an `ArgumentError` when its data are absent. Never offer to add an Analysis plot unprompted.
+
+**REPL summaries.** `src/Display.jl` gives every result type a one-line `show` and a short `text/plain` summary. A new result type gets both, plus an entry in `_DISPLAY_FIELDS`; a new field on a summarized type is classified there as shown or omitted, which `test/display_check.jl` enforces.
 
 ### Subagent Consultations
 

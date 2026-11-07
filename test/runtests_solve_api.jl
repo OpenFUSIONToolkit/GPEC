@@ -1,5 +1,6 @@
 using TOML
 using HDF5
+include("display_check.jl")
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
 # same pipeline the TOML driver does. Every assertion is anchored on the coarse TJ fixture
@@ -98,6 +99,7 @@ using HDF5
         ideal = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
 
         @test scaled.mats.kinetic !== nothing && ideal.mats.kinetic === nothing
+        @test scaled.closure === :regular && ideal.closure === :ideal && iszero(scaled.bpen)
         @test !isapprox(scaled.free_boundary.et[1], ideal.free_boundary.et[1]; rtol=1e-6)
         @test factored.free_boundary.et[1] ≈ scaled.free_boundary.et[1] rtol = 1e-10
         @test factored.kinetic.kmsing == scaled.kinetic.kmsing
@@ -280,10 +282,19 @@ using HDF5
         end
     end
 
+    # A forcing-mode table and its HDF5 twin, for the construction checks.
+    forcing_dir = mktempdir()
+    table = joinpath(forcing_dir, "forcing.dat")
+    write(table, "# normalization: normal_field_T\n1 2 1e-4 0.0\n1 3 5e-5 0.0\n")
+    table_h5 = joinpath(forcing_dir, "forcing.h5")
+    h5open(table_h5, "w") do f
+        f["n"], f["m"], f["amplitude_real"], f["amplitude_imag"] = [1, 1], [2, 3], [1e-4, 5e-5], [0.0, 0.0]
+    end
+
     @testset "RMPField algebra is lazy and flattens" begin
-        a = RMPField("a.dat")
-        b = RMPField("b.dat"; scale=0.5)
-        c = RMPField("c.dat")
+        a = RMPField(table)
+        b = RMPField(table; scale=0.5)
+        c = RMPField(table_h5)
         s = a + b
         @test s isa GPEC.ForcingTerms.RMPFieldSum
         @test length(s.terms) == 2
@@ -295,18 +306,37 @@ using HDF5
         @test (a * 3).scale == 3.0 + 0.0im
         @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
+        @test repr(a) == "RMPField(forcing.dat (ascii))" && repr(3 * a) == "RMPField(3 × forcing.dat (ascii))"
+        @test occursin("-0.5im × forcing.h5 (hdf5)", repr(MIME"text/plain"(), a - 0.5im * c))
     end
 
     @testset "RMPField infers its format and carries its scale" begin
-        @test RMPField("forcing.dat").ctrl.forcing_data_format == "ascii"
-        @test RMPField("forcing.h5").ctrl.forcing_data_format == "hdf5"
-        @test RMPField("forcing.dat"; format="hdf5").ctrl.forcing_data_format == "hdf5"
-        @test isabspath(RMPField("forcing.dat").ctrl.forcing_data_file)
-        @test RMPField("forcing.dat"; scale=3.0).scale == 3.0
-        coil_field = RMPField(Dict{String,Any}[Dict{String,Any}("name" => "iu")]; machine="d3d")
+        @test RMPField(table).ctrl.forcing_data_format == "ascii"
+        @test RMPField(table_h5).ctrl.forcing_data_format == "hdf5"
+        @test isabspath(RMPField(table).ctrl.forcing_data_file)
+        @test RMPField(table; scale=3.0).scale == 3.0
+        # One coil set or several, as NamedTuples or Dicts with the [[ForcingTerms.coil_set]] keys.
+        c_coil = (name="c", currents=[1e3, 500, -500, -1e3, -500, 500])
+        coil_field = RMPField(c_coil; machine="d3d")
         @test coil_field.ctrl.forcing_data_format == "coil"
         @test coil_field.ctrl.machine == "d3d"
-        @test length(coil_field.ctrl.coil_sets_raw) == 1
+        @test coil_field.ctrl.coil_sets_raw == [Dict{String,Any}("name" => "c", "currents" => c_coil.currents)]
+        @test length(RMPField([c_coil, Dict("name" => "iu", "currents" => fill(1e3, 6))]; machine="d3d").ctrl.coil_sets_raw) == 2
+        @test repr(coil_field) == "RMPField(d3d coils c)"
+    end
+
+    @testset "RMPField checks its source when built" begin
+        @test_throws "no forcing file" RMPField(joinpath(forcing_dir, "missing.dat"))
+        geometry = joinpath(pkgdir(GPEC), "src", "ForcingTerms", "coil_geometries", "d3d_c.dat")
+        @test_throws "is not a forcing-mode table" RMPField(geometry)
+        @test_throws "is not a forcing-mode table" RMPField(table; format="hdf5")
+        @test_throws "is not \"ascii\", \"hdf5\" or \"coil\"" RMPField(table; format="csv")
+        @test_throws "has no currents" RMPField((name="c",); machine="d3d")
+        @test_throws "currents for its 6 conductors" RMPField((name="c", currents=ones(7)); machine="d3d")
+        @test_throws "pass machine" RMPField((name="c", currents=ones(6)))
+        @test_throws "unknown keys" RMPField((name="c", curents=ones(6)); machine="d3d")
+        @test_throws "a coil set is a Dict or NamedTuple" RMPField([1, 2])
+        @test_throws "at least one forcing mode" RMPField(GPEC.ForcingTerms.ForcingMode[])
     end
 
     @testset "rejected keyword combinations" begin
@@ -653,6 +683,7 @@ using HDF5
                 open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
                 @test reference.kinetic isa KineticForcesResult && reference.kinetic.pe === reference.pe
+                _check_display(reference.kinetic)
 
                 kf = kinetic_torque(reference.pe, GPEC.kinetic_forces_control(ntv_deck))
                 @test sort!(collect(keys(kf.total.method_results))) == sort!(collect(keys(reference.kinetic.total.method_results)))
