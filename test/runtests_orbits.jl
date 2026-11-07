@@ -112,6 +112,10 @@ using QuadGK
         p = KF.EnergyParams(1.0, 0.7, -0.4, 0.0, 0.0, 0.0, 0.0, 1, "harmonic", "slowingdown", 1.0, false; xb=12.0)
         @test 2 / sqrt(π) * quadgk(x -> KF._energy_weight(x, p) * sqrt(x), 0, 12; rtol=1e-12)[1] ≈ 1 rtol = 1e-10
         @test KF._energy_weight(12.5, p) == 0
+        # Pressure moment p/(n E_c) = (x_b − I)/L, I = ∫₀^{x_b} dx/(1 + x^{3/2}) in closed form with t = √x.
+        F(t) = -log1p(t) / 3 + log(t^2 - t + 1) / 6 + atan((2t - 1) / sqrt(3)) / sqrt(3)
+        I = 2 * (F(sqrt(12.0)) - F(0.0))
+        @test 4 / (3 * sqrt(π)) * quadgk(x -> KF._energy_weight(x, p) * x^1.5, 0, 12; rtol=1e-12)[1] ≈ (12 - I) / log1p(12^1.5) rtol = 1e-10
         for x in (0.2, 3.0, 9.0)
             h = 1e-6 * x
             fd = (KF._energy_numerator(x + h, p) - KF._energy_numerator(x - h, p)) / 2h
