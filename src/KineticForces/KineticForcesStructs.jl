@@ -234,6 +234,8 @@ perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles
     # Upper ψ bound (FFS psilim); the perturbation interpolants are invalid beyond it,
     # so the outer ψ quadrature clips here.
     psilim::Float64 = 1.0
+    # Lower ψ bound: the first ψ of the perturbation data, above psilow when FFS starts at qlow.
+    psilow::Float64 = 0.0
 
     # Rational-surface ψ locations for ψ-quadrature paneling (see docstring).
     sing_psis::Vector{Float64} = Float64[]
@@ -325,6 +327,7 @@ function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state::Pertur
     xi_modes = pe_state.xi_modes
     psi_grid = pe_state.psi_grid
     npsi = length(psi_grid)
+    kf_intr.psilow = psi_grid[1]
     mpert = ffs.mpert
 
     # Build xs_m: 3 CubicSeriesInterpolants from Clebsch displacement matrices

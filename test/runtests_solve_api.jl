@@ -641,6 +641,13 @@ using HDF5
                         @test isequal(read(api_h5["KineticForces/Orbits/wb"]), read(deck_h5["KineticForces/Orbits/wb"]))
                     end
                 end
+
+                # With qlow above q0 the response starts off axis, and the torque quadrature starts with it.
+                ntv_deck["ForceFreeStates"]["qlow"] = 1.9
+                open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
+                raised = GPEC.main([dir])
+                @test raised.pe.psi_grid[1] > ntv_deck["Equilibrium"]["psilow"]
+                @test minimum(raised.kinetic.total.method_results["fgar"].psi_grid) >= raised.pe.psi_grid[1]
             end
         end
 
