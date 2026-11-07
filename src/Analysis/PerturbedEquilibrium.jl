@@ -328,7 +328,7 @@ function _plot_perturbed_field_rz end
 function _plot_islands end
 
 """
-    plot_perturbed_field_rz(pe; component=:b_n, phi=0.0, deform=false, save_path=nothing)
+    plot_perturbed_field_rz(pe; component=:b_n, phi=0.0, deform=false, clip=0.9, save_path=nothing)
 
 Plot the perturbed normal field b_n or normal displacement ξ_n on the poloidal plane at toroidal angle φ, drawn on the
 flux-surface grid with the rational surfaces outlined; with `deform`, also the boundary displaced along its normal by
@@ -343,17 +343,19 @@ a scaled ξ_n over the equilibrium outline.
   - `component`: `:b_n` (T, default) or `:xi_n` (m)
   - `phi`: Toroidal angle in radians (default: `0.0`)
   - `deform`: Draw the displaced boundary, scaled so its largest displacement is 5 % of the minor radius (default: `false`)
+  - `clip`: Quantile of |value| that sets the symmetric colour range; larger values saturate. `1` shows the full range (default: `0.9`)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_perturbed_field_rz(pe::PerturbedEquilibriumState; component=:b_n, phi=0.0, deform=false, save_path=nothing)
+function plot_perturbed_field_rz(pe::PerturbedEquilibriumState; component=:b_n, phi=0.0, deform=false, clip=0.9, save_path=nothing)
     _require(plot_perturbed_field_rz, pe)
+    0 < clip <= 1 || throw(ArgumentError("plot_perturbed_field_rz: clip must be in (0, 1], got $clip"))
     d = _poloidal_data(pe, component; phi)
     boundary = deform ? _boundary_displacement(pe; phi) : nothing
-    return _draw(_plot_perturbed_field_rz, d, component, boundary; save_path)
+    return _draw(_plot_perturbed_field_rz, d, component, boundary; clip, save_path)
 end
 
 """

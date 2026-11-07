@@ -194,15 +194,18 @@ function _display_scale(R, xi; frac=0.05)
     return max(1, round(Int, floor(s / p) * p))
 end
 
-# b_n or ξ_n on the poloidal plane in `gl`, with its colourbar, and the displaced boundary when given.
-function _field_rz_panel!(gl, d, component, boundary)
+# b_n or ξ_n on the poloidal plane in `gl`, with its colourbar, and the displaced boundary when given. The colour range
+# is ±the `clip` quantile of |value|.
+function _field_rz_panel!(gl, d, component, boundary; clip=0.9)
     glyph, unit = _NORMAL_STYLE[component]
-    values, scale = _decade(d.values)
+    a = sort!(abs.(vec(d.values)))
+    lim = a[clamp(ceil(Int, clip * length(a)), 1, length(a))]
+    factor, scale = _power([lim])
     title =
         boundary === nothing ? rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°") :
         rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°: largest boundary |ξ", subscript("n"), "| = ", _num(1e3 * maximum(abs, boundary.xi)), " mm")
     ax = Axis(gl[1, 1]; title)
-    hm = _poloidal_slice!(ax, d.R, d.Z, values; outlines=d.outlines)
+    hm = _poloidal_slice!(ax, d.R, d.Z, d.values ./ factor; lim=lim / factor, outlines=d.outlines)
     Colorbar(gl[1, 2], hm; label=rich(glyph, _unit(scale, unit)))
     # The column takes the plasma's own width-to-height ratio, so the panel leaves no empty band beside it.
     colsize!(gl, 1, Aspect(1, (maximum(d.R) - minimum(d.R)) / (maximum(d.Z) - minimum(d.Z))))
@@ -218,11 +221,11 @@ function _field_rz_panel!(gl, d, component, boundary)
     return ax
 end
 
-function PE._plot_perturbed_field_rz(d, component, boundary)
+function PE._plot_perturbed_field_rz(d, component, boundary; clip=0.9)
     return themed() do
         fig = Figure(; size=(560, boundary === nothing ? 680 : 720))
         gl = fig[1, 1] = GridLayout()
-        _field_rz_panel!(gl, d, component, boundary)
+        _field_rz_panel!(gl, d, component, boundary; clip)
         fig
     end
 end
