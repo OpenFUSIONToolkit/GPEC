@@ -100,7 +100,8 @@ F(w) on a log-spaced grid from w<sub>lo</sub> = max(δ<sub>r</sub>, 10<sup>−5<
 
 ## 4. Gates and validity
 
-- Linear gate (Benjamin §2.3): D<sub>R</sub> > 0 → excluded as resistive-interchange unstable; Δ′<sub>mn</sub> > Δ′<sub>crit</sub> = √2 π<sup>3/2</sup> D<sub>R</sub>/w<sub>d</sub> (Leuthold Eq. 4.1) → linearly tearing unstable, flagged, no roots.
+- Interchange gate (Benjamin §2.3): D<sub>R</sub> > 0 → excluded as resistive-interchange unstable.
+- Linear tearing gate [M0-D3]: the existing GPEC tearing solve, `solve(TearingProblem, GGJModel)` in `:uncoupled` mode (`src/Tearing/GGJTearing.jl`), on the same Δ′ the MRE uses. Each surface gets its own GGJ resistive layer (D<sub>I</sub>, D<sub>R</sub>, H, with η and ρ from the kinetic profiles), so curvature (Glasser) stabilization enters through D<sub>R</sub>. A root with γ > 0 → linearly tearing unstable, flagged, no MRE roots. The layer has no thermal-transport (w<sub>d</sub>) modification, so this gate is more conservative than the Leuthold Eq. 4.1 proxy, which is not used (its printed sign contradicts its text and its source, Fitzpatrick 2025 Eq. 7).
 - Validity: δ<sub>r</sub> < w ≪ 1; Δ′w < 1 (Benjamin p. 5); constant-ψ; the polarization ordering needs w ≳ w<sub>ib</sub>. Roots outside these are flagged, not discarded.
 - Quality screen on Δ′: |Re Δ′/Im Δ′| > 10³ (Benjamin footnote 2).
 
@@ -120,7 +121,7 @@ Calibration (check, not a fit): Sauter 2010 Eq. 1, Δτ<sub>E</sub>/τ<sub>E</su
 | χ<sub>⊥</sub> | kinetic profile | ×0.3 to ×3 [D3] | — |
 | c<sub>pol</sub> / C<sub>pol</sub> | 1 / 1.9 | C<sub>pol</sub> 0.5–1.9 | Callen report p. 23; La Haye 2006 |
 | ω | ARC-basis E<sub>r</sub> model (§7) | 0.5×, 1×, 2×, plus stalled ω = 0 | Leuthold JPP 2026 §2; Rice NF 2007; Zimmermann PoP 2024 |
-| Δ′<sub>mn</sub> | Riccati, vacuum on | Riccati/Galerkin × vacuum on/off | — |
+| Δ′<sub>mn</sub> | Riccati, vacuum on | none [M0-D2]: Riccati and Galerkin agree to 10<sup>−3</sup> (M0); the conducting-wall case is not swept | M0 report |
 | f<sub>t</sub> | Sauter-2002 form (Benjamin, Fortran) [D2] | Lin-Liu & Miller as alternative | `mercier.f`; Benjamin ref. 25; `NeoclassicalResistivity.jl` |
 
 ## 7. Rotation model (input to Δ<sub>pol</sub> and to the E×B frame)
@@ -141,6 +142,11 @@ Follows the ARC MHD basis (Leuthold JPP 2026 §2, "Rotation estimates", read fro
 - D5. Rotation: the ARC-basis model of §7 (Nik, 2026-11-06: follow the Leuthold rotation description, the Rice–Zimmermann lineage), at 0.5×, 1× and 2×, with the stalled island ω = 0 as a separate bounding case.
 - D6. Flattening default sharp (Fortran rule); Δj<sub>bs</sub> by the leading-order p′ proportionality above.
 - D7. c<sub>wd</sub> nominal 1 (Benjamin toroidal form), swept 1 to 2√2.
+
+## Decisions from milestone reports
+
+- M0-D2 (2026-11-07, Nik: option c). Δ′ is computed with the vacuum only; the Riccati–Galerkin spread (about 10<sup>−3</sup>) is the recorded Δ′ formalism uncertainty and the wall case is dropped from the sweeps.
+- M0-D3 (2026-11-07, Nik). The linear tearing gate reuses the existing tearing module (GGJ layer, classical tearing growth rate with curvature stabilization) instead of Leuthold Eq. 4.1; §4 amended.
 
 ## [VERIFY] items remaining
 
