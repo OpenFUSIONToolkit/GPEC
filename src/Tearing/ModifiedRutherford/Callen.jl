@@ -44,7 +44,7 @@ does not exist.
   - `b_res`, `b_vac` - |total| and |vacuum| resonant field [T].
   - `hw_isl`, `hw_v` - Total-field and vacuum island half-widths.
   - `hw_v_crit` - Critical vacuum half-width.
-  - `hw_min`, `hw_sat` - Smaller and larger positive cubic roots.
+  - `hw_min`, `hw_sat` - Half of the smaller and larger positive (full-width) cubic roots.
   - `n_roots` - Number of positive cubic roots (0 or 2).
   - `b_crit` - Critical vacuum resonant field [T].
 """

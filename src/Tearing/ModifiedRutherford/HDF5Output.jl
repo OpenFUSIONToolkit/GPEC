@@ -128,8 +128,8 @@ const CALLEN_H5_ANNOTATIONS = [
     "hw_isl" => (; long_name="total-field island half-width", units="psi_N", dims=("surface",)),
     "hw_v" => (; long_name="vacuum island half-width", units="psi_N", dims=("surface",)),
     "hw_v_crit" => (; long_name="critical vacuum island half-width", units="psi_N", dims=("surface",)),
-    "hw_min" => (; long_name="smaller positive root of the Callen cubic, NaN if none", units="psi_N", dims=("surface",)),
-    "hw_sat" => (; long_name="larger positive root of the Callen cubic, NaN if none", units="psi_N", dims=("surface",)),
+    "hw_min" => (; long_name="island half-width at the smaller positive root of the Callen cubic, NaN if none", units="psi_N", dims=("surface",)),
+    "hw_sat" => (; long_name="island half-width at the larger positive root of the Callen cubic, NaN if none", units="psi_N", dims=("surface",)),
     "n_roots" => (; long_name="number of positive roots of the Callen cubic", dims=("surface",)),
     "b_crit" => (; long_name="critical vacuum resonant field", units="T", dims=("surface",))
 ]
