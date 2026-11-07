@@ -27,7 +27,7 @@ Every plot returns a Makie `Figure`, and `save_path` saves it with the loaded ba
 
 The summary figures of a DIII-D-like run (`examples/DIIID-like_ideal_example`):
 
-![Equilibrium summary: flux surfaces and the q, μ₀p and 2πF profiles](figures/analysis/equilibrium_summary.png)
+![Equilibrium summary: flux surfaces and the q, μ₀p and 2πF profiles, with the n = 1 rational surfaces](figures/analysis/equilibrium_summary.png)
 
 ![Stability summary: critical determinant, free-boundary energies and the least stable eigenmodes](figures/analysis/ffs_summary.png)
 
