@@ -103,16 +103,17 @@ end
 
 """
     growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia, gamma_sq_init=1e9, gamma_sq_min=1e4, gamma_sq_max=1e16,
-                rtol=1e-3, verbose=false) -> GrowthRateResult
+                rtol=1e-3, ftol=1e-6, maxiter=30, verbose=false) -> GrowthRateResult
 
 Growth rate of the least-stable free-boundary mode of `prob` with the perpendicular inertia `inertia`
 (a [`PerpendicularInertia`](@ref)), ELITE's eigenvalue problem solved by shooting: the ideal solve
 gives the marginal least-stable energy λ_min(0); when it is negative, the inertia enters as
 `kinetic_factor = γ²` and λ_min(γ²), which rises monotonically with γ² once the interior is
-positive, is brought to zero. The root is bracketed by decades from `gamma_sq_init` and closed by
-Brent's method to a relative tolerance `rtol` in γ²; every evaluation is one force-balance solve.
-`gamma_sq_min` is the floor below which the mode counts as marginal, `gamma_sq_max` the ceiling
-beyond which bracketing stops with an error.
+positive, is brought to zero. The root is bracketed by decades from `gamma_sq_init` and closed by a
+bracketed secant (Illinois) iteration that stops when |λ_min| falls below `ftol` times the marginal
+|λ_min(0)| or the bracket is narrower than `rtol` in γ², within `maxiter` steps; every evaluation is
+one force-balance solve. `gamma_sq_min` is the floor below which the mode counts as marginal,
+`gamma_sq_max` the ceiling beyond which bracketing stops with an error.
 
 The problem's `singfac_min` is set to 0 for the inertial solves unless given: with inertia the
 rational surfaces are regular, so the integration runs as a single chunk. A fixed-boundary mode
@@ -120,7 +121,8 @@ faster than the free-boundary one shows as `nzero > 0` at the root in `history`;
 reports the free-boundary root and leaves the interior count to the caller.
 """
 function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::PerpendicularInertia,
-    gamma_sq_init::Real=1e9, gamma_sq_min::Real=1e4, gamma_sq_max::Real=1e16, rtol::Real=1e-3, verbose::Bool=false)
+    gamma_sq_init::Real=1e9, gamma_sq_min::Real=1e4, gamma_sq_max::Real=1e16, rtol::Real=1e-3, ftol::Real=1e-6, maxiter::Int=30,
+    verbose::Bool=false)
     history = @NamedTuple{gamma_sq::Float64, lambda::Float64, nzero::Int}[]
     lambda_min(r) = minimum(real, r.free_boundary.et)
 
@@ -165,6 +167,24 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         hi > gamma_sq_max && error("growth_rate: λ_min is still negative at γ² = $lo; raise gamma_sq_max or check the inertia density")
         lam = lambda_at(hi)
     end
-    gamma_sq = find_zero(lambda_at, (lo, hi), Roots.Brent(); xrtol=rtol)
+
+    # Illinois iteration on the sign-change bracket; the retained end's λ is halved when it is kept twice running
+    flo, fhi = seen[lo], seen[hi]
+    gamma_sq, side = hi, 0
+    for _ in 1:maxiter
+        gamma_sq = (lo * fhi - hi * flo) / (fhi - flo)
+        lam = lambda_at(gamma_sq)
+        abs(lam) <= ftol * abs(history[1].lambda) && break
+        if lam < 0
+            lo, flo = gamma_sq, lam
+            side == -1 && (fhi /= 2)
+            side = -1
+        else
+            hi, fhi = gamma_sq, lam
+            side == 1 && (flo /= 2)
+            side = 1
+        end
+        hi - lo <= rtol * hi && break
+    end
     return GrowthRateResult(sqrt(gamma_sq), gamma_sq, marginal, last[], history)
 end
