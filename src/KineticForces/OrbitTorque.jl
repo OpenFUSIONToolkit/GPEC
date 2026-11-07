@@ -323,10 +323,14 @@ function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, 
             any(err .> energy_tol .* max.(scale, eps())) && push!(bad, j)
         end
         (isempty(bad) || length(us) >= ORBIT_MAXNODES) && break
+        # No midpoint closer than ORBIT_EDGE_TOL of the segment: a step in the data would otherwise draw every node onto it.
+        hmin = ORBIT_EDGE_TOL * (ub - ua)
+        n0 = length(samples)
         for j in bad
-            sample!((us[j-1] + us[j]) / 2)
-            sample!((us[j] + us[j+1]) / 2)
+            us[j] - us[j-1] > 2hmin && sample!((us[j-1] + us[j]) / 2)
+            us[j+1] - us[j] > 2hmin && sample!((us[j] + us[j+1]) / 2)
         end
+        length(samples) == n0 && break
     end
     us = sort!(collect(keys(samples)))
     length(us) < 4 && return nothing
