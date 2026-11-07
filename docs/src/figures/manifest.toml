@@ -14,5 +14,5 @@ script = "(not preserved)"
 [inner_layer.backend_regime_map]
 commit = "3a0837e3-dirty"
 date = "2026-07-08"
-depends = ["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/Galerkin.jl", "src/InnerLayer/GGJ/Shooting.jl"]
+depends = ["src/InnerLayer/ToroidalLayer/Ray.jl", "src/InnerLayer/ToroidalLayer/Galerkin.jl", "src/InnerLayer/GGJ/Shooting.jl"]
 script = "make_backend_regime_map.jl"

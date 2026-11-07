@@ -1,78 +1,20 @@
 # Galerkin.jl
 #
-# Hermite-cubic finite-element (Galerkin) solver for the GGJ inner layer, porting the GWP2016
+# Hermite-cubic finite-element (Galerkin) solver for a toroidal inner layer, porting the GWP2016
 # Sec. III singular-Galerkin method: the half-domain weak form (Eq. 32) on a packed grid
 # (Eq. 33), parity conditions at x = 0, and resonant/extension cells at x_max supplying the
 # matching data (Eqs. 34–35). Fortran deltac configuration: "resonant" + noexp + inps,
-# Hermite basis, mpert = 3 (Ψ, Ξ, Υ). `_assemble_and_solve_point!` reuses the assembly on the
-# rotated ray with a point far-field condition (Ray.jl).
+# Hermite basis, mpert = 3 (Ψ, Ξ, Υ). The model's equations enter only through `layer_weak_form` and its
+# Wasow basis. `_assemble_and_solve_point!` reuses the assembly on the rotated ray with a point far-field
+# condition (Ray.jl).
 
 using LinearAlgebra
 using FastGaussQuadrature: gausslobatto
 using QuadGK: quadgk
 
-"""
-    ggj_rows([CT,] params, Q, x) -> (Ũ, Ṽ)
-
-GWP2016 Eq. 11 solved for the second derivatives, `u'' = Ũ·u + Ṽ·u'` for u = (Ψ, Ξ, Υ), at real or complex
-`x` (used as given). `CT` is the element type (default `ComplexF64`). The Galerkin weak form scales the rows by
-diag(1, Q², Q) ([`_physical_uv`](@ref)); the ray march takes them as the lower half of its companion matrix
-([`ode_matrix`](@ref)).
-"""
-ggj_rows(params::GGJParameters, Q::Number, x::Number) = ggj_rows(ComplexF64, params, Q, x)
-
-function ggj_rows(::Type{CT}, params::GGJParameters, Q::Number, x::Number) where {CT<:Complex}
-    e = CT(params.E)
-    f = CT(params.F)
-    g = CT(params.G)
-    h = CT(params.H)
-    k = CT(params.K)
-    q = CT(Q)
-    q2 = q * q
-    x2 = x * x
-    # Ψ'' = Q Ψ − Q x Ξ + H Υ';  Ξ'' = −(x/Q) Ψ + (x²/Q) Ξ − ((E+F)/Q²) Υ − (H/Q²) Ψ';
-    # Υ'' = −(x/Q) Ψ − Q(G−KE) Ξ + (x²/Q + Q(G+KF)) Υ + HKQ Ψ'
-    #! format: off
-    Ũ = SMatrix{3,3,CT}(
-        q,          -x / q,             -x / q,
-        -q * x,     x2 / q,             -(g - k * e) * q,
-        0,          -(e + f) / q2,      x2 / q + (g + k * f) * q)
-    Ṽ = SMatrix{3,3,CT}(
-        0,          -h / q2,            h * k * q,
-        0,          0,                  0,
-        h,          0,                  0)
-    #! format: on
-    return Ũ, Ṽ
-end
-
-"""
-    _physical_uv(params, Q, x) -> (I, U, V)
-
-3×3 coefficients of `I·u'' − V·u' − U·u = 0` for u = (Ψ, Ξ, Υ) at real or complex `x`, with
-(I, V, U) = (A, −B, −C) of GWP2016 Eqs. 12–15: the rows of [`ggj_rows`](@ref) scaled by diag(1, Q², Q).
-"""
-function _physical_uv(params::GGJParameters, Q::ComplexF64, x::Number)
-    Ũ, Ṽ = ggj_rows(params, Q, x)
-    q, q2 = Q, Q * Q
-    Imat = @SMatrix ComplexF64[1 0 0; 0 q2 0; 0 0 q]
-    #! format: off
-    U = @SMatrix ComplexF64[
-        Ũ[1, 1]         Ũ[1, 2]         0
-        Ũ[2, 1] * q2    Ũ[2, 2] * q2    Ũ[2, 3] * q2
-        Ũ[3, 1] * q     Ũ[3, 2] * q     Ũ[3, 3] * q
-    ]
-    V = @SMatrix ComplexF64[
-        0               0               Ṽ[1, 3]
-        Ṽ[2, 1] * q2    0               0
-        Ṽ[3, 1] * q     0               0
-    ]
-    #! format: on
-    return Imat, U, V
-end
-
 # x_max and the two thin matching cells inside it, from where the series residual (GW2020 Eq. 54)
 # crosses three tolerances. Returns (xmax, dx1, dx2, cache).
-function _xmax_3level(params::GGJParameters, Q::ComplexF64;
+function _xmax_3level(params::ToroidalLayerParameters, Q::ComplexF64;
     kmax::Int=8, xfac::Float64=1.0,
     eps_vec::NTuple{3,Float64}=(1e-2, 5e-7, 1e-7))
     cache = build_asymptotics(params, Q; kmax=kmax)
@@ -316,7 +258,7 @@ end
 # I·(αᵢ' αⱼ') + V·(αᵢ αⱼ') + U·(αᵢ αⱼ), by Gauss–Lobatto quadrature.
 function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
     quad_nodes::Vector{Float64}, quad_weights::Vector{Float64},
-    params::GGJParameters, Q::ComplexF64; θ::Float64=0.0)
+    params::ToroidalLayerParameters, Q::ComplexF64; θ::Float64=0.0)
     np_cell = cell.np
     nq = length(quad_nodes)
     x0 = (cell.x_right + cell.x_left) / 2
@@ -327,10 +269,10 @@ function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
         x = x0 + dx * quad_nodes[iq]
         w = dx * quad_weights[iq]
         if iszero(θ)
-            Imat, Umat, Vmat = _physical_uv(params, Q, x)
+            Imat, Umat, Vmat = layer_weak_form(params, Q, x)
         else
             # Rotated contour x = e^{iθ}s: d/dx = e^{-iθ} d/ds; times e^{2iθ}, I is unchanged, V gains e^{iθ}, U gains e^{2iθ}.
-            Imat, U0, V0 = _physical_uv(params, Q, cis(θ) * x)
+            Imat, U0, V0 = layer_weak_form(params, Q, cis(θ) * x)
             Umat, Vmat = cis(2θ) * U0, cis(θ) * V0
         end
         pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
@@ -353,7 +295,7 @@ end
 function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64},
     cell::GalerkinCell,
     quad_nodes::Vector{Float64}, quad_weights::Vector{Float64},
-    params::GGJParameters, Q::ComplexF64,
+    params::ToroidalLayerParameters, Q::ComplexF64,
     cache::InnerAsymptoticsCache)
     np_cell = cell.np
     x0c = (cell.x_right + cell.x_left) / 2
@@ -369,7 +311,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
             x = x0c + dxc * quad_nodes[iq]
             w = dxc * quad_weights[iq]
             uax, duax = physical_ua_dua(cache, x)
-            Imat, Umat, Vmat = _physical_uv(params, Q, x)
+            Imat, Umat, Vmat = layer_weak_form(params, Q, x)
             pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
 
             # Extra DOF φ = ua₁(x_r)·H₁₀ + ua₁'(x_r)·H₁₁, the large solution Hermite-blended at the right
@@ -411,7 +353,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
         @inbounds for iq in 1:nq
             x = x0c + dxc * quad_nodes[iq]
             w = dxc * quad_weights[iq]
-            Imat, Umat, Vmat = _physical_uv(params, Q, x)
+            Imat, Umat, Vmat = layer_weak_form(params, Q, x)
             pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
 
             if cell.etype == CT_EXT1
@@ -434,7 +376,7 @@ end
 
 # Resonant-cell scalar products ∫ ua₁ᵀ L ua_j dx (j = 1 stiffness, j = 2 RHS) with the asymptotic
 # solutions as test and trial functions; non-analytic, so adaptive QuadGK (GWP2016 Sec. III).
-function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
+function _resonant_integral(cell::GalerkinCell, params::ToroidalLayerParameters,
     Q::ComplexF64, cache::InnerAsymptoticsCache;
     tol::Float64=1e-5)
     x_left = cell.x_left
@@ -442,7 +384,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
 
     function integrand_11(x)
         ua, dua = physical_ua_dua(cache, x)
-        Imat, Umat, Vmat = _physical_uv(params, Q, x)
+        Imat, Umat, Vmat = layer_weak_form(params, Q, x)
         ua1 = ua[:, 1]
         dua1 = dua[:, 1]
         return transpose(dua1) * Imat * dua1 + transpose(ua1) * Vmat * dua1 + transpose(ua1) * Umat * ua1
@@ -450,7 +392,7 @@ function _resonant_integral(cell::GalerkinCell, params::GGJParameters,
 
     function integrand_12(x)
         ua, dua = physical_ua_dua(cache, x)
-        Imat, Umat, Vmat = _physical_uv(params, Q, x)
+        Imat, Umat, Vmat = layer_weak_form(params, Q, x)
         dua1 = dua[:, 1]
         ua1 = ua[:, 1]
         ua2 = ua[:, 2]
@@ -467,7 +409,7 @@ end
 # Global assembly and solve.
 
 function _assemble_and_solve!(ws::GalerkinWorkspace,
-    params::GGJParameters, Q::ComplexF64,
+    params::ToroidalLayerParameters, Q::ComplexF64,
     cache::InnerAsymptoticsCache;
     nq::Int=4, tol_res::Float64=1e-5)
     mpert = 3
@@ -540,7 +482,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     res_cell = ws.cells[ws.nx]
     x_lsode = res_cell.x_lsode
     ua_xmax, dua_xmax = physical_ua_dua(cache, x_lsode)
-    Imat_xmax, _, _ = _physical_uv(params, Q, x_lsode)
+    Imat_xmax, _, _ = layer_weak_form(params, Q, x_lsode)
     emap1 = res_cell.emap[1]
     if emap1 <= ws.ndim
         # Surface term: -ua_1^T I dua_1 at x_lsode (stiffness)
@@ -575,7 +517,7 @@ end
 
 # Copy the base system to both parities, impose the x = 0 parity conditions, and solve the
 # leading n×n banded system of each parity by LAPACK banded LU.
-function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64, n::Int)
+function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::ToroidalLayerParameters, Q::ComplexF64, n::Int)
     mpert = 3
     offset = ws.kl + ws.kl + 1
 
@@ -583,7 +525,7 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::GGJParameters, Q:
     ws.rhs[:, 2] .= ws.rhs[:, 1]
 
     cell1 = ws.cells[1]
-    Imat0, _, _ = _physical_uv(params, Q, cell1.x_left)
+    Imat0, _, _ = layer_weak_form(params, Q, cell1.x_left)
 
     # IBP surface term at x = 0
     for ipert in 1:mpert, jpert in 1:mpert
@@ -659,7 +601,7 @@ with Us, Ub, E given as (Ψ, Ξ, Υ, Ψ', Ξ', Υ') in x-derivatives; the last n
 replaced by (Δ, c₁, c₂). Returns the raw Δ and decaying-pair coefficients per parity
 (isol = 1 even/Δ₊, 2 odd/Δ₋); `ws.sol` holds the full nodal solution afterwards.
 """
-function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters, Q::ComplexF64,
+function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::ToroidalLayerParameters, Q::ComplexF64,
     θ::Float64, Us::Vector{ComplexF64}, Ub::Vector{ComplexF64}, E::Matrix{ComplexF64}; nq::Int=6)
     quad_nodes, quad_weights = gausslobatto(nq + 1)
     offset = ws.kl + ws.kl + 1
@@ -681,7 +623,7 @@ function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::GGJParameters
         Kc[3ip+ipert, 3jp+jpert] = cell_mat[ipert, jpert, ip+1, jp+1]
     end
     # IBP boundary term at the far end, mirroring the x = 0 term of `_parity_bcs_and_solve!` (I is x-independent).
-    Imat, _, _ = _physical_uv(params, Q, 0.0)
+    Imat, _, _ = layer_weak_form(params, Q, 0.0)
     for ipert in 1:3, jpert in 1:3
         Kc[6+ipert, 9+jpert] -= Imat[ipert, jpert]
     end
@@ -770,7 +712,7 @@ end
 # Stock Galerkin solve shared by `solve_inner` and `solve_inner_profile`. The matching data are the
 # resonant cell's emap DOF, the coefficient of the large resonant solution (GWP2016 Eqs. 34–35), per
 # parity isol = 1 (even, Δ₊), 2 (odd, Δ₋); returns them rescaled, with the solved workspace.
-function _galerkin_solve(params::GGJParameters, γ::Number;
+function _galerkin_solve(params::ToroidalLayerParameters, γ::Number;
     kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
     cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
     Q = inner_Q(params, γ)
@@ -779,41 +721,4 @@ function _galerkin_solve(params::GGJParameters, γ::Number;
     _assemble_and_solve!(ws, params, Q, xmax_info.cache; nq=nq, tol_res=tol_res)
     emap1 = ws.cells[ws.nx].emap[1]
     return rescale_delta(SVector{2,ComplexF64}(ws.sol[emap1, 1], ws.sol[emap1, 2]), params), ws
-end
-
-"""
-    solve_inner_profile(::GGJModel{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
-        -> (; Δ, x, Ψ, Ξ, dψdx, rescale)
-
-Hermite-FEM implementation of the [`solve_inner_profile`](@ref) interface:
-real-axis solve, so `Δ` and the profiles come from the same solution. Same
-numerics/kwargs as `solve_inner(GGJModel(; solver=:galerkin), ...)`.
-"""
-function solve_inner_profile(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
-    Δ, ws = _galerkin_solve(params, γ; kwargs...)
-    prof = _solution_profile(ws)
-    return (; Δ=Δ, x=prof.x, Ψ=prof.Ψ, Ξ=prof.Ξ, _profile_conversions(params)...)
-end
-
-"""
-    solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
-                kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
-                cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
-                -> InnerLayerResponse
-
-Solve the GGJ inner-layer matching problem using the Hermite-cubic finite
-element (Galerkin) method (GWP2016 Sec. III), in the "resonant + noexp + inps"
-configuration.
-
-Returns the parity-projected matching data (GWP2016 Eqs. 34–35), rescaled by
-[`rescale_delta`](@ref), as an `InnerLayerResponse`: `interchange` is the even-parity Δ₊
-(isol = 1), `tearing` the odd-parity Δ₋ (isol = 2).
-
-Knobs: `kmax` series order; `nx` cell count; `nq` Gauss–Lobatto order; `pfac` grid packing;
-`cutoff` extension-cell span (cells nx−cutoff−1 … nx−1); `xfac` scale on the two inner matching radii; `tol_res`
-resonant-cell quadrature tolerance.
-"""
-function solve_inner(::_BareGGJ{:galerkin}, params::GGJParameters, γ::Number; kwargs...)
-    Δ, _ = _galerkin_solve(params, γ; kwargs...)
-    return InnerLayerResponse(; interchange=Δ[1], tearing=Δ[2])
 end
