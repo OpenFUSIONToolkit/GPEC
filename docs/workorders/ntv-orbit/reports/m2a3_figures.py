@@ -67,7 +67,7 @@ def fig_phi_orbits():
                 b += cnt[st]
             axs[3].text(x, b + 3, "off old new".split()[j], ha="center", va="bottom", fontsize=8, rotation=90)
     axs[3].set_xticks([0, 1], [c[1] for c in cases])
-    axs[3].set_ylim(0, 200)
+    axs[3].set_ylim(0, 215)
     axs[3].set_ylabel("orbits")
     axs[3].legend(loc="upper center", fontsize=8, frameon=False, ncol=3, handlelength=0.8, columnspacing=0.6, bbox_to_anchor=(0.5, 1.0))
     for ax, l in zip(axs, "abcd"):
