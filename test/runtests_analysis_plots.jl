@@ -1,11 +1,10 @@
+using CairoMakie
 using HDF5
-using Plots
 using TOML
 
 # Every registered plot against real writer output, from the result in memory and from the gpec.h5 it was saved to:
 # both sources must supply the same data, draw the same plots, and refuse the same ones with the registry's reason.
 @testset "Analysis plots from a result or gpec.h5" begin
-    ENV["GKSwstype"] = "100"
     GPEC = GeneralizedPerturbedEquilibrium
     A = GPEC.Analysis
 
@@ -51,7 +50,7 @@ using TOML
             sources = A._accepts(e, h5) ? (x, h5) : (x,)
             if A._can(e.fn, caps)
                 for src in sources
-                    @test e.fn(src) isa Plots.Plot
+                    @test e.fn(src) isa Figure
                 end
             else
                 reason = A._why(A._missing(e, caps))
@@ -80,28 +79,56 @@ using TOML
                             "currents" => [2.0e3], "tiltx" => [3.0])]),
                     "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
             )
-            for x in (ret.equil, ret.ffs, ret.pe)
+            for x in (ret.equil, ret.ffs, ret.resp, ret.pe)
                 _check_sources(x, h5)
             end
             ret.local_stability === nothing || _check_sources(ret.local_stability, h5)
             for component in (:xi_psi, :b_psi, :Jb_theta, :Jb_zeta)
                 @test _same(A.PerturbedEquilibrium._response_data(ret.pe, component), A.PerturbedEquilibrium._response_data(h5, component))
-                @test A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component) isa Plots.Plot
+                @test A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; component) isa Figure
             end
             @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(h5; component=:b_theta)
+            @test A.PerturbedEquilibrium.plot_mode_spectrogram(h5; style=:lines) isa Figure
+            @test_throws ArgumentError A.PerturbedEquilibrium.plot_mode_spectrogram(ret.pe; style=:contour)
+
+            # Field views that take more than the result: any control-surface spectrum, the displaced boundary, the 3D surface.
+            CF = A.CoilForcing
+            @test CF.plot_control_surface(ret.pe, ret.pe.forcing_b_rootarea; label="the applied forcing", coils=true) isa Figure
+            @test CF.plot_control_surface(ret.pe, ret.pe.forcing_b_rootarea ./ maximum(abs, ret.pe.forcing_b_rootarea); arb=true) isa Figure
+            @test_throws ArgumentError CF.plot_control_surface(ret.pe, ret.pe.forcing_b; weighting=:flux)
+            @test A.PerturbedEquilibrium.plot_perturbed_field_rz(ret.pe; component=:xi_n, deform=true) isa Figure
+            @test CF.plot_surface_3d(ret.equil, ret.pe.forcing_modes, 1; coil_sets=ret.pe.coil_sets, mtheta=60, nphi=60) isa Figure
+            @test CF.plot_bn_contour(randn(32, 16), 32, 16; n=1) isa Figure
+
+            # The response alone draws its dominant modes, with no forcing; a perturbed equilibrium inherits them.
+            @test A.capabilities(ret.resp) ⊆ A.capabilities(ret.pe)
+            @test plot_dominant_mode_surface(ret.resp; mode=length(ret.resp.dominant_singular_values)) isa Figure
+            @test_throws "mode must be 1 to" plot_dominant_mode_surface(ret.resp; mode=length(ret.resp.dominant_singular_values) + 1)
+            @test_throws "coils = true needs" CF.plot_control_surface(ret.resp, ret.resp.dominant_right_singular_vectors[:, 1]; coils=true)
+            # A bare equilibrium marks the q = m/n crossings of n = 1, which include every surface the solve found.
+            bare, solved = A.Equilibrium._surfaces(ret.equil), A.Equilibrium._surfaces(ret.ffs)
+            @test all(q -> any(≈(q), bare.sing_q), solved.sing_q) && !isempty(bare.sing_q)
+            @test plot_equilibrium_summary(ret.equil; n=2) isa Figure
+            # An RMPField draws its coil sources in 3D before any plasma; a mode table has no geometry to draw.
+            hoop = RMPField((name="hoop", source="pf_hoop", radius=12.0, height=1.2, currents=[2.0e3], tiltx=[3.0]))
+            @test plot_sources(hoop) isa Figure && plot_sources(2hoop - 0.5im * hoop; color=:set) isa Figure
+            @test_throws A.REASONS[:coil_source] plot_sources(RMPField([GPEC.ForcingTerms.ForcingMode(; n=1, m=2, amplitude=1e-4)]))
+            # A summary none of whose panels this run supplies is listed as unavailable, and says so when called.
+            @test occursin("✗ plot_error_field_summary", repr(MIME"text/plain"(), available_plots(h5)))
+            @test_throws A.REASONS[:ef_sensitivities] plot_error_field_summary(h5)
 
             # The catalog lists a Forward run's absent products with what to change, for a result, a path and main's tuple.
             listing = repr(MIME"text/plain"(), available_plots(ret.ffs))
-            @test occursin("✓ ForceFreeStates.plot_mode_displacement", listing)
-            @test occursin("✗ ForceFreeStates.plot_delta_prime", listing) && occursin(A.REASONS[:delta_prime], listing)
-            @test occursin("✗ Equilibrium.plot_gse_by_theta", repr(MIME"text/plain"(), available_plots(h5)))
+            @test occursin(r"\nForceFreeStates\n", listing) && occursin("✓ plot_mode_displacement", listing)
+            @test occursin("✗ plot_delta_prime ", listing) && occursin(A.REASONS[:delta_prime], listing)
             @test length(available_plots(ret).sections) == count(x -> x !== nothing && any(e -> A._accepts(e, x), A.PLOTS), unique(values(ret)))
-            @test A.plot_counts(ret.ffs) == (11, 13)
+            @test A.plot_counts(ret.ffs) == (11, 15)
 
             # Optional outputs this run does not produce throw instead of drawing a placeholder.
             @test_throws ArgumentError A.ForceFreeStates.plot_cond_fbar(h5)
-            @test_throws ArgumentError A.Equilibrium.plot_gse_by_theta(h5)
-            @test_throws ArgumentError A.Equilibrium.plot_gse_integrated(h5)
+
+            # The Grad-Shafranov residual plot is an unregistered stub that draws the residual computed in memory.
+            @test A.Equilibrium.plot_gse(GPEC.Equilibrium.equilibrium_gse!(ret.equil)) isa Figure
 
             png = joinpath(dir, "qprofile.png")
             A.Equilibrium.plot_qprofile(ret.equil; save_path=png)
@@ -120,9 +147,15 @@ using TOML
             _check_sources(ret.ffs, h5)
             @test :delta_prime in A.capabilities(ret.ffs) && :solution_profiles ∉ A.capabilities(ret.ffs)
             @test_throws A.REASONS[:solution_profiles] A.ForceFreeStates.plot_mode_displacement(ret.ffs)
-            @test occursin("✗ ForceFreeStates.plot_mode_displacement", repr(MIME"text/plain"(), available_plots(ret.ffs)))
-            # The summary leaves out the ξ panel rather than failing: three panels and a blank fourth.
-            @test length(A.ForceFreeStates.plot_ffs_summary(ret.ffs).subplots) == 4
+            @test occursin("✗ plot_mode_displacement", repr(MIME"text/plain"(), available_plots(ret.ffs)))
+            # The summary leaves out the ξ panel rather than failing, keeping the other four.
+            caps = A.capabilities(ret.ffs)
+            @test count(((f, _),) -> A._can(f, caps), A.ForceFreeStates._ffs_panels(ret.ffs)) == 4
+            @test A.ForceFreeStates.plot_ffs_summary(ret.ffs) isa Figure
+            # The Δ′ family draws any part of its complex entries and refuses others.
+            @test A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:abs) isa Figure
+            @test A.ForceFreeStates.plot_delta_coil(h5; part=:imag) isa Figure
+            @test_throws ArgumentError A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:phase)
         end
     end
 
@@ -137,7 +170,7 @@ using TOML
             h5 = joinpath(dir, "gpec.h5")
             save_to_hdf5(h5, ffs)
             _check_sources(ffs, h5)
-            @test A.ForceFreeStates.plot_cond_fbar(ffs) isa Plots.Plot
+            @test A.ForceFreeStates.plot_cond_fbar(ffs) isa Figure
         end
     end
 end

@@ -213,7 +213,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [core, api, errorfields]
+        group: [core, api, errorfields, plots]
     env:
       GPEC_LOCAL_CACHE_DIR: ${{ vars.GPEC_LOCAL_CACHE_DIR }}
       JULIA_CPU_TARGET: 'generic'
@@ -295,9 +295,24 @@ jobs:
 
       # Level 1 can reuse the higher-optimization production package images.
       - name: Run tests
+        if: matrix.group != 'plots'
         uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
           check_bounds: 'yes'
           optimize: '1'
           allow_reresolve: false
+
+      # The plots draw with Makie through GPEC's package extension, so Makie stays out of the package's own
+      # dependencies; this group loads CairoMakie from a separate environment stacked onto LOAD_PATH.
+      - name: Add the plotting backend
+        if: matrix.group == 'plots'
+        run: |
+          set -euo pipefail
+          backend="$RUNNER_TEMP/plots-backend"
+          julia --project="$backend" -e 'using Pkg; Pkg.add("CairoMakie")'
+          echo "JULIA_LOAD_PATH=@:$backend:@stdlib" >> "$GITHUB_ENV"
+
+      - name: Run plot tests
+        if: matrix.group == 'plots'
+        run: julia --project=. --check-bounds=yes -O1 test/runtests.jl

@@ -11,6 +11,7 @@ using .PerturbedEquilibrium: PerturbedEquilibriumState
 using .KineticForces: MethodResult, KineticForcesState
 using .ErrorFields: MonteCarloResult, RiskResult, EFCCoupling
 using .Tearing: GrowthRateResult
+using .ForcingTerms: RMPSource, RMPSpectrum, RMPFieldSum
 
 _fmt(x::Real) = @sprintf("%.4g", x)
 _fmt(::Nothing) = "—"
@@ -276,13 +277,37 @@ function Base.show(io::IO, ::MIME"text/plain", r::PlasmaResponse)
     isempty(r.dominant_singular_values) || _row(io, "Dominant σ", _list(_fmt.(r.dominant_singular_values); max=3))
     _row(io, "Torque resp.", isempty(r.T_xe) ? "not computed" : "T_xe $(_shape(r.T_xe))")
     r.odet_from_gal && _row(io, "Basis", "Galerkin-native solution")
+    _plots_row(io, r)
+    return nothing
+end
+
+# Forcing sources: the source, and its weight when it is not 1 (always in a sum, where the weights are the point).
+
+_weight(w) = string(iszero(real(w)) && !iszero(imag(w)) ? _fmt(imag(w)) * "im" : _fmt(w), " × ")
+
+function _rmp_label(f::RMPSource)
+    c = f.ctrl
+    c.forcing_data_format == "coil" || return string(basename(c.forcing_data_file), " (", c.forcing_data_format, ")")
+    sets = [isempty(get(d, "name", "")) ? get(d, "source", "coil set") : d["name"] for d in c.coil_sets_raw]
+    return string(isempty(c.machine) ? "" : c.machine * " ", "coils ", _list(sets))
+end
+_rmp_label(f::RMPSpectrum) = string("spectrum of ", _plural(length(f.modes), "mode"), ", n = ", _irange([m.n for m in f.modes]))
+
+Base.show(io::IO, f::Union{RMPSource,RMPSpectrum}) = print(io, "RMPField(", f.scale == 1 ? "" : _weight(f.scale), _rmp_label(f), ")")
+Base.show(io::IO, f::RMPFieldSum) = print(io, "RMPField(sum of ", _plural(length(f.terms), "term"), ")")
+
+function Base.show(io::IO, ::MIME"text/plain", f::RMPFieldSum)
+    print(io, "RMPField  sum of ", _plural(length(f.terms), "term"))
+    for t in f.terms
+        print(io, "\n  ", _weight(t.scale), _rmp_label(t))
+    end
     return nothing
 end
 
 function _forcing_label(s::PerturbedEquilibriumState)
     isempty(s.coil_sets) || return "coils: " * _list([c.name for c in s.coil_sets])
     s.forcing === nothing && return "none"
-    return string(nameof(typeof(s.forcing)))
+    return sprint(show, s.forcing)
 end
 
 function Base.show(io::IO, s::PerturbedEquilibriumState)
