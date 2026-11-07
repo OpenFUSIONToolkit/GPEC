@@ -1,0 +1,424 @@
+<meta charset="utf-8">
+<title>M2 Attempt 3</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!-- Built by m2a3_build.py from M2a3.template.html; edit the template, not M2a3.html. -->
+<style>
+  /* One reading column; figures sit on white plates so they read in both themes. */
+  :root { --bg: #fff; --fg: #111; --muted: #555; --rule: #ccc; --plate: #fff; --panel: #f3f3f2; --accent: #2a78d6; --warn: #a33b2a;
+          --ok: #2e7d32; --amber: #b26a00; --card: #fafaf8; --serif: Georgia, "Times New Roman", serif;
+          --sans: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38;
+          --plate: #fff; --panel: #222220; --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38; --plate: #fff; --panel: #222220;
+          --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--serif); }
+  main { max-width: 52em; margin: 0 auto; padding-block: 2em; padding-left: max(16px, env(safe-area-inset-left, 0px));
+         padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  h1 { font-size: 1.5em; margin: 0 0 .2em; text-wrap: balance; }
+  .meta { color: var(--muted); font-size: .85em; margin-bottom: 1em; }
+  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--rule);
+       padding-bottom: .3em; margin-top: 2.6em; text-wrap: balance; }
+  h3 { font-size: 1em; margin: 1.6em 0 .3em; }
+  p, li { max-width: 70ch; }
+  figure { margin: 1.5em 0; }
+  figure .plate { background: var(--plate); padding: .5em; border-radius: 3px; overflow-x: auto; }
+  figure img, figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figure.d2 .plate { max-width: 36em; margin: 0 auto; }
+  figure.narrow img { max-width: min(100%, 32em); }
+  .side { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.2em; align-items: start; }
+  @media (max-width: 40em) { .side { grid-template-columns: 1fr; } }
+  figcaption { font-size: .85em; color: var(--muted); margin-top: .5em; }
+  .lede { font-size: 1.02em; }
+  .open { border-left: 3px solid var(--warn); padding-left: 1em; }
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; font: .88em/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--rule); padding: .35em .7em; text-align: left; vertical-align: top; }
+  th { font-weight: 600; }
+  code { font-size: .9em; }
+  a { color: var(--accent); }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(17em, 1fr)); gap: 1em; align-items: start; }
+  .two > * { min-width: 0; }
+  /* status strip */
+  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center; border: 1px solid var(--rule);
+           padding: .6em 1em; font: .9em/1.5 var(--sans); }
+  .strip b { font-weight: 600; }
+  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; background: var(--ok); }
+  /* map of the decisions */
+  .map { font: .92em/1.5 var(--sans); background: var(--panel); padding: .7em 1.1em; border-radius: 3px; }
+  .map ol { margin: .3em 0; padding-left: 1.3em; } .map li { margin: .2em 0; }
+  /* decision cards */
+  .card { border: 1px solid var(--rule); border-left: 5px solid var(--fg); background: var(--card); padding: 1em 1.2em;
+          margin: 1.6em 0 2em; font: .95em/1.55 var(--sans); }
+  .card h3 { margin: 0 0 .4em; font-size: 1.05em; }
+  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .5em; }
+  .card dd { margin: 0 0 0 1.6em; }
+  .card label { display: block; cursor: pointer; }
+  .card .rec { background: var(--panel); padding: .5em .8em; margin: .6em 0; }
+  .card textarea { width: 100%; box-sizing: border-box; min-height: 3em; font: inherit; background: var(--bg); color: var(--fg); }
+  .result-pass { color: var(--ok); font-weight: 600; } .result-fail { color: var(--warn); font-weight: 600; }
+  .copy { font: inherit; padding: .4em 1em; margin-top: 1em; cursor: pointer; }
+  #answers { white-space: pre-wrap; background: var(--panel); padding: .6em; }
+  @media print { h2, .card, figure { page-break-inside: avoid; } .copy { display: none; } }
+</style>
+<main>
+<h1>M2 attempt 3 - Orbits that close on their topology, and a clean zero-orbit-width limit</h1>
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} (runs at 1463259f5, same
+<code>src/</code>) &middot; attempt 3 of 3 (Q13 B) &middot; DIII-D-like example and the TJ example, toroidal mode number n = 1,
+thermal deuterium &middot; 2026-11-06</div>
+
+<div class="strip">
+  <span class="state">GREEN</span>
+  <span><b>Attempts</b> 5 of 15 (M2: 3 of 3)</span>
+  <span><b>Checks</b> 1 passes in both variants; 4 passes in all three parts (<a href="#checks">table</a>)</span>
+  <span><b>Tests</b> {{TESTS}}</span>
+  <span><b>Key runs</b> 7-charge orbit-width scan against a 512-point surface reference, 54 flux surfaces each, 1 CPU per job
+  (array 139407); Z = 1 table 1.2 h of CPU, was 5.1 h</span>
+  <span><b>Decisions</b> 2 open; Q14 gates M3</span>
+  <span><b>Oldest open question</b> Q1 (DIII-D data, by M5)</span>
+</div>
+
+<p class="lede">This is the third attempt at M2, which you granted in Q13 B. M2 adds <code>forb</code> to GPEC: the NTV torque
+computed along each particle's real guiding-center orbit instead of on its start flux surface. You asked for two things: close
+the two floors in the zero-orbit-width limit before M3 (Q11 B), and work out why trapped orbits stopped closing with the
+electrostatic potential on, keeping it on in the parity test with a 15-minute limit (Q12 B). Both questions were checked by
+independent review agents, as you asked.</p>
+
+<p><b>In brief.</b> Both floors and the closure failure came from the orbit code, not from the table or the physics. The orbit field
+rebuilt the flux-coordinate Jacobian from derivatives of R and Z, and that copy is rough near the edge. It caused the 1.5%
+precession offset (floor B) and, through the orbit's timing, the |δJ|² floor (A). The closure test keyed trapped and passing on
+reversals of v<sub>∥</sub>, but with the potential on two known orbit types do not reverse v<sub>∥</sub> where it expects: they are
+E×B-modified orbits, not potato orbits. With those fixed, the zero-orbit-width limit falls with no floor in both variants: A as
+a clean power law of slope 0.98 over 3.5 decades, B by 4.8 decades. The physical-width torque converges within 2.7% with the
+potential off or on. The parity suite runs in 4 min 40 s, and tables build 4.3 times faster. M2 is green. One item that
+physics.md placed in M2, the phase-space measure, has not been done and is proposed as the first task of M3 (Q14).</p>
+
+<nav class="map"><b>Where the decisions are.</b> Section 1 says what changed and why; read it first. Each later section ends in
+its card where it has one.
+<ol>
+<li value="2"><a href="#phi">Orbits with the potential on</a>: your Q12 question, no card</li>
+<li><a href="#zow">The zero-orbit-width limit</a>: your Q11 question, no card</li>
+<li><a href="#conv">Physical width</a> &rarr; <a href="#q14">Q14</a>: physics.md wording and the phase-space measure (gates M3)</li>
+<li><a href="#speed">What the reviews proposed that I have not done</a> &rarr; <a href="#q15">Q15</a>: the remaining speed-ups (not gating)</li>
+</ol></nav>
+
+
+<!-- ============================================================ -->
+<h2 id="what">1. What attempt 3 changed, and how it was checked</h2>
+
+<p><b>The object.</b> For each flux surface ψ₀ (ψ the normalized poloidal flux), <code>forb</code> launches guiding-center orbits
+from the point of minimum field strength θ<sub>bmin</sub> on that surface. Each orbit is labelled by its pitch λ = μB₀/E (μ the
+magnetic moment, E the kinetic energy, B₀ a reference field), its normalized speed u = √(E/T) (T the temperature) and the sign σ
+of its parallel velocity v<sub>∥</sub>. The orbit's bounce frequency ω<sub>b</sub>, mean toroidal rate ⟨φ̇⟩ and the bounce
+harmonics |δJ<sub>ℓ</sub>|² of the perturbed action go into the same resonant pitch and energy integrals that the surface method
+<code>fgar</code> uses. The resonance is Ω<sub>ℓ</sub> = ℓω<sub>b</sub> − n⟨φ̇⟩, with ℓ an integer bounce harmonic. Attempt 2 built
+that per-column table and its integrals. Attempt 3 changes only how a single orbit is integrated and classified (Figure {{N_CLOSURE}}).</p>
+
+<figure id="fig-closure" class="d2"><div class="plate">{{D2_CLOSURE}}</div>
+<figcaption>Figure {{N_CLOSURE}}. One orbit in attempt 3. Green: changed in this attempt. The orbit field now takes its Jacobian
+from the equilibrium, as <code>fgar</code> does. The toroidal angle is integrated relative to the field line of the start surface
+(χ). The orbit ends at its first return to the start point in the start direction, and its net poloidal winding k sets its
+class. q is the safety factor and τ the period.</figcaption></figure>
+
+<p><b>The three changes</b> (gpec 1463259f5, all in <code>Orbits.jl</code>):</p>
+<ol>
+<li><b>Closure by topology.</b> E, μ and the canonical toroidal momentum P<sub>φ</sub> are conserved, so at each (ψ, θ) they fix
+v<sub>∥</sub>, and every orbit is a closed curve on the cylinder (ψ, θ mod 1). An orbit closes the first time it crosses
+θ ≡ θ₀ (mod 1) in its starting direction at ψ = ψ₀. Its net winding k is the class: k = 0 trapped, k = ±1 passing. The old test
+asked for two v<sub>∥</sub> reversals (trapped) or none (passing) and failed every orbit for which v<sub>∥</sub> and θ̇ reverse at
+different times. The count of start-section crossings per period is also recorded: 2 for a trapped orbit and 1 for a passing
+one. That count is what the ½ and 1 weights in the pitch integral assume.</li>
+<li><b>Jacobian from the equilibrium.</b> The orbit field used 𝒥 = R(R<sub>θ</sub>Z<sub>ψ</sub> − R<sub>ψ</sub>Z<sub>θ</sub>) built
+from ψ-derivatives of the R, Z map. The surface path uses the equilibrium's own <code>rzphi_jac</code>. On average the two
+agree, but the rebuilt one is rough in θ near the edge (Section 3). The orbit field now uses <code>rzphi_jac</code>.</li>
+<li><b>Precession without cancellation.</b> A trapped orbit's precession was the small remainder of two large toroidal legs, so
+its error grew as Z × the ODE tolerance. The orbit now integrates χ = φ − ∫(B<sup>φ</sup>/B<sup>θ</sup>)(ψ₀, θ)dθ, with the parallel
+streaming cancelled analytically inside the right-hand side. ⟨φ̇⟩ = (Δχ + 2πqk)/τ is the same quantity, now accurate to the ODE
+tolerance at any width. A unit test checks it at Z = 4096 for tolerances 10⁻⁸ and 10⁻¹¹.</li>
+</ol>
+
+<p><b>How it was checked.</b> As you asked, three review agents worked from the code, physics.md, the attempt-2 numbers and your
+words, without my hypotheses. One took the per-orbit numerics against <code>fgar</code>, one the table architecture, and one
+the orbit classes with a radial electric field (reports in <code>results/m2a3_dev/review_*.md</code>). While they worked I ran
+three probes: orbit portraits with the potential on, a field-by-field comparison of the orbit and surface inputs, and a
+Jacobian swap. The reviewers and the probes reached the same two causes independently. The table reviewer recommended keeping
+the per-column table: its pitch coordinate already straightens the class boundaries, and it found no way for the table to make
+a floor that does not change with Z. The swap tests had already pointed the same way, since the floors left when a single orbit
+quantity was replaced.</p>
+
+<h3 id="checks">The checks from the plan, at a glance</h3>
+<div class="tbl"><table>
+<tr><th>Check, from PLAN.md (the project plan) as restated by Q9a, Q9b, Q10, Q12</th><th>Seen</th><th>Result</th><th>Where</th></tr>
+<tr><td>1. ZOW limit, variant A: the difference falls as a power law in Δ<sub>b</sub> with no floor over at least 3 decades</td>
+    <td>3.2×10⁻² → 9.2×10⁻⁶ over Δ<sub>b</sub>/a = 2.9×10⁻³ … 7.0×10⁻⁷; slope 0.98, local slopes 0.88–1.09</td>
+    <td><span class="result-pass">pass: 3.5 decades</span></td><td><a href="#zow">&sect;3</a></td></tr>
+<tr><td>1. ZOW limit, variant B: the same with ω<sub>E</sub> and ν divided by Z</td>
+    <td>3.9×10⁻² → 6.6×10⁻⁷, no floor; not a single power law (a 68× step between Z = 256 and 1024)</td>
+    <td><span class="result-pass">pass: 4.8 decades, no floor</span></td><td><a href="#zow">&sect;3</a></td></tr>
+<tr><td>4a. No layer or other ZOW fallback anywhere</td><td>none; lost orbits zero; no unclosed orbit in any probe</td>
+    <td><span class="result-pass">pass</span></td><td><a href="#phi">&sect;2</a></td></tr>
+<tr><td>4b. The Z = 1 torque changes by &lt; 5% on doubling pitch and energy resolution</td>
+    <td>64 → 128 nodes: Φ off 2.7, 1.1, 1.4%; Φ on 2.6, 0.9, 0.5% (ψ = 0.5, 0.7, 0.96)</td>
+    <td><span class="result-pass">pass, both</span></td><td><a href="#conv">&sect;4</a></td></tr>
+<tr><td>4c. The deck-and-API parity test with Φ on runs in under 15 min (Q12 B)</td><td>whole solve-API suite, parity included:
+    4 min 40 s, 183/183 (job 139340; attempt 2: 35 min)</td>
+    <td><span class="result-pass">pass</span></td><td><a href="#phi">&sect;2</a></td></tr>
+</table></div>
+
+
+<!-- ============================================================ -->
+<h2 id="phi">2. Orbits with the potential on (your Q12 question)</h2>
+
+<p><b>What failed.</b> With the electrostatic potential Φ in the orbit Hamiltonian (your Q8 default), many orbits never met the
+closure test and ran to the time limit: 21 of 144 in a DIII-D probe at ψ = 0.5 and 40 of 144 in TJ. I integrated each one for a
+long time and recorded energy conservation, reversals of v<sub>∥</sub> and of θ̇, and the net poloidal winding (probe P3,
+<code>phi_orbits.jl</code>). Energy holds to 10⁻¹⁴–10⁻⁷ on every one, so the integrator is not at fault. The orbits fall into
+two types (Figure {{N_PHI}}).</p>
+
+<figure id="fig-phi"><div class="plate">{{FIG_PHI}}</div>
+<figcaption>Figure {{N_PHI}}. Z = 1, ψ₀ = 0.5, Φ on. (a, b) A DIII-D-like orbit with σ = −1, λ = 0.79, u = 0.5: a closed loop in
+(θ, ψ) that never winds poloidally, while v<sub>∥</sub> stays between −0.21v and −0.58v. It is trapped, but the old test needed
+v<sub>∥</sub> to reverse. (c) A TJ orbit with σ = +1, λ = 1.06 (past the trapped–passing boundary λ<sub>tp</sub> = 0.93),
+u = 1: v<sub>∥</sub> passes through zero twice per transit, yet θ circulates. It winds, so it is passing. (d) Classes in a
+24-pitch × 2-sign × 3-energy probe: Φ off; Φ on with the old test; Φ on with the new test. Unclosed orbits: 21 → 0 (DIII-D) and
+40 → 0 (TJ, also 0 at ψ = 0.9). The Φ-off classes are identical before and after.</figcaption></figure>
+
+<p><b>Not potato orbits.</b> A potato orbit is a banana orbit wide enough to enclose the magnetic axis. That needs the orbit width
+to be comparable to the distance from the axis. The potato width (2q²ρ²R)<sup>1/3</sup> (Helander 2000, cited from the classes
+review, which read it in full; ρ the Larmor radius) is 6–8 cm for thermal deuterium here, against 0.4–0.7 m from the axis at
+ψ = 0.5. The orbits in Figure {{N_PHI}} move by less than 0.03 in ψ. Potatoes do matter for the M3 alphas near the axis: the
+review estimates r/a ≲ 0.15–0.2 for 3.5 MeV alphas in ITER and SPARC. The new closure test handles them, because they wind
+like any other closed curve.</p>
+
+<p><b>What they are.</b> These are the two orbit types of a strong radial electric field (Shaing's E×B-modified trapping, via
+Trinczek 2023, which the review read in full).</p>
+<ul>
+<li><b>Trapped by E×B</b> (Figure {{N_PHI}}a, b). The poloidal motion v<sub>∥</sub>b·∇θ + v<sub>E</sub>·∇θ reverses, but
+v<sub>∥</sub> does not, because the trapping region in v<sub>∥</sub> is centred on −Rω<sub>E</sub> instead of zero.
+v<sub>E</sub> is the E×B drift and ω<sub>E</sub> the E×B rotation frequency. The measured orbit-averaged v<sub>∥</sub> is the same
+at every energy and pitch and equals the input Rω<sub>E</sub>: 0.19v<sub>t</sub> against 0.19 in DIII-D, and 1.0–1.1v<sub>t</sub>
+against 0.97 in TJ (v<sub>t</sub> = √(2T/m) the thermal speed). Every unclosed DIII-D orbit and 37 of the 40 in TJ are of this type.</li>
+<li><b>Carried round by E×B</b> (Figure {{N_PHI}}c). These are magnetically trapped, so v<sub>∥</sub> oscillates through zero, but
+the E×B drift carries them round in θ. 3 of the 40 in TJ.</li>
+</ul>
+
+<p><b>TJ rotates at the thermal speed.</b> The TJ deck sets ω<sub>E</sub> = 2×10⁴(1 − ψ) rad/s with T<sub>i</sub> = 20 + 180(1 − ψ) eV
+on R₀ = 10 m. At ψ = 0.5 that gives Rω<sub>E</sub> = 1.0×10⁵ m/s against v<sub>t</sub> = 1.03×10⁵ m/s. Most thermal ions
+below u ≈ 1 are then E×B-dominated, which is outside the drift-kinetic ordering physics.md §4 assumes. That sentence reads
+"E×B speed small against the thermal speed". The E×B speed itself is small here (v<sub>E</sub>/v<sub>t</sub> ≈ 0.04); what sets
+the orbit topology is Rω<sub>E</sub>, which is v<sub>E</sub> divided by B<sub>p</sub>/B. So TJ with Φ on serves the classifier
+as a stress test, not as a zero-orbit-width comparison. The DIII-D-like case, at Rω<sub>E</sub>/v<sub>t</sub> ≈ 0.2, is inside
+the ordering and is the one on KR2's path. Q14 proposes restating physics.md §4 in terms of Rω<sub>E</sub>.</p>
+
+<p><b>Cost and the parity test.</b> Unclosed orbits ran to 11 times the time limit and were then thrown away. The table reviewer
+estimated they took 65% of the Z = 1 table time even with Φ off, mostly near the axis, where wide orbits wind with
+v<sub>∥</sub> reversals. With them closing, the Z = 1 table of 54 surfaces costs 1.2 h of CPU (attempt 2: 5.1 h), and the whole
+solve-API suite with the parity test runs in 4 min 40 s, inside your 15-minute limit. Near the axis (ψ = 0.05 and 0.10, Z = 1,
+Φ off, u up to 6.5) every trapped orbit crosses the start section twice per period and every passing orbit once, so the ½ and 1
+weights hold there.</p>
+
+
+<!-- ============================================================ -->
+<h2 id="zow">3. The zero-orbit-width limit (your Q11 question)</h2>
+
+<p><b>The check.</b> Raising the charge Z shrinks the orbit width Δ<sub>b</sub> ∝ 1/Z, so <code>forb</code> should approach the
+<i>replay</i>, the surface values from <code>fgar</code> pushed through the same orbit integrals on the same pitch grid. Variant
+A raises Z only. Variant B also divides ω<sub>E</sub> and the collision frequency ν by Z, which keeps the resonances sharp.
+Attempt 2 found two floors that did not move with Z. Swapping one orbit quantity at a time for its surface value traced A to the
+trapped |δJ<sub>ℓ</sub>|² at the edge and B to a 1.5% offset in trapped precession at ψ ≈ 0.92, where ω<sub>E</sub> crosses zero.</p>
+
+<p><b>Cause of both: the rebuilt Jacobian.</b> Probe P2 compared every orbit-field input with the surface path's source on a
+θ grid. |B| and ∂B/∂ψ are identical, because both come from the same spline. The rebuilt Jacobian equals the equilibrium's on
+average, but it is rough in θ. Its second differences are 10⁻⁵ of its size at ψ = 0.5 and 10⁻² from ψ = 0.92 out, against 10⁻¹²
+for <code>rzphi_jac</code>. Its ψ-derivative is off by up to 75% at ψ = 0.92 (Figure {{N_JAC}}). It enters the curvature terms of
+the orbit drift (precession, floor B) and dt along the orbit (timing and phase in δJ, floor A). Using <code>rzphi_jac</code> moved
+the median trapped precession, orbit over surface, at ψ = 0.918 from 0.9858 to 0.99999, with ψ = 0.5 unchanged (job 139296). The
+numerics reviewer named the same cause independently. It also found that the precession offset was up to 4.5% at some pitches,
+and that it returned towards 1 for the deepest orbits, where the roughness is smallest: the pattern of noise, not of a physics
+term.</p>
+
+<figure id="fig-jac" class="narrow"><div class="plate">{{FIG_JAC}}</div>
+<figcaption>Figure {{N_JAC}}. ∂𝒥/∂ψ of the Jacobian rebuilt from the R, Z map, over that of <code>rzphi_jac</code>, along θ at
+three surfaces of the DIII-D-like case (rzphi grid: 280 × 257 points). The two agree at ψ = 0.5 and scatter by tens of percent
+from ψ = 0.92 out. The orbit field now uses <code>rzphi_jac</code>.</figcaption></figure>
+
+<p><b>The scan after the fixes.</b> I first reran the scan exactly as in attempt 2 (array 139359). A now falls with no floor.
+B falls from 3.9×10⁻² to 1.1×10⁻⁵ and levels at 6.5×10⁻⁶. That level sits at the ω<sub>E</sub> = 0 crossing (ψ = 0.918–0.932), is
+the same at every Z, and is trapped precession again (swap: 8.6×10⁻⁵ → 2.4×10⁻⁶ per surface). Tightening the quadrature
+tolerances 10× and 100× changes nothing. Raising the θ resolution of the <em>surface</em> reference does: <code>fgar</code>'s
+default of 128 θ points gives 8.6×10⁻⁵ at ψ = 0.921, and 256, 512 and 1024 points give 5.5×10⁻⁶, 1.3×10⁻⁶ and 1.0×10⁻⁶ (job 139406).
+So the last level was the reference's error, and the orbit was the more accurate side. Doubling the orbit's δJ samples from 256
+to 1024 changes nothing (jobs 139302–3). Against a replay built at 512 θ points (array 139407), both variants fall with no floor
+(Figure {{N_ZOW}}).</p>
+
+<figure id="fig-zow" class="narrow"><div class="plate">{{FIG_ZOW}}</div>
+<figcaption>Figure {{N_ZOW}}. |T<sub>forb</sub>/T<sub>replay</sub> − 1| for the ψ-integrated complex torque against the
+trapped-orbit width at ψ = 0.5, Z = 16 … 65536, DIII-D-like case, 64 pitch nodes, Φ off. Grey: attempt 2, with the two floors.
+Black: attempt 3 against a replay at 512 θ points. Variant A (circles, solid) has slope 0.98 overall and local slopes 0.95, 0.88,
+0.92, 1.09, 1.03, 1.00. Variant B (dashed) falls 4.8 decades. Light blue: variant B of attempt 3 against a replay at
+<code>fgar</code>'s default 128 θ points; the 6.5×10⁻⁶ level it reaches is that reference's own resolution.</figcaption></figure>
+
+<p><b>Variant B is not a single power law.</b> It drops 68 times between Z = 256 and Z = 1024, then falls with slope about 1, and
+about 0.5 in the last step. Figure {{N_FLOOR}}b shows the drop happens in the edge surfaces. My unconfirmed explanation: in
+variant B every frequency except ω<sub>b</sub> scales as 1/Z, so the ℓ ≠ 0 bounce resonances move to energies that grow with Z
+and leave the energy range (u ≤ 6.5) near Z ≈ 500. From there only the ℓ = 0 resonance is left, whose position does not move.
+I have not tested this. The check as restated asks for a power law with no floor. A meets that as written; B has no floor
+over 4.8 decades but is not a single power law.</p>
+
+<figure id="fig-floor"><div class="plate">{{FIG_FLOOR}}</div>
+<figcaption>Figure {{N_FLOOR}}. Each ψ node's |ΔT|, weighted as in the ψ quadrature, over the integrated |T|, for four charges.
+(a) Variant A: every surface falls in proportion to 1/Z. (b) Variant B: the edge surfaces fall by orders of magnitude between
+Z = 256 and 4096.</figcaption></figure>
+
+<p><b>Two things for <code>develop</code>, not for this project</b> (parked in JOURNAL). <code>fgar</code>'s default 128 θ
+points leave a trapped-precession error of about 10⁻⁴ near an ω<sub>E</sub> = 0 crossing, and its default 128 pitch nodes leave a
+2.5% torque-density error at ψ = 0.7 (attempt 2). Both belong in one issue for <code>develop</code>.</p>
+
+
+<!-- ============================================================ -->
+<h2 id="conv">4. Physical width: convergence, cost and the torque</h2>
+
+<p><b>Convergence.</b> At Z = 1 I doubled the pitch nodes and halved the energy tolerance on three surfaces, with Φ off and on
+(Figure {{N_CONV}}). From 64 to 128 nodes the complex torque moves by at most 2.7% with Φ off and 2.6% with Φ on, inside the 5%
+check. Tables at 64 nodes take 1.0–1.5 min per surface with Φ off and 1.4–1.8 min with Φ on, about half of attempt 2's time. The
+Φ-off torques are unchanged from attempt 2 (0.0371 + 0.0818i at ψ = 0.5).</p>
+
+<figure id="fig-conv"><div class="plate">{{FIG_CONVERGE}}</div>
+<figcaption>Figure {{N_CONV}}. Z = 1, DIII-D-like case, ℓ = −2 … 2 (jobs 139341–139358). (a) Change in the complex torque density
+on each doubling of the pitch nodes, with <code>orbit_energy_tol</code> halved alongside (10⁻², 5×10⁻³, 2.5×10⁻³); dotted: the 5%
+check. (b) Table build time per surface, single thread.</figcaption></figure>
+
+<p><b>The torque at physical width.</b> Figure {{N_PROFILE}} shows the Z = 1 torque density of thermal deuterium in the DIII-D-like case with Φ
+on, the default since Q8, beside Φ off and <code>fgar</code>. Integrated over ψ: <code>fgar</code> 0.536 + 0.169i N·m;
+<code>forb</code> 0.204 − 0.036i with Φ off and 0.119 + 0.077i with Φ on. Inside ψ = 0.9 the three nearly agree in real part
+(0.070, 0.059, 0.059). Above it <code>fgar</code> has 0.466, <code>forb</code> 0.145 with Φ off and 0.060 with Φ on. With Φ on,
+the peak at the ω<sub>E</sub> = 0 crossing (ψ ≈ 0.92) is gone and the edge peak is lower and broader. That is the mechanism
+physics.md §4 names for KR2: an orbit that straddles the ω<sub>E</sub> zero sees its average. With Φ on the table costs 1.25 h
+of CPU and no orbit is left unclosed. One sign of what the table reviewer flagged: 2969 sampled nodes with Φ on (606 with Φ off), across 12,332
+segments, fall in a class other than their segment's and are dropped. These are thin class bands that the 24-point scan in u
+misses; the class-edge change in Section 5 would catch them.</p>
+
+<figure id="fig-profile"><div class="plate">{{FIG_PROFILE}}</div>
+<figcaption>Figure {{N_PROFILE}}. Real part of the torque density at Z = 1, 64 pitch nodes, L = 6. Grey: <code>fgar</code>.
+Black dashed: <code>forb</code> with Φ off. Black solid: <code>forb</code> with Φ on, the default. (b) The edge enlarged. The drive
+is still ∂f/∂ψ at the start surface and lost orbits count as zero, so this is a preview of KR2, not the result.</figcaption></figure>
+
+<p><b>Not done: the phase-space measure.</b> physics.md §3 gives the orbit path's phase-space measure as Gorelenkov 1999 Eq. 22,
+"check the denominator against the PDF in M2". It is not in the code. The pitch integral uses <code>fgar</code>'s measure, so
+the Jacobian |∂P<sub>φ</sub>/∂ψ₀| at fixed (E, μ, θ₀), which relates a start label ψ₀ to the constants of motion, is missing.
+It goes to 1 as the orbit width goes to zero, so it cannot touch check 1. The table reviewer estimates it at about 1% for
+thermal ions at Z = 1 and up to tens of percent for alphas with Δ<sub>b</sub>/a ≈ 0.1–0.3. The Z = 1 profile above lacks it. It
+belongs with the M3 drive ∂f/∂P<sub>φ</sub>, which needs the same derivative, so Q14 proposes moving it there as M3's first task.</p>
+
+<div class="card" id="q14" data-q="Q14">
+  <h3>Q14 - physics.md wording after attempt 3, and moving the measure to M3 (gates M3)</h3>
+  <p><b>Found.</b> The code now differs from physics.md in three places, each for a reason given above, and one M2 item is not
+  done. (a) §2 says the Jacobian comes from R, Z; the code uses <code>rzphi_jac</code>, because the rebuilt one is rough near the
+  edge (Section 3). (b) §2 classifies orbits by v<sub>∥</sub> reversals; the code closes on the first return in the start
+  direction and classifies by net poloidal winding, which covers the two E×B orbit types, potatoes and stagnation orbits
+  (Section 2). (c) §4 states the ordering as "E×B speed small against the thermal speed"; what sets the orbit topology is
+  Rω<sub>E</sub> ≪ v<sub>t</sub>, and TJ with Φ on violates it (Section 2). (d) The §3 measure, assigned to M2, is not in the
+  code (Section 4).</p>
+  <p><b>Why it gates M3.</b> M3's alphas add potato and stagnation orbits to the same classifier, and their weight and measure
+  follow from it, so physics.md should say what the code does before M3 builds on it.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q14" value="A"> A - All four: amend §2 and §4 as in (a)–(c); the measure becomes M3's first task</label></dt>
+    <dd>physics.md §2: "𝒥 from <code>rzphi_jac</code>, as the surface path"; "closed: first return to θ ≡ θ₀ (mod 1) at ψ₀ in the
+    start direction; class by net winding k (0 trapped, ±1 passing), weight 1/(crossings per period)". §4: "Rω<sub>E</sub> ≪
+    v<sub>t</sub>; TJ with Φ on is a classifier test only". §3 and PLAN M3 gain "the measure |∂P<sub>φ</sub>/∂ψ₀| per orbit,
+    analytic at the launch point, checked against Gorelenkov 1999 Eq. 22 in the PDF", with an M3 check that it goes to 1 at zero
+    orbit width.</dd>
+    <dt><label><input type="radio" name="Q14" value="B"> B - The three wording changes; the measure waits until M3 shows it matters</label></dt>
+    <dd>Keeps M3 smaller. The Z = 1 thermal-ion profile stays about 1% off, and the alpha torques of KR1 may move by much more
+    when it is added later.</dd>
+    <dt><label><input type="radio" name="Q14" value="C"> C - Hold physics.md; revert the code to its text where it differs</label></dt>
+    <dd>Brings back floor B and the unclosed orbits. Listed for completeness.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, sure about (a)–(c), which describe what the code now does for reasons
+  measured here; fairly sure about (d), because the M3 drive needs the same ∂P<sub>φ</sub>/∂ψ₀ anyway.</div>
+  <textarea name="Q14-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="speed">5. What the reviews proposed that I have not done</h2>
+
+<p>You asked whether a review could find methods that are both more stable and faster. The stability part is in Sections 2 and
+3. On speed, the closure fix gave the largest gain, 4.3× on the Z = 1 table. The table reviewer proposed three more changes. Its
+estimate is that together they would take the Z = 1 profile from 1.2 h to well under an hour of table time and cut the integral
+stage by about 3×; I have not measured that.</p>
+<ul>
+<li><b>Class edges without orbits.</b> Each pitch column scans 24 orbits in u and bisects the class changes. Most of those probes
+are discarded, and a class band thinner than the 0.28 scan spacing can be missed. The class boundaries are where the
+constants-of-motion function has critical values on the curves ∂B/∂θ = 0, so they can be computed from the field alone, leaving
+one orbit per segment to confirm the class.</li>
+<li><b>Refinement weighted by energy.</b> 49 of 149 segments hit the 64-node cap in a Z = 1 table, and 31% of their nodes sit at
+u &gt; 4, where the Maxwellian weight is negligible. The refinement test can weight each quantity by its contribution to the
+energy integral and treat each ℓ separately.</li>
+<li><b>The integral stage.</b> It rebuilds a spline at every pitch evaluation and runs two small eigenvalue solves in every spline
+cell, which can be cached per group.</li>
+</ul>
+<p>The numerics reviewer's main speed lever was passing interpolation hints to the orbit right-hand side (its estimate 2–4× per
+orbit), also not done. None of these changes the answer, so they can wait.</p>
+
+<div class="card" id="q15" data-q="Q15">
+  <h3>Q15 - When to do the remaining speed-ups (not gating)</h3>
+  <p><b>Found.</b> The cost at physical width is now 1.2 h of CPU per thermal-ion profile, 1.0–1.8 min per surface. The four
+  changes above are estimated, not measured, to give several times more. The alpha scans in M4 (KR1: three machines × a field
+  scan) will be the largest runs of the project.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q15" value="A"> A - In M7, with the PR clean-up</label></dt>
+    <dd>M3 and M4 run at today's cost. M4 needs about 3 surfaces × 64 nodes × the field scan per machine; I will measure the alpha
+    cost in M3 and say if it exceeds the M0 budget estimate by more than 2× (the card PLAN already expects).</dd>
+    <dt><label><input type="radio" name="Q15" value="B"> B - As M3's second task, after the measure</label></dt>
+    <dd>Faster M3–M5 iterations, at the price of touching the table code again before the alpha physics is in.</dd>
+    <dt><label><input type="radio" name="Q15" value="C"> C - Only if M3's alpha cost measurement asks for it</label></dt>
+    <dd>The decision moves to the M3 report, with the measured alpha cost in hand.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: C</b>, fairly sure. Whether the speed-ups are needed depends on the alpha cost, which M3
+  measures anyway. Until then the code should stay as it is while its physics settles.</div>
+  <textarea name="Q15-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<button class="copy" onclick="copyAnswers()">Copy answers</button>
+<pre id="answers" hidden></pre>
+
+<h2>Paper</h2>
+<p><b>Abstract and key results.</b> No change. <b>KR3</b> (the methods figure, <code>fig_zow_limit.pdf</code>): Figure {{N_ZOW}}
+is its draft. The caption states slope 0.98 for A and the 512-point reference, and the slope is re-measured after M3 as Q9a asks.
+<b>KR2</b>: Figure {{N_PROFILE}} is a preview with the drive at the start surface, lost orbits at zero and no measure. Nothing is
+promoted to <code>paper/</code> until M3.</p>
+<p><b>Coherence.</b> The Letter's premise, that orbit averaging changes the thermal-ion torque at order unity near the edge,
+still holds with Φ on (Section 4). The methods paragraph gains one sentence: orbits are classified by their poloidal winding,
+which covers the E×B-modified orbits of the edge.</p>
+
+<h2>Next</h2>
+<ul>
+<li><b>Waiting for Q14</b> (it gates M3). With A, M3 opens with the measure, then the P<sub>φ</sub> drive, the loss boundary and
+the slowing-down distribution, as PLAN lists. With B, M3 starts with the drive.</li>
+<li>Before M3 needs <code>f0type</code>: the Q6 forwarding bugfix as a separate small PR to <code>develop</code>, opened as a draft
+with a human reviewer named. <b>It is never merged without a human reviewer's approval.</b></li>
+<li>Parked for <code>develop</code>: <code>fgar</code>'s default 128 pitch nodes and 128 θ points (Section 3).</li>
+</ul>
+<p>Everything here is committed and pushed: gpec <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} (report scripts in
+<code>docs/workorders/ntv-orbit/reports/m2a3_*</code>), runs in <code>results/m2a3_dev/</code>, <code>results/m2a3_zow/</code>,
+<code>results/m2a3_zow512/</code>, <code>results/m2a3_z1phi/</code>, logs in <code>/mnt/scratch/ncl2128/claude-jobs/</code>.</p>
+</main>
+
+<script>
+function copyAnswers() {
+  const date = new Date().toISOString().slice(0, 10);
+  const lines = [`## Answers to M2 attempt 3 (${date})`, ''];
+  document.querySelectorAll('.card').forEach(c => {
+    const q = c.dataset.q;
+    const sel = c.querySelector(`input[name="${q}"]:checked`);
+    const note = c.querySelector(`textarea[name="${q}-note"]`).value.trim();
+    const label = sel ? sel.parentElement.textContent.trim().replace(/\s+/g, ' ') : '(no option chosen)';
+    lines.push(`- **${q}**: ${label}` + (note ? `\n  - ${note}` : ''));
+  });
+  const text = lines.join('\n');
+  const pre = document.getElementById('answers');
+  pre.textContent = text; pre.hidden = false;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});  // the block is shown either way
+}
+</script>
