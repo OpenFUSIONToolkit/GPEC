@@ -227,6 +227,31 @@ function sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.psilow > profiles.xs[1] &&
         @info "sing_min: qlow=$(@sprintf("%.3f", ctrl.qlow)); raising psilow from $(@sprintf("%.5f", profiles.xs[1])) " *
               "to $(@sprintf("%.5f", intr.psilow)) (excludes the q < qlow region)"
+    move_start_off_rational!(intr, ctrl)
+    return intr.psilow
+end
+
+"""
+    move_start_off_rational!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
+
+Move `intr.psilow` just past any singular surface it lands on. A start on a rational, or inside its
+crossing standoff `singfac_min/|n q'|`, sits where the resonant Euler-Lagrange coefficients diverge
+and the first chunk would have to run backwards to the standoff; the start is placed one standoff
+beyond that surface instead, which then counts as inside the domain start and is not crossed. A
+rational `qlow` lands here for every n that makes `n·qlow` an integer (qlow = 1.5 at n = 2, qlow = 3
+at n = 3, 6, 9, ...).
+"""
+function move_start_off_rational!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
+    for s in intr.sing
+        standoff = ctrl.singfac_min / (minimum(s.n) * abs(s.q1))
+        if abs(intr.psilow - s.psifac) <= standoff
+            moved = s.psifac + standoff
+            @warn "Integration start ψ_N=$(@sprintf("%.7f", intr.psilow)) lands on the q=$(@sprintf("%.4f", s.q)) rational surface " *
+                  "(m/n = $(join(s.m, ","))/$(join(s.n, ","))) at ψ_N=$(@sprintf("%.7f", s.psifac)); " *
+                  "moving the start to ψ_N=$(@sprintf("%.7f", moved)), one crossing standoff singfac_min/|n q'| past it."
+            intr.psilow = moved
+        end
+    end
     return intr.psilow
 end
 

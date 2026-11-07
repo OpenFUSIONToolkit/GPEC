@@ -42,7 +42,7 @@ records needed to undo it, and singular-surface asymptotic coefficients.
 ## Fields
 
   - `numpert_total::Int` - Total number of (m, n) modes.
-  - `numunorms_init::Int` - Allocated number of Gaussian-reduction records.
+  - `numunorms_init::Int` - Capacity of the Gaussian-reduction records; doubled on demand by `grow_reduction_store!`.
   - `msing::Int` - Number of singular surfaces (sizes `ca_l`/`ca_r`).
   - `numsteps_init::Int` - Initial allocation of stored steps.
   - `step::Int` - Index of the next stored step (1-based).
@@ -71,10 +71,10 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `unorm::Vector{Float64}` - Current solution-column norms.
   - `unorm0::Vector{Float64}` - Reference norms since the last reduction.
   - `ifix::Int` - Number of Gaussian reductions performed.
-  - `index::Array{Int,2}` - Pivot column order for each reduction, shape `(numpert_total, numunorms_init)`.
+  - `index::Array{Int,2}` - Pivot column order for each reduction, shape `(numpert_total, capacity)`.
   - `sing_flag::Vector{Bool}` - Whether each reduction was at a singular surface.
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal crossing, the positions in `index` of the zeroed resonant solutions.
-  - `fixfac::Array{ComplexF64,3}` - Gaussian-reduction factors, shape `(numpert_total, numpert_total, numunorms_init)`.
+  - `fixfac::Array{ComplexF64,3}` - Gaussian-reduction factors, shape `(numpert_total, numpert_total, capacity)`.
   - `fixstep::Vector{Int64}` - Last stored step before each reduction.
   - `spline_hint::Base.RefValue{Int}` - Shared interval hint for profile splines evaluated at the same ψ.
   - `mats_hint::Base.RefValue{Int}` - Interval hint for the matrix splines; per `OdeState`, so per-thread copies do not race.
@@ -129,6 +129,34 @@ end
 
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
     OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+
+"""
+    grow_reduction_store!(odet::OdeState) -> OdeState
+
+Double the capacity of the Gaussian-reduction records (`index`, `sing_flag`, `zeroed_idx`, `fixfac`,
+`fixstep`), keeping the records already written. A reduction fires at every rational surface and at every
+`renorm_threshold` trigger, so high-n runs outgrow `numunorms_init`; without the records `transform_u!`
+cannot rebuild the solution profiles.
+"""
+function grow_reduction_store!(odet::OdeState)
+    cap = length(odet.fixstep)
+    N = odet.numpert_total
+    index = zeros(Int, N, 2cap)
+    index[:, 1:cap] .= odet.index
+    odet.index = index
+    sing_flag = falses(2cap)
+    sing_flag[1:cap] .= odet.sing_flag
+    odet.sing_flag = sing_flag
+    append!(odet.zeroed_idx, [Int[] for _ in 1:cap])
+    fixfac = zeros(ComplexF64, N, N, 2cap)
+    fixfac[:, :, 1:cap] .= odet.fixfac
+    odet.fixfac = fixfac
+    fixstep = zeros(Int64, 2cap)
+    fixstep[1:cap] .= odet.fixstep
+    odet.fixstep = fixstep
+    odet.numunorms_init = 2cap
+    return odet
+end
 
 """
     compute_delta_prime_from_ca!(odet, intr, equil)
@@ -542,7 +570,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                 error(
                     "Singular surface q=$(sg.q) at ψ=$(sg.psifac) (q'=$(sg.q1)): its crossing standoff " *
                     "singfac_min/|n q'| = $(sg.psifac - psi_end) reaches back past the current chunk start ψ=$psi_current. " *
-                    "Move the domain start (psilow, or a qlow that lands on this surface) off it, or lower singfac_min if a neighboring crossing is too close."
+                    "Move the domain start (psilow) off it, or lower singfac_min if a neighboring crossing is too close."
                 )
             end
             @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"
@@ -813,12 +841,8 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     end
 
     if fix_required
-        if odet.ifix < ctrl.algorithm.numunorms_init
-            odet.ifix += 1
-        else
-            @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
-            Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
-        end
+        odet.ifix == length(odet.fixstep) && grow_reduction_store!(odet)
+        odet.ifix += 1
         apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
         odet.new = true
     end
