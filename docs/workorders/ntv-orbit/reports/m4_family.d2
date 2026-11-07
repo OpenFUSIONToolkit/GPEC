@@ -1,0 +1,20 @@
+direction: right
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  new: {style: {fill: "#e4ece4"; stroke: "#2f6b3a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+}
+g: "published gEQDSK\nARC · ITER · SPARC" {class: n}
+q: "raise q₀ to 1.1\nF² → F² + C" {class: new}
+s: "rescale by λ\nψ, F, Iₚ, B ×λ; p ×λ²" {class: new}
+k: "kinetic profiles\nunchanged" {class: n}
+c: "EFCC currents ×λ\nδB/B fixed" {class: new}
+r: "GPEC n = 1 response\nfrom max(q₀, 1.02)" {class: n}
+t: "fgar and forb\nalpha torque, fixed ν" {class: new}
+o: "ratio vs Δb/a ∝ 1/λ" {class: new}
+g -> q -> s -> r
+g -> s
+k -> r
+c -> r
+r -> t -> o
+(* -> *)[*].style: {stroke: "#333333"; stroke-width: 2}

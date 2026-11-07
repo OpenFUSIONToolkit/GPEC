@@ -1,0 +1,383 @@
+<meta charset="utf-8">
+<title>M4 Attempt 1</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!-- Built by m4_build.py from M4.template.html; edit the template, not M4.html. -->
+<style>
+  /* One reading column; figures sit on white plates so they read in both themes. */
+  :root { --bg: #fff; --fg: #111; --muted: #555; --rule: #ccc; --plate: #fff; --panel: #f3f3f2; --accent: #2a78d6; --warn: #a33b2a;
+          --ok: #2e7d32; --amber: #b26a00; --card: #fafaf8; --serif: Georgia, "Times New Roman", serif;
+          --sans: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38;
+          --plate: #fff; --panel: #222220; --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38; --plate: #fff; --panel: #222220;
+          --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--serif); }
+  main { max-width: 52em; margin: 0 auto; padding-block: 2em; padding-left: max(16px, env(safe-area-inset-left, 0px));
+         padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  h1 { font-size: 1.5em; margin: 0 0 .2em; text-wrap: balance; }
+  .meta { color: var(--muted); font-size: .85em; margin-bottom: 1em; }
+  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--rule);
+       padding-bottom: .3em; margin-top: 2.6em; text-wrap: balance; }
+  h3 { font-size: 1em; margin: 1.6em 0 .3em; }
+  p, li { max-width: 70ch; }
+  figure { margin: 1.5em 0; }
+  figure .plate { background: var(--plate); padding: .5em; border-radius: 3px; overflow-x: auto; }
+  figure img, figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figure.d2 .plate { max-width: 36em; margin: 0 auto; }
+  figure.narrow img { max-width: min(100%, 32em); }
+  .side { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.2em; align-items: start; }
+  @media (max-width: 40em) { .side { grid-template-columns: 1fr; } }
+  figcaption { font-size: .85em; color: var(--muted); margin-top: .5em; }
+  .lede { font-size: 1.02em; }
+  .open { border-left: 3px solid var(--warn); padding-left: 1em; }
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; font: .88em/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--rule); padding: .35em .7em; text-align: left; vertical-align: top; }
+  th { font-weight: 600; }
+  code { font-size: .9em; }
+  a { color: var(--accent); }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(17em, 1fr)); gap: 1em; align-items: start; }
+  .two > * { min-width: 0; }
+  /* status strip */
+  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center; border: 1px solid var(--rule);
+           padding: .6em 1em; font: .9em/1.5 var(--sans); }
+  .strip b { font-weight: 600; }
+  .state.amber { background: var(--amber); }
+  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; background: var(--ok); }
+  /* map of the decisions */
+  .map { font: .92em/1.5 var(--sans); background: var(--panel); padding: .7em 1.1em; border-radius: 3px; }
+  .map ol { margin: .3em 0; padding-left: 1.3em; } .map li { margin: .2em 0; }
+  /* decision cards */
+  .card { border: 1px solid var(--rule); border-left: 5px solid var(--fg); background: var(--card); padding: 1em 1.2em;
+          margin: 1.6em 0 2em; font: .95em/1.55 var(--sans); }
+  .card h3 { margin: 0 0 .4em; font-size: 1.05em; }
+  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .5em; }
+  .card dd { margin: 0 0 0 1.6em; }
+  .card label { display: block; cursor: pointer; }
+  .card .rec { background: var(--panel); padding: .5em .8em; margin: .6em 0; }
+  .card textarea { width: 100%; box-sizing: border-box; min-height: 3em; font: inherit; background: var(--bg); color: var(--fg); }
+  .result-pass { color: var(--ok); font-weight: 600; } .result-fail { color: var(--warn); font-weight: 600; }
+  .copy { font: inherit; padding: .4em 1em; margin-top: 1em; cursor: pointer; }
+  #answers { white-space: pre-wrap; background: var(--panel); padding: .6em; }
+  @media print { h2, .card, figure { page-break-inside: avoid; } .copy { display: none; } }
+</style>
+<style>.part { color: var(--warn); font-size: .85em; } td small { color: var(--muted); }</style>
+<main>
+<h1>M4 attempt 1 - KR1: the alpha torque against orbit width in ARC, ITER and SPARC</h1>
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} &middot; attempt 1 of 3 &middot;
+ARC V3A, ITER 13 MA H-mode (OpenFUSIONToolkit), SPARC PRD; fusion alphas, toroidal mode number n = 1 &middot; 2026-11-07</div>
+
+<div class="strip">
+  <span class="state amber">AMBER</span>
+  <span><b>Attempts</b> 7 of 15 (M4: 1 of 3)</span>
+  <span><b>Checks</b> 3 of 4 pass; the energy-scan check passes on the q₀ = 1.1 family and is open on the published q (<a href="#checks">table</a>)</span>
+  <span><b>Tests</b> {{TESTS}}</span>
+  <span><b>Key runs</b> 3 devices × 5 field values × 2 collision models, dense ψ grids, 128 pitch × 16 energy nodes, 1 CPU per
+  surface (feynman, landau, alfven)</span>
+  <span><b>Decisions</b> 3 open; Q20 (a module change) stops the milestone, as PLAN requires</span>
+</div>
+
+<p class="lede">M4 is the first key result (KR1): the ratio of the orbit-averaged alpha torque to the surface torque as the
+orbit width shrinks, in three reactor-class equilibria. Each equilibrium is rescaled into a family in which only the orbit
+width changes. The ratio goes to 1 as it should, and at the widths of the real machines the two methods differ by 3–30%
+depending on device and equilibrium.</p>
+
+<p><b>In brief.</b> At small width the ratio reaches 1 within 1.5% in ARC and SPARC (Figure {{N_SCAN}}). At the physical
+field it is 0.69 (ARC) and 1.70 (SPARC) on the published q profiles. Both values come from the inner edge of the response,
+where orbits read perturbation data that was extrapolated below the cut at q = 1.02. On ARC with q₀ raised to 1.1, which needs
+no cut, the ratio is 0.91. Away from the edges the orbit average keeps each resonance's contribution but moves it inward by
+about two orbit widths (Section 3); that is the mechanism behind KR1. On the way I found and fixed a defect in
+<code>forb</code>'s energy refinement that put spikes on two surfaces (Section 5). Three cards: the equilibria for the Letter's
+figure (Q19), accepting that fix, the module change PLAN asks me to card (Q20, stops M4), and the ITER and SPARC sources (Q21).</p>
+
+<nav class="map"><b>Where the decisions are.</b> Section 1 says what was run and how it was checked; read it first.
+<ol>
+<li value="2"><a href="#scan">The KR1 scan</a>: no card</li>
+<li><a href="#shift">Where the two torques differ</a>: no card</li>
+<li><a href="#edge">The inner edge and q₀</a> &rarr; <a href="#q19">Q19</a>: the equilibria for KR1 (not gating)</li>
+<li><a href="#defect">A defect in the energy refinement</a> &rarr; <a href="#q20">Q20</a>: the module change (stops M4)</li>
+<li><a href="#sources">ITER and SPARC</a> &rarr; <a href="#q21">Q21</a>: the equilibrium sources (not gating)</li>
+</ol></nav>
+
+
+<!-- ============================================================ -->
+<h2 id="what">1. What M4 ran, and how it was checked</h2>
+
+<p><b>The scan.</b> KR1 asks how the orbit torque <code>forb</code>, computed along each alpha's guiding-center orbit, compares
+with the surface torque <code>fgar</code>, which treats each flux surface on its own (the zero-orbit-width limit). The comparison
+is made as the orbit width Δ<sub>b</sub> shrinks at fixed everything else. Grad–Shafranov is homogeneous under multiplying the
+poloidal flux ψ, the toroidal field function F, the plasma current I<sub>p</sub> and the field B by λ, with the pressure ×λ²: the
+shape, the safety factor q(ψ) and β are unchanged, and Δ<sub>b</sub> ∝ 1/λ. So each published gEQDSK becomes a family
+λ = 1, 2, 4, 8, 16 without a new solve (Figure {{N_FAMILY}}). The kinetic profiles are held fixed, so the alpha distribution
+and its density are the same for every member. The coil currents scale with λ, so δB/B is fixed. This is a numerical
+orbit-width scan, not a device family. The width quoted below is the radial excursion over the minor radius a of a 3.5 MeV
+trapped alpha launched at r/a = 0.8 on the outboard midplane: at λ = 1 it is 0.090 (ARC), 0.093 (ITER) and 0.136 (SPARC).</p>
+
+<figure id="fig-family" class="d2"><div class="plate">{{D2_FAMILY}}</div>
+<figcaption>Figure {{N_FAMILY}}. How each family member is built. Green: new in M4. EFCC: error-field-correction coils. The q₀
+raise (Section 4) is exact: F² → F² + C leaves ψ, p and FF′ unchanged and multiplies q by F<sub>new</sub>/F<sub>old</sub>.</figcaption></figure>
+
+<p><b>Forcing.</b> As you asked, ARC is driven by its error-field-correction coils from the MHD physics basis (Leuthold et al.
+2026, §5.2): two rows of six picture-frame coils outside the TF coils at θ ≈ ±60° from the outboard midplane, 2 m tall, with
+6° toroidal gaps, n = 1 phasing, 10 kA × λ. ITER uses its EFCC set (<code>iter_efcm</code>, 50 kA × λ) and SPARC a midplane
+window-pane row (R = 2.82 m, 1.5 m tall, 20 kA × λ). Figure {{N_COILS}} shows where they sit.</p>
+
+<figure id="fig-coils"><div class="plate">{{FIG_COILS}}</div>
+<figcaption>Figure {{N_COILS}}. Plasma boundary (grey) and the n = 1 forcing coils (black) of (a) ARC, (b) ITER and (c) SPARC
+at λ = 1. The ARC rows are digitized from Leuthold et al. 2026 Fig. 12(c).</figcaption></figure>
+
+<p><b>Numerics.</b> 128 pitch × 16 energy nodes (M3 §5); one point at 192 × 24 moves the torque by 0.3% and the energy term by
+2.4%. The surface torque has steps and narrow peaks where a bounce resonance enters the energy range. On the 39 Gauss nodes
+of M3, <code>fgar</code> and <code>forb</code> sampled them on different sides and their totals scattered by ±8% at small width.
+The runs here use uniform nodes 0.003 apart in ψ over the outer half (0.006 in ITER and the q₀ = 1.1 families), with Gauss panels
+inside. Each surface is one job on one CPU.</p>
+
+<h3 id="checks">The checks from PLAN.md, at a glance</h3>
+<div class="tbl"><table>
+<tr><th>Check, from PLAN.md M4</th><th>Seen</th><th>Result</th><th>Where</th></tr>
+<tr><td>q(ψ) and β unchanged across each family to 1%</td>
+    <td>ARC: ≤ 2×10⁻⁵ in q, β, W/λ², islands and the stability energies; ITER and SPARC by the same exact rescaling</td>
+    <td><span class="result-pass">pass</span></td><td>&sect;1</td></tr>
+<tr><td>Ideal δW and plasma-response amplification unchanged across each family</td>
+    <td>ARC: stability energies and island widths ≤ 2×10⁻⁵; the forcing ×λ keeps δB/B</td>
+    <td><span class="result-pass">pass</span></td><td>&sect;1</td></tr>
+<tr><td>The ratio → 1 at the small-width end</td>
+    <td>ARC 0.9997 (λ = 8), 0.986 (λ = 16); SPARC 0.990, 1.0005; per surface, fixed ν converges (Figure {{N_NU}})</td>
+    <td><span class="result-pass">pass</span></td><td><a href="#scan">&sect;2</a></td></tr>
+<tr><td>The energy scan at fixed field reproduces the field-scan trend at matched Δ<sub>b</sub>/a</td>
+    <td>ARC q₀ = 1.1: 0.975 at 0.875 MeV against 0.966 at λ = 2; published q (39 nodes): 0.836 against 0.914</td>
+    <td><span class="result-pass">pass</span> on q₀ = 1.1; open on the published q</td><td><a href="#scan">&sect;2</a></td></tr>
+</table></div>
+
+<p>One deviation from PLAN: M4 was to change scripts only, and it changed <code>forb</code> (Section 5). PLAN says to stop and
+card that, hence Q20.</p>
+
+
+<!-- ============================================================ -->
+<h2 id="scan">2. The KR1 scan</h2>
+
+<p><b>The figure.</b> Figure {{N_SCAN}} is KR1's figure. The table gives the numbers; a red fraction marks a dense run that was
+still incomplete when this report was built (surfaces done / total).</p>
+
+{{KR1_TABLE}}
+
+<figure id="fig-scan"><div class="plate">{{FIG_SCAN}}</div>
+<figcaption>Figure {{N_SCAN}}. Re T<sub>forb</sub>/Re T<sub>fgar</sub>, the ψ-integrated n = 1 alpha torque, against the
+trapped-orbit width Δ<sub>b</sub>/a, (a) on the published q profiles and (b) with q₀ = 1.1. Circles: ARC; squares: ITER;
+diamonds: SPARC. Filled, solid: field scan, fixed collision frequency ν. Open, dotted: field scan with ν/λ. Grey: energy scan
+at λ = 1 (0.875 and 0.219 MeV birth energy). Only complete dense runs are shown.</figcaption></figure>
+
+<p><b>Which collision frequency.</b> Scaling the field leaves the pitch-angle scattering rate ν unchanged. M3's
+zero-orbit-width test divided ν by the scale factor ("variant B") so that the surface torque stays exactly invariant. For
+the field scan that turned out to be the wrong choice: with ν/λ the per-surface difference stays at 0.4–0.5 through λ = 256
+(Figure {{N_NU}}b), while with ν fixed it falls to 10⁻² (Figure {{N_NU}}a). My reading, not proved: for ℓ ≠ 0 the orbit shift of a
+bounce resonance and the width ν that smooths it both scale as 1/λ, so with ν/λ their ratio never changes and there is no
+zero-width limit. Fixed ν is also the physical choice: a stronger field does not slow collisions. PLAN v0.11 records the
+switch; the ν/λ points stay on the figure as open symbols. The integrated ratios differ little between the two (table rows
+agree within 0.04), because the per-surface differences change sign along ψ.</p>
+
+<figure id="fig-nu"><div class="plate">{{FIG_NU}}</div>
+<figcaption>Figure {{N_NU}}. |T<sub>forb</sub> − T<sub>fgar</sub>|/|T<sub>fgar</sub>| on three ARC surfaces against λ (2 to 256;
+λ = 64, 256 as single-surface runs), (a) fixed ν and (b) ν/λ. 39-node runs, before the fix of Section 5.</figcaption></figure>
+
+<p><b>The energy scan.</b> Lowering the birth energy at λ = 1 shrinks the width too, but it also changes the distribution, so
+PLAN asks that it reproduce the field-scan trend at matched width. On ARC with q₀ = 1.1 it does: 0.975 at 0.875 MeV against 0.966
+at λ = 2, both Δ<sub>b</sub>/a = 0.044, and 1.015 at 0.219 MeV against 0.983 at λ = 4 (that run partial). On the published q only
+the 39-node runs exist: 0.836 against 0.914. The 39-node totals scatter by ±8%, so that gap is within their error, and I have
+not rerun them dense.</p>
+
+
+<!-- ============================================================ -->
+<h2 id="shift">3. Where the two torques differ</h2>
+
+<p>A ratio near 1 does not mean the torque profiles match. Each orbit is labelled by its launch flux ψ₀ at the field minimum,
+but it samples the perturbation over its whole width and its resonance sits at its mean flux ψ̄. Figure {{N_SHIFT}} follows one
+resonance step of <code>fgar</code>, at ψ ≈ 0.825 in ARC, through the family. In <code>forb</code> the same contribution
+appears inside it, by about 0.03, 0.017 and 0.009 in ψ at λ = 2, 4 and 8: twice the trapped orbit's ψ excursion at r/a = 0.8
+(0.017, 0.0085, 0.0042). The peak is taller and narrower but carries the same integral to within the totals' agreement. One
+surface at λ = 4 taken apart by harmonic shows it is the ℓ = −2 bounce resonance alone (7.8×10⁻⁴ of 7.8×10⁻⁴ N m), and
+unchanged by the fix of Section 5. This shift of resonant torque by about an orbit width is what KR2 claims for thermal ions
+at DIII-D's rational surfaces; for alphas it moves peaks rather than removing them.</p>
+
+<figure id="fig-shift"><div class="plate">{{FIG_SHIFT}}</div>
+<figcaption>Figure {{N_SHIFT}}. ARC published q, fixed ν: torque density across the ψ = 0.78–0.85 resonance step,
+(a)–(d) λ = 2, 4, 8, 16. Grey: <code>fgar</code>; black: <code>forb</code>. At λ = 16 the shift (≈ 0.004) is near the node
+spacing, 0.003.</figcaption></figure>
+
+
+<!-- ============================================================ -->
+<h2 id="edge">4. The inner edge, and q₀</h2>
+
+<p><b>What goes wrong at λ = 1.</b> With the published q (your Q18 B), ARC (q₀ = 0.89) and SPARC (q₀ = 0.93) start the response
+at q = 1.02, ψ = 0.343 and 0.327. The perturbation splines are extended below that with a cubic. Orbits launched near the
+cut, at the full width, reach below it and read the extension. At λ = 1 that dominates the ratio. With the extension replaced
+by zero, by its edge value (flat) or left cubic, the λ = 1 ratio is 0.40 / 0.88 / 1.69 in SPARC and 0.69 / 0.85 / 0.67 in ARC
+(Figure {{N_INNER}}). The physics gives no reason to prefer any of the three, so the λ = 1 points on the published q measure the
+extension, not the orbit average. From λ = 2 on, the affected band is under 0.02 in ψ and the ratios settle.</p>
+
+<figure id="fig-inner" class="narrow"><div class="plate">{{FIG_INNER}}</div>
+<figcaption>Figure {{N_INNER}}. SPARC λ = 1, published q: torque density on the innermost surfaces. Grey: <code>fgar</code>.
+Black: <code>forb</code> with the perturbation below the response's first ψ (vertical line, q = 1.02) extended as a cubic
+(solid, the code's default), held flat (dashed) or set to zero (dotted).</figcaption></figure>
+
+<p><b>The q₀ &gt; 1 check you allowed.</b> You asked for approach A (q₀ &gt; 1) against B (the cut) if cheap, and to go with A if it
+had a clear benefit. The extension sensitivity above is that benefit. Raising q₀ is exact and cheap: F² → F² + C changes
+neither ψ, the pressure nor FF′ and multiplies q by F<sub>new</sub>/F<sub>old</sub>, so only the toroidal field changes, by a
+few percent at the axis. With q₀ = 1.1 (q₉₅ ≈ 3.95) the response starts at the axis and no orbit leaves it inward; the ARC λ = 1
+ratio is 0.91. The surface torque does change: with q = 1 gone, the core alpha torque is set by the m = 1 response near
+q = 1, and it falls from 2.6×10⁻³ to 8.6×10⁻⁴ and 2.7×10⁻⁴ N m as q₀ goes 1.05, 1.1, 1.2 (Figure {{N_Q0}}). There is no plateau,
+so the absolute torque depends on the choice of q₀; the ratio KR1 plots depends on it much less (0.91 at 1.1). ITER's
+equilibrium already has q₀ = 1.30 and needs nothing. I built the q₀ = 1.1 families for ARC and SPARC and kept q₀ = 1.2 as a
+sensitivity point for ARC at λ = 1.</p>
+
+<figure id="fig-q0" class="narrow"><div class="plate">{{FIG_Q0}}</div>
+<figcaption>Figure {{N_Q0}}. ARC λ = 1 surface alpha torque density, 600 surfaces, for the published q (grey, response from
+q = 1.02, ψ = 0.343) and q₀ = 1.05, 1.1 and 1.2 (black dashed, solid, dotted; response from the axis). Symmetric-log scale.</figcaption></figure>
+
+<div class="card" id="q19" data-q="Q19">
+  <h3>Q19 - The equilibria for KR1 (not gating)</h3>
+  <p><b>Found.</b> On the published q, the λ = 1 points of ARC and SPARC are set by how the perturbation is extended below the
+  q = 1.02 cut (0.40–1.69 in SPARC). With q₀ = 1.1 there is no cut, the ratio is defined at the physical width, and the
+  energy-scan check passes. The absolute core torque depends on q₀, with no plateau.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q19" value="A"> A - q₀ = 1.1 families for ARC and SPARC, ITER as published, as the Letter's figure</label></dt>
+    <dd>Ratios at all widths, physical end included. The methods paragraph says q₀ was raised by F² → F² + C, and quotes the
+    q₀ = 1.2 sensitivity point. The published-q runs go to the supplement as the check that λ ≥ 2 agrees.</dd>
+    <dt><label><input type="radio" name="Q19" value="B"> B - Published q, dropping the λ = 1 points of ARC and SPARC</label></dt>
+    <dd>Faithful equilibria, but the figure stops at Δ<sub>b</sub>/a ≈ 0.04–0.07, half the reactor width. The abstract's claim
+    at physical width would rest on ITER alone.</dd>
+    <dt><label><input type="radio" name="Q19" value="C"> C - Both on the figure, as now</label></dt>
+    <dd>Shows the sensitivity openly; the figure is busier, and the λ = 1 published points need a caption that says they are not
+    trustworthy.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, fairly sure. It is what your Q18 answer allowed when A shows a clear benefit, and the
+  extension test is one. The q₀ dependence is of the absolute torque, which KR1 does not claim.</div>
+  <textarea name="Q19-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="defect">5. A defect in the energy refinement</h2>
+
+<p><b>The symptom.</b> The first dense ARC λ = 16 run gave a ratio of 1.09, against 0.9997 at λ = 8. All of the excess came
+from one surface near the edge, ψ = 0.99275: <code>forb</code> was +2.7×10⁻³ N m there and −2.2×10⁻⁶ on a surface 3.5×10⁻⁶
+away in ψ, with the same orbit counts. Taken apart, the excess was all in ℓ = 0, from a pitch band λ = 0.858–0.871 where the
+pitch integrand reached 2×10⁶ against ~50 elsewhere (Figure {{N_DEFECT}}b).</p>
+
+<p><b>The cause.</b> On each orbit segment (the energies at one pitch with the same orbit class), <code>forb</code> samples
+|δJ<sub>ℓ</sub>|², the bounce frequency and the precession, and adds midpoints wherever a cubic through every other node
+misses the rest by more than the tolerance. On pitch node 100 the data had a 2.5% step in |δJ|² at u = √(E/T) = 2.095. A step
+never passes that test, so every midpoint went to it: 35 of the segment's 72 nodes ended up within 10⁻⁴ in u. A cubic through
+nodes that close overshoots in the gap that follows, here to 7.8×10⁻³ against data no larger than 6×10⁻⁷ (Figure
+{{N_DEFECT}}a). I have not explained the step itself; the fix makes the interpolation robust to it.</p>
+
+<figure id="fig-defect" class="narrow"><div class="plate">{{FIG_DEFECT}}</div>
+<figcaption>Figure {{N_DEFECT}}. ARC λ = 16, ψ = 0.99275, before the fix. (a) The largest |δJ<sub>ℓ</sub>|² of the samples on
+one trapped segment of pitch node 100 (dots) and a not-a-knot cubic through them (grey; the code's cubic is of the same kind).
+(b) |K₀(λ)|, the ℓ = 0 pitch integrand, on this surface (black) and on the surface 3.5×10⁻⁶ away (grey dashed).</figcaption></figure>
+
+<p><b>The fix</b> (gpec 93fe67df1, six lines in <code>OrbitTorque.jl</code>). Midpoints are no closer than 10⁻³ of the segment,
+the tolerance already used for class edges, and refinement stops when a pass adds no node. The spike surface now gives
+−2.23×10⁻⁶ and its neighbours are unchanged to four digits. The parked SPARC outlier from earlier in M4 (Im <code>forb</code>
+27.1 against 7.8×10⁻³ on one surface) was the same defect: it is now 0.019. A scan of every run for surfaces more than 20 times
+their neighbours and <code>fgar</code> finds only these two, apart from the ℓ = −2 resonance of Section 3.</p>
+
+<p><b>Mixed code.</b> The fix went onto all three machines at 13:00, while the families were running. Surfaces computed
+before then keep the old code; the two flagged surfaces were rerun and replace their old values. To test that the old code
+is otherwise the same, the whole ARC λ = 8 profile (151 surfaces) was rerun with the fix: {{FIXCHK}}.</p>
+
+<div class="card" id="q20" data-q="Q20">
+  <h3>Q20 - The refinement fix, a module change in M4 (stops M4)</h3>
+  <p><b>Found.</b> <code>forb</code>'s energy refinement could pile its nodes onto a step in the data, and the cubic through them
+  overshot by up to 10⁴. A six-line floor on the node spacing fixes it (93fe67df1, on <code>feature/ntv-orbit</code>). PLAN
+  says M4 changes scripts only and that a module change stops the milestone with a card.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q20" value="A"> A - Accept the fix; keep the runs made before it, with the two flagged surfaces rerun</label></dt>
+    <dd>Justified by the full λ = 8 comparison above. M4 attempt 2 then only finishes the families still running and builds
+    the final figure.</dd>
+    <dt><label><input type="radio" name="Q20" value="B"> B - Accept the fix and rerun every M4 run with it</label></dt>
+    <dd>One code version throughout, at about 60 CPU-hours (a day on my share). It changes nothing if the comparison holds.</dd>
+    <dt><label><input type="radio" name="Q20" value="C"> C - Revert, and drop the affected surfaces instead</label></dt>
+    <dd>Leaves a known defect in <code>forb</code>, which KR2 and every later run inherit.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, sure if the comparison holds, B if it does not. The fix rides with the
+  <code>forb</code> PR at M7 and gets a unit test there.</div>
+  <textarea name="Q20-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="sources">6. ITER and SPARC</h2>
+
+<p><b>ITER.</b> No ITER gEQDSK with kinetic profiles was at hand, so I rebuilt OpenFUSIONToolkit's H-mode example
+(<code>ITER_Hmode_ex</code>) with TokaMaker and its bootstrap-current solve: 13 MA, q₀ = 1.30, q₉₅ = 3.48, β<sub>N</sub> = 1.98,
+with the example's own profiles. That is not the 15 MA Q = 10 baseline. Its last closed surface is truncated at ψ = 0.985.</p>
+
+<p><b>SPARC.</b> The SPARC public PRD equilibrium (FreeGS, 513²) with TRANSP profiles, n<sub>i</sub> = 0.85 n<sub>e</sub>. The two
+files disagree on the edge flux (TRANSP 2.338, gEQDSK 2.463 Wb/rad). Each is normalized to its own ψ<sub>N</sub>, which puts the
+profiles 5% outward in flux if the gEQDSK is right. q₀ = 0.93 in GPEC (the gEQDSK's q column is zero).</p>
+
+<div class="card" id="q21" data-q="Q21">
+  <h3>Q21 - The ITER and SPARC equilibria (not gating)</h3>
+  <p><b>Found.</b> ITER is OpenFUSIONToolkit's 13 MA H-mode example, not the 15 MA baseline; SPARC is the public PRD case, whose
+  TRANSP and gEQDSK edge fluxes differ by 5%. KR1 is a ratio and both are representative, but a referee may ask for the
+  standard scenarios.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q21" value="A"> A - Keep both, and say so in the methods</label></dt>
+    <dd>No new work. The Letter names them as representative ITER and SPARC equilibria.</dd>
+    <dt><label><input type="radio" name="Q21" value="B"> B - You supply the 15 MA ITER baseline and a SPARC kinetic EFIT</label></dt>
+    <dd>Two more families (about 30 CPU-hours) in M4 attempt 2; the figure waits for the files.</dd>
+    <dt><label><input type="radio" name="Q21" value="C"> C - ITER as now; SPARC with its TRANSP flux used for both</label></dt>
+    <dd>Removes the 5% mismatch by rescaling the gEQDSK's ψ to the TRANSP edge; a small rerun of the SPARC family.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, unsure: you know better than I do what referees in this community will expect of
+  "ITER". A is enough for a ratio; B is better if the Letter quotes absolute torques.</div>
+  <textarea name="Q21-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<button class="copy" onclick="copyAnswers()">Copy answers</button>
+<pre id="answers" hidden></pre>
+
+<h2>Paper</h2>
+<p><b>Abstract and key results.</b> No change to the claims. <b>KR1</b>: Figure {{N_SCAN}} is the draft of the Letter's
+figure; it converges to 1 at small width, and at physical width the orbit average changes the alpha torque by 3–10% on the
+q₀ &gt; 1 equilibria. Section 3 supplies the sentence on mechanism: the orbit average moves resonant torque inward by about an
+orbit width. If Q19 is A, the methods state the q₀ raise and the fixed collision frequency. <b>Coherence with KR2</b>: the
+alpha result is a shift of resonant peaks, where KR2 claims removal of thermal-ion peaks at rational surfaces; the Letter
+should say both are the orbit average acting on one resonance width.</p>
+
+<h2>Next</h2>
+<ul>
+<li><b>Stopped at Q20</b>, a module change, as PLAN requires. With A, M4 attempt 2 finishes the families still running
+(listed red in the table), redraws Figure {{N_SCAN}} and closes M4; then M5 (DIII-D, KR2, with beams).</li>
+<li>Draft PRs <a href="https://github.com/OpenFUSIONToolkit/GPEC/pull/660">#660</a> (forward the torque keys) and
+<a href="https://github.com/OpenFUSIONToolkit/GPEC/pull/661">#661</a> (start the torque where the response starts) still need a
+named reviewer. <b>Neither is merged without a human reviewer's approval.</b></li>
+<li>Parked: the 2.5% step in |δJ|² that triggered the defect (Section 5); the published-q energy scan, dense; the energy term
+δW<sub>K</sub>, converged to 2.4% at 128 × 16.</li>
+</ul>
+<p>Everything here is committed and pushed: gpec <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} (report scripts
+<code>docs/workorders/ntv-orbit/reports/m4_*</code>), runs in <code>results/m4_arc/</code>, <code>results/m4_iter/</code>,
+<code>results/m4_sparc/</code> (reruns after the fix in each run's <code>fix/</code>); logs in
+<code>/mnt/scratch/ncl2128/claude-jobs/</code> on feynman, landau and alfven.</p>
+</main>
+
+
+<script>
+function copyAnswers() {
+  const date = new Date().toISOString().slice(0, 10);
+  const lines = [`## Answers to M4 attempt 1 (${date})`, ''];
+  document.querySelectorAll('.card').forEach(c => {
+    const q = c.dataset.q;
+    const sel = c.querySelector(`input[name="${q}"]:checked`);
+    const note = c.querySelector(`textarea[name="${q}-note"]`).value.trim();
+    const label = sel ? sel.parentElement.textContent.trim().replace(/\s+/g, ' ') : '(no option chosen)';
+    lines.push(`- **${q}**: ${label}` + (note ? `\n  - ${note}` : ''));
+  });
+  const text = lines.join('\n');
+  const pre = document.getElementById('answers');
+  pre.textContent = text; pre.hidden = false;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});  // the block is shown either way
+}
+</script>
