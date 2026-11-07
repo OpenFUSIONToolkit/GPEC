@@ -101,7 +101,7 @@ F(w) on a log-spaced grid from w<sub>lo</sub> = max(δ<sub>r</sub>, 10<sup>−5<
 ## 4. Gates and validity
 
 - Interchange gate (Benjamin §2.3): D<sub>R</sub> > 0 → excluded as resistive-interchange unstable.
-- Linear tearing gate [M0-D3]: the existing GPEC tearing solve, `solve(TearingProblem, GGJModel)` in `:uncoupled` mode (`src/Tearing/GGJTearing.jl`), on the same Δ′ the MRE uses. Each surface gets its own GGJ resistive layer (D<sub>I</sub>, D<sub>R</sub>, H, with η and ρ from the kinetic profiles), so curvature (Glasser) stabilization enters through D<sub>R</sub>. A root with γ > 0 → linearly tearing unstable, flagged, no MRE roots. The layer has no thermal-transport (w<sub>d</sub>) modification, so this gate is more conservative than the Leuthold Eq. 4.1 proxy, which is not used (its printed sign contradicts its text and its source, Fitzpatrick 2025 Eq. 7).
+- Linear tearing gate [M0-D3, revised 2026-11-07]: the existing GPEC tearing solve, `solve(TearingProblem, SLAYERModel(; D_c_type = :toroidal))` in `:uncoupled` mode, on the same vacuum Δ′ the MRE uses. The SLAYER two-fluid layer gives the linear growth rate per surface; its critical Δ is the Connor, Ham, Hastie & Liu 2015 χ∥-matching closure with toroidal geometry (`toroidal_dgeo`, `toroidal_kpar`), including curvature through D<sub>R</sub> = E + F + H². A root with γ > 0 → linearly tearing unstable, flagged, no MRE roots. The critical Δ's χ⊥ (`chi_perp_Dc`) is set to the same χ⊥ that sets w<sub>d</sub> in §1b and takes the same ×0.3–×3 UQ multiplier, so the gate and the MRE share one transport assumption. The gate code accepts any inner-layer model, so the toroidal drift-resistive layer `CCCModel` (open PR #654, on #653) can be swapped in as a cross-check once it is on develop. Leuthold Eq. 4.1 is not used (its printed sign contradicts its text and its source, Fitzpatrick 2025 Eq. 7).
 - Validity: δ<sub>r</sub> < w ≪ 1; Δ′w < 1 (Benjamin p. 5); constant-ψ; the polarization ordering needs w ≳ w<sub>ib</sub>. Roots outside these are flagged, not discarded.
 - Quality screen on Δ′: |Re Δ′/Im Δ′| > 10³ (Benjamin footnote 2).
 
@@ -146,7 +146,7 @@ Follows the ARC MHD basis (Leuthold JPP 2026 §2, "Rotation estimates", read fro
 ## Decisions from milestone reports
 
 - M0-D2 (2026-11-07, Nik: option c). Δ′ is computed with the vacuum only; the Riccati–Galerkin spread (about 10<sup>−3</sup>) is the recorded Δ′ formalism uncertainty and the wall case is dropped from the sweeps.
-- M0-D3 (2026-11-07, Nik). The linear tearing gate reuses the existing tearing module (GGJ layer, classical tearing growth rate with curvature stabilization) instead of Leuthold Eq. 4.1; §4 amended.
+- M0-D3 (2026-11-07, Nik). The linear tearing gate reuses the existing tearing module instead of Leuthold Eq. 4.1. Revised the same day: SLAYER inner layer with the toroidal critical-Δ (`D_c_type = :toroidal`) as nominal; `CCCModel` (PR #654) as a cross-check when merged; §4 amended.
 
 ## [VERIFY] items remaining
 
