@@ -12,22 +12,22 @@
 Per-surface geometry of the modified Rutherford terms. Averages ⟨·⟩ are normalized flux-surface averages (⟨1⟩ = 1)
 and `ψ_N` is normalized poloidal flux, as in [`ResistGeometry`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.ResistGeometry).
 
-| field                 | meaning                                                                  |
-|:--------------------- |:------------------------------------------------------------------------ |
-| `q`, `q1`             | safety factor and dq/dψ_N                                                |
-| `p1`                  | μ₀ dp/dψ_N                                                               |
-| `v1`                  | dV/dψ_N [m³]                                                             |
-| `psio`                | poloidal flux per radian at the boundary [Wb]                            |
-| `avg_bsq_over_dpsisq` | ⟨B²/‖∇ψ_N‖²⟩                                                             |
-| `avg_bsq`             | ⟨B²⟩ [T²]                                                                |
-| `avg_dpsisq`          | ⟨‖∇ψ_N‖²⟩                                                                |
-| `overbar_Rsq`         | Hegna 1999 R̄² = ⟨R² V′/𝒥⟩ [m²]                                        |
-| `avg_bpol`, `avg_bpolsq` | ⟨B_pol⟩ [T] and ⟨B_pol²⟩ [T²]                                         |
-| `r_minor`             | ⟨r⟩, mean distance from the magnetic axis [m]                            |
-| `R_major`, `eps`      | (R_max + R_min)/2 [m] and (R_max − R_min)/(R_max + R_min)                |
-| `delta`               | triangularity, mean of the upper and lower values                        |
-| `f_trap`              | Sauter 2002 trapped fraction with the triangularity-corrected ε_eff      |
-| `Wc_prefac`           | Schlutt & Hegna 2012 w_d⁴ prefactor in ψ_N⁴, before χ⊥/χ∥ and 1/m²       |
+| field                    | meaning                                                             |
+|:------------------------ |:------------------------------------------------------------------- |
+| `q`, `q1`                | safety factor and dq/dψ_N                                           |
+| `p1`                     | μ₀ dp/dψ_N                                                          |
+| `v1`                     | dV/dψ_N [m³]                                                        |
+| `psio`                   | poloidal flux per radian at the boundary [Wb]                       |
+| `avg_bsq_over_dpsisq`    | ⟨B²/‖∇ψ_N‖²⟩                                                        |
+| `avg_bsq`                | ⟨B²⟩ [T²]                                                           |
+| `avg_dpsisq`             | ⟨‖∇ψ_N‖²⟩                                                           |
+| `overbar_Rsq`            | Hegna 1999 R̄² = ⟨R² V′/𝒥⟩ [m²]                                     |
+| `avg_bpol`, `avg_bpolsq` | ⟨B_pol⟩ [T] and ⟨B_pol²⟩ [T²]                                       |
+| `r_minor`                | ⟨r⟩, mean distance from the magnetic axis [m]                       |
+| `R_major`, `eps`         | (R_max + R_min)/2 [m] and (R_max − R_min)/(R_max + R_min)           |
+| `delta`                  | triangularity, mean of the upper and lower values                   |
+| `f_trap`                 | Sauter 2002 trapped fraction with the triangularity-corrected ε_eff |
+| `Wc_prefac`              | Schlutt & Hegna 2012 w_d⁴ prefactor in ψ_N⁴, before χ⊥/χ∥ and 1/m²  |
 """
 struct MRESurfaceGeometry
     q::Float64

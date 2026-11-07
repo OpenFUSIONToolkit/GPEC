@@ -192,10 +192,13 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
             cl = D_I < 0 ? classical_term(dp_mn, D_I, wj; model=prob.delta_prime_model) : NaN
             bs = bootstrap_term(D_nc, wd, wj; prob.k1)
             cv = D_I < 0 ? curvature_term(D_R, rg.H, D_I, wd, wj; prob.k1) : NaN
-            pl = prob.pol_sign * (prob.pol_model === :full ?
-                                  polarization_term(wj; prob.c_pol, g.eps, rho_theta_over_rs=rho_theta / g.r_minor, psi_s=psi, beta_p,
-                gradient_ratio, omega_hat, omega_hat_pi, w_ib) :
-                                  reduced_polarization_term(wj; prob.c_pol, prob.C_pol, w_ib))
+            pl =
+                prob.pol_sign * (
+                    prob.pol_model === :full ?
+                    polarization_term(wj; prob.c_pol, g.eps, rho_theta_over_rs=rho_theta / g.r_minor, psi_s=psi, beta_p,
+                        gradient_ratio, omega_hat, omega_hat_pi, w_ib) :
+                    reduced_polarization_term(wj; prob.c_pol, prob.C_pol, w_ib)
+                )
             mats[:w_d][k, j] = wd
             mats[:classical][k, j], mats[:bootstrap][k, j], mats[:curvature][k, j], mats[:polarization][k, j] = cl, bs, cv, pl
             mats[:F][k, j] = prob.classical * cl + prob.bootstrap * bs + prob.curvature * cv + prob.polarization * pl

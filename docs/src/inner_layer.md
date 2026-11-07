@@ -103,6 +103,17 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/Diagnostics/ValidRoots`, `Poles`, `FilteredRoots` | the root classification of the scan |
 | `Tearing/Scan/Surface_<k>/` | the scanned Δ(Q) with `store_scan = true` |
 | `Tearing/CriticalResonantField/br_crit`, `br_crit_tesla`, `Q_peak`, `Q0` | the penetration threshold as ``b_r/B_\phi`` and in tesla, the Q of the balance maximum and the natural rotation |
+| `Tearing/ModifiedRutherford/w`, `Terms/F`, `Terms/<term>`, `Terms/w_d`, `PerSurface/` | the modified Rutherford width grid, ``F(w)`` and each switched term per surface, the transport width, and the surface inputs |
+
+## Modified Rutherford diagnostics
+
+`[Tearing.ModifiedRutherford]` evaluates the steady modified Rutherford equation on a grid of full island widths ``w`` (in ``\psi_N``) for each rational surface of a single-``n`` Riccati or Galerkin run with Δ′:
+
+```math
+F(w) = \Delta'(w) + \Delta_\mathrm{nc}(w) + \Delta_\mathrm{GGJ}(w) + \Delta_\mathrm{pol}(w; \omega),
+```
+
+the classical drive with its finite-pressure power law, the bootstrap drive with the transport threshold ``w_d``, the Glasser–Greene–Johnson curvature term and the ion-polarization term (Benjamin et al. 2026, Eqs. 7, 10–14 and C.1). Each term has a switch and a coefficient; the polarization term is off by default. The surface geometry follows the Fortran RDCON `mercier.f` averages, and the densities, temperatures, ``\omega_E``, ``Z_\mathrm{eff}`` and ``\chi_\perp`` come from the equilibrium's kinetic profiles. A `[Tearing]` section holding only this sub-table runs no layer solve. In a script, `solve(ModifiedRutherfordProblem(ffs; polarization=true))` returns the same [`ModifiedRutherfordResult`](@ref Tearing.ModifiedRutherford.ModifiedRutherfordResult).
 
 ## Numerical notes
 
@@ -174,4 +185,10 @@ Modules = [GeneralizedPerturbedEquilibrium.Tearing.Dispersion]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
+```
+
+### ModifiedRutherford
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford]
 ```
