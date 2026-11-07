@@ -81,6 +81,7 @@ using .ForcingTerms: RMPField
 using .PerturbedEquilibrium: plasma_response, perturbed_equilibrium, PlasmaResponse
 using .KineticForces: kinetic_torque, KineticForcesControl, KineticForcesResult
 using .ErrorFields: error_fields, ErrorFieldsResult
+using .Analysis: available_plots
 
 using .ForceFreeStates: ForceBalanceProblem, kinetic_matrices, _prepare_solve, maybe_reform_equilibrium, ForceFreeStatesControl, kinetic_source
 include("Deck.jl")
@@ -308,6 +309,7 @@ export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestK
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
+export available_plots
 
 include("Precompile.jl")
 
