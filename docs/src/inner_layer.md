@@ -122,9 +122,8 @@ When the deck also has a `[Tearing]` layer solve, its uncoupled growth rates gat
 Surfaces with ``D_R>0`` are excluded as resistive-interchange unstable, and roots below the ion banana width or with ``|\Delta'|w\ge1`` are flagged.
 The island frequency in ``\Delta_\mathrm{pol}`` is ``\omega_{*e}(1+\eta_e/4)`` (Wilson 1996) by default, or the lab-frame ``n\omega_E`` with `omega_model = "exb"`.
 
-`[Tearing.Callen]` evaluates Callen's reduced equation for RMP-driven islands on a single-``n`` perturbed equilibrium driven by coils, in the form of Fortran GPEC: the critical vacuum island half-width, the critical vacuum resonant field and the two positive roots of the cubic ``\Delta_c x^3 + \Delta'_\mathrm{RMP}(2h_v)^2x - w_\mathrm{pol}^2 = 0``.
+`[Tearing.Callen]` evaluates Callen's reduced equation for RMP-driven islands on a single-``n`` perturbed equilibrium driven by coils, in the form of Fortran GPEC: the critical vacuum island half-width, the critical vacuum resonant field and the half-widths of the two positive roots of the steady cubic ``\Delta_c w^3 + \Delta'_\mathrm{RMP}w_\mathrm{vac}^2w - w_\mathrm{pol}^2 = 0`` (Callen 2016, Eq. 17), which is posed in the full width ``w`` with ``w_\mathrm{vac} = 2h_v``.
 The vacuum resonant field is the coils' resonant harmonic on the rational surface over its area.
-The roots are the exact roots of the cubic; Fortran GPEC 1.6.0 reports half of each, from a trigonometric solution missing its factor 2.
 In a script, `solve(CallenProblem(pe))` returns the same [`CallenResult`](@ref Tearing.ModifiedRutherford.CallenResult).
 
 ## Numerical notes

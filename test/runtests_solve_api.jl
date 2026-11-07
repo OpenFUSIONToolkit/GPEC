@@ -622,6 +622,37 @@ using HDF5
             end
         end
 
+        @testset "Callen threshold under [Tearing.Callen]" begin
+            # The coil-driven DIII-D-like example with the empty sub-table, against solve(CallenProblem(pe)).
+            ex_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+            mktempdir() do dir
+                deck = TOML.parsefile(joinpath(ex_dir, "gpec.toml"))
+                foreach(k -> delete!(deck, k), ("LocalStability", "Ballooning", "ErrorFields", "KineticForces"))
+                deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
+                deck["Tearing"] = Dict{String,Any}("Callen" => Dict{String,Any}())
+                for key in ("eq_filename", "kinetic_file")
+                    deck["Equilibrium"][key] = abspath(joinpath(ex_dir, deck["Equilibrium"][key]))
+                end
+                open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
+                reference = GPEC.main([dir])
+                api = solve(CallenProblem(reference.pe))
+                @test reference.tearing === nothing && reference.callen isa CallenResult
+                @test api.hw_v_crit ≈ reference.callen.hw_v_crit rtol = 1e-12
+                @test all(isfinite, api.hw_v_crit)
+                @test isequal(api.hw_min, reference.callen.hw_min) && isequal(api.hw_sat, reference.callen.hw_sat)
+                h5open(joinpath(dir, "gpec.h5")) do f
+                    @test read(f["Tearing/Callen/hw_v_crit"]) ≈ api.hw_v_crit rtol = 1e-12
+                    @test haskey(TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"], "Callen")
+                end
+            end
+
+            # Without a perturbed equilibrium the deck stops at parse time.
+            mktempdir() do dir
+                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("Callen" => Dict{String,Any}())))
+                @test_throws "needs a [PerturbedEquilibrium]" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+        end
+
         @testset "kinetic_format" begin
             # A rates-v1 kinetic file read through the deck's [Equilibrium] keys and through the API keyword.
             mktempdir() do dir

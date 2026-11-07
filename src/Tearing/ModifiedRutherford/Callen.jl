@@ -14,8 +14,8 @@ radius ρ = (Φ_tor/πB₀)^(1/2) inside, and in ψ_N on output, as in Fortran G
   - Δ_RMP = |Δ|/(2πR₀q) B₀/|B_res|, Δ the singular-current jump over 2πχ₁ and B_res the total resonant field;
   - Δ_c = −2m/ρ;
   - critical vacuum half-width h_v,crit = ½ w_pol^(2/3) ((27/4)|Δ_c|)^(1/6)/Δ_RMP^(1/2);
-  - the cubic Δ_c x³ + Δ_RMP (2h_v)² x − w_pol² = 0 for the half-width x, with h_v the vacuum island half-width; its
-    positive roots are h_min < h_sat;
+  - the steady state of Callen's Eq. 17, Δ_c w³ + Δ_RMP w_vac² w − w_pol² = 0, a cubic in the full width w with
+    w_vac = 2h_v; its positive roots halved are h_min < h_sat;
   - critical resonant field B_crit = |B_vac| (h_v,crit/h_v)².
 
 The vacuum resonant field B_vac is the coils' resonant harmonic on the rational surface over its area.
@@ -141,9 +141,10 @@ function CommonSolve.solve(prob::CallenProblem)
         b_vac = _vacuum_resonant_field(pe, equil, psi, n, m, area)
         shear = n * q1 / q
         hw_v = sqrt(abs(4 * b_vac * area / (2π * shear * q * chi1)))
+        # Roots are full widths in metres; the outputs are half-widths in ψ_N.
         x_min, x_sat = callen_cubic_roots(delta_c, delta_rmp * (2 * hw_v * drho)^2, -w_pol^2)
         for (k, v) in pairs((; psi, q, rho_tor=rho, drho_dpsi=drho, rho_i, w_pol, delta_rmp, delta_c, b_res, b_vac,
-            hw_isl=pe.island_half_width[row], hw_v, hw_v_crit=hw_v_crit / drho, hw_min=x_min / drho, hw_sat=x_sat / drho,
+            hw_isl=pe.island_half_width[row], hw_v, hw_v_crit=hw_v_crit / drho, hw_min=x_min / (2 * drho), hw_sat=x_sat / (2 * drho),
             b_crit=b_vac * (hw_v_crit / drho / hw_v)^2))
             out[k][row] = v
         end
