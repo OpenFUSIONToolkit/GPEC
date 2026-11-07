@@ -32,7 +32,8 @@ Its profile view carries, on the grid of `kp`:
   - the pitch-angle scattering rate on the ions at v = v_c, ν = Σ_j n_j Z_j² Z_α² e⁴ lnΛ/(4π ε₀² m_α² v_c³), as the
     Krook rate of the harmonic collision model, whose x^{-3/2} is the fast-ion v^{-3} law with x = E/E_c,
 
-with τ_s = 3(2π)^{3/2} ε₀² m_α T_e^{3/2}/(n_e Z_α² e⁴ m_e^{1/2} lnΛ) the Spitzer slowing-down time on the electrons.
+with τ_s = 3(2π)^{3/2} ε₀² m_α T_e^{3/2}/(n_e Z_α² e⁴ m_e^{1/2} lnΛ) the Spitzer slowing-down time on the electrons. The
+density is floored at 10⁻⁴ of its peak, which only the cold edge reaches.
 D and T are the species with (z, m) = (1, 2) and (1, 3).
 """
 function alpha_species(species::AbstractVector{<:Equilibrium.ResolvedNTVSpecies}, kp::Equilibrium.KineticProfileSplines;
@@ -56,7 +57,8 @@ function alpha_species(species::AbstractVector{<:Equilibrium.ResolvedNTVSpecies}
         vc = sqrt(2 * Ec[k] / mα)
         nu[k] = nz2 * zα^2 * e^4 * lnΛ / (4π * ε₀^2 * mα^2 * vc^3)
     end
-    all(>(0), nα) || error("alpha density is not positive everywhere")
+    # Floor at 1e-4 of the peak: where the reactivity collapses at the edge, the cubic density spline would ring negative.
+    nα .= max.(nα, 1e-4 * maximum(nα))
     ne, Te, ω, lnΛ, nue, zeff = ([f(ψ) for ψ in xs] for f in (kp.ne_spline, kp.Te_spline, kp.omegaE_spline, kp.loglam_spline, kp.nue_spline, kp.zeff_spline))
     view = Equilibrium.KineticProfileSplines(xs, nα, ne, Ec, Te, ω, lnΛ, nu, nue, zeff)
     return Equilibrium.ResolvedNTVSpecies(zα, 4, false, "alpha", view)
