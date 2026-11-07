@@ -140,21 +140,18 @@ cannot rebuild the solution profiles.
 """
 function grow_reduction_store!(odet::OdeState)
     cap = length(odet.fixstep)
+    added = max(cap, 1)
     N = odet.numpert_total
-    index = zeros(Int, N, 2cap)
+    index = zeros(Int, N, cap + added)
     index[:, 1:cap] .= odet.index
     odet.index = index
-    sing_flag = falses(2cap)
-    sing_flag[1:cap] .= odet.sing_flag
-    odet.sing_flag = sing_flag
-    append!(odet.zeroed_idx, [Int[] for _ in 1:cap])
-    fixfac = zeros(ComplexF64, N, N, 2cap)
+    fixfac = zeros(ComplexF64, N, N, cap + added)
     fixfac[:, :, 1:cap] .= odet.fixfac
     odet.fixfac = fixfac
-    fixstep = zeros(Int64, 2cap)
-    fixstep[1:cap] .= odet.fixstep
-    odet.fixstep = fixstep
-    odet.numunorms_init = 2cap
+    append!(odet.sing_flag, falses(added))
+    append!(odet.zeroed_idx, [Int[] for _ in 1:added])
+    append!(odet.fixstep, zeros(Int64, added))
+    odet.numunorms_init = cap + added
     return odet
 end
 

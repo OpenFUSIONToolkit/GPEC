@@ -54,7 +54,7 @@ Solve-time scratch state for a force-balance solve: the resolved mode space, sin
     kinsing_scan_cond::Vector{Float64} = Float64[]
     kinsing_scan_threshold::Float64 = 0.0
     psilim::Float64 = 0.0
-    psilow::Float64 = 0.0   # lower integration bound; the outermost crossing of q = qlow (sing_min!), else the first grid node
+    psilow::Float64 = 0.0   # lower integration bound; the outermost crossing of q = qlow (sing_min!), moved off a rational it lands on, else the first grid node
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing

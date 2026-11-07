@@ -343,6 +343,7 @@ end
         FFS.grow_reduction_store!(odet)
         @test length(odet.fixstep) == 4 && size(odet.fixfac) == (mpert, mpert, 4) && size(odet.index) == (mpert, 4)
         @test length(odet.sing_flag) == 4 && length(odet.zeroed_idx) == 4 && odet.numunorms_init == 4
+        @test length(FFS.grow_reduction_store!(FFS.OdeState(mpert, 10, 0, 1)).fixstep) == 1   # a zero capacity still grows
         @test odet.fixfac[:, :, 1:2] == kept[1] && odet.index[:, 1:2] == kept[2] && odet.fixstep[1:2] == kept[3]
         @test odet.sing_flag[1:2] == kept[4] && odet.zeroed_idx[1:2] == kept[5] && isempty(odet.zeroed_idx[3])
 
@@ -363,6 +364,7 @@ end
         intr = FFS.ForceFreeStatesInternal(; mpert=2, numpert_total=2)
         intr.sing = [FFS.SingType(; psifac=p, q=q, q1=2.0, m=[m], n=[2]) for (p, q, m) in ((0.25, 1.5, 3), (0.50, 2.0, 4))]
         intr.msing = 2
+        intr.psilim = 1.0
         ctrl = FFS.ForceFreeStatesControl(; algorithm=Forward(), singfac_min=1e-4)
         standoff = 1e-4 / (2 * 2.0)
 
@@ -372,6 +374,14 @@ end
         @test (@test_logs (:warn, r"m/n = 4/2") FFS.move_start_off_rational!(intr, ctrl)) ≈ 0.50 + standoff
         intr.psilow = 0.30                     # off every rational: untouched, no warning
         @test (@test_logs FFS.move_start_off_rational!(intr, ctrl)) == 0.30
+        intr.psilow = 0.25                     # no standoff when singfac_min = 0: the start is left where it is
+        @test (@test_logs FFS.move_start_off_rational!(intr, FFS.ForceFreeStatesControl(; algorithm=Forward(), singfac_min=0.0))) == 0.25
+        intr.sing[2].q1 = 0.0                  # q' = 0 at a surface: an infinite standoff is skipped, not applied
+        intr.psilow = 0.50
+        @test (@test_logs FFS.move_start_off_rational!(intr, ctrl)) == 0.50
+        intr.sing[2].q1 = 2.0
+        intr.psilim = 0.50 + 0.5 * standoff    # the moved start would pass psilim: an error, not a silent move
+        @test_throws ErrorException FFS.move_start_off_rational!(intr, ctrl)
     end
 
     @testset "compute_solution_norms!" begin
