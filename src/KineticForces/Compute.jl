@@ -142,6 +142,7 @@ function integrate_psi_quadgk(
                 tpsi!(thread_tpsi[tid], Float64(x[idx[j]]), n, l, zi, mi, wdfac, divxfac,
                     electron, method, equil, intr, kinetic_profiles;
                     op_wmats=w, surface=surfaces[j],
+                    nutype=ctrl.nutype, f0type=ctrl.f0type, nufac=ctrl.collisionality_factor,
                     atol_xlmda=ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
