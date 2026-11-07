@@ -1,0 +1,63 @@
+using TOML
+
+# The modified Rutherford terms (physics.md of the mre-islands work order): the limits and signs each term must show
+# alone, and the surface geometry against Fortran RDCON (MRE_flag output) on the DIII-D-like example.
+@testset "ModifiedRutherford terms" begin
+    MR = GeneralizedPerturbedEquilibrium.ModifiedRutherford
+
+    @testset "classical term: Mercier power and its zero-pressure limit" begin
+        @test MR.classical_term(-3.0, -0.25, 0.01) ≈ -3.0
+        @test MR.classical_term(-3.0, -0.3, 0.01; model=:constant) == -3.0
+        # Slope of log Δ′(w) is −2α₋ = 2√(−D_I) − 1.
+        D_I = -0.3
+        slope = log(MR.classical_term(2.0, D_I, 0.02) / MR.classical_term(2.0, D_I, 0.01)) / log(2)
+        @test slope ≈ 2 * sqrt(-D_I) - 1 rtol = 1e-12
+    end
+
+    @testset "bootstrap term: positive, peaked, k1·D_nc/w far above w_d" begin
+        D_nc, w_d, k1 = 0.4, 1e-3, 1.7
+        w = exp.(range(log(1e-5), log(0.2); length=400))
+        b = MR.bootstrap_term.(D_nc, w_d, w; k1)
+        @test all(>(0), b)
+        @test w[argmax(b)] ≈ sqrt(k1 / 0.5) * w_d rtol = 0.02
+        @test MR.bootstrap_term(D_nc, w_d, 1e3 * w_d; k1) ≈ k1 * D_nc / (1e3 * w_d) rtol = 1e-5
+        @test MR.bootstrap_term(D_nc, w_d, 1e-3 * w_d; k1) ≈ 0.5 * D_nc * 1e-3 * w_d / w_d^2 rtol = 1e-5
+    end
+
+    @testset "curvature term: stabilizing for D_R < 0" begin
+        @test MR.curvature_term(-0.02, 0.01, -0.27, 1e-3, 0.01) < 0
+        @test MR.curvature_term(0.02, 0.01, -0.27, 1e-3, 0.01) > 0
+    end
+
+    @testset "polarization term: sign follows ω̂(ω̂ − ω̂_pi), zero at ω̂ = 0" begin
+        args = (; c_pol=1.0, eps=0.2, rho_theta_over_rs=0.01, psi_s=0.6, beta_p=0.5, gradient_ratio=-0.8, omega_hat_pi=1.5, w_ib=1e-3)
+        pol(ω̂) = MR.polarization_term(0.02; args..., omega_hat=ω̂)
+        @test pol(0.0) == 0
+        @test pol(1.5) == 0
+        @test pol(0.7) > 0          # ω̂ inside (0, ω̂_pi): destabilizing
+        @test pol(2.0) < 0 && pol(-1.0) < 0
+        @test MR.reduced_polarization_term(0.01; c_pol=1.0, C_pol=1.9, w_ib=1e-3) ≈ -(1.9e-3)^2 / 1e-6
+    end
+
+    @testset "transport width grows as w^(1/4)" begin
+        kw = (; c_wd=1.0, chi_perp=1.0, v_te=5e7, R0=1.7, q=2.0, q1=3.0, n=1, m=2, Wc_prefac=3e4)
+        @test MR.transport_width(16e-3; kw...) / MR.transport_width(1e-3; kw...) ≈ 2 rtol = 1e-12
+    end
+
+    @testset "surface geometry matches Fortran RDCON on the DIII-D-like example" begin
+        # Fortran values at q = 2 (ψ_N = 0.5183), interpolated from rdcon_output_n1.nc with MRE_flag = t and Z_eff = 1.52.
+        dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_gal_resistive_example")
+        deck = TOML.parsefile(joinpath(dir, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(deck, dir),
+            GeneralizedPerturbedEquilibrium.analytic_config(deck))
+        psi = 0.51830565
+        g = MR.mre_geometry(equil, psi, equil.profiles.q_deriv(psi))
+        @test g.f_trap ≈ 0.61419 rtol = 2e-3
+        @test g.overbar_Rsq ≈ 3.0113 rtol = 2e-3
+        @test g.avg_bpol ≈ 0.28709 rtol = 2e-3
+        @test g.Wc_prefac ≈ 33565 rtol = 2e-3
+        D_nc, mu_ratio = MR.bootstrap_coefficient(g, 1.52)
+        @test mu_ratio ≈ 0.68255 rtol = 2e-3
+        @test D_nc ≈ 0.38065 rtol = 2e-3
+    end
+end

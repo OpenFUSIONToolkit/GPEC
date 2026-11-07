@@ -29,12 +29,16 @@ function deck_sections end
     record_inputs!(target, result)
 
 Merge the deck sections of `result` into the run record `Input/gpec_toml_raw` of `target`, replacing any section of
-the same name, so every saved result adds the deck it was computed from.
+the same name (a section stated only as sub-tables joins it instead), so every saved result adds the deck it was computed from.
 """
 function record_inputs!(target::Union{HDF5.File,HDF5.Group}, result)
     path = "Input/gpec_toml_raw"
     deck = haskey(target, path) ? TOML.parse(read(target[path])) : Dict{String,Any}()
-    merge!(deck, deck_sections(result))
+    # A section stated only as sub-tables (e.g. [Tearing.ModifiedRutherford]) joins the recorded section; any other replaces it.
+    for (k, v) in deck_sections(result)
+        subtables_only = v isa AbstractDict && all(x -> x isa AbstractDict, values(v))
+        deck[k] = subtables_only && get(deck, k, nothing) isa AbstractDict ? merge(deck[k], v) : v
+    end
     haskey(target, path) && HDF5.delete_object(target, path)
     target[path] = sprint(TOML.print, deck)
     return nothing
