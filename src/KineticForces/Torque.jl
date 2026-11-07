@@ -30,6 +30,7 @@ Toroidal torque from nonambipolar transport at one ψ and bounce harmonic `l`, w
     one ψ; built here when not given
   - `nutype`, `f0type`, `nufac`: Collision operator, equilibrium distribution and collisionality
     factor passed to `calculate_gar` (the `[KineticForces]` keys `nutype`, `f0type`, `collisionality_factor`)
+  - `ebirth`: birth energy in J of a slowing-down species (`f0type = "slowingdown"`), whose temperature slot holds E_c
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
@@ -37,7 +38,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
     op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
     surface::Union{Nothing,NamedTuple}=nothing,
-    nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0,
+    nutype::String="harmonic", f0type::String="maxwellian", nufac::Float64=1.0, ebirth::Float64=Inf,
     rex_override::Union{Nothing,Float64}=nothing,
     imx_override::Union{Nothing,Float64}=nothing,
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6,
@@ -57,11 +58,12 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
 
     # Everything up to the method dispatch depends on ψ alone, so the caller may share one
     # bundle across the bounce harmonics of a surface.
-    surf = surface === nothing ?
-           _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles;
-        need_matrices=(!isnothing(op_wmats)), n, wdfac, divxfac) :
-           surface
-    (; chrg, mass, tspl, bmax, bmin, q, n_s, T_s, welec, wdian, wdiat, nuk, epsr, dbob_m_f, divx_m_f) = surf
+    surf =
+        surface === nothing ?
+        _torque_surface(psi, zi, mi, electron, method, equil, intr, kinetic_profiles;
+            need_matrices=(!isnothing(op_wmats)), n, wdfac, divxfac, ebirth) :
+        surface
+    (; chrg, mass, tspl, bmax, bmin, q, n_s, T_s, welec, wdian, wdiat, nuk, epsr, dbob_m_f, divx_m_f, xb) = surf
 
     # Method selection — route on the registry dispatch tag (errors on unknown method)
     kind = method_kind(method)
@@ -70,8 +72,11 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
             n_s, T_s, equil, intr)
 
     elseif kind == :orbit
+        electron && error("forb does not support electrons")
+        drive = orbit_drive(kinetic_profiles, intr.orbit_field, psi, chrg, intr.chi1; potential=intr.orbit_potential, f0type, ebirth)
         tpsi_var[] = calculate_orbit(surf.orbit, n, l, q, epsr, wdian, wdiat, welec, nuk, intr.bo, bmax, n_s, T_s;
-            chi1=intr.chi1, ro=intr.ro, energy_atol=atol_energy, energy_rtol=rtol_energy, pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
+            chi1=intr.chi1, ro=intr.ro, energy_atol=atol_energy, energy_rtol=rtol_energy, pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
+            drive, nutype, nufac)
 
     else  # :gar — fgar/tgar/pgar + all *mm matrix methods
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
@@ -83,7 +88,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
             B_vpar=surf.B_vpar, surface_field=surf.bf,
             smat=surf.smat_f, tmat=surf.tmat_f, xmat=surf.xmat_f,
             ymat=surf.ymat_f, zmat=surf.zmat_f,
-            nutype, f0type, nufac,
+            nutype, f0type, nufac, xb,
             energy_atol=atol_energy, energy_rtol=rtol_energy,
             pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
             rex_override=rex_override, imx_override=imx_override,
@@ -191,7 +196,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     ymat=nothing, zmat=nothing,
     nlmda::Int=128, ntheta::Int=128,
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, qt::Bool=false,
+    nufac::Float64=1.0, qt::Bool=false, xb::Float64=Inf,
     energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
     pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
     rex_override::Union{Nothing,Float64}=nothing,
@@ -267,7 +272,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     lxint = integrate_pitch_gar_quadgk(
         wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
         fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
-        nutype, f0type, nufac, qt,
+        nutype, f0type, nufac, qt, xb,
         energy_atol, energy_rtol, pitch_atol, pitch_rtol)
 
     # Scalar torque, Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013).
@@ -492,8 +497,9 @@ every bounce harmonic of the surface; otherwise `geometry` is `nothing`. Reads `
 """
 function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method::String,
     equil, intr::KineticForcesInternal, kinetic_profiles::Equilibrium.KineticProfileSplines;
-    need_matrices::Bool=false, n::Union{Nothing,Int}=nothing, wdfac::Float64=1.0, divxfac::Float64=1.0)
+    need_matrices::Bool=false, n::Union{Nothing,Int}=nothing, wdfac::Float64=1.0, divxfac::Float64=1.0, ebirth::Float64=Inf)
     state = _setup_surface_state(psi, zi, mi, electron, equil, intr, kinetic_profiles)
+    xb = ebirth / state.T_s
 
     # Matrix-only methods build their operator from the geometric matrices; dbob_m / divx_m
     # only feed the scalar dJdJ normalisation, so a run without perturbations passes zeros.
@@ -530,12 +536,12 @@ function _torque_surface(psi::Float64, zi::Int, mi::Int, electron::Bool, method:
     orbit = if n !== nothing && kind == :orbit
         orbit_surface_table(intr.orbit_field, geometry, intr, psi, state.theta_bmin, state.q, state.welec, state.mass, state.chrg, state.T_s, n;
             divxfac, lmax=intr.orbit_lmax, nenergy=intr.orbit_nenergy, potential=intr.orbit_potential, umax=intr.orbit_umax,
-            energy_tol=intr.orbit_energy_tol)
+            energy_tol=intr.orbit_energy_tol, ebirth)
     else
         nothing
     end
 
-    return (; state..., dbob_m_f, divx_m_f, smat_f, tmat_f, xmat_f, ymat_f, zmat_f, geometry, orbit)
+    return (; state..., dbob_m_f, divx_m_f, smat_f, tmat_f, xmat_f, ymat_f, zmat_f, geometry, orbit, xb)
 end
 
 """

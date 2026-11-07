@@ -27,15 +27,41 @@ struct EnergyParams
     qt::Bool          # heat flux calculation flag
     nutype_id::Int    # `nutype` as an integer code (see `_NUTYPE_IDS`), for the hot loop
     f0type_id::Int    # `f0type` as an integer code (see `_F0TYPE_IDS`)
+    xb::Float64       # birth energy E_b/T of a slowing-down distribution (Inf otherwise)
+    xmax::Float64     # upper limit of the energy integral: min(xb, X_ENERGY_MAX)
+    sdnorm::Float64   # slowing-down normalization 3√π/(4 ln(1 + xb^{3/2}))
 end
 
 const _NUTYPE_IDS = Dict("zero" => 1, "small" => 2, "krook" => 3, "harmonic" => 4)
-const _F0TYPE_IDS = Dict("maxwellian" => 1, "park" => 2, "cgl" => 3)
+const _F0TYPE_IDS = Dict("maxwellian" => 1, "park" => 2, "cgl" => 3, "slowingdown" => 4)
 
-function EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype::String, f0type::String, nufac, qt)
+function EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype::String, f0type::String, nufac, qt; xb::Float64=Inf)
     haskey(_NUTYPE_IDS, nutype) || error("nutype must be zero, small, krook, or harmonic")
-    haskey(_F0TYPE_IDS, f0type) || error("f0type must be maxwellian, park, or cgl")
-    return EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, qt, _NUTYPE_IDS[nutype], _F0TYPE_IDS[f0type])
+    haskey(_F0TYPE_IDS, f0type) || error("f0type must be maxwellian, park, cgl, or slowingdown")
+    sd = f0type == "slowingdown"
+    sd && !(0 < xb < Inf) && error("a slowing-down distribution needs a finite birth energy xb > 0, got $xb")
+    xmax = sd ? min(xb, X_ENERGY_MAX) : X_ENERGY_MAX
+    sdnorm = sd ? 3 * sqrt(π) / (4 * log1p(xb^1.5)) : 0.0
+    return EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, qt, _NUTYPE_IDS[nutype], _F0TYPE_IDS[f0type], xb, xmax, sdnorm)
+end
+
+"""
+    _energy_weight(x::Float64, p::EnergyParams) → Float64
+
+Normalized equilibrium distribution f̂(x) = f₀/(n (m/2πT)^{3/2}) at x = E/T: e^{−x} for the Maxwellian family, and for the
+isotropic slowing-down distribution with T the critical energy E_c, f̂ = (3√π/(4L))/(x^{3/2} + 1) below the
+birth energy xb, L = ln(1 + xb^{3/2}), 0 above it. Both have unit density moment (2/√π)∫f̂ x^{1/2} dx.
+"""
+@inline function _energy_weight(x::Float64, p::EnergyParams)::Float64
+    p.f0type_id == 4 || return exp(-x)
+    return x < p.xb ? p.sdnorm / (x * sqrt(x) + 1) : 0.0
+end
+
+# x-derivative of `_energy_weight` below the birth energy.
+@inline function _energy_weight_deriv(x::Float64, p::EnergyParams)::Float64
+    p.f0type_id == 4 || return -exp(-x)
+    d = x * sqrt(x) + 1
+    return -1.5 * sqrt(x) * p.sdnorm / d^2
 end
 
 """
@@ -66,10 +92,12 @@ end
     _energy_numerator(x::Float64, p::EnergyParams) → ComplexF64
 
 Numerator N(x) of the energy integrand, **without** the resonance denominator
-and **without** the Maxwellian weight exp(-x). The physical x-space integrand is
-N(x)·exp(-x)/denom(x); the residue at a pole uses N(x_res)·exp(-x_res).
+and **without** the distribution weight f̂(x) (`_energy_weight`, e^{−x} for a Maxwellian). The physical x-space
+integrand is N(x)·f̂(x)/denom(x); the residue at a pole uses N(x_res)·f̂(x_res).
 
-For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n).
+For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n). For the slowing-down distribution (T = E_c) the drive
+at fixed total energy is ŵ_C − (3/2)ω_*T/(x^{3/2}+1) + (3/2)ω_E x^{1/2}/(x^{3/2}+1), with
+ŵ_C = ω_*n + (3/2)xb^{3/2}/((1 + xb^{3/2})L)·ω_*T the gradient of C(ψ) = 3n/(4πL).
 """
 @inline function _energy_numerator(x::Float64, p::EnergyParams)::ComplexF64
     x25 = x * x * sqrt(x)   # x^2.5
@@ -78,6 +106,8 @@ For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n).
         ComplexF64((p.we + p.wn + p.wt * (x - 1.5)) * x25)
     elseif id == 2
         ComplexF64((p.we + p.wn + p.wt * 2) * x25)
+    elseif id == 4
+        ComplexF64(_sd_drive(x, p) * x25)
     else
         complex(0.0, -x25 / p.n)   # x^2.5 / (i*n)
     end
@@ -85,6 +115,14 @@ For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n).
         fx *= (x - 2.5)
     end
     return fx
+end
+
+# Slowing-down drive bracket (see `_energy_numerator`), T = E_c.
+@inline function _sd_drive(x::Float64, p::EnergyParams)::Float64
+    b = p.xb * sqrt(p.xb)
+    wc = p.wn + 1.5 * b / ((1 + b) * log1p(b)) * p.wt
+    d = x * sqrt(x) + 1
+    return wc - 1.5 * p.wt / d + 1.5 * p.we * sqrt(x) / d
 end
 
 """
@@ -106,8 +144,14 @@ never carries a CGL numerator (CGL has no pole).
         a = p.we + p.wn + p.wt * 2
         nn = ComplexF64(a * x25)
         dn = ComplexF64(a * 2.5 * x15)
+    elseif p.f0type_id == 4
+        a = _sd_drive(x, p)
+        d = x15 + 1
+        da = 2.25 * sx * p.wt / d^2 + 0.75 * p.we * (1 - 2 * x15) / (sx * d^2)
+        nn = ComplexF64(a * x25)
+        dn = ComplexF64(da * x25 + a * 2.5 * x15)
     else
-        error("_energy_numerator_deriv supports maxwellian and park")
+        error("_energy_numerator_deriv supports maxwellian, park and slowingdown")
     end
     return p.qt ? dn * (x - 2.5) + nn : dn   # d/dx[N·(x-2.5)] = N′·(x-2.5) + N
 end
@@ -115,7 +159,7 @@ end
 """
     _energy_integrand_real(x::Float64, p::EnergyParams) → ComplexF64
 
-Physical energy integrand in x-space, N(x)·exp(-x)/denom(x), evaluated on the
+Physical energy integrand in x-space, N(x)·f̂(x)/denom(x), evaluated on the
 real axis. Used both by the production integral (`integrate_energy` via
 `_integrate_energy_resonant`) and for diagnostics (`evaluate_energy_integrand`).
 """
@@ -124,7 +168,7 @@ real axis. Used both by the production integral (`integrate_energy` via
     nux = _energy_collision_frequency(x, p)
     # Resonance denominator: i*(l_eff*wb*sqrt(x) + n*(we + wd*x)) - nu
     denom = complex(-nux, p.leff * p.wb * sqx + p.n * (p.we + p.wd * x))
-    emx = exp(-x)
+    emx = _energy_weight(x, p)
     if p.f0type_id == 3
         # CGL has no resonance denominator.
         fx = complex(0.0, -x * x * sqx * emx / p.n)
@@ -225,8 +269,8 @@ Laurent regular part (finite limit at `x → x_res`) of the pole-subtracted
 real-axis (ν=0) integrand `N(x)·exp(-x)/(i·Ω(x)) − R/(x − x_res)`, with
 `Ω(x) = leff·wb·√x + n·(we+wd·x)` and `R = N(x_res)·exp(-x_res)/(i·Ω′)`.
 
-Writing `h(x) = N(x)·exp(-x)`, the limit is
-`[h′(x_res) − h(x_res)·Ω″/(2Ω′)] / (i·Ω′)`, with `h′ = (N′ − N)·exp(-x)`,
+Writing `h(x) = N(x)·f̂(x)`, the limit is
+`[h′(x_res) − h(x_res)·Ω″/(2Ω′)] / (i·Ω′)`, with `h′ = N′f̂ + Nf̂′` (`(N′ − N)·exp(-x)` for a Maxwellian),
 `Ω′ = leff·wb/(2√x) + n·wd`, `Ω″ = −leff·wb/(4·x^{3/2})`.
 """
 @inline function _real_pole_regular_part(xr::Float64, p::EnergyParams, leff::Float64,
@@ -236,7 +280,8 @@ Writing `h(x) = N(x)·exp(-x)`, the limit is
     opp = -leff * wb / (4.0 * xr * sx)            # Ω″(x_res)
     nn = _energy_numerator(xr, p)                 # N(x_res)
     dn = _energy_numerator_deriv(xr, p)           # N′(x_res)
-    return exp(-xr) * ((dn - nn) - nn * opp / (2.0 * op)) / (im * op)
+    w = _energy_weight(xr, p)
+    return ((dn * w + nn * _energy_weight_deriv(xr, p)) - nn * w * opp / (2.0 * op)) / (im * op)
 end
 
 # Real x-space integrand minus the pole parts; a named function keeps allocation out of the QuadGK loop.
@@ -266,7 +311,8 @@ end
 """
     _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol, segbuf=nothing) → ComplexF64
 
-Energy integral over real `x ∈ [0, X_ENERGY_MAX]`, as in Fortran PENTRC (energy.f90). Each resonance pole
+Energy integral over real `x ∈ [0, p.xmax]` (`X_ENERGY_MAX`, or the birth energy of a slowing-down distribution), as in
+Fortran PENTRC (energy.f90). Each resonance pole
 `x_pole = x_res − i·ν/Ω′` is removed by principal value + residue (Sokhotski-Plemelj) and the smooth remainder is
 integrated in `u = √x`. The collisionless case is the exact ν→0⁺ limit: the signed zero of `−pole_offset` carries its
 causal branch and the analytic regular-part limit its on-axis `0/0`. Poles narrower than `NARROW_POLE_FRACTION` of
@@ -283,8 +329,8 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
     pole_contribution = ComplexF64(0.0)
 
     for xr in x_res_list
-        # Poles beyond X_ENERGY_MAX (exp(-xr) negligible) lie outside the domain — drop them.
-        (xr <= 0.0 || xr >= X_ENERGY_MAX) && continue
+        # Poles beyond the upper limit lie outside the domain — drop them.
+        (xr <= 0.0 || xr >= p.xmax) && continue
         # Ω′(x_res) = d/dx[leff·wb·√x + n·(we + wd·x)]
         omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
         abs(omega_prime) < SINGULAR_EPS && continue
@@ -294,9 +340,9 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
         isfinite(pole_offset) || continue
         x_pole = complex(xr, -pole_offset)   # signed-zero imag part for ν=0 carries the causal branch
         # Residue of N(x)·exp(-x)/(i·Ω(x)) at x_res, where Ω ≈ Ω′·(x - x_res) near the pole.
-        R = _energy_numerator(xr, p) * exp(-xr) / (im * omega_prime)
+        R = _energy_numerator(xr, p) * _energy_weight(xr, p) / (im * omega_prime)
         # Add-back ∫₀^xmax R/(x - x_pole) dx = R·[log(xmax - x_pole) - log(-x_pole)].
-        pole_contribution += R * (log(X_ENERGY_MAX - x_pole) - log(-x_pole))
+        pole_contribution += R * (log(p.xmax - x_pole) - log(-x_pole))
         push!(x_poles, x_pole)
         push!(residues, R)
     end
@@ -305,7 +351,7 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
 
     # Physical integrand N(x)·exp(-x)/(i·Ω) minus the subtracted pole parts, in u = √x.
     integrand_u = u -> 2u * _resonant_integrand(u * u, p, residues, x_poles, npole, leff, wb, n, wd)
-    u_max = sqrt(X_ENERGY_MAX)
+    u_max = sqrt(p.xmax)
 
     if npole == 0
         val, err = quadgk(integrand_u, 0.0, u_max; atol=atol, rtol=rtol, segbuf=segbuf)
@@ -325,7 +371,7 @@ function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
         if 0 < w < NARROW_POLE_FRACTION * xr && xr < NARROW_POLE_XMAX
             for d in (-10w, -2w, 2w, 10w)
                 xb = xr + d
-                0.0 < xb < X_ENERGY_MAX && push!(pts, sqrt(xb))
+                0.0 < xb < p.xmax && push!(pts, sqrt(xb))
             end
         end
     end
@@ -345,17 +391,17 @@ Integrate the kinetic resonance operator ∫₀^∞ N(x)·exp(-x)/denom(x) dx ov
 with resonance poles handled by `_integrate_energy_resonant`; CGL has no pole and is integrated directly.
 
 Collision operator types (`nutype`): `"zero"`, `"small"`, `"krook"`, `"harmonic"`.
-Distribution function types (`f0type`): `"maxwellian"`, `"park"`, `"cgl"`.
+Distribution function types (`f0type`): `"maxwellian"`, `"park"`, `"cgl"`, `"slowingdown"` (with the birth energy `xb`).
 """
 function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
     wb::Float64, nuk::Float64, ell::Int, leff::Float64,
     n::Int, psi::Float64, lambda::Float64, method::String;
     nutype::String="harmonic", f0type::String="maxwellian",
-    nufac::Float64=1.0, qt::Bool=false,
+    nufac::Float64=1.0, qt::Bool=false, xb::Float64=Inf,
     atol::Float64=1e-7, rtol::Float64=1e-5, segbuf=nothing)::ComplexF64
 
     p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
-        nutype, f0type, nufac, qt)
+        nutype, f0type, nufac, qt; xb)
 
     # CGL has no resonance denominator and no pole — integrate the physical
     # x-space integrand directly over the half line (QuadGK maps [0,∞) itself).

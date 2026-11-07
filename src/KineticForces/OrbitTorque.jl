@@ -22,6 +22,8 @@ const ORBIT_NT = 64
 const ORBIT_TAU_RETRY = 10.0
 # Orbit rtol for the table: changes ω_b, ⟨φ̇⟩ and |δJ_ℓ|² by < 4e-5 from 1e-10 at 2.4× less cost.
 const ORBIT_RTOL = 1e-8
+# ψ_N step of the central difference ∂ψ̄/∂ψ₀ at fixed (E, μ): ψ̄ noise ~1e-8 at ORBIT_RTOL, so the error is ~1e-5.
+const ORBIT_DPSI = 1e-3
 
 """
     OrbitSegment
@@ -37,6 +39,12 @@ One closed-class interval [`ua`, `ub`] in √x of a (pitch, sign of v∥) column
   - `u`: √x sample nodes inside [`ua`, `ub`]
   - `wb`: ω_b/√x in rad/s; `wd`: the precession in the form of `BounceData.wd`
   - `dJdJ`: |δJ_ℓ|², size (length(u), 2lmax+1), indexed by the surface path's ℓ
+  - `dpsibar`: ψ̄ − ψ₀, the orbit-averaged ψ_N relative to the launch surface, where the drive is evaluated
+  - `gpsi`: the drive factor sgn(r)·∂ψ̄/∂ψ₀ at fixed (E, μ), r = (∂P_φ/∂ψ₀)/(−Z e s psio); 1 at zero width
+  - `measure`: |r|, the phase-space measure relative to zero orbit width (it cancels from the torque except for its sign)
+  - `weight`: 1/(crossings of the launch section per period): ½ for a banana, 1 for a passing orbit
+
+The eight-argument constructor gives the surface drive (ψ̄ = ψ₀, unit factors) and the class weight.
 """
 struct OrbitSegment
     passing::Bool
@@ -47,6 +55,91 @@ struct OrbitSegment
     wb::Vector{Float64}
     wd::Vector{Float64}
     dJdJ::Matrix{Float64}
+    dpsibar::Vector{Float64}
+    gpsi::Vector{Float64}
+    measure::Vector{Float64}
+    weight::Float64
+end
+
+OrbitSegment(passing, dir, ua, ub, u, wb, wd, dJdJ) =
+    OrbitSegment(passing, dir, ua, ub, u, wb, wd, dJdJ, zeros(length(u)), ones(length(u)), ones(length(u)), passing ? 1.0 : 0.5)
+
+"""
+    OrbitDrive
+
+The equilibrium distribution of one species as the orbit path needs it: n ∂f₀/∂P_φ at fixed (E, μ) with f₀(E, ψ̄)
+normalized like the surface path's numerator so that it reduces to (ω_E + ω_*n + ω_*T(x − 3/2))e^{−x}
+(or the slowing-down form) at ψ̄ = ψ₀. Built per surface by [`orbit_drive`](@ref).
+
+## Fields
+
+  - `prof`: the species' kinetic-profile splines (density in `ni_spline`, temperature, or E_c for slowing-down, in `Ti_spline`)
+  - `field`: the [`GuidingCenterField`](@ref) whose potential Φ is in the orbit, or `nothing`
+  - `psi0`, `n0`, `T0`, `phi0`: launch surface, its density, temperature (J) and potential (V)
+  - `chrg`, `chi1`: species charge (C) and 2π·psio
+  - `slowing`: slowing-down distribution with birth energy `ebirth` (J); Maxwellian otherwise
+"""
+struct OrbitDrive{K,G}
+    prof::K
+    field::G
+    psi0::Float64
+    n0::Float64
+    T0::Float64
+    phi0::Float64
+    chrg::Float64
+    chi1::Float64
+    slowing::Bool
+    ebirth::Float64
+end
+
+"""
+    orbit_drive(prof, field, psi0, chrg, chi1; potential, f0type="maxwellian", ebirth=Inf) → OrbitDrive
+"""
+function orbit_drive(prof, field, psi0::Float64, chrg::Float64, chi1::Float64; potential::Bool, f0type::String="maxwellian",
+    ebirth::Float64=Inf)
+    f0type in ("maxwellian", "slowingdown") || error("forb supports f0type maxwellian and slowingdown, got $f0type")
+    fld = potential ? field : nothing
+    return OrbitDrive(prof, fld, psi0, prof.ni_spline(psi0), prof.Ti_spline(psi0), fld === nothing ? 0.0 : _phi(fld, psi0), chrg, chi1,
+        f0type == "slowingdown", ebirth)
+end
+
+# Normalized drive times f̂ at launch energy x = E_k/T₀, for an orbit with ψ̄ = ψ₀ + dψ̄ and drive factor gs (no x^{5/2}).
+function (d::OrbitDrive)(x::Float64, dpsibar::Float64, gs::Float64)
+    ψ = d.psi0 + dpsibar
+    p = d.prof
+    nb, Tb = p.ni_spline(ψ), p.Ti_spline(ψ)
+    wn = -twopi * Tb * p.ni_deriv(ψ) / (d.chrg * d.chi1 * nb)
+    wt = -twopi * p.Ti_deriv(ψ) / (d.chrg * d.chi1)
+    we = p.omegaE_spline(ψ)
+    xbar = (x * d.T0 + (d.field === nothing ? 0.0 : d.chrg * (d.phi0 - _phi(d.field, ψ)))) / Tb
+    xbar > 0 || return 0.0
+    scale = gs * (nb / d.n0) * (d.T0 / Tb)^2.5
+    d.slowing || return scale * exp(-xbar) * (we + wn + wt * (xbar - 1.5))
+    xb = d.ebirth / Tb
+    xbar < xb || return 0.0
+    b = xb * sqrt(xb)
+    dn = xbar * sqrt(xbar) + 1
+    drive = wn + 1.5 * b / ((1 + b) * log1p(b)) * wt - 1.5 * wt / dn + 1.5 * we * sqrt(xbar) / dn
+    return scale * 3 * sqrt(π) / (4 * log1p(b)) / dn * drive
+end
+
+"""
+    launch_measure(g, psi0, theta0, lambda, energy, sigma; mass, chrg) → Float64
+
+r = (∂P_φ/∂ψ₀)/(−Z e s psio) at fixed (E, μ) and θ₀ for the orbit launched at (`psi0`, `theta0`) with kinetic energy
+`energy` (J), pitch `lambda` and sign `sigma`: m v∥ ∂(F/B)/∂ψ + (F/B)(−ZeΦ′ − μ ∂B/∂ψ)/v∥ − Z e s psio, normalized. |r| is the
+phase-space measure dP_φ relative to zero orbit width (Gorelenkov 1999 Eq. 22); r → 1 as ρ/a and Rω_E/v∥ → 0.
+"""
+function launch_measure(g::GuidingCenterField, psi0::Real, theta0::Real, lambda::Real, energy::Real, sigma::Real; mass::Real, chrg::Real)
+    pt = (psi0, theta0)
+    B, Bx = g.B(pt), g.B(pt; deriv=DerivOp(1, 0))
+    v = sqrt(2 * energy / mass)
+    vpar = sign(sigma) * v * sqrt(1 - lambda * B / g.bo)
+    mu = lambda * energy / g.bo
+    F, Fx = g.F(psi0), g.dFdpsi(psi0)
+    c = chrg * g.s * g.psio
+    dP = mass * vpar * (Fx / B - F * Bx / B^2) + (F / B) * (-chrg * _dphi(g, psi0) - mu * Bx) / vpar - c
+    return -dP / c
 end
 
 """
@@ -60,14 +153,20 @@ Guiding-center orbit segments on one flux surface.
   - `segments`: per pitch node, the closed-class segments of both signs of v∥
   - `lmax`: bounce harmonics ℓ = -lmax:lmax
   - `nstatus`: class-scan orbit counts in `ORBIT_STATUS_CODES` order (0–4), then sample nodes dropped because the orbit
-    did not close or changed class
+    did not close or changed class, then samples whose ∂ψ̄/∂ψ₀ fell back to one side, then samples with a crossing count
+    different from their segment's
+  - `lost_fraction`: share of the launch phase space (density weight of the species over √x ≤ umax and v∥/v at θ₀, both
+    signs) on lost orbits; `NaN` when not computed
 """
 struct OrbitSurfaceTable
     lambda::Vector{Float64}
     segments::Vector{Vector{OrbitSegment}}
     lmax::Int
     nstatus::Vector{Int}
+    lost_fraction::Float64
 end
+
+OrbitSurfaceTable(lambda, segments, lmax, nstatus) = OrbitSurfaceTable(lambda, segments, lmax, nstatus, NaN)
 
 """
     orbit_energy_nodes(a, b, n) → Vector{Float64}
@@ -79,28 +178,46 @@ orbit_energy_nodes(a::Float64, b::Float64, n::Int) = [a + (b - a) * (1 - cos(π 
 """
     orbit_surface_table(g, geo, intr, psi, theta0, q, welec, mass, chrg, T_s, n;
                         divxfac=1.0, lmax=1, nenergy=12, potential=false, nsample=ORBIT_NSAMPLE,
-                        umax=ORBIT_U_MAX, energy_tol=1e-2) → OrbitSurfaceTable
+                        umax=ORBIT_U_MAX, energy_tol=1e-2, ebirth=Inf) → OrbitSurfaceTable
 
 Follow the orbits through (`psi`, `theta0`) in energy on each pitch node of `geo` and both signs of v∥. On each
 trapped or passing segment, ω_b, the precession and |δJ_ℓ|² start on `nenergy` nodes (at least 7) and gain midpoints until a spline
 through every other node reproduces the rest to `energy_tol` of each quantity's largest value.
 δJ_ℓ = R₀∮dτ [w²∇·ξ⊥ + (w² − ½λB/B₀)δB/B] e^{−in(2πζ − ⟨φ̇⟩t)} e^{−iℓω_b t}, with w = v∥/v and ζ = (φ − ν)/2π the
 straight-field-line toroidal angle, so the resonance is Ω = ℓω_b − n⟨φ̇⟩. With `potential`, `g` carries Φ and ω_E is
-part of ⟨φ̇⟩, so it is taken out of `wd`. Lost and axis segments carry nothing.
+part of ⟨φ̇⟩, so it is taken out of `wd`. Lost and axis segments carry nothing. Each sample also carries ψ̄, the drive
+factor ∂ψ̄/∂ψ₀ at fixed (E, μ) from two status-only orbits at ψ₀ ± `ORBIT_DPSI`, and the launch measure (see
+[`OrbitSegment`](@ref)). A finite `ebirth` (J) caps the energy range at the birth energy, √x ≤ √(ebirth/T_s).
 """
 function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, psi::Float64, theta0::Float64,
     q::Float64, welec::Float64, mass::Float64, chrg::Float64, T_s::Float64, n::Int;
     divxfac::Float64=1.0, lmax::Int=1, nenergy::Int=12, potential::Bool=false, nsample::Int=ORBIT_NSAMPLE,
-    umax::Float64=ORBIT_U_MAX, energy_tol::Float64=1e-2)
+    umax::Float64=ORBIT_U_MAX, energy_tol::Float64=1e-2, ebirth::Float64=Inf)
     nl, nh = geo.nlmda, 2 * lmax + 1
+    isfinite(ebirth) && (umax = sqrt(ebirth / T_s))
     segments = [OrbitSegment[] for _ in 1:nl]
-    counts = [zeros(Int, 6) for _ in 1:nl]
+    counts = [zeros(Int, 8) for _ in 1:nl]
+    # Density weight (4/√π)u²f̂(u²) of the species in √x, for the lost fraction.
+    fhat(x) = isfinite(ebirth) ? (x < ebirth / T_s ? 1 / (x * sqrt(x) + 1) : 0.0) : exp(-x)
+    densw(a, b) = quadgk(u -> u^2 * fhat(u^2), a, b; rtol=1e-6)[1]
+    Bθ0 = g.B((psi, theta0))
+    lost_w, all_w = zeros(nl), zeros(nl)
     for il in 1:nl
         geo.valid[il] || continue
         lam, nstatus = geo.lambda[il], counts[il]
         buf = (dbob=zeros(ComplexF64, intr.mpert), divx=zeros(ComplexF64, intr.mpert), A=zeros(ComplexF64, nsample), u=zeros(6))
         for sv in (1, -1)
             gco(u; kw...) = guiding_center_orbit(g, psi, lam, u^2 * T_s, sv; mass, chrg, theta0, rtol=ORBIT_RTOL, kw...)
+            # The orbit through ψ₀ + δ at θ₀ with the same total energy, μ and σ: status-only, for ∂ψ̄/∂ψ₀.
+            function neighbour(u, δ)
+                ψn = psi + δ
+                g.psi_min < ψn < g.psi_max || return nothing
+                ek = u^2 * T_s
+                ekn = ek + (potential ? chrg * (_phi(g, psi) - _phi(g, ψn)) : 0.0)
+                ekn > 0 || return nothing
+                return guiding_center_orbit(g, ψn, lam * ek / ekn, ekn, sv; mass, chrg, theta0, rtol=ORBIT_RTOL, dense=false)
+            end
+            measure(u) = launch_measure(g, psi, theta0, lam, u^2 * T_s, sv; mass, chrg)
             function orbit(u; dense=true)
                 o = gco(u; dense)
                 o !== nothing && o.status == :unclosed && (o = gco(u; dense, tau_max=2e4 * ORBIT_TAU_RETRY))
@@ -109,15 +226,23 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
             code(o) = o === nothing ? Int8(-1) : ORBIT_STATUS_CODES[o.status]
             # Class probes need only the status; bisection points are not retried, since near an edge the period diverges.
             for (ua, ub, c) in _class_segments(u -> code(orbit(u; dense=false)), u -> code(gco(u; dense=false)), umax, nstatus)
+                w = densw(ua, ub)
+                all_w[il] += w
+                c == 3 && (lost_w[il] += w)
                 c in (1, 2) || continue
-                seg = _sample_segment(orbit, c == 2, ua, ub, lam, q, welec, potential, n, lmax, divxfac, g, intr, buf, nenergy,
-                    energy_tol, nstatus)
+                seg = _sample_segment(orbit, neighbour, measure, c == 2, ua, ub, lam, q, welec, potential, n, lmax, divxfac, g, intr, buf,
+                    nenergy, energy_tol, nstatus)
                 seg === nothing || push!(segments[il], seg)
             end
         end
     end
     nstatus = reduce(+, counts)
-    return OrbitSurfaceTable(geo.lambda[1:nl], segments, lmax, nstatus)
+    # Trapezoid in ξ = v∥/v at θ₀ over the valid pitch nodes.
+    ok = [il for il in 1:nl if geo.valid[il] && all_w[il] > 0]
+    ξ = [sqrt(max(1 - geo.lambda[il] * Bθ0 / g.bo, 0.0)) for il in ok]
+    tw = [abs(ξ[min(k + 1, end)] - ξ[max(k - 1, 1)]) / 2 for k in eachindex(ok)]
+    lost = isempty(ok) ? NaN : sum(tw .* lost_w[ok]) / sum(tw .* all_w[ok])
+    return OrbitSurfaceTable(geo.lambda[1:nl], segments, lmax, nstatus, lost)
 end
 
 # Class segments [(ua, ub, code)] of one column in √x ∈ [0, umax]: a scan with `cls`, then bisection of each class change with `edge`.
@@ -141,14 +266,15 @@ function _class_segments(cls, edge, umax::Float64, nstatus)
 end
 
 # Orbit quantities on one closed segment, refined until a spline through every other node reproduces the rest.
-function _sample_segment(orbit, passing::Bool, ua, ub, lam, q, welec, potential, n, lmax, divxfac, g, intr, buf, nenergy,
-    energy_tol, nstatus)
+function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, q, welec, potential, n, lmax, divxfac, g, intr, buf,
+    nenergy, energy_tol, nstatus)
     nh = 2 * lmax + 1
-    samples = Dict{Float64,Tuple{Float64,Float64,Vector{Float64},Int}}()
+    cls = passing ? :passing : :trapped
+    samples = Dict{Float64,Tuple{Float64,Float64,Vector{Float64},Int,Float64,Float64,Float64,Int}}()
     function sample!(u)
         haskey(samples, u) && return nothing
         o = orbit(u)
-        if o === nothing || o.status != (passing ? :passing : :trapped)
+        if o === nothing || o.status != cls
             nstatus[6] += 1
             return nothing
         end
@@ -156,16 +282,28 @@ function _sample_segment(orbit, passing::Bool, ua, ub, lam, q, welec, potential,
         dj = zeros(nh)
         _orbit_action!(dj, o, g, intr, lam, n, lmax, divxfac, passing && o.dir_theta > 0, buf)
         wd = (-o.wphi + (passing ? o.dir_theta * q * o.wb : 0.0) - (potential ? welec : 0.0)) / x
-        samples[u] = (o.wb / u, wd, dj, passing ? Int(o.dir_theta) : 0)
+        # ∂ψ̄/∂ψ₀ at fixed (E, μ): central where both neighbours keep the class, else one-sided, else the sample is dropped.
+        ψb(on) = on !== nothing && on.status == cls ? on.psibar : NaN
+        hp, hm = ψb(neighbour(u, ORBIT_DPSI)), ψb(neighbour(u, -ORBIT_DPSI))
+        dψ = !isnan(hp) && !isnan(hm) ? (hp - hm) / (2 * ORBIT_DPSI) : !isnan(hp) ? (hp - o.psibar) / ORBIT_DPSI :
+             !isnan(hm) ? (o.psibar - hm) / ORBIT_DPSI : NaN
+        if isnan(dψ)
+            nstatus[6] += 1
+            return nothing
+        end
+        (isnan(hp) || isnan(hm)) && (nstatus[7] += 1)
+        r = measure(u)
+        samples[u] = (o.wb / u, wd, dj, passing ? Int(o.dir_theta) : 0, o.psibar - o.sol.u[1][1], sign(r) * dψ, abs(r), o.ncross)
         return nothing
     end
     foreach(sample!, orbit_energy_nodes(max(ua, ORBIT_U_MIN), ub, max(nenergy, 7)))
     while true
         us = sort!(collect(keys(samples)))
         length(us) < 7 && break
-        V = reduce(vcat, [hcat(samples[u][1], samples[u][2], samples[u][3]') for u in us])
-        dmax = maximum(abs, view(V, :, 3:size(V, 2)))
-        scale = [j < 3 ? maximum(abs, view(V, :, j)) : dmax for j in axes(V, 2)]
+        V = reduce(vcat, [hcat(samples[u][1], samples[u][2], samples[u][5], samples[u][6], samples[u][3]') for u in us])
+        dmax = maximum(abs, view(V, :, 5:size(V, 2)))
+        scale = [j < 5 ? maximum(abs, view(V, :, j)) : dmax for j in axes(V, 2)]
+        scale[3] = max(scale[3], ORBIT_DPSI)
         coarse = 1:2:length(us)
         spl = cubic_interp(us[coarse], Series(V[coarse, :]); bc=CubicFit())
         bad = Int[]
@@ -182,8 +320,11 @@ function _sample_segment(orbit, passing::Bool, ua, ub, lam, q, welec, potential,
     us = sort!(collect(keys(samples)))
     length(us) < 4 && return nothing
     dir = samples[us[1]][4]
-    return OrbitSegment(passing, dir, ua, ub, us, [samples[u][1] for u in us], [samples[u][2] for u in us],
-        reduce(vcat, [samples[u][3]' for u in us]))
+    nc = [samples[u][8] for u in us]
+    ncs = sort(unique(nc); by=k -> -count(==(k), nc))[1]
+    nstatus[8] += count(!=(ncs), nc)
+    col(k) = [samples[u][k] for u in us]
+    return OrbitSegment(passing, dir, ua, ub, us, col(1), col(2), reduce(vcat, [samples[u][3]' for u in us]), col(5), col(6), col(7), 1 / ncs)
 end
 
 # |δJ_ℓ|² of one orbit for ℓ = -lmax:lmax (the surface path's labels; `flip` maps them to −ℓ along the orbit).
@@ -229,20 +370,22 @@ end
 
 """
     calculate_orbit(tab, n, l, q, epsr, wdian, wdiat, welec, nuk, bo, bmax, n_s, T_s;
-                    chi1, ro, energy_atol, energy_rtol, pitch_atol, pitch_rtol, classes=:all) → ComplexF64
+                    chi1, ro, energy_atol, energy_rtol, pitch_atol, pitch_rtol, classes=:all, drive=nothing,
+                    nutype="harmonic", nufac=1.0) → ComplexF64
 
 Torque density of harmonic `l` from an [`OrbitSurfaceTable`](@ref) with the normalization of [`calculate_gar`](@ref).
 Each segment is resampled on fixed nodes in t = (√x − u_a)/(u_b − u_a); adjacent pitch nodes with the same segment
 sequence form a group, in which u_a, u_b and the resampled values are splined in λ. The pitch quadrature breaks between
 groups and, at each λ, sums the energy integrals of the interpolated segments, each keyed by its orbit class (ℓ_eff,
-collisionality, weight ½ per trapped sign), so the resonance is never interpolated. `classes` (`:all`, `:passing`,
-`:trapped`) keeps only one orbit class.
+collisionality, launch-section weight), so the resonance is never interpolated. `classes` (`:all`, `:passing`,
+`:trapped`) keeps only one orbit class. With an [`OrbitDrive`](@ref) the drive is evaluated at each orbit's ψ̄ with the
+factor ∂ψ̄/∂ψ₀; without one it is the surface Maxwellian of `wdian`, `wdiat`, `welec` (the replay of the surface path).
 """
 function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, epsr::Float64,
     wdian::Float64, wdiat::Float64, welec::Float64, nuk::Float64, bo::Float64, bmax::Float64,
     n_s::Float64, T_s::Float64; chi1::Float64, ro::Float64,
     energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5, pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
-    classes::Symbol=:all)::ComplexF64
+    classes::Symbol=:all, drive=nothing, nutype::String="harmonic", nufac::Float64=1.0)::ComplexF64
     abs(l) <= tab.lmax || error("calculate_orbit: harmonic $l outside the table's ±$(tab.lmax)")
     nl = length(tab.lambda)
     nl < 4 && return ComplexF64(0.0)
@@ -253,11 +396,11 @@ function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, eps
     segbuf = QuadGK.alloc_segbuf(Float64, ComplexF64, Float64)
     t = orbit_energy_nodes(0.0, 1.0, ORBIT_NT)
     keep(seg) = !(classes == :passing && !seg.passing) && !(classes == :trapped && seg.passing)
-    # Per pitch node: segment signature, and per segment [u_a; u_b; ω_b/√x, wd, |δJ_ℓ|² on the t nodes].
-    sig = [[(seg.passing, seg.dir) for seg in tab.segments[il]] for il in 1:nl]
+    # Per pitch node: segment signature, and per segment [u_a; u_b; ω_b/√x, wd, |δJ_ℓ|², ψ̄ − ψ₀, drive factor on the t nodes].
+    sig = [[(seg.passing, seg.dir, seg.weight) for seg in tab.segments[il]] for il in 1:nl]
     rows = map(1:nl) do il
         map(tab.segments[il]) do seg
-            spl = cubic_interp(seg.u, Series(hcat(seg.wb, seg.wd, view(seg.dJdJ, :, ih) .* dnorm)); bc=CubicFit())
+            spl = cubic_interp(seg.u, Series(hcat(seg.wb, seg.wd, view(seg.dJdJ, :, ih) .* dnorm, seg.dpsibar, seg.gpsi)); bc=CubicFit())
             us = clamp.(seg.ua .+ t .* (seg.ub - seg.ua), first(seg.u), last(seg.u))
             vcat(seg.ua, seg.ub, vec(reduce(vcat, [spl(u)' for u in us])))
         end
@@ -275,20 +418,19 @@ function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, eps
     function kernel(λ)
         gr = groups[clamp(searchsortedlast([g.λa for g in groups], λ), 1, length(groups))]
         total = zero(ComplexF64)
-        for (j, (passing, dir)) in enumerate(gr.sig)
+        for (j, (passing, dir, weight)) in enumerate(gr.sig)
             r = gr.segs[j](λ)
             ua, ub = max(r[1], 0.0), r[2]
             ub > ua || continue
             seg = (; passing)
             keep(seg) || continue
             u = ua .+ t .* (ub - ua)
-            spl = cubic_interp(u, Series(reshape(r[3:end], ORBIT_NT, 3)); bc=CubicFit())
+            spl = cubic_interp(u, Series(reshape(r[3:end], ORBIT_NT, 5)); bc=CubicFit())
             leff = passing ? l + n * q : Float64(l)
-            p = EnergyParams(wdian, wdiat, welec, 0.0, 0.0, passing ? nuk : nuk / (2 * epsr), leff, n, "harmonic", "maxwellian",
-                1.0, false)
+            p = EnergyParams(wdian, wdiat, welec, 0.0, 0.0, passing ? nuk : nuk / (2 * epsr), leff, n, nutype, "maxwellian", nufac, false)
             sgn = passing && dir > 0 ? -1.0 : 1.0
-            xint = _integrate_energy_orbit(p, leff, sgn, spl, u, ua, ub, energy_atol, energy_rtol, segbuf)
-            total += passing ? xint : 0.5 * xint
+            xint = _integrate_energy_orbit(p, leff, sgn, spl, u, ua, ub, energy_atol, energy_rtol, segbuf; drive)
+            total += weight * xint
         end
         return total
     end
@@ -355,19 +497,20 @@ function _cell_roots(f, a::Float64, b::Float64, deg::Int)
 end
 
 """
-    _integrate_energy_orbit(p, leff, sgn, spl, u, ua, ub, atol, rtol, segbuf) → ComplexF64
+    _integrate_energy_orbit(p, leff, sgn, spl, u, ua, ub, atol, rtol, segbuf; drive=nothing) → ComplexF64
 
 ∫ N(x)e^{−x}D(√x)/(iΩ − ν) dx over √x ∈ [ua, ub], with Ω(u) = leff·sgn·Wb(u)·u + n(ω_E + Wd(u)·u²), where `spl`
-splines [Wb, Wd, D] on the √x nodes `u` and is held at the end nodes outside them. On each spline cell Ω is a
+splines [Wb, Wd, D, ψ̄ − ψ₀, drive factor] on the √x nodes `u` and is held at the end nodes outside them. With an
+[`OrbitDrive`](@ref), N(x)e^{−x} is replaced by x^{5/2} times the drive at the orbit's ψ̄. On each spline cell Ω is a
 polynomial of degree ≤ 5 in √x, so its real roots are found exactly (see [`_cell_roots`](@ref)) and removed by principal
 value and residue as in [`_integrate_energy_resonant`](@ref), to which this reduces when Wb, Wd and D are constant. The
 stationary points of Ω are breakpoints, so a near-tangent resonance that does not cross zero is still resolved.
 """
 function _integrate_energy_orbit(p::EnergyParams, leff::Float64, sgn::Float64, spl, u::Vector{Float64},
-    ua::Float64, ub::Float64, atol::Float64, rtol::Float64, segbuf)::ComplexF64
+    ua::Float64, ub::Float64, atol::Float64, rtol::Float64, segbuf; drive=nothing)::ComplexF64
     n = p.n
     u1, uK = first(u), last(u)
-    y, dy = zeros(3), zeros(3)
+    y, dy = zeros(5), zeros(5)
     cl(s) = clamp(s, u1, uK)
     function Ω(s)
         spl(y, cl(s))
@@ -381,7 +524,8 @@ function _integrate_energy_orbit(p::EnergyParams, leff::Float64, sgn::Float64, s
     end
     function h(x)
         spl(y, cl(sqrt(x)))
-        return _energy_numerator(x, p) * exp(-x) * y[3]
+        drive === nothing && return _energy_numerator(x, p) * _energy_weight(x, p) * y[3]
+        return x * x * sqrt(x) * drive(x, y[4], y[5]) * y[3]
     end
     xa, xb = ua^2, ub^2
 

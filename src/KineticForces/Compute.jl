@@ -79,7 +79,8 @@ function integrate_psi_quadgk(
     wdfac::Float64, divxfac::Float64, electron::Bool,
     method::String, equil, intr::KineticForcesInternal, ctrl::KineticForcesControl,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
-    psi_min::Float64=0.0, psi_max::Float64=1.0, axis_psi_c::Float64=0.0
+    psi_min::Float64=0.0, psi_max::Float64=1.0, axis_psi_c::Float64=0.0,
+    f0type::String=ctrl.f0type, ebirth::Float64=Inf
 )
     is_matrix_method = occursin("mm", method)
     mpert = intr.mpert
@@ -97,7 +98,8 @@ function integrate_psi_quadgk(
     # Near-axis validity suppression on the torque density. `axis_psi_c` is the run's single
     # boundary (widest-orbit species, cleared of rationals), so the quadrature domain matches the
     # EL kinetic matrices and the Validity output; below it the integrand is identically zero.
-    psi_c = ctrl.axis_validity_suppression ? axis_psi_c : 0.0
+    # The orbit-averaged method has no orbit-width limit and is never suppressed.
+    psi_c = ctrl.axis_validity_suppression && method_kind(method) != :orbit ? axis_psi_c : 0.0
     x0 = max(x0, psi_c)
     if x0 >= xout
         return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0, psi_quad_error=0.0,
@@ -119,6 +121,7 @@ function integrate_psi_quadgk(
     logged_dtdpsi = ComplexF64[]
     logged_dtdpsi_ell = Vector{Vector{ComplexF64}}()
     logged_elems = is_matrix_method ? Vector{Array{ComplexF64,3}}() : nothing
+    logged_lost = Float64[]
 
     function psi_batch!(y::AbstractVector{ComplexF64}, x::AbstractVector)
         for c0 in 1:chunk:length(x)
@@ -128,7 +131,7 @@ function integrate_psi_quadgk(
             surfaces = Vector{Any}(undef, nc)
             Threads.@threads :static for j in 1:nc
                 surfaces[j] = _torque_surface(Float64(x[idx[j]]), zi, mi, electron, method, equil, intr, kinetic_profiles;
-                    need_matrices=is_matrix_method, n, wdfac, divxfac)
+                    need_matrices=is_matrix_method, n, wdfac, divxfac, ebirth)
             end
 
             harm_vals = Matrix{ComplexF64}(undef, nharm, nc)
@@ -142,7 +145,7 @@ function integrate_psi_quadgk(
                 tpsi!(thread_tpsi[tid], Float64(x[idx[j]]), n, l, zi, mi, wdfac, divxfac,
                     electron, method, equil, intr, kinetic_profiles;
                     op_wmats=w, surface=surfaces[j],
-                    nutype=ctrl.nutype, f0type=ctrl.f0type, nufac=ctrl.collisionality_factor,
+                    nutype=ctrl.nutype, f0type, nufac=ctrl.collisionality_factor, ebirth,
                     atol_xlmda=ctrl.atol_pitch, rtol_xlmda=rtol_pitch,
                     atol_x=ctrl.atol_x, rtol_x=ctrl.rtol_x,
                     nested_tolerance_margin=ctrl.nested_tolerance_margin)
@@ -164,6 +167,8 @@ function integrate_psi_quadgk(
 
                 push!(logged_psi, psi)
                 push!(logged_dtdpsi, total)
+                orb = get(surfaces[j], :orbit, nothing)
+                push!(logged_lost, orb === nothing ? NaN : orb.lost_fraction)
                 # Same envelope as `total` so Σ_ℓ still reproduces it.
                 push!(logged_dtdpsi_ell, harm_vals[:, j] .* envelope)
                 if is_matrix_method
@@ -209,9 +214,10 @@ function integrate_psi_quadgk(
         end
     end
 
-    torque_profile = npts > 1 ?
-                     (psi=sorted_psi, dtdpsi=sorted_dtdpsi, t_cumulative=t_cumulative,
-        dtdpsi_ell=sorted_dtdpsi_ell, ell=collect(-nl:nl)) : nothing
+    torque_profile =
+        npts > 1 ?
+        (psi=sorted_psi, dtdpsi=sorted_dtdpsi, t_cumulative=t_cumulative,
+            dtdpsi_ell=sorted_dtdpsi_ell, ell=collect(-nl:nl), lost_fraction=logged_lost[perm]) : nothing
 
     # Trapezoidal integration of kinetic matrices over ψ (matrix methods only)
     matrix_integrated = nothing
@@ -341,11 +347,14 @@ toroidal mode numbers and assembling block-diagonal kinetic matrices for the mat
     (`KineticForces.axis_validity_boundary`); 0 disables the suppression
   - `z`, `m`, `electron`: the species whose torque this is; default the equilibrium's main ion, with
     `ctrl.electron`. The species sum calls this once per resolved species.
+  - `f0type`, `ebirth`: the species' equilibrium distribution (default `ctrl.f0type`) and, for `"slowingdown"`, its birth
+    energy in J; the slowing-down species carries its critical energy in the temperature slot of `kinetic_profiles`
 """
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
     ctrl::KineticForcesControl, equil,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
-    axis_psi_c::Float64=0.0, z::Int=main_ion(equil)[1], m::Int=main_ion(equil)[2], electron::Bool=ctrl.electron)
+    axis_psi_c::Float64=0.0, z::Int=main_ion(equil)[1], m::Int=main_ion(equil)[2], electron::Bool=ctrl.electron,
+    f0type::String=ctrl.f0type, ebirth::Float64=Inf)
 
     if ctrl.forb_flag && intr.orbit_field === nothing
         intr.orbit_potential = ctrl.orbit_potential
@@ -385,6 +394,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         psi_nsteps_total = 0
         panel_psis_out = Float64[]
         resonance_psis_out = Float64[]
+        lost_out = Float64[]
 
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
@@ -394,7 +404,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                 n, ctrl.bounce_harmonic_max, z, m,
                 ctrl.magnetic_drift_factor, ctrl.divxi_factor, electron,
                 method, equil, intr, ctrl, kinetic_profiles;
-                psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2], axis_psi_c=axis_psi_c)
+                psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2], axis_psi_c=axis_psi_c, f0type, ebirth)
 
             total_torque += result.total
             psi_nsteps_total += result.psi_nsteps
@@ -411,6 +421,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                     # `total_torque` when npert > 1.
                     dtdpsi_ell_out = result.torque_profile.dtdpsi_ell
                     ell_out = result.torque_profile.ell
+                    method_kind(method) == :orbit && (lost_out = result.torque_profile.lost_fraction)
                 end
             end
 
@@ -437,7 +448,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             ell=ell_out,
             psi_nsteps=psi_nsteps_total,
             panel_psis=panel_psis_out,
-            resonance_psis=resonance_psis_out
+            resonance_psis=resonance_psis_out,
+            lost_fraction=lost_out
         )
         state.method_results[method] = result_entry
 
@@ -480,6 +492,10 @@ function kinetic_torque(pe::PerturbedEquilibrium.PerturbedEquilibriumState, ctrl
 
     kf_intr = KineticForcesInternal(equil; verbose)
     set_perturbation_data!(kf_intr, pe, ffs, equil, ffs.metric)
+    if ctrl.alpha
+        species === nothing && error("alpha = true needs D and T entries in ion_species")
+        alpha = alpha_species(species, kinetic_profiles; ebirth=ctrl.alpha_birth_energy * eV)
+    end
     if species === nothing
         total = KineticForcesState()
         compute_torque_all_methods!(total, kf_intr, ctrl, equil, kinetic_profiles; axis_psi_c)
@@ -490,6 +506,12 @@ function kinetic_torque(pe::PerturbedEquilibrium.PerturbedEquilibriumState, ctrl
         state = KineticForcesState()
         compute_torque_all_methods!(state, kf_intr, ctrl, equil, sp.profiles; axis_psi_c, z=sp.z, m=sp.m, electron=sp.electron)
         push!(per_species, String(sp.label) => state)
+    end
+    if ctrl.alpha
+        state = KineticForcesState()
+        compute_torque_all_methods!(state, kf_intr, ctrl, equil, alpha.profiles; axis_psi_c, z=alpha.z, m=alpha.m, electron=false,
+            f0type="slowingdown", ebirth=ctrl.alpha_birth_energy * eV)
+        push!(per_species, String(alpha.label) => state)
     end
     return KineticForcesResult(combine_species_states(last.(per_species)), per_species, axis_psi_c, pe, ctrl)
 end

@@ -1,5 +1,6 @@
 using TOML
 using HDF5
+using QuadGK
 
 @testset "KineticForces guiding-center orbits" begin
     GPEC = GeneralizedPerturbedEquilibrium
@@ -84,6 +85,41 @@ using HDF5
                 @test all(isfinite, read(h5["KineticForces/Orbits/psibar"])[in.(st, Ref((1, 2)))])
             end
         end
+    end
+
+    @testset "launch measure and drive" begin
+        # r = (∂P_φ/∂ψ₀)/(−Z e s psio) at fixed (E, μ, θ₀), against a central difference of P_φ.
+        lam, E, σ, θ0 = 0.5, 10T, -1, 0.0
+        μ = lam * E / g.bo
+        P(ψ, Z) = (vp = σ * sqrt(2 * (E - μ * g.B((ψ, θ0))) / mass);
+        mass * vp * g.F(ψ) / g.B((ψ, θ0)) - Z * chrg * g.s * g.psio * ψ)
+        for Z in (1, 4096)
+            fd = (P(0.5 + 1e-5, Z) - P(0.5 - 1e-5, Z)) / 2e-5 / (-Z * chrg * g.s * g.psio)
+            @test KF.launch_measure(g, 0.5, θ0, lam, E, σ; mass, chrg=Z * chrg) ≈ fd rtol = 1e-6
+        end
+        @test abs(KF.launch_measure(g, 0.5, θ0, lam, T, σ; mass, chrg=4096chrg) - 1) < 1e-3
+        # At ψ̄ = ψ₀ with unit factor the orbit drive is the surface numerator.
+        d = KF.orbit_drive(prof, g, 0.5, chrg, 2π * equil.psio; potential=false)
+        wn = -2π * T * prof.ni_deriv(0.5) / (chrg * 2π * equil.psio * prof.ni_spline(0.5))
+        wt = -2π * prof.Ti_deriv(0.5) / (chrg * 2π * equil.psio)
+        p = KF.EnergyParams(wn, wt, prof.omegaE_spline(0.5), 0.0, 0.0, 0.0, 0.0, 1, "harmonic", "maxwellian", 1.0, false)
+        for x in (0.3, 2.0, 7.0)
+            @test d(x, 0.0, 1.0) ≈ real(KF._energy_numerator(x, p)) * exp(-x) / x^2.5 rtol = 1e-12
+        end
+    end
+
+    @testset "slowing-down distribution" begin
+        p = KF.EnergyParams(1.0, 0.7, -0.4, 0.0, 0.0, 0.0, 0.0, 1, "harmonic", "slowingdown", 1.0, false; xb=12.0)
+        @test 2 / sqrt(π) * quadgk(x -> KF._energy_weight(x, p) * sqrt(x), 0, 12; rtol=1e-12)[1] ≈ 1 rtol = 1e-10
+        @test KF._energy_weight(12.5, p) == 0
+        for x in (0.2, 3.0, 9.0)
+            h = 1e-6 * x
+            fd = (KF._energy_numerator(x + h, p) - KF._energy_numerator(x - h, p)) / 2h
+            @test KF._energy_numerator_deriv(x, p) ≈ fd rtol = 1e-6
+            @test KF._energy_weight_deriv(x, p) ≈ (KF._energy_weight(x + h, p) - KF._energy_weight(x - h, p)) / 2h rtol = 1e-6
+        end
+        # Bosch & Hale (1992) Table VIII: ⟨σv⟩_DT = 1.136e-22 m³/s at 10 keV.
+        @test KF.dt_reactivity(10.0) ≈ 1.136e-22 rtol = 3e-3
     end
 
     @testset "resonance roots per spline cell" begin
