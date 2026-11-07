@@ -1,0 +1,23 @@
+direction: down
+vars: {d2-config: {theme-id: 0}}
+classes: {
+  n: {style: {fill: "#ffffff"; stroke: "#333333"; font-size: 15; border-radius: 4}}
+  new: {style: {fill: "#e4ece4"; stroke: "#2f6b3a"; stroke-width: 2; font-size: 15; border-radius: 4; bold: true}}
+  q: {shape: diamond; style: {fill: "#ffffff"; stroke: "#333333"; font-size: 14}}
+}
+lau: "launch at θ_bmin\n(ψ₀, λ, u, σ)" {class: n}
+orb: "orbit: class, ω_b, ⟨φ̇⟩,\n|δJ_ℓ|², ψ̄ = ⟨ψ⟩" {class: n}
+lost: "lost?" {class: q}
+L: "excluded;\nadds to lost fraction L" {class: new}
+nb: "neighbours at ψ₀ ± h\nsame E, μ, σ, θ₀" {class: new}
+g: "g = ∂ψ̄/∂ψ₀\nsign of ∂P_φ/∂ψ₀" {class: new}
+f: "f₀(E, ψ̄): Maxwellian\nor slowing-down" {class: new}
+S: "drive ∂f₀/∂ψ̄ · g\nweight 1/(crossings)" {class: new}
+E: "same resonant pitch\nand energy integrals" {class: n}
+lau -> orb -> lost
+lost -> L: "yes"
+lost -> nb: "no"
+nb -> g -> S
+f -> S
+S -> E
+(* -> *)[*].style: {stroke: "#333333"; stroke-width: 2}

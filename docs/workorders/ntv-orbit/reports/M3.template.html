@@ -1,0 +1,449 @@
+<meta charset="utf-8">
+<title>M3 Attempt 1</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!-- Built by m3_build.py from M3.template.html; edit the template, not M3.html. -->
+<style>
+  /* One reading column; figures sit on white plates so they read in both themes. */
+  :root { --bg: #fff; --fg: #111; --muted: #555; --rule: #ccc; --plate: #fff; --panel: #f3f3f2; --accent: #2a78d6; --warn: #a33b2a;
+          --ok: #2e7d32; --amber: #b26a00; --card: #fafaf8; --serif: Georgia, "Times New Roman", serif;
+          --sans: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38;
+          --plate: #fff; --panel: #222220; --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #161616; --fg: #e9e8e4; --muted: #aaa9a3; --rule: #3a3a38; --plate: #fff; --panel: #222220;
+          --accent: #6da7ec; --warn: #e88a78; --card: #1d1d1c; color-scheme: dark; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--serif); }
+  main { max-width: 52em; margin: 0 auto; padding-block: 2em; padding-left: max(16px, env(safe-area-inset-left, 0px));
+         padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  h1 { font-size: 1.5em; margin: 0 0 .2em; text-wrap: balance; }
+  .meta { color: var(--muted); font-size: .85em; margin-bottom: 1em; }
+  h2 { font-size: 1.05em; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--rule);
+       padding-bottom: .3em; margin-top: 2.6em; text-wrap: balance; }
+  h3 { font-size: 1em; margin: 1.6em 0 .3em; }
+  p, li { max-width: 70ch; }
+  figure { margin: 1.5em 0; }
+  figure .plate { background: var(--plate); padding: .5em; border-radius: 3px; overflow-x: auto; }
+  figure img, figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figure.d2 .plate { max-width: 36em; margin: 0 auto; }
+  figure.narrow img { max-width: min(100%, 32em); }
+  .side { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.2em; align-items: start; }
+  @media (max-width: 40em) { .side { grid-template-columns: 1fr; } }
+  figcaption { font-size: .85em; color: var(--muted); margin-top: .5em; }
+  .lede { font-size: 1.02em; }
+  .open { border-left: 3px solid var(--warn); padding-left: 1em; }
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; font: .88em/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--rule); padding: .35em .7em; text-align: left; vertical-align: top; }
+  th { font-weight: 600; }
+  code { font-size: .9em; }
+  a { color: var(--accent); }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(17em, 1fr)); gap: 1em; align-items: start; }
+  .two > * { min-width: 0; }
+  /* status strip */
+  .strip { display: flex; flex-wrap: wrap; gap: .6em 1.4em; align-items: center; border: 1px solid var(--rule);
+           padding: .6em 1em; font: .9em/1.5 var(--sans); }
+  .strip b { font-weight: 600; }
+  .state.amber { background: var(--amber); }
+  .state { padding: .1em .6em; border-radius: 3px; color: #fff; font-weight: 600; background: var(--ok); }
+  /* map of the decisions */
+  .map { font: .92em/1.5 var(--sans); background: var(--panel); padding: .7em 1.1em; border-radius: 3px; }
+  .map ol { margin: .3em 0; padding-left: 1.3em; } .map li { margin: .2em 0; }
+  /* decision cards */
+  .card { border: 1px solid var(--rule); border-left: 5px solid var(--fg); background: var(--card); padding: 1em 1.2em;
+          margin: 1.6em 0 2em; font: .95em/1.55 var(--sans); }
+  .card h3 { margin: 0 0 .4em; font-size: 1.05em; }
+  .card dl { margin: .6em 0; } .card dt { font-weight: 600; margin-top: .5em; }
+  .card dd { margin: 0 0 0 1.6em; }
+  .card label { display: block; cursor: pointer; }
+  .card .rec { background: var(--panel); padding: .5em .8em; margin: .6em 0; }
+  .card textarea { width: 100%; box-sizing: border-box; min-height: 3em; font: inherit; background: var(--bg); color: var(--fg); }
+  .result-pass { color: var(--ok); font-weight: 600; } .result-fail { color: var(--warn); font-weight: 600; }
+  .copy { font: inherit; padding: .4em 1em; margin-top: 1em; cursor: pointer; }
+  #answers { white-space: pre-wrap; background: var(--panel); padding: .6em; }
+  @media print { h2, .card, figure { page-break-inside: avoid; } .copy { display: none; } }
+</style>
+<main>
+<h1>M3 attempt 1 - The orbit drive, slowing-down alphas, and a first ARC alpha torque</h1>
+<div class="meta">Project ntv-orbit &middot; branch <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} &middot; attempt 1 of 2 &middot;
+DIII-D-like example (thermal deuterium) and ARC V3A (D–T fuel and fusion alphas), toroidal mode number n = 1 &middot; 2026-11-07</div>
+
+<div class="strip">
+  <span class="state amber">AMBER</span>
+  <span><b>Attempts</b> 6 of 15 (M3: 1 of 2)</span>
+  <span><b>Checks</b> 4 of 5 pass; the lost fraction reaches ½, not the 1 PLAN asks for (<a href="#checks">table</a>)</span>
+  <span><b>Tests</b> {{TESTS}}</span>
+  <span><b>Key runs</b> orbit-width scan Z = 16 … 65536 (alfven array 1251); ARC alpha profiles at 32×8, 64×12 and
+  128×16 pitch × energy nodes, 1 CPU per job</span>
+  <span><b>Decisions</b> 3 open; Q18 gates M4</span>
+  <span><b>Draft PRs</b> <a href="https://github.com/OpenFUSIONToolkit/GPEC/pull/660">#660</a> (torque keys),
+  <a href="https://github.com/OpenFUSIONToolkit/GPEC/pull/661">#661</a> (torque start)</span>
+</div>
+
+<p class="lede">M3 turns <code>forb</code>, the NTV torque computed along each particle's guiding-center orbit, into a method
+that can handle fusion alphas. It weights each orbit by its phase-space measure (your Q14 A). It drives each orbit by the
+gradient of the distribution at the orbit's own mean flux. It adds the slowing-down distribution of fusion alphas to both
+methods, and it excludes lost orbits and counts them. This report also gives the first alpha torque on an ARC-class equilibrium.</p>
+
+<p><b>In brief.</b> The measure and drive keep the zero-orbit-width (ZOW) limit clean: the M2 scan still falls as a power law,
+slope 0.96, with no floor, once a floor that I first missed was fixed (Section 2). The thermal-ion torque keeps its sign; it
+grows from 0.119 to 0.147 N m with the potential on.
+The alpha distribution reproduces its analytic density and pressure moments, and its fusion source matches the ARC
+transport file's to 0.5%. On ARC, with q = 1 kept out of the response, the alpha torque is about 1.5 N m on both
+methods. The difference is in its shape: the orbit average removes the surface method's peak between the q = 3 and q = 4
+surfaces. Two problems surfaced. On the way I found a develop bug that integrated the torque over a region with no plasma
+response; it is fixed in a draft PR. With q = 1 inside the response, the orbit method shows a negative energy band about one
+alpha orbit wide around q = 1, which I have not resolved. Three cards: the lost-fraction check (Q16), when and how to add
+beams (Q17), and how M4 should treat q &lt; 1 (Q18, gating).</p>
+
+<nav class="map"><b>Where the decisions are.</b> Section 1 says what changed and how it was checked; read it first.
+<ol>
+<li value="2"><a href="#drive">The measure and the drive</a>: no card</li>
+<li><a href="#sd">Slowing-down alphas</a>: no card</li>
+<li><a href="#lost">Lost orbits</a> &rarr; <a href="#q16">Q16</a>: the lost-fraction check and physics.md §5 (not gating)</li>
+<li><a href="#arc">The ARC alpha torque</a> &rarr; <a href="#q18">Q18</a>: q &lt; 1 in the M4 equilibria (gates M4)</li>
+<li><a href="#beams">Beams</a> &rarr; <a href="#q17">Q17</a>: the pitch label for λ &gt; 1 and when beams go in (not gating)</li>
+<li><a href="#cost">Cost</a>: your Q15 hybrid, no card</li>
+</ol></nav>
+
+
+<!-- ============================================================ -->
+<h2 id="what">1. What M3 changed, and how it was checked</h2>
+
+<p><b>The object.</b> For each flux surface ψ₀ (ψ the normalized poloidal flux), <code>forb</code> launches guiding-center orbits
+from the point of minimum field strength θ<sub>bmin</sub>. Each orbit is labelled by its pitch λ = μB₀/E (μ the magnetic
+moment, E the energy, B₀ a reference field), its normalized speed u = √(E/T) (T the temperature) and the sign σ of its
+parallel velocity. Its bounce frequency, mean toroidal rate and the bounce harmonics of the perturbed action |δJ<sub>ℓ</sub>|²
+go into the same resonant pitch and energy integrals as the surface method <code>fgar</code>, the existing GPEC calculation
+on each flux surface. Up to M2, each orbit carried the surface weight and the drive of its start surface ψ₀. M3 changes what
+each orbit contributes (Figure {{N_WEIGHT}}).</p>
+
+<figure id="fig-weight" class="d2"><div class="plate">{{D2_WEIGHT}}</div>
+<figcaption>Figure {{N_WEIGHT}}. What one launched orbit contributes in M3. Green: new in M3. ψ̄ = ⟨ψ⟩ is the orbit's
+time-averaged flux, P<sub>φ</sub> the canonical toroidal momentum, f₀ the equilibrium distribution and h = 10⁻³ the
+difference step in ψ.</figcaption></figure>
+
+<p><b>The changes</b> (gpec e1057aca4, e28165e76; physics.md v2 §3–§6):</p>
+<ol>
+<li><b>Measure and drive.</b> Gorelenkov et al. (1999) Eq. 22 writes the phase-space volume as (2π)² Σ<sub>σ</sub> (B/ω<sub>c</sub>)
+dP<sub>φ</sub> dμ dE dt, with ω<sub>c</sub> the cyclotron frequency (read in the PDF). Labelling orbits by their launch flux
+ψ₀ therefore brings in the factor |∂P<sub>φ</sub>/∂ψ₀| at fixed E and μ. The drive is ∂f₀/∂P<sub>φ</sub> at fixed E and μ, with
+f₀ a function of E and ψ̄. In the static torque the two multiply, and |∂P<sub>φ</sub>/∂ψ₀| cancels except for its sign. What
+remains is (∂f₀/∂ψ̄)·g, with g = ∂ψ̄/∂ψ₀. The code gets g by a central difference from two status-only orbits at
+ψ₀ ± h, h = 10⁻³, with the same E, μ, σ and θ₀. A neighbour that changes class, or leaves the domain, is retried at h/8
+and h/64. If one side still fails, the difference is one-sided; if both do, the sample is dropped. The sign comes from the analytic ∂P<sub>φ</sub>/∂ψ₀ at the launch point. Each launch is weighted by
+1/(number of times its orbit crosses the launch section), ½ for trapped and 1 for passing orbits, from the crossings each
+orbit records.</li>
+<li><b>Slowing-down distribution</b> (physics.md §6, isotropic). f₀ ∝ 1/(E<sup>3/2</sup> + E<sub>c</sub><sup>3/2</sup>) below the
+birth energy E<sub>b</sub>, where E<sub>c</sub> is the critical energy at which electron and ion drag are equal. It is a new
+<code>f0type = "slowingdown"</code> on both methods, with analytic energy and ψ derivatives. A new deck key
+<code>alpha = true</code> adds an alpha species (Z = 2, A = 4) to the species sum. Its density follows from the D–T fusion
+source and the slowing-down time (Section 3).</li>
+<li><b>Lost orbits.</b> Orbits that reach the last surface of the response (ψ<sub>lim</sub>) contribute nothing. The lost share
+of each surface's launch phase space goes to HDF5 as <code>KineticForces/forb/lost_fraction</code>.</li>
+<li><b><code>forb</code> is no longer cut near the axis.</b> The surface method is suppressed inside an orbit-width validity
+boundary (physics.md §1); the orbit method has no such limit and now integrates from the first surface.</li>
+</ol>
+
+<p><b>How it was checked.</b> Before writing the code, an independent review agent re-derived the measure, the drive and the
+slowing-down bracket from physics.md and the papers, without my derivation (<code>results/m3_dev/review_m3_algebra.md</code>). It
+confirmed all three. The one error it found, the sign of one slowing-down term, had already been caught and corrected. Unit tests
+check ∂P<sub>φ</sub>/∂ψ₀ against a finite difference (relative 10⁻⁶ at Z = 1 and 4096), check that the drive at ψ̄ = ψ₀
+equals the surface numerator, and check the distribution's moments (Section 3). A new deck-and-API parity case runs the alpha
+species on both methods.</p>
+
+<h3 id="checks">The checks from PLAN.md, at a glance</h3>
+<div class="tbl"><table>
+<tr><th>Check, from PLAN.md M3</th><th>Seen</th><th>Result</th><th>Where</th></tr>
+<tr><td>The measure goes to 1 at zero orbit width, and the M2 check-1 scan still has no floor; ∂f/∂P<sub>φ</sub> reduces to
+    ∂f/∂ψ·∂ψ/∂P<sub>φ</sub> there</td>
+    <td>|r − 1| &lt; 10⁻³ at Z = 4096 (unit test); variant A 2.4×10⁻² → 8.5×10⁻⁶, slope 0.96; variant B 4.7×10⁻² → 6.6×10⁻⁷;
+    no floor after the step fix (gpec 417d4df65)</td>
+    <td><span class="result-pass">pass</span></td><td><a href="#drive">&sect;2</a></td></tr>
+<tr><td>Density and pressure moments of the slowing-down distribution reproduce the analytic values</td>
+    <td>density 1 and pressure (x<sub>b</sub> − I)/L to 10⁻¹⁰ (unit tests); fusion source vs ARC's file: 0.5%</td>
+    <td><span class="result-pass">pass</span></td><td><a href="#sd">&sect;3</a></td></tr>
+<tr><td>The sign of the thermal-ion torque is unchanged from M2</td>
+    <td>Z = 1, potential on: 0.147 + 0.136i N m (M2: 0.119 + 0.077i)</td>
+    <td><span class="result-pass">pass</span></td><td><a href="#drive">&sect;2</a></td></tr>
+<tr><td>The alpha lost fraction versus ψ is monotone</td><td>monotone on every ARC run</td>
+    <td><span class="result-pass">pass</span></td><td><a href="#lost">&sect;4</a></td></tr>
+<tr><td>… and reaches 1 at the edge</td><td>0.4999 at the last surface; the limit for a launch at θ<sub>bmin</sub> is ½</td>
+    <td><span class="result-fail">not met as written</span> (Q16)</td><td><a href="#lost">&sect;4</a></td></tr>
+</table></div>
+
+<p>Not done from the M3 list: the Liu beam form of physics.md §6, your Q7 B. Section 6 explains why and proposes when (Q17).</p>
+
+
+<!-- ============================================================ -->
+<h2 id="drive">2. The measure and the drive</h2>
+
+<p><b>Zero orbit width.</b> Raising the charge Z shrinks the orbit width Δ<sub>b</sub> ∝ 1/Z, so <code>forb</code> must
+approach the <i>replay</i>: the surface values of <code>fgar</code> pushed through the same orbit integrals on the same pitch
+grid. Variant A raises Z only; variant B also divides the E×B frequency ω<sub>E</sub> and the collision frequency ν by Z.
+With the measure and the drive in, both fall with no floor (Figure {{N_ZOW}}): A as Δ<sub>b</sub><sup>0.96</sup>, and B down to
+6.6×10⁻⁷, the M2 value. The new drive brings ψ̄ and g into every orbit; both go to their surface values as 1/Z.</p>
+
+<p><b>A floor I first missed.</b> My journal called the first M3 scan floor-free, with variant B down to 6.7×10⁻⁷. The
+finished files say otherwise: B goes flat at 2×10⁻⁵ from Z = 4096 on. I cannot reproduce the journal's numbers from them.
+Most likely I read the files before every task had finished; that is inference. The rows each task writes last, the
+surfaces nearest ψ<sub>lim</sub>, carry the whole floor: without the last two, B falls to 6.7×10⁻⁷. At those surfaces the
+outward neighbour at ψ₀ + h leaves the response, and 24 samples per surface were dropped at every Z, so the inward one failed
+too. My reading, not checked sample by sample, is that at fixed λ the inward neighbour sees a different field at θ₀, and the
+pitch rows next to the trapped–passing boundary change class there. Retrying a failed side at h/8 and h/64
+(gpec 417d4df65) removes the floor: no sample is dropped from Z = 4096 on. Elsewhere it changes the integrated torque by at
+most 2×10⁻³ (at Z = 16) and by under 10⁻⁵ from Z = 64 on.</p>
+
+<figure id="fig-zow" class="narrow"><div class="plate">{{FIG_ZOW}}</div>
+<figcaption>Figure {{N_ZOW}}. |T<sub>forb</sub>/T<sub>replay</sub> − 1| for the ψ-integrated complex torque against the
+trapped-orbit width at ψ = 0.5, Z = 16 … 65536, DIII-D-like case, 64 pitch nodes, potential off. Light blue: M2 attempt 3.
+Black: M3, with the measure, the drive at ψ̄ and the step fix. Variant A (circles): slope 0.96, 2.4×10⁻² → 8.5×10⁻⁶.
+Variant B (squares, dashed): 4.7×10⁻² → 6.6×10⁻⁷. M3 and M2 differ most at Z = 16, where ψ̄ − ψ₀ and g − 1, first order in
+the width, are largest; from Z = 1024 on they agree within 10%.</figcaption></figure>
+
+<p><b>One-sided differences.</b> The tables now count the samples they keep. In the scan, 2–7% of the g samples are
+one-sided for Z ≤ 1024 and under 0.4% above it; at most 0.1% are dropped. The one-sided ones sit where finite width moves the
+class boundary in energy. The scan is the test that they do no harm.</p>
+
+<p><b>The thermal-ion torque, potential on.</b> At Z = 1 with the electrostatic potential Φ in the orbit (your Q8 default), the
+orbit torque grows from 0.119 + 0.077i N m at M2 to 0.147 + 0.136i N m, with the same sign (Figure {{N_PROFILE}}). The
+edge peaks of <code>fgar</code> stay removed. The step fix moved this total by under 1%. With Φ on, 8.4% of the 795,138 kept
+samples are one-sided and 0.4% are dropped. My inference, untested: with Φ on, a neighbour launched at the same total energy
+has a different kinetic energy, so more orbits near the E×B-modified class boundaries change class. This matters for KR2, not
+for the alpha runs of M4, which have no potential; M5 opens with a test at h = 10⁻⁴.</p>
+
+<figure id="fig-profile"><div class="plate">{{FIG_PROFILE}}</div>
+<figcaption>Figure {{N_PROFILE}}. Real part of the thermal-deuterium torque density, DIII-D-like case, n = 1, Z = 1, Φ on, 64
+pitch × 12 energy nodes. (a) The whole profile; (b) the edge. Grey: <code>fgar</code> (0.536 + 0.169i N m). Light blue:
+<code>forb</code> at M2 (0.119 + 0.077i). Black: <code>forb</code> at M3 (0.147 + 0.136i). The table cost rises from 1.25 h
+to 3.5 h of CPU before the step fix and 6.4 h after it, because every sample takes two or more extra orbits; the second figure
+was measured with alfven fully loaded.</figcaption></figure>
+
+
+<!-- ============================================================ -->
+<h2 id="sd">3. Slowing-down alphas</h2>
+
+<p><b>The distribution.</b> With x = E/E<sub>c</sub> and x<sub>b</sub> = E<sub>b</sub>/E<sub>c</sub>, the code uses
+f̂ = (3√π/4L)/(x<sup>3/2</sup> + 1) for x &lt; x<sub>b</sub>, with L = ln(1 + x<sub>b</sub><sup>3/2</sup>). Its density moment is 1 by
+construction, and its pressure moment is p/(n E<sub>c</sub>) = (x<sub>b</sub> − I)/L, with I = ∫₀<sup>x<sub>b</sub></sup> dx/(1 + x<sup>3/2</sup>) in closed
+form. Quadrature of the code's weight reproduces both to 10⁻¹⁰ (unit tests). The species density is the steady state of the
+fusion source, n<sub>α</sub> = S τ<sub>s</sub> L/3, with S = n<sub>D</sub>n<sub>T</sub>⟨σv⟩ from the Bosch–Hale fit and
+τ<sub>s</sub> the Spitzer slowing-down time on electrons. E<sub>c</sub> = 14.8 A T<sub>e</sub>(Σ<sub>j</sub> n<sub>j</sub>Z<sub>j</sub>²/(n<sub>e</sub>A<sub>j</sub>))<sup>2/3</sup>
+sums over the resolved ions, including the impurity that closes quasi-neutrality. The collision model is the harmonic one, with
+the alpha's pitch-angle scattering rate on the ions at the critical speed as its rate; its x<sup>−3/2</sup> is the fast-ion
+v<sup>−3</sup> law.</p>
+
+<p><b>Against the ARC transport file.</b> The ARC V3A case (your Q5 A; gEQDSK and MITIM <code>input.gacode</code>, Zenodo 19498373)
+carries its own fast-helium density and fusion power. The source S agrees with the file's q<sub>fus</sub>/E<sub>α</sub> to 0.5%
+at every radius. On axis, n<sub>α</sub> and the energy per particle (1.0 MeV) agree within 3% (Figure {{N_MOMENTS}}). Off axis,
+the file's fast helium is 30–70% denser. In the model, n<sub>α</sub>/S falls from 0.27 s on axis to 0.08 s at ψ = 0.96,
+following τ<sub>s</sub> ∝ T<sub>e</sub><sup>3/2</sup>/n<sub>e</sub>. In the file it stays near 0.25 s. That points to radial transport
+or a global slowing-down time in the file's model; I have not found its documentation. This is a comparison with another model,
+not the PLAN check, which is the moment test above.</p>
+
+<figure id="fig-moments"><div class="plate">{{FIG_MOMENTS}}</div>
+<figcaption>Figure {{N_MOMENTS}}. ARC V3A alpha (a) density and (b) pressure against ψ. Black: the local slowing-down model.
+Grey dashed: fast helium in the MITIM <code>input.gacode</code>. The model density is floored at 10⁻⁴ of its peak
+(e28165e76). Without the floor the cubic density spline rang negative at ψ = 0.985, where T<sub>i</sub> falls to 75 eV and
+the reactivity collapses.</figcaption></figure>
+
+
+<!-- ============================================================ -->
+<h2 id="lost">4. Lost orbits</h2>
+
+<p>The lost fraction is the density-weighted share of a surface's launch phase space whose orbits reach ψ<sub>lim</sub>. On ARC it
+is zero inside ψ = 0.8, rises monotonically and ends at 0.4999 on the last surface (Figure {{N_LOST}}). PLAN asks for 1.
+That cannot happen for a launch-section count. An orbit started on the last surface stays inside only if its launch point is
+its outermost point. At θ<sub>bmin</sub> that holds for one of the two signs of v<sub>∥</sub>. For a passing orbit the drift
+shifts one direction outward and the other inward. A trapped orbit is launched on one leg of its banana, and the other leg lies
+outward for one σ and inward for the other. So the limit is ½, and the run reaches it to 10⁻⁴. PLAN's "1" holds for orbits
+whose mean flux ψ̄ is at the edge. That is physics.md §5's wording, L(ψ̄), but a lost orbit never closes and has no ψ̄.</p>
+
+<figure id="fig-lost" class="narrow"><div class="plate">{{FIG_LOST}}</div>
+<figcaption>Figure {{N_LOST}}. Alpha lost fraction against the launch surface, ARC V3A, 64 pitch × 12 energy nodes.
+Dotted: ½.</figcaption></figure>
+
+<div class="card" id="q16" data-q="Q16">
+  <h3>Q16 - The lost-fraction check and physics.md §5 (not gating)</h3>
+  <p><b>Found.</b> The lost fraction is monotone and reaches ½ at ψ<sub>lim</sub>, which is the exact limit for a launch at
+  θ<sub>bmin</sub>. PLAN's "reaches 1 at the edge" cannot be met by this definition. physics.md §5 writes L(ψ̄), which a lost
+  orbit does not have.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q16" value="A"> A - Reword: L(ψ₀) per launch surface, monotone, reaching ½ at ψ<sub>lim</sub></label></dt>
+    <dd>Amends the PLAN check and physics.md §5. No code change; M3's check passes.</dd>
+    <dt><label><input type="radio" name="Q16" value="B"> B - Also report a θ₀-averaged L, launching from several poloidal angles</label></dt>
+    <dd>Closer to "the share of particles on the surface that are lost". It still ends near ½, and the tables cost several times
+    more. Only the diagnostic changes; the torque does not.</dd>
+    <dt><label><input type="radio" name="Q16" value="C"> C - Keep the check as written</label></dt>
+    <dd>M3 cannot pass it. Listed for completeness.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, sure. The ½ is derived and measured. The lost fraction only bounds the edge
+  contribution in KR2, and a per-launch-surface value does that.</div>
+  <textarea name="Q16-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="arc">5. The ARC alpha torque</h2>
+
+<p><b>The case.</b> ARC V3A (B₀ = 11.4 T, I<sub>p</sub> = 12 MA, a = 1.18 m) with D and T at 50/50 of the fuel density, boron
+closing quasi-neutrality and the alpha species, all on the same n = 1 perturbation. The perturbation is the plasma response to
+an applied normal field of 10⁻³ T on m = 2, 3, 4. ARC's own error field is M4's business; this is a test case. The file has no
+rotation, so ω<sub>E</sub> = 0 and Φ plays no part.</p>
+
+<p><b>A bug on the way.</b> ARC has q₀ = 0.89. With the default <code>qlow = 1.02</code>, ForceFreeStates (FFS), the stability
+stage, starts its response at q = 1.02, ψ = 0.343. KineticForces still integrated the torque from ψ = 10⁻⁴, so everything
+inside 0.343 came from extrapolated perturbation data. The first alpha torque, 6306 N m, was nearly all extrapolation. The torque
+quadrature now starts where the response starts, as it already stopped where it ends. The fix went to <code>develop</code> as
+draft PR <a href="https://github.com/OpenFUSIONToolkit/GPEC/pull/661">#661</a>; the harness shows the five kinetic cases
+unchanged. The M2 DIII-D runs were not affected, since their q₀ = 1.20.</p>
+
+<p><b>q = 1 kept out.</b> With the fix and <code>qlow = 1.02</code>, the response and the torque cover ψ = 0.343–0.994
+(Figure {{N_ALPHA}}). The two methods give nearly the same alpha torque: <code>fgar</code> 1.35 + 7.73i N m and
+<code>forb</code> 1.49 + 7.10i N m. The fuel ions give 8.9 and 8.6 N m on <code>fgar</code>. The difference is in the shape. The
+<code>fgar</code> peak at ψ = 0.96, between the q = 3 and q = 4 surfaces, is gone from <code>forb</code>; this is KR2's mechanism
+showing up for alphas. Near the inner edge of the response, <code>forb</code> rises to twice <code>fgar</code>. An alpha
+orbit's width in ψ there is a few hundredths, so orbits launched from the first surfaces reach below 0.343, onto perturbation
+data that is extrapolated again. The first ~0.03 in ψ is not trustworthy.</p>
+
+<p><b>Resolution.</b> I reran half of the surfaces at 128 pitch × 16 energy nodes. The torque on them changes by 2%. The
+energy term rises by 7%, by about the same amount on every surface (5–20%, most at the edge). The 8% gap between the methods'
+energy terms is the same size, so it is not a result yet. The torque difference in shape is well above both changes. M4's
+scans will use 128 × 16 and check one point at 192 × 24.</p>
+
+<figure id="fig-alpha"><div class="plate">{{FIG_ALPHA}}</div>
+<figcaption>Figure {{N_ALPHA}}. ARC V3A alpha torque density, (a) real part (torque) and (b) imaginary part (2n δW<sub>K</sub>,
+δW<sub>K</sub> the kinetic energy), against ψ, n = 1, response from q = 1.02 (ψ = 0.343) outward. Grey: <code>fgar</code>, with its
+near-axis suppression. Black: <code>forb</code>, 64 pitch × 12 energy nodes. Totals: <code>fgar</code> 1.35 + 7.73i,
+<code>forb</code> 1.49 + 7.10i N m.</figcaption></figure>
+
+<p><b>q = 1 inside.</b> With <code>qlow = 0.8</code> the response covers the core, q = 1 at ψ = 0.313 included. All
+free-boundary n = 1 modes are stable, but the fixed-boundary test flags the n = 1 mode as unstable: the internal kink of a
+q₀ &lt; 1 plasma. The largest island half-width grows from 0.017 to 0.106. On <code>fgar</code> the alpha torque is
+5.24 + 20.6i N m, most of it inside q = 1. On <code>forb</code> the real part agrees at 6.8 N m. The energy term, however, turns
+strongly negative in a band about ±0.03 around q = 1 (Figure {{N_Q1}}). Doubling the pitch and energy resolution leaves the band
+in place: −110 against −102 at ψ = 0.289. So the band comes from the response's ψ structure, not from the energy or pitch grids.
+Elsewhere the coarse 32×8 grid was not converged: the total energy term changes sign between 32×8 and 64×12.</p>
+
+<p>I probed the response across q = 1 on a fine grid. The δB/B harmonics jump at q = 1; m = 2, for one, falls 30×. Within
+0.0015 of the surface they overshoot their median 4–10×, which is a cubic spline ringing at a jump. The overshoot is much
+narrower than an alpha orbit. The jump is the ideal response's own: an orbit that straddles q = 1 samples both sides, while
+<code>fgar</code> sees one side at a time. I cannot yet say whether the band is that physics, the ringing, or the near-marginal
+internal kink that sets the size of the jump. For KR1 this is a question of which equilibria to use.</p>
+
+<figure id="fig-q1"><div class="plate">{{FIG_Q1}}</div>
+<figcaption>Figure {{N_Q1}}. ARC V3A alpha torque density with q = 1 (dotted, ψ = 0.313) inside the response, (a) real and (b)
+imaginary part. Grey: <code>fgar</code>. Light blue dashed: <code>forb</code> at 32 pitch × 8 energy nodes. Black:
+<code>forb</code> at 64 × 12. Totals: <code>fgar</code> 5.24 + 20.6i; <code>forb</code> 6.05 − 5.51i (32×8) and
+6.83 + 10.0i (64×12) N m.</figcaption></figure>
+
+<div class="card" id="q18" data-q="Q18">
+  <h3>Q18 - q &lt; 1 in the M4 equilibria (gates M4)</h3>
+  <p><b>Found.</b> ARC V3A has q₀ = 0.89. With q = 1 inside the response, the ideal n = 1 response is large and jumps at q = 1.
+  The fixed-boundary test flags the internal kink, and <code>forb</code> shows an unresolved negative energy band one orbit width
+  around q = 1. With q = 1 kept out, both methods agree on the total and differ in shape, as KR1 expects. ITER and SPARC
+  baseline scenarios also have q₀ near or below 1, so M4's TokaMaker families will meet the same choice.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q18" value="A"> A - Build the M4 families with q₀ &gt; 1 (current profile broadened)</label></dt>
+    <dd>KR1 is a ratio, orbit to surface, against orbit width; it does not need a sawtoothing core. The alphas' core torque stays
+    in. The equilibria are a little less like the published scenarios, and the abstract should say so.</dd>
+    <dt><label><input type="radio" name="Q18" value="B"> B - Keep the published q profiles and start the response at q = 1.02</label></dt>
+    <dd>Faithful equilibria, but the core, where alphas are densest, is cut out of both methods. Inside q = 1.02 the KR1 ratio is
+    not defined, and the cut moves with the field scan.</dd>
+    <dt><label><input type="radio" name="Q18" value="C"> C - Keep q = 1 inside and resolve the band first (an M3 attempt 2)</label></dt>
+    <dd>Probe the orbit average across an ideal jump: a regularized response (<code>regularization_width</code>), a monotone
+    interpolant, and the kink's distance from marginal. That costs one attempt of the two M3 has, and may end at A anyway.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, fairly sure. It keeps KR1 about orbit width and away from an ideal internal kink that
+  neither method is built to treat. The q = 1 band then becomes a follow-on question, and I park it.</div>
+  <textarea name="Q18-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="beams">6. Beams</h2>
+
+<p>Your Q7 B asked that the slowing-down species also take the MARS-K beam form of Liu et al. (2014) Eqs. 6–7, a Gaussian in the
+pitch label ζ about the injection pitch ζ₀, widening as the ions slow down. physics.md §6 defines ζ = σ√(1 − λ), which is
+v<sub>∥</sub>/v where B = B₀. That label is not defined for λ &gt; 1. Those are orbits trapped on the outboard side, where
+B &lt; B₀, and every ARC and DIII-D surface outside the axis has them. A pitch label must be a constant of motion and defined
+for every confined orbit. ζ² = 1 − λB<sub>min</sub>(ψ̄)/B₀ is both: v<sub>∥</sub>/v at the orbit's own field minimum. It
+reduces to Liu's label on the axis. I have not written the beam form: it needs this definition first, and the alpha physics
+had to settle before beams could reuse it.</p>
+
+<div class="card" id="q17" data-q="Q17">
+  <h3>Q17 - The beam pitch label, and when beams go in (not gating)</h3>
+  <p><b>Found.</b> physics.md §6's ζ = σ√(1 − λ) is undefined for outboard-trapped orbits (λ &gt; 1). The beam form is not yet
+  in the code. physics.md §7 still names the method <code>ogar</code> and its HDF5 group <code>ogar/lost_fraction</code>; the
+  code uses <code>forb</code>.</p>
+  <dl>
+    <dt><label><input type="radio" name="Q17" value="A"> A - ζ² = 1 − λB<sub>min</sub>(ψ̄)/B₀; beams in M5, with the DIII-D case</label></dt>
+    <dd>Amends physics.md §6 and the §7 names. Beams arrive where they are used, on DIII-D next to KR2, after KR1 is done. M3
+    closes without them.</dd>
+    <dt><label><input type="radio" name="Q17" value="B"> B - Same label; beams now, as the opening of M4</label></dt>
+    <dd>Keeps Q7 B's schedule. It delays the KR1 scan by about one attempt's work, and nothing in KR1 uses beams.</dd>
+    <dt><label><input type="radio" name="Q17" value="C"> C - Beams as a follow-on PR after the Letter</label></dt>
+    <dd>Reverses Q7 B. The Letter does not need beams; the capability arrives later.</dd>
+  </dl>
+  <div class="rec"><b>Recommendation: A</b>, fairly sure about the label (it is the unique choice that is a constant of motion
+  and continuous across λ = 1 for monotone B along the orbit); the schedule is your call on what M5 should carry.</div>
+  <textarea name="Q17-note" placeholder="Notes, or a different answer"></textarea>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="cost">7. Cost (your Q15 hybrid)</h2>
+
+<p>You chose to do the remaining speed-ups in M3 only if the alpha cost asked for them, and otherwise to revisit them in M7. It
+does not ask. An ARC alpha profile of 39 surfaces at 64 pitch × 12 energy nodes takes 0.91 h of table and 0.54 h of integrals on
+one CPU; each surface takes 1.5–1.9 min of table. At 128 × 16 nodes, which Section 5 asks for, a profile costs 1.7 times more, about 2.5 h. M4 then needs about
+3 machines × 6 field values × 2.5 h ≈ 45 CPU-hours, about 3 hours on 16 CPUs. The thermal-ion table with Φ on has tripled to 3.5 h, because of the neighbour orbits for g, but it is
+needed once per KR2 profile. The speed-ups stay parked for the M7 performance review.</p>
+
+
+<button class="copy" onclick="copyAnswers()">Copy answers</button>
+<pre id="answers" hidden></pre>
+
+<h2>Paper</h2>
+<p><b>Abstract and key results.</b> No change. <b>KR1</b>: Figure {{N_ALPHA}} is the first alpha torque density on an
+ARC-class case; at physical width the two methods agree on the total within about 10% and differ in shape. KR1's claim is about
+the trend with orbit width, which M4 measures. If Q18 is answered A, the methods paragraph states that the equilibria have
+q₀ &gt; 1 by construction. <b>KR3</b>: Figure {{N_ZOW}} replaces the M2 draft; slope 0.96 with the measure and drive in, as Q9a
+asked. <b>KR2</b>: Figure {{N_PROFILE}} is still a preview; with Φ on, 8.4% of the g samples are one-sided, and M5 tests a
+smaller step.</p>
+<p><b>Coherence.</b> The alpha edge result, the surface peak at rational surfaces removed by the orbit average, is the same
+mechanism as KR2's thermal-ion claim. That gives the Letter one story across both results.</p>
+
+<h2>Next</h2>
+<ul>
+<li><b>Waiting for Q18</b> (it gates M4). With A, M4 opens by building the ARC, ITER and SPARC TokaMaker families with q₀ &gt; 1.</li>
+<li>Draft PRs to <code>develop</code>: <a href="https://github.com/OpenFUSIONToolkit/GPEC/pull/660">#660</a> forwards
+<code>nutype</code>, <code>f0type</code> and <code>collisionality_factor</code> to the post-PE torque (your Q6);
+<a href="https://github.com/OpenFUSIONToolkit/GPEC/pull/661">#661</a> starts the torque where the response starts. Both are
+assigned to you, with harness reports, and need a named reviewer. <b>Neither is merged without a human reviewer's approval.</b></li>
+<li>Parked: the q = 1 band (Section 5); <code>forb</code> orbits from the first and last surfaces sample perturbation data beyond
+the response, so the outermost ~0.03 in ψ of each end is unreliable; the 8.4% one-sided g share with Φ on (Section 2).</li>
+</ul>
+<p>Everything here is committed and pushed: gpec <code>feature/ntv-orbit</code> @ {{GPEC_COMMIT}} (report scripts
+<code>docs/workorders/ntv-orbit/reports/m3_*</code>), runs in <code>results/m3_zow/</code>, <code>results/m3_z1phi/</code>,
+<code>results/m3_arc/</code> (<code>run/</code> is the invalid qlow = 1.02 run before the fix, kept; <code>run_fix/</code> and
+<code>run_qlow/</code> are the two in this report), <code>results/m3_dev/</code>; logs in <code>/mnt/scratch/ncl2128/claude-jobs/</code>
+on feynman and alfven.</p>
+</main>
+
+
+<script>
+function copyAnswers() {
+  const date = new Date().toISOString().slice(0, 10);
+  const lines = [`## Answers to M3 attempt 1 (${date})`, ''];
+  document.querySelectorAll('.card').forEach(c => {
+    const q = c.dataset.q;
+    const sel = c.querySelector(`input[name="${q}"]:checked`);
+    const note = c.querySelector(`textarea[name="${q}-note"]`).value.trim();
+    const label = sel ? sel.parentElement.textContent.trim().replace(/\s+/g, ' ') : '(no option chosen)';
+    lines.push(`- **${q}**: ${label}` + (note ? `\n  - ${note}` : ''));
+  });
+  const text = lines.join('\n');
+  const pre = document.getElementById('answers');
+  pre.textContent = text; pre.hidden = false;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});  // the block is shown either way
+}
+</script>
