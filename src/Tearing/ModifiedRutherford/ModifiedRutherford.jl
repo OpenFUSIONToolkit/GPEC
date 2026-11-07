@@ -9,18 +9,21 @@ import FastInterpolations
 using FastInterpolations: cubic_interp, Series, PeriodicBC, DerivOp
 
 import ...Utilities
+import ...ForcingTerms
 import ...Utilities: save_to_hdf5
 using ...Utilities.HDF5Annotations: replace_group!
 using ...Utilities.PhysicalConstants: M_E, M_P, E_CHG, MU_0
 using ...InnerLayer.SLAYER: _slayer_profiles
+using Roots: find_zero, Brent
 
 include("Geometry.jl")
 include("Terms.jl")
 include("Problem.jl")
+include("Callen.jl")
 include("HDF5Output.jl")
 
 export MRESurfaceGeometry, mre_geometry, sauter2002_trapped_fraction, bootstrap_coefficient
 export classical_term, bootstrap_term, curvature_term, polarization_term, reduced_polarization_term, transport_width
-export ModifiedRutherfordProblem, ModifiedRutherfordResult
+export mre_roots, ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem, CallenResult, callen_cubic_roots
 
 end # module ModifiedRutherford

@@ -46,7 +46,7 @@ include("ModifiedRutherford/ModifiedRutherford.jl")
 import .Dispersion as Dispersion
 import .CriticalResonantField as CriticalResonantField
 import .ModifiedRutherford as ModifiedRutherford
-using .ModifiedRutherford: ModifiedRutherfordProblem, ModifiedRutherfordResult
+using .ModifiedRutherford: ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem, CallenResult
 using .Dispersion: SurfaceCoupling, surface_coupling,
     MultiSurfaceCoupling, multi_surface_coupling,
     ScanResult, brute_force_scan,
@@ -63,7 +63,7 @@ include("GGJTearing.jl")
 include("HDF5Output.jl")
 
 export InnerLayer, Dispersion, CriticalResonantField, ModifiedRutherford
-export ModifiedRutherfordProblem, ModifiedRutherfordResult
+export ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem, CallenResult
 export resistive_layer_overlap, layer_overlap_scan, LayerOverlapScan
 export TearingProblem, TearingConfig, TearingResult
 export run_slayer_from_inputs

@@ -44,6 +44,30 @@ using TOML
         @test MR.transport_width(16e-3; kw...) / MR.transport_width(1e-3; kw...) ≈ 2 rtol = 1e-12
     end
 
+    @testset "roots: seed threshold rises through zero, saturation falls through it" begin
+        grid = exp.(range(log(1e-5), log(0.2); length=60))
+        r = MR.mre_roots(w -> (w - 3e-3) * (0.05 - w) / w^2, 1e-5, grid)
+        @test r.w_m ≈ 3e-3 rtol = 1e-10
+        @test r.w_sat ≈ 0.05 rtol = 1e-10
+        @test !r.fully_stabilized && !r.unstable_any_seed
+        @test MR.mre_roots(w -> -1 / w, 1e-5, grid).fully_stabilized
+        s = MR.mre_roots(w -> (0.05 - w) / w, 1e-5, grid)
+        @test s.unstable_any_seed && isnan(s.w_m)
+        @test s.w_sat ≈ 0.05 rtol = 1e-10
+    end
+
+    @testset "Callen cubic: both positive roots solve it and merge at the critical vacuum width" begin
+        a, c = -40.0, -(1.5e-2)^2
+        x_min, x_sat = MR.callen_cubic_roots(a, 2.0, c)
+        @test 0 < x_min < x_sat
+        @test abs(a * x_min^3 + 2.0 * x_min + c) < 1e-12 && abs(a * x_sat^3 + 2.0 * x_sat + c) < 1e-12
+        # The double root sits where 4p³ + 27q² = 0, i.e. b = 3|a| (c/2a)^(2/3).
+        b_crit = 3 * abs(a) * (c / (2a))^(2 / 3)
+        @test all(isnan, MR.callen_cubic_roots(a, 0.99 * b_crit, c))
+        lo, hi = MR.callen_cubic_roots(a, 1.0001 * b_crit, c)
+        @test hi / lo < 1.05
+    end
+
     @testset "surface geometry matches Fortran RDCON on the DIII-D-like example" begin
         # Fortran values at q = 2 (ψ_N = 0.5183), interpolated from rdcon_output_n1.nc with MRE_flag = t and Z_eff = 1.52.
         dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_gal_resistive_example")

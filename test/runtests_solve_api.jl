@@ -562,7 +562,7 @@ using HDF5
 
         @testset "modified Rutherford under [Tearing.ModifiedRutherford]" begin
             # The MRE alone: a [Tearing] holding only the sub-table runs no layer solve, and its deck replays.
-            settings = (; polarization=true, omega_factor=0.5, nw=40)
+            settings = (; polarization=true, omega_model=:exb, omega_factor=0.5, delta_prime_factor=0.9, D_nc_factor=1.1, rho_theta_factor=1.2, nw=40)
             mktempdir() do dir
                 psi = collect(range(0.0, 1.0; length=101))
                 h5open(joinpath(dir, "kinetic.h5"), "w") do f
@@ -575,19 +575,44 @@ using HDF5
                 api = solve(ModifiedRutherfordProblem(ric; settings...))
                 deck_dir = _stage_deck(dir; eq_overrides=Dict{String,Any}("kinetic_file" => "kinetic.h5"),
                     ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
-                    extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}(String(k) => v for (k, v) in pairs(settings)))))
+                    extra_sections=Dict{String,Any}(
+                        "Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                            Dict{String,Any}(String(k) => (v isa Symbol ? String(v) : v) for (k, v) in pairs(settings)))
+                    ))
                 reference = GPEC.main([deck_dir])
 
                 @test reference.tearing === nothing
                 @test api.F ≈ reference.modified_rutherford.F rtol = 1e-10
                 @test api.polarization ≈ reference.modified_rutherford.polarization rtol = 1e-10
+                @test isequal(api.w_m, reference.modified_rutherford.w_m) && isequal(api.w_sat, reference.modified_rutherford.w_sat)
+                @test api.fully_stabilized == reference.modified_rutherford.fully_stabilized
                 @test all(<(0), api.D_R) && all(isfinite, api.F)
                 h5open(joinpath(dir, "gpec.h5")) do f
                     @test read(f["Tearing/ModifiedRutherford/Terms/F"]) ≈ api.F rtol = 1e-12
                     recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))
                     @test recorded["Tearing"] == Dict{String,Any}("ModifiedRutherford" => recorded["Tearing"]["ModifiedRutherford"])
                     @test recorded["Tearing"]["ModifiedRutherford"]["omega_factor"] == 0.5
+                    @test recorded["Tearing"]["ModifiedRutherford"]["omega_model"] == "exb"
+                    @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/w_m"]), api.w_m)
                 end
+            end
+
+            # With [Tearing], main hands the linear solve to the MRE as its gate, as the API keyword does.
+            sl_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_SLAYER_example")
+            mktempdir() do dir
+                deck = TOML.parsefile(joinpath(sl_dir, "gpec.toml"))
+                deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
+                deck["Tearing"]["ModifiedRutherford"] = Dict{String,Any}("nw" => 40)
+                for key in ("eq_filename", "kinetic_file")
+                    deck["Equilibrium"][key] = abspath(joinpath(sl_dir, deck["Equilibrium"][key]))
+                end
+                open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
+                reference = GPEC.main([dir])
+                api = solve(ModifiedRutherfordProblem(reference.ffs; tearing=reference.tearing, nw=40))
+                @test reference.modified_rutherford.problem.tearing === reference.tearing
+                @test isequal(api.gamma, reference.modified_rutherford.gamma) && all(isfinite, api.gamma)
+                @test api.linear_unstable == (api.gamma .> 0)
+                @test isequal(api.w_m, reference.modified_rutherford.w_m)
             end
 
             # A forward solve has no Δ′, so the deck stops at parse time.

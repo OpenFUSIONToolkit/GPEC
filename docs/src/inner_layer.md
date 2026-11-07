@@ -104,6 +104,8 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/Scan/Surface_<k>/` | the scanned Δ(Q) with `store_scan = true` |
 | `Tearing/CriticalResonantField/br_crit`, `br_crit_tesla`, `Q_peak`, `Q0` | the penetration threshold as ``b_r/B_\phi`` and in tesla, the Q of the balance maximum and the natural rotation |
 | `Tearing/ModifiedRutherford/w`, `Terms/F`, `Terms/<term>`, `Terms/w_d`, `PerSurface/` | the modified Rutherford width grid, ``F(w)`` and each switched term per surface, the transport width, and the surface inputs |
+| `Tearing/ModifiedRutherford/w_m_star`, `PerSurface/w_m`, `PerSurface/w_sat`, `PerSurface/<flag>` | the seed threshold and saturated widths per surface, their minimum over the surfaces, and the validity and gate flags (0/1) |
+| `Tearing/Callen/` | Callen's critical vacuum island width, critical resonant field and cubic roots per resonant row |
 
 ## Modified Rutherford diagnostics
 
@@ -114,6 +116,16 @@ F(w) = \Delta'(w) + \Delta_\mathrm{nc}(w) + \Delta_\mathrm{GGJ}(w) + \Delta_\mat
 ```
 
 the classical drive with its finite-pressure power law, the bootstrap drive with the transport threshold ``w_d``, the Glasser–Greene–Johnson curvature term and the ion-polarization term (Benjamin et al. 2026, Eqs. 7, 10–14 and C.1). Each term has a switch and a coefficient; the polarization term is off by default. The surface geometry follows the Fortran RDCON `mercier.f` averages, and the densities, temperatures, ``\omega_E``, ``Z_\mathrm{eff}`` and ``\chi_\perp`` come from the equilibrium's kinetic profiles. A `[Tearing]` section holding only this sub-table runs no layer solve. In a script, `solve(ModifiedRutherfordProblem(ffs; polarization=true))` returns the same [`ModifiedRutherfordResult`](@ref Tearing.ModifiedRutherford.ModifiedRutherfordResult).
+
+The roots of ``F`` are bracketed on the grid and refined by Brent's method: the seed threshold ``w_m`` is the smallest crossing from ``F<0`` to ``F>0`` and the saturated width ``w_\mathrm{sat}`` the largest from ``F>0`` to ``F<0``.
+When the deck also has a `[Tearing]` layer solve, its uncoupled growth rates gate the roots (a surface with ``\gamma>0`` is linearly unstable and gets none) and its resistive layer width sets the lower end of the search; in a script, pass it as `ModifiedRutherfordProblem(ffs; tearing)`.
+Surfaces with ``D_R>0`` are excluded as resistive-interchange unstable, and roots below the ion banana width or with ``|\Delta'|w\ge1`` are flagged.
+The island frequency in ``\Delta_\mathrm{pol}`` is ``\omega_{*e}(1+\eta_e/4)`` (Wilson 1996) by default, or the lab-frame ``n\omega_E`` with `omega_model = "exb"`.
+
+`[Tearing.Callen]` evaluates Callen's reduced equation for RMP-driven islands on a single-``n`` perturbed equilibrium driven by coils, in the form of Fortran GPEC: the critical vacuum island half-width, the critical vacuum resonant field and the two positive roots of the cubic ``\Delta_c x^3 + \Delta'_\mathrm{RMP}(2h_v)^2x - w_\mathrm{pol}^2 = 0``.
+The vacuum resonant field is the coils' resonant harmonic on the rational surface over its area.
+The roots are the exact roots of the cubic; Fortran GPEC 1.6.0 reports half of each, from a trigonometric solution missing its factor 2.
+In a script, `solve(CallenProblem(pe))` returns the same [`CallenResult`](@ref Tearing.ModifiedRutherford.CallenResult).
 
 ## Numerical notes
 

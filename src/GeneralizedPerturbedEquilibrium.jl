@@ -75,7 +75,8 @@ include("Rerun.jl")
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
-using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl, ModifiedRutherfordProblem, ModifiedRutherfordResult
+using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl, ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem,
+    CallenResult
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
@@ -158,7 +159,7 @@ function main_from_inputs(
     runtimes = Vector{Pair{String,Float64}}()
     deck = parse_deck(inputs, path)
     (; output_file, verbose) = deck.run
-    local_stability = ffs = match = resp = pe = kinetic = error_fields = tearing = modified_rutherford = nothing
+    local_stability = ffs = match = resp = pe = kinetic = error_fields = tearing = modified_rutherford = callen = nothing
 
     equil = _timed_stage(runtimes, "equilibrium", "Equilibrium") do
         Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
@@ -227,9 +228,17 @@ function main_from_inputs(
     # After the tearing stage, which replaces the whole Tearing/ group.
     if deck.modified_rutherford !== nothing
         modified_rutherford = _timed_stage(runtimes, "modified_rutherford", "Modified Rutherford") do
-            solve(ModifiedRutherfordProblem(ffs; deck.modified_rutherford...))
+            # With [Tearing], its linear solve gates the roots on the same Δ′.
+            solve(ModifiedRutherfordProblem(ffs; tearing, deck.modified_rutherford...))
         end
         save_to_hdf5(output_file, modified_rutherford)
+    end
+
+    if deck.callen
+        callen = _timed_stage(runtimes, "callen", "Callen threshold") do
+            solve(CallenProblem(pe))
+        end
+        save_to_hdf5(output_file, callen)
     end
 
     total_dt = time() - total_start
@@ -237,7 +246,7 @@ function main_from_inputs(
     ffs === nothing || _write_runtimes!(output_file, runtimes)
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
 
-    return (; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford)
+    return (; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford, callen)
 end
 
 """
@@ -313,7 +322,7 @@ export main, write_imas
 export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fields
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
-export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel, ModifiedRutherfordProblem, ModifiedRutherfordResult
+export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel, ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem, CallenResult
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
 

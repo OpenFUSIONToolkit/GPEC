@@ -16,28 +16,42 @@ the Mercier, resistive-interchange and Pfirsch-Schlüter indices D_I, D_R = E + 
 `ResistGeometry`, and the plasma (densities, temperatures, Z_eff, χ⊥,e, E×B rotation, ion species) is the
 equilibrium's kinetic data, as every tearing layer reads it. A deck states it as `[Tearing.ModifiedRutherford]`.
 
+The roots of F are refined between grid points from `w_lo = max(δ_r, w_min)`: the seed threshold `w_m` is the
+smallest crossing from F < 0 to F > 0 and the saturated width `w_sat` the largest from F > 0 to F < 0. Surfaces that
+are resistive-interchange unstable (D_R > 0) or linearly tearing unstable (γ > 0 in `tearing`) get no roots.
+
 ## Fields
 
   - `ffs` - Outer solution with a Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`), single n.
+  - `tearing` - Linear tearing solve on the same Δ′ (the gate and the layer width δ_r), or `nothing`; set by the deck
+    when `[Tearing]` is present.
   - `classical`, `bootstrap`, `curvature`, `polarization` - Term switches s_Δ, s_nc, s_GGJ, s_pol.
   - `delta_prime_model` - `:mercier_power` (Benjamin Eq. 10) or `:constant` (Δ′(w) = Δ′_mn).
+  - `delta_prime_factor`, `D_nc_factor`, `rho_theta_factor` - Multipliers on Δ′_mn, D_nc and the poloidal ion Larmor
+    radius ρ_θi (which also sets w_ib), for scans.
   - `k1` - Bootstrap and curvature coefficient k₁.
   - `c_wd` - Prefactor of the transport threshold width w_d.
   - `chi_perp_factor` - Multiplier on χ⊥,e (the kinetic `chi_e` profile, else its `chi_e_default`).
   - `pol_model` - `:full` (Benjamin Eq. C.1) or `:reduced` (−c_pol w_pol²/w³, w_pol = C_pol w_ib).
   - `c_pol`, `C_pol` - Polarization coefficients.
   - `pol_sign` - ±1, multiplies the polarization term.
-  - `omega_factor` - Multiplier on the island frequency ω = n Ω_E from the kinetic `omega_E`; 0 is a stalled island.
-  - `omega_ratio` - ω/ω_*i on every surface, replacing the one from `omega_E`; `nothing` (default) uses `omega_E`.
+  - `omega_model` - Island frequency ω in the E_r = 0 frame: `:electron_diamagnetic`, ω = ω_*e(1 + η_e/4) (Wilson
+    1996), or `:exb`, the lab-frame ω = n Ω_E from the kinetic `omega_E`.
+  - `omega_factor` - Multiplier on the ω of `omega_model`; 0 is a stalled island.
+  - `omega_ratio` - ω/ω_*i on every surface, replacing `omega_model`; `nothing` (default) uses the model.
   - `w_min`, `w_max`, `nw` - Log-spaced width grid in ψ_N.
 """
-@kwdef struct ModifiedRutherfordProblem{R}
+@kwdef struct ModifiedRutherfordProblem{R,T}
     ffs::R
+    tearing::T = nothing
     classical::Bool = true
     bootstrap::Bool = true
     curvature::Bool = true
     polarization::Bool = false
     delta_prime_model::Symbol = :mercier_power
+    delta_prime_factor::Float64 = 1.0
+    D_nc_factor::Float64 = 1.0
+    rho_theta_factor::Float64 = 1.0
     k1::Float64 = 1.7
     c_wd::Float64 = 1.0
     chi_perp_factor::Float64 = 1.0
@@ -45,6 +59,7 @@ equilibrium's kinetic data, as every tearing layer reads it. A deck states it as
     c_pol::Float64 = 1.0
     C_pol::Float64 = 1.9
     pol_sign::Float64 = 1.0
+    omega_model::Symbol = :electron_diamagnetic
     omega_factor::Float64 = 1.0
     omega_ratio::Union{Nothing,Float64} = nothing
     w_min::Float64 = 1e-5
@@ -52,7 +67,7 @@ equilibrium's kinetic data, as every tearing layer reads it. A deck states it as
     nw::Int = 200
 end
 
-ModifiedRutherfordProblem(ffs; kwargs...) = ModifiedRutherfordProblem{typeof(ffs)}(; ffs=ffs, kwargs...)
+ModifiedRutherfordProblem(ffs; kwargs...) = ModifiedRutherfordProblem(; ffs=ffs, kwargs...)
 
 """
     ModifiedRutherfordResult
@@ -64,12 +79,23 @@ Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to 
   - `problem` - The producing problem.
   - `w` - Width grid in ψ_N.
   - `psi`, `q`, `m`, `n` - Surface identity.
-  - `delta_prime`, `D_I`, `D_R`, `H` - Outer-region and layer indices.
+  - `delta_prime`, `delta_prime_imag`, `D_I`, `D_R`, `H` - Outer-region and layer indices (Δ′ after `delta_prime_factor`).
   - `D_nc`, `f_trap`, `mu_ratio`, `zeff` - Bootstrap coefficient, Sauter 2002 trapped fraction, μ_e/(ν_e + μ_e), Z_eff.
   - `Wc_prefac`, `chi_perp`, `v_te`, `R0` - Inputs of w_d.
-  - `omega_star_i`, `omega_hat`, `omega_hat_pi` - Ion diamagnetic frequency [rad/s], ω/ω_*i and ω_*pi/ω_*i.
+  - `omega_star_i`, `omega_star_e`, `omega_hat`, `omega_hat_pi` - Ion and electron diamagnetic frequencies [rad/s] from
+    the density gradients, ω/ω_*i and ω_*pi/ω_*i.
   - `beta_p`, `rho_theta`, `w_ib`, `eps` - Polarization inputs: poloidal ion beta, poloidal ion Larmor radius [m],
     banana width in ψ_N, inverse aspect ratio.
+  - `gamma`, `delta_r` - Linear growth rate [1/s] and resistive layer width in ψ_N from `tearing` (`NaN` without it).
+  - `w_lo` - Lower end of the root search.
+  - `w_m`, `w_sat` - Seed threshold and saturated full widths in ψ_N; `NaN` when absent or excluded.
+  - `w_m_star` - Smallest `w_m` over the surfaces.
+  - `fully_stabilized` - F < 0 on the whole search range.
+  - `unstable_any_seed` - F > 0 at `w_lo`.
+  - `interchange_unstable`, `linear_unstable` - Excluded by D_R > 0, or by γ > 0.
+  - `below_w_ib` - `w_m` below the ion banana width, where the polarization ordering fails.
+  - `large_delta_prime_w` - |Δ′| w ≥ 1 at `w_m` or `w_sat`.
+  - `complex_delta_prime` - |Im Δ′_mn| > 10⁻³ |Re Δ′_mn|.
   - `F`, `classical`, `bootstrap`, `curvature`, `polarization`, `w_d` - F(w), each term, and w_d(w).
 """
 struct ModifiedRutherfordResult{P}
@@ -80,6 +106,7 @@ struct ModifiedRutherfordResult{P}
     m::Vector{Int}
     n::Vector{Int}
     delta_prime::Vector{Float64}
+    delta_prime_imag::Vector{Float64}
     D_I::Vector{Float64}
     D_R::Vector{Float64}
     H::Vector{Float64}
@@ -92,12 +119,26 @@ struct ModifiedRutherfordResult{P}
     v_te::Vector{Float64}
     R0::Vector{Float64}
     omega_star_i::Vector{Float64}
+    omega_star_e::Vector{Float64}
     omega_hat::Vector{Float64}
     omega_hat_pi::Vector{Float64}
     beta_p::Vector{Float64}
     rho_theta::Vector{Float64}
     w_ib::Vector{Float64}
     eps::Vector{Float64}
+    gamma::Vector{Float64}
+    delta_r::Vector{Float64}
+    w_lo::Vector{Float64}
+    w_m::Vector{Float64}
+    w_sat::Vector{Float64}
+    w_m_star::Float64
+    fully_stabilized::Vector{Bool}
+    unstable_any_seed::Vector{Bool}
+    interchange_unstable::Vector{Bool}
+    linear_unstable::Vector{Bool}
+    below_w_ib::Vector{Bool}
+    large_delta_prime_w::Vector{Bool}
+    complex_delta_prime::Vector{Bool}
     F::Matrix{Float64}
     classical::Matrix{Float64}
     bootstrap::Matrix{Float64}
@@ -116,9 +157,11 @@ function validate(prob::ModifiedRutherfordProblem)
     ffs.equil.kinetic === nothing && throw(ArgumentError("ModifiedRutherfordProblem needs kinetic profiles; set kinetic_file in [Equilibrium]"))
     prob.delta_prime_model in (:mercier_power, :constant) || throw(ArgumentError("delta_prime_model must be :mercier_power or :constant"))
     prob.pol_model in (:full, :reduced) || throw(ArgumentError("pol_model must be :full or :reduced"))
+    prob.omega_model in (:electron_diamagnetic, :exb) || throw(ArgumentError("omega_model must be :electron_diamagnetic or :exb"))
     abs(prob.pol_sign) == 1 || throw(ArgumentError("pol_sign must be +1 or -1"))
     0 < prob.w_min < prob.w_max && prob.nw >= 2 || throw(ArgumentError("the width grid needs 0 < w_min < w_max and nw ≥ 2"))
-    prob.k1 > 0 && prob.c_wd > 0 && prob.chi_perp_factor > 0 || throw(ArgumentError("k1, c_wd and chi_perp_factor must be positive"))
+    prob.k1 > 0 && prob.c_wd > 0 && prob.chi_perp_factor > 0 && prob.rho_theta_factor > 0 ||
+        throw(ArgumentError("k1, c_wd, chi_perp_factor and rho_theta_factor must be positive"))
     return nothing
 end
 
@@ -127,6 +170,30 @@ function _profile_at(psi_xs, values, psi)
     itp = cubic_interp(psi_xs, collect(Float64, values))
     return Float64(itp(psi)), Float64(itp(psi; deriv=DerivOp(1)))
 end
+
+
+"""
+    mre_roots(F, w_lo, w_grid) -> (; w_m, w_sat, fully_stabilized, unstable_any_seed)
+
+Roots of `F` on `[w_lo, maximum(w_grid)]`, bracketed on `w_lo` and the grid points above it and refined by Brent's
+method: `w_m` is the smallest crossing from negative to positive, `w_sat` the largest from positive to negative
+(`NaN` when absent).
+"""
+function mre_roots(F, w_lo::Real, w_grid::AbstractVector)
+    nodes = vcat(Float64(w_lo), filter(>(w_lo), w_grid))
+    vals = F.(nodes)
+    w_m, w_sat = NaN, NaN
+    for j in 1:(length(nodes)-1)
+        a, b = vals[j], vals[j+1]
+        isfinite(a) && isfinite(b) && a != 0 && (a * b < 0 || b == 0) || continue
+        root = find_zero(F, (nodes[j], nodes[j+1]), Brent())
+        a < 0 ? (isnan(w_m) && (w_m = root)) : (w_sat = root)
+    end
+    return (; w_m, w_sat, fully_stabilized=all(<(0), vals), unstable_any_seed=vals[1] > 0)
+end
+
+# The linear tearing row at ψ in `tearing`, or `nothing`.
+_tearing_row(tearing, psi) = findfirst(p -> isapprox(p, psi; atol=1e-8), tearing.rational_psi)
 
 function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     validate(prob)
@@ -146,11 +213,17 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     species = data.ion_species
     m_i = sum(s.fraction * s.m for s in species) / sum(s.fraction for s in species) * M_P
     z_i = Float64(first(species).z)
+    gate = prob.tearing
+    chi_gate = gate === nothing || !hasproperty(gate.model, :chi_perp_Dc) ? nothing : gate.model.chi_perp_Dc
 
     vec0() = zeros(ns)
-    out = (; psi=vec0(), q=vec0(), m=zeros(Int, ns), n=zeros(Int, ns), delta_prime=vec0(), D_I=vec0(), D_R=vec0(), H=vec0(),
-        D_nc=vec0(), f_trap=vec0(), mu_ratio=vec0(), zeff=vec0(), Wc_prefac=vec0(), chi_perp=vec0(), v_te=vec0(), R0=vec0(),
-        omega_star_i=vec0(), omega_hat=vec0(), omega_hat_pi=vec0(), beta_p=vec0(), rho_theta=vec0(), w_ib=vec0(), eps=vec0())
+    flag0() = falses(ns)
+    out = (; psi=vec0(), q=vec0(), m=zeros(Int, ns), n=zeros(Int, ns), delta_prime=vec0(), delta_prime_imag=vec0(), D_I=vec0(), D_R=vec0(),
+        H=vec0(), D_nc=vec0(), f_trap=vec0(), mu_ratio=vec0(), zeff=vec0(), Wc_prefac=vec0(), chi_perp=vec0(), v_te=vec0(), R0=vec0(),
+        omega_star_i=vec0(), omega_star_e=vec0(), omega_hat=vec0(), omega_hat_pi=vec0(), beta_p=vec0(), rho_theta=vec0(), w_ib=vec0(),
+        eps=vec0(), gamma=vec0(), delta_r=vec0(), w_lo=vec0(), w_m=vec0(), w_sat=vec0())
+    flags = (; fully_stabilized=flag0(), unstable_any_seed=flag0(), interchange_unstable=flag0(), linear_unstable=flag0(),
+        below_w_ib=flag0(), large_delta_prime_w=flag0(), complex_delta_prime=flag0())
     mats = Dict(k => zeros(ns, prob.nw) for k in (:F, :classical, :bootstrap, :curvature, :polarization, :w_d))
 
     for (k, s) in enumerate(surfaces)
@@ -164,30 +237,37 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         D_I < 0 || @warn "ModifiedRutherfordProblem: D_I = $D_I ≥ 0 at the $m/$n surface; its terms are NaN"
 
         # Plasma at the surface; the ion density falls back to n_e where the data have no n_i.
-        n_e = Float64(loaded.profiles.n_e(psi))
-        T_e = Float64(loaded.profiles.T_e(psi))
+        n_e, dn_e = Float64(loaded.profiles.n_e(psi)), Float64(loaded.profiles.n_e(psi; deriv=DerivOp(1)))
+        T_e, dT_e = Float64(loaded.profiles.T_e(psi)), Float64(loaded.profiles.T_e(psi; deriv=DerivOp(1)))
         T_i, dT_i = Float64(loaded.profiles.T_i(psi)), Float64(loaded.profiles.T_i(psi; deriv=DerivOp(1)))
-        n_i, dn_i = usable(data.n_i) ? _profile_at(psi_xs, data.n_i, psi) : (n_e, Float64(loaded.profiles.n_e(psi; deriv=DerivOp(1))))
+        n_i, dn_i = usable(data.n_i) ? _profile_at(psi_xs, data.n_i, psi) : (n_e, dn_e)
         zeff = loaded.zeff === nothing ? data.zeff_default : Float64(loaded.zeff(psi))
         chi_perp = prob.chi_perp_factor * (usable(data.chi_e) ? first(_profile_at(psi_xs, data.chi_e, psi)) : data.chi_e_default)
+        chi_gate === nothing || isapprox(chi_gate, chi_perp; rtol=1e-6) ||
+            @warn "ModifiedRutherfordProblem: the gate's chi_perp_Dc = $chi_gate differs from the w_d χ⊥ = $chi_perp at the $m/$n surface"
 
         D_nc, mu_ratio = bootstrap_coefficient(g, zeff)
+        D_nc *= prob.D_nc_factor
 
         # Polarization inputs (Benjamin App. C); widths in metres map to ψ_N by w/(2ψ_s) ↔ ρ/r_s.
         v_te = sqrt(2 * E_CHG * T_e / M_E)
         v_ti = sqrt(2 * E_CHG * T_i / m_i)
-        rho_theta = m_i * v_ti / (g.avg_bpol * E_CHG)
+        rho_theta = prob.rho_theta_factor * m_i * v_ti / (g.avg_bpol * E_CHG)
         w_ib = sqrt(g.eps) * rho_theta * 2 * psi / g.r_minor
         beta_p = 2 * MU_0 * n_i * E_CHG * T_i / g.avg_bpolsq
         gradient_ratio = (dn_i / n_i) / (g.q1 / g.q)
-        # Ion diamagnetic frequency from the density gradient, in SLAYER's sign convention; ω_*pi adds the temperature gradient.
+        # Diamagnetic frequencies from the density gradients, in SLAYER's sign convention (charge −1 for electrons).
         omega_star_i = -n * T_i * (dn_i / n_i) / (z_i * g.psio)
+        omega_star_e = n * T_e * (dn_e / n_e) / g.psio
         omega_hat_pi = 1 + (dT_i / T_i) / (dn_i / n_i)
-        omega = prob.omega_factor * n * (loaded.has_omega_E ? Float64(loaded.profiles.omega_E(psi)) : 0.0)
-        omega_hat = something(prob.omega_ratio, omega / omega_star_i)
+        omega_model =
+            prob.omega_model === :electron_diamagnetic ? omega_star_e * (1 + 0.25 * (dT_e / T_e) / (dn_e / n_e)) :
+            n * (loaded.has_omega_E ? Float64(loaded.profiles.omega_E(psi)) : 0.0)
+        omega_hat = something(prob.omega_ratio, prob.omega_factor * omega_model / omega_star_i)
 
-        dp_mn = real(ffs.delta_prime.matrix[k, k])
-        for (j, wj) in enumerate(w)
+        dp_complex = ffs.delta_prime.matrix[k, k]
+        dp_mn = prob.delta_prime_factor * real(dp_complex)
+        function terms(wj)
             wd = transport_width(wj; prob.c_wd, chi_perp, v_te, R0=g.R_major, g.q, g.q1, n, m, g.Wc_prefac)
             cl = D_I < 0 ? classical_term(dp_mn, D_I, wj; model=prob.delta_prime_model) : NaN
             bs = bootstrap_term(D_nc, wd, wj; prob.k1)
@@ -199,17 +279,43 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
                         gradient_ratio, omega_hat, omega_hat_pi, w_ib) :
                     reduced_polarization_term(wj; prob.c_pol, prob.C_pol, w_ib)
                 )
-            mats[:w_d][k, j] = wd
-            mats[:classical][k, j], mats[:bootstrap][k, j], mats[:curvature][k, j], mats[:polarization][k, j] = cl, bs, cv, pl
-            mats[:F][k, j] = prob.classical * cl + prob.bootstrap * bs + prob.curvature * cv + prob.polarization * pl
+            F = prob.classical * cl + prob.bootstrap * bs + prob.curvature * cv + prob.polarization * pl
+            return (; F, cl, bs, cv, pl, wd)
         end
-        for (key, val) in pairs((; psi, q=s.q, m, n, delta_prime=dp_mn, D_I, D_R, H=rg.H, D_nc, f_trap=g.f_trap, mu_ratio, zeff,
-            g.Wc_prefac, chi_perp, v_te, R0=g.R_major, omega_star_i, omega_hat, omega_hat_pi, beta_p, rho_theta, w_ib, g.eps))
+        for (j, wj) in enumerate(w)
+            t = terms(wj)
+            mats[:F][k, j], mats[:w_d][k, j] = t.F, t.wd
+            mats[:classical][k, j], mats[:bootstrap][k, j], mats[:curvature][k, j], mats[:polarization][k, j] = t.cl, t.bs, t.cv, t.pl
+        end
+
+        # Gates: the linear tearing growth rate and resistive layer width from `tearing`, and resistive interchange.
+        row = gate === nothing ? nothing : _tearing_row(gate, psi)
+        gamma = row === nothing ? NaN : gate.gamma[row]
+        delta_r = row === nothing || isempty(gate.layer_widths) ? NaN : 2 * psi * gate.layer_widths[row].delta_s_m / g.r_minor
+        w_lo = isnan(delta_r) ? prob.w_min : max(delta_r, prob.w_min)
+        flags.interchange_unstable[k] = D_R > 0
+        flags.linear_unstable[k] = gamma > 0
+        flags.complex_delta_prime[k] = abs(imag(dp_complex)) > 1e-3 * abs(real(dp_complex))
+        r = mre_roots(wj -> terms(wj).F, w_lo, w)
+        excluded = flags.interchange_unstable[k] || flags.linear_unstable[k] || D_I >= 0
+        w_m, w_sat = excluded ? (NaN, NaN) : (r.w_m, r.w_sat)
+        flags.fully_stabilized[k], flags.unstable_any_seed[k] = !excluded && r.fully_stabilized, !excluded && r.unstable_any_seed
+        flags.below_w_ib[k] = w_m < w_ib
+        flags.large_delta_prime_w[k] = abs(dp_mn) * w_m >= 1 || abs(dp_mn) * w_sat >= 1
+
+        for (key, val) in pairs((; psi, q=s.q, m, n, delta_prime=dp_mn, delta_prime_imag=imag(dp_complex), D_I, D_R, H=rg.H, D_nc,
+            f_trap=g.f_trap, mu_ratio, zeff, g.Wc_prefac, chi_perp, v_te, R0=g.R_major, omega_star_i, omega_star_e, omega_hat, omega_hat_pi,
+            beta_p, rho_theta, w_ib, g.eps, gamma, delta_r, w_lo, w_m, w_sat))
             getfield(out, key)[k] = val
         end
     end
-    return ModifiedRutherfordResult(prob, collect(w), out.psi, out.q, out.m, out.n, out.delta_prime, out.D_I, out.D_R, out.H,
-        out.D_nc, out.f_trap, out.mu_ratio, out.zeff, out.Wc_prefac, out.chi_perp, out.v_te, out.R0, out.omega_star_i,
-        out.omega_hat, out.omega_hat_pi, out.beta_p, out.rho_theta, out.w_ib, out.eps,
+    valid = filter(!isnan, out.w_m)
+    w_m_star = isempty(valid) ? NaN : minimum(valid)
+    return ModifiedRutherfordResult(prob, collect(w), out.psi, out.q, out.m, out.n, out.delta_prime, out.delta_prime_imag, out.D_I, out.D_R,
+        out.H, out.D_nc, out.f_trap, out.mu_ratio, out.zeff, out.Wc_prefac, out.chi_perp, out.v_te, out.R0, out.omega_star_i,
+        out.omega_star_e, out.omega_hat, out.omega_hat_pi, out.beta_p, out.rho_theta, out.w_ib, out.eps, out.gamma, out.delta_r, out.w_lo,
+        out.w_m, out.w_sat, w_m_star, Vector{Bool}(flags.fully_stabilized), Vector{Bool}(flags.unstable_any_seed),
+        Vector{Bool}(flags.interchange_unstable), Vector{Bool}(flags.linear_unstable), Vector{Bool}(flags.below_w_ib),
+        Vector{Bool}(flags.large_delta_prime_w), Vector{Bool}(flags.complex_delta_prime),
         mats[:F], mats[:classical], mats[:bootstrap], mats[:curvature], mats[:polarization], mats[:w_d])
 end
