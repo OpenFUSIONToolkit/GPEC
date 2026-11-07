@@ -9,6 +9,7 @@ module CoilForcing
 
 import ...Utilities.FourierTransforms: FourierTransform, inverse
 import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
+import ...ForcingTerms as FT
 using ..Analysis: register!, _require, _draw
 
 # Helicity = sign(Bt)·sign(Ip); the SFL→machine toroidal-angle handedness.
@@ -231,6 +232,57 @@ function plot_coil_geometry_3d(pe::PerturbedEquilibriumState; save_path=nothing)
     return plot_coil_geometry_3d(pe.coil_sets; equil=pe.response.ffs.equil, save_path)
 end
 
+# The coil sets of every coil term of `rmp`, each set's currents scaled by its term's weight (by the weight's magnitude
+# when it is complex, which shifts the toroidal phase), with the number of terms that have no geometry.
+function _rmp_coil_sets(rmp::FT.RMPField; n=1)
+    sets, skipped, complex_weight = FT.CoilSet[], 0, false
+    for t in FT._rmp_terms(rmp)
+        if !(t isa FT.RMPSource && t.ctrl.forcing_data_format == "coil")
+            skipped += 1
+            continue
+        end
+        complex_weight |= !isreal(t.scale)
+        w = isreal(t.scale) ? real(t.scale) : abs(t.scale)
+        for cs in FT.load_coil_sets(FT.CoilConfig(t.ctrl), n)
+            push!(sets, FT.CoilSet(cs.name, cs.ncoil, cs.s, cs.nw, cs.nsec, cs.x, cs.y, cs.z, w .* cs.currents))
+        end
+    end
+    return (; sets, skipped, complex_weight)
+end
+
+"""
+    plot_sources(rmp; n=1, color=:current, save_path=nothing)
+
+Plot the coils of an `RMPField` in 3D at equal data aspect, with no plasma: every coil term of a sum together, each
+term's currents scaled by its weight. Mode-table and spectrum terms have no geometry and are counted in the title. Use
+GLMakie to rotate it.
+
+### Arguments
+
+  - `rmp`: An `RMPField` with at least one coil term
+
+### Keyword arguments
+
+  - `n`: Toroidal mode number that sets the n-modulated tilts (default: `1`)
+  - `color`: `:current` colours each conductor by its current in kA, `:set` gives each coil set its own colour (default: `:current`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_sources(rmp::FT.RMPField; n::Int=1, color::Symbol=:current, save_path=nothing)
+    _require(plot_sources, rmp)
+    color in (:current, :set) || throw(ArgumentError("plot_sources: color must be :current or :set"))
+    d = _rmp_coil_sets(rmp; n)
+    notes = String[]
+    d.skipped > 0 && push!(notes, "$(d.skipped) mode-table term$(d.skipped == 1 ? "" : "s") not drawn")
+    d.complex_weight && push!(notes, "complex weights drawn at their magnitude")
+    nset, ncond = length(d.sets), sum(cs.ncoil for cs in d.sets)
+    title = "Coil sources: $nset set$(nset == 1 ? "" : "s"), $ncond conductor$(ncond == 1 ? "" : "s")" * (isempty(notes) ? "" : " ($(join(notes, "; ")))")
+    return _draw(_plot_coils_3d, d.sets, nothing, nothing; title, by_set=color === :set, save_path)
+end
+
 """
     plot_coil_geometry_rz(coil_sets; equil=nothing, psi=nothing, save_path=nothing)
     plot_coil_geometry_rz(pe; save_path=nothing)
@@ -411,9 +463,10 @@ register!(plot_bn_contour, (PerturbedEquilibriumState,), (:forcing_modes,), "app
 register!(plot_coil_geometry_3d, (PerturbedEquilibriumState,), (:coil_sets,), "3D coils and plasma boundary")
 register!(plot_coil_geometry_rz, (PerturbedEquilibriumState,), (:coil_sets,), "coils over the plasma boundary in (R, Z)")
 register!(plot_mode_spectrum, (PerturbedEquilibriumState,), (:forcing_modes,), "|Φ_x(m, n)| forcing spectrum")
+register!(plot_sources, (FT.RMPField,), (:coil_source,), "the coil sources in 3D, coloured by current or by set")
 
 export plot_coil_geometry_3d, plot_coil_geometry_rz
-export plot_bn_contour, plot_mode_spectrum, plot_control_surface
+export plot_bn_contour, plot_mode_spectrum, plot_control_surface, plot_sources
 export plot_surface_3d, control_surface_scalar
 
 end # module CoilForcing

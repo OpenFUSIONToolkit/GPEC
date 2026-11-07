@@ -25,7 +25,7 @@ function _coil_runs(x, y, azimuth, near)
     return runs
 end
 
-function CF._plot_coils_3d(coil_sets, surface, field; title=nothing)
+function CF._plot_coils_3d(coil_sets, surface, field; title=nothing, by_set=false)
     return themed() do
         fig = Figure(; size=(900, 560), figure_padding=(30, 10, 10, 10))
         title = something(title, surface === nothing ? "Coils" : "Plasma boundary and coils")
@@ -37,11 +37,15 @@ function CF._plot_coils_3d(coil_sets, surface, field; title=nothing)
         # CairoMakie draws in order with no depth test, so coil runs behind the plasma go before the surface and the rest
         # after it; GLMakie depth-tests either way.
         function coils!(near)
-            for cs in coil_sets, j in 1:cs.ncoil, k in 1:cs.s
+            for (i, cs) in enumerate(coil_sets), j in 1:cs.ncoil, k in 1:cs.s
                 x, y, z = cs.x[j, k, :], cs.y[j, k, :], cs.z[j, k, :]
                 for r in _coil_runs(x, y, azimuth, near)
-                    lines!(ax, x[r], y[r], z[r]; color=fill(cs.currents[j] / 1e3, length(r)), colormap=DIVERGING, colorrange=(-ilim, ilim),
-                        linewidth=3)
+                    if by_set
+                        lines!(ax, x[r], y[r], z[r]; color=WONG[mod1(i, length(WONG))], linewidth=3)
+                    else
+                        lines!(ax, x[r], y[r], z[r]; color=fill(cs.currents[j] / 1e3, length(r)), colormap=DIVERGING, colorrange=(-ilim, ilim),
+                            linewidth=3)
+                    end
                 end
             end
         end
@@ -62,7 +66,12 @@ function CF._plot_coils_3d(coil_sets, surface, field; title=nothing)
             end
         end
         coils!(true)
-        isempty(coil_sets) || Colorbar(fig[1, col]; colormap=DIVERGING, limits=(-ilim, ilim), label="coil current (kA)", height=Relative(0.6))
+        if by_set
+            Legend(fig[1, col], [LineElement(; color=WONG[mod1(i, length(WONG))], linewidth=3) for i in eachindex(coil_sets)], [cs.name for cs in coil_sets];
+                framevisible=false)
+        elseif !isempty(coil_sets)
+            Colorbar(fig[1, col]; colormap=DIVERGING, limits=(-ilim, ilim), label="coil current (kA)", height=Relative(0.6))
+        end
         fig
     end
 end

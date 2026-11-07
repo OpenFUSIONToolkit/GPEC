@@ -8,6 +8,7 @@ import ..Equilibrium: PlasmaEquilibrium
 import ..LocalStability: LocalStabilityResult
 import ..ForceFreeStates: ForceFreeStatesResult
 import ..PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
+import ..ForcingTerms as FT
 import ..ErrorFields as EF
 
 """
@@ -60,6 +61,7 @@ const REASONS = Dict{Symbol,String}(
     :forcing_modes => "needs forcing modes: give ForcingTerms a forcing",
     :ef_sensitivities => "needs the coil sensitivities: add an [ErrorFields] section",
     :dominant_mode => "needs the dominant resonant-coupling mode: run PerturbedEquilibrium with compute_singular_coupling = true",
+    :coil_source => "needs a coil source: give RMPField coil sets (a mode table or spectrum has no geometry to draw)",
     :coupling_matrices => "needs the resonant coupling matrices: run plasma_response with compute_singular_coupling = true",
     :ef_monte_carlo => "needs the tolerance Monte Carlo: give ErrorFields a tolerance file",
     :ef_risk => "needs the locking risk: give ErrorFields a tolerance file and a scenario",
@@ -94,6 +96,9 @@ function capabilities(r::ForceFreeStatesResult)
 end
 
 capabilities(r::LocalStabilityResult) = isempty(r.alpha) ? Set{Symbol}() : Set([:ballooning_scan])
+
+capabilities(r::FT.RMPField) =
+    any(t -> t isa FT.RMPSource && t.ctrl.forcing_data_format == "coil", FT._rmp_terms(r)) ? Set([:coil_source]) : Set{Symbol}()
 
 function capabilities(r::PlasmaResponse)
     caps = Set{Symbol}()

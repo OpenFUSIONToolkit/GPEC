@@ -10,14 +10,18 @@ using HDF5
 
 using ..Analysis: register!, _require, _draw
 import ...Equilibrium: PlasmaEquilibrium
-import ...ForceFreeStates: ForceFreeStatesResult
+import ...ForceFreeStates: ForceFreeStatesResult, _find_rational_surfaces
 
 const Source = Union{AbstractString,PlasmaEquilibrium,ForceFreeStatesResult}
 
-# Rational surfaces (ψ_N, q) to mark: none for a bare equilibrium.
-_surfaces(::PlasmaEquilibrium) = (; sing_psi=Float64[], sing_q=Float64[])
-_surfaces(r::ForceFreeStatesResult) = (; sing_psi=[s.psifac for s in r.surfaces], sing_q=[s.q for s in r.surfaces])
-function _surfaces(fid::HDF5.File)
+# Rational surfaces (ψ_N, q) to mark: the q = m/n crossings of toroidal mode `n` on a bare equilibrium, and the surfaces
+# a stability result or its file solved for.
+function _surfaces(eq::PlasmaEquilibrium; n=1)
+    s = _find_rational_surfaces(eq, n, n)
+    return (; sing_psi=[x.psifac for x in s], sing_q=[x.m / x.n for x in s])
+end
+_surfaces(r::ForceFreeStatesResult; n=1) = (; sing_psi=[s.psifac for s in r.surfaces], sing_q=[s.q for s in r.surfaces])
+function _surfaces(fid::HDF5.File; n=1)
     haskey(fid, "SingularSurfaces/rational_psi") || return _surfaces(nothing)
     return (; sing_psi=read(fid["SingularSurfaces/rational_psi"]), sing_q=read(fid["SingularSurfaces/rational_q"]))
 end
@@ -26,26 +30,26 @@ _surfaces(::Nothing) = (; sing_psi=Float64[], sing_q=Float64[])
 _equil(eq::PlasmaEquilibrium) = eq
 _equil(r::ForceFreeStatesResult) = r.equil
 
-function _profile_data(src::Union{PlasmaEquilibrium,ForceFreeStatesResult})
+function _profile_data(src::Union{PlasmaEquilibrium,ForceFreeStatesResult}; n=1)
     eq = _equil(src)
     prof = eq.profiles
-    return (; psi=prof.xs, q=prof.q_spline.y, mu0p=prof.P_spline.y, twopif=prof.F_spline.y, q0=eq.params.q0, q95=eq.params.q95, _surfaces(src)...)
+    return (; psi=prof.xs, q=prof.q_spline.y, mu0p=prof.P_spline.y, twopif=prof.F_spline.y, q0=eq.params.q0, q95=eq.params.q95, _surfaces(src; n)...)
 end
 
-function _profile_data(h5path::AbstractString)
+function _profile_data(h5path::AbstractString; n=1)
     h5open(h5path, "r") do fid
         (; psi=read(fid["Equilibrium/Profiles/psi"]), q=read(fid["Equilibrium/Profiles/q"]), mu0p=read(fid["Equilibrium/Profiles/mu0p"]),
             twopif=read(fid["Equilibrium/Profiles/2piF"]), q0=read(fid["Equilibrium/q_axis"]), q95=read(fid["Equilibrium/q_95"]), _surfaces(fid)...)
     end
 end
 
-function _geometry_data(src::Union{PlasmaEquilibrium,ForceFreeStatesResult})
+function _geometry_data(src::Union{PlasmaEquilibrium,ForceFreeStatesResult}; n=1)
     eq = _equil(src)
     return (; rcoords=eq.rzphi_rsquared.nodal_derivs.partials[1, :, :], offset=eq.rzphi_offset.nodal_derivs.partials[1, :, :],
-        psi=eq.rzphi_xs, theta=eq.rzphi_ys, ro=eq.ro, zo=eq.zo, _surfaces(src)...)
+        psi=eq.rzphi_xs, theta=eq.rzphi_ys, ro=eq.ro, zo=eq.zo, _surfaces(src; n)...)
 end
 
-function _geometry_data(h5path::AbstractString)
+function _geometry_data(h5path::AbstractString; n=1)
     h5open(h5path, "r") do fid
         (; rcoords=read(fid["Equilibrium/Geometry/rcoords"]), offset=read(fid["Equilibrium/Geometry/offset"]), psi=read(fid["Equilibrium/Geometry/psi"]),
             theta=read(fid["Equilibrium/Geometry/theta"]), ro=read(fid["Equilibrium/R_axis"]), zo=read(fid["Equilibrium/Z_axis"]), _surfaces(fid)...)
@@ -87,7 +91,7 @@ function _plot_equilibrium_summary end
 function _plot_gse end
 
 """
-    plot_qprofile(src; show_singular=true, save_path=nothing)
+    plot_qprofile(src; show_singular=true, n=1, save_path=nothing)
 
 Plot the safety factor q against ψ_N, with q₀ and q₉₅ marked and the rational surfaces labelled along the top.
 
@@ -98,19 +102,21 @@ Plot the safety factor q against ψ_N, with q₀ and q₉₅ marked and the rati
 ### Keyword arguments
 
   - `show_singular`: Mark the rational surfaces (default: `true`)
+  - `n`: Toroidal mode number whose rational surfaces q = m/n are marked on a bare equilibrium (default: `1`); a stability
+    result or `gpec.h5` marks the surfaces it solved for
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_qprofile(src::Source; show_singular=true, save_path=nothing)
+function plot_qprofile(src::Source; show_singular=true, n=1, save_path=nothing)
     _require(plot_qprofile, src)
-    return _draw(_plot_qprofile, _profile_data(src); show_singular, save_path)
+    return _draw(_plot_qprofile, _profile_data(src; n); show_singular, save_path)
 end
 
 """
-    plot_pressure_profile(src; save_path=nothing)
+    plot_pressure_profile(src; n=1, save_path=nothing)
 
 Plot μ₀p against ψ_N, with the rational surfaces labelled along the top.
 
@@ -120,19 +126,21 @@ Plot μ₀p against ψ_N, with the rational surfaces labelled along the top.
 
 ### Keyword arguments
 
+  - `n`: Toroidal mode number whose rational surfaces q = m/n are marked on a bare equilibrium (default: `1`); a stability
+    result or `gpec.h5` marks the surfaces it solved for
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_pressure_profile(src::Source; save_path=nothing)
+function plot_pressure_profile(src::Source; n=1, save_path=nothing)
     _require(plot_pressure_profile, src)
-    return _draw(_plot_pressure_profile, _profile_data(src); save_path)
+    return _draw(_plot_pressure_profile, _profile_data(src; n); save_path)
 end
 
 """
-    plot_f_profile(src; save_path=nothing)
+    plot_f_profile(src; n=1, save_path=nothing)
 
 Plot 2πF = RB_φ against ψ_N, with the rational surfaces labelled along the top.
 
@@ -142,19 +150,21 @@ Plot 2πF = RB_φ against ψ_N, with the rational surfaces labelled along the to
 
 ### Keyword arguments
 
+  - `n`: Toroidal mode number whose rational surfaces q = m/n are marked on a bare equilibrium (default: `1`); a stability
+    result or `gpec.h5` marks the surfaces it solved for
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_f_profile(src::Source; save_path=nothing)
+function plot_f_profile(src::Source; n=1, save_path=nothing)
     _require(plot_f_profile, src)
-    return _draw(_plot_f_profile, _profile_data(src); save_path)
+    return _draw(_plot_f_profile, _profile_data(src; n); save_path)
 end
 
 """
-    plot_flux_surfaces(src; n_psi=11, n_theta=18, save_path=nothing)
+    plot_flux_surfaces(src; n_psi=11, n_theta=18, n=1, save_path=nothing)
 
 Plot flux surfaces and constant-θ spokes in (R, Z) at equal aspect, with the rational surfaces in colour.
 
@@ -166,19 +176,21 @@ Plot flux surfaces and constant-θ spokes in (R, Z) at equal aspect, with the ra
 
   - `n_psi`: Number of flux surfaces drawn (default: 11)
   - `n_theta`: Number of constant-θ spokes drawn (default: 18)
+  - `n`: Toroidal mode number whose rational surfaces q = m/n are marked on a bare equilibrium (default: `1`); a stability
+    result or `gpec.h5` marks the surfaces it solved for
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_flux_surfaces(src::Source; n_psi=11, n_theta=18, save_path=nothing)
+function plot_flux_surfaces(src::Source; n_psi=11, n_theta=18, n=1, save_path=nothing)
     _require(plot_flux_surfaces, src)
-    return _draw(_plot_flux_surfaces, _geometry_data(src); n_psi, n_theta, save_path)
+    return _draw(_plot_flux_surfaces, _geometry_data(src; n); n_psi, n_theta, save_path)
 end
 
 """
-    plot_equilibrium_summary(src; save_path=nothing)
+    plot_equilibrium_summary(src; n=1, save_path=nothing)
 
 Plot the equilibrium's headline scalars, its flux surfaces in (R, Z), and q, μ₀p and 2πF against a shared ψ_N axis.
 
@@ -188,15 +200,17 @@ Plot the equilibrium's headline scalars, its flux surfaces in (R, Z), and q, μ�
 
 ### Keyword arguments
 
+  - `n`: Toroidal mode number whose rational surfaces q = m/n are marked on a bare equilibrium (default: `1`); a stability
+    result or `gpec.h5` marks the surfaces it solved for
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_equilibrium_summary(src::Source; save_path=nothing)
+function plot_equilibrium_summary(src::Source; n=1, save_path=nothing)
     _require(plot_equilibrium_summary, src)
-    return _draw(_plot_equilibrium_summary, _global_data(src), _profile_data(src), _geometry_data(src); save_path)
+    return _draw(_plot_equilibrium_summary, _global_data(src), _profile_data(src; n), _geometry_data(src; n); save_path)
 end
 
 """

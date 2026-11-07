@@ -102,9 +102,17 @@ using TOML
 
             # The response alone draws its dominant modes, with no forcing; a perturbed equilibrium inherits them.
             @test A.capabilities(ret.resp) ⊆ A.capabilities(ret.pe)
-            @test plot_dominant_mode_surface(ret.resp; mode=2) isa Figure
-            @test_throws "mode must be 1 to" plot_dominant_mode_surface(ret.resp; mode=99)
+            @test plot_dominant_mode_surface(ret.resp; mode=length(ret.resp.dominant_singular_values)) isa Figure
+            @test_throws "mode must be 1 to" plot_dominant_mode_surface(ret.resp; mode=length(ret.resp.dominant_singular_values) + 1)
             @test_throws "coils = true needs" CF.plot_control_surface(ret.resp, ret.resp.dominant_right_singular_vectors[:, 1]; coils=true)
+            # A bare equilibrium marks the q = m/n crossings of n = 1, which include every surface the solve found.
+            bare, solved = A.Equilibrium._surfaces(ret.equil), A.Equilibrium._surfaces(ret.ffs)
+            @test all(q -> any(≈(q), bare.sing_q), solved.sing_q) && !isempty(bare.sing_q)
+            @test plot_equilibrium_summary(ret.equil; n=2) isa Figure
+            # An RMPField draws its coil sources in 3D before any plasma; a mode table has no geometry to draw.
+            hoop = RMPField((name="hoop", source="pf_hoop", radius=12.0, height=1.2, currents=[2.0e3], tiltx=[3.0]))
+            @test plot_sources(hoop) isa Figure && plot_sources(2hoop - 0.5im * hoop; color=:set) isa Figure
+            @test_throws A.REASONS[:coil_source] plot_sources(RMPField([GPEC.ForcingTerms.ForcingMode(; n=1, m=2, amplitude=1e-4)]))
             # A summary none of whose panels this run supplies is listed as unavailable, and says so when called.
             @test occursin("✗ plot_error_field_summary", repr(MIME"text/plain"(), available_plots(h5)))
             @test_throws A.REASONS[:ef_sensitivities] plot_error_field_summary(h5)
