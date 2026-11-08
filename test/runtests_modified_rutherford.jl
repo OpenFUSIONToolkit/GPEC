@@ -136,6 +136,35 @@ using TOML
         @test w_sat ≈ 2.24 rtol = 0.1
     end
 
+    @testset "forcing thresholds: Callen's B_crit, and a forced window below an intrinsic seed" begin
+        RF = GeneralizedPerturbedEquilibrium.Tearing.ResonantForcing
+        grid = exp.(range(log(1e-5), log(0.2); length=200))
+        # Callen's F0 = Δ_c + c/w³: the window opens where the cubic's roots merge, b = 3|a| (c/2a)^(2/3).
+        a, c = -40.0, -(1.5e-2)^2
+        th = RF.forcing_thresholds(w -> a + c / w^3, 2.0, 1e-5, grid, NaN)
+        @test th.b_crit ≈ 3 * abs(a) * (c / (2a))^(2 / 3) / 2 rtol = 1e-8
+        @test th.w_crit ≈ cbrt(c / (2a)) rtol = 1e-6
+        @test isnan(th.b_trigger)
+        # G = −F0 w² with a local minimum near 0.01 and a barrier before the intrinsic seed threshold 0.03.
+        G(w) = (0.03 - w) * ((w - 0.01)^2 + 1e-5)
+        th = RF.forcing_thresholds(w -> -G(w) / w^2, 2.0, 1e-5, grid, 0.03)
+        fine = range(1e-5, 0.03; length=100_001)
+        @test th.b_crit ≈ minimum(G, filter(<(0.02), fine)) / 2 rtol = 1e-6
+        @test th.b_trigger ≈ maximum(G, filter(>=(th.w_crit), fine)) / 2 rtol = 1e-6
+        @test th.w_crit < 0.03
+        # G rising from w_lo opens the window there; G falling all the way to the seed threshold has none, so any field
+        # lowers it and b_trigger is the field that needs no seed. F0 > 0 at w_lo: no seed is needed.
+        th = RF.forcing_thresholds(w -> (w - 0.03) / w, 2.0, 1e-5, grid, 0.03)
+        @test th.w_crit == 1e-5
+        @test th.b_crit ≈ 1e-5 * (0.03 - 1e-5) / 2 rtol = 1e-12
+        @test th.b_trigger ≈ 0.015^2 / 2 rtol = 1e-8
+        th = RF.forcing_thresholds(w -> (w - 0.03) / w^3, 2.0, 1e-5, grid, 0.03)
+        @test th.b_crit == 0 && isnan(th.w_crit)
+        @test th.b_trigger ≈ (0.03 - 1e-5) / 1e-5 / 2 rtol = 1e-12
+        @test RF.forcing_thresholds(w -> 1 / w, 2.0, 1e-5, grid, NaN).b_trigger == 0
+        @test isnan(RF.forcing_thresholds(w -> -1 / w, 0.0, 1e-5, grid, NaN).b_crit)
+    end
+
     @testset "surface geometry matches Fortran RDCON on the DIII-D-like example" begin
         # Fortran values at q = 2 (ψ_N = 0.5183), interpolated from rdcon_output_n1.nc with MRE_flag = t and Z_eff = 1.52.
         dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_gal_resistive_example")

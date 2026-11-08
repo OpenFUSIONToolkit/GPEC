@@ -642,26 +642,33 @@ include("display_check.jl")
                 end
             end
 
-            # A forward solve has no Δ′, so the deck stops at parse time.
+            # A forward solve without vac_flag has no Δ′ and allows no Riccati solve, so the deck stops at parse time.
             mktempdir() do dir
-                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}())))
+                deck_dir = _stage_deck(dir; ffs_overrides=Dict{String,Any}("vac_flag" => false),
+                    extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}())))
                 @test_throws "needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
             # omega_ratio is the one optional (nothing-default) key: a deck value reaches the problem as a Float64.
             @test GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
                 Dict{String,Any}("omega_ratio" => 1))))[:omega_ratio] == 1.0
+            # preset = "callen" expands under the section's own keys.
+            preset = GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                Dict{String,Any}("preset" => "callen", "nw" => 50))))
+            @test preset[:pol_model] === :callen && preset[:delta_prime_model] === :callen && preset[:nw] == 50 && !haskey(preset, :preset)
+            @test_throws "preset" GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                Dict{String,Any}("preset" => "other"))))
         end
 
         @testset "Callen threshold under [Tearing.Callen]" begin
-            # The coil-driven DIII-D-like example: Callen with the computed Δ′ (main adds a Riccati solve) and the
-            # cylindrical MRE on the same forward solve, against the API.
+            # The coil-driven DIII-D-like example: Callen and the MRE's Callen preset on one shared Riccati Δ′ solve, with
+            # the coil forcing, against the API.
+            MRE = GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford
             ex_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
             mktempdir() do dir
                 deck = TOML.parsefile(joinpath(ex_dir, "gpec.toml"))
                 foreach(k -> delete!(deck, k), ("LocalStability", "Ballooning", "ErrorFields", "KineticForces"))
                 deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
-                deck["Tearing"] = Dict{String,Any}("Callen" => Dict{String,Any}(),
-                    "ModifiedRutherford" => Dict{String,Any}("delta_prime_source" => "cylindrical", "saturation" => true, "nw" => 40))
+                deck["Tearing"] = Dict{String,Any}("Callen" => Dict{String,Any}(), "ModifiedRutherford" => Dict{String,Any}("preset" => "callen", "nw" => 400))
                 for key in ("eq_filename", "kinetic_file")
                     deck["Equilibrium"][key] = abspath(joinpath(ex_dir, deck["Equilibrium"][key]))
                 end
@@ -671,6 +678,7 @@ include("display_check.jl")
 
                 ric = reference.callen.problem.delta_prime
                 @test ric isa ForceFreeStatesResult
+                @test reference.modified_rutherford.problem.ffs === ric
                 api = solve(CallenProblem(reference.pe; delta_prime=ric))
                 @test api.delta_c ≈ reference.callen.delta_c rtol = 1e-10
                 @test api.hw_v_crit ≈ reference.callen.hw_v_crit rtol = 1e-10
@@ -678,16 +686,47 @@ include("display_check.jl")
                 @test !(solve(CallenProblem(reference.pe; delta_prime_source=:cylindrical)).delta_c ≈ api.delta_c)
                 @test_throws "needs delta_prime" solve(CallenProblem(reference.pe))
 
-                mre = solve(ModifiedRutherfordProblem(reference.ffs; delta_prime_source=:cylindrical, saturation=true, nw=40))
+                # The preset is Callen's equation: its roots are his full widths and its b_crit his B_crit. On the shared Riccati
+                # solve they agree to the few 1e-7 by which its surfaces' q differs from the forward solve's.
+                mre = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, MRE.CALLEN_PRESET..., nw=400))
                 @test mre.F ≈ reference.modified_rutherford.F rtol = 1e-10
-                @test isequal(mre.w_m, reference.modified_rutherford.w_m)
-                @test all(<(0), mre.delta_prime)
-                @test all(isfinite, mre.C_sat)
+                row(res, psi) = findfirst(p -> isapprox(p, psi; atol=1e-6), res.rational_psi)
+                @test [mre.b_crit[row(mre, psi)] for psi in api.rational_psi] ≈ api.b_crit rtol = 1e-6
+                # On the forward solve's own surfaces, with Callen's cylindrical Δ_c and the coils scaled past the largest critical
+                # field so every surface has both roots, they agree to the root tolerance.
+                cyl0 = solve(CallenProblem(reference.pe; delta_prime_source=:cylindrical))
+                strong = perturbed_equilibrium(reference.pe.response, 4 * maximum(cyl0.b_crit ./ cyl0.b_vac) * reference.pe.forcing;
+                    coil_sets=reference.pe.coil_sets, reference.pe.regularization_width)
+                cyl = solve(CallenProblem(strong; delta_prime_source=:cylindrical))
+                pre = solve(ModifiedRutherfordProblem(reference.ffs; pe=strong, MRE.CALLEN_PRESET..., delta_prime_source=:cylindrical, nw=400))
+                @test cyl.b_crit ≈ cyl0.b_crit rtol = 1e-8
+                @test all(==(2), cyl.n_roots)
+                compared = 0
+                for k in eachindex(cyl.rational_psi)
+                    s = row(pre, cyl.rational_psi[k])
+                    @test pre.delta_rmp[s] ≈ cyl.delta_rmp[k] rtol = 1e-12
+                    @test pre.w_v[s] ≈ 2 * cyl.hw_v[k] rtol = 1e-12
+                    @test pre.b_crit[s] ≈ cyl.b_crit[k] rtol = 1e-8
+                    cyl.n_roots[k] == 2 && 2 * cyl.hw_sat[k] < pre.w[end] && 2 * cyl.hw_min[k] > pre.w_lo[s] || continue
+                    @test pre.w_m[s] ≈ 2 * cyl.hw_min[k] rtol = 1e-8
+                    @test pre.w_sat[s] ≈ 2 * cyl.hw_sat[k] rtol = 1e-8
+                    compared += 1
+                end
+                @test compared > 0
+                # The general MRE takes the same forcing: F gains exactly the forcing term, which scales as (w_v/w)².
+                kw = (; delta_prime_source=:cylindrical, saturation=true, nw=40)
+                forced = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, kw...))
+                free = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, forcing=false, kw...))
+                @test forced.F ≈ free.F .+ forced.forcing rtol = 1e-12
+                @test forced.forcing .* forced.w' .^ 2 ≈ repeat(forced.forcing[:, 1] .* forced.w[1]^2, 1, 40) rtol = 1e-10
+                @test all(>(0), forced.forcing) && isequal(forced.b_crit, free.b_crit)
+                @test all(isnan, solve(ModifiedRutherfordProblem(ric; kw...)).b_crit)
                 h5open(joinpath(dir, "gpec.h5")) do f
                     @test read(f["Tearing/Callen/PerSurface/delta_c"]) ≈ api.delta_c rtol = 1e-10
+                    @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/b_crit"]), reference.modified_rutherford.b_crit)
+                    @test read(f["Tearing/ModifiedRutherford/Terms/forcing"]) ≈ reference.modified_rutherford.forcing
                     recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
-                    @test haskey(recorded, "Callen") && recorded["ModifiedRutherford"]["delta_prime_source"] == "cylindrical"
-                    @test recorded["ModifiedRutherford"]["saturation"] && read(f["Tearing/ModifiedRutherford/PerSurface/C_sat"]) ≈ mre.C_sat
+                    @test haskey(recorded, "Callen") && recorded["ModifiedRutherford"]["pol_model"] == "callen"
                 end
             end
 

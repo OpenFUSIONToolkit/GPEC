@@ -42,6 +42,7 @@ using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner, layer_
 include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")
 include("CriticalResonantField/CriticalResonantField.jl")
+include("ResonantForcing.jl")
 include("ModifiedRutherford/ModifiedRutherford.jl")
 include("Callen/Callen.jl")
 
@@ -49,6 +50,7 @@ import .Dispersion as Dispersion
 import .CriticalResonantField as CriticalResonantField
 import .ModifiedRutherford as ModifiedRutherford
 import .Callen as Callen
+import .ResonantForcing as ResonantForcing
 using .ModifiedRutherford: ModifiedRutherfordProblem, ModifiedRutherfordResult
 using .Callen: CallenProblem, CallenResult
 using .Dispersion: SurfaceCoupling, surface_coupling,

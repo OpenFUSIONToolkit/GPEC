@@ -226,24 +226,27 @@ function main_from_inputs(
         save_to_hdf5(output_file, tearing)
     end
 
+    # The perturbed equilibrium needs a forward solve, so a computed Δ′ for the MRE or Callen comes from one shared Riccati solve.
+    computed(section) = section !== nothing && get(section, :delta_prime_source, :computed) === :computed
+    has_delta_prime = ffs !== nothing && ffs.delta_prime !== nothing && !isempty(ffs.delta_prime.matrix)
+    ric = has_delta_prime ? ffs : nothing
+    if !has_delta_prime && (computed(deck.modified_rutherford) || computed(deck.callen))
+        ric = _timed_stage(runtimes, "tearing_delta_prime", "Tearing Δ′ (Riccati)") do
+            solve(ForceBalanceProblem(equil; deck.force_balance.keywords...), Riccati(); verbose)
+        end
+    end
+
     if deck.modified_rutherford !== nothing
         modified_rutherford = _timed_stage(runtimes, "modified_rutherford", "Modified Rutherford") do
-            # With [Tearing], its linear solve gates the roots on the same Δ′.
-            solve(ModifiedRutherfordProblem(ffs; tearing, deck.modified_rutherford...))
+            # With [Tearing], its linear solve gates the roots; with [PerturbedEquilibrium], the coil field forces them.
+            solve(ModifiedRutherfordProblem(something(ric, ffs); tearing, pe, deck.modified_rutherford...))
         end
         save_to_hdf5(output_file, modified_rutherford)
     end
 
     if deck.callen !== nothing
-        # The perturbed equilibrium needs a forward solve, so the computed Δ′ comes from a second, Riccati solve.
-        ric = nothing
-        if get(deck.callen, :delta_prime_source, :computed) === :computed
-            ric = _timed_stage(runtimes, "callen_delta_prime", "Callen Δ′ (Riccati)") do
-                solve(ForceBalanceProblem(equil; deck.force_balance.keywords...), Riccati(); verbose)
-            end
-        end
         callen = _timed_stage(runtimes, "callen", "Callen threshold") do
-            solve(CallenProblem(pe; delta_prime=ric, deck.callen...))
+            solve(CallenProblem(pe; delta_prime=computed(deck.callen) ? ric : nothing, deck.callen...))
         end
         save_to_hdf5(output_file, callen)
     end

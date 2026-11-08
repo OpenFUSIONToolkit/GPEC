@@ -5,7 +5,8 @@
 #   Tearing/
 #   └── ModifiedRutherford/
 #       ├── w                      -- width grid (ψ_N)
-#       ├── w_m_star               -- smallest seed threshold over the surfaces
+#       ├── w_m_star, b_m_star     -- smallest seed threshold and its field over the surfaces
+#       ├── b_crit_star            -- smallest critical field of the forcing over the surfaces
 #       ├── PerSurface/            -- surface identity, indices, term inputs, roots and flags
 #       └── Terms/                 -- F(w), each term and w_d(w), surface × width
 
@@ -36,6 +37,7 @@ const MRE_H5_ANNOTATIONS = [
     "w" => (; long_name="full island width grid", units="psi_N", dims=("w",)),
     "w_m_star" => (; long_name="smallest seed-threshold full width over the surfaces, NaN if none", units="psi_N"),
     "b_m_star" => (; long_name="smallest b_m over the surfaces, NaN if none", units="T"),
+    "b_crit_star" => (; long_name="smallest b_crit over the surfaces, NaN if none", units="T"),
     "PerSurface/rational_psi" => (; long_name="normalized poloidal flux of the rational surface", units="psi_N", dims=("surface",)),
     "PerSurface/rational_q" => (; long_name="safety factor at the surface", dims=("surface",)),
     "PerSurface/m" => (; long_name="resonant poloidal mode number", dims=("surface",)),
@@ -105,6 +107,16 @@ const MRE_H5_ANNOTATIONS = [
         units="T", dims=("surface",)),
     "PerSurface/n_sat" => (; long_name="number of saturated widths", dims=("surface",)),
     "PerSurface/multiple_saturated" => (; long_name="1 if more than one saturated width (see w_sat_all)", dims=("surface",)),
+    "PerSurface/b_vac" => (; long_name="vacuum (coil) resonant area-weighted field of the perturbed equilibrium, NaN without one", units="T", dims=("surface",)),
+    "PerSurface/b_res" => (; long_name="total resonant area-weighted field of the perturbed equilibrium, NaN without one", units="T", dims=("surface",)),
+    "PerSurface/delta_rmp" => (; long_name="Callen Delta_RMP = |Delta|/(2 pi R0 q) B0/|B_res| in 1/m of rho, NaN without a perturbed equilibrium",
+        units="1/m", dims=("surface",)),
+    "PerSurface/w_v" => (; long_name="vacuum island full width at the applied field, NaN without a perturbed equilibrium", units="psi_N", dims=("surface",)),
+    "PerSurface/b_crit" => (; long_name="vacuum resonant field at which a forced window F > 0 opens below the unforced seed threshold", units="T",
+        dims=("surface",)),
+    "PerSurface/b_trigger" => (; long_name="vacuum resonant field at which the forced window reaches the unforced seed threshold", units="T",
+        dims=("surface",)),
+    "PerSurface/w_crit" => (; long_name="full width where the forced window opens at b_crit, NaN if none", units="psi_N", dims=("surface",)),
     "PerSurface/complex_delta_prime" => (; long_name="1 if |Im Delta'| > 1e-3 |Re Delta'|", dims=("surface",)),
     "Terms/F" => (; long_name="modified Rutherford F(w), the sum of the switched-on terms", dims=_MRE_TERM_DIMS),
     "Terms/classical" => (; long_name="classical term Delta'(w)", dims=_MRE_TERM_DIMS),
@@ -112,5 +124,6 @@ const MRE_H5_ANNOTATIONS = [
     "Terms/bootstrap" => (; long_name="bootstrap term Delta_nc(w)", dims=_MRE_TERM_DIMS),
     "Terms/curvature" => (; long_name="curvature term Delta_GGJ(w) of curvature_model", dims=_MRE_TERM_DIMS),
     "Terms/polarization" => (; long_name="ion polarization term Delta_pol(w), including pol_sign", dims=_MRE_TERM_DIMS),
+    "Terms/forcing" => (; long_name="coil forcing term Delta_RMP (drho/dpsi_N) (w_v/w)^2, 0 without a perturbed equilibrium", dims=_MRE_TERM_DIMS),
     "Terms/w_d" => (; long_name="transport threshold width w_d(w)", units="psi_N", dims=_MRE_TERM_DIMS)
 ]

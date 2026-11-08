@@ -16,6 +16,7 @@ using ...Utilities.PhysicalConstants: M_E, M_P, E_CHG, MU_0
 using ...InnerLayer: layer_plasma
 using ...InnerLayer.SLAYER: radial_label, build_slayer_inputs
 using Roots: find_zero, Brent
+using ..ResonantForcing: resonant_forcing, toroidal_flux_radius, callen_polarization_width, forcing_thresholds
 
 include("Geometry.jl")
 include("Terms.jl")
@@ -26,6 +27,6 @@ export MRESurfaceGeometry, mre_geometry, current_density_profile, sauter2002_tra
 export classical_term, saturation_coefficient, saturation_term, bootstrap_term, curvature_term, lutjens_curvature_term, layer_transport_width, polarization_term,
     reduced_polarization_term,
     transport_width
-export mre_roots, vacuum_island_field, ModifiedRutherfordProblem, ModifiedRutherfordResult
+export mre_roots, vacuum_island_field, ModifiedRutherfordProblem, ModifiedRutherfordResult, CALLEN_PRESET
 
 end # module ModifiedRutherford

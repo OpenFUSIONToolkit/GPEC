@@ -104,17 +104,6 @@ function callen_cubic_roots(a::Real, b::Real, c::Real)
     return (roots[1], roots[2])
 end
 
-# Vacuum resonant field |B_vac| [T] of the coil forcing on the surface ψ, harmonic m.
-function _vacuum_resonant_field(pe, equil, psi, n, m, area)
-    rmp = pe.forcing
-    rmp isa ForcingTerms.RMPSource && rmp.ctrl.forcing_data_format == "coil" ||
-        throw(ArgumentError("CallenProblem needs a single coil forcing (forcing_data_format = \"coil\") for the vacuum resonant field"))
-    cfg = ForcingTerms.CoilConfig(rmp.ctrl)
-    grid = ForcingTerms.CoilForcingGrid(equil, cfg, n; psi)
-    amplitude = only(ForcingTerms.coil_forcing_modes(pe.coil_sets, grid, n, m, m)).amplitude
-    return abs(rmp.scale * amplitude) / area
-end
-
 # Δ′_mn of the surface at ψ from a force-free-states result, referred to the radius ρ in 1/m: K^(2α) Δ′/ρ, K = ρ dψ_N/dρ.
 function _callen_delta_c(ric, psi, rho, drho)
     k = findfirst(s -> isapprox(s.psifac, psi; atol=1e-8), ric.surfaces)
@@ -140,43 +129,24 @@ function CommonSolve.solve(prob::CallenProblem)
         throw(ArgumentError("CallenProblem with delta_prime_source = :computed needs delta_prime, a Riccati or Galerkin solve carrying Δ′"))
 
     plasma = layer_plasma(equil; log=false)
-    T_i_of, m_i, z_i = plasma.profiles.T_i, plasma.mu_i * M_P, plasma.z_i
-    R0, B0 = equil.ro, equil.params.bt0
-    chi1 = 2π * equil.psio
-    qspl = equil.profiles.q_spline
-    psi0 = first(equil.profiles.xs)
-
-    nrow = length(resp.rational_psi)
-    out = Dict(
-        k => fill(NaN, nrow) for k in (:rational_psi, :rational_q, :rho_tor, :drho_dpsi, :rho_i, :w_pol, :delta_rmp, :delta_c, :b_res, :b_vac,
-            :hw_isl, :hw_v, :hw_v_crit, :hw_min, :hw_sat, :b_crit)
-    )
-    m_out, n_out, n_roots = zeros(Int, nrow), zeros(Int, nrow), zeros(Int, nrow)
+    rf = resonant_forcing(pe)
+    nrow = length(rf.rational_psi)
+    out = Dict(k => fill(NaN, nrow) for k in (:rho_i, :w_pol, :delta_c, :hw_v_crit, :hw_min, :hw_sat, :b_crit))
+    n_roots = zeros(Int, nrow)
     for row in 1:nrow
-        psi, q, m, n, area = resp.rational_psi[row], resp.rational_q[row], resp.rational_m_res[row], resp.rational_n[row], resp.rational_area[row]
-        q1 = ffs.surfaces[resp.rational_surface_idx[row]].q1
-        # ρ = (Φ_tor/πB₀)^(1/2) with Φ_tor = 2πψ₀ ∫q dψ_N; dρ/dψ_N = qψ₀/(B₀ρ).
-        rho = sqrt(FastInterpolations.integrate(qspl, psi0, psi) * 2 * equil.psio / B0)
-        drho = q * equil.psio / (B0 * rho)
-        rho_i = sqrt(2 * E_CHG * Float64(T_i_of(psi)) / m_i) / (z_i * E_CHG * B0 / m_i)
-        w_pol = 0.5 * q * rho_i / sqrt(rho / R0)
-        b_res = abs(pe.resonant_area_weighted_field[row])
-        delta_rmp = abs(pe.delta_prime[row]) / (2π * R0 * q) * B0 / b_res
+        psi, m, rho, drho, delta_rmp, hw_v, b_vac = rf.rational_psi[row], rf.m[row], rf.rho[row], rf.drho[row], rf.delta_rmp[row], rf.hw_v[row], rf.b_vac[row]
+        rho_i, w_pol = callen_polarization_width(equil, plasma, psi, rf.rational_q[row])
         delta_c = prob.delta_prime_source === :cylindrical ? -2 * m / rho : _callen_delta_c(ric, psi, rho, drho)
         # With Δ_c ≥ 0 any vacuum island lets a seed above h_min grow, so the critical vacuum width is zero.
         hw_v_crit = delta_c < 0 ? 0.5 * w_pol^(2 / 3) * ((27 / 4) * abs(delta_c))^(1 / 6) / sqrt(delta_rmp) : 0.0
-        b_vac = _vacuum_resonant_field(pe, equil, psi, n, m, area)
-        shear = n * q1 / q
-        hw_v = sqrt(abs(4 * b_vac * area / (2π * shear * q * chi1)))
         # Roots are full widths in metres; the outputs are half-widths in ψ_N.
         x_min, x_sat = callen_cubic_roots(delta_c, delta_rmp * (2 * hw_v * drho)^2, -w_pol^2)
-        for (k, v) in pairs((; rational_psi=psi, rational_q=q, rho_tor=rho, drho_dpsi=drho, rho_i, w_pol, delta_rmp, delta_c, b_res, b_vac,
-            hw_isl=pe.island_half_width[row], hw_v, hw_v_crit=hw_v_crit / drho, hw_min=x_min / (2 * drho), hw_sat=x_sat / (2 * drho),
+        for (k, v) in pairs((; rho_i, w_pol, delta_c, hw_v_crit=hw_v_crit / drho, hw_min=x_min / (2 * drho), hw_sat=x_sat / (2 * drho),
             b_crit=b_vac * (hw_v_crit / drho / hw_v)^2))
             out[k][row] = v
         end
-        m_out[row], n_out[row], n_roots[row] = m, n, count(!isnan, (x_min, x_sat))
+        n_roots[row] = count(!isnan, (x_min, x_sat))
     end
-    return CallenResult(prob, out[:rational_psi], out[:rational_q], m_out, n_out, out[:rho_tor], out[:drho_dpsi], out[:rho_i], out[:w_pol], out[:delta_rmp],
-        out[:delta_c], out[:b_res], out[:b_vac], out[:hw_isl], out[:hw_v], out[:hw_v_crit], out[:hw_min], out[:hw_sat], n_roots, out[:b_crit])
+    return CallenResult(prob, rf.rational_psi, rf.rational_q, rf.m, rf.n, rf.rho, rf.drho, out[:rho_i], out[:w_pol], rf.delta_rmp, out[:delta_c], rf.b_res,
+        rf.b_vac, rf.hw_isl, rf.hw_v, out[:hw_v_crit], out[:hw_min], out[:hw_sat], n_roots, out[:b_crit])
 end

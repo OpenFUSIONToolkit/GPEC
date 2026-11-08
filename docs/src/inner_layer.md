@@ -107,6 +107,8 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/ModifiedRutherford/w_m_star`, `PerSurface/w_m`, `PerSurface/w_sat`, `PerSurface/<flag>` | the seed threshold and saturated widths per surface, their minimum over the surfaces, and the validity and gate flags (0/1) |
 | `PerSurface/w_sat_all`, `PerSurface/w_seed_all`, `PerSurface/w_seed_unsaturated`, `PerSurface/n_sat` | every saturated width per surface (branch × surface, NaN-padded) with the seed threshold that reaches it, the seed above which the island grows past `w_max`, and the number of saturated widths |
 | `PerSurface/b_m`, `PerSurface/b_seed_all`, `PerSurface/b_seed_unsaturated`, `b_m_star` | the resonant area-weighted field [T] whose vacuum island is as wide as each seed threshold, ``B = \pi |n q'| \chi_1 w^2/(8A)`` (the inverse of the perturbed equilibrium's island width), to compare with `PerturbedEquilibrium` resonant fields and error-field thresholds |
+| `PerSurface/b_vac`, `b_res`, `delta_rmp`, `w_v`, `Terms/forcing` | with a perturbed equilibrium, the vacuum and total resonant fields, Callen's ``\Delta'_\mathrm{RMP}``, the vacuum island width and the forcing term per width |
+| `PerSurface/b_crit`, `b_trigger`, `w_crit`, `b_crit_star` | the vacuum resonant fields [T] at which a forced window opens below the unforced seed threshold (at width `w_crit`) and at which it reaches that threshold, and the smallest `b_crit` over the surfaces |
 | `Tearing/Callen/PerSurface/` | Callen's critical vacuum island width, critical resonant field and cubic roots per resonant row |
 
 ## Modified Rutherford diagnostics
@@ -114,7 +116,7 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 `[Tearing.ModifiedRutherford]` evaluates the steady modified Rutherford equation on a grid of full island widths ``w`` (in ``\psi_N``) for each rational surface of a single-``n`` Riccati or Galerkin run with Δ′:
 
 ```math
-F(w) = \Delta'(w) + \Delta_\mathrm{nc}(w) + \Delta_\mathrm{GGJ}(w) + \Delta_\mathrm{pol}(w; \omega),
+F(w) = \Delta'(w) + \Delta_\mathrm{nc}(w) + \Delta_\mathrm{GGJ}(w) + \Delta_\mathrm{pol}(w; \omega) + \Delta_\mathrm{RMP}(w),
 ```
 
 the classical drive with its finite-pressure power law, the bootstrap drive with the transport threshold ``w_d``, the Glasser–Greene–Johnson curvature term and the ion-polarization term (Benjamin et al. 2026, Eqs. 7, 10–14 and C.1). Each term has a switch and a coefficient; the polarization term is off by default. A finite-width saturation term, `saturation = true` (off by default), replaces ``r_s\Delta'`` by ``r_s\Delta'(0) - C_\mathrm{sat}W/r_s`` with ``C_\mathrm{sat} = 0.8\alpha_s^2 - 0.27\beta_s - 0.09\alpha_s`` from the current-density gradients at the surface (Fitzpatrick 2023, Eq. 9.15), so that a surface with ``\Delta' > 0`` saturates. The curvature term defaults to the Lütjens et al. (2001) form ``r_s\Delta_\mathrm{GGJ} = 6.35 D_R/\sqrt{(W/r_s)^2 + 0.65 W_d^2}`` with ``W_d`` from SLAYER's toroidal critical offset, so that at small widths it equals the critical ``\Delta`` of the linear SLAYER layer; `curvature_model = "benjamin"` selects Benjamin et al. (2026) Eq. 12. The surface geometry follows the Fortran RDCON `mercier.f` averages, and the densities, temperatures, ``\omega_E``, ``Z_\mathrm{eff}`` and ``\chi_\perp`` come from the equilibrium's kinetic profiles. A `[Tearing]` section holding only this sub-table runs no layer solve. In a script, `solve(ModifiedRutherfordProblem(ffs; polarization=true))` returns the same [`ModifiedRutherfordResult`](@ref Tearing.ModifiedRutherford.ModifiedRutherfordResult).
@@ -127,9 +129,19 @@ Surfaces with ``D_R>0`` are excluded as resistive-interchange unstable, and root
 Lengths in metres (the layer width, the poloidal ion Larmor radius and the banana width) map to ``\psi_N`` with the toroidal-flux label of `radial_label`, as SLAYER's do.
 The island frequency in ``\Delta_\mathrm{pol}`` is ``\omega_{*e}(1+\eta_e/4)`` (Wilson 1996) by default, or the lab-frame ``n\omega_E`` with `omega_model = "exb"`.
 
+### Applied-field forcing and critical fields
+
+With a coil-driven `[PerturbedEquilibrium]` in the same deck (or `ModifiedRutherfordProblem(ffs; pe)` in a script), the applied field forces the island through Callen's term ``\Delta_\mathrm{RMP}(w) = \Delta'_\mathrm{RMP}(d\rho/d\psi_N)(w_v/w)^2`` (Callen 2016, Eq. 17), with ``w_v`` the vacuum island width and the island locked in phase with the field; `forcing = false` switches it off. The roots and branches are then those of the forced ``F``.
+The perturbed equilibrium needs a forward solve, so `main` adds one Riccati solve for ``\Delta'`` and shares it between the MRE and `[Tearing.Callen]`; the forward solve then needs `vac_flag = true`.
+Since the forcing is proportional to the vacuum resonant field ``B_\mathrm{vac}``, the forced ``F`` is positive where ``k B_\mathrm{vac} > G(w) = -F_0(w)w^2``, with ``F_0`` the unforced sum and ``k = \Delta'_\mathrm{RMP}(d\rho/d\psi_N)w_v^2/B_\mathrm{vac}``.
+`b_crit` is the field at which a forced window first opens below the unforced seed threshold (the smallest local minimum of ``G``), and `b_trigger` the field at which that window reaches the unforced seed threshold, so that a forced island grows on to the intrinsic saturated width (the largest ``G`` between the window and that threshold).
+Both are 0 on a surface that is unstable at ``w_\mathrm{lo}`` without forcing.
+Callen's ``-w_\mathrm{pol}^2/w^3`` beats the forcing at small widths and so gives a window away from ``w_\mathrm{lo}``; without such a term ``G`` rises from ``w_\mathrm{lo}``, the window opens there (`w_crit` equals `w_lo`), and `b_crit` depends on ``w_\mathrm{lo}``, which the `[Tearing]` gate sets to the resistive layer width. `b_trigger` does not.
+`preset = "callen"` (`CALLEN_PRESET` in a script) reduces ``F`` to Callen's steady state ``\Delta_c + \Delta'_\mathrm{RMP}(w_v/w)^2 - w_\mathrm{pol}^2/w^3`` in his units (`delta_prime_model = "callen"`, `pol_model = "callen"`, the other terms off): its roots are then the full widths of `[Tearing.Callen]`'s cubic roots, and its `b_crit` is Callen's critical field.
+
 `[Tearing.Callen]` evaluates Callen's reduced equation for RMP-driven islands on a single-``n`` perturbed equilibrium driven by coils, in the form of Fortran GPEC: the critical vacuum island half-width, the critical vacuum resonant field and the half-widths of the two positive roots of the steady cubic ``\Delta_c w^3 + \Delta'_\mathrm{RMP}w_\mathrm{vac}^2w - w_\mathrm{pol}^2 = 0`` (Callen 2016, Eq. 17), which is posed in the full width ``w`` with ``w_\mathrm{vac} = 2h_v``.
 The vacuum resonant field is the coils' resonant harmonic on the rational surface over its area.
-Its intrinsic index ``\Delta_c`` is the computed ``\Delta'_{mn}`` by default (`main` adds a Riccati solve for it, since the perturbed equilibrium needs a forward one; in a script, pass it as `CallenProblem(pe; delta_prime)`), or Callen's cylindrical ``-2m/\rho`` of Fortran GPEC 1.6.0 with `delta_prime_source = "cylindrical"`.
+Its intrinsic index ``\Delta_c`` is the computed ``\Delta'_{mn}`` by default (from the Riccati solve `main` shares with the MRE; in a script, pass it as `CallenProblem(pe; delta_prime)`), or Callen's cylindrical ``-2m/\rho`` of Fortran GPEC 1.6.0 with `delta_prime_source = "cylindrical"`.
 The same switch on `[Tearing.ModifiedRutherford]` replaces ``\Delta'_{mn}`` by the cylindrical ``r_s\Delta' = -2m``, so the MRE then runs on any solve, forward included, as a reference case.
 In a script, `solve(CallenProblem(pe))` returns the same [`CallenResult`](@ref Tearing.Callen.CallenResult).
 
@@ -215,4 +227,10 @@ Modules = [GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.Callen]
+```
+
+### ResonantForcing
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.ResonantForcing]
 ```
