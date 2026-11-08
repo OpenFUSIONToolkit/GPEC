@@ -1,4 +1,4 @@
-# Callen.jl
+# Problem.jl
 #
 # `solve(CallenProblem(pe))`: Callen's reduced modified Rutherford equation for RMP-driven islands (UW-CPTC 16-4, 2016),
 # in the Fortran GPEC 1.6.0 form, on every resonant row of a single-n perturbed equilibrium driven by coils.
@@ -46,7 +46,7 @@ does not exist.
 ## Fields
 
   - `problem` - The producing problem.
-  - `psi`, `q`, `m`, `n` - Surface identity.
+  - `rational_psi`, `rational_q`, `m`, `n` - Surface identity.
   - `rho_tor`, `drho_dpsi` - Toroidal-flux radius ρ [m] and dρ/dψ_N [m].
   - `rho_i`, `w_pol` - Ion gyroradius and polarization width [m].
   - `delta_rmp`, `delta_c` - Δ_RMP and Δ_c [1/m].
@@ -59,8 +59,8 @@ does not exist.
 """
 struct CallenResult{P}
     problem::P
-    psi::Vector{Float64}
-    q::Vector{Float64}
+    rational_psi::Vector{Float64}
+    rational_q::Vector{Float64}
     m::Vector{Int}
     n::Vector{Int}
     rho_tor::Vector{Float64}
@@ -150,7 +150,7 @@ function CommonSolve.solve(prob::CallenProblem)
 
     nrow = length(resp.rational_psi)
     out = Dict(
-        k => fill(NaN, nrow) for k in (:psi, :q, :rho_tor, :drho_dpsi, :rho_i, :w_pol, :delta_rmp, :delta_c, :b_res, :b_vac,
+        k => fill(NaN, nrow) for k in (:rational_psi, :rational_q, :rho_tor, :drho_dpsi, :rho_i, :w_pol, :delta_rmp, :delta_c, :b_res, :b_vac,
             :hw_isl, :hw_v, :hw_v_crit, :hw_min, :hw_sat, :b_crit)
     )
     m_out, n_out, n_roots = zeros(Int, nrow), zeros(Int, nrow), zeros(Int, nrow)
@@ -172,13 +172,13 @@ function CommonSolve.solve(prob::CallenProblem)
         hw_v = sqrt(abs(4 * b_vac * area / (2π * shear * q * chi1)))
         # Roots are full widths in metres; the outputs are half-widths in ψ_N.
         x_min, x_sat = callen_cubic_roots(delta_c, delta_rmp * (2 * hw_v * drho)^2, -w_pol^2)
-        for (k, v) in pairs((; psi, q, rho_tor=rho, drho_dpsi=drho, rho_i, w_pol, delta_rmp, delta_c, b_res, b_vac,
+        for (k, v) in pairs((; rational_psi=psi, rational_q=q, rho_tor=rho, drho_dpsi=drho, rho_i, w_pol, delta_rmp, delta_c, b_res, b_vac,
             hw_isl=pe.island_half_width[row], hw_v, hw_v_crit=hw_v_crit / drho, hw_min=x_min / (2 * drho), hw_sat=x_sat / (2 * drho),
             b_crit=b_vac * (hw_v_crit / drho / hw_v)^2))
             out[k][row] = v
         end
         m_out[row], n_out[row], n_roots[row] = m, n, count(!isnan, (x_min, x_sat))
     end
-    return CallenResult(prob, out[:psi], out[:q], m_out, n_out, out[:rho_tor], out[:drho_dpsi], out[:rho_i], out[:w_pol], out[:delta_rmp],
+    return CallenResult(prob, out[:rational_psi], out[:rational_q], m_out, n_out, out[:rho_tor], out[:drho_dpsi], out[:rho_i], out[:w_pol], out[:delta_rmp],
         out[:delta_c], out[:b_res], out[:b_vac], out[:hw_isl], out[:hw_v], out[:hw_v_crit], out[:hw_min], out[:hw_sat], n_roots, out[:b_crit])
 end

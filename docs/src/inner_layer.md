@@ -128,7 +128,7 @@ The island frequency in ``\Delta_\mathrm{pol}`` is ``\omega_{*e}(1+\eta_e/4)`` (
 The vacuum resonant field is the coils' resonant harmonic on the rational surface over its area.
 Its intrinsic index ``\Delta_c`` is the computed ``\Delta'_{mn}`` by default (`main` adds a Riccati solve for it, since the perturbed equilibrium needs a forward one; in a script, pass it as `CallenProblem(pe; delta_prime)`), or Callen's cylindrical ``-2m/\rho`` of Fortran GPEC 1.6.0 with `delta_prime_source = "cylindrical"`.
 The same switch on `[Tearing.ModifiedRutherford]` replaces ``\Delta'_{mn}`` by the cylindrical ``r_s\Delta' = -2m``, so the MRE then runs on any solve, forward included, as a reference case.
-In a script, `solve(CallenProblem(pe))` returns the same [`CallenResult`](@ref Tearing.ModifiedRutherford.CallenResult).
+In a script, `solve(CallenProblem(pe))` returns the same [`CallenResult`](@ref Tearing.Callen.CallenResult).
 
 ## Numerical notes
 
@@ -206,4 +206,10 @@ Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford]
+```
+
+### Callen
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.Callen]
 ```

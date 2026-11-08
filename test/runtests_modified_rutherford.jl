@@ -4,6 +4,7 @@ using TOML
 # alone, and the surface geometry against Fortran RDCON (MRE_flag output) on the DIII-D-like example.
 @testset "ModifiedRutherford terms" begin
     MR = GeneralizedPerturbedEquilibrium.ModifiedRutherford
+    CL = GeneralizedPerturbedEquilibrium.Tearing.Callen
 
     @testset "classical term: Mercier power and its zero-pressure limit" begin
         @test MR.classical_term(-3.0, -0.25, 0.01) ≈ -3.0
@@ -109,16 +110,16 @@ using TOML
 
     @testset "Callen cubic: both positive roots solve it and merge at the critical vacuum width" begin
         a, c = -40.0, -(1.5e-2)^2
-        x_min, x_sat = MR.callen_cubic_roots(a, 2.0, c)
+        x_min, x_sat = CL.callen_cubic_roots(a, 2.0, c)
         @test 0 < x_min < x_sat
         @test abs(a * x_min^3 + 2.0 * x_min + c) < 1e-12 && abs(a * x_sat^3 + 2.0 * x_sat + c) < 1e-12
         # The double root sits where 4p³ + 27q² = 0, i.e. b = 3|a| (c/2a)^(2/3).
         b_crit = 3 * abs(a) * (c / (2a))^(2 / 3)
-        @test all(isnan, MR.callen_cubic_roots(a, 0.99 * b_crit, c))
-        lo, hi = MR.callen_cubic_roots(a, 1.0001 * b_crit, c)
+        @test all(isnan, CL.callen_cubic_roots(a, 0.99 * b_crit, c))
+        lo, hi = CL.callen_cubic_roots(a, 1.0001 * b_crit, c)
         @test hi / lo < 1.05
         # Callen 2016 Fig. 8 (DIII-D 158115, ρ = 71.88 cm): full widths w_min ≈ 1.28 cm, w_sat ≈ 2.24 cm.
-        w_min, w_sat = MR.callen_cubic_roots(-16 / 71.88, 26.4 / 71.88 * 2.45^2, -1.5^2)
+        w_min, w_sat = CL.callen_cubic_roots(-16 / 71.88, 26.4 / 71.88 * 2.45^2, -1.5^2)
         @test w_min ≈ 1.28 rtol = 0.1
         @test w_sat ≈ 2.24 rtol = 0.1
     end

@@ -677,7 +677,7 @@ include("display_check.jl")
                 @test all(<(0), mre.delta_prime)
                 @test all(isfinite, mre.C_sat)
                 h5open(joinpath(dir, "gpec.h5")) do f
-                    @test read(f["Tearing/Callen/delta_c"]) ≈ api.delta_c rtol = 1e-10
+                    @test read(f["Tearing/Callen/PerSurface/delta_c"]) ≈ api.delta_c rtol = 1e-10
                     recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
                     @test haskey(recorded, "Callen") && recorded["ModifiedRutherford"]["delta_prime_source"] == "cylindrical"
                     @test recorded["ModifiedRutherford"]["saturation"] && read(f["Tearing/ModifiedRutherford/PerSurface/C_sat"]) ≈ mre.C_sat
