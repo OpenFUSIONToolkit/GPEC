@@ -72,7 +72,8 @@ include("Rerun.jl")
 # Scripting-API surface: the integrator selectors, the published result, the equilibrium
 # constructor and the forcing description, re-exported so a user needs one `using`.
 using .ForceFreeStates:
-    AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult, PerpendicularInertia, IdealGrowthRateResult, growth_rate
+    AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult, PerpendicularInertia, IdealGrowthRateResult, growth_rate,
+    GrowthRateConfig, ion_diamagnetic_frequency
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl
@@ -141,10 +142,10 @@ equilibrium and writes nothing. The raw forcing file contents are captured in
 `Input/RawInputs/ForcingTerms/`, and `preloaded_coil_sets` lets the rerun path inject the coil
 geometry stored in `Input/RawInputs/Coils/`.
 
-Returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing)`, each
+Returns `(; equil, local_stability, ffs, match, growth_rate, resp, pe, kinetic, error_fields, tearing)`, each
 `nothing` when its section is absent. `equil` is the equilibrium the stages used (the solve's, on
 the two-pass grid), `ffs` the result the later stages read (the matched one when the deck has
-`[Match]`), and `match` its `MatchResult`.
+`[Match]`), `match` its `MatchResult`, and `growth_rate` the `IdealGrowthRateResult` of `[GrowthRate]`.
 """
 function main_from_inputs(
     inputs::Dict{String,Any},
@@ -159,7 +160,7 @@ function main_from_inputs(
     runtimes = Vector{Pair{String,Float64}}()
     deck = parse_deck(inputs, path)
     (; output_file, verbose) = deck.run
-    local_stability = ffs = match = resp = pe = kinetic = error_fields = tearing = nothing
+    local_stability = ffs = match = growth = resp = pe = kinetic = error_fields = tearing = nothing
 
     equil = _timed_stage(runtimes, "equilibrium", "Equilibrium") do
         Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
@@ -189,6 +190,12 @@ function main_from_inputs(
             save_to_hdf5(target, ffs; git_version, local_stability)
         end
         @info "Results written to $output_file"
+        if deck.growth_rate !== nothing
+            growth = _timed_stage(runtimes, "growth_rate", "GrowthRate") do
+                growth_rate(ForceBalanceProblem(equil; deck.force_balance.keywords...), deck.force_balance.algorithm, deck.growth_rate; marginal=ffs, verbose)
+            end
+            save_to_hdf5(output_file, growth)
+        end
     end
 
     if deck.perturbed_equilibrium !== nothing
@@ -230,7 +237,7 @@ function main_from_inputs(
     ffs === nothing || _write_runtimes!(output_file, runtimes)
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
 
-    return (; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing)
+    return (; equil, local_stability, ffs, match, growth_rate=growth, resp, pe, kinetic, error_fields, tearing)
 end
 
 """
@@ -306,7 +313,7 @@ export main, write_imas
 export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fields
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
-export PerpendicularInertia, IdealGrowthRateResult, growth_rate
+export PerpendicularInertia, IdealGrowthRateResult, GrowthRateConfig, growth_rate, ion_diamagnetic_frequency
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
