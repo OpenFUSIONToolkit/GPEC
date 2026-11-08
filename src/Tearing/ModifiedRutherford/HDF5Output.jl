@@ -97,7 +97,7 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/interchange_unstable" => (; long_name="1 if D_R > 0 (excluded)", dims=("surface",)),
     "PerSurface/linear_unstable" => (; long_name="1 if the gate's growth rate is positive (no seed threshold, w_sat kept)", dims=("surface",)),
     "PerSurface/below_w_ib" => (; long_name="1 if w_m < w_ib", dims=("surface",)),
-    "PerSurface/large_delta_prime_w" => (; long_name="1 if |Delta'| w >= 1 at w_m or w_sat", dims=("surface",)),
+    "PerSurface/large_delta_prime_w" => (; long_name="1 if |Delta'(w)| w >= 1 at w_m or w_sat, Delta'(w) the classical term", dims=("surface",)),
     "PerSurface/saturation_unconverged" => (; long_name="1 if C_sat moves more than 20% between half and double the fit window, or the window leaves the grid",
         dims=("surface",)),
     "PerSurface/complex_delta_prime" => (; long_name="1 if |Im Delta'| > 1e-3 |Re Delta'|", dims=("surface",)),

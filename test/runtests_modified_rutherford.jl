@@ -44,8 +44,11 @@ using TOML
         W_d = MR.layer_transport_width(D_R, D_c)
         @test MR.lutjens_curvature_term(D_R, -0.25, K, W_d, 1e-9) * K ≈ -D_c rtol = 1e-3
         @test MR.lutjens_curvature_term(D_R, -0.25, K, W_d, 1e3 * W_d * K) ≈ 6.35 * D_R / (1e3 * W_d * K) rtol = 1e-6
-        # Referred to ψ_N as the outer Δ′: K^(−2α) at D_I < −¼.
-        @test MR.lutjens_curvature_term(D_R, -0.3, K, W_d, 1e-9) * K^(2 * sqrt(0.3)) ≈ -D_c rtol = 1e-3
+        # Away from D_I = −¼, classical plus curvature still change sign where SLAYER's gate does, at any small w.
+        for D_I in (-0.3, -0.4), w in (1e-6, 1e-3 * W_d * K), f in (0.99, 1.01)
+            dp = f * D_c * K^(-2 * sqrt(-D_I))
+            @test sign(MR.classical_term(dp, D_I, w) + MR.lutjens_curvature_term(D_R, D_I, K, W_d, w)) == sign(f - 1)
+        end
         @test MR.layer_transport_width(D_R, 0.0) == Inf
     end
 

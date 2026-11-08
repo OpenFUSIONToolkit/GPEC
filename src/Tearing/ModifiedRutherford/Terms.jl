@@ -36,16 +36,18 @@ function curvature_term(D_R::Real, H::Real, D_I::Real, w_d::Real, w::Real; k1::R
 end
 
 """
-    lutjens_curvature_term(D_R, D_I, K, W_d, w) -> Float64
+    lutjens_curvature_term(D_R, D_I, K, W_d, w; model=:mercier_power) -> Float64
 
 Curvature term of Lütjens, Luciani & Garbet (2001) in the form of Urso et al. (2010) Eq. 1,
 `r_s Δ_GGJ = 6.35 D_R / √((W/r_s)² + 0.65 W_d²)`, with `W/r_s = w/K` and `W_d` the transport width in the same
 `(r − r_s)/r_s` reference ([`layer_transport_width`](@ref)), referred to ψ_N as the outer Δ′ is (`K^(−2α)`,
-`α = √(−D_I)`). Its `w → 0` limit is SLAYER's critical offset `−√2 π^(3/2) D_R/W_d` (6.35/√0.65 = √2 π^(3/2)); for
-`w ≫ W_d` it is the large-aspect-ratio `6.35 D_R/W` (La Haye 2006). Stabilizing for `D_R < 0`.
+`α = √(−D_I)`) and carried through [`classical_term`](@ref) as [`saturation_term`](@ref) is, so it has the units of
+the other terms. Its `w → 0` limit is then `classical_term(−D_c K^(−2α), D_I, w)` with SLAYER's critical offset
+`D_c = −√2 π^(3/2) D_R/W_d` (6.35/√0.65 = √2 π^(3/2)), so classical plus curvature change sign where SLAYER's gate does;
+for `w ≫ W_d` it is the large-aspect-ratio `6.35 D_R/W` (La Haye 2006). Stabilizing for `D_R < 0`.
 """
-function lutjens_curvature_term(D_R::Real, D_I::Real, K::Real, W_d::Real, w::Real)
-    return K^(-2 * sqrt(-D_I)) * 6.35 * D_R / sqrt((w / K)^2 + 0.65 * W_d^2)
+function lutjens_curvature_term(D_R::Real, D_I::Real, K::Real, W_d::Real, w::Real; model::Symbol=:mercier_power)
+    return classical_term(K^(-2 * sqrt(-D_I)) * 6.35 * D_R / sqrt((w / K)^2 + 0.65 * W_d^2), D_I, w; model)
 end
 
 """

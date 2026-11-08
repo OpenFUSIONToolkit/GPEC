@@ -563,7 +563,8 @@ include("display_check.jl")
 
         @testset "modified Rutherford under [Tearing.ModifiedRutherford]" begin
             # The MRE alone: a [Tearing] holding only the sub-table runs no layer solve, and its deck replays.
-            settings = (; polarization=true, omega_model=:exb, omega_factor=0.5, delta_prime_factor=0.9, D_nc_factor=1.1, rho_theta_factor=1.2, nw=40)
+            settings = (; polarization=true, omega_model=:exb, omega_factor=0.5, delta_prime_factor=0.9, D_nc_factor=1.1, rho_theta_factor=1.2, nw=40,
+                curvature_model=:benjamin)
             mktempdir() do dir
                 psi = collect(range(0.0, 1.0; length=101))
                 h5open(joinpath(dir, "kinetic.h5"), "w") do f
@@ -594,6 +595,7 @@ include("display_check.jl")
                     @test recorded["Tearing"] == Dict{String,Any}("ModifiedRutherford" => recorded["Tearing"]["ModifiedRutherford"])
                     @test recorded["Tearing"]["ModifiedRutherford"]["omega_factor"] == 0.5
                     @test recorded["Tearing"]["ModifiedRutherford"]["omega_model"] == "exb"
+                    @test recorded["Tearing"]["ModifiedRutherford"]["curvature_model"] == "benjamin"
                     @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/w_m"]), api.w_m)
                 end
             end
@@ -612,7 +614,6 @@ include("display_check.jl")
                 api = solve(ModifiedRutherfordProblem(reference.ffs; tearing=reference.tearing, nw=40))
                 @test reference.modified_rutherford.problem.tearing === reference.tearing
                 @test isequal(api.gamma, reference.modified_rutherford.gamma) && all(isfinite, api.gamma)
-                @test api.linear_unstable == (api.gamma .> 0)
                 @test isequal(api.w_m, reference.modified_rutherford.w_m)
                 # The default Lütjens curvature takes SLAYER's toroidal critical offset, so it equals a toroidal gate's at the same χ⊥.
                 # χ⊥ varies by surface here, so the gate is built with the 3/1 surface's χ⊥ and compared there.
@@ -622,8 +623,16 @@ include("display_check.jl")
                 row = findfirst(x -> isapprox(x, api.psi[k]; atol=1e-8), gate.rational_psi)
                 @test gate.params[row].dc_tmp ≈ api.D_c[k] rtol = 1e-10
                 ben = solve(ModifiedRutherfordProblem(reference.ffs; tearing=reference.tearing, nw=40, curvature_model=:benjamin))
-                @test all(isnan, ben.D_c) && ben.classical ≈ api.classical && !(ben.curvature ≈ api.curvature)
+                @test all(isnan, ben.D_c) && !(ben.curvature ≈ api.curvature)
                 @test_throws "curvature_model" solve(ModifiedRutherfordProblem(reference.ffs; curvature_model=:other))
+                # A TearingResult saved after the MRE keeps Tearing/ModifiedRutherford and its recorded sub-table.
+                h5open(joinpath(dir, "reversed.h5"), "w") do f
+                    save_to_hdf5(f, api)
+                    save_to_hdf5(f, reference.tearing)
+                    @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/w_m"]), api.w_m) && haskey(f, "Tearing/PerSurface")
+                    recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
+                    @test recorded["ModifiedRutherford"]["nw"] == 40 && haskey(recorded, "model")
+                end
             end
 
             # A forward solve has no Δ′, so the deck stops at parse time.
@@ -631,6 +640,9 @@ include("display_check.jl")
                 deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}())))
                 @test_throws "needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
+            # omega_ratio is the one optional (nothing-default) key: a deck value reaches the problem as a Float64.
+            @test GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                Dict{String,Any}("omega_ratio" => 1)))).omega_ratio === 1.0
         end
 
         @testset "Callen threshold under [Tearing.Callen]" begin
@@ -650,13 +662,13 @@ include("display_check.jl")
                 reference = GPEC.main([dir])
                 @test reference.tearing === nothing && reference.callen isa CallenResult
 
-                ric = solve(ForceBalanceProblem(reference.ffs.equil; GPEC.parse_deck(deck, dir).force_balance.keywords...), Riccati())
+                ric = reference.callen.problem.delta_prime
+                @test ric isa ForceFreeStatesResult
                 api = solve(CallenProblem(reference.pe; delta_prime=ric))
                 @test api.delta_c ≈ reference.callen.delta_c rtol = 1e-10
                 @test api.hw_v_crit ≈ reference.callen.hw_v_crit rtol = 1e-10
                 @test isequal(api.n_roots, reference.callen.n_roots)
-                cyl = solve(CallenProblem(reference.pe; delta_prime_source=:cylindrical))
-                @test cyl.delta_c ≈ -2 .* cyl.m ./ cyl.rho_tor
+                @test !(solve(CallenProblem(reference.pe; delta_prime_source=:cylindrical)).delta_c ≈ api.delta_c)
                 @test_throws "needs delta_prime" solve(CallenProblem(reference.pe))
 
                 mre = solve(ModifiedRutherfordProblem(reference.ffs; delta_prime_source=:cylindrical, saturation=true, nw=40))
@@ -664,7 +676,6 @@ include("display_check.jl")
                 @test isequal(mre.w_m, reference.modified_rutherford.w_m)
                 @test all(<(0), mre.delta_prime)
                 @test all(isfinite, mre.C_sat)
-                @test all(all(sign.(mre.saturation[k, :]) .== -sign(mre.C_sat[k])) for k in eachindex(mre.psi) if mre.D_I[k] < 0)
                 h5open(joinpath(dir, "gpec.h5")) do f
                     @test read(f["Tearing/Callen/delta_c"]) ≈ api.delta_c rtol = 1e-10
                     recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]

@@ -1,7 +1,7 @@
 # Problem.jl
 #
 # `solve(ModifiedRutherfordProblem(ffs; ...))`: the terms of the steady modified Rutherford equation and their sum F(w)
-# on a log-spaced grid of full island widths, per rational surface. Diagnostic only: no roots.
+# on a log-spaced grid of full island widths, per rational surface, and its roots w_m and w_sat.
 
 """
     ModifiedRutherfordProblem(ffs; kwargs...)
@@ -112,7 +112,7 @@ Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to 
   - `unstable_any_seed` - F > 0 at `w_lo`.
   - `interchange_unstable`, `linear_unstable` - D_R > 0 (excluded), or γ > 0 (no seed threshold; `w_sat` kept).
   - `below_w_ib` - `w_m` below the ion banana width, where the polarization ordering fails.
-  - `large_delta_prime_w` - |Δ′| w ≥ 1 at `w_m` or `w_sat`.
+  - `large_delta_prime_w` - |Δ′(w)| w ≥ 1 at `w_m` or `w_sat`, with Δ′(w) the classical term.
   - `complex_delta_prime` - |Im Δ′_mn| > 10⁻³ |Re Δ′_mn|.
   - `saturation_unconverged` - `C_sat` not converged in the fit window (see [`saturation_coefficient`](@ref)).
   - `F`, `classical`, `saturation`, `bootstrap`, `curvature`, `polarization`, `w_d` - F(w), each term, and w_d(w).
@@ -335,7 +335,7 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
             bs = bootstrap_term(D_nc, wd, wj; prob.k1)
             cv =
                 D_I >= 0 ? NaN :
-                prob.curvature_model === :lutjens ? lutjens_curvature_term(D_R, D_I, K, W_d_layer, wj) :
+                prob.curvature_model === :lutjens ? lutjens_curvature_term(D_R, D_I, K, W_d_layer, wj; model=prob.delta_prime_model) :
                 curvature_term(D_R, rg.H, D_I, wd, wj; prob.k1)
             pl =
                 prob.pol_sign * (
@@ -368,7 +368,8 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         w_m, w_sat = excluded ? (NaN, NaN) : (flags.linear_unstable[k] ? NaN : r.w_m, r.w_sat)
         flags.fully_stabilized[k], flags.unstable_any_seed[k] = !excluded && r.fully_stabilized, !excluded && r.unstable_any_seed
         flags.below_w_ib[k] = w_m < w_ib
-        flags.large_delta_prime_w[k] = abs(dp_mn) * w_m >= 1 || abs(dp_mn) * w_sat >= 1
+        # Δ′(w) w at the root, dimensionless at any D_I.
+        flags.large_delta_prime_w[k] = any(x -> isfinite(x) && abs(terms(x).cl) * x >= 1, (w_m, w_sat))
 
         for (key, val) in pairs((; psi, q=s.q, m, n, delta_prime=dp_mn, delta_prime_imag=imag(dp_complex), D_I, D_R, H=rg.H, D_nc,
             f_trap=g.f_trap, mu_ratio, zeff, g.Wc_prefac, chi_perp, v_te, R0=g.R_major, omega_star_i, omega_star_e, omega_hat, omega_hat_pi,

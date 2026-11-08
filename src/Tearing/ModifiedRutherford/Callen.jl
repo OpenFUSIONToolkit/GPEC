@@ -10,7 +10,8 @@ Callen's reduced MRE for the vacuum-island threshold on every resonant row of th
 (a single-n state from `perturbed_equilibrium` with a coil forcing). Half-widths are in metres of the toroidal-flux
 radius ρ = (Φ_tor/πB₀)^(1/2) inside, and in ψ_N on output, as in Fortran GPEC 1.6.0:
 
-  - w_pol = ½ q ρ_i/(ρ/R₀)^(1/2) with ρ_i = (2T_i/m_i)^(1/2)/(Z_i e B₀/m_i), R₀ and B₀ on the axis;
+  - w_pol = ½ q ρ_i/(ρ/R₀)^(1/2) with ρ_i = (2T_i/m_i)^(1/2)/(Z_i e B₀/m_i), R₀ the axis major radius and B₀ the
+    vacuum toroidal field `bt0`, as Fortran GPEC 1.6.0 takes them;
   - Δ_RMP = |Δ|/(2πR₀q) B₀/|B_res|, Δ the singular-current jump over 2πχ₁ and B_res the total resonant field;
   - Δ_c the intrinsic tearing index in 1/m of ρ: the true Δ′_mn of `delta_prime` (a Riccati or Galerkin solve on the
     same equilibrium and n), referred to ρ as K^(2α) Δ′_mn/ρ with K = ρ dψ_N/dρ and α = (−D_I)^(1/2) as for SLAYER, with
@@ -87,6 +88,7 @@ x_k = 2R cos((θ + 2πk)/3), R = (−p/3)^(1/2), cos θ = −q/(2R³) of the dep
 roots or none (`(NaN, NaN)`); for `a > 0` there is one positive root (Cardano), returned as `(x, NaN)`.
 """
 function callen_cubic_roots(a::Real, b::Real, c::Real)
+    a == 0 && return (b > 0 ? -c / b : NaN, NaN)
     p, q = b / a, c / a
     if a > 0
         s = sqrt(q^2 / 4 + p^3 / 27)

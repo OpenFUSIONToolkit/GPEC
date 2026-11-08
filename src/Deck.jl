@@ -513,6 +513,8 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     callen = callen_from_deck(inputs)
     if callen !== nothing
         perturbed_equilibrium === nothing && error("[Tearing.Callen] needs a [PerturbedEquilibrium] section")
+        first(force_balance.keywords[:nn]) == last(force_balance.keywords[:nn]) ||
+            error("[Tearing.Callen] is single-n: set [ForceFreeStates] nn to one toroidal mode number")
         get(callen, :delta_prime_source, :computed) === :cylindrical || get(force_balance.keywords, :vac_flag, false) ||
             error("[Tearing.Callen] computes Δ′ with an extra Riccati solve, which needs [ForceFreeStates] vac_flag = true; " *
                   "or set delta_prime_source = \"cylindrical\"")
