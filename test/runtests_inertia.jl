@@ -178,6 +178,25 @@ include("h5_metadata_check.jl")
         @test_throws "finite and positive" FFS.inertia_kinetic_matrices(FFS.PerpendicularInertia(; rho=0.0), equil, intr, metric)
     end
 
+    @testset "a fixed-boundary mode inside the bracket" begin
+        # p0 = 0.8 adds a fixed-boundary mode at γ² ≈ 1.2e8 (ρ = 1e-7) below the external kink at ≈ 4.9e9, a pole of λ_min
+        # between them. The crossing counter watches the smallest-magnitude eigenvalue of W⁻¹, which a stiff harmonic holds
+        # near zero on this fixture, so it misses the conjugate point; until the count is exact these pin the wrong answers.
+        hp_deck = merge(deck, Dict{String,Any}("TJAnalytic" => merge(deck["TJAnalytic"], Dict{String,Any}("qa" => 2.9, "p0" => 0.8))))
+        hp_equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(hp_deck, template), GPEC.analytic_config(hp_deck))
+        inertia = FFS.PerpendicularInertia(; rho=1e-7)
+        # Starting below the pole, only the count can carry the search past it to the fastest mode
+        low_start = FFS.growth_rate(ForceBalanceProblem(hp_equil; nn=1, wall, ffs_kwargs...), forward; inertia, gamma_sq_init=1e8)
+        @test low_start.converged
+        @test_broken low_start.gamma_sq > 4e9
+        # A close wall makes the marginal free-boundary energy positive, so only the count says the plasma is unstable, and the
+        # bracket [1e8, 1e9] then holds the pole: the count bisection must lift its lower end before the sign iteration
+        close_wall = GPEC.Vacuum.ConformalWall(; standoff_fraction=0.05)
+        walled = FFS.growth_rate(ForceBalanceProblem(hp_equil; nn=1, wall=close_wall, ffs_kwargs...), forward; inertia, gamma_sq_init=1e8)
+        @test_broken walled.gamma > 0
+        @test_broken any(h.nzero > 0 for h in walled.history)
+    end
+
     @testset "kinetic data without T_e" begin
         ktemplate = joinpath(@__DIR__, "test_data", "regression_tj_kinetic_calculated")
         kdeck = TOML.parsefile(joinpath(ktemplate, "gpec.toml"))

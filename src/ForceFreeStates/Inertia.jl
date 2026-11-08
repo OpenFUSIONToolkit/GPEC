@@ -206,15 +206,23 @@ Growth rate of the fastest ideal mode of `prob` with the perpendicular inertia `
 count `nzero` plus one when the least-stable free-boundary energy λ_min is negative, and that count cannot
 rise with γ² since the kinetic energy is positive. The ideal solve gives the count at γ = 0; when it is
 zero the plasma is stable and `gamma` is 0. Otherwise the count is bracketed by decades from
-`gamma_sq_init` (down while nothing is faster, up while something still is), and when the lower end has
-no interior crossing left, only λ_min changes sign in the bracket and a bracketed secant (Illinois)
-iteration brings it to zero, stopping when |λ_min| falls below `ftol` times the reference |λ_min| (the
-marginal value, or the bracket's negative end when the marginal energy is positive) or the bracket is
-narrower than `rtol` in γ², within `maxiter` steps (a warning and `converged = false` otherwise). Every
-evaluation is one force-balance solve. `gamma_sq_min` is the floor below which the mode counts as marginal
-(`gamma` = 0), `gamma_sq_max` the ceiling beyond which bracketing stops with an error. A fastest mode that
-is fixed-boundary (an interior crossing still present at the bracket's lower end) is reported as an error:
-locating a fixed-boundary growth rate is not supported yet.
+`gamma_sq_init` (down while nothing is faster, up while something still is). An interior crossing still
+present at the lower end is a fixed-boundary eigenvalue inside the bracket, where λ_min has a pole; since
+the fastest mode is free-boundary and at least as fast as any fixed-boundary one, the lower end is lifted
+above it by bisecting on the count. Then only λ_min changes sign in the bracket and a bracketed secant
+(Illinois) iteration brings it to zero, stopping when |λ_min| falls below `ftol` times the reference
+|λ_min| (the marginal value, or the bracket's negative end when the marginal energy is positive) or the
+bracket is narrower than `rtol` in γ², within `maxiter` steps (a warning and `converged = false`
+otherwise). Every evaluation is one force-balance solve. `gamma_sq_min` is the floor below which the mode
+counts as marginal (`gamma` = 0), `gamma_sq_max` the ceiling beyond which bracketing stops with an error.
+When the count bisection reaches `rtol` with a crossing still present, the fastest mode is a fixed-boundary
+one (its edge displacement vanishes) and the bracket's upper end is reported as converged.
+
+The count is only as good as the crossing detector, which follows the smallest-magnitude eigenvalue of W⁻¹
+along ψ and misses a conjugate point whenever a stiff harmonic holds that eigenvalue near zero. A missed
+crossing below `gamma_sq_init` makes a positive λ_min look stable, so the search can settle on a slower
+mode or report γ = 0. Start `gamma_sq_init` above the fastest growth rate expected: the upward scan needs
+only the sign of λ_min, and `history` shows whether λ_min rose monotonically through the bracket.
 
 A `marginal` result of the same problem (an earlier ideal `solve`) is reused instead of solving it again;
 `config` is recorded on the result and is what the three-argument method passes. The problem must carry no
@@ -280,9 +288,22 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         hi > gamma_sq_max && error("growth_rate: a mode still grows at γ² = $lo; raise gamma_sq_max or check the inertia density")
         h_hi = evaluate(hi)
     end
-    # The fastest root lies in (lo, hi]; with no interior crossing left at lo only the free-boundary energy changes sign there
-    h_lo.nzero == 0 || error("growth_rate: the fastest mode is fixed-boundary (nzero = $(h_lo.nzero) at γ² = $lo, 0 at γ² = $hi); " *
-          "locating a fixed-boundary growth rate is not supported yet")
+    # The fastest root lies in (lo, hi]. A crossing still present at lo is a fixed-boundary eigenvalue inside the bracket, where
+    # λ_min has a pole; the fastest mode is free-boundary and at least as fast (interlacing), so bisect on the count, which is
+    # monotone, until lo is above that eigenvalue and only the free-boundary energy changes sign in the bracket
+    while h_lo.nzero > 0 && hi - lo > rtol * hi
+        mid = sqrt(lo * hi)
+        h_mid = evaluate(mid)
+        if faster(h_mid) == 0
+            hi, h_hi = mid, h_mid
+        else
+            lo, h_lo = mid, h_mid
+        end
+    end
+    if h_lo.nzero > 0   # the root sits on the pole to within rtol: the fastest mode has no edge displacement
+        verbose && @info @sprintf("growth_rate: the fastest mode is fixed-boundary to within rtol, γ² in [%.6e, %.6e]", lo, hi)
+        return finish(hi, true)
+    end
 
     # Illinois iteration on the sign change; the retained end's λ is halved when it is kept twice running
     scale = history[1].lambda < 0 ? abs(history[1].lambda) : abs(h_lo.lambda)
