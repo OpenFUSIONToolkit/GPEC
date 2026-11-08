@@ -102,7 +102,7 @@ Full branch-naming table, hotfix workflow, versioning scheme, and merge-conflict
 
 ## Agent Team
 
-This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them.
+This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them. They register only in a session started in this repository; from a session started elsewhere, paste the agent file's body into a general-purpose agent's prompt rather than writing your own checklist.
 
 Roster, the recommended review pipeline (physics fidelity → readability → performance → regression), and per-consultation budget rules are in **[`.claude/agents/README.md`](.claude/agents/README.md)**.
 
