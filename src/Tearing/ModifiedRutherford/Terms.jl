@@ -44,7 +44,8 @@ Curvature term of Lütjens, Luciani & Garbet (2001) in the form of Urso et al. (
 `α = √(−D_I)`) and carried through [`classical_term`](@ref) as [`saturation_term`](@ref) is, so it has the units of
 the other terms. Its `w → 0` limit is then `classical_term(−D_c K^(−2α), D_I, w)` with SLAYER's critical offset
 `D_c = −√2 π^(3/2) D_R/W_d` (6.35/√0.65 = √2 π^(3/2)), so classical plus curvature change sign where SLAYER's gate does;
-for `w ≫ W_d` it is the large-aspect-ratio `6.35 D_R/W` (La Haye 2006). Stabilizing for `D_R < 0`.
+for `w ≫ W_d` its Δ′ form is the large-aspect-ratio `6.35 D_R/W` (La Haye 2006). The source has no `D_I ≠ −¼` form;
+the factor of `classical_term` is the convention that keeps the seam at every `D_I`. Stabilizing for `D_R < 0`.
 """
 function lutjens_curvature_term(D_R::Real, D_I::Real, K::Real, W_d::Real, w::Real; model::Symbol=:mercier_power)
     return classical_term(K^(-2 * sqrt(-D_I)) * 6.35 * D_R / sqrt((w / K)^2 + 0.65 * W_d^2), D_I, w; model)
