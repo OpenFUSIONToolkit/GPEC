@@ -1,6 +1,6 @@
 # The resonant forcing of a single-n coil-driven perturbed equilibrium, per rational surface, in the form a steady island
 # equation takes it (Callen, UW-CPTC 16-4, 2016): the vacuum and total resonant fields, Δ_RMP and the vacuum island width,
-# on the toroidal-flux radius ρ that Callen's widths use. The Callen threshold and the modified Rutherford equation share it.
+# on the toroidal-flux radius ρ that Callen's widths use. The modified Rutherford equation's forcing term and Callen preset use it.
 
 module ResonantForcing
 

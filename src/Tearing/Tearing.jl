@@ -8,8 +8,6 @@
 #                  resonant field of error-field penetration
 #   ModifiedRutherford -- terms of the steady modified Rutherford equation and
 #                  F(w) per surface, `solve(ModifiedRutherfordProblem(ffs; ...))`
-#   Callen       -- Callen's reduced equation for coil-driven islands,
-#                  `solve(CallenProblem(pe; ...))`
 #   TearingProblem / TearingConfig / TearingResult -- the public solve,
 #                  `solve(TearingProblem(ffs; ...), model; config)`, with one
 #                  method per inner-layer model (SLAYERModel, GGJModel)
@@ -44,15 +42,12 @@ include("Dispersion/Dispersion.jl")
 include("CriticalResonantField/CriticalResonantField.jl")
 include("ResonantForcing.jl")
 include("ModifiedRutherford/ModifiedRutherford.jl")
-include("Callen/Callen.jl")
 
 import .Dispersion as Dispersion
 import .CriticalResonantField as CriticalResonantField
 import .ModifiedRutherford as ModifiedRutherford
-import .Callen as Callen
 import .ResonantForcing as ResonantForcing
 using .ModifiedRutherford: ModifiedRutherfordProblem, ModifiedRutherfordResult
-using .Callen: CallenProblem, CallenResult
 using .Dispersion: SurfaceCoupling, surface_coupling,
     MultiSurfaceCoupling, multi_surface_coupling,
     ScanResult, brute_force_scan,
@@ -69,7 +64,7 @@ include("GGJTearing.jl")
 include("HDF5Output.jl")
 
 export InnerLayer, Dispersion, CriticalResonantField, ModifiedRutherford
-export ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem, CallenResult
+export ModifiedRutherfordProblem, ModifiedRutherfordResult
 export resistive_layer_overlap, layer_overlap_scan, LayerOverlapScan
 export TearingProblem, TearingConfig, TearingResult
 export run_slayer_from_inputs

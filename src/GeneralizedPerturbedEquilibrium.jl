@@ -75,8 +75,7 @@ include("Rerun.jl")
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
-using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl, ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem,
-    CallenResult
+using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl, ModifiedRutherfordProblem, ModifiedRutherfordResult
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
@@ -142,7 +141,7 @@ equilibrium and writes nothing. The raw forcing file contents are captured in
 `Input/RawInputs/ForcingTerms/`, and `preloaded_coil_sets` lets the rerun path inject the coil
 geometry stored in `Input/RawInputs/Coils/`.
 
-Returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford, callen)`, each
+Returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford)`, each
 `nothing` when its section is absent. `equil` is the equilibrium the stages used (the solve's, on
 the two-pass grid), `ffs` the result the later stages read (the matched one when the deck has
 `[Match]`), and `match` its `MatchResult`.
@@ -160,7 +159,7 @@ function main_from_inputs(
     runtimes = Vector{Pair{String,Float64}}()
     deck = parse_deck(inputs, path)
     (; output_file, verbose) = deck.run
-    local_stability = ffs = match = resp = pe = kinetic = error_fields = tearing = modified_rutherford = callen = nothing
+    local_stability = ffs = match = resp = pe = kinetic = error_fields = tearing = modified_rutherford = nothing
 
     equil = _timed_stage(runtimes, "equilibrium", "Equilibrium") do
         Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
@@ -226,11 +225,10 @@ function main_from_inputs(
         save_to_hdf5(output_file, tearing)
     end
 
-    # The perturbed equilibrium needs a forward solve, so a computed Δ′ for the MRE or Callen comes from one shared Riccati solve.
-    computed(section) = section !== nothing && get(section, :delta_prime_source, :computed) === :computed
+    # The perturbed equilibrium needs a forward solve, so a computed Δ′ for the MRE comes from its own Riccati solve.
     has_delta_prime = ffs !== nothing && ffs.delta_prime !== nothing && !isempty(ffs.delta_prime.matrix)
     ric = has_delta_prime ? ffs : nothing
-    if !has_delta_prime && (computed(deck.modified_rutherford) || computed(deck.callen))
+    if !has_delta_prime && deck.modified_rutherford !== nothing && get(deck.modified_rutherford, :delta_prime_source, :computed) === :computed
         ric = _timed_stage(runtimes, "tearing_delta_prime", "Tearing Δ′ (Riccati)") do
             solve(ForceBalanceProblem(equil; deck.force_balance.keywords...), Riccati(); verbose)
         end
@@ -244,19 +242,12 @@ function main_from_inputs(
         save_to_hdf5(output_file, modified_rutherford)
     end
 
-    if deck.callen !== nothing
-        callen = _timed_stage(runtimes, "callen", "Callen threshold") do
-            solve(CallenProblem(pe; delta_prime=computed(deck.callen) ? ric : nothing, deck.callen...))
-        end
-        save_to_hdf5(output_file, callen)
-    end
-
     total_dt = time() - total_start
     push!(runtimes, "total" => total_dt)
     ffs === nothing || _write_runtimes!(output_file, runtimes)
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
 
-    return (; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford, callen)
+    return (; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford)
 end
 
 """
@@ -332,7 +323,7 @@ export main, write_imas
 export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fields
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
-export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel, ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem, CallenResult
+export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel, ModifiedRutherfordProblem, ModifiedRutherfordResult
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
 

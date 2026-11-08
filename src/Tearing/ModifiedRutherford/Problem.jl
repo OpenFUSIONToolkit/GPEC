@@ -31,7 +31,8 @@ field. It scales with the vacuum resonant field B_vac, so the roots and branches
 critical fields `b_crit` and `b_trigger` follow from the unforced F ([`forcing_thresholds`](@ref)).
 
 `CALLEN_PRESET` (deck `preset = "callen"`) reduces F to Callen's steady state Δ_c + Δ_RMP (w_v/w)² − w_pol²/w³ in his
-units, so `solve` reproduces `CallenProblem`'s roots (full widths) and critical field.
+units (Fortran GPEC 1.6.0's w_pol, Δ_RMP and Δ_c), so its roots are the full widths of Callen's cubic
+Δ_c w³ + Δ_RMP w_v² w − w_pol² = 0 and its `b_crit` is his critical field B_crit = |B_vac| (w_v,crit/w_v)².
 
 ## Fields
 

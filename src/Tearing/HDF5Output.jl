@@ -20,7 +20,7 @@ using HDF5
     save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, result::TearingResult)
 
 Write `result` into a `Tearing/` subgroup of `parent`, replacing its previous contents but keeping the
-`ModifiedRutherford/` and `Callen/` groups that other results write there.
+`ModifiedRutherford/` group that its result writes there.
 """
 function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     result::TearingResult)
@@ -184,7 +184,7 @@ const TEARING_RAGGED_H5_ANNOTATIONS = [
 ]
 
 # Groups under Tearing/ that other results own, so a TearingResult write keeps them.
-const _TEARING_FOREIGN_GROUPS = ("ModifiedRutherford", "Callen")
+const _TEARING_FOREIGN_GROUPS = ("ModifiedRutherford",)
 
 # Empty Tearing/ of everything a TearingResult writes, or create it.
 function _reset_tearing_group!(parent)

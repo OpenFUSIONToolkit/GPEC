@@ -659,81 +659,98 @@ include("display_check.jl")
                 Dict{String,Any}("preset" => "other"))))
         end
 
-        @testset "Callen threshold under [Tearing.Callen]" begin
-            # The coil-driven DIII-D-like example: Callen and the MRE's Callen preset on one shared Riccati Δ′ solve, with
-            # the coil forcing, against the API.
+        @testset "MRE Callen preset against Callen's closed form" begin
+            # The coil-driven DIII-D-like example: the MRE's Callen preset with the coil forcing and its own Riccati Δ′ solve,
+            # against the API and against Callen's closed-form critical field and cubic roots.
             MRE = GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford
+            RF = GeneralizedPerturbedEquilibrium.Tearing.ResonantForcing
             ex_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
             mktempdir() do dir
                 deck = TOML.parsefile(joinpath(ex_dir, "gpec.toml"))
                 foreach(k -> delete!(deck, k), ("LocalStability", "Ballooning", "ErrorFields", "KineticForces"))
                 deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
-                deck["Tearing"] = Dict{String,Any}("Callen" => Dict{String,Any}(), "ModifiedRutherford" => Dict{String,Any}("preset" => "callen", "nw" => 400))
+                deck["Tearing"] = Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}("preset" => "callen", "nw" => 400))
                 for key in ("eq_filename", "kinetic_file")
                     deck["Equilibrium"][key] = abspath(joinpath(ex_dir, deck["Equilibrium"][key]))
                 end
                 open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
-                @test reference.tearing === nothing && reference.callen isa CallenResult
+                @test reference.tearing === nothing
+                @test reference.modified_rutherford isa ModifiedRutherfordResult
 
-                ric = reference.callen.problem.delta_prime
+                ric = reference.modified_rutherford.problem.ffs
                 @test ric isa ForceFreeStatesResult
-                @test reference.modified_rutherford.problem.ffs === ric
-                api = solve(CallenProblem(reference.pe; delta_prime=ric))
-                @test api.delta_c ≈ reference.callen.delta_c rtol = 1e-10
-                @test api.hw_v_crit ≈ reference.callen.hw_v_crit rtol = 1e-10
-                @test isequal(api.n_roots, reference.callen.n_roots)
-                @test !(solve(CallenProblem(reference.pe; delta_prime_source=:cylindrical)).delta_c ≈ api.delta_c)
-                @test_throws "needs delta_prime" solve(CallenProblem(reference.pe))
-
-                # The preset is Callen's equation: its roots are his full widths and its b_crit his B_crit. On the shared Riccati
-                # solve they agree to the few 1e-7 by which its surfaces' q differs from the forward solve's.
+                @test ric !== reference.ffs
+                @test !isempty(ric.delta_prime.matrix)
                 mre = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, MRE.CALLEN_PRESET..., nw=400))
                 @test mre.F ≈ reference.modified_rutherford.F rtol = 1e-10
+
+                # Callen's closed form (Fortran GPEC 1.6.0) with his cylindrical Δ_c = −2m/ρ, in metres of ρ: the critical
+                # vacuum half-width ½ w_pol^(2/3) ((27/4)|Δ_c|)^(1/6)/Δ_RMP^(1/2), B_crit = B_vac (h_v,crit/h_v)², and the
+                # positive roots of Δ_c x³ + Δ_RMP (2h_v)² x − w_pol² = 0 (trigonometric form), all widths back in ψ_N.
+                equil = reference.pe.response.ffs.equil
+                plasma = GeneralizedPerturbedEquilibrium.InnerLayer.layer_plasma(equil; log=false)
+                function callen(pe)
+                    rf = RF.resonant_forcing(pe)
+                    map(eachindex(rf.rational_psi)) do k
+                        rho, drho, d_rmp, hw_v = rf.rho[k], rf.drho[k], rf.delta_rmp[k], rf.hw_v[k]
+                        w_pol = RF.callen_polarization_width(equil, plasma, rf.rational_psi[k], rf.rational_q[k])[2]
+                        dc = -2 * rf.m[k] / rho
+                        hw_v_crit = 0.5 * w_pol^(2 / 3) * ((27 / 4) * abs(dc))^(1 / 6) / sqrt(d_rmp) / drho
+                        p, q = d_rmp * (2 * hw_v * drho)^2 / dc, -w_pol^2 / dc
+                        R = sqrt(-p / 3)
+                        arg = -q / (2 * R^3)
+                        x = abs(arg) <= 1 ? sort(filter(>(0), [2R * cos((acos(arg) + 2π * j) / 3) for j in 0:2])) ./ drho : [NaN, NaN]
+                        (; psi=rf.rational_psi[k], b_vac=rf.b_vac[k], d_rmp, w_v=2 * hw_v, b_crit=rf.b_vac[k] * (hw_v_crit / hw_v)^2,
+                            w_min=x[1], w_sat=x[end])
+                    end
+                end
                 row(res, psi) = findfirst(p -> isapprox(p, psi; atol=1e-6), res.rational_psi)
-                @test [mre.b_crit[row(mre, psi)] for psi in api.rational_psi] ≈ api.b_crit rtol = 1e-6
-                # On the forward solve's own surfaces, with Callen's cylindrical Δ_c and the coils scaled past the largest critical
-                # field so every surface has both roots, they agree to the root tolerance.
-                cyl0 = solve(CallenProblem(reference.pe; delta_prime_source=:cylindrical))
-                strong = perturbed_equilibrium(reference.pe.response, 4 * maximum(cyl0.b_crit ./ cyl0.b_vac) * reference.pe.forcing;
+                # On the forward solve's own surfaces, with the coils scaled past the largest critical field so every surface
+                # has both roots, the preset meets the closed form to the root tolerance.
+                cyl0 = callen(reference.pe)
+                strong = perturbed_equilibrium(reference.pe.response, 4 * maximum(c.b_crit / c.b_vac for c in cyl0) * reference.pe.forcing;
                     coil_sets=reference.pe.coil_sets, reference.pe.regularization_width)
-                cyl = solve(CallenProblem(strong; delta_prime_source=:cylindrical))
+                cyl = callen(strong)
                 pre = solve(ModifiedRutherfordProblem(reference.ffs; pe=strong, MRE.CALLEN_PRESET..., delta_prime_source=:cylindrical, nw=400))
-                @test cyl.b_crit ≈ cyl0.b_crit rtol = 1e-8
-                @test all(==(2), cyl.n_roots)
+                @test [c.b_crit for c in cyl] ≈ [c.b_crit for c in cyl0] rtol = 1e-8
+                @test all(c -> c.w_sat > c.w_min, cyl)
                 compared = 0
-                for k in eachindex(cyl.rational_psi)
-                    s = row(pre, cyl.rational_psi[k])
-                    @test pre.delta_rmp[s] ≈ cyl.delta_rmp[k] rtol = 1e-12
-                    @test pre.w_v[s] ≈ 2 * cyl.hw_v[k] rtol = 1e-12
-                    @test pre.b_crit[s] ≈ cyl.b_crit[k] rtol = 1e-8
-                    cyl.n_roots[k] == 2 && 2 * cyl.hw_sat[k] < pre.w[end] && 2 * cyl.hw_min[k] > pre.w_lo[s] || continue
-                    @test pre.w_m[s] ≈ 2 * cyl.hw_min[k] rtol = 1e-8
-                    @test pre.w_sat[s] ≈ 2 * cyl.hw_sat[k] rtol = 1e-8
+                for c in cyl
+                    s = row(pre, c.psi)
+                    @test pre.delta_rmp[s] ≈ c.d_rmp rtol = 1e-12
+                    @test pre.w_v[s] ≈ c.w_v rtol = 1e-12
+                    @test pre.b_crit[s] ≈ c.b_crit rtol = 1e-8
+                    c.w_sat < pre.w[end] && c.w_min > pre.w_lo[s] || continue
+                    @test pre.w_m[s] ≈ c.w_min rtol = 1e-8
+                    @test pre.w_sat[s] ≈ c.w_sat rtol = 1e-8
                     compared += 1
                 end
                 @test compared > 0
+                # The computed Δ′ moves Δ_c, and so the critical field, off the cylindrical one.
+                @test !(mre.b_crit ≈ solve(ModifiedRutherfordProblem(ric; pe=reference.pe, MRE.CALLEN_PRESET..., delta_prime_source=:cylindrical, nw=400)).b_crit)
                 # The general MRE takes the same forcing: F gains exactly the forcing term, which scales as (w_v/w)².
                 kw = (; delta_prime_source=:cylindrical, saturation=true, nw=40)
                 forced = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, kw...))
                 free = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, forcing=false, kw...))
                 @test forced.F ≈ free.F .+ forced.forcing rtol = 1e-12
                 @test forced.forcing .* forced.w' .^ 2 ≈ repeat(forced.forcing[:, 1] .* forced.w[1]^2, 1, 40) rtol = 1e-10
-                @test all(>(0), forced.forcing) && isequal(forced.b_crit, free.b_crit)
+                @test all(>(0), forced.forcing)
+                @test isequal(forced.b_crit, free.b_crit)
                 @test all(isnan, solve(ModifiedRutherfordProblem(ric; kw...)).b_crit)
                 h5open(joinpath(dir, "gpec.h5")) do f
-                    @test read(f["Tearing/Callen/PerSurface/delta_c"]) ≈ api.delta_c rtol = 1e-10
+                    @test !haskey(f["Tearing"], "Callen")
                     @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/b_crit"]), reference.modified_rutherford.b_crit)
                     @test read(f["Tearing/ModifiedRutherford/Terms/forcing"]) ≈ reference.modified_rutherford.forcing
                     recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
-                    @test haskey(recorded, "Callen") && recorded["ModifiedRutherford"]["pol_model"] == "callen"
+                    @test recorded["ModifiedRutherford"]["pol_model"] == "callen"
                 end
             end
 
-            # Without a perturbed equilibrium the deck stops at parse time.
+            # The retired [Tearing.Callen] section stops the parse as an unknown [Tearing] key.
             mktempdir() do dir
                 deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("Callen" => Dict{String,Any}())))
-                @test_throws "needs a [PerturbedEquilibrium]" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+                @test_throws "Callen" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
         end
 
