@@ -36,7 +36,7 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, result::ModifiedRuthe
 end
 
 const _MRE_PER_SURFACE = (:psi, :q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff, :Wc_prefac,
-    :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma, :delta_r, :w_lo,
+    :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma, :delta_r, :w_lo, :D_c, :W_d_layer,
     :alpha_s, :beta_s, :C_sat, :w_m, :w_sat)
 const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :interchange_unstable, :linear_unstable, :below_w_ib, :large_delta_prime_w,
     :complex_delta_prime, :saturation_unconverged)
@@ -80,6 +80,10 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/gamma" => (; long_name="linear tearing growth rate of the gate, NaN without one", units="1/s", dims=("surface",)),
     "PerSurface/delta_r" => (; long_name="resistive layer width of the gate, NaN without one", units="psi_N", dims=("surface",)),
     "PerSurface/w_lo" => (; long_name="lower end of the root search max(delta_r, w_min)", units="psi_N", dims=("surface",)),
+    "PerSurface/D_c" => (; long_name="SLAYER toroidal critical offset used by curvature_model = lutjens (r_s reference), NaN otherwise",
+        dims=("surface",)),
+    "PerSurface/W_d_layer" => (; long_name="transport width sqrt(2) pi^1.5 (-D_R)/D_c in the (r - r_s)/r_s reference, NaN otherwise",
+        dims=("surface",)),
     "PerSurface/alpha_s" =>
         (; long_name="saturation current-gradient coefficient alpha_s = -r q J_z'/s (Fitzpatrick 2023 Eq. 9.16), J_z = (R0^2/B0) <mu0 j_phi/R>", dims=("surface",)),
     "PerSurface/beta_s" => (; long_name="saturation current-curvature coefficient beta_s = -r^2 q J_z''/s", dims=("surface",)),
@@ -101,7 +105,7 @@ const MRE_H5_ANNOTATIONS = [
     "Terms/classical" => (; long_name="classical term Delta'(w)", dims=_MRE_TERM_DIMS),
     "Terms/saturation" => (; long_name="finite-width saturation term Delta_sat(w)", dims=_MRE_TERM_DIMS),
     "Terms/bootstrap" => (; long_name="bootstrap term Delta_nc(w)", dims=_MRE_TERM_DIMS),
-    "Terms/curvature" => (; long_name="curvature term Delta_GGJ(w)", dims=_MRE_TERM_DIMS),
+    "Terms/curvature" => (; long_name="curvature term Delta_GGJ(w) of curvature_model", dims=_MRE_TERM_DIMS),
     "Terms/polarization" => (; long_name="ion polarization term Delta_pol(w), including pol_sign", dims=_MRE_TERM_DIMS),
     "Terms/w_d" => (; long_name="transport threshold width w_d(w)", units="psi_N", dims=_MRE_TERM_DIMS)
 ]

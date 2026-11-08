@@ -39,6 +39,16 @@ using TOML
         @test MR.reduced_polarization_term(0.01; c_pol=1.0, C_pol=1.9, w_ib=1e-3) ≈ -(1.9e-3)^2 / 1e-6
     end
 
+    @testset "Lütjens curvature: SLAYER's critical offset at small w, 6.35 D_R/W at large w" begin
+        D_R, D_c, K = -0.02, 1.5, 0.9
+        W_d = MR.layer_transport_width(D_R, D_c)
+        @test MR.lutjens_curvature_term(D_R, -0.25, K, W_d, 1e-9) * K ≈ -D_c rtol = 1e-3
+        @test MR.lutjens_curvature_term(D_R, -0.25, K, W_d, 1e3 * W_d * K) ≈ 6.35 * D_R / (1e3 * W_d * K) rtol = 1e-6
+        # Referred to ψ_N as the outer Δ′: K^(−2α) at D_I < −¼.
+        @test MR.lutjens_curvature_term(D_R, -0.3, K, W_d, 1e-9) * K^(2 * sqrt(0.3)) ≈ -D_c rtol = 1e-3
+        @test MR.layer_transport_width(D_R, 0.0) == Inf
+    end
+
     @testset "saturation term: Wesson cylinder of Fitzpatrick 2023 Fig. 9.2" begin
         # q0 = 0.8, q(a) = 4.4, r = √ψ (a = 1), J_z = (2/q0)(1 − r²)^ν; reference α_s, β_s from the independent shooting script.
         q0, qa = 0.8, 4.4

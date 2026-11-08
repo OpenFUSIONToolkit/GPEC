@@ -36,6 +36,27 @@ function curvature_term(D_R::Real, H::Real, D_I::Real, w_d::Real, w::Real; k1::R
 end
 
 """
+    lutjens_curvature_term(D_R, D_I, K, W_d, w) -> Float64
+
+Curvature term of Lütjens, Luciani & Garbet (2001) in the form of Urso et al. (2010) Eq. 1,
+`r_s Δ_GGJ = 6.35 D_R / √((W/r_s)² + 0.65 W_d²)`, with `W/r_s = w/K` and `W_d` the transport width in the same
+`(r − r_s)/r_s` reference ([`layer_transport_width`](@ref)), referred to ψ_N as the outer Δ′ is (`K^(−2α)`,
+`α = √(−D_I)`). Its `w → 0` limit is SLAYER's critical offset `−√2 π^(3/2) D_R/W_d` (6.35/√0.65 = √2 π^(3/2)); for
+`w ≫ W_d` it is the large-aspect-ratio `6.35 D_R/W` (La Haye 2006). Stabilizing for `D_R < 0`.
+"""
+function lutjens_curvature_term(D_R::Real, D_I::Real, K::Real, W_d::Real, w::Real)
+    return K^(-2 * sqrt(-D_I)) * 6.35 * D_R / sqrt((w / K)^2 + 0.65 * W_d^2)
+end
+
+"""
+    layer_transport_width(D_R, D_c) -> Float64
+
+Transport width `W_d` in the `(r − r_s)/r_s` reference implied by a SLAYER critical offset,
+`D_c = −√2 π^(3/2) D_R/W_d` (Connor et al. 2015 Eq. 59 with Fitzpatrick's W_d); `Inf` when `D_c = 0`.
+"""
+layer_transport_width(D_R::Real, D_c::Real) = D_c == 0 ? Inf : sqrt(2) * π^1.5 * (-D_R) / D_c
+
+"""
     saturation_coefficient(J, r, dr_dpsi, q, dq_dpsi, psi; window=0.02, psi_lim=(0.0, 1.0), npts=11) -> NamedTuple
 
 Current-gradient coefficients of the finite-width saturation term (Fitzpatrick 2023 Eqs. 9.15–9.19, after Hastie,

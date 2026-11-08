@@ -36,7 +36,11 @@ from noise, so they get no seed threshold but keep `w_sat`.
   - `delta_prime_model` - `:mercier_power` (Benjamin Eq. 10) or `:constant` (Δ′(w) = Δ′_mn).
   - `delta_prime_factor`, `D_nc_factor`, `rho_theta_factor` - Multipliers on Δ′_mn, D_nc and the poloidal ion Larmor
     radius ρ_θi (which also sets w_ib), for scans.
-  - `k1` - Bootstrap and curvature coefficient k₁.
+  - `curvature_model` - `:lutjens` (default; Lütjens et al. 2001, [`lutjens_curvature_term`](@ref), whose small-w limit is
+    the SLAYER toroidal critical offset D_c of the linear gate) or `:benjamin` (Benjamin Eq. 12, [`curvature_term`](@ref),
+    for comparison with the tearing-physics suite). `:lutjens` takes W_d and D_c from SLAYER's toroidal layer parameters
+    built on each surface with this problem's χ⊥.
+  - `k1` - Bootstrap coefficient k₁, and curvature coefficient of `curvature_model = :benjamin`.
   - `c_wd` - Prefactor of the transport threshold width w_d.
   - `chi_perp_factor` - Multiplier on χ⊥,e (the kinetic `chi_e` profile, else its `chi_e_default`).
   - `pol_model` - `:full` (Benjamin Eq. C.1) or `:reduced` (−c_pol w_pol²/w³, w_pol = C_pol w_ib).
@@ -57,6 +61,7 @@ from noise, so they get no seed threshold but keep `w_sat`.
     polarization::Bool = false
     saturation::Bool = false
     saturation_window::Float64 = 0.02
+    curvature_model::Symbol = :lutjens
     delta_prime_source::Symbol = :computed
     delta_prime_model::Symbol = :mercier_power
     delta_prime_factor::Float64 = 1.0
@@ -98,6 +103,8 @@ Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to 
     banana width in ψ_N, inverse aspect ratio.
   - `gamma`, `delta_r` - Linear growth rate [1/s] and resistive layer width in ψ_N from `tearing` (`NaN` without it).
   - `w_lo` - Lower end of the root search.
+  - `D_c`, `W_d_layer` - SLAYER toroidal critical offset (r_s reference) and the transport width it implies, in the
+    (r − r_s)/r_s reference, used by `curvature_model = :lutjens` (`NaN` for `:benjamin`).
   - `alpha_s`, `beta_s`, `C_sat` - Current-gradient coefficients of the saturation term and its coefficient.
   - `w_m`, `w_sat` - Seed threshold and saturated full widths in ψ_N; `NaN` when absent or excluded, and `w_m` `NaN` when γ > 0.
   - `w_m_star` - Smallest `w_m` over the surfaces.
@@ -141,6 +148,8 @@ struct ModifiedRutherfordResult{P}
     gamma::Vector{Float64}
     delta_r::Vector{Float64}
     w_lo::Vector{Float64}
+    D_c::Vector{Float64}
+    W_d_layer::Vector{Float64}
     alpha_s::Vector{Float64}
     beta_s::Vector{Float64}
     C_sat::Vector{Float64}
@@ -182,6 +191,7 @@ function validate(prob::ModifiedRutherfordProblem)
     end
     ffs.equil.kinetic === nothing && throw(ArgumentError("ModifiedRutherfordProblem needs kinetic profiles; set kinetic_file in [Equilibrium]"))
     prob.delta_prime_model in (:mercier_power, :constant) || throw(ArgumentError("delta_prime_model must be :mercier_power or :constant"))
+    prob.curvature_model in (:lutjens, :benjamin) || throw(ArgumentError("curvature_model must be :lutjens or :benjamin"))
     prob.pol_model in (:full, :reduced) || throw(ArgumentError("pol_model must be :full or :reduced"))
     prob.omega_model in (:electron_diamagnetic, :exb) || throw(ArgumentError("omega_model must be :electron_diamagnetic or :exb"))
     abs(prob.pol_sign) == 1 || throw(ArgumentError("pol_sign must be +1 or -1"))
@@ -218,6 +228,17 @@ function mre_roots(F, w_lo::Real, w_grid::AbstractVector)
     return (; w_m, w_sat, fully_stabilized=all(<(0), vals), unstable_any_seed=vals[1] > 0)
 end
 
+# SLAYER's toroidal critical offset D_c and the W_d it implies at one surface, with χ⊥ for every χ input.
+function _layer_critical_offset(equil, s, loaded, data, chi_perp)
+    zeff = _layer_zeff(loaded, data)
+    p = only(
+        build_slayer_inputs(equil, [s], loaded.profiles; mu_i=_layer_ion_mass(data), mu_rho=_layer_mass_per_electron(data, zeff), zeff,
+            chi_perp_e=chi_perp, chi_perp_i=chi_perp, chi_perp_Dc=chi_perp, chi_tor=chi_perp, tau_E=data.tau_E, P_perp_model=:chi_perp_e,
+            dc_type=:toroidal, resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
+    )
+    return p.dc_tmp, layer_transport_width(p.dr_val, p.dc_tmp)
+end
+
 # The linear tearing row at ψ in `tearing`, or `nothing`.
 _tearing_row(tearing, psi) = findfirst(p -> isapprox(p, psi; atol=1e-8), tearing.rational_psi)
 
@@ -251,7 +272,7 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     out = (; psi=vec0(), q=vec0(), m=zeros(Int, ns), n=zeros(Int, ns), delta_prime=vec0(), delta_prime_imag=vec0(), D_I=vec0(), D_R=vec0(),
         H=vec0(), D_nc=vec0(), f_trap=vec0(), mu_ratio=vec0(), zeff=vec0(), Wc_prefac=vec0(), chi_perp=vec0(), v_te=vec0(), R0=vec0(),
         omega_star_i=vec0(), omega_star_e=vec0(), omega_hat=vec0(), omega_hat_pi=vec0(), beta_p=vec0(), rho_theta=vec0(), w_ib=vec0(),
-        eps=vec0(), gamma=vec0(), delta_r=vec0(), w_lo=vec0(), alpha_s=vec0(), beta_s=vec0(), C_sat=vec0(), w_m=vec0(), w_sat=vec0())
+        eps=vec0(), gamma=vec0(), delta_r=vec0(), w_lo=vec0(), D_c=vec0(), W_d_layer=vec0(), alpha_s=vec0(), beta_s=vec0(), C_sat=vec0(), w_m=vec0(), w_sat=vec0())
     flags = (; fully_stabilized=flag0(), unstable_any_seed=flag0(), interchange_unstable=flag0(), linear_unstable=flag0(),
         below_w_ib=flag0(), large_delta_prime_w=flag0(), complex_delta_prime=flag0(),
         saturation_unconverged=flag0())
@@ -305,12 +326,17 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         sc = saturation_coefficient(J_z, r_at, x -> abs(dr_dpsi(x)), x -> Float64(equil.profiles.q_spline(x)),
             x -> Float64(equil.profiles.q_deriv(x)), psi; window=prob.saturation_window, psi_lim)
         flags.saturation_unconverged[k] = !sc.converged
+        # SLAYER's toroidal critical offset at this surface with this χ⊥, so the curvature term meets the gate at small w.
+        D_c, W_d_layer = prob.curvature_model === :lutjens ? _layer_critical_offset(equil, s, loaded, data, chi_perp) : (NaN, NaN)
         function terms(wj)
             wd = transport_width(wj; prob.c_wd, chi_perp, v_te, R0=g.R_major, g.q, g.q1, n, m, g.Wc_prefac)
             cl = D_I < 0 ? classical_term(dp_mn, D_I, wj; model=prob.delta_prime_model) : NaN
             st = D_I < 0 ? saturation_term(sc.C_sat, K, D_I, wj; model=prob.delta_prime_model) : NaN
             bs = bootstrap_term(D_nc, wd, wj; prob.k1)
-            cv = D_I < 0 ? curvature_term(D_R, rg.H, D_I, wd, wj; prob.k1) : NaN
+            cv =
+                D_I >= 0 ? NaN :
+                prob.curvature_model === :lutjens ? lutjens_curvature_term(D_R, D_I, K, W_d_layer, wj) :
+                curvature_term(D_R, rg.H, D_I, wd, wj; prob.k1)
             pl =
                 prob.pol_sign * (
                     prob.pol_model === :full ?
@@ -346,7 +372,7 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
 
         for (key, val) in pairs((; psi, q=s.q, m, n, delta_prime=dp_mn, delta_prime_imag=imag(dp_complex), D_I, D_R, H=rg.H, D_nc,
             f_trap=g.f_trap, mu_ratio, zeff, g.Wc_prefac, chi_perp, v_te, R0=g.R_major, omega_star_i, omega_star_e, omega_hat, omega_hat_pi,
-            beta_p, rho_theta, w_ib, g.eps, gamma, delta_r, w_lo, sc.alpha_s, sc.beta_s, sc.C_sat, w_m, w_sat))
+            beta_p, rho_theta, w_ib, g.eps, gamma, delta_r, w_lo, D_c, W_d_layer, sc.alpha_s, sc.beta_s, sc.C_sat, w_m, w_sat))
             getfield(out, key)[k] = val
         end
     end
@@ -355,7 +381,7 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     return ModifiedRutherfordResult(prob, collect(w), out.psi, out.q, out.m, out.n, out.delta_prime, out.delta_prime_imag, out.D_I, out.D_R,
         out.H, out.D_nc, out.f_trap, out.mu_ratio, out.zeff, out.Wc_prefac, out.chi_perp, out.v_te, out.R0, out.omega_star_i,
         out.omega_star_e, out.omega_hat, out.omega_hat_pi, out.beta_p, out.rho_theta, out.w_ib, out.eps, out.gamma, out.delta_r, out.w_lo,
-        out.alpha_s, out.beta_s, out.C_sat, out.w_m, out.w_sat, w_m_star, Vector{Bool}(flags.fully_stabilized), Vector{Bool}(flags.unstable_any_seed),
+        out.D_c, out.W_d_layer, out.alpha_s, out.beta_s, out.C_sat, out.w_m, out.w_sat, w_m_star, Vector{Bool}(flags.fully_stabilized), Vector{Bool}(flags.unstable_any_seed),
         Vector{Bool}(flags.interchange_unstable), Vector{Bool}(flags.linear_unstable), Vector{Bool}(flags.below_w_ib),
         Vector{Bool}(flags.large_delta_prime_w), Vector{Bool}(flags.complex_delta_prime),
         Vector{Bool}(flags.saturation_unconverged),

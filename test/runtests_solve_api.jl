@@ -613,6 +613,16 @@ using HDF5
                 @test isequal(api.gamma, reference.modified_rutherford.gamma) && all(isfinite, api.gamma)
                 @test api.linear_unstable == (api.gamma .> 0)
                 @test isequal(api.w_m, reference.modified_rutherford.w_m)
+                # The default Lütjens curvature takes SLAYER's toroidal critical offset, so it equals a toroidal gate's at the same χ⊥.
+                # χ⊥ varies by surface here, so the gate is built with the 3/1 surface's χ⊥ and compared there.
+                @test all(isfinite, api.D_c) && all(>(0), api.W_d_layer)
+                k = findfirst(==(3), api.m)
+                gate = solve(TearingProblem(reference.ffs), SLAYERModel(; D_c_type=:toroidal, chi_perp_Dc=api.chi_perp[k]))
+                row = findfirst(x -> isapprox(x, api.psi[k]; atol=1e-8), gate.rational_psi)
+                @test gate.params[row].dc_tmp ≈ api.D_c[k] rtol = 1e-10
+                ben = solve(ModifiedRutherfordProblem(reference.ffs; tearing=reference.tearing, nw=40, curvature_model=:benjamin))
+                @test all(isnan, ben.D_c) && ben.classical ≈ api.classical && !(ben.curvature ≈ api.curvature)
+                @test_throws "curvature_model" solve(ModifiedRutherfordProblem(reference.ffs; curvature_model=:other))
             end
 
             # A forward solve has no Δ′, so the deck stops at parse time.
