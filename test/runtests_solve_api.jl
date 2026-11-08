@@ -631,7 +631,7 @@ include("display_check.jl")
                     save_to_hdf5(f, reference.tearing)
                     @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/w_m"]), api.w_m) && haskey(f, "Tearing/PerSurface")
                     recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
-                    @test recorded["ModifiedRutherford"]["nw"] == 40 && haskey(recorded, "model")
+                    @test recorded["ModifiedRutherford"]["nw"] == 40 && recorded["inner_model"] == "SLAYER"
                 end
             end
 
@@ -642,7 +642,7 @@ include("display_check.jl")
             end
             # omega_ratio is the one optional (nothing-default) key: a deck value reaches the problem as a Float64.
             @test GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
-                Dict{String,Any}("omega_ratio" => 1)))).omega_ratio === 1.0
+                Dict{String,Any}("omega_ratio" => 1))))[:omega_ratio] == 1.0
         end
 
         @testset "Callen threshold under [Tearing.Callen]" begin
