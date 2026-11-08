@@ -134,6 +134,15 @@ using QuadGK
         @test isempty(KF._cell_roots(s -> 2.0, 0.0, 1.0, 5))
     end
 
+    @testset "core extension below the first response surface" begin
+        # Harmonics m = 0, 2, -3 at ψ = ψ_low/4: regular scales by (1/4)^{|m|/2}, flat keeps them, zero drops them.
+        intr = KF.KineticForcesInternal(equil)
+        intr.psilow, intr.mfac = 0.2, [0, 2, -3]
+        ext(mode) = (intr.orbit_core_extension = mode; buf = (dbob=ComplexF64[1, 1, 1], divx=ComplexF64[2, 2, 2]); KF._core_extension!(buf, intr, 0.05); buf)
+        @test ext("regular").dbob ≈ [1, 1 / 4, 1 / 8] && ext("regular").divx ≈ [2, 1 / 2, 1 / 4]
+        @test ext("flat").dbob == [1, 1, 1] && all(iszero, ext("zero").divx)
+    end
+
     @testset "orbit-averaged torque reduces to the surface path" begin
         # Synthetic two-mode perturbation: the torque reads only the δB/B and ∇·ξ⊥ Fourier modes.
         intr = KF.KineticForcesInternal(equil)

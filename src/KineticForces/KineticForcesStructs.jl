@@ -84,6 +84,10 @@ Immutable: vary a field by building a new control.
   - `orbit_nenergy::Int` - Starting √x nodes on each orbit-class segment of a `forb` pitch node and sign of v∥.
   - `orbit_energy_tol::Float64` - Relative error to which the `forb` segment samples are refined in √x.
   - `orbit_umax::Float64` - Top of the `forb` energy range in √x = √(E/T).
+  - `orbit_core_extension::String` - Perturbation seen by `forb` orbits inside the first ψ of the response (ψ_low, above
+    the axis when the response starts at `qlow`): `"regular"` scales each poloidal harmonic m by (ψ/ψ_low)^{|m|/2}, the
+    r^|m| of a regular field, so m ≠ 0 vanishes on axis; `"flat"` holds the ψ_low values; `"zero"` drops it. Default
+    `"regular"`.
   - `alpha::Bool` - Add the fusion alphas to the species sum: an isotropic slowing-down distribution whose source is the
     D–T fusion rate of the D (z = 1, m = 2) and T (z = 1, m = 3) entries of `ion_species` (see [`alpha_species`](@ref)).
     Torque methods only (fgar, forb and their variants); not in the calculated kinetic matrices. Default `false`.
@@ -157,6 +161,7 @@ Immutable: vary a field by building a new control.
     orbit_nenergy::Int = 12         # Starting √x nodes per orbit-class segment of forb
     orbit_energy_tol::Float64 = 1e-2 # Relative refinement tolerance of the forb √x samples
     orbit_umax::Float64 = 6.5       # Top of the forb energy range in √x
+    orbit_core_extension::String = "regular" # forb perturbation inside the first response ψ: regular, flat or zero
 
     # Fusion alphas
     alpha::Bool = false             # Add the D-T fusion-alpha NTV (isotropic slowing-down distribution)
@@ -210,6 +215,7 @@ perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles
   - `orbit_lmax`, `orbit_nlambda`, `orbit_nenergy`, `orbit_energy_tol`, `orbit_umax`: bounce harmonics, pitch nodes and
     √x sampling of the `forb` orbit tables
   - `orbit_potential`: whether `orbit_field` carries the potential
+  - `orbit_core_extension`: the `forb` perturbation below `psilow` (see [`KineticForcesControl`](@ref))
 """
 @kwdef mutable struct KineticForcesInternal
     # Equilibrium-derived quantities
@@ -248,6 +254,7 @@ perturbation and geometric-matrix interpolants. Equilibrium and kinetic profiles
     orbit_energy_tol::Float64 = 1e-2
     orbit_umax::Float64 = 6.5
     orbit_potential::Bool = false
+    orbit_core_extension::String = "regular"
 
     # θ knot grid (length mthsurf+1) read by the per-surface setup; never written after construction.
     tpsi_xs::Vector{Float64} = Float64[]
@@ -466,6 +473,8 @@ Results for one NTV computation method across all flux surfaces.
     resonance_psis::Vector{Float64} = Float64[]
     # forb only: lost share of the launch phase space at each `psi_grid` point (see `OrbitSurfaceTable`)
     lost_fraction::Vector{Float64} = Float64[]
+    # forb only: share of the launch phase space on closed orbits entering ψ < psilow (see `OrbitSurfaceTable`)
+    core_fraction::Vector{Float64} = Float64[]
 end
 
 """

@@ -159,6 +159,8 @@ Guiding-center orbit segments on one flux surface.
     different from their segment's
   - `lost_fraction`: share of the launch phase space (density weight of the species over √x ≤ umax and v∥/v at θ₀, both
     signs) on lost orbits; `NaN` when not computed
+  - `core_fraction`: share of the same phase space on closed orbits that enter ψ < `psilow`, where the perturbation is the
+    `orbit_core_extension` (each segment weighted by the share of its nodes that do); `NaN` when not computed
 """
 struct OrbitSurfaceTable
     lambda::Vector{Float64}
@@ -166,9 +168,10 @@ struct OrbitSurfaceTable
     lmax::Int
     nstatus::Vector{Int}
     lost_fraction::Float64
+    core_fraction::Float64
 end
 
-OrbitSurfaceTable(lambda, segments, lmax, nstatus) = OrbitSurfaceTable(lambda, segments, lmax, nstatus, NaN)
+OrbitSurfaceTable(lambda, segments, lmax, nstatus) = OrbitSurfaceTable(lambda, segments, lmax, nstatus, NaN, NaN)
 
 """
     orbit_energy_nodes(a, b, n) → Vector{Float64}
@@ -203,7 +206,8 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
     fhat(x) = isfinite(ebirth) ? (x < ebirth / T_s ? 1 / (x * sqrt(x) + 1) : 0.0) : exp(-x)
     densw(a, b) = quadgk(u -> u^2 * fhat(u^2), a, b; rtol=1e-6)[1]
     Bθ0 = g.B((psi, theta0))
-    lost_w, all_w = zeros(nl), zeros(nl)
+    lost_w, core_w, all_w = zeros(nl), zeros(nl), zeros(nl)
+    coreshare = Ref(0.0)
     for il in 1:nl
         geo.valid[il] || continue
         lam, nstatus = geo.lambda[il], counts[il]
@@ -233,8 +237,10 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
                 c == 3 && (lost_w[il] += w)
                 c in (1, 2) || continue
                 seg = _sample_segment(orbit, neighbour, measure, c == 2, ua, ub, lam, q, welec, potential, n, lmax, divxfac, g, intr, buf,
-                    nenergy, energy_tol, nstatus)
-                seg === nothing || push!(segments[il], seg)
+                    nenergy, energy_tol, nstatus, coreshare)
+                seg === nothing && continue
+                push!(segments[il], seg)
+                core_w[il] += w * coreshare[]
             end
         end
     end
@@ -243,8 +249,8 @@ function orbit_surface_table(g::GuidingCenterField, geo::BounceGeometry, intr, p
     ok = [il for il in 1:nl if geo.valid[il] && all_w[il] > 0]
     ξ = [sqrt(max(1 - geo.lambda[il] * Bθ0 / g.bo, 0.0)) for il in ok]
     tw = [abs(ξ[min(k + 1, end)] - ξ[max(k - 1, 1)]) / 2 for k in eachindex(ok)]
-    lost = isempty(ok) ? NaN : sum(tw .* lost_w[ok]) / sum(tw .* all_w[ok])
-    return OrbitSurfaceTable(geo.lambda[1:nl], segments, lmax, nstatus, lost)
+    frac(v) = isempty(ok) ? NaN : sum(tw .* v[ok]) / sum(tw .* all_w[ok])
+    return OrbitSurfaceTable(geo.lambda[1:nl], segments, lmax, nstatus, frac(lost_w), frac(core_w))
 end
 
 # Class segments [(ua, ub, code)] of one column in √x ∈ [0, umax]: a scan with `cls`, then bisection of each class change with `edge`.
@@ -269,8 +275,9 @@ end
 
 # Orbit quantities on one closed segment, refined until a spline through every other node reproduces the rest.
 function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, q, welec, potential, n, lmax, divxfac, g, intr, buf,
-    nenergy, energy_tol, nstatus)
+    nenergy, energy_tol, nstatus, coreshare)
     nh = 2 * lmax + 1
+    incore = Dict{Float64,Bool}()
     cls = passing ? :passing : :trapped
     samples = Dict{Float64,Tuple{Float64,Float64,Vector{Float64},Int,Float64,Float64,Float64,Int}}()
     function sample!(u)
@@ -304,6 +311,7 @@ function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, 
         end
         (isnan(hp) || isnan(hm)) && (nstatus[7] += 1)
         r = measure(u)
+        incore[u] = o.psi_range[1] < intr.psilow
         samples[u] = (o.wb / u, wd, dj, passing ? Int(o.dir_theta) : 0, o.psibar - o.sol.u[1][1], sign(r) * dψ, abs(r), o.ncross)
         return nothing
     end
@@ -338,8 +346,27 @@ function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, 
     nc = [samples[u][8] for u in us]
     ncs = sort(unique(nc); by=k -> -count(==(k), nc))[1]
     nstatus[8] += count(!=(ncs), nc)
+    coreshare[] = count(u -> incore[u], us) / length(us)
     col(k) = [samples[u][k] for u in us]
     return OrbitSegment(passing, dir, ua, ub, us, col(1), col(2), reduce(vcat, [samples[u][3]' for u in us]), col(5), col(6), col(7), 1 / ncs)
+end
+
+# Inside the first response surface, scale the harmonics taken there: (ψ/ψ_low)^{|m|/2} ("regular", r^|m|), 1 ("flat") or 0 ("zero").
+function _core_extension!(buf, intr, ψ::Float64)
+    mode = intr.orbit_core_extension
+    mode == "flat" && return nothing
+    if mode == "zero"
+        fill!(buf.dbob, 0)
+        fill!(buf.divx, 0)
+        return nothing
+    end
+    s = sqrt(max(ψ, 0.0) / intr.psilow)
+    @inbounds for j in eachindex(buf.dbob)
+        f = s^abs(intr.mfac[j])
+        buf.dbob[j] *= f
+        buf.divx[j] *= f
+    end
+    return nothing
 end
 
 # |δJ_ℓ|² of one orbit for ℓ = -lmax:lmax (the surface path's labels; `flip` maps them to −ℓ along the orbit).
@@ -357,8 +384,9 @@ function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr,
         τ = (k - 1) * dτ
         u = sol(buf.u, τ)
         ψ, θ, w = u[1], u[2], u[4]
-        intr.dbob_m(buf.dbob, ψ)
-        intr.divx_m(buf.divx, ψ)
+        intr.dbob_m(buf.dbob, max(ψ, intr.psilow))
+        intr.divx_m(buf.divx, max(ψ, intr.psilow))
+        ψ < intr.psilow && _core_extension!(buf, intr, ψ)
         e1 = cis(twopi * θ)
         em = cis(twopi * m1 * θ)
         dbob = divx = zero(ComplexF64)

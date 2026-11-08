@@ -122,6 +122,7 @@ function integrate_psi_quadgk(
     logged_dtdpsi_ell = Vector{Vector{ComplexF64}}()
     logged_elems = is_matrix_method ? Vector{Array{ComplexF64,3}}() : nothing
     logged_lost = Float64[]
+    logged_core = Float64[]
 
     function psi_batch!(y::AbstractVector{ComplexF64}, x::AbstractVector)
         for c0 in 1:chunk:length(x)
@@ -169,6 +170,7 @@ function integrate_psi_quadgk(
                 push!(logged_dtdpsi, total)
                 orb = get(surfaces[j], :orbit, nothing)
                 push!(logged_lost, orb === nothing ? NaN : orb.lost_fraction)
+                push!(logged_core, orb === nothing ? NaN : orb.core_fraction)
                 # Same envelope as `total` so Σ_ℓ still reproduces it.
                 push!(logged_dtdpsi_ell, harm_vals[:, j] .* envelope)
                 if is_matrix_method
@@ -217,7 +219,7 @@ function integrate_psi_quadgk(
     torque_profile =
         npts > 1 ?
         (psi=sorted_psi, dtdpsi=sorted_dtdpsi, t_cumulative=t_cumulative,
-            dtdpsi_ell=sorted_dtdpsi_ell, ell=collect(-nl:nl), lost_fraction=logged_lost[perm]) : nothing
+            dtdpsi_ell=sorted_dtdpsi_ell, ell=collect(-nl:nl), lost_fraction=logged_lost[perm], core_fraction=logged_core[perm]) : nothing
 
     # Trapezoidal integration of kinetic matrices over ψ (matrix methods only)
     matrix_integrated = nothing
@@ -361,6 +363,9 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         intr.orbit_field = guiding_center_field(equil; omegaE=ctrl.orbit_potential ? kinetic_profiles.omegaE_spline : nothing)
         intr.orbit_lmax, intr.orbit_nlambda, intr.orbit_nenergy = ctrl.bounce_harmonic_max, ctrl.orbit_nlambda, ctrl.orbit_nenergy
         intr.orbit_energy_tol, intr.orbit_umax = ctrl.orbit_energy_tol, ctrl.orbit_umax
+        ctrl.orbit_core_extension in ("regular", "flat", "zero") ||
+            error("orbit_core_extension must be regular, flat or zero, got $(ctrl.orbit_core_extension)")
+        intr.orbit_core_extension = ctrl.orbit_core_extension
     end
 
     for entry in METHOD_REGISTRY
@@ -394,7 +399,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         psi_nsteps_total = 0
         panel_psis_out = Float64[]
         resonance_psis_out = Float64[]
-        lost_out = Float64[]
+        lost_out, core_out = Float64[], Float64[]
 
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
@@ -421,7 +426,9 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                     # `total_torque` when npert > 1.
                     dtdpsi_ell_out = result.torque_profile.dtdpsi_ell
                     ell_out = result.torque_profile.ell
-                    method_kind(method) == :orbit && (lost_out = result.torque_profile.lost_fraction)
+                    if method_kind(method) == :orbit
+                        lost_out, core_out = result.torque_profile.lost_fraction, result.torque_profile.core_fraction
+                    end
                 end
             end
 
@@ -449,7 +456,8 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             psi_nsteps=psi_nsteps_total,
             panel_psis=panel_psis_out,
             resonance_psis=resonance_psis_out,
-            lost_fraction=lost_out
+            lost_fraction=lost_out,
+            core_fraction=core_out
         )
         state.method_results[method] = result_entry
 

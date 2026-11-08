@@ -78,6 +78,7 @@ function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, state::KineticForcesS
                 mg["dVdpsi"] = [dVdpsi_spline(p) for p in result.psi_grid]
             end
             isempty(result.lost_fraction) || (mg["lost_fraction"] = result.lost_fraction)
+            isempty(result.core_fraction) || (mg["core_fraction"] = result.core_fraction)
         end
     end
 
@@ -127,6 +128,11 @@ const KF_METHOD_H5_ANNOTATIONS = [
         attach=(1 => "psi", 2 => "ell")
     ),
     "lost_fraction" => (; long_name="share of the launch phase space on lost orbits (forb only)", dims=("psi",), attach=(1 => "psi",)),
+    "core_fraction" => (;
+        long_name="share of the launch phase space on closed orbits entering psi below the response's first surface, where orbit_core_extension sets the perturbation (forb only)",
+        dims=("psi",),
+        attach=(1 => "psi",)
+    ),
     "dVdpsi" => (; long_name="flux-surface volume derivative dV/dψ_N at quadrature points", units="m^3", dims=("psi",), attach=(1 => "psi",)),
     "KineticMatrices/A" => (; long_name="Logan 2015 drift-kinetic coefficient matrix A = W_Z†W_Z (energy normalization)", dims=("mode_row", "mode_col")),
     "KineticMatrices/B" => (; long_name="Logan 2015 drift-kinetic coefficient matrix B = W_Z†W_X (energy normalization)", dims=("mode_row", "mode_col")),
