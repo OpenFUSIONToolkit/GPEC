@@ -39,7 +39,7 @@ const _MRE_PER_SURFACE = (:psi, :q, :m, :n, :delta_prime, :delta_prime_imag, :D_
     :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma, :delta_r, :w_lo,
     :alpha_s, :beta_s, :C_sat, :w_m, :w_sat)
 const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :interchange_unstable, :linear_unstable, :below_w_ib, :large_delta_prime_w,
-    :complex_delta_prime)
+    :complex_delta_prime, :saturation_unconverged)
 const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d)
 
 # Julia's surface × width matrices land in HDF5 as (width, surface).
@@ -80,7 +80,8 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/gamma" => (; long_name="linear tearing growth rate of the gate, NaN without one", units="1/s", dims=("surface",)),
     "PerSurface/delta_r" => (; long_name="resistive layer width of the gate, NaN without one", units="psi_N", dims=("surface",)),
     "PerSurface/w_lo" => (; long_name="lower end of the root search max(delta_r, w_min)", units="psi_N", dims=("surface",)),
-    "PerSurface/alpha_s" => (; long_name="saturation current-gradient coefficient alpha_s = -r q J_z'/s (Fitzpatrick 2023 Eq. 9.16)", dims=("surface",)),
+    "PerSurface/alpha_s" =>
+        (; long_name="saturation current-gradient coefficient alpha_s = -r q J_z'/s (Fitzpatrick 2023 Eq. 9.16), J_z = (R0^2/B0) <mu0 j_phi/R>", dims=("surface",)),
     "PerSurface/beta_s" => (; long_name="saturation current-curvature coefficient beta_s = -r^2 q J_z''/s", dims=("surface",)),
     "PerSurface/C_sat" => (; long_name="saturation coefficient 0.8 alpha_s^2 - 0.27 beta_s - 0.09 alpha_s (Fitzpatrick 2023 Eq. 9.15)",
         dims=("surface",)),
@@ -93,6 +94,8 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/linear_unstable" => (; long_name="1 if the gate's growth rate is positive (no seed threshold, w_sat kept)", dims=("surface",)),
     "PerSurface/below_w_ib" => (; long_name="1 if w_m < w_ib", dims=("surface",)),
     "PerSurface/large_delta_prime_w" => (; long_name="1 if |Delta'| w >= 1 at w_m or w_sat", dims=("surface",)),
+    "PerSurface/saturation_unconverged" => (; long_name="1 if C_sat moves more than 20% between half and double the fit window, or the window leaves the grid",
+        dims=("surface",)),
     "PerSurface/complex_delta_prime" => (; long_name="1 if |Im Delta'| > 1e-3 |Re Delta'|", dims=("surface",)),
     "Terms/F" => (; long_name="modified Rutherford F(w), the sum of the switched-on terms", dims=_MRE_TERM_DIMS),
     "Terms/classical" => (; long_name="classical term Delta'(w)", dims=_MRE_TERM_DIMS),

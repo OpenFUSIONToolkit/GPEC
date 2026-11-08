@@ -36,23 +36,32 @@ function curvature_term(D_R::Real, H::Real, D_I::Real, w_d::Real, w::Real; k1::R
 end
 
 """
-    saturation_coefficient(r, dr_dpsi, q, dq_dpsi, psi; h=0.01) -> NamedTuple
+    saturation_coefficient(J, r, dr_dpsi, q, dq_dpsi, psi; window=0.02, psi_lim=(0.0, 1.0), npts=11) -> NamedTuple
 
 Current-gradient coefficients of the finite-width saturation term (Fitzpatrick 2023 Eqs. 9.15–9.19, after Hastie,
 Militello & Porcelli 2005): `α_s = −r q J_z′/s`, `β_s = −r² q J_z″/s` and `C_sat = 0.8 α_s² − 0.27 β_s − 0.09 α_s`, with
-`s = r q′/q`, `′ = d/dr` and the cylindrical `J_z = R₀μ₀j_z/B_z = (2 − s)/q`, all in the radial label `r(ψ)` with
-derivative `dr_dpsi(ψ)`. `J_z′` and `J_z″` are central differences of step `h` in ψ_N. Eq. 9.17 prints `r q J_z″/s`;
-the `r²` form is the dimensionless one and the one that reproduces Fitzpatrick's Fig. 9.2.
+`s = r q′/q` and `′ = d/dr` in the radial label `r(ψ)` (derivative `dr_dpsi`), and `J(ψ)` the dimensionless current
+density ([`current_density_profile`](@ref)). Eq. 9.17 prints `r q J_z″/s`; the `r²` form is the dimensionless one and
+the one that reproduces Fitzpatrick's Fig. 9.2. `J_z′` and `J_z″` come from a least-squares quadratic in `r − r_s` over
+`ψ ± window` (`npts` samples), the island-width scale of the theory's expansion in W. `converged` is false when the
+doubled window leaves `psi_lim` or `C_sat` at half or double the window differs from it by more than 20%.
 """
-function saturation_coefficient(r, dr_dpsi, q, dq_dpsi, psi::Real; h::Real=0.01)
-    shear(x) = r(x) * dq_dpsi(x) / (q(x) * dr_dpsi(x))
-    J(x) = (2 - shear(x)) / q(x)
-    dJ_dr(x) = (J(x + h) - J(x - h)) / (2h * dr_dpsi(x))
-    d2J_dr2 = (dJ_dr(psi + h) - dJ_dr(psi - h)) / (2h * dr_dpsi(psi))
-    rs, qs, s = r(psi), q(psi), shear(psi)
-    alpha_s = -rs * qs * dJ_dr(psi) / s
-    beta_s = -rs^2 * qs * d2J_dr2 / s
-    return (; alpha_s, beta_s, C_sat=0.8 * alpha_s^2 - 0.27 * beta_s - 0.09 * alpha_s)
+function saturation_coefficient(J, r, dr_dpsi, q, dq_dpsi, psi::Real; window::Real=0.02, psi_lim=(0.0, 1.0), npts::Int=11)
+    rs, qs = r(psi), q(psi)
+    s = rs * dq_dpsi(psi) / (qs * dr_dpsi(psi))
+    clamped = psi - 2window < psi_lim[1] || psi + 2window > psi_lim[2]
+    function coefficients(W)
+        W = min(W, 0.999 * (psi - psi_lim[1]), 0.999 * (psi_lim[2] - psi))
+        xs = range(psi - W, psi + W; length=npts)
+        x = r.(xs) .- rs
+        c = hcat(ones(npts), x, x .^ 2) \ J.(xs)
+        alpha_s = -rs * qs * c[2] / s
+        beta_s = -rs^2 * qs * 2 * c[3] / s
+        return (; alpha_s, beta_s, C_sat=0.8 * alpha_s^2 - 0.27 * beta_s - 0.09 * alpha_s, J_s=c[1])
+    end
+    mid = coefficients(window)
+    spread = maximum(abs(coefficients(f * window).C_sat - mid.C_sat) for f in (0.5, 2.0)) / max(abs(mid.C_sat), eps())
+    return (; mid..., converged=!clamped && spread <= 0.2)
 end
 
 """

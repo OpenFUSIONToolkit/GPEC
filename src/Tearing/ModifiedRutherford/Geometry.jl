@@ -127,3 +127,31 @@ function mre_geometry(equil, psifac::Real, q1::Real)
     return MRESurfaceGeometry(q, q1, p1, v1, equil.psio, avg[1], avg[2], avg[3], avg[4], avg[5], avg[6], avg[7],
         R_major, eps, delta, sauter2002_trapped_fraction(eps, delta), Wc_prefac)
 end
+
+"""
+    current_density_profile(equil) -> Function
+
+Dimensionless toroidal current density `J_z(ψ_N) = (R₀²/B₀) ⟨μ₀ j_φ/R⟩` of the cylindrical saturation theory, from the
+Grad–Shafranov flux-surface identity `⟨μ₀ j_φ/R⟩ = μ₀ dp/dψ + F dF/dψ ⟨R⁻²⟩` (ψ the poloidal flux per radian), signed
+positive in the core. It reduces to `R₀μ₀j_z/B_z` in the large-aspect-ratio cylinder.
+"""
+function current_density_profile(equil)
+    profiles = equil.profiles
+    R0, B0, psio = Float64(equil.ro), Float64(equil.params.b0), Float64(equil.psio)
+    ys = equil.rzphi_ys
+    function avg_inv_Rsq(psi)
+        ff = zeros(Float64, length(ys), 2)
+        for (i, theta) in enumerate(ys)
+            rfac = sqrt(equil.rzphi_rsquared((psi, theta)))
+            jac = equil.rzphi_jac((psi, theta))
+            r = equil.ro + rfac * cos(2π * (theta + equil.rzphi_offset((psi, theta))))
+            ff[i, 1], ff[i, 2] = jac / r^2, jac
+        end
+        @views ff[end, :] .= ff[1, :]
+        avg = FastInterpolations.integrate(cubic_interp(ys, Series(ff); bc=PeriodicBC()))
+        return avg[1] / avg[2]
+    end
+    raw(psi) = (profiles.P_deriv(psi) + profiles.F_spline(psi) * profiles.F_deriv(psi) / (4π^2) * avg_inv_Rsq(psi)) / psio
+    sgn = sign(raw(0.05))
+    return psi -> sgn * R0^2 / B0 * raw(Float64(psi))
+end

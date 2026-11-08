@@ -40,7 +40,7 @@ using TOML
     end
 
     @testset "saturation term: Wesson cylinder of Fitzpatrick 2023 Fig. 9.2" begin
-        # q0 = 0.8, q(a) = 4.4, r = √ψ (a = 1); reference α_s, β_s from the analytic J_z = (2/q0)(1 − r²)^ν, not from q.
+        # q0 = 0.8, q(a) = 4.4, r = √ψ (a = 1), J_z = (2/q0)(1 − r²)^ν; reference α_s, β_s from the independent shooting script.
         q0, qa = 0.8, 4.4
         nu = qa / q0 - 1
         q(x) = qa * x / (1 - (1 - x)^(nu + 1))
@@ -51,7 +51,8 @@ using TOML
             q(mid) < 2 ? (lo = mid) : (hi = mid)
         end
         psi_s = (lo + hi) / 2
-        sc = MR.saturation_coefficient(sqrt, x -> 0.5 / sqrt(x), q, dq, psi_s; h=1e-3)
+        sc = MR.saturation_coefficient(x -> (2 / q0) * (1 - x)^nu, sqrt, x -> 0.5 / sqrt(x), q, dq, psi_s; window=0.005)
+        @test sc.converged
         @test sqrt(psi_s) ≈ 0.65942681 rtol = 1e-6
         @test sc.alpha_s ≈ 1.642673 rtol = 1e-4
         @test sc.beta_s ≈ -7.204691 rtol = 1e-3

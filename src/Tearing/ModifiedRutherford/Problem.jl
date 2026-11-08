@@ -31,7 +31,7 @@ from noise, so they get no seed threshold but keep `w_sat`.
     when `[Tearing]` is present.
   - `classical`, `saturation`, `bootstrap`, `curvature`, `polarization` - Term switches s_Δ, s_sat, s_nc, s_GGJ, s_pol.
     `saturation` is the finite-width correction to Δ′ ([`saturation_term`](@ref)), off by default.
-  - `saturation_dpsi` - ψ_N step of the differences that give J_z′ and J_z″ in [`saturation_coefficient`](@ref).
+  - `saturation_window` - Half-width in ψ_N of the quadratic fit that gives J_z′ and J_z″ in [`saturation_coefficient`](@ref).
   - `delta_prime_source` - `:computed` (Δ′_mn of `ffs`) or `:cylindrical` (r_s Δ′_mn = −2m, a reference case).
   - `delta_prime_model` - `:mercier_power` (Benjamin Eq. 10) or `:constant` (Δ′(w) = Δ′_mn).
   - `delta_prime_factor`, `D_nc_factor`, `rho_theta_factor` - Multipliers on Δ′_mn, D_nc and the poloidal ion Larmor
@@ -56,7 +56,7 @@ from noise, so they get no seed threshold but keep `w_sat`.
     curvature::Bool = true
     polarization::Bool = false
     saturation::Bool = false
-    saturation_dpsi::Float64 = 0.01
+    saturation_window::Float64 = 0.02
     delta_prime_source::Symbol = :computed
     delta_prime_model::Symbol = :mercier_power
     delta_prime_factor::Float64 = 1.0
@@ -107,6 +107,7 @@ Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to 
   - `below_w_ib` - `w_m` below the ion banana width, where the polarization ordering fails.
   - `large_delta_prime_w` - |Δ′| w ≥ 1 at `w_m` or `w_sat`.
   - `complex_delta_prime` - |Im Δ′_mn| > 10⁻³ |Re Δ′_mn|.
+  - `saturation_unconverged` - `C_sat` not converged in the fit window (see [`saturation_coefficient`](@ref)).
   - `F`, `classical`, `saturation`, `bootstrap`, `curvature`, `polarization`, `w_d` - F(w), each term, and w_d(w).
 """
 struct ModifiedRutherfordResult{P}
@@ -153,6 +154,7 @@ struct ModifiedRutherfordResult{P}
     below_w_ib::Vector{Bool}
     large_delta_prime_w::Vector{Bool}
     complex_delta_prime::Vector{Bool}
+    saturation_unconverged::Vector{Bool}
     F::Matrix{Float64}
     classical::Matrix{Float64}
     saturation::Matrix{Float64}
@@ -240,6 +242,8 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     gate = prob.tearing
     # Metres map to ψ_N with the toroidal-flux radial label's dr/dψ, the label SLAYER's layer widths use.
     r_at, dr_dpsi = radial_label(equil)
+    J_z = current_density_profile(equil)
+    psi_lim = (first(equil.profiles.xs), last(equil.profiles.xs))
     chi_gate = gate === nothing || !hasproperty(gate.model, :chi_perp_Dc) ? nothing : gate.model.chi_perp_Dc
 
     vec0() = zeros(ns)
@@ -249,7 +253,8 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         omega_star_i=vec0(), omega_star_e=vec0(), omega_hat=vec0(), omega_hat_pi=vec0(), beta_p=vec0(), rho_theta=vec0(), w_ib=vec0(),
         eps=vec0(), gamma=vec0(), delta_r=vec0(), w_lo=vec0(), alpha_s=vec0(), beta_s=vec0(), C_sat=vec0(), w_m=vec0(), w_sat=vec0())
     flags = (; fully_stabilized=flag0(), unstable_any_seed=flag0(), interchange_unstable=flag0(), linear_unstable=flag0(),
-        below_w_ib=flag0(), large_delta_prime_w=flag0(), complex_delta_prime=flag0())
+        below_w_ib=flag0(), large_delta_prime_w=flag0(), complex_delta_prime=flag0(),
+        saturation_unconverged=flag0())
     mats = Dict(k => zeros(ns, prob.nw) for k in (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d))
 
     for (k, s) in enumerate(surfaces)
@@ -296,10 +301,10 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         K = r_at(psi) / abs(dr_dpsi(psi))
         dp_complex = prob.delta_prime_source === :computed ? ffs.delta_prime.matrix[k, k] : complex(-2 * m * K^(-2 * sqrt(max(-D_I, 0.0))))
         dp_mn = prob.delta_prime_factor * real(dp_complex)
-        # Saturation coefficients in the same radial label; the stencil (±2h) stays inside the ψ_N grid.
-        h_sat = min(prob.saturation_dpsi, 0.4 * psi, 0.4 * (1 - psi))
-        sc = saturation_coefficient(r_at, x -> abs(dr_dpsi(x)), x -> Float64(equil.profiles.q_spline(x)),
-            x -> Float64(equil.profiles.q_deriv(x)), psi; h=h_sat)
+        # Saturation coefficients from the equilibrium current in the same radial label.
+        sc = saturation_coefficient(J_z, r_at, x -> abs(dr_dpsi(x)), x -> Float64(equil.profiles.q_spline(x)),
+            x -> Float64(equil.profiles.q_deriv(x)), psi; window=prob.saturation_window, psi_lim)
+        flags.saturation_unconverged[k] = !sc.converged
         function terms(wj)
             wd = transport_width(wj; prob.c_wd, chi_perp, v_te, R0=g.R_major, g.q, g.q1, n, m, g.Wc_prefac)
             cl = D_I < 0 ? classical_term(dp_mn, D_I, wj; model=prob.delta_prime_model) : NaN
@@ -353,5 +358,6 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         out.alpha_s, out.beta_s, out.C_sat, out.w_m, out.w_sat, w_m_star, Vector{Bool}(flags.fully_stabilized), Vector{Bool}(flags.unstable_any_seed),
         Vector{Bool}(flags.interchange_unstable), Vector{Bool}(flags.linear_unstable), Vector{Bool}(flags.below_w_ib),
         Vector{Bool}(flags.large_delta_prime_w), Vector{Bool}(flags.complex_delta_prime),
+        Vector{Bool}(flags.saturation_unconverged),
         mats[:F], mats[:classical], mats[:saturation], mats[:bootstrap], mats[:curvature], mats[:polarization], mats[:w_d])
 end
