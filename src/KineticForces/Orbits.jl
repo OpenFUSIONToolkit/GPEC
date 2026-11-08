@@ -55,8 +55,8 @@ the potential from dΦ/dψ_N = −psio ω_E; `nothing` leaves Φ out of the orbi
 function guiding_center_field(equil; omegaE=nothing, psi_max::Float64=Inf)
     xs, ys = equil.rzphi_xs, equil.rzphi_ys
     nx, ny = length(xs), length(ys)
-    F(ψ) = equil.profiles.F_spline(ψ) / twopi
-    dF(ψ) = equil.profiles.F_deriv(ψ) / twopi
+    F(ψ; hint=nothing) = equil.profiles.F_spline(ψ; hint) / twopi
+    dF(ψ; hint=nothing) = equil.profiles.F_deriv(ψ; hint) / twopi
     jac, R, Z, nu, gpt, gtt = (zeros(nx, ny) for _ in 1:6)
     for (j, θ) in enumerate(ys), (i, ψ) in enumerate(xs)
         pt = (ψ, θ)
@@ -106,11 +106,12 @@ function guiding_center_field(equil; omegaE=nothing, psi_max::Float64=Inf)
         F, dF, phi, s, equil.psio, abs(F(0.0)) / equil.ro, equil.ro, first(xs), min(psi_max, last(xs)))
 end
 
-_phi(g::GuidingCenterField, ψ) = g.phi === nothing ? 0.0 : g.phi(ψ)
-_dphi(g::GuidingCenterField, ψ) = g.phi === nothing ? 0.0 : g.phi(ψ; deriv=DerivOp(1))
+_phi(g::GuidingCenterField, ψ; hint=nothing) = g.phi === nothing ? 0.0 : g.phi(ψ; hint)
+_dphi(g::GuidingCenterField, ψ; hint=nothing) = g.phi === nothing ? 0.0 : g.phi(ψ; deriv=DerivOp(1), hint)
 
 """
-Parameters of one orbit integration: species, μ, reference speed and the event bookkeeping.
+Parameters of one orbit integration: species, μ, reference speed, the event bookkeeping, F(ψ₀), and spline cell hints for the
+orbit point (`h`, `h1`) and for the start surface (`h0`).
 """
 mutable struct _OrbitParams{G}
     g::G
@@ -124,10 +125,14 @@ mutable struct _OrbitParams{G}
     ncross::Int
     winding::Int
     status::Symbol
+    F0::Float64
+    h::NTuple{2,Base.RefValue{Int}}
+    h0::NTuple{2,Base.RefValue{Int}}
+    h1::Base.RefValue{Int}
 end
 
 # Field-line pitch B^φ/B^θ on the start surface ψ₀ at θ.
-_pitch0(g, p, θ) = (pt = (p.psi0, θ); g.F(p.psi0) * g.jac(pt) / (g.s * g.psio * g.R(pt)^2))
+_pitch0(g, p, θ) = (pt = (p.psi0, θ); p.F0 * g.jac(pt; hint=p.h0) / (g.s * g.psio * g.R(pt; hint=p.h0)^2))
 
 """
 Right-hand side in normalized time τ = t v/R₀; state (ψ, θ, φ, v∥/v, ∫ψ dτ, χ), with χ = φ − ∫ (B^φ/B^θ)(ψ₀, θ) dθ the
@@ -137,15 +142,15 @@ cancelled, so the precession of a trapped orbit is not the small remainder of tw
 function _gc_rhs!(du, u, p::_OrbitParams, t)
     g = p.g
     ψ, θ, w = u[1], u[2], u[4]
-    pt = (ψ, θ)
-    B = g.B(pt)
-    B_x, B_y = g.B(pt; deriv=DerivOp(1, 0)), g.B(pt; deriv=DerivOp(0, 1))
-    J = g.jac(pt)
-    bψ, bθ = g.bcov_psi(pt), g.bcov_theta(pt)
-    bθ_x = g.bcov_theta(pt; deriv=DerivOp(1, 0))
-    bψ_y = g.bcov_psi(pt; deriv=DerivOp(0, 1))
-    R = g.R(pt)
-    F, F_x = g.F(ψ), g.dFdpsi(ψ)
+    pt, h, h1 = (ψ, θ), p.h, p.h1
+    B = g.B(pt; hint=h)
+    B_x, B_y = g.B(pt; deriv=DerivOp(1, 0), hint=h), g.B(pt; deriv=DerivOp(0, 1), hint=h)
+    J = g.jac(pt; hint=h)
+    bψ, bθ = g.bcov_psi(pt; hint=h), g.bcov_theta(pt; hint=h)
+    bθ_x = g.bcov_theta(pt; deriv=DerivOp(1, 0), hint=h)
+    bψ_y = g.bcov_psi(pt; deriv=DerivOp(0, 1), hint=h)
+    R = g.R(pt; hint=h)
+    F, F_x = g.F(ψ; hint=h1), g.dFdpsi(ψ; hint=h1)
     bφ = F / B
     bφ_x, bφ_y = F_x / B - F * B_x / B^2, -F * B_y / B^2
     # Contravariant ∇×b and B
@@ -155,7 +160,7 @@ function _gc_rhs!(du, u, p::_OrbitParams, t)
     k = p.mass * vpar / p.chrg
     Bsψ, Bsθ, Bsφ = k * cψ, Bθ + k * cθ, Bφ + k * cφ
     Bspar = B + k * (bψ * cψ + bθ * cθ + bφ * cφ)
-    Hx = p.mu * B_x + p.chrg * _dphi(g, ψ)
+    Hx = p.mu * B_x + p.chrg * _dphi(g, ψ; hint=h1)
     Hy = p.mu * B_y
     sc = g.ro / p.v
     du[1] = sc * (vpar * Bsψ - bφ * Hy / (J * p.chrg)) / Bspar
@@ -258,13 +263,15 @@ function guiding_center_orbit(g::GuidingCenterField, psi0::Real, lambda::Real, e
     v = sqrt(2 * energy / mass)
     mu = lambda * energy / g.bo
     u0 = [Float64(psi0), Float64(theta0), 0.0, sign(sigma) * sqrt(w2), 0.0, 0.0]
-    p = _OrbitParams(g, Float64(mass), Float64(chrg), mu, v, Float64(theta0), Float64(psi0), 0.0, 0, 0, :unclosed)
+    p = _OrbitParams(g, Float64(mass), Float64(chrg), mu, v, Float64(theta0), Float64(psi0), 0.0, 0, 0, :unclosed, g.F(psi0),
+        (Ref(1), Ref(1)), (Ref(1), Ref(1)), Ref(1))
     du = similar(u0)
     _gc_rhs!(du, u0, p, 0.0)
     p.dir0 = sign(du[2])
     H0, P0 = _energy(g, p, u0), _pphi(g, p, u0)
+    # Events are found from sign changes at step ends: interior checks would run Vern9's extra interpolation stages every step.
     cb = VectorContinuousCallback(_orbit_condition!, (i, idx) -> _orbit_event!(i, idx, true),
-        (i, idx) -> _orbit_event!(i, idx, false), 3; save_positions=(false, false))
+        (i, idx) -> _orbit_event!(i, idx, false), 3; save_positions=(false, false), interp_points=0)
     prob = ODEProblem(_gc_rhs!, u0, (0.0, Float64(tau_max)), p)
     sol = solve(prob, Vern9(); reltol=rtol, abstol=rtol * 1e-2, callback=cb, dense, save_everystep=dense)
     uend, τn = sol.u[end], sol.t[end]

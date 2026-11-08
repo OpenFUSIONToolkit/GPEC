@@ -375,6 +375,7 @@ function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr,
     ζ0 = (u0[3] - g.nu((u0[1], u0[2]))) / twopi
     Δζ = (uend[3] - g.nu((uend[1], uend[2]))) / twopi - ζ0
     m1 = first(intr.mfac)
+    h = (Ref(1), Ref(1))
     for k in 1:N
         τ = (k - 1) * dτ
         u = sol(buf.u, τ)
@@ -390,8 +391,8 @@ function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr,
             divx += buf.divx[j] * em
             em *= e1
         end
-        A = w^2 * divxfac * divx + (w^2 - 0.5 * lam * g.B((ψ, θ)) / g.bo) * dbob
-        ζ = (u[3] - g.nu((ψ, θ))) / twopi - ζ0
+        A = w^2 * divxfac * divx + (w^2 - 0.5 * lam * g.B((ψ, θ); hint=h) / g.bo) * dbob
+        ζ = (u[3] - g.nu((ψ, θ); hint=h)) / twopi - ζ0
         buf.A[k] = A * cis(-n * twopi * (ζ - Δζ * τ / τn))
     end
     wbbar = twopi / τn
