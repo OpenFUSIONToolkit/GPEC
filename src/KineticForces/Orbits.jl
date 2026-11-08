@@ -24,7 +24,7 @@ Equilibrium field tabulated for guiding-center orbits on the `rzphi` grid of (ψ
   - `phi`: electrostatic potential Φ(ψ_N) in V, or `nothing` for no potential
   - `s`: sign in B^θ = s psio/𝒥, chosen so that q > 0
   - `psio`, `bo`, `ro`: flux per radian, axis field, axis major radius
-  - `psi_min`, `psi_max`: radial grid limits; orbits reaching them are classified axis or lost
+  - `psi_min`, `psi_max`: the radial grid's first ψ and the loss boundary; orbits reaching them are classified axis or lost
 """
 struct GuidingCenterField{I,S,D,P}
     B::I
@@ -46,12 +46,13 @@ struct GuidingCenterField{I,S,D,P}
 end
 
 """
-    guiding_center_field(equil; omegaE=nothing) → GuidingCenterField
+    guiding_center_field(equil; omegaE=nothing, psi_max=Inf) → GuidingCenterField
 
 Tabulate the guiding-center field of `equil`. `omegaE(ψ_N)` (rad/s, the input E×B frequency) builds
-the potential from dΦ/dψ_N = −psio ω_E; `nothing` leaves Φ out of the orbit.
+the potential from dΦ/dψ_N = −psio ω_E; `nothing` leaves Φ out of the orbit. Orbits are lost at
+`psi_max` (the control surface `psilim` for `forb`, where the perturbation ends) or at the grid's last ψ if lower.
 """
-function guiding_center_field(equil; omegaE=nothing)
+function guiding_center_field(equil; omegaE=nothing, psi_max::Float64=Inf)
     xs, ys = equil.rzphi_xs, equil.rzphi_ys
     nx, ny = length(xs), length(ys)
     F(ψ) = equil.profiles.F_spline(ψ) / twopi
@@ -102,7 +103,7 @@ function guiding_center_field(equil; omegaE=nothing)
         phi = cubic_interp(xs, FastInterpolations.cumulative_integrate(cubic_interp(xs, dphi)); extrap=ExtendExtrap())
     end
     return GuidingCenterField(itp(Bt), itp(bpsi), itp(btheta), itp(jac), itp(R), itp(Z), itp(nu),
-        F, dF, phi, s, equil.psio, abs(F(0.0)) / equil.ro, equil.ro, first(xs), last(xs))
+        F, dF, phi, s, equil.psio, abs(F(0.0)) / equil.ro, equil.ro, first(xs), min(psi_max, last(xs)))
 end
 
 _phi(g::GuidingCenterField, ψ) = g.phi === nothing ? 0.0 : g.phi(ψ)

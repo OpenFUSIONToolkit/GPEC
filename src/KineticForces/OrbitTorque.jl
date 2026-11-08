@@ -160,7 +160,7 @@ Guiding-center orbit segments on one flux surface.
   - `lost_fraction`: share of the launch phase space (density weight of the species over √x ≤ umax and v∥/v at θ₀, both
     signs) on lost orbits; `NaN` when not computed
   - `core_fraction`: share of the same phase space on closed orbits that enter ψ < `psilow`, where the perturbation is the
-    `orbit_core_extension` (each segment weighted by the share of its nodes that do); `NaN` when not computed
+    regular extension of [`orbit_surface_table`](@ref) (each segment weighted by the share of its nodes that do); `NaN` when not computed
 """
 struct OrbitSurfaceTable
     lambda::Vector{Float64}
@@ -188,6 +188,8 @@ orbit_energy_nodes(a::Float64, b::Float64, n::Int) = [a + (b - a) * (1 - cos(π 
 Follow the orbits through (`psi`, `theta0`) in energy on each pitch node of `geo` and both signs of v∥. On each
 trapped or passing segment, ω_b, the precession and |δJ_ℓ|² start on `nenergy` nodes (at least 7) and gain midpoints until a spline
 through every other node reproduces the rest to `energy_tol` of each quantity's largest value.
+Below the response's first surface ψ_low (above the axis when it starts at `qlow`), each poloidal harmonic m of δB/B and
+∇·ξ⊥ is its ψ_low value times (ψ/ψ_low)^{|m|/2}, the r^|m| of a field regular on axis.
 δJ_ℓ = R₀∮dτ [w²∇·ξ⊥ + (w² − ½λB/B₀)δB/B] e^{−in(2πζ − ⟨φ̇⟩t)} e^{−iℓω_b t}, with w = v∥/v and ζ = (φ − ν)/2π the
 straight-field-line toroidal angle, so the resonance is Ω = ℓω_b − n⟨φ̇⟩. With `potential`, `g` carries Φ and ω_E is
 part of ⟨φ̇⟩, so it is taken out of `wd`. Lost and axis segments carry nothing. Each sample also carries ψ̄, the drive
@@ -351,15 +353,8 @@ function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, 
     return OrbitSegment(passing, dir, ua, ub, us, col(1), col(2), reduce(vcat, [samples[u][3]' for u in us]), col(5), col(6), col(7), 1 / ncs)
 end
 
-# Inside the first response surface, scale the harmonics taken there: (ψ/ψ_low)^{|m|/2} ("regular", r^|m|), 1 ("flat") or 0 ("zero").
+# Inside the first response surface, scale the harmonics taken there by (ψ/ψ_low)^{|m|/2}: the r^|m| of a regular field.
 function _core_extension!(buf, intr, ψ::Float64)
-    mode = intr.orbit_core_extension
-    mode == "flat" && return nothing
-    if mode == "zero"
-        fill!(buf.dbob, 0)
-        fill!(buf.divx, 0)
-        return nothing
-    end
     s = sqrt(max(ψ, 0.0) / intr.psilow)
     @inbounds for j in eachindex(buf.dbob)
         f = s^abs(intr.mfac[j])

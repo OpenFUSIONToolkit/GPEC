@@ -129,7 +129,7 @@ const KF_METHOD_H5_ANNOTATIONS = [
     ),
     "lost_fraction" => (; long_name="share of the launch phase space on lost orbits (forb only)", dims=("psi",), attach=(1 => "psi",)),
     "core_fraction" => (;
-        long_name="share of the launch phase space on closed orbits entering psi below the response's first surface, where orbit_core_extension sets the perturbation (forb only)",
+        long_name="share of the launch phase space on closed orbits entering psi below the response's first surface, where the perturbation is extended as r^|m| (forb only)",
         dims=("psi",),
         attach=(1 => "psi",)
     ),
