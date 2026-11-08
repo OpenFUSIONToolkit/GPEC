@@ -142,7 +142,7 @@ equilibrium and writes nothing. The raw forcing file contents are captured in
 `Input/RawInputs/ForcingTerms/`, and `preloaded_coil_sets` lets the rerun path inject the coil
 geometry stored in `Input/RawInputs/Coils/`.
 
-Returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford)`, each
+Returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, modified_rutherford, callen)`, each
 `nothing` when its section is absent. `equil` is the equilibrium the stages used (the solve's, on
 the two-pass grid), `ffs` the result the later stages read (the matched one when the deck has
 `[Match]`), and `match` its `MatchResult`.
@@ -226,7 +226,6 @@ function main_from_inputs(
         save_to_hdf5(output_file, tearing)
     end
 
-    # After the tearing stage, which replaces the whole Tearing/ group.
     if deck.modified_rutherford !== nothing
         modified_rutherford = _timed_stage(runtimes, "modified_rutherford", "Modified Rutherford") do
             # With [Tearing], its linear solve gates the roots on the same Δ′.
