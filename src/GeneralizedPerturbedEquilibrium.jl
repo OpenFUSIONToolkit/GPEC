@@ -86,6 +86,7 @@ using .ErrorFields: error_fields, ErrorFieldsResult
 
 using .ForceFreeStates: ForceBalanceProblem, kinetic_matrices, _prepare_solve, maybe_reform_equilibrium, ForceFreeStatesControl, kinetic_source
 include("Deck.jl")
+include("Display.jl")
 
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Every input source builds a ready `(inputs, eq_config, additional_input)` and hands it to

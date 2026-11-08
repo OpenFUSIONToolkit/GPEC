@@ -8,6 +8,7 @@
     using TOML
 
     include("h5_metadata_check.jl")
+    include("display_check.jl")
     # ------- Helper: build a synthetic SLAYERParameters with full control
     function _mk_params(; rs=0.5, lu=1e7, tauk=1e-4,
         Q_e=-1.0, Q_i=0.5, m=2, n=1, ising=1,
@@ -106,6 +107,7 @@
         r = solve(TearingProblem(no_surfaces), SLAYERModel())
         @test isempty(r.params)
         @test r.enabled == false
+        @test repr(r) == "TearingResult(disabled)"
 
         # With surfaces to analyse, the profiles must come from the equilibrium.
         bare = (equil=(; kinetic=nothing), surfaces=[nothing], delta_prime=nothing)
@@ -185,6 +187,8 @@
             @test coupled.omega[1] ≈ 2π * 1e3 rtol = 1e-2
             @test coupled.gamma[1] ≈ still.gamma[1] rtol = 1e-2
             @test coupled.gamma[1] != still.gamma[1]
+            foreach(_check_display, (still, coupled))
+            foreach(_check_display, still.per_surface_extraction)
             # The LAR deck carries no kinetic profiles, so a missing ρ is named in the error.
             @test_throws "GGJ tearing: give rho, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7), GGJModel();
                 config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
