@@ -192,7 +192,7 @@ function main_from_inputs(
         @info "Results written to $output_file"
         if deck.growth_rate !== nothing
             growth = _timed_stage(runtimes, "growth_rate", "GrowthRate") do
-                growth_rate(ForceBalanceProblem(equil; deck.force_balance.keywords...), deck.force_balance.algorithm, deck.growth_rate; marginal=ffs, verbose)
+                growth_rate(ffs.problem, deck.force_balance.algorithm, deck.growth_rate; marginal=ffs, verbose)   # the problem the marginal solve came from
             end
             save_to_hdf5(output_file, growth)
         end

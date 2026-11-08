@@ -603,8 +603,29 @@ include("display_check.jl")
                 @test [h.nzero for h in reference.growth_rate.history] == [h.nzero for h in api.history]
             end
 
-            # The root find needs a Forward free-boundary solve as its plain ideal marginal one, so the deck stops at parse time.
             parse_staged(dir; kwargs...) = (deck_dir = _stage_deck(dir; kwargs...); GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir))
+            # On the two-pass auto grid the deck must hand growth_rate the problem its marginal solve came from, so both paths re-form from pass 1.
+            auto_overrides = Dict{String,Any}("grid_type" => "auto", "mpsi" => 0, "psi_accuracy" => 3e-2)
+            mktempdir() do dir
+                auto_deck = merge(kink_deck, Dict{String,Any}("Equilibrium" => merge(kink_deck["Equilibrium"], auto_overrides)))
+                pass1 = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(auto_deck, template), GPEC.analytic_config(auto_deck))
+                api = growth_rate(ForceBalanceProblem(pass1; nn=1, wall=wall, ffs_kwargs...), forward, config)
+                reference =
+                    GPEC.main([_stage_deck(dir; eq_overrides=auto_overrides, extra_sections=merge(growth_section, Dict{String,Any}("TJAnalytic" => kink_deck["TJAnalytic"])))])
+                @test api.gamma > 0
+                @test reference.growth_rate.gamma ≈ api.gamma rtol = 1e-10
+                @test [h.lambda for h in reference.growth_rate.history] ≈ [h.lambda for h in api.history] rtol = 1e-10
+            end
+
+            # A kinetic source in [ForceFreeStates] would make the marginal solve kinetic-MHD while the inertial ones are ideal.
+            mktempdir() do dir
+                deck_dir = _stage_deck(dir; eq_overrides=Dict{String,Any}("kinetic_file" => "kinetic.dat"), ffs_overrides=Dict{String,Any}("kinetic" => "KineticForces"),
+                    extra_sections=growth_section)
+                cp(joinpath(@__DIR__, "test_data", "regression_tj_kinetic_calculated", "kinetic.dat"), joinpath(deck_dir, "kinetic.dat"))
+                @test_throws "[GrowthRate] needs an ideal force-balance solve" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+
+            # The root find needs a Forward free-boundary solve as its plain ideal marginal one, so the deck stops at parse time.
             mktempdir() do dir
                 @test_throws "[GrowthRate] needs the free-boundary energy" parse_staged(dir; ffs_overrides=Dict{String,Any}("vac_flag" => false), extra_sections=growth_section)
             end

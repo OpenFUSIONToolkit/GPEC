@@ -477,6 +477,7 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     if growth_rate !== nothing
         (; keywords, algorithm) = force_balance
         haskey(inputs, "Match") && error("[GrowthRate] needs the ideal solve as its marginal one: remove the [Match] section")
+        get(keywords, :kinetic, nothing) === nothing || error("[GrowthRate] needs an ideal force-balance solve: remove kinetic from [ForceFreeStates]")
         get(keywords, :vac_flag, false) || error("[GrowthRate] needs the free-boundary energy: set [ForceFreeStates] vac_flag = true")
         algorithm isa Forward || error("[GrowthRate] needs integrator = \"Forward\" in [ForceFreeStates]")
     end

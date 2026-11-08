@@ -146,11 +146,53 @@ include("h5_metadata_check.jl")
             h5open(path, "r") do f
                 @test isempty(_collect_metadata_violations(f))
                 @test read(f["ForceFreeStates/GrowthRate/gamma"]) == 0.0
+                @test read(f["ForceFreeStates/GrowthRate/converged"]) == 1
                 @test read(f["ForceFreeStates/GrowthRate/omega_star_pi"]) == gr2.omega_star_pi
                 @test length(read(f["ForceFreeStates/GrowthRate/History/lambda_min"])) == 1
                 @test read(f["ForceFreeStates/GrowthRate/rho"]) ≈ [FFS._rho_at(src, x) for x in read(f["ForceFreeStates/GrowthRate/psi"])]
                 @test haskey(TOML.parse(read(f["Input/gpec_toml_raw"])), "GrowthRate")
             end
         end
+    end
+
+    @testset "root search on a free-boundary-unstable fixture" begin
+        # q_a = 2.9 makes the TJ fixture external-kink unstable at n = 1
+        kink_deck = merge(deck, Dict{String,Any}("TJAnalytic" => merge(deck["TJAnalytic"], Dict{String,Any}("qa" => 2.9))))
+        kink_equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(kink_deck, template), GPEC.analytic_config(kink_deck))
+        kink_prob = ForceBalanceProblem(kink_equil; nn=1, wall, ffs_kwargs...)
+        inertia = FFS.PerpendicularInertia(; rho=1e-7)
+        gr = FFS.growth_rate(kink_prob, forward; inertia)
+        @test gr.gamma > 0 && gr.converged && gr.result !== nothing
+        @test all(h.nzero == 0 for h in gr.history)
+        @test abs(minimum(real, gr.result.free_boundary.et)) <= 1e-6 * abs(gr.history[1].lambda)
+        @test gr.result.closure == :regular && isnan(gr.omega_star_pi)
+        # Running out of iterations is reported, not hidden
+        short = @test_logs (:warn, r"no convergence in 1 steps") match_mode = :any FFS.growth_rate(kink_prob, forward; inertia, maxiter=1, marginal=gr.marginal)
+        @test !short.converged && short.gamma > 0 && short.result !== nothing
+        # A root below gamma_sq_min counts as marginal: γ = 0, no inertial solve reported
+        floor = FFS.growth_rate(kink_prob, forward; inertia, gamma_sq_min=1e12, marginal=gr.marginal)
+        @test floor.gamma == 0 && floor.gamma_sq == 0 && floor.result === nothing && floor.converged
+        @test all(h.lambda > 0 for h in floor.history[2:end])
+        # The marginal problem must be ideal, and the density positive
+        @test_throws "ideal marginal problem" FFS.growth_rate(ForceBalanceProblem(kink_equil; nn=1, wall, ffs_kwargs..., kinetic=GPEC.KineticForcesControl()), forward; inertia)
+        @test_throws "finite and positive" FFS.inertia_kinetic_matrices(FFS.PerpendicularInertia(; rho=0.0), equil, intr, metric)
+    end
+
+    @testset "kinetic data without T_e" begin
+        ktemplate = joinpath(@__DIR__, "test_data", "regression_tj_kinetic_calculated")
+        kdeck = TOML.parsefile(joinpath(ktemplate, "gpec.toml"))
+        kequil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(kdeck, ktemplate), GPEC.analytic_config(kdeck))
+        data = kequil.kinetic
+        GPEC.attach_kinetic_profiles!(kequil, GPEC.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_i=data.T_i))
+        @test_throws ArgumentError FFS.PerpendicularInertia(kequil)
+        @test_throws ArgumentError FFS.ion_diamagnetic_frequency(kequil, 1)
+        kkw = Dict{Symbol,Any}(q.first => q.second for q in GPEC.force_balance_keywords(kdeck, ktemplate) if !(q.first in (:nn, :wall, :kinetic, :kinetic_factor)))
+        kkw[:vac_flag] = true
+        gr = FFS.growth_rate(
+            ForceBalanceProblem(kequil; nn=1, wall=GPEC.Vacuum.parse_wall(get(kdeck, "Wall", nothing)), kkw...),
+            forward;
+            inertia=FFS.PerpendicularInertia(; rho=1e-7)
+        )
+        @test gr.gamma == 0 && isnan(gr.omega_star_pi)
     end
 end

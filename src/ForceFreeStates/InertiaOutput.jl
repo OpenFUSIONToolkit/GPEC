@@ -1,13 +1,14 @@
 # Writer for an `IdealGrowthRateResult`. Layout under the caller's parent group (inputs live only under Input/):
 #
 #   ForceFreeStates/GrowthRate/
-#   ├── gamma, gamma_sq, omega_star_pi -- growth rate, its square and the EPED1 ω_*pi reference
+#   ├── gamma, gamma_sq, converged, omega_star_pi -- growth rate, its square, the stop flag and the EPED1 ω_*pi reference
 #   ├── psi, rho                       -- inertia density on the marginal solve's ψ_N grid
 #   └── History/                       -- every (γ², λ_min, nzero) evaluated by the root search
 
 const GROWTH_RATE_H5_ANNOTATIONS = [
     "gamma" => (; long_name="growth rate γ of the least-stable free-boundary mode with perpendicular inertia (0 when stable)", units="s^-1"),
     "gamma_sq" => (; long_name="γ² at which the least-stable free-boundary energy eigenvalue crosses zero (0 when stable)", units="s^-2"),
+    "converged" => (; long_name="1 when the root iteration met its stop criterion, 0 when maxiter ran out (gamma is then the last iterate)"),
     "omega_star_pi" => (; long_name="peak ion diamagnetic frequency |ω_*pi| over the integration domain at the lowest n (NaN without kinetic T_i)",
         units="rad/s"),
     "psi" => (; long_name="normalized poloidal flux ψ_N grid of the marginal solve", dims=("psi",), scale="psi"),
@@ -29,6 +30,7 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, result::IdealGrowthRa
     g = Utilities.HDF5Annotations.replace_group!(ffs, "GrowthRate")
     g["gamma"] = result.gamma
     g["gamma_sq"] = result.gamma_sq
+    g["converged"] = Int(result.converged)
     g["omega_star_pi"] = result.omega_star_pi
     psi = collect(Float64, result.marginal.metric.xs)
     g["psi"] = psi
@@ -37,6 +39,6 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, result::IdealGrowthRa
     g["History/lambda_min"] = [h.lambda for h in result.history]
     g["History/nzero"] = [h.nzero for h in result.history]
     Utilities.HDF5Annotations.annotate!(g, GROWTH_RATE_H5_ANNOTATIONS)
-    Utilities.record_inputs!(parent, result)
+    result.config === nothing || Utilities.record_inputs!(parent, result)   # the API form has no deck section to record
     return g
 end

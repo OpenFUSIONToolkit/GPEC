@@ -33,6 +33,7 @@ kinetic profiles are attached (set `kinetic_file` or call `attach_kinetic_profil
 """
 function PerpendicularInertia(equil::Equilibrium.PlasmaEquilibrium)
     data = InnerLayer._layer_kinetic_data(equil, "mass density ρ")
+    _require_profiles(data, "the inertia density ρ = μ m_p n_e")
     loaded = InnerLayer.SLAYER._slayer_profiles(data, nothing)
     mu = InnerLayer.SLAYER._layer_mass_per_electron(data, InnerLayer.SLAYER._layer_zeff(loaded, data))
     n_e = loaded.profiles.n_e
@@ -49,17 +50,26 @@ when γ > ω_*pi/2 at the pedestal.
 """
 function ion_diamagnetic_frequency(equil::Equilibrium.PlasmaEquilibrium, n::Integer; z_i::Real=1)
     data = InnerLayer._layer_kinetic_data(equil, "ion diamagnetic frequency ω_*pi")
-    data.T_i === nothing && throw(ArgumentError("ω_*pi needs the ion temperature, and the kinetic data carries no T_i"))
+    _require_profiles(data, "ω_*pi")
     p = InnerLayer.SLAYER._slayer_profiles(data, nothing).profiles
     scale = -n / (z_i * equil.psio)
     return psi -> scale * (p.T_i(psi) * p.n_e(psi; deriv=DerivOp(1)) / p.n_e(psi) + p.T_i(psi; deriv=DerivOp(1)))
 end
 
-# Peak |ω_*pi| over the integration domain of `r` at its lowest n; NaN without kinetic profiles that carry T_i.
+# The shared kinetic-profile loader needs n_e, T_e and T_i even where only some of them enter.
+_has_profiles(data) = data !== nothing && data.n_e !== nothing && data.T_e !== nothing && data.T_i !== nothing
+function _require_profiles(data, what::AbstractString)
+    _has_profiles(data) || throw(ArgumentError("$what needs kinetic data with n_e, T_e and T_i (the shared profile loader reads all three)"))
+    return data
+end
+
+# Toroidal mode number of the least-stable free-boundary mode of `r` (its lowest n without free-boundary energies).
+_least_stable_n(r::ForceFreeStatesResult) = r.free_boundary === nothing ? r.nlow : r.nlow + r.free_boundary.n_tor_idx[1]
+
+# Peak |ω_*pi| over the integration domain of `r` at its least-stable mode's n; NaN without the kinetic profiles.
 function _peak_omega_star_pi(r::ForceFreeStatesResult)
-    data = r.equil.kinetic
-    (data === nothing || data.T_i === nothing) && return NaN
-    omega = ion_diamagnetic_frequency(r.equil, r.nlow)
+    _has_profiles(r.equil.kinetic) || return NaN
+    omega = ion_diamagnetic_frequency(r.equil, _least_stable_n(r))
     psis = filter(x -> r.psilow <= x <= r.psilim, r.metric.xs)
     return isempty(psis) ? NaN : maximum(abs ∘ omega, psis)
 end
@@ -81,7 +91,9 @@ function inertia_kinetic_matrices(src::PerpendicularInertia, equil::Equilibrium.
     integrands = zeros(Float64, mpsi, mtheta, 3)
     for ipsi in 1:mpsi
         q = equil.profiles.q_spline(metric.xs[ipsi])
-        mu0rho = Utilities.MU_0 * _rho_at(src, metric.xs[ipsi])
+        rho = _rho_at(src, metric.xs[ipsi])
+        isfinite(rho) && rho > 0 || error("PerpendicularInertia: ρ(ψ_N = $(metric.xs[ipsi])) = $rho; the mass density must be finite and positive")
+        mu0rho = Utilities.MU_0 * rho
         for jtheta in 1:mtheta
             g11, g22, g33, g23, g31, g12, jac = @view metric.fs[ipsi, jtheta, 1:7]
             gradpsi2 = g22 * g33 - g23^2
@@ -159,10 +171,14 @@ The outcome of [`growth_rate`](@ref).
 
   - `gamma::Float64` - Growth rate in s⁻¹ of the least-stable free-boundary mode; 0 when the plasma is marginally stable or stable.
   - `gamma_sq::Float64` - γ² at which the least-stable free-boundary energy eigenvalue crosses zero.
+  - `converged::Bool` - Whether the root iteration met its `ftol` or `rtol` stop (always true for a stable or marginal plasma); false when
+    `maxiter` ran out, in which case `gamma` is the last iterate and `history` brackets the root.
   - `inertia::PerpendicularInertia` - The inertia source the solves used.
   - `config::Union{Nothing,GrowthRateConfig}` - The deck settings when the solve came from a `[GrowthRate]` section or the three-argument method; `nothing` otherwise.
-  - `omega_star_pi::Float64` - Peak ion diamagnetic frequency |ω_*pi| in rad/s over the integration domain at the problem's lowest n, from the
-    equilibrium's kinetic profiles (NaN when none carry T_i); the EPED1 criterion counts the mode as unstable when `gamma > omega_star_pi/2`.
+  - `omega_star_pi::Float64` - Peak ion diamagnetic frequency |ω_*pi| in rad/s over the integration domain, at the toroidal n of the
+    least-stable free-boundary mode of the solve at `gamma_sq` (of the marginal solve when stable), from the equilibrium's kinetic
+    profiles (NaN without n_e, T_e and T_i); the EPED1 criterion counts the mode as unstable when `gamma > omega_star_pi/2`. The
+    peak is taken over `[psilow, psilim]`, so a truncated domain can cut off part of a pedestal gradient.
   - `marginal::ForceFreeStatesResult` - The ideal (γ² = 0) solve, whose least-stable energy decides stability.
   - `result::Union{Nothing,ForceFreeStatesResult}` - The solve at `gamma_sq`, carrying the eigenmode; `nothing` when stable.
   - `history::Vector` - Every (γ², λ_min, nzero) evaluated, in order, with λ_min the least-stable free-boundary energy at that γ².
@@ -170,6 +186,7 @@ The outcome of [`growth_rate`](@ref).
 struct IdealGrowthRateResult
     gamma::Float64
     gamma_sq::Float64
+    converged::Bool
     inertia::PerpendicularInertia
     config::Union{Nothing,GrowthRateConfig}
     omega_star_pi::Float64
@@ -183,79 +200,103 @@ end
                 rtol=1e-3, ftol=1e-6, maxiter=30, marginal=nothing, config=nothing, verbose=false) -> IdealGrowthRateResult
     growth_rate(prob::ForceBalanceProblem, alg::Forward, config::GrowthRateConfig; marginal=nothing, verbose=false)
 
-Growth rate of the least-stable free-boundary mode of `prob` with the perpendicular inertia `inertia`
-(a [`PerpendicularInertia`](@ref)), ELITE's eigenvalue problem solved by shooting: the ideal solve
-gives the marginal least-stable energy λ_min(0); when it is negative, the inertia enters as
-`kinetic_factor = γ²` and λ_min(γ²), which rises monotonically with γ² once the interior is
-positive, is brought to zero. The root is bracketed by decades from `gamma_sq_init` and closed by a
-bracketed secant (Illinois) iteration that stops when |λ_min| falls below `ftol` times the marginal
-|λ_min(0)| or the bracket is narrower than `rtol` in γ², within `maxiter` steps; every evaluation is
-one force-balance solve. `gamma_sq_min` is the floor below which the mode counts as marginal,
-`gamma_sq_max` the ceiling beyond which bracketing stops with an error.
+Growth rate of the fastest ideal mode of `prob` with the perpendicular inertia `inertia` (a
+[`PerpendicularInertia`](@ref)), ELITE's eigenvalue problem solved by shooting. The inertia enters as
+`kinetic_factor = γ²`; at each γ² the number of modes growing faster than γ is the interior zero-crossing
+count `nzero` plus one when the least-stable free-boundary energy λ_min is negative, and that count cannot
+rise with γ² since the kinetic energy is positive. The ideal solve gives the count at γ = 0; when it is
+zero the plasma is stable and `gamma` is 0. Otherwise the count is bracketed by decades from
+`gamma_sq_init` (down while nothing is faster, up while something still is), and when the lower end has
+no interior crossing left, only λ_min changes sign in the bracket and a bracketed secant (Illinois)
+iteration brings it to zero, stopping when |λ_min| falls below `ftol` times the reference |λ_min| (the
+marginal value, or the bracket's negative end when the marginal energy is positive) or the bracket is
+narrower than `rtol` in γ², within `maxiter` steps (a warning and `converged = false` otherwise). Every
+evaluation is one force-balance solve. `gamma_sq_min` is the floor below which the mode counts as marginal
+(`gamma` = 0), `gamma_sq_max` the ceiling beyond which bracketing stops with an error. A fastest mode that
+is fixed-boundary (an interior crossing still present at the bracket's lower end) is reported as an error:
+locating a fixed-boundary growth rate is not supported yet.
 
-A `marginal` result of the same problem (an earlier ideal `solve`) is reused instead of solving it again; `config`
-is recorded on the result and is what the three-argument method passes.
-The problem's `singfac_min` is set to 0 for the inertial solves unless given: with inertia the
-rational surfaces are regular, so the integration runs as a single chunk. A fixed-boundary mode
-faster than the free-boundary one shows as `nzero > 0` at the root in `history`; this first version
-reports the free-boundary root and leaves the interior count to the caller.
+A `marginal` result of the same problem (an earlier ideal `solve`) is reused instead of solving it again;
+`config` is recorded on the result and is what the three-argument method passes. The problem must carry no
+kinetic source. The inertial solves take every other control of the problem, so a two-pass ψ grid is the
+same as the marginal one; with `singfac_min > 0` the kinetic surface finder can still place crossings at
+the sharp cond(F̂) peaks that appear near rational surfaces when γ²ρ is far below any physical root, where
+only the sign of λ_min matters, and `singfac_min = 0` gives a single chunk (the rational surfaces are
+regular with inertia).
 """
 function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::PerpendicularInertia,
     gamma_sq_init::Real=1e9, gamma_sq_min::Real=1e4, gamma_sq_max::Real=1e16, rtol::Real=1e-3, ftol::Real=1e-6, maxiter::Int=30,
     marginal::Union{Nothing,ForceFreeStatesResult}=nothing, config::Union{Nothing,GrowthRateConfig}=nothing, verbose::Bool=false)
+    get(prob.ctrl_kwargs, :kinetic, nothing) === nothing ||
+        error("growth_rate needs an ideal marginal problem: remove its kinetic source, the inertia is the only kinetic term")
     history = @NamedTuple{gamma_sq::Float64, lambda::Float64, nzero::Int}[]
     lambda_min(r) = minimum(real, r.free_boundary.et)
+    faster(h) = h.nzero + (h.lambda < 0)   # modes growing faster than γ; non-increasing in γ²
+    solves = Dict{Float64,ForceFreeStatesResult}()
+    function finish(gamma_sq, converged)
+        r = get(solves, gamma_sq, nothing)
+        return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, converged, inertia, config, _peak_omega_star_pi(something(r, marginal)), marginal, r, history)
+    end
 
     marginal = marginal === nothing ? solve(prob, alg; verbose) : marginal
     marginal.free_boundary === nothing && error("growth_rate needs the free-boundary energies: set vac_flag=true")
-    omega_star_pi = _peak_omega_star_pi(marginal)
     push!(history, (gamma_sq=0.0, lambda=lambda_min(marginal), nzero=marginal.diagnostics.nzero))
     verbose && @info @sprintf("growth_rate: marginal λ_min = %.6e (nzero = %d)", history[end].lambda, history[end].nzero)
-    history[end].lambda < 0 || return IdealGrowthRateResult(0.0, 0.0, inertia, config, omega_star_pi, marginal, nothing, history)
+    faster(history[1]) == 0 && return finish(0.0, true)
 
     kwargs = copy(prob.ctrl_kwargs)
-    haskey(kwargs, :singfac_min) || (kwargs[:singfac_min] = 0.0)
     kwargs[:kinetic] = inertia
-    matrices = Ref{Any}(nothing)   # the inertia bands, evaluated once and reused at every γ²
-    last = Ref{Any}(nothing)
-    seen = Dict{Float64,Float64}()   # Brent re-evaluates its bracket ends; each γ² is one solve
-    function lambda_at(gamma_sq)
-        haskey(seen, gamma_sq) && return seen[gamma_sq]
+    kwargs[:kinetic_factor] = Float64(gamma_sq_init)
+    kwargs[:kinetic] = kinetic_matrices(ForceBalanceProblem(prob.equil, prob.wall, kwargs), alg; verbose)   # the bands once, reused at every γ²
+    seen = Dict{Float64,Int}()   # γ² → history index; each γ² is one solve
+    function evaluate(gamma_sq)
+        gamma_sq = Float64(gamma_sq)
+        haskey(seen, gamma_sq) && return history[seen[gamma_sq]]
         kw = copy(kwargs)
-        matrices[] === nothing || (kw[:kinetic] = matrices[])
         kw[:kinetic_factor] = gamma_sq
-        inertial = ForceBalanceProblem(prob.equil, prob.wall, kw)
-        matrices[] === nothing && (matrices[] = kinetic_matrices(inertial, alg; verbose))
-        r = solve(inertial, alg; verbose)
-        last[] = r
-        push!(history, (gamma_sq=Float64(gamma_sq), lambda=lambda_min(r), nzero=r.diagnostics.nzero))
+        r = solve(ForceBalanceProblem(prob.equil, prob.wall, kw), alg; verbose)
+        solves[gamma_sq] = r
+        push!(history, (gamma_sq=gamma_sq, lambda=lambda_min(r), nzero=r.diagnostics.nzero))
+        seen[gamma_sq] = length(history)
         verbose && @info @sprintf("growth_rate: γ² = %.4e  λ_min = %.6e  nzero = %d", gamma_sq, history[end].lambda, history[end].nzero)
-        return seen[Float64(gamma_sq)] = history[end].lambda
+        return history[end]
     end
 
-    # Bracket by decades: down while already positive, up while still negative
+    # Bracket the count by decades: down while nothing is faster, up while something still is
     hi = Float64(gamma_sq_init)
-    lam = lambda_at(hi)
-    while lam > 0
+    h_hi = evaluate(hi)
+    while faster(h_hi) == 0
         hi /= 10
-        hi < gamma_sq_min && return IdealGrowthRateResult(sqrt(hi), hi, inertia, config, omega_star_pi, marginal, last[], history)
-        lam = lambda_at(hi)
+        if hi < gamma_sq_min
+            verbose && @info @sprintf("growth_rate: nothing grows faster than γ² = %.2e, below gamma_sq_min: marginal", 10hi)
+            return finish(0.0, true)
+        end
+        h_hi = evaluate(hi)
     end
-    lo = hi
-    while lam <= 0
-        lo = hi
+    lo, h_lo = hi, h_hi
+    while faster(h_hi) > 0
+        lo, h_lo = hi, h_hi
         hi *= 10
-        hi > gamma_sq_max && error("growth_rate: λ_min is still negative at γ² = $lo; raise gamma_sq_max or check the inertia density")
-        lam = lambda_at(hi)
+        hi > gamma_sq_max && error("growth_rate: a mode still grows at γ² = $lo; raise gamma_sq_max or check the inertia density")
+        h_hi = evaluate(hi)
     end
+    # The fastest root lies in (lo, hi]; with no interior crossing left at lo only the free-boundary energy changes sign there
+    h_lo.nzero == 0 || error("growth_rate: the fastest mode is fixed-boundary (nzero = $(h_lo.nzero) at γ² = $lo, 0 at γ² = $hi); " *
+          "locating a fixed-boundary growth rate is not supported yet")
 
-    # Illinois iteration on the sign-change bracket; the retained end's λ is halved when it is kept twice running
-    flo, fhi = seen[lo], seen[hi]
-    gamma_sq, side = hi, 0
+    # Illinois iteration on the sign change; the retained end's λ is halved when it is kept twice running
+    scale = history[1].lambda < 0 ? abs(history[1].lambda) : abs(h_lo.lambda)
+    flo, fhi = h_lo.lambda, h_hi.lambda
+    gamma_sq, side, converged = hi, 0, false
     for _ in 1:maxiter
         gamma_sq = (lo * fhi - hi * flo) / (fhi - flo)
-        lam = lambda_at(gamma_sq)
-        abs(lam) <= ftol * abs(history[1].lambda) && break
+        h = evaluate(gamma_sq)
+        h.nzero == 0 || error("growth_rate: an interior zero crossing appeared inside the bracket at γ² = $gamma_sq; the free-boundary energy is not monotone there")
+        lam = h.lambda
+        if abs(lam) <= ftol * scale
+            converged = true
+            break
+        end
         if lam < 0
             lo, flo = gamma_sq, lam
             side == -1 && (fhi /= 2)
@@ -265,9 +306,13 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
             side == 1 && (flo /= 2)
             side = 1
         end
-        hi - lo <= rtol * hi && break
+        if hi - lo <= rtol * hi
+            converged = true
+            break
+        end
     end
-    return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, inertia, config, omega_star_pi, marginal, last[], history)
+    converged || @warn "growth_rate: no convergence in $maxiter steps; γ² lies in [$lo, $hi] and the last iterate $gamma_sq is reported"
+    return finish(gamma_sq, converged)
 end
 
 function growth_rate(prob::ForceBalanceProblem, alg::Forward, config::GrowthRateConfig; marginal::Union{Nothing,ForceFreeStatesResult}=nothing, verbose::Bool=false)
