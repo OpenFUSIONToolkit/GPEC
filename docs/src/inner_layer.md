@@ -106,6 +106,7 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/ModifiedRutherford/w`, `Terms/F`, `Terms/<term>`, `Terms/w_d`, `PerSurface/` | the modified Rutherford width grid, ``F(w)`` and each switched term per surface, the transport width, and the surface inputs |
 | `Tearing/ModifiedRutherford/w_m_star`, `PerSurface/w_m`, `PerSurface/w_sat`, `PerSurface/<flag>` | the seed threshold and saturated widths per surface, their minimum over the surfaces, and the validity and gate flags (0/1) |
 | `PerSurface/w_sat_all`, `PerSurface/w_seed_all`, `PerSurface/w_seed_unsaturated`, `PerSurface/n_sat` | every saturated width per surface (branch × surface, NaN-padded) with the seed threshold that reaches it, the seed above which the island grows past `w_max`, and the number of saturated widths |
+| `PerSurface/b_m`, `PerSurface/b_seed_all`, `PerSurface/b_seed_unsaturated`, `b_m_star` | the resonant area-weighted field [T] whose vacuum island is as wide as each seed threshold, ``B = \pi |n q'| \chi_1 w^2/(8A)`` (the inverse of the perturbed equilibrium's island width), to compare with `PerturbedEquilibrium` resonant fields and error-field thresholds |
 | `Tearing/Callen/PerSurface/` | Callen's critical vacuum island width, critical resonant field and cubic roots per resonant row |
 
 ## Modified Rutherford diagnostics

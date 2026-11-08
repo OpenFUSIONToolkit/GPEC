@@ -243,6 +243,13 @@ include("display_check.jl")
 
             # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
             @test pe.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
+            # The MRE's seed field inverts the perturbed equilibrium's vacuum-island width at every surface.
+            MRE = GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford
+            for (row, k) in enumerate(resp.rational_surface_idx)
+                sk = ffs.surfaces[k]
+                @test MRE.vacuum_island_field(equil, resp.rational_psi[row], resp.rational_n[row], sk.q1, 2 * pe.island_half_width[row]) ≈
+                      abs(pe.resonant_area_weighted_field[row]) rtol = 1e-8
+            end
             @test pe.forcing_b ≈ reference.forcing_b rtol = 1e-10
 
             # One response serves any number of fields: forcing it again reproduces the result.

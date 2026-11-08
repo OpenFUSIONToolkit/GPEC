@@ -116,6 +116,10 @@ surface × width.
   - `w_seed_unsaturated` - Seed above which the island grows past `w_max`, when F > 0 there; `NaN` otherwise.
   - `n_sat` - Number of saturated widths; `multiple_saturated` when more than one.
   - `w_m_star` - Smallest `w_m` over the surfaces.
+  - `b_m`, `b_seed_all`, `b_seed_unsaturated`, `b_m_star` - Resonant area-weighted field [T] whose vacuum island is as wide as
+    `w_m`, each `w_seed_all` and `w_seed_unsaturated` ([`vacuum_island_field`](@ref)), comparable with the perturbed
+    equilibrium's resonant field and with error-field thresholds; `b_m_star` is the smallest `b_m` over the surfaces (not
+    necessarily at the `w_m_star` surface).
   - `fully_stabilized` - F < 0 on the whole search range.
   - `unstable_any_seed` - F > 0 at `w_lo`.
   - `unsaturated` - F > 0 at `w_max`: an island past its last rising root does not saturate in the search range.
@@ -170,7 +174,11 @@ surface × width.
     w_seed_all::Matrix{Float64}
     w_seed_unsaturated::Vector{Float64}
     n_sat::Vector{Int}
+    b_m::Vector{Float64}
+    b_seed_all::Matrix{Float64}
+    b_seed_unsaturated::Vector{Float64}
     w_m_star::Float64
+    b_m_star::Float64
     fully_stabilized::Vector{Bool}
     unstable_any_seed::Vector{Bool}
     unsaturated::Vector{Bool}
@@ -262,10 +270,22 @@ function mre_roots(F, w_lo::Real, w_grid::AbstractVector)
         unsaturated=vals[end] > 0)
 end
 
+"""
+    vacuum_island_field(equil, psi, n, q1, w) -> Float64
+
+Resonant area-weighted field [T] whose vacuum island at the surface `psi` (toroidal mode number `n`, dq/dψ_N `q1`) has
+full width `w` in ψ_N: the inverse of the perturbed equilibrium's island width, B = π |n q1| χ₁ w²/(8A), with χ₁ = 2πψ₀
+and A the flux-surface area.
+"""
+function vacuum_island_field(equil, psi::Real, n::Integer, q1::Real, w::Real)
+    area = Equilibrium.flux_surface_area(equil, Float64(psi), length(equil.rzphi_ys) - 1)
+    return π * abs(n * q1) * 2π * equil.psio * w^2 / (8 * area)
+end
+
 # Per-surface scalars, flags and width rows of the result, in field order.
 const _MRE_SCALARS = (:rational_psi, :rational_q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff,
     :Wc_prefac, :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma,
-    :delta_r, :w_lo, :D_c, :W_d_layer, :alpha_s, :beta_s, :C_sat, :w_m, :w_sat, :w_seed_unsaturated, :n_sat)
+    :delta_r, :w_lo, :D_c, :W_d_layer, :alpha_s, :beta_s, :C_sat, :w_m, :w_sat, :w_seed_unsaturated, :n_sat, :b_m, :b_seed_unsaturated)
 const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :unsaturated, :multiple_saturated, :outside_plasma, :gate_disagrees, :interchange_unstable,
     :linear_unstable, :below_w_ib, :large_delta_prime_w, :complex_delta_prime, :saturation_unconverged)
 const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d)
@@ -344,7 +364,8 @@ function _surface_inputs(prob::ModifiedRutherfordProblem, ctx, k, s)
         x -> Float64(equil.profiles.q_deriv(x)), psi; window=prob.saturation_window, ctx.psi_lim)
     # SLAYER's toroidal critical offset at this surface with this χ⊥, so the curvature term meets the gate at small w.
     D_c, W_d_layer = prob.curvature_model === :lutjens ? _layer_critical_offset(equil, s, plasma, chi_perp) : (NaN, NaN)
-    return (; rational_psi=psi, rational_q=s.q, m, n, g, D_I, D_R, H=rg.H, D_nc=prob.D_nc_factor * D_nc, mu_ratio, zeff, chi_perp, v_te,
+    return (; rational_psi=psi, rational_q=s.q, m, n, g, b_per_w2=vacuum_island_field(equil, psi, n, s.q1, 1.0), D_I, D_R, H=rg.H, D_nc=prob.D_nc_factor * D_nc, mu_ratio, zeff,
+        chi_perp, v_te,
         omega_star_i, omega_star_e, omega_hat=something(prob.omega_ratio, prob.omega_factor * omega_model / omega_star_i),
         omega_hat_pi=1 + (dT_i / T_i) / (dn_i / n_i), beta_p=2 * MU_0 * n_i * E_CHG * T_i / g.avg_bpolsq, rho_theta, rho_theta_psi,
         w_ib=sqrt(g.eps) * rho_theta_psi, gradient_ratio=(dn_i / n_i) / (g.q1 / g.q), K, dp_complex,
@@ -391,8 +412,12 @@ function _surface_roots(prob::ModifiedRutherfordProblem, ctx, si, gt, w)
     # A linearly unstable surface grows from noise, so it has no seed threshold; the MRE still sets its saturation.
     w_m, w_sat = excluded ? (NaN, NaN) : (linear_unstable ? NaN : r.w_m, r.w_sat)
     w_sat_all, w_seed_all = excluded ? (Float64[], Float64[]) : (r.w_sat_all, r.w_seed_all)
+    w_seed_unsaturated = excluded ? NaN : r.w_seed_unsaturated
     psi = si.rational_psi
-    return (; w_m, w_sat, w_sat_all, w_seed_all, w_seed_unsaturated=excluded ? NaN : r.w_seed_unsaturated, n_sat=length(w_sat_all),
+    # Resonant field of the vacuum island as wide as each seed threshold; B ∝ w².
+    b(x) = si.b_per_w2 * x^2
+    return (; w_m, w_sat, w_sat_all, w_seed_all, w_seed_unsaturated, n_sat=length(w_sat_all), b_m=b(w_m), b_seed_all=b.(w_seed_all),
+        b_seed_unsaturated=b(w_seed_unsaturated),
         multiple_saturated=length(w_sat_all) > 1, fully_stabilized=!excluded && r.fully_stabilized, unstable_any_seed=!excluded && r.unstable_any_seed,
         unsaturated=!excluded && r.unsaturated, outside_plasma=isfinite(w_sat) && (psi - w_sat / 2 < ctx.psi_lim[1] || psi + w_sat / 2 > ctx.psi_lim[2]),
         gate_disagrees=!excluded && isfinite(gt.gamma) && (r.unstable_any_seed ? gt.gamma < 0 : gt.gamma > 0), interchange_unstable,
@@ -421,7 +446,8 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     branches(key) = [k <= length(getfield(r, key)) ? getfield(r, key)[k] : NaN for r in rows, k in 1:nbranch]
     w_m = column(:w_m)
     return ModifiedRutherfordResult(; problem=prob, w=collect(w), (key => column(key) for key in _MRE_SCALARS)...,
-        w_sat_all=branches(:w_sat_all), w_seed_all=branches(:w_seed_all),
+        w_sat_all=branches(:w_sat_all), w_seed_all=branches(:w_seed_all), b_seed_all=branches(:b_seed_all),
+        b_m_star=all(isnan, column(:b_m)) ? NaN : minimum(filter(!isnan, column(:b_m))),
         w_m_star=all(isnan, w_m) ? NaN : minimum(filter(!isnan, w_m)), (key => Vector{Bool}(column(key)) for key in _MRE_FLAGS)...,
         (key => matrix(key) for key in _MRE_TERMS)...)
 end

@@ -9,6 +9,7 @@ import FastInterpolations
 using FastInterpolations: cubic_interp, Series, PeriodicBC, DerivOp
 
 import ...Utilities
+import ...Equilibrium
 import ...Utilities: save_to_hdf5
 using ...Utilities.HDF5Annotations: replace_group!
 using ...Utilities.PhysicalConstants: M_E, M_P, E_CHG, MU_0
@@ -25,6 +26,6 @@ export MRESurfaceGeometry, mre_geometry, current_density_profile, sauter2002_tra
 export classical_term, saturation_coefficient, saturation_term, bootstrap_term, curvature_term, lutjens_curvature_term, layer_transport_width, polarization_term,
     reduced_polarization_term,
     transport_width
-export mre_roots, ModifiedRutherfordProblem, ModifiedRutherfordResult
+export mre_roots, vacuum_island_field, ModifiedRutherfordProblem, ModifiedRutherfordResult
 
 end # module ModifiedRutherford
