@@ -1,17 +1,17 @@
 # Regression case: DIII-D-like H-mode n=1 modified Rutherford equation (MRE) behind the toroidal SLAYER gate.
-# Same deck as diiid_slayer_n1_toroidal plus [Tearing.ModifiedRutherford] with polarization and saturation on, so
-# the classical, saturation, bootstrap, Lütjens curvature and polarization terms, the gate and the roots are tracked.
+# A variant of diiid_slayer_n1_toroidal (its deck, overrides and quantities) plus [Tearing.ModifiedRutherford] with
+# polarization and saturation on, so the classical, saturation, bootstrap, Lütjens curvature and polarization terms,
+# the gate and the roots are tracked.
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
 # and the noise floor below which a difference is treated as zero.
 [case]
 name = "diiid_slayer_n1_mre"
+base = "diiid_slayer_n1_toroidal"   # Inherit example_dir, [quantities.*] and [overrides] from this case
 description = "DIII-D-like H-mode, n=1, modified Rutherford equation with polarization and saturation behind the toroidal SLAYER gate"
-example_dir = "examples/DIIID-like_SLAYER_example"
 
 [overrides]
-"SLAYER.D_c_type" = "toroidal"
-"Tearing.ModifiedRutherford.polarization" = true
-"Tearing.ModifiedRutherford.saturation" = true
+"Tearing.ModifiedRutherford.polarization" = true   # Ion polarization term on (off by default)
+"Tearing.ModifiedRutherford.saturation" = true     # Finite-width saturation term on (off by default)
 
 # Surface coefficients the terms are built from.
 [quantities.mre_D_nc]

@@ -9,10 +9,10 @@ example_dir = "examples/DIIID-like_ideal_example"
 remove_sections = ["LocalStability", "Ballooning", "ErrorFields", "KineticForces"]
 
 [overrides]
-"Tearing.Callen.delta_prime_source" = "cylindrical"
+"Tearing.Callen.delta_prime_source" = "cylindrical"   # Intrinsic Delta' -2m/rho, as Fortran GPEC 1.6.0; no extra Delta' solve
 
 [quantities.callen_hw_v]
-h5path = "Tearing/Callen/hw_v"
+h5path = "Tearing/Callen/PerSurface/hw_v"
 type = "real_vector"
 extract = "all_real"
 label = "Callen vacuum island half-width (psi_N)"
@@ -21,7 +21,7 @@ order = 10
 class = "physics_converged"
 
 [quantities.callen_hw_v_crit]
-h5path = "Tearing/Callen/hw_v_crit"
+h5path = "Tearing/Callen/PerSurface/hw_v_crit"
 type = "real_vector"
 extract = "all_real"
 label = "Callen critical vacuum half-width (psi_N)"
@@ -30,7 +30,7 @@ order = 12
 class = "physics_converged"
 
 [quantities.callen_b_crit]
-h5path = "Tearing/Callen/b_crit"
+h5path = "Tearing/Callen/PerSurface/b_crit"
 type = "real_vector"
 extract = "all_real"
 label = "Callen critical vacuum resonant field (T)"
@@ -39,7 +39,7 @@ order = 14
 class = "physics_converged"
 
 [quantities.callen_n_roots]
-h5path = "Tearing/Callen/n_roots"
+h5path = "Tearing/Callen/PerSurface/n_roots"
 type = "real_vector"
 extract = "all_real"
 label = "Callen positive cubic roots per surface"

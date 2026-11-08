@@ -235,10 +235,14 @@ function main_from_inputs(
     end
 
     if deck.callen !== nothing
+        # The perturbed equilibrium needs a forward solve, so the computed Δ′ comes from a second, Riccati solve.
+        ric = nothing
+        if get(deck.callen, :delta_prime_source, :computed) === :computed
+            ric = _timed_stage(runtimes, "callen_delta_prime", "Callen Δ′ (Riccati)") do
+                solve(ForceBalanceProblem(equil; deck.force_balance.keywords...), Riccati(); verbose)
+            end
+        end
         callen = _timed_stage(runtimes, "callen", "Callen threshold") do
-            # The perturbed equilibrium needs a forward solve, so the computed Δ′ comes from a second, Riccati solve.
-            computed = get(deck.callen, :delta_prime_source, :computed) === :computed
-            ric = computed ? solve(ForceBalanceProblem(equil; deck.force_balance.keywords...), Riccati(); verbose) : nothing
             solve(CallenProblem(pe; delta_prime=ric, deck.callen...))
         end
         save_to_hdf5(output_file, callen)
