@@ -11,21 +11,26 @@ The steady modified Rutherford equation (MRE) on every rational surface of a fin
     F(w) = s_Δ Δ′(w) + s_nc Δ_nc(w) + s_GGJ Δ_GGJ(w) + s_pol Δ_pol(w),
 
 with `w` the full island width in normalized poloidal flux ψ_N. Each term is evaluated on the grid whether or not its
-switch is on; the switches select which terms `F` sums. Δ′ is the real part of the diagonal of `ffs.delta_prime`,
+switch is on; the switches select which terms `F` sums. Δ′ is the real part of the diagonal of `ffs.delta_prime`
+(`delta_prime_source = :computed`) or the cylindrical vacuum value r_s Δ′ = −2m referred to ψ_N as SLAYER refers Δ′ to
+r_s (`:cylindrical`, which needs no Δ′ solve);
 the Mercier, resistive-interchange and Pfirsch-Schlüter indices D_I, D_R = E + F + H², H come from the surfaces'
 `ResistGeometry`, and the plasma (densities, temperatures, Z_eff, χ⊥,e, E×B rotation, ion species) is the
 equilibrium's kinetic data, as every tearing layer reads it. A deck states it as `[Tearing.ModifiedRutherford]`.
 
 The roots of F are refined between grid points from `w_lo = max(δ_r, w_min)`: the seed threshold `w_m` is the
 smallest crossing from F < 0 to F > 0 and the saturated width `w_sat` the largest from F > 0 to F < 0. Surfaces that
-are resistive-interchange unstable (D_R > 0) or linearly tearing unstable (γ > 0 in `tearing`) get no roots.
+are resistive-interchange unstable (D_R > 0) get no roots; linearly tearing unstable ones (γ > 0 in `tearing`) grow
+from noise, so they get no seed threshold but keep `w_sat`.
 
 ## Fields
 
-  - `ffs` - Outer solution with a Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`), single n.
+  - `ffs` - Outer solution, single n, with a Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`)
+    unless `delta_prime_source = :cylindrical`.
   - `tearing` - Linear tearing solve on the same Δ′ (the gate and the layer width δ_r), or `nothing`; set by the deck
     when `[Tearing]` is present.
   - `classical`, `bootstrap`, `curvature`, `polarization` - Term switches s_Δ, s_nc, s_GGJ, s_pol.
+  - `delta_prime_source` - `:computed` (Δ′_mn of `ffs`) or `:cylindrical` (r_s Δ′_mn = −2m, a reference case).
   - `delta_prime_model` - `:mercier_power` (Benjamin Eq. 10) or `:constant` (Δ′(w) = Δ′_mn).
   - `delta_prime_factor`, `D_nc_factor`, `rho_theta_factor` - Multipliers on Δ′_mn, D_nc and the poloidal ion Larmor
     radius ρ_θi (which also sets w_ib), for scans.
@@ -48,6 +53,7 @@ are resistive-interchange unstable (D_R > 0) or linearly tearing unstable (γ > 
     bootstrap::Bool = true
     curvature::Bool = true
     polarization::Bool = false
+    delta_prime_source::Symbol = :computed
     delta_prime_model::Symbol = :mercier_power
     delta_prime_factor::Float64 = 1.0
     D_nc_factor::Float64 = 1.0
@@ -88,11 +94,11 @@ Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to 
     banana width in ψ_N, inverse aspect ratio.
   - `gamma`, `delta_r` - Linear growth rate [1/s] and resistive layer width in ψ_N from `tearing` (`NaN` without it).
   - `w_lo` - Lower end of the root search.
-  - `w_m`, `w_sat` - Seed threshold and saturated full widths in ψ_N; `NaN` when absent or excluded.
+  - `w_m`, `w_sat` - Seed threshold and saturated full widths in ψ_N; `NaN` when absent or excluded, and `w_m` `NaN` when γ > 0.
   - `w_m_star` - Smallest `w_m` over the surfaces.
   - `fully_stabilized` - F < 0 on the whole search range.
   - `unstable_any_seed` - F > 0 at `w_lo`.
-  - `interchange_unstable`, `linear_unstable` - Excluded by D_R > 0, or by γ > 0.
+  - `interchange_unstable`, `linear_unstable` - D_R > 0 (excluded), or γ > 0 (no seed threshold; `w_sat` kept).
   - `below_w_ib` - `w_m` below the ion banana width, where the polarization ordering fails.
   - `large_delta_prime_w` - |Δ′| w ≥ 1 at `w_m` or `w_sat`.
   - `complex_delta_prime` - |Im Δ′_mn| > 10⁻³ |Re Δ′_mn|.
@@ -150,10 +156,19 @@ end
 function validate(prob::ModifiedRutherfordProblem)
     ffs = prob.ffs
     ffs.npert == 1 || throw(ArgumentError("ModifiedRutherfordProblem is single-n; the solve spans n = $(ffs.nlow):$(ffs.nhigh)"))
-    dp = ffs.delta_prime
-    dp === nothing && throw(ArgumentError("ModifiedRutherfordProblem needs Δ′: solve with Riccati() and vac_flag=true, or Galerkin(; rpec_flag=true)"))
-    size(dp.matrix, 1) == length(ffs.surfaces) ||
-        throw(ArgumentError("ModifiedRutherfordProblem: the Δ′ matrix is $(size(dp.matrix, 1))×$(size(dp.matrix, 2)) for $(length(ffs.surfaces)) surfaces"))
+    prob.delta_prime_source in (:computed, :cylindrical) || throw(ArgumentError("delta_prime_source must be :computed or :cylindrical"))
+    if prob.delta_prime_source === :computed
+        dp = ffs.delta_prime
+        (dp === nothing || isempty(dp.matrix)) &&
+            throw(
+                ArgumentError(
+                    "ModifiedRutherfordProblem needs Δ′: solve with Riccati() and vac_flag=true, Galerkin(; rpec_flag=true), " *
+                    "or set delta_prime_source = :cylindrical"
+                )
+            )
+        size(dp.matrix, 1) == length(ffs.surfaces) ||
+            throw(ArgumentError("ModifiedRutherfordProblem: the Δ′ matrix is $(size(dp.matrix, 1))×$(size(dp.matrix, 2)) for $(length(ffs.surfaces)) surfaces"))
+    end
     ffs.equil.kinetic === nothing && throw(ArgumentError("ModifiedRutherfordProblem needs kinetic profiles; set kinetic_file in [Equilibrium]"))
     prob.delta_prime_model in (:mercier_power, :constant) || throw(ArgumentError("delta_prime_model must be :mercier_power or :constant"))
     prob.pol_model in (:full, :reduced) || throw(ArgumentError("pol_model must be :full or :reduced"))
@@ -214,6 +229,8 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     m_i = sum(s.fraction * s.m for s in species) / sum(s.fraction for s in species) * M_P
     z_i = Float64(first(species).z)
     gate = prob.tearing
+    # Metres map to ψ_N with the toroidal-flux radial label's dr/dψ, the label SLAYER's layer widths use.
+    r_at, dr_dpsi = radial_label(equil)
     chi_gate = gate === nothing || !hasproperty(gate.model, :chi_perp_Dc) ? nothing : gate.model.chi_perp_Dc
 
     vec0() = zeros(ns)
@@ -249,11 +266,12 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         D_nc, mu_ratio = bootstrap_coefficient(g, zeff)
         D_nc *= prob.D_nc_factor
 
-        # Polarization inputs (Benjamin App. C); widths in metres map to ψ_N by w/(2ψ_s) ↔ ρ/r_s.
+        # Polarization inputs (Benjamin App. C); lengths in metres map to ψ_N with dr/dψ.
         v_te = sqrt(2 * E_CHG * T_e / M_E)
         v_ti = sqrt(2 * E_CHG * T_i / m_i)
         rho_theta = prob.rho_theta_factor * m_i * v_ti / (g.avg_bpol * E_CHG)
-        w_ib = sqrt(g.eps) * rho_theta * 2 * psi / g.r_minor
+        rho_theta_psi = rho_theta / abs(dr_dpsi(psi))
+        w_ib = sqrt(g.eps) * rho_theta_psi
         beta_p = 2 * MU_0 * n_i * E_CHG * T_i / g.avg_bpolsq
         gradient_ratio = (dn_i / n_i) / (g.q1 / g.q)
         # Diamagnetic frequencies from the density gradients, in SLAYER's sign convention (charge −1 for electrons).
@@ -265,7 +283,9 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
             n * (loaded.has_omega_E ? Float64(loaded.profiles.omega_E(psi)) : 0.0)
         omega_hat = something(prob.omega_ratio, prob.omega_factor * omega_model / omega_star_i)
 
-        dp_complex = ffs.delta_prime.matrix[k, k]
+        # Cylindrical: r_s Δ′ = −2m, referred back to ψ_N by K^(−2α), K = r_s dψ_N/dr, α = √(−D_I) (as delta_prime_to_rs_reference).
+        dp_complex = prob.delta_prime_source === :computed ? ffs.delta_prime.matrix[k, k] :
+                     complex(-2 * m * (r_at(psi) / abs(dr_dpsi(psi)))^(-2 * sqrt(max(-D_I, 0.0))))
         dp_mn = prob.delta_prime_factor * real(dp_complex)
         function terms(wj)
             wd = transport_width(wj; prob.c_wd, chi_perp, v_te, R0=g.R_major, g.q, g.q1, n, m, g.Wc_prefac)
@@ -275,7 +295,7 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
             pl =
                 prob.pol_sign * (
                     prob.pol_model === :full ?
-                    polarization_term(wj; prob.c_pol, g.eps, rho_theta_over_rs=rho_theta / g.r_minor, psi_s=psi, beta_p,
+                    polarization_term(wj; prob.c_pol, g.eps, rho_theta_psi, beta_p,
                         gradient_ratio, omega_hat, omega_hat_pi, w_ib) :
                     reduced_polarization_term(wj; prob.c_pol, prob.C_pol, w_ib)
                 )
@@ -291,14 +311,15 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         # Gates: the linear tearing growth rate and resistive layer width from `tearing`, and resistive interchange.
         row = gate === nothing ? nothing : _tearing_row(gate, psi)
         gamma = row === nothing ? NaN : gate.gamma[row]
-        delta_r = row === nothing || isempty(gate.layer_widths) ? NaN : 2 * psi * gate.layer_widths[row].delta_s_m / g.r_minor
+        delta_r = row === nothing || isempty(gate.layer_widths) ? NaN : gate.layer_widths[row].delta_s_m / abs(dr_dpsi(psi))
         w_lo = isnan(delta_r) ? prob.w_min : max(delta_r, prob.w_min)
         flags.interchange_unstable[k] = D_R > 0
         flags.linear_unstable[k] = gamma > 0
         flags.complex_delta_prime[k] = abs(imag(dp_complex)) > 1e-3 * abs(real(dp_complex))
         r = mre_roots(wj -> terms(wj).F, w_lo, w)
-        excluded = flags.interchange_unstable[k] || flags.linear_unstable[k] || D_I >= 0
-        w_m, w_sat = excluded ? (NaN, NaN) : (r.w_m, r.w_sat)
+        excluded = flags.interchange_unstable[k] || D_I >= 0
+        # A linearly unstable surface grows from noise, so it has no seed threshold; the MRE still sets its saturation.
+        w_m, w_sat = excluded ? (NaN, NaN) : (flags.linear_unstable[k] ? NaN : r.w_m, r.w_sat)
         flags.fully_stabilized[k], flags.unstable_any_seed[k] = !excluded && r.fully_stabilized, !excluded && r.unstable_any_seed
         flags.below_w_ib[k] = w_m < w_ib
         flags.large_delta_prime_w[k] = abs(dp_mn) * w_m >= 1 || abs(dp_mn) * w_sat >= 1

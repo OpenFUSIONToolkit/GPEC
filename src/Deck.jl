@@ -390,14 +390,13 @@ function modified_rutherford_from_deck(inputs::AbstractDict)
 end
 
 """
-    callen_from_deck(inputs) -> Bool
+    callen_from_deck(inputs) -> Union{Nothing,Dict{Symbol,Any}}
 
-Whether `[Tearing.Callen]` is present; it takes no keys.
+The `CallenProblem` keywords of `[Tearing.Callen]`; `nothing` without that section.
 """
 function callen_from_deck(inputs::AbstractDict)
-    haskey(inputs, "Tearing") && haskey(inputs["Tearing"], "Callen") || return false
-    section_keywords(inputs["Tearing"]["Callen"], "Tearing.Callen", _struct_fields(CallenProblem, (:pe,)))
-    return true
+    haskey(inputs, "Tearing") && haskey(inputs["Tearing"], "Callen") || return nothing
+    return section_keywords(inputs["Tearing"]["Callen"], "Tearing.Callen", _struct_fields(CallenProblem, (:pe, :delta_prime)))
 end
 
 """
@@ -500,16 +499,23 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
         has_ffs || error("[Tearing.ModifiedRutherford] needs a [ForceFreeStates] solve")
         (; keywords, algorithm) = force_balance
         first(keywords[:nn]) == last(keywords[:nn]) || error("[Tearing.ModifiedRutherford] is single-n: set [ForceFreeStates] nn to one toroidal mode number")
-        (algorithm isa Galerkin && algorithm.rpec_flag) || (algorithm isa Riccati && get(keywords, :vac_flag, false)) ||
-            error("[Tearing.ModifiedRutherford] needs Δ′: use integrator = \"Riccati\" with vac_flag = true, or \"Galerkin\" with [Galerkin] rpec_flag = true")
+        get(modified_rutherford, :delta_prime_source, :computed) === :cylindrical ||
+            (algorithm isa Galerkin && algorithm.rpec_flag) || (algorithm isa Riccati && get(keywords, :vac_flag, false)) ||
+            error(
+                "[Tearing.ModifiedRutherford] needs Δ′: use integrator = \"Riccati\" with vac_flag = true, \"Galerkin\" with [Galerkin] rpec_flag = true, " *
+                "or delta_prime_source = \"cylindrical\""
+            )
         isempty(get(get(inputs, "Equilibrium", Dict{String,Any}()), "kinetic_file", "")) &&
             error("[Tearing.ModifiedRutherford] needs kinetic profiles: set kinetic_file in [Equilibrium]")
     end
     perturbed_equilibrium = perturbed_equilibrium_from_deck(inputs)
     forcing = forcing_terms_control(inputs, path)
     callen = callen_from_deck(inputs)
-    if callen
+    if callen !== nothing
         perturbed_equilibrium === nothing && error("[Tearing.Callen] needs a [PerturbedEquilibrium] section")
+        get(callen, :delta_prime_source, :computed) === :cylindrical || get(force_balance.keywords, :vac_flag, false) ||
+            error("[Tearing.Callen] computes Δ′ with an extra Riccati solve, which needs [ForceFreeStates] vac_flag = true; " *
+                  "or set delta_prime_source = \"cylindrical\"")
         forcing.forcing_data_format == "coil" || error("[Tearing.Callen] needs a coil forcing: set [ForcingTerms] forcing_data_format = \"coil\"")
         isempty(get(get(inputs, "Equilibrium", Dict{String,Any}()), "kinetic_file", "")) &&
             error("[Tearing.Callen] needs kinetic profiles: set kinetic_file in [Equilibrium]")
@@ -621,7 +627,7 @@ function deck_inputs(deck::NamedTuple, config::Equilibrium.EquilibriumConfig, an
     end
     mre = deck.modified_rutherford
     mre === nothing || (get!(inputs, "Tearing", Dict{String,Any}())["ModifiedRutherford"] = _deck_table(mre))
-    deck.callen && (get!(inputs, "Tearing", Dict{String,Any}())["Callen"] = Dict{String,Any}())
+    deck.callen === nothing || (get!(inputs, "Tearing", Dict{String,Any}())["Callen"] = _deck_table(deck.callen))
     deck.kinetic_forces === nothing || merge!(inputs, deck_sections(deck.kinetic_forces))
     pe = deck.perturbed_equilibrium
     pe === nothing || (inputs["PerturbedEquilibrium"] = _deck_table(merge(pe.response, pe.drive)))
@@ -671,7 +677,7 @@ deck_sections(m::ForceFreeStates.MatchResult) =
 deck_sections(kf::KineticForcesResult) = deck_sections(kf.control)
 deck_sections(t::TearingResult) = t.model === nothing ? Dict{String,Any}() : _tearing_sections(t.problem, t.problem.critical_resonant_field, t.model, t.config)
 deck_sections(r::ModifiedRutherfordResult) = Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => _deck_table(r.problem, (:ffs, :tearing))))
-deck_sections(::CallenResult) = Dict{String,Any}("Tearing" => Dict{String,Any}("Callen" => Dict{String,Any}()))
+deck_sections(r::CallenResult) = Dict{String,Any}("Tearing" => Dict{String,Any}("Callen" => _deck_table(r.problem, (:pe, :delta_prime))))
 deck_sections(ef::ErrorFieldsResult) = _error_fields_sections(ef.settings, ef.tolerances === nothing ? "" : _RECORDED_TOLERANCES)
 
 function deck_sections(ffs::ForceFreeStatesResult)

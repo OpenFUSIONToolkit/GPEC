@@ -4,7 +4,7 @@
 # in the Fortran GPEC 1.6.0 form, on every resonant row of a single-n perturbed equilibrium driven by coils.
 
 """
-    CallenProblem(pe)
+    CallenProblem(pe; delta_prime=nothing, delta_prime_source=:computed)
 
 Callen's reduced MRE for the vacuum-island threshold on every resonant row of the perturbed equilibrium `pe`
 (a single-n state from `perturbed_equilibrium` with a coil forcing). Half-widths are in metres of the toroidal-flux
@@ -12,10 +12,12 @@ radius ρ = (Φ_tor/πB₀)^(1/2) inside, and in ψ_N on output, as in Fortran G
 
   - w_pol = ½ q ρ_i/(ρ/R₀)^(1/2) with ρ_i = (2T_i/m_i)^(1/2)/(Z_i e B₀/m_i), R₀ and B₀ on the axis;
   - Δ_RMP = |Δ|/(2πR₀q) B₀/|B_res|, Δ the singular-current jump over 2πχ₁ and B_res the total resonant field;
-  - Δ_c = −2m/ρ;
+  - Δ_c the intrinsic tearing index in 1/m of ρ: the true Δ′_mn of `delta_prime` (a Riccati or Galerkin solve on the
+    same equilibrium and n), referred to ρ as K^(2α) Δ′_mn/ρ with K = ρ dψ_N/dρ and α = (−D_I)^(1/2) as for SLAYER, with
+    `delta_prime_source = :computed`; or Callen's cylindrical −2m/ρ (Fortran GPEC 1.6.0) with `:cylindrical`;
   - critical vacuum half-width h_v,crit = ½ w_pol^(2/3) ((27/4)|Δ_c|)^(1/6)/Δ_RMP^(1/2);
   - the steady state of Callen's Eq. 17, Δ_c w³ + Δ_RMP w_vac² w − w_pol² = 0, a cubic in the full width w with
-    w_vac = 2h_v; its positive roots halved are h_min < h_sat;
+    w_vac = 2h_v; its positive roots halved are h_min < h_sat (with Δ_c ≥ 0 only h_min exists, and h_v,crit = 0);
   - critical resonant field B_crit = |B_vac| (h_v,crit/h_v)².
 
 The vacuum resonant field B_vac is the coils' resonant harmonic on the rational surface over its area.
@@ -23,10 +25,16 @@ The vacuum resonant field B_vac is the coils' resonant harmonic on the rational 
 ## Fields
 
   - `pe` - Perturbed-equilibrium state, single n, from a coil forcing.
+  - `delta_prime` - Force-free-states result carrying Δ′ (Riccati or Galerkin) for `:computed`; set by the deck.
+  - `delta_prime_source` - `:computed` (true Δ′_mn) or `:cylindrical` (−2m/ρ, the Fortran 1.6.0 reference).
 """
-struct CallenProblem{S}
+@kwdef struct CallenProblem{S,D}
     pe::S
+    delta_prime::D = nothing
+    delta_prime_source::Symbol = :computed
 end
+
+CallenProblem(pe; kwargs...) = CallenProblem(; pe=pe, kwargs...)
 
 """
     CallenResult
@@ -45,7 +53,7 @@ does not exist.
   - `hw_isl`, `hw_v` - Total-field and vacuum island half-widths.
   - `hw_v_crit` - Critical vacuum half-width.
   - `hw_min`, `hw_sat` - Half of the smaller and larger positive (full-width) cubic roots.
-  - `n_roots` - Number of positive cubic roots (0 or 2).
+  - `n_roots` - Number of positive cubic roots (0 or 2; 1 when Δ_c ≥ 0).
   - `b_crit` - Critical vacuum resonant field [T].
 """
 struct CallenResult{P}
@@ -74,12 +82,16 @@ end
 """
     callen_cubic_roots(a, b, c) -> (x_min, x_sat)
 
-The positive roots of `a x³ + b x + c = 0` with `a < 0`, `b ≥ 0`, `c < 0`, by the trigonometric solution
-x_k = 2R cos((θ + 2πk)/3), R = (−p/3)^(1/2), cos θ = −q/(2R³) of the depressed cubic x³ + px + q; `(NaN, NaN)`
-when it has no positive root.
+The positive roots of `a x³ + b x + c = 0` with `b ≥ 0`, `c < 0`. For `a < 0`, the trigonometric solution
+x_k = 2R cos((θ + 2πk)/3), R = (−p/3)^(1/2), cos θ = −q/(2R³) of the depressed cubic x³ + px + q gives two positive
+roots or none (`(NaN, NaN)`); for `a > 0` there is one positive root (Cardano), returned as `(x, NaN)`.
 """
 function callen_cubic_roots(a::Real, b::Real, c::Real)
     p, q = b / a, c / a
+    if a > 0
+        s = sqrt(q^2 / 4 + p^3 / 27)
+        return (cbrt(-q / 2 + s) + cbrt(-q / 2 - s), NaN)
+    end
     p < 0 || return (NaN, NaN)
     R = sqrt(-p / 3)
     arg = -q / (2 * R^3)
@@ -101,6 +113,15 @@ function _vacuum_resonant_field(pe, equil, psi, n, m, area)
     return abs(rmp.scale * amplitude) / area
 end
 
+# Δ′_mn of the surface at ψ from a force-free-states result, referred to the radius ρ in 1/m: K^(2α) Δ′/ρ, K = ρ dψ_N/dρ.
+function _callen_delta_c(ric, psi, rho, drho)
+    k = findfirst(s -> isapprox(s.psifac, psi; atol=1e-8), ric.surfaces)
+    k === nothing && throw(ArgumentError("CallenProblem: delta_prime has no rational surface at ψ = $psi"))
+    rg = ric.surfaces[k].restype
+    alpha = sqrt(max(0.25 - (rg.E + rg.F + rg.H), 0.0))
+    return (rho / drho)^(2 * alpha) * real(ric.delta_prime.matrix[k, k]) / rho
+end
+
 function CommonSolve.solve(prob::CallenProblem)
     pe = prob.pe
     resp = pe.response
@@ -110,6 +131,11 @@ function CommonSolve.solve(prob::CallenProblem)
     data = equil.kinetic
     data === nothing && throw(ArgumentError("CallenProblem needs kinetic profiles; set kinetic_file in [Equilibrium]"))
     isempty(pe.island_half_width) && throw(ArgumentError("CallenProblem needs the singular coupling of the perturbed equilibrium"))
+    prob.delta_prime_source in (:computed, :cylindrical) ||
+        throw(ArgumentError("delta_prime_source must be :computed or :cylindrical, got :$(prob.delta_prime_source)"))
+    ric = prob.delta_prime
+    prob.delta_prime_source === :cylindrical || (ric !== nothing && !isempty(ric.delta_prime.matrix)) ||
+        throw(ArgumentError("CallenProblem with delta_prime_source = :computed needs delta_prime, a Riccati or Galerkin solve carrying Δ′"))
 
     T_i_of = _slayer_profiles(data, nothing).profiles.T_i
     species = data.ion_species
@@ -136,8 +162,9 @@ function CommonSolve.solve(prob::CallenProblem)
         w_pol = 0.5 * q * rho_i / sqrt(rho / R0)
         b_res = abs(pe.resonant_area_weighted_field[row])
         delta_rmp = abs(pe.delta_prime[row]) / (2π * R0 * q) * B0 / b_res
-        delta_c = -2 * m / rho
-        hw_v_crit = 0.5 * w_pol^(2 / 3) * ((27 / 4) * abs(delta_c))^(1 / 6) / sqrt(delta_rmp)
+        delta_c = prob.delta_prime_source === :cylindrical ? -2 * m / rho : _callen_delta_c(ric, psi, rho, drho)
+        # With Δ_c ≥ 0 any vacuum island lets a seed above h_min grow, so the critical vacuum width is zero.
+        hw_v_crit = delta_c < 0 ? 0.5 * w_pol^(2 / 3) * ((27 / 4) * abs(delta_c))^(1 / 6) / sqrt(delta_rmp) : 0.0
         b_vac = _vacuum_resonant_field(pe, equil, psi, n, m, area)
         shear = n * q1 / q
         hw_v = sqrt(abs(4 * b_vac * area / (2π * shear * q * chi1)))
@@ -148,7 +175,7 @@ function CommonSolve.solve(prob::CallenProblem)
             b_crit=b_vac * (hw_v_crit / drho / hw_v)^2))
             out[k][row] = v
         end
-        m_out[row], n_out[row], n_roots[row] = m, n, isnan(x_min) ? 0 : 2
+        m_out[row], n_out[row], n_roots[row] = m, n, count(!isnan, (x_min, x_sat))
     end
     return CallenResult(prob, out[:psi], out[:q], m_out, n_out, out[:rho_tor], out[:drho_dpsi], out[:rho_i], out[:w_pol], out[:delta_rmp],
         out[:delta_c], out[:b_res], out[:b_vac], out[:hw_isl], out[:hw_v], out[:hw_v_crit], out[:hw_min], out[:hw_sat], n_roots, out[:b_crit])

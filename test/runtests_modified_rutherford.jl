@@ -30,7 +30,7 @@ using TOML
     end
 
     @testset "polarization term: sign follows ω̂(ω̂ − ω̂_pi), zero at ω̂ = 0" begin
-        args = (; c_pol=1.0, eps=0.2, rho_theta_over_rs=0.01, psi_s=0.6, beta_p=0.5, gradient_ratio=-0.8, omega_hat_pi=1.5, w_ib=1e-3)
+        args = (; c_pol=1.0, eps=0.2, rho_theta_psi=0.012, beta_p=0.5, gradient_ratio=-0.8, omega_hat_pi=1.5, w_ib=1e-3)
         pol(ω̂) = MR.polarization_term(0.02; args..., omega_hat=ω̂)
         @test pol(0.0) == 0
         @test pol(1.5) == 0

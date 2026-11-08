@@ -623,26 +623,39 @@ using HDF5
         end
 
         @testset "Callen threshold under [Tearing.Callen]" begin
-            # The coil-driven DIII-D-like example with the empty sub-table, against solve(CallenProblem(pe)).
+            # The coil-driven DIII-D-like example: Callen with the computed Δ′ (main adds a Riccati solve) and the
+            # cylindrical MRE on the same forward solve, against the API.
             ex_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
             mktempdir() do dir
                 deck = TOML.parsefile(joinpath(ex_dir, "gpec.toml"))
                 foreach(k -> delete!(deck, k), ("LocalStability", "Ballooning", "ErrorFields", "KineticForces"))
                 deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
-                deck["Tearing"] = Dict{String,Any}("Callen" => Dict{String,Any}())
+                deck["Tearing"] = Dict{String,Any}("Callen" => Dict{String,Any}(),
+                    "ModifiedRutherford" => Dict{String,Any}("delta_prime_source" => "cylindrical", "nw" => 40))
                 for key in ("eq_filename", "kinetic_file")
                     deck["Equilibrium"][key] = abspath(joinpath(ex_dir, deck["Equilibrium"][key]))
                 end
                 open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
-                api = solve(CallenProblem(reference.pe))
                 @test reference.tearing === nothing && reference.callen isa CallenResult
-                @test api.hw_v_crit ≈ reference.callen.hw_v_crit rtol = 1e-12
-                @test all(isfinite, api.hw_v_crit)
-                @test isequal(api.hw_min, reference.callen.hw_min) && isequal(api.hw_sat, reference.callen.hw_sat)
+
+                ric = solve(ForceBalanceProblem(reference.ffs.equil; GPEC.parse_deck(deck, dir).force_balance.keywords...), Riccati())
+                api = solve(CallenProblem(reference.pe; delta_prime=ric))
+                @test api.delta_c ≈ reference.callen.delta_c rtol = 1e-10
+                @test api.hw_v_crit ≈ reference.callen.hw_v_crit rtol = 1e-10
+                @test isequal(api.n_roots, reference.callen.n_roots)
+                cyl = solve(CallenProblem(reference.pe; delta_prime_source=:cylindrical))
+                @test cyl.delta_c ≈ -2 .* cyl.m ./ cyl.rho_tor
+                @test_throws "needs delta_prime" solve(CallenProblem(reference.pe))
+
+                mre = solve(ModifiedRutherfordProblem(reference.ffs; delta_prime_source=:cylindrical, nw=40))
+                @test mre.F ≈ reference.modified_rutherford.F rtol = 1e-10
+                @test isequal(mre.w_m, reference.modified_rutherford.w_m)
+                @test all(<(0), mre.delta_prime)
                 h5open(joinpath(dir, "gpec.h5")) do f
-                    @test read(f["Tearing/Callen/hw_v_crit"]) ≈ api.hw_v_crit rtol = 1e-12
-                    @test haskey(TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"], "Callen")
+                    @test read(f["Tearing/Callen/delta_c"]) ≈ api.delta_c rtol = 1e-10
+                    recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
+                    @test haskey(recorded, "Callen") && recorded["ModifiedRutherford"]["delta_prime_source"] == "cylindrical"
                 end
             end
 

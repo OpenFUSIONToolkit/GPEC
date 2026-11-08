@@ -36,16 +36,17 @@ function curvature_term(D_R::Real, H::Real, D_I::Real, w_d::Real, w::Real; k1::R
 end
 
 """
-    polarization_term(w; c_pol, eps, rho_theta_over_rs, psi_s, beta_p, gradient_ratio, omega_hat, omega_hat_pi, w_ib) -> Float64
+    polarization_term(w; c_pol, eps, rho_theta_psi, beta_p, gradient_ratio, omega_hat, omega_hat_pi, w_ib) -> Float64
 
 Ion-polarization term of Benjamin Eq. C.1,
-`−c_pol 3.28 ε^(3/2) I₁ [(ρ_iθ/r_s)/(w/(2ψ_s))]² (β_p/w) G² ω̂(ω̂ − ω̂_pi) w⁴/(w⁴ + w_ib⁴)`, with `I₁ = 0.71`,
+`−c_pol 3.28 ε^(3/2) I₁ (ρ_iθ,ψ/w)² (β_p/w) G² ω̂(ω̂ − ω̂_pi) w⁴/(w⁴ + w_ib⁴)`, with `I₁ = 0.71`, the poloidal Larmor
+radius `ρ_iθ,ψ` in ψ_N (Benjamin's `(ρ_iθ/r_s)/(w/2ψ_s)` with its `dψ/dr = 2ψ_s/r_s` replaced by the layer label's),
 `G = (n_i⁻¹ dn_i/dψ)/(q⁻¹ dq/dψ)` and the island frequency `ω̂ = ω/ω_*i` and `ω̂_pi = ω_*pi/ω_*i` normalized to the
 ion diamagnetic frequency. Zero at `ω̂ = 0` and at `ω̂ = ω̂_pi`; stabilizing for `ω̂(ω̂ − ω̂_pi) > 0`.
 """
-function polarization_term(w::Real; c_pol::Real, eps::Real, rho_theta_over_rs::Real, psi_s::Real, beta_p::Real,
-    gradient_ratio::Real, omega_hat::Real, omega_hat_pi::Real, w_ib::Real)
-    return -c_pol * 3.28 * eps^1.5 * 0.71 * (rho_theta_over_rs / (w / (2 * psi_s)))^2 * (beta_p / w) * gradient_ratio^2 *
+function polarization_term(w::Real; c_pol::Real, eps::Real, rho_theta_psi::Real, beta_p::Real, gradient_ratio::Real, omega_hat::Real,
+    omega_hat_pi::Real, w_ib::Real)
+    return -c_pol * 3.28 * eps^1.5 * 0.71 * (rho_theta_psi / w)^2 * (beta_p / w) * gradient_ratio^2 *
            omega_hat * (omega_hat - omega_hat_pi) * w^4 / (w^4 + w_ib^4)
 end
 

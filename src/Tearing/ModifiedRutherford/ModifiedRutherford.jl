@@ -13,7 +13,7 @@ import ...ForcingTerms
 import ...Utilities: save_to_hdf5
 using ...Utilities.HDF5Annotations: replace_group!
 using ...Utilities.PhysicalConstants: M_E, M_P, E_CHG, MU_0
-using ...InnerLayer.SLAYER: _slayer_profiles
+using ...InnerLayer.SLAYER: _slayer_profiles, radial_label
 using Roots: find_zero, Brent
 
 include("Geometry.jl")
