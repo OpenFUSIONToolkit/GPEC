@@ -37,10 +37,10 @@ end
 
 const _MRE_PER_SURFACE = (:psi, :q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff, :Wc_prefac,
     :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma, :delta_r, :w_lo,
-    :w_m, :w_sat)
+    :alpha_s, :beta_s, :C_sat, :w_m, :w_sat)
 const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :interchange_unstable, :linear_unstable, :below_w_ib, :large_delta_prime_w,
     :complex_delta_prime)
-const _MRE_TERMS = (:F, :classical, :bootstrap, :curvature, :polarization, :w_d)
+const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d)
 
 # Julia's surface × width matrices land in HDF5 as (width, surface).
 const _MRE_TERM_DIMS = ("w", "surface")
@@ -80,6 +80,10 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/gamma" => (; long_name="linear tearing growth rate of the gate, NaN without one", units="1/s", dims=("surface",)),
     "PerSurface/delta_r" => (; long_name="resistive layer width of the gate, NaN without one", units="psi_N", dims=("surface",)),
     "PerSurface/w_lo" => (; long_name="lower end of the root search max(delta_r, w_min)", units="psi_N", dims=("surface",)),
+    "PerSurface/alpha_s" => (; long_name="saturation current-gradient coefficient alpha_s = -r q J_z'/s (Fitzpatrick 2023 Eq. 9.16)", dims=("surface",)),
+    "PerSurface/beta_s" => (; long_name="saturation current-curvature coefficient beta_s = -r^2 q J_z''/s", dims=("surface",)),
+    "PerSurface/C_sat" => (; long_name="saturation coefficient 0.8 alpha_s^2 - 0.27 beta_s - 0.09 alpha_s (Fitzpatrick 2023 Eq. 9.15)",
+        dims=("surface",)),
     "PerSurface/w_m" => (; long_name="seed threshold: smallest F crossing from negative to positive, NaN if none", units="psi_N", dims=("surface",)),
     "PerSurface/w_sat" => (; long_name="saturated width: largest F crossing from positive to negative, NaN if none", units="psi_N",
         dims=("surface",)),
@@ -92,6 +96,7 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/complex_delta_prime" => (; long_name="1 if |Im Delta'| > 1e-3 |Re Delta'|", dims=("surface",)),
     "Terms/F" => (; long_name="modified Rutherford F(w), the sum of the switched-on terms", dims=_MRE_TERM_DIMS),
     "Terms/classical" => (; long_name="classical term Delta'(w)", dims=_MRE_TERM_DIMS),
+    "Terms/saturation" => (; long_name="finite-width saturation term Delta_sat(w)", dims=_MRE_TERM_DIMS),
     "Terms/bootstrap" => (; long_name="bootstrap term Delta_nc(w)", dims=_MRE_TERM_DIMS),
     "Terms/curvature" => (; long_name="curvature term Delta_GGJ(w)", dims=_MRE_TERM_DIMS),
     "Terms/polarization" => (; long_name="ion polarization term Delta_pol(w), including pol_sign", dims=_MRE_TERM_DIMS),

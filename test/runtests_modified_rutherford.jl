@@ -39,6 +39,31 @@ using TOML
         @test MR.reduced_polarization_term(0.01; c_pol=1.0, C_pol=1.9, w_ib=1e-3) ≈ -(1.9e-3)^2 / 1e-6
     end
 
+    @testset "saturation term: Wesson cylinder of Fitzpatrick 2023 Fig. 9.2" begin
+        # q0 = 0.8, q(a) = 4.4, r = √ψ (a = 1); reference α_s, β_s from the analytic J_z = (2/q0)(1 − r²)^ν, not from q.
+        q0, qa = 0.8, 4.4
+        nu = qa / q0 - 1
+        q(x) = qa * x / (1 - (1 - x)^(nu + 1))
+        dq(x) = (q(x + 1e-7) - q(x - 1e-7)) / 2e-7
+        lo, hi = 0.1, 0.9
+        for _ in 1:60
+            mid = (lo + hi) / 2
+            q(mid) < 2 ? (lo = mid) : (hi = mid)
+        end
+        psi_s = (lo + hi) / 2
+        sc = MR.saturation_coefficient(sqrt, x -> 0.5 / sqrt(x), q, dq, psi_s; h=1e-3)
+        @test sqrt(psi_s) ≈ 0.65942681 rtol = 1e-6
+        @test sc.alpha_s ≈ 1.642673 rtol = 1e-4
+        @test sc.beta_s ≈ -7.204691 rtol = 1e-3
+        # Classical plus saturation vanish at W_pw/r_s = r_sΔ′(0)/C_sat (Eq. 9.21); r_sΔ′(0) = 1.64 from the cylindrical
+        # tearing equation, which puts W_pw/a at the 0.27 peak of the r_w = a curve. K = r_s dψ/dr = 2ψ_s.
+        E_ss, K = 1.64, 2 * psi_s
+        grid = exp.(range(log(1e-4), log(2.0); length=200))
+        r = MR.mre_roots(w -> MR.classical_term(E_ss / K, -0.25, w) + MR.saturation_term(sc.C_sat, K, -0.25, w), 1e-4, grid)
+        @test r.w_sat / K ≈ E_ss / sc.C_sat rtol = 1e-8
+        @test sqrt(psi_s) * r.w_sat / K ≈ 0.27 rtol = 0.02
+    end
+
     @testset "transport width grows as w^(1/4)" begin
         kw = (; c_wd=1.0, chi_perp=1.0, v_te=5e7, R0=1.7, q=2.0, q1=3.0, n=1, m=2, Wc_prefac=3e4)
         @test MR.transport_width(16e-3; kw...) / MR.transport_width(1e-3; kw...) ≈ 2 rtol = 1e-12

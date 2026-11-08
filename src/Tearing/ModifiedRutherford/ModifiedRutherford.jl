@@ -23,7 +23,8 @@ include("Callen.jl")
 include("HDF5Output.jl")
 
 export MRESurfaceGeometry, mre_geometry, sauter2002_trapped_fraction, bootstrap_coefficient
-export classical_term, bootstrap_term, curvature_term, polarization_term, reduced_polarization_term, transport_width
+export classical_term, saturation_coefficient, saturation_term, bootstrap_term, curvature_term, polarization_term, reduced_polarization_term,
+    transport_width
 export mre_roots, ModifiedRutherfordProblem, ModifiedRutherfordResult, CallenProblem, CallenResult, callen_cubic_roots
 
 end # module ModifiedRutherford

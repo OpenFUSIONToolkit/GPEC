@@ -631,7 +631,7 @@ using HDF5
                 foreach(k -> delete!(deck, k), ("LocalStability", "Ballooning", "ErrorFields", "KineticForces"))
                 deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
                 deck["Tearing"] = Dict{String,Any}("Callen" => Dict{String,Any}(),
-                    "ModifiedRutherford" => Dict{String,Any}("delta_prime_source" => "cylindrical", "nw" => 40))
+                    "ModifiedRutherford" => Dict{String,Any}("delta_prime_source" => "cylindrical", "saturation" => true, "nw" => 40))
                 for key in ("eq_filename", "kinetic_file")
                     deck["Equilibrium"][key] = abspath(joinpath(ex_dir, deck["Equilibrium"][key]))
                 end
@@ -648,14 +648,17 @@ using HDF5
                 @test cyl.delta_c ≈ -2 .* cyl.m ./ cyl.rho_tor
                 @test_throws "needs delta_prime" solve(CallenProblem(reference.pe))
 
-                mre = solve(ModifiedRutherfordProblem(reference.ffs; delta_prime_source=:cylindrical, nw=40))
+                mre = solve(ModifiedRutherfordProblem(reference.ffs; delta_prime_source=:cylindrical, saturation=true, nw=40))
                 @test mre.F ≈ reference.modified_rutherford.F rtol = 1e-10
                 @test isequal(mre.w_m, reference.modified_rutherford.w_m)
                 @test all(<(0), mre.delta_prime)
+                @test all(isfinite, mre.C_sat)
+                @test all(all(sign.(mre.saturation[k, :]) .== -sign(mre.C_sat[k])) for k in eachindex(mre.psi) if mre.D_I[k] < 0)
                 h5open(joinpath(dir, "gpec.h5")) do f
                     @test read(f["Tearing/Callen/delta_c"]) ≈ api.delta_c rtol = 1e-10
                     recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
                     @test haskey(recorded, "Callen") && recorded["ModifiedRutherford"]["delta_prime_source"] == "cylindrical"
+                    @test recorded["ModifiedRutherford"]["saturation"] && read(f["Tearing/ModifiedRutherford/PerSurface/C_sat"]) ≈ mre.C_sat
                 end
             end
 

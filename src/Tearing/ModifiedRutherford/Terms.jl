@@ -36,6 +36,38 @@ function curvature_term(D_R::Real, H::Real, D_I::Real, w_d::Real, w::Real; k1::R
 end
 
 """
+    saturation_coefficient(r, dr_dpsi, q, dq_dpsi, psi; h=0.01) -> NamedTuple
+
+Current-gradient coefficients of the finite-width saturation term (Fitzpatrick 2023 Eqs. 9.15–9.19, after Hastie,
+Militello & Porcelli 2005): `α_s = −r q J_z′/s`, `β_s = −r² q J_z″/s` and `C_sat = 0.8 α_s² − 0.27 β_s − 0.09 α_s`, with
+`s = r q′/q`, `′ = d/dr` and the cylindrical `J_z = R₀μ₀j_z/B_z = (2 − s)/q`, all in the radial label `r(ψ)` with
+derivative `dr_dpsi(ψ)`. `J_z′` and `J_z″` are central differences of step `h` in ψ_N. Eq. 9.17 prints `r q J_z″/s`;
+the `r²` form is the dimensionless one and the one that reproduces Fitzpatrick's Fig. 9.2.
+"""
+function saturation_coefficient(r, dr_dpsi, q, dq_dpsi, psi::Real; h::Real=0.01)
+    shear(x) = r(x) * dq_dpsi(x) / (q(x) * dr_dpsi(x))
+    J(x) = (2 - shear(x)) / q(x)
+    dJ_dr(x) = (J(x + h) - J(x - h)) / (2h * dr_dpsi(x))
+    d2J_dr2 = (dJ_dr(psi + h) - dJ_dr(psi - h)) / (2h * dr_dpsi(psi))
+    rs, qs, s = r(psi), q(psi), shear(psi)
+    alpha_s = -rs * qs * dJ_dr(psi) / s
+    beta_s = -rs^2 * qs * d2J_dr2 / s
+    return (; alpha_s, beta_s, C_sat=0.8 * alpha_s^2 - 0.27 * beta_s - 0.09 * alpha_s)
+end
+
+"""
+    saturation_term(C_sat, K, D_I, w; model=:mercier_power) -> Float64
+
+Finite-width saturation term: Fitzpatrick's replacement `r_sΔ′ → r_sΔ′(0) − C_sat W/r_s` (Eq. 9.15) referred to ψ_N
+as the outer Δ′ is (`W/r_s = w/K`, `Δ′_ψ = K^(−2α) r_sΔ′`, `K = r_s dψ_N/dr`, `α = √(−D_I)`), then carried through
+[`classical_term`](@ref), which is linear in Δ′: `−classical_term(C_sat K^(−1−2α) w, D_I, w)`. At `D_I = −¼` it is
+`−C_sat w/K²`, so classical plus saturation vanish at Fitzpatrick's `W_pw/r_s = r_sΔ′(0)/C_sat` (Eq. 9.21).
+"""
+function saturation_term(C_sat::Real, K::Real, D_I::Real, w::Real; model::Symbol=:mercier_power)
+    return -classical_term(C_sat * K^(-1 - 2 * sqrt(-D_I)) * w, D_I, w; model)
+end
+
+"""
     polarization_term(w; c_pol, eps, rho_theta_psi, beta_p, gradient_ratio, omega_hat, omega_hat_pi, w_ib) -> Float64
 
 Ion-polarization term of Benjamin Eq. C.1,
