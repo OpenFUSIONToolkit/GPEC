@@ -188,13 +188,13 @@ include("h5_metadata_check.jl")
         # Starting below the pole, only the count can carry the search past it to the fastest mode
         low_start = FFS.growth_rate(ForceBalanceProblem(hp_equil; nn=1, wall, ffs_kwargs...), forward; inertia, gamma_sq_init=1e8)
         @test low_start.converged
-        @test_broken low_start.gamma_sq > 4e9
+        @test low_start.gamma_sq > 4e9
         # A close wall makes the marginal free-boundary energy positive, so only the count says the plasma is unstable, and the
         # bracket [1e8, 1e9] then holds the pole: the count bisection must lift its lower end before the sign iteration
         close_wall = GPEC.Vacuum.ConformalWall(; standoff_fraction=0.05)
         walled = FFS.growth_rate(ForceBalanceProblem(hp_equil; nn=1, wall=close_wall, ffs_kwargs...), forward; inertia, gamma_sq_init=1e8)
-        @test_broken walled.gamma > 0
-        @test_broken any(h.nzero > 0 for h in walled.history)
+        @test walled.gamma > 0
+        @test any(h.nzero > 0 for h in walled.history)
     end
 
     @testset "kinetic data without T_e" begin

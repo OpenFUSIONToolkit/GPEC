@@ -92,9 +92,12 @@ ffs = solve(prob, Riccati())
 ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
-function CommonSolve.solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false)
+CommonSolve.solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false) = _solve_force_balance(prob, alg; verbose)
+
+# `solve` with the internal switch for the exact conjugate-point count, which growth_rate turns on for its solves.
+function _solve_force_balance(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false, count_conjugate_points::Bool=false)
     total_start = time()
-    ctrl, intr, equil, metric, mats, layer_overlap = _prepare_solve(prob, alg; verbose)
+    ctrl, intr, equil, metric, mats, layer_overlap = _prepare_solve(prob, alg; verbose, count_conjugate_points)
     result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa Galerkin && alg.cut_solution)
     result = _with(result; problem=prob, algorithm=alg, layer_overlap=layer_overlap)
 
@@ -123,7 +126,7 @@ end
 
 # Everything solve does before the integration: the control, the mode space, the (re-formed) equilibrium, the metric,
 # the matrices, the layer-overlap scan and the kinetic matrices.
-function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false)
+function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false, count_conjugate_points::Bool=false)
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
     ctrl = ForceFreeStatesControl(; algorithm=alg, ctrl_kwargs...)
@@ -148,7 +151,7 @@ function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verb
               "nodes; regenerate the file in double precision for converged Δ′." file = eq_config.eq_filename
     end
 
-    intr = ForceFreeStatesInternal(; verbose)
+    intr = ForceFreeStatesInternal(; verbose, count_conjugate_points)
     intr.wall_settings = prob.wall
 
     resolve_mode_space!(intr, ctrl)

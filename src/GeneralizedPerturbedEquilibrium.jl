@@ -171,7 +171,9 @@ function main_from_inputs(
 
     if deck.force_balance !== nothing
         ffs = _timed_stage(runtimes, "force_free_states", "Force-Free States") do
-            solve(ForceBalanceProblem(equil; deck.force_balance.keywords...), deck.force_balance.algorithm; verbose)
+            # growth_rate reuses this solve as its marginal, so it carries the conjugate-point count when a [GrowthRate] section follows
+            ForceFreeStates._solve_force_balance(ForceBalanceProblem(equil; deck.force_balance.keywords...), deck.force_balance.algorithm; verbose,
+                count_conjugate_points=deck.growth_rate !== nothing)
         end
         # Every later stage, local stability included, sees the equilibrium the solve formed (re-formed on the two-pass grid).
         equil = ffs.equil

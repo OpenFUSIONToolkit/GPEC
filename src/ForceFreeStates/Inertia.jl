@@ -172,7 +172,8 @@ The outcome of [`growth_rate`](@ref).
   - `gamma::Float64` - Growth rate in s⁻¹ of the least-stable free-boundary mode; 0 when the plasma is marginally stable or stable.
   - `gamma_sq::Float64` - γ² at which the least-stable free-boundary energy eigenvalue crosses zero.
   - `converged::Bool` - Whether the root iteration met its `ftol` or `rtol` stop (always true for a stable or marginal plasma); false when
-    `maxiter` ran out, in which case `gamma` is the last iterate and `history` brackets the root.
+    `maxiter` ran out, in which case `gamma` is the last iterate and `history` brackets the root, or when any solve flagged an ambiguous
+    step in its conjugate-point count.
   - `inertia::PerpendicularInertia` - The inertia source the solves used.
   - `config::Union{Nothing,GrowthRateConfig}` - The deck settings when the solve came from a `[GrowthRate]` section or the three-argument method; `nothing` otherwise.
   - `omega_star_pi::Float64` - Peak ion diamagnetic frequency |ω_*pi| in rad/s over the integration domain, at the toroidal n of the
@@ -181,7 +182,8 @@ The outcome of [`growth_rate`](@ref).
     peak is taken over `[psilow, psilim]`, so a truncated domain can cut off part of a pedestal gradient.
   - `marginal::ForceFreeStatesResult` - The ideal (γ² = 0) solve, whose least-stable energy decides stability.
   - `result::Union{Nothing,ForceFreeStatesResult}` - The solve at `gamma_sq`, carrying the eigenmode; `nothing` when stable.
-  - `history::Vector` - Every (γ², λ_min, nzero) evaluated, in order, with λ_min the least-stable free-boundary energy at that γ².
+  - `history::Vector` - Every (γ², λ_min, nzero) evaluated, in order, with λ_min the least-stable free-boundary energy at that γ² and
+    `nzero` the exact conjugate-point count of that solve.
 """
 struct IdealGrowthRateResult
     gamma::Float64
@@ -202,8 +204,8 @@ end
 
 Growth rate of the fastest ideal mode of `prob` with the perpendicular inertia `inertia` (a
 [`PerpendicularInertia`](@ref)), ELITE's eigenvalue problem solved by shooting. The inertia enters as
-`kinetic_factor = γ²`; at each γ² the number of modes growing faster than γ is the interior zero-crossing
-count `nzero` plus one when the least-stable free-boundary energy λ_min is negative, and that count cannot
+`kinetic_factor = γ²`; at each γ² the number of modes growing faster than γ is the number of conjugate
+points `nzero` plus one when the least-stable free-boundary energy λ_min is negative, and that count cannot
 rise with γ² since the kinetic energy is positive. The ideal solve gives the count at γ = 0; when it is
 zero the plasma is stable and `gamma` is 0. Otherwise the count is bracketed by decades from
 `gamma_sq_init` (down while nothing is faster, up while something still is). An interior crossing still
@@ -218,11 +220,10 @@ counts as marginal (`gamma` = 0), `gamma_sq_max` the ceiling beyond which bracke
 When the count bisection reaches `rtol` with a crossing still present, the fastest mode is a fixed-boundary
 one (its edge displacement vanishes) and the bracket's upper end is reported as converged.
 
-The count is only as good as the crossing detector, which follows the smallest-magnitude eigenvalue of W⁻¹
-along ψ and misses a conjugate point whenever a stiff harmonic holds that eigenvalue near zero. A missed
-crossing below `gamma_sq_init` makes a positive λ_min look stable, so the search can settle on a slower
-mode or report γ = 0. Start `gamma_sq_init` above the fastest growth rate expected: the upward scan needs
-only the sign of λ_min, and `history` shows whether λ_min rose monotonically through the bracket.
+The conjugate points are counted exactly, as the eigenphases of the Cayley transform of the solution frame
+that wrap through π along ψ (its Maslov index), not by the smallest-eigenvalue detector `diagnostics.nzero`;
+a step whose phase match is ambiguous is warned about and marks the result not converged. Starting
+`gamma_sq_init` above the fastest growth rate expected is cheapest, since the upward scan needs only the sign of λ_min.
 
 A `marginal` result of the same problem (an earlier ideal `solve`) is reused instead of solving it again;
 `config` is recorded on the result and is what the three-argument method passes. The problem must carry no
@@ -239,16 +240,30 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         error("growth_rate needs an ideal marginal problem: remove its kinetic source, the inertia is the only kinetic term")
     history = @NamedTuple{gamma_sq::Float64, lambda::Float64, nzero::Int}[]
     lambda_min(r) = minimum(real, r.free_boundary.et)
+    counted_solve(p) = _solve_force_balance(p, alg; verbose, count_conjugate_points=true)
+    counted(r) = r.diagnostics !== nothing && r.diagnostics.nzero_conj >= 0
+    flagged = Ref(false)
+    function check_flags(r, gamma_sq)
+        nflag = r.diagnostics.nconj_flags
+        nflag > 0 || return
+        flagged[] = true
+        @warn "growth_rate: the conjugate-point count at γ² = $gamma_sq had $nflag ambiguous step(s); the result is marked not converged"
+    end
     faster(h) = h.nzero + (h.lambda < 0)   # modes growing faster than γ; non-increasing in γ²
     solves = Dict{Float64,ForceFreeStatesResult}()
     function finish(gamma_sq, converged)
         r = get(solves, gamma_sq, nothing)
-        return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, converged, inertia, config, _peak_omega_star_pi(something(r, marginal)), marginal, r, history)
+        return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, converged && !flagged[], inertia, config, _peak_omega_star_pi(something(r, marginal)), marginal, r, history)
     end
 
-    marginal = marginal === nothing ? solve(prob, alg; verbose) : marginal
+    if marginal !== nothing && !counted(marginal)
+        verbose && @info "growth_rate: the supplied marginal solve has no conjugate-point count; solving it again with the count"
+        marginal = nothing
+    end
+    marginal = marginal === nothing ? counted_solve(prob) : marginal
     marginal.free_boundary === nothing && error("growth_rate needs the free-boundary energies: set vac_flag=true")
-    push!(history, (gamma_sq=0.0, lambda=lambda_min(marginal), nzero=marginal.diagnostics.nzero))
+    check_flags(marginal, 0.0)
+    push!(history, (gamma_sq=0.0, lambda=lambda_min(marginal), nzero=marginal.diagnostics.nzero_conj))
     verbose && @info @sprintf("growth_rate: marginal λ_min = %.6e (nzero = %d)", history[end].lambda, history[end].nzero)
     faster(history[1]) == 0 && return finish(0.0, true)
 
@@ -262,9 +277,10 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         haskey(seen, gamma_sq) && return history[seen[gamma_sq]]
         kw = copy(kwargs)
         kw[:kinetic_factor] = gamma_sq
-        r = solve(ForceBalanceProblem(prob.equil, prob.wall, kw), alg; verbose)
+        r = counted_solve(ForceBalanceProblem(prob.equil, prob.wall, kw))
         solves[gamma_sq] = r
-        push!(history, (gamma_sq=gamma_sq, lambda=lambda_min(r), nzero=r.diagnostics.nzero))
+        check_flags(r, gamma_sq)
+        push!(history, (gamma_sq=gamma_sq, lambda=lambda_min(r), nzero=r.diagnostics.nzero_conj))
         seen[gamma_sq] = length(history)
         verbose && @info @sprintf("growth_rate: γ² = %.4e  λ_min = %.6e  nzero = %d", gamma_sq, history[end].lambda, history[end].nzero)
         return history[end]

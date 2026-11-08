@@ -15,7 +15,7 @@ const GROWTH_RATE_H5_ANNOTATIONS = [
     "rho" => (; long_name="perpendicular-inertia mass density ρ", units="kg/m^3", dims=("psi",), attach=(1 => "psi",)),
     "History/gamma_sq" => (; long_name="γ² evaluated by the growth-rate root search, in order", units="s^-2", dims=("iteration",)),
     "History/lambda_min" => (; long_name="power-normalized least-stable free-boundary energy at each evaluated γ² (per unit ⟨|ξ|²⟩)", dims=("iteration",)),
-    "History/nzero" => (; long_name="number of zero crossings of the fixed-boundary critical eigenvalue at each evaluated γ²", dims=("iteration",))
+    "History/nzero" => (; long_name="number of conjugate points (fixed-boundary modes inside the ψ interval) at each evaluated γ²", dims=("iteration",))
 ]
 
 """

@@ -37,6 +37,8 @@ Solve-time scratch state for a force-balance solve: the resolved mode space, sin
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape settings for vacuum calculations
   - `verbose::Bool` - Log solve progress; set from the `verbose` keyword of `solve`
+  - `count_conjugate_points::Bool` - Run the exact conjugate-point count of the forward integration (`OdeState.nzero_conj`); set by
+    `growth_rate` for its solves, off otherwise
 """
 @kwdef mutable struct ForceFreeStatesInternal <: ModeSpace
     mlow::Int = 0
@@ -59,6 +61,7 @@ Solve-time scratch state for a force-balance solve: the resolved mode space, sin
     q1lim::Float64 = 0.0
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
     verbose::Bool = false
+    count_conjugate_points::Bool = false
     """
     Inter-surface Δ' matrix, `msing × msing`, PEST3 convention: the odd-parity projection of
     `delta_prime_raw`, set by `compute_delta_prime_matrix!` (Riccati path only).

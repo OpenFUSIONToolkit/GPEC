@@ -67,6 +67,19 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `ising_start::Int` - Index of the last singular surface inside the starting ψ.
   - `needs_crossing::Bool` - Whether a rational surface must be crossed after the current region.
   - `nzero::Int` - Number of detected zero crossings of the critical eigenvalue.
+  - `count_conj::Bool` - Whether the exact conjugate-point count runs (forward Hamiltonian runs that request it: no kinetic source, or a
+    `PerpendicularInertia` one); off by default since it costs two LU factorizations and one eigenvalue solve per accepted step.
+  - `nconj::Int` - Signed running count of Cayley eigenphases that wrapped through π (conjugate points, fixed-boundary modes inside the
+    ψ interval), reseeded after each ideal crossing so it counts per Newcomb interval.
+  - `nzero_conj::Int` - Number of conjugate points, `abs(nconj)` at the end of the run; −1 when the count did not run.
+  - `nconj_flags::Int` - Accepted steps whose count is unreliable (an eigenphase rotation above π/2, or a unitarity defect above 1e-3 that
+    shows the frame is not Lagrangian to working precision); a nonzero value means `nzero_conj` may be wrong.
+  - `maslov_theta::Vector{Float64}` - Cayley eigenphases at the last counted step, aligned with the columns of `maslov_vecs`.
+  - `maslov_vecs::Matrix{ComplexF64}` - Cayley eigenvectors at the last counted step, which identify each eigenphase across a step.
+  - `maslov_pending::Bool` - Whether the next accepted step seeds the eigenphases and the Cayley scale instead of advancing the count.
+  - `maslov_s::Float64` - Scale s of the Cayley transform (U₁ − i s U₂)(U₁ + i s U₂)⁻¹, set to ‖U₁‖/‖U₂‖ of the column-normalized frame one step
+    into each chunk.
+  - `maslov_defect::Float64` - Largest unitarity defect max| |λ| − 1 | of the Cayley eigenvalues over the run.
   - `new::Bool` - Whether the next norm call records fresh reference norms `unorm0`.
   - `unorm::Vector{Float64}` - Current solution-column norms.
   - `unorm0::Vector{Float64}` - Reference norms since the last reduction.
@@ -110,6 +123,17 @@ records needed to undo it, and singular-surface asymptotic coefficients.
     ising_start::Int = 0
     needs_crossing::Bool = false
     nzero::Int = 0
+
+    # Exact conjugate-point count
+    count_conj::Bool = false
+    nconj::Int = 0
+    nzero_conj::Int = -1
+    nconj_flags::Int = 0
+    maslov_theta::Vector{Float64} = zeros(Float64, numpert_total)
+    maslov_vecs::Matrix{ComplexF64} = zeros(ComplexF64, numpert_total, numpert_total)
+    maslov_pending::Bool = false
+    maslov_s::Float64 = 1.0
+    maslov_defect::Float64 = 0.0
 
     # Used for Gaussian reduction
     new::Bool = true
@@ -285,6 +309,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
     odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
     initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+    odet.count_conj = intr.count_conjugate_points && kinetic_source(ctrl.kinetic) isa Union{Nothing,PerpendicularInertia}
 
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
 
@@ -293,6 +318,8 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     end
 
     for chunk in chunks
+        # Reseeds the count one step into the chunk: at the Frobenius start and after an ideal crossing U₁ has vanishing columns
+        odet.count_conj && maslov_seed!(odet)
         integrate_el_region!(odet, ctrl, equil, mats, intr, chunk)
         if verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
@@ -318,6 +345,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
+    odet.count_conj && (odet.nzero_conj = abs(odet.nconj))
 
     # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
@@ -663,6 +691,7 @@ function cross_kinetic_singular_surf!(
     odet.psifac = ksurf.psifac + dpsi
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
+    odet.count_conj && maslov_advance!(odet, odet.u)   # compared with the phases of the chunk's last accepted step
 
     odet.q = equil.profiles.q_spline(odet.psifac; hint=odet.spline_hint)
     store_ode_data!(odet, odet.psifac, odet.u)
@@ -746,6 +775,8 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
         column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
+        # The dense output lets a step with a fast-moving eigenphase be bisected for the conjugate-point count
+        odet.count_conj && maslov_advance!(odet, integrator.u; refine=τ -> integrator(integrator.tprev + τ * (integrator.t - integrator.tprev)))
 
         # The first step is always saved, even when q_range ≈ 0
         near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
