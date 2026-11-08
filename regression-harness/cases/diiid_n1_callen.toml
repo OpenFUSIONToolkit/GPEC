@@ -1,0 +1,57 @@
+# Regression case: DIII-D-like n=1 Callen vacuum-island threshold on the coil-driven perturbed equilibrium.
+# The cylindrical intrinsic Δ′ (−2m/ρ) keeps the Fortran GPEC parity case and needs no extra Δ′ solve.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "diiid_n1_callen"
+description = "DIII-D-like, n=1, Callen vacuum-island threshold and cubic roots on the coil-driven perturbed equilibrium"
+example_dir = "examples/DIIID-like_ideal_example"
+remove_sections = ["LocalStability", "Ballooning", "ErrorFields", "KineticForces"]
+
+[overrides]
+"Tearing.Callen.delta_prime_source" = "cylindrical"
+
+[quantities.callen_hw_v]
+h5path = "Tearing/Callen/hw_v"
+type = "real_vector"
+extract = "all_real"
+label = "Callen vacuum island half-width (psi_N)"
+noise_threshold = 1e-10
+order = 10
+class = "physics_converged"
+
+[quantities.callen_hw_v_crit]
+h5path = "Tearing/Callen/hw_v_crit"
+type = "real_vector"
+extract = "all_real"
+label = "Callen critical vacuum half-width (psi_N)"
+noise_threshold = 1e-10
+order = 12
+class = "physics_converged"
+
+[quantities.callen_b_crit]
+h5path = "Tearing/Callen/b_crit"
+type = "real_vector"
+extract = "all_real"
+label = "Callen critical vacuum resonant field (T)"
+noise_threshold = 1e-12
+order = 14
+class = "physics_converged"
+
+[quantities.callen_n_roots]
+h5path = "Tearing/Callen/n_roots"
+type = "real_vector"
+extract = "all_real"
+label = "Callen positive cubic roots per surface"
+noise_threshold = 0
+order = 16
+class = "physics_converged"
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999
+class = "diagnostic"
