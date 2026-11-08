@@ -1,0 +1,79 @@
+# Regression case: ELITE-style ideal growth rate of the large-aspect-ratio reversed-shear n=1 example.
+# The example is free-boundary unstable at n=1, so [GrowthRate] root-finds a nonzero γ with a uniform
+# deuterium mass density (1e20 m⁻³). Tracks γ, γ², the root-find history and the ideal energy it starts from.
+# Each [quantities.*] block names an HDF5 path, how to extract it, and its noise floor.
+[case]
+name = "lar_reversed_shear_growth_rate_n1"
+description = "Large-aspect-ratio reversed-shear equilibrium, n=1, ELITE-style ideal growth rate with uniform deuterium density"
+example_dir = "examples/LAR_reversed_shear_example"
+
+[overrides]
+"GrowthRate.rho" = 3.3e-7                # Uniform mass density [kg/m³] (deuterium at 1e20 m⁻³); NaN derives ρ(ψ) from the kinetic profiles
+
+# Growth rate (γ ≈ 3.0e3 1/s); absolute floors match a 1e-10 shift in λ_min near the root
+[quantities.gamma]
+h5path = "ForceFreeStates/GrowthRate/gamma"
+type = "real_scalar"
+extract = "value"
+label = "growth rate gamma (1/s)"
+noise_threshold = 1e-5
+order = 10
+
+[quantities.gamma_sq]
+h5path = "ForceFreeStates/GrowthRate/gamma_sq"
+type = "real_scalar"
+extract = "value"
+label = "growth rate squared gamma^2 (1/s^2)"
+noise_threshold = 1e-1
+order = 11
+
+# Root-find history: every γ² evaluated, the least-stable free-boundary energy there, and the fixed-boundary zero count
+[quantities.history_gamma_sq]
+h5path = "ForceFreeStates/GrowthRate/History/gamma_sq"
+type = "real_vector"
+extract = "all_real"
+label = "root-find gamma^2 history"
+noise_threshold = 1e-1
+order = 20
+
+[quantities.history_lambda_min]
+h5path = "ForceFreeStates/GrowthRate/History/lambda_min"
+type = "real_vector"
+extract = "all_real"
+label = "root-find lambda_min history"
+noise_threshold = 1e-10
+order = 21
+
+[quantities.history_nzero]
+h5path = "ForceFreeStates/GrowthRate/History/nzero"
+type = "real_vector"
+extract = "all_real"
+label = "root-find nzero history (integer counts)"
+noise_threshold = 0
+order = 22
+
+# Ideal marginal solve the root find starts from
+[quantities.et_real]
+h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+order = 30
+
+[quantities.msing]
+h5path = "SingularSurfaces/rational_count"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+order = 31
+
+# Runtime (special: not from H5)
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999

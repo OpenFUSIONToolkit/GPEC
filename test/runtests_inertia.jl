@@ -1,5 +1,7 @@
 using TOML
 using LinearAlgebra
+using HDF5
+include("h5_metadata_check.jl")
 
 # Perpendicular inertia (ELITE's kinetic energy K = ½∫ρ|ξ_⊥|² dV) as a kinetic source of the force-balance
 # equations: the A, C, H bands it adds, the B² identity they rely on, the γ²-scaled solves and growth_rate.
@@ -134,7 +136,21 @@ using LinearAlgebra
         cfg = FFS.GrowthRateConfig()
         gr2 = FFS.growth_rate(kprob, forward, cfg; marginal=gr.marginal)
         @test gr2.gamma == gr.gamma && gr2.omega_star_pi == gr.omega_star_pi && gr2.marginal === gr.marginal
+        @test gr.config === nothing && gr.inertia === src && gr2.config === cfg && isnan(gr2.config.rho)
         @test FFS._rho_at(FFS.inertia_source(cfg, kequil), 0.4) == FFS._rho_at(src, 0.4)
         @test FFS._rho_at(FFS.inertia_source(FFS.GrowthRateConfig(; rho=2.0), kequil), 0.4) == 2.0
+        # The HDF5 writer: the group, its annotations and the recorded [GrowthRate] inputs
+        mktempdir() do dir
+            path = joinpath(dir, "gpec.h5")
+            FFS.save_to_hdf5(path, gr2)
+            h5open(path, "r") do f
+                @test isempty(_collect_metadata_violations(f))
+                @test read(f["ForceFreeStates/GrowthRate/gamma"]) == 0.0
+                @test read(f["ForceFreeStates/GrowthRate/omega_star_pi"]) == gr2.omega_star_pi
+                @test length(read(f["ForceFreeStates/GrowthRate/History/lambda_min"])) == 1
+                @test read(f["ForceFreeStates/GrowthRate/rho"]) ≈ [FFS._rho_at(src, x) for x in read(f["ForceFreeStates/GrowthRate/psi"])]
+                @test haskey(TOML.parse(read(f["Input/gpec_toml_raw"])), "GrowthRate")
+            end
+        end
     end
 end
