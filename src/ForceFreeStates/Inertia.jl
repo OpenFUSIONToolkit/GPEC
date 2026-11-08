@@ -25,6 +25,46 @@ end
 _rho_at(src::PerpendicularInertia, psi::Real) = src.rho isa Function ? Float64(src.rho(psi)) : src.rho
 
 """
+    PerpendicularInertia(equil::Equilibrium.PlasmaEquilibrium)
+
+The inertia of the equilibrium's attached kinetic profiles: ρ(ψ_N) = μ m_p n_e(ψ_N), with μ the mean ion mass per
+electron of the main ions and the impurity at the local Z_eff, the density the SLAYER layer uses. Errors when no
+kinetic profiles are attached (set `kinetic_file` or call `attach_kinetic_profiles!`).
+"""
+function PerpendicularInertia(equil::Equilibrium.PlasmaEquilibrium)
+    data = InnerLayer._layer_kinetic_data(equil, "mass density ρ")
+    loaded = InnerLayer.SLAYER._slayer_profiles(data, nothing)
+    mu = InnerLayer.SLAYER._layer_mass_per_electron(data, InnerLayer.SLAYER._layer_zeff(loaded, data))
+    n_e = loaded.profiles.n_e
+    return PerpendicularInertia(; rho=psi -> (mu isa Real ? mu : mu(psi)) * Utilities.M_P * n_e(psi))
+end
+
+"""
+    ion_diamagnetic_frequency(equil::Equilibrium.PlasmaEquilibrium, n::Integer; z_i=1) -> ψ_N -> ω_*pi
+
+The ion diamagnetic frequency in rad/s for toroidal mode number `n`, ω_*pi = n (dp_i/dΨ)/(Z_i e n_i) with Ψ the
+poloidal flux per radian, from the attached kinetic profiles with n_i ∝ n_e and p_i = n_i T_i, the layer
+convention (positive for the usual outward-decreasing profiles). The EPED1 criterion counts a mode as unstable
+when γ > ω_*pi/2 at the pedestal.
+"""
+function ion_diamagnetic_frequency(equil::Equilibrium.PlasmaEquilibrium, n::Integer; z_i::Real=1)
+    data = InnerLayer._layer_kinetic_data(equil, "ion diamagnetic frequency ω_*pi")
+    data.T_i === nothing && throw(ArgumentError("ω_*pi needs the ion temperature, and the kinetic data carries no T_i"))
+    p = InnerLayer.SLAYER._slayer_profiles(data, nothing).profiles
+    scale = -n / (z_i * equil.psio)
+    return psi -> scale * (p.T_i(psi) * p.n_e(psi; deriv=DerivOp(1)) / p.n_e(psi) + p.T_i(psi; deriv=DerivOp(1)))
+end
+
+# Peak |ω_*pi| over the integration domain of `r` at its lowest n; NaN without kinetic profiles that carry T_i.
+function _peak_omega_star_pi(r::ForceFreeStatesResult)
+    data = r.equil.kinetic
+    (data === nothing || data.T_i === nothing) && return NaN
+    omega = ion_diamagnetic_frequency(r.equil, r.nlow)
+    psis = filter(x -> r.psilow <= x <= r.psilim, r.metric.xs)
+    return isempty(psis) ? NaN : maximum(abs ∘ omega, psis)
+end
+
+"""
     inertia_kinetic_matrices(src::PerpendicularInertia, equil, intr, metric) -> (kw_flat, kt_flat)
 
 The perpendicular-inertia bands on the metric's (ψ, θ) grid in the (ψ, mode pair, component) layout
@@ -89,6 +129,8 @@ The outcome of [`growth_rate`](@ref).
 
   - `gamma::Float64` - Growth rate in s⁻¹ of the least-stable free-boundary mode; 0 when the plasma is marginally stable or stable.
   - `gamma_sq::Float64` - γ² at which the least-stable free-boundary energy eigenvalue crosses zero.
+  - `omega_star_pi::Float64` - Peak ion diamagnetic frequency |ω_*pi| in rad/s over the integration domain at the problem's lowest n, from the
+    equilibrium's kinetic profiles (NaN when none carry T_i); the EPED1 criterion counts the mode as unstable when `gamma > omega_star_pi/2`.
   - `marginal::ForceFreeStatesResult` - The ideal (γ² = 0) solve, whose least-stable energy decides stability.
   - `result::Union{Nothing,ForceFreeStatesResult}` - The solve at `gamma_sq`, carrying the eigenmode; `nothing` when stable.
   - `history::Vector` - Every (γ², λ_min, nzero) evaluated, in order, with λ_min the least-stable free-boundary energy at that γ².
@@ -96,6 +138,7 @@ The outcome of [`growth_rate`](@ref).
 struct IdealGrowthRateResult
     gamma::Float64
     gamma_sq::Float64
+    omega_star_pi::Float64
     marginal::ForceFreeStatesResult
     result::Union{Nothing,ForceFreeStatesResult}
     history::Vector{@NamedTuple{gamma_sq::Float64, lambda::Float64, nzero::Int}}
@@ -103,7 +146,8 @@ end
 
 """
     growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia, gamma_sq_init=1e9, gamma_sq_min=1e4, gamma_sq_max=1e16,
-                rtol=1e-3, ftol=1e-6, maxiter=30, verbose=false) -> IdealGrowthRateResult
+                rtol=1e-3, ftol=1e-6, maxiter=30, marginal=nothing, verbose=false) -> IdealGrowthRateResult
+    growth_rate(prob::ForceBalanceProblem, alg::Forward, config::GrowthRateConfig; marginal=nothing, verbose=false)
 
 Growth rate of the least-stable free-boundary mode of `prob` with the perpendicular inertia `inertia`
 (a [`PerpendicularInertia`](@ref)), ELITE's eigenvalue problem solved by shooting: the ideal solve
@@ -115,6 +159,7 @@ bracketed secant (Illinois) iteration that stops when |λ_min| falls below `ftol
 one force-balance solve. `gamma_sq_min` is the floor below which the mode counts as marginal,
 `gamma_sq_max` the ceiling beyond which bracketing stops with an error.
 
+A `marginal` result of the same problem (an earlier ideal `solve`) is reused instead of solving it again.
 The problem's `singfac_min` is set to 0 for the inertial solves unless given: with inertia the
 rational surfaces are regular, so the integration runs as a single chunk. A fixed-boundary mode
 faster than the free-boundary one shows as `nzero > 0` at the root in `history`; this first version
@@ -122,15 +167,16 @@ reports the free-boundary root and leaves the interior count to the caller.
 """
 function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::PerpendicularInertia,
     gamma_sq_init::Real=1e9, gamma_sq_min::Real=1e4, gamma_sq_max::Real=1e16, rtol::Real=1e-3, ftol::Real=1e-6, maxiter::Int=30,
-    verbose::Bool=false)
+    marginal::Union{Nothing,ForceFreeStatesResult}=nothing, verbose::Bool=false)
     history = @NamedTuple{gamma_sq::Float64, lambda::Float64, nzero::Int}[]
     lambda_min(r) = minimum(real, r.free_boundary.et)
 
-    marginal = solve(prob, alg; verbose)
+    marginal = marginal === nothing ? solve(prob, alg; verbose) : marginal
     marginal.free_boundary === nothing && error("growth_rate needs the free-boundary energies: set vac_flag=true")
+    omega_star_pi = _peak_omega_star_pi(marginal)
     push!(history, (gamma_sq=0.0, lambda=lambda_min(marginal), nzero=marginal.diagnostics.nzero))
     verbose && @info @sprintf("growth_rate: marginal λ_min = %.6e (nzero = %d)", history[end].lambda, history[end].nzero)
-    history[end].lambda < 0 || return IdealGrowthRateResult(0.0, 0.0, marginal, nothing, history)
+    history[end].lambda < 0 || return IdealGrowthRateResult(0.0, 0.0, omega_star_pi, marginal, nothing, history)
 
     kwargs = copy(prob.ctrl_kwargs)
     haskey(kwargs, :singfac_min) || (kwargs[:singfac_min] = 0.0)
@@ -157,7 +203,7 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
     lam = lambda_at(hi)
     while lam > 0
         hi /= 10
-        hi < gamma_sq_min && return IdealGrowthRateResult(sqrt(hi), hi, marginal, last[], history)
+        hi < gamma_sq_min && return IdealGrowthRateResult(sqrt(hi), hi, omega_star_pi, marginal, last[], history)
         lam = lambda_at(hi)
     end
     lo = hi
@@ -186,5 +232,40 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         end
         hi - lo <= rtol * hi && break
     end
-    return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, marginal, last[], history)
+    return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, omega_star_pi, marginal, last[], history)
+end
+
+"""
+    GrowthRateConfig(; rho=NaN, gamma_sq_init=1e9, gamma_sq_min=1e4, gamma_sq_max=1e16, rtol=1e-3, ftol=1e-6, maxiter=30)
+
+The `[GrowthRate]` deck section: its presence runs [`growth_rate`](@ref) after the force-balance stage, and the
+same settings drive the three-argument `growth_rate` method.
+
+## Fields
+
+  - `rho` - Uniform mass density in kg/m³; NaN (the default) derives ρ(ψ_N) from the equilibrium's kinetic profiles.
+  - `gamma_sq_init` - First γ² in s⁻² tried when bracketing the root.
+  - `gamma_sq_min` - γ² floor in s⁻² below which the mode counts as marginal.
+  - `gamma_sq_max` - γ² ceiling in s⁻² beyond which bracketing stops with an error.
+  - `rtol` - Relative width of the γ² bracket at which the root iteration stops.
+  - `ftol` - Fraction of the marginal |λ_min| below which |λ_min| counts as zero.
+  - `maxiter` - Maximum root-iteration steps after bracketing.
+"""
+@kwdef struct GrowthRateConfig
+    rho::Float64 = NaN
+    gamma_sq_init::Float64 = 1e9
+    gamma_sq_min::Float64 = 1e4
+    gamma_sq_max::Float64 = 1e16
+    rtol::Float64 = 1e-3
+    ftol::Float64 = 1e-6
+    maxiter::Int = 30
+end
+
+# The inertia a deck section asks for: uniform, or from the equilibrium's kinetic profiles.
+inertia_source(config::GrowthRateConfig, equil::Equilibrium.PlasmaEquilibrium) =
+    isnan(config.rho) ? PerpendicularInertia(equil) : PerpendicularInertia(; rho=config.rho)
+
+function growth_rate(prob::ForceBalanceProblem, alg::Forward, config::GrowthRateConfig; marginal::Union{Nothing,ForceFreeStatesResult}=nothing, verbose::Bool=false)
+    return growth_rate(prob, alg; inertia=inertia_source(config, prob.equil), config.gamma_sq_init, config.gamma_sq_min, config.gamma_sq_max,
+        config.rtol, config.ftol, config.maxiter, marginal, verbose)
 end

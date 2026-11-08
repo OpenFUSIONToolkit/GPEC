@@ -98,4 +98,43 @@ using LinearAlgebra
         @test length(gr.history) == 1
         @test gr.history[1].lambda ≈ lambda_min(ideal) rtol = 1e-12
     end
+
+    @testset "rho and omega_star_pi from kinetic profiles" begin
+        ktemplate = joinpath(@__DIR__, "test_data", "regression_tj_kinetic_calculated")
+        kdeck = TOML.parsefile(joinpath(ktemplate, "gpec.toml"))
+        kequil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(kdeck, ktemplate), GPEC.analytic_config(kdeck))
+        @test kequil.kinetic !== nothing
+        src = FFS.PerpendicularInertia(kequil)
+        # The density the SLAYER layer uses at a rational surface
+        @test FFS._rho_at(src, 0.5) ≈ only(GPEC.InnerLayer.layer_rho(kequil, [(psifac=0.5,)])) rtol = 1e-12
+        @test FFS._rho_at(src, 0.3) > 0
+        # ω_*pi = n (dp_i/dΨ)/(Z e n_i) with p_i = n_e T_i, against a finite difference of the profile splines
+        p = GPEC.InnerLayer.SLAYER._slayer_profiles(kequil.kinetic, nothing).profiles
+        p_i(ψ) = p.n_e(ψ) * p.T_i(ψ)
+        h = 1e-4
+        for n in (1, 3)
+            omega = FFS.ion_diamagnetic_frequency(kequil, n)
+            fd = -n / kequil.psio * (p_i(0.5 + h) - p_i(0.5 - h)) / (2h) / p.n_e(0.5)
+            @test omega(0.5) ≈ fd rtol = 1e-6
+        end
+        @test FFS.ion_diamagnetic_frequency(kequil, 2)(0.5) ≈ 2 * FFS.ion_diamagnetic_frequency(kequil, 1)(0.5)
+        @test FFS.ion_diamagnetic_frequency(kequil, 1)(0.5) > 0   # outward-decreasing p_i: the layer sign convention
+        @test_throws ArgumentError FFS.ion_diamagnetic_frequency(equil, 1)   # the ideal fixture carries no kinetic data
+        @test_throws ArgumentError FFS.PerpendicularInertia(equil)
+
+        # The kinetic TJ fixture is ideal-stable too: γ = 0 with the domain's peak ω_*pi reported
+        kkw = Dict{Symbol,Any}(q.first => q.second for q in GPEC.force_balance_keywords(kdeck, ktemplate) if !(q.first in (:nn, :wall, :kinetic, :kinetic_factor)))
+        kkw[:vac_flag] = true
+        kprob = ForceBalanceProblem(kequil; nn=1, wall=GPEC.Vacuum.parse_wall(get(kdeck, "Wall", nothing)), kkw...)
+        gr = FFS.growth_rate(kprob, forward; inertia=src)
+        @test gr.gamma == 0 && isfinite(gr.omega_star_pi) && gr.omega_star_pi > 0
+        omega1 = FFS.ion_diamagnetic_frequency(kequil, 1)
+        @test gr.omega_star_pi ≈ maximum(abs ∘ omega1, filter(x -> gr.marginal.psilow <= x <= gr.marginal.psilim, gr.marginal.metric.xs))
+        # The config form reuses a marginal solve and derives the same inertia
+        cfg = FFS.GrowthRateConfig()
+        gr2 = FFS.growth_rate(kprob, forward, cfg; marginal=gr.marginal)
+        @test gr2.gamma == gr.gamma && gr2.omega_star_pi == gr.omega_star_pi && gr2.marginal === gr.marginal
+        @test FFS._rho_at(FFS.inertia_source(cfg, kequil), 0.4) == FFS._rho_at(src, 0.4)
+        @test FFS._rho_at(FFS.inertia_source(FFS.GrowthRateConfig(; rho=2.0), kequil), 0.4) == 2.0
+    end
 end
