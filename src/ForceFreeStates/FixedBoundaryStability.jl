@@ -116,7 +116,7 @@ unitarity defect max| |λ| − 1 |. For a Lagrangian frame Ψ is unitary; an eig
 det U₁ = 0, a conjugate point, while an eigenvalue +1 marks a singular U₂, a harmless pole of W⁻¹ (Arnold
 1967, Funct. Anal. Appl. 1, 1; Robbin & Salamon 1993, Topology 32, 827). Ψ is invariant under U → U·T for
 any invertible T, so Gaussian reduction leaves it unchanged and the frame can be passed with normalized
-columns (see [`normalized_frame`](@ref)). When U₁†U₂ drifts from Hermitian, Ψ is not exactly unitary; the
+columns (see `normalized_frame`). When U₁†U₂ drifts from Hermitian, Ψ is not exactly unitary; the
 eigenpairs are used regardless and the defect reports the drift.
 """
 function cayley_eigen!(θ::AbstractVector{Float64}, V::AbstractMatrix{ComplexF64}, u1::AbstractMatrix{ComplexF64}, u2::AbstractMatrix{ComplexF64}, s::Real)
