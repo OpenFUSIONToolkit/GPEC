@@ -105,6 +105,7 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/CriticalResonantField/br_crit`, `br_crit_tesla`, `Q_peak`, `Q0` | the penetration threshold as ``b_r/B_\phi`` and in tesla, the Q of the balance maximum and the natural rotation |
 | `Tearing/ModifiedRutherford/w`, `Terms/F`, `Terms/<term>`, `Terms/w_d`, `PerSurface/` | the modified Rutherford width grid, ``F(w)`` and each switched term per surface, the transport width, and the surface inputs |
 | `Tearing/ModifiedRutherford/w_m_star`, `PerSurface/w_m`, `PerSurface/w_sat`, `PerSurface/<flag>` | the seed threshold and saturated widths per surface, their minimum over the surfaces, and the validity and gate flags (0/1) |
+| `PerSurface/w_sat_all`, `PerSurface/w_seed_all`, `PerSurface/w_seed_unsaturated`, `PerSurface/n_sat` | every saturated width per surface (branch × surface, NaN-padded) with the seed threshold that reaches it, the seed above which the island grows past `w_max`, and the number of saturated widths |
 | `Tearing/Callen/PerSurface/` | Callen's critical vacuum island width, critical resonant field and cubic roots per resonant row |
 
 ## Modified Rutherford diagnostics
@@ -119,6 +120,7 @@ the classical drive with its finite-pressure power law, the bootstrap drive with
 
 The roots of ``F`` are bracketed on the grid and refined by Brent's method: the seed threshold ``w_m`` is the smallest crossing from ``F<0`` to ``F>0`` and the saturated width ``w_\mathrm{sat}`` the first crossing from ``F>0`` to ``F<0`` above where the island starts, ``w_\mathrm{lo}`` when ``F(w_\mathrm{lo})>0``, else ``w_m``.
 Flags mark an island that does not saturate in the search range (`unsaturated`), one whose ``w_\mathrm{sat}`` reaches past the equilibrium grid (`outside_plasma`), and a sign of ``F(w_\mathrm{lo})`` that disagrees with the gate's growth rate (`gate_disagrees`).
+When ``F`` crosses zero more than once, every saturated width is kept: an island seeded between `w_seed_all[k]` and the next seed threshold settles at `w_sat_all[k]`, and `multiple_saturated` marks surfaces where ``w_\mathrm{sat}`` is the first of several.
 When the deck also has a `[Tearing]` layer solve, its uncoupled growth rates gate the roots (a surface with ``\gamma>0`` grows from noise, so it has no seed threshold ``w_m``, but keeps its saturated width) and its resistive layer width, converted to ``\psi_N`` with the layer's own radial label, sets the lower end of the search; in a script, pass it as `ModifiedRutherfordProblem(ffs; tearing)`.
 Surfaces with ``D_R>0`` are excluded as resistive-interchange unstable, and roots below the ion banana width or with ``|\Delta'|w\ge1`` are flagged.
 Lengths in metres (the layer width, the poloidal ion Larmor radius and the banana width) map to ``\psi_N`` with the toroidal-flux label of `radial_label`, as SLAYER's do.

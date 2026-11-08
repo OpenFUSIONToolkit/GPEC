@@ -101,11 +101,23 @@ using TOML
         @test u.w_m ≈ 3e-3 rtol = 1e-10
         @test u.w_sat ≈ 2e-3 rtol = 1e-10
         @test u.unsaturated
+        # Every branch: 2e-3 from any seed below 3e-3, 0.02 from seeds in (3e-3, 0.05), growth past the grid above 0.05.
+        @test u.w_sat_all ≈ [2e-3, 0.02] rtol = 1e-10
+        @test isnan(u.w_seed_all[1])
+        @test u.w_seed_all[2] ≈ 3e-3 rtol = 1e-10
+        @test u.w_seed_unsaturated ≈ 0.05 rtol = 1e-10
         # With F < 0 at w_lo the island starts at w_m = 2e-3 and saturates at the next falling root, 3e-3, not at 0.05.
         v = MR.mre_roots(w -> -f4(w), 1e-5, grid)
         @test v.w_m ≈ 2e-3 rtol = 1e-10
         @test v.w_sat ≈ 3e-3 rtol = 1e-10
         @test !v.unsaturated
+        @test v.w_sat_all ≈ [3e-3, 0.05] rtol = 1e-10
+        @test v.w_seed_all ≈ [2e-3, 0.02] rtol = 1e-10
+        @test isnan(v.w_seed_unsaturated)
+        # One rising root and F > 0 at the top: w_m is also the seed of unbounded growth; a stable branch has none.
+        @test MR.mre_roots(w -> (w - 3e-3) / w, 1e-5, grid).w_seed_unsaturated ≈ 3e-3 rtol = 1e-10
+        @test isnan(s.w_seed_unsaturated)
+        @test s.w_sat_all ≈ [0.05] rtol = 1e-10
     end
 
     @testset "Callen cubic: both positive roots solve it and merge at the critical vacuum width" begin

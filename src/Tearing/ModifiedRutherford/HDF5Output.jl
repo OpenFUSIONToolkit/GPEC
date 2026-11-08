@@ -30,6 +30,7 @@ end
 
 # Julia's surface × width matrices land in HDF5 as (width, surface).
 const _MRE_TERM_DIMS = ("w", "surface")
+const _MRE_BRANCH_DIMS = ("branch", "surface")
 
 const MRE_H5_ANNOTATIONS = [
     "w" => (; long_name="full island width grid", units="psi_N", dims=("w",)),
@@ -89,6 +90,14 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/large_delta_prime_w" => (; long_name="1 if |Delta'(w)| w >= 1 at w_m or w_sat, Delta'(w) the classical term", dims=("surface",)),
     "PerSurface/saturation_unconverged" => (; long_name="1 if C_sat moves more than 20% between half and double the fit window, or the window leaves the grid",
         dims=("surface",)),
+    "PerSurface/w_sat_all" => (; long_name="every saturated width (falling F crossing) in increasing order, NaN-padded; w_sat is the first",
+        units="psi_N", dims=_MRE_BRANCH_DIMS),
+    "PerSurface/w_seed_all" => (; long_name="seed threshold reaching each w_sat_all entry (rising crossing below it), NaN if F > 0 from w_lo",
+        units="psi_N", dims=_MRE_BRANCH_DIMS),
+    "PerSurface/w_seed_unsaturated" => (; long_name="seed above which the island grows past w_max (F > 0 there), NaN otherwise", units="psi_N",
+        dims=("surface",)),
+    "PerSurface/n_sat" => (; long_name="number of saturated widths", dims=("surface",)),
+    "PerSurface/multiple_saturated" => (; long_name="1 if more than one saturated width (see w_sat_all)", dims=("surface",)),
     "PerSurface/complex_delta_prime" => (; long_name="1 if |Im Delta'| > 1e-3 |Re Delta'|", dims=("surface",)),
     "Terms/F" => (; long_name="modified Rutherford F(w), the sum of the switched-on terms", dims=_MRE_TERM_DIMS),
     "Terms/classical" => (; long_name="classical term Delta'(w)", dims=_MRE_TERM_DIMS),

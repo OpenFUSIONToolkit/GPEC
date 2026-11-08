@@ -20,7 +20,8 @@ equilibrium's kinetic data, as every tearing layer reads it. A deck states it as
 
 The roots of F are refined between grid points from `w_lo = max(δ_r, w_min)`: the seed threshold `w_m` is the
 smallest crossing from F < 0 to F > 0 and the saturated width `w_sat` the first crossing from F > 0 to F < 0 above where
-the island starts (`w_lo` when F(w_lo) > 0, else `w_m`). Surfaces that
+the island starts (`w_lo` when F(w_lo) > 0, else `w_m`). Every saturated width and the seed threshold that reaches it are
+kept as well (`w_sat_all`, `w_seed_all`), so a surface with several saturated solutions shows all of them. Surfaces that
 are resistive-interchange unstable (D_R > 0) get no roots; linearly tearing unstable ones (γ > 0 in `tearing`) grow
 from noise, so they get no seed threshold but keep `w_sat`.
 
@@ -109,6 +110,11 @@ surface × width.
     (r − r_s)/r_s reference, used by `curvature_model = :lutjens` (`NaN` for `:benjamin`).
   - `alpha_s`, `beta_s`, `C_sat` - Current-gradient coefficients of the saturation term and its coefficient.
   - `w_m`, `w_sat` - Seed threshold and saturated full widths in ψ_N; `NaN` when absent or excluded, and `w_m` `NaN` when γ > 0.
+  - `w_sat_all`, `w_seed_all` - Every saturated width per surface (surface × branch, increasing, `NaN`-padded) and the
+    seed threshold that reaches each: seeds between `w_seed_all[s, k]` and the next threshold settle at `w_sat_all[s, k]`;
+    `w_seed_all` is `NaN` on a branch F > 0 reaches from `w_lo`. `w_sat` is the first column.
+  - `w_seed_unsaturated` - Seed above which the island grows past `w_max`, when F > 0 there; `NaN` otherwise.
+  - `n_sat` - Number of saturated widths; `multiple_saturated` when more than one.
   - `w_m_star` - Smallest `w_m` over the surfaces.
   - `fully_stabilized` - F < 0 on the whole search range.
   - `unstable_any_seed` - F > 0 at `w_lo`.
@@ -160,10 +166,15 @@ surface × width.
     C_sat::Vector{Float64}
     w_m::Vector{Float64}
     w_sat::Vector{Float64}
+    w_sat_all::Matrix{Float64}
+    w_seed_all::Matrix{Float64}
+    w_seed_unsaturated::Vector{Float64}
+    n_sat::Vector{Int}
     w_m_star::Float64
     fully_stabilized::Vector{Bool}
     unstable_any_seed::Vector{Bool}
     unsaturated::Vector{Bool}
+    multiple_saturated::Vector{Bool}
     outside_plasma::Vector{Bool}
     gate_disagrees::Vector{Bool}
     interchange_unstable::Vector{Bool}
@@ -217,12 +228,17 @@ end
 
 
 """
-    mre_roots(F, w_lo, w_grid) -> (; w_m, w_sat, fully_stabilized, unstable_any_seed, unsaturated)
+    mre_roots(F, w_lo, w_grid) -> (; w_m, w_sat, w_sat_all, w_seed_all, w_seed_unsaturated, fully_stabilized, unstable_any_seed, unsaturated)
 
 Roots of `F` on `[w_lo, maximum(w_grid)]`, bracketed on `w_lo` and the grid points above it and refined by Brent's
 method: `w_m` is the smallest crossing from negative to positive, and `w_sat` the first crossing from positive to
 negative above where an island starts, `w_lo` when F(w_lo) > 0, else `w_m` (`NaN` when absent). `unsaturated` is
 F > 0 at the top of the grid.
+
+Every saturated branch is returned too: `w_sat_all` holds each falling crossing in increasing order, and `w_seed_all[k]`
+the rising crossing just below `w_sat_all[k]` (`NaN` when F > 0 from `w_lo` up to it). An island seeded between
+`w_seed_all[k]` and the next seed threshold settles at `w_sat_all[k]`. `w_seed_unsaturated` is the rising crossing
+above the last falling one when F > 0 at the top of the grid: seeds above it grow past the grid (`NaN` otherwise).
 """
 function mre_roots(F, w_lo::Real, w_grid::AbstractVector)
     nodes = vcat(Float64(w_lo), filter(>(w_lo), w_grid))
@@ -237,14 +253,20 @@ function mre_roots(F, w_lo::Real, w_grid::AbstractVector)
     start = vals[1] > 0 ? nodes[1] : w_m
     above = filter(>(start), falling)
     w_sat = isempty(above) ? NaN : first(above)
-    return (; w_m, w_sat, fully_stabilized=all(<(0), vals), unstable_any_seed=vals[1] > 0, unsaturated=vals[end] > 0)
+    # F is continuous, so rising and falling crossings alternate; each falling one is reached from the rising one below it.
+    seed_below(x) = (b = filter(<(x), rising); isempty(b) ? NaN : last(b))
+    w_seed_all = seed_below.(above)
+    top = isempty(above) ? filter(>(-Inf), rising) : filter(>(last(above)), rising)
+    w_seed_unsaturated = vals[end] > 0 && !isempty(top) ? last(top) : NaN
+    return (; w_m, w_sat, w_sat_all=above, w_seed_all, w_seed_unsaturated, fully_stabilized=all(<(0), vals), unstable_any_seed=vals[1] > 0,
+        unsaturated=vals[end] > 0)
 end
 
 # Per-surface scalars, flags and width rows of the result, in field order.
 const _MRE_SCALARS = (:rational_psi, :rational_q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff,
     :Wc_prefac, :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma,
-    :delta_r, :w_lo, :D_c, :W_d_layer, :alpha_s, :beta_s, :C_sat, :w_m, :w_sat)
-const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :unsaturated, :outside_plasma, :gate_disagrees, :interchange_unstable,
+    :delta_r, :w_lo, :D_c, :W_d_layer, :alpha_s, :beta_s, :C_sat, :w_m, :w_sat, :w_seed_unsaturated, :n_sat)
+const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :unsaturated, :multiple_saturated, :outside_plasma, :gate_disagrees, :interchange_unstable,
     :linear_unstable, :below_w_ib, :large_delta_prime_w, :complex_delta_prime, :saturation_unconverged)
 const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d)
 
@@ -368,8 +390,10 @@ function _surface_roots(prob::ModifiedRutherfordProblem, ctx, si, gt, w)
     excluded = interchange_unstable || si.D_I >= 0
     # A linearly unstable surface grows from noise, so it has no seed threshold; the MRE still sets its saturation.
     w_m, w_sat = excluded ? (NaN, NaN) : (linear_unstable ? NaN : r.w_m, r.w_sat)
+    w_sat_all, w_seed_all = excluded ? (Float64[], Float64[]) : (r.w_sat_all, r.w_seed_all)
     psi = si.rational_psi
-    return (; w_m, w_sat, fully_stabilized=!excluded && r.fully_stabilized, unstable_any_seed=!excluded && r.unstable_any_seed,
+    return (; w_m, w_sat, w_sat_all, w_seed_all, w_seed_unsaturated=excluded ? NaN : r.w_seed_unsaturated, n_sat=length(w_sat_all),
+        multiple_saturated=length(w_sat_all) > 1, fully_stabilized=!excluded && r.fully_stabilized, unstable_any_seed=!excluded && r.unstable_any_seed,
         unsaturated=!excluded && r.unsaturated, outside_plasma=isfinite(w_sat) && (psi - w_sat / 2 < ctx.psi_lim[1] || psi + w_sat / 2 > ctx.psi_lim[2]),
         gate_disagrees=!excluded && isfinite(gt.gamma) && (r.unstable_any_seed ? gt.gamma < 0 : gt.gamma > 0), interchange_unstable,
         linear_unstable, below_w_ib=w_m < si.w_ib,
@@ -392,8 +416,12 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
     end
     column(key) = [getfield(r, key) for r in rows]
     matrix(key) = isempty(rows) ? zeros(0, length(w)) : permutedims(reduce(hcat, column(key)))
+    # Branches padded with NaN to the most found on any surface.
+    nbranch = maximum((r.n_sat for r in rows); init=1)
+    branches(key) = [k <= length(getfield(r, key)) ? getfield(r, key)[k] : NaN for r in rows, k in 1:nbranch]
     w_m = column(:w_m)
     return ModifiedRutherfordResult(; problem=prob, w=collect(w), (key => column(key) for key in _MRE_SCALARS)...,
+        w_sat_all=branches(:w_sat_all), w_seed_all=branches(:w_seed_all),
         w_m_star=all(isnan, w_m) ? NaN : minimum(filter(!isnan, w_m)), (key => Vector{Bool}(column(key)) for key in _MRE_FLAGS)...,
         (key => matrix(key) for key in _MRE_TERMS)...)
 end
