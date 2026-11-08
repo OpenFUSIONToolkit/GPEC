@@ -1,6 +1,6 @@
 using TOML
 
-# The modified Rutherford terms (physics.md of the mre-islands work order): the limits and signs each term must show
+# The modified Rutherford terms: the limits and signs each term must show
 # alone, and the surface geometry against Fortran RDCON (MRE_flag output) on the DIII-D-like example.
 @testset "ModifiedRutherford terms" begin
     MR = GeneralizedPerturbedEquilibrium.ModifiedRutherford
