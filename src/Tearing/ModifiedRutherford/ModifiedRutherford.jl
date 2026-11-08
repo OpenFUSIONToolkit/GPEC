@@ -12,8 +12,8 @@ import ...Utilities
 import ...Utilities: save_to_hdf5
 using ...Utilities.HDF5Annotations: replace_group!
 using ...Utilities.PhysicalConstants: M_E, M_P, E_CHG, MU_0
-using ...InnerLayer.SLAYER: _slayer_profiles, radial_label, build_slayer_inputs, _layer_zeff, _layer_ion_mass, _layer_mass_per_electron,
-    _build_resistivity_model
+using ...InnerLayer: layer_plasma
+using ...InnerLayer.SLAYER: radial_label, build_slayer_inputs
 using Roots: find_zero, Brent
 
 include("Geometry.jl")

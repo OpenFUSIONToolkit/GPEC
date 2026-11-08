@@ -105,7 +105,7 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/CriticalResonantField/br_crit`, `br_crit_tesla`, `Q_peak`, `Q0` | the penetration threshold as ``b_r/B_\phi`` and in tesla, the Q of the balance maximum and the natural rotation |
 | `Tearing/ModifiedRutherford/w`, `Terms/F`, `Terms/<term>`, `Terms/w_d`, `PerSurface/` | the modified Rutherford width grid, ``F(w)`` and each switched term per surface, the transport width, and the surface inputs |
 | `Tearing/ModifiedRutherford/w_m_star`, `PerSurface/w_m`, `PerSurface/w_sat`, `PerSurface/<flag>` | the seed threshold and saturated widths per surface, their minimum over the surfaces, and the validity and gate flags (0/1) |
-| `Tearing/Callen/` | Callen's critical vacuum island width, critical resonant field and cubic roots per resonant row |
+| `Tearing/Callen/PerSurface/` | Callen's critical vacuum island width, critical resonant field and cubic roots per resonant row |
 
 ## Modified Rutherford diagnostics
 

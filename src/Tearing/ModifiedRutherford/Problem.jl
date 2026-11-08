@@ -88,13 +88,14 @@ ModifiedRutherfordProblem(ffs; kwargs...) = ModifiedRutherfordProblem(; ffs=ffs,
 """
     ModifiedRutherfordResult
 
-Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to edge; matrices are surface × width.
+Output of `solve(::ModifiedRutherfordProblem)`, built by keyword. Per-surface vectors run core to edge; matrices are
+surface × width.
 
 ## Fields
 
   - `problem` - The producing problem.
   - `w` - Width grid in ψ_N.
-  - `psi`, `q`, `m`, `n` - Surface identity.
+  - `rational_psi`, `rational_q`, `m`, `n` - Surface identity.
   - `delta_prime`, `delta_prime_imag`, `D_I`, `D_R`, `H` - Outer-region and layer indices (Δ′ after `delta_prime_factor`).
   - `D_nc`, `f_trap`, `mu_ratio`, `zeff` - Bootstrap coefficient, Sauter 2002 trapped fraction, μ_e/(ν_e + μ_e), Z_eff.
   - `Wc_prefac`, `chi_perp`, `v_te`, `R0` - Inputs of w_d.
@@ -121,11 +122,11 @@ Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to 
   - `saturation_unconverged` - `C_sat` not converged in the fit window (see [`saturation_coefficient`](@ref)).
   - `F`, `classical`, `saturation`, `bootstrap`, `curvature`, `polarization`, `w_d` - F(w), each term, and w_d(w).
 """
-struct ModifiedRutherfordResult{P}
+@kwdef struct ModifiedRutherfordResult{P}
     problem::P
     w::Vector{Float64}
-    psi::Vector{Float64}
-    q::Vector{Float64}
+    rational_psi::Vector{Float64}
+    rational_q::Vector{Float64}
     m::Vector{Int}
     n::Vector{Int}
     delta_prime::Vector{Float64}
@@ -239,13 +240,20 @@ function mre_roots(F, w_lo::Real, w_grid::AbstractVector)
     return (; w_m, w_sat, fully_stabilized=all(<(0), vals), unstable_any_seed=vals[1] > 0, unsaturated=vals[end] > 0)
 end
 
+# Per-surface scalars, flags and width rows of the result, in field order.
+const _MRE_SCALARS = (:rational_psi, :rational_q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff,
+    :Wc_prefac, :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma,
+    :delta_r, :w_lo, :D_c, :W_d_layer, :alpha_s, :beta_s, :C_sat, :w_m, :w_sat)
+const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :unsaturated, :outside_plasma, :gate_disagrees, :interchange_unstable,
+    :linear_unstable, :below_w_ib, :large_delta_prime_w, :complex_delta_prime, :saturation_unconverged)
+const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d)
+
 # SLAYER's toroidal critical offset D_c and the W_d it implies at one surface, with χ⊥ for every χ input.
-function _layer_critical_offset(equil, s, loaded, data, chi_perp)
-    zeff = _layer_zeff(loaded, data)
+function _layer_critical_offset(equil, s, plasma, chi_perp)
     p = only(
-        build_slayer_inputs(equil, [s], loaded.profiles; mu_i=_layer_ion_mass(data), mu_rho=_layer_mass_per_electron(data, zeff), zeff,
-            chi_perp_e=chi_perp, chi_perp_i=chi_perp, chi_perp_Dc=chi_perp, chi_tor=chi_perp, tau_E=data.tau_E, P_perp_model=:chi_perp_e,
-            dc_type=:toroidal, resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
+        build_slayer_inputs(equil, [s], plasma.profiles; plasma.mu_i, plasma.mu_rho, plasma.zeff, chi_perp_e=chi_perp, chi_perp_i=chi_perp,
+            chi_perp_Dc=chi_perp, chi_tor=chi_perp, tau_E=plasma.data.tau_E, P_perp_model=:chi_perp_e, dc_type=:toroidal,
+            plasma.resistivity_model, plasma.lnLambda_form)
     )
     return p.dc_tmp, layer_transport_width(p.dr_val, p.dc_tmp)
 end
@@ -253,154 +261,139 @@ end
 # The linear tearing row at ψ in `tearing`, or `nothing`.
 _tearing_row(tearing, psi) = findfirst(p -> isapprox(p, psi; atol=1e-8), tearing.rational_psi)
 
-function CommonSolve.solve(prob::ModifiedRutherfordProblem)
-    validate(prob)
-    ffs = prob.ffs
-    equil = ffs.equil
-    data = equil.kinetic
-    surfaces = ffs.surfaces
-    ns = length(surfaces)
-    w = exp.(range(log(prob.w_min), log(prob.w_max); length=prob.nw))
-
-    # One plasma for every tearing consumer: the SLAYER view supplies n_e, T_e, T_i, Ω_E and the Z_eff closure.
-    loaded = _slayer_profiles(data, nothing)
-    psi_xs = collect(Float64, data.psi)
+# What every surface shares: the plasma, the radial label, the current profile and the gate.
+function _mre_context(prob::ModifiedRutherfordProblem)
+    equil = prob.ffs.equil
+    plasma = layer_plasma(equil; log=false)
+    data = plasma.data
     usable(v) = v !== nothing && !all(iszero, v)
     usable(data.chi_e) || data.chi_e_default !== nothing ||
         throw(ArgumentError("ModifiedRutherfordProblem needs χ⊥,e: a chi_e profile or chi_e_default in the kinetic data"))
-    species = data.ion_species
-    m_i = sum(s.fraction * s.m for s in species) / sum(s.fraction for s in species) * M_P
-    z_i = Float64(first(species).z)
     gate = prob.tearing
     # Metres map to ψ_N with the toroidal-flux radial label's dr/dψ, the label SLAYER's layer widths use.
     r_at, dr_dpsi = radial_label(equil)
-    J_z = current_density_profile(equil)
-    psi_lim = (first(equil.profiles.xs), last(equil.profiles.xs))
-    chi_gate = gate === nothing || !hasproperty(gate.model, :chi_perp_Dc) ? nothing : gate.model.chi_perp_Dc
+    return (; equil, plasma, data, psi_xs=collect(Float64, data.psi), usable, gate, r_at, dr_dpsi, J_z=current_density_profile(equil),
+        psi_lim=(first(equil.profiles.xs), last(equil.profiles.xs)),
+        chi_gate=gate === nothing || !hasproperty(gate.model, :chi_perp_Dc) ? nothing : gate.model.chi_perp_Dc)
+end
 
-    vec0() = zeros(ns)
-    flag0() = falses(ns)
-    out = (; psi=vec0(), q=vec0(), m=zeros(Int, ns), n=zeros(Int, ns), delta_prime=vec0(), delta_prime_imag=vec0(), D_I=vec0(), D_R=vec0(),
-        H=vec0(), D_nc=vec0(), f_trap=vec0(), mu_ratio=vec0(), zeff=vec0(), Wc_prefac=vec0(), chi_perp=vec0(), v_te=vec0(), R0=vec0(),
-        omega_star_i=vec0(), omega_star_e=vec0(), omega_hat=vec0(), omega_hat_pi=vec0(), beta_p=vec0(), rho_theta=vec0(), w_ib=vec0(),
-        eps=vec0(), gamma=vec0(), delta_r=vec0(), w_lo=vec0(), D_c=vec0(), W_d_layer=vec0(), alpha_s=vec0(), beta_s=vec0(), C_sat=vec0(), w_m=vec0(), w_sat=vec0())
-    flags = (; fully_stabilized=flag0(), unstable_any_seed=flag0(), unsaturated=flag0(), outside_plasma=flag0(), gate_disagrees=flag0(),
-        interchange_unstable=flag0(), linear_unstable=flag0(),
-        below_w_ib=flag0(), large_delta_prime_w=flag0(), complex_delta_prime=flag0(),
-        saturation_unconverged=flag0())
-    mats = Dict(k => zeros(ns, prob.nw) for k in (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d))
+# Geometry, indices, plasma and term inputs at the k-th rational surface.
+function _surface_inputs(prob::ModifiedRutherfordProblem, ctx, k, s)
+    (; equil, plasma, data, psi_xs, usable, r_at, dr_dpsi) = ctx
+    rg = s.restype
+    rg === nothing && throw(ArgumentError("ModifiedRutherfordProblem: the surface at ψ = $(s.psifac) has no ResistGeometry"))
+    psi = s.psifac
+    m, n = s.m[1], s.n[1]
+    g = mre_geometry(equil, psi, s.q1)
+    D_I = rg.E + rg.F + rg.H - 0.25
+    D_R = rg.E + rg.F + rg.H^2
+    D_I < 0 || @warn "ModifiedRutherfordProblem: D_I = $D_I ≥ 0 at the $m/$n surface; its terms are NaN"
 
-    for (k, s) in enumerate(surfaces)
-        rg = s.restype
-        rg === nothing && throw(ArgumentError("ModifiedRutherfordProblem: the surface at ψ = $(s.psifac) has no ResistGeometry"))
-        psi = s.psifac
-        m, n = s.m[1], s.n[1]
-        g = mre_geometry(equil, psi, s.q1)
-        D_I = rg.E + rg.F + rg.H - 0.25
-        D_R = rg.E + rg.F + rg.H^2
-        D_I < 0 || @warn "ModifiedRutherfordProblem: D_I = $D_I ≥ 0 at the $m/$n surface; its terms are NaN"
+    # Plasma at the surface; the ion density falls back to n_e where the data have no n_i.
+    prof = plasma.profiles
+    n_e, dn_e = Float64(prof.n_e(psi)), Float64(prof.n_e(psi; deriv=DerivOp(1)))
+    T_e, dT_e = Float64(prof.T_e(psi)), Float64(prof.T_e(psi; deriv=DerivOp(1)))
+    T_i, dT_i = Float64(prof.T_i(psi)), Float64(prof.T_i(psi; deriv=DerivOp(1)))
+    n_i, dn_i = usable(data.n_i) ? _profile_at(psi_xs, data.n_i, psi) : (n_e, dn_e)
+    zeff = plasma.zeff isa Real ? Float64(plasma.zeff) : Float64(plasma.zeff(psi))
+    chi_perp = prob.chi_perp_factor * (usable(data.chi_e) ? first(_profile_at(psi_xs, data.chi_e, psi)) : data.chi_e_default)
+    ctx.chi_gate === nothing || isapprox(ctx.chi_gate, chi_perp; rtol=1e-6) ||
+        @warn "ModifiedRutherfordProblem: the gate's chi_perp_Dc = $(ctx.chi_gate) differs from the w_d χ⊥ = $chi_perp at the $m/$n surface"
+    D_nc, mu_ratio = bootstrap_coefficient(g, zeff)
 
-        # Plasma at the surface; the ion density falls back to n_e where the data have no n_i.
-        n_e, dn_e = Float64(loaded.profiles.n_e(psi)), Float64(loaded.profiles.n_e(psi; deriv=DerivOp(1)))
-        T_e, dT_e = Float64(loaded.profiles.T_e(psi)), Float64(loaded.profiles.T_e(psi; deriv=DerivOp(1)))
-        T_i, dT_i = Float64(loaded.profiles.T_i(psi)), Float64(loaded.profiles.T_i(psi; deriv=DerivOp(1)))
-        n_i, dn_i = usable(data.n_i) ? _profile_at(psi_xs, data.n_i, psi) : (n_e, dn_e)
-        zeff = loaded.zeff === nothing ? data.zeff_default : Float64(loaded.zeff(psi))
-        chi_perp = prob.chi_perp_factor * (usable(data.chi_e) ? first(_profile_at(psi_xs, data.chi_e, psi)) : data.chi_e_default)
-        chi_gate === nothing || isapprox(chi_gate, chi_perp; rtol=1e-6) ||
-            @warn "ModifiedRutherfordProblem: the gate's chi_perp_Dc = $chi_gate differs from the w_d χ⊥ = $chi_perp at the $m/$n surface"
+    # Polarization inputs (Benjamin App. C); lengths in metres map to ψ_N with dr/dψ.
+    m_i, z_i = plasma.mu_i * M_P, plasma.z_i
+    v_te = sqrt(2 * E_CHG * T_e / M_E)
+    v_ti = sqrt(2 * E_CHG * T_i / m_i)
+    rho_theta = prob.rho_theta_factor * m_i * v_ti / (g.avg_bpol * E_CHG)
+    rho_theta_psi = rho_theta / abs(dr_dpsi(psi))
+    # Diamagnetic frequencies from the density gradients, in SLAYER's sign convention (charge −1 for electrons).
+    omega_star_i = -n * T_i * (dn_i / n_i) / (z_i * g.psio)
+    omega_star_e = n * T_e * (dn_e / n_e) / g.psio
+    omega_model =
+        prob.omega_model === :electron_diamagnetic ? omega_star_e * (1 + 0.25 * (dT_e / T_e) / (dn_e / n_e)) :
+        n * (plasma.has_omega_E ? Float64(prof.omega_E(psi)) : 0.0)
 
-        D_nc, mu_ratio = bootstrap_coefficient(g, zeff)
-        D_nc *= prob.D_nc_factor
+    # Cylindrical: r_s Δ′ = −2m, referred back to ψ_N by K^(−2α), K = r_s dψ_N/dr, α = √(−D_I) (as delta_prime_to_rs_reference).
+    K = r_at(psi) / abs(dr_dpsi(psi))
+    dp_complex = prob.delta_prime_source === :computed ? prob.ffs.delta_prime.matrix[k, k] : complex(-2 * m * K^(-2 * sqrt(max(-D_I, 0.0))))
+    # Saturation coefficients from the equilibrium current in the same radial label.
+    sc = saturation_coefficient(ctx.J_z, r_at, x -> abs(dr_dpsi(x)), x -> Float64(equil.profiles.q_spline(x)),
+        x -> Float64(equil.profiles.q_deriv(x)), psi; window=prob.saturation_window, ctx.psi_lim)
+    # SLAYER's toroidal critical offset at this surface with this χ⊥, so the curvature term meets the gate at small w.
+    D_c, W_d_layer = prob.curvature_model === :lutjens ? _layer_critical_offset(equil, s, plasma, chi_perp) : (NaN, NaN)
+    return (; rational_psi=psi, rational_q=s.q, m, n, g, D_I, D_R, H=rg.H, D_nc=prob.D_nc_factor * D_nc, mu_ratio, zeff, chi_perp, v_te,
+        omega_star_i, omega_star_e, omega_hat=something(prob.omega_ratio, prob.omega_factor * omega_model / omega_star_i),
+        omega_hat_pi=1 + (dT_i / T_i) / (dn_i / n_i), beta_p=2 * MU_0 * n_i * E_CHG * T_i / g.avg_bpolsq, rho_theta, rho_theta_psi,
+        w_ib=sqrt(g.eps) * rho_theta_psi, gradient_ratio=(dn_i / n_i) / (g.q1 / g.q), K, dp_complex,
+        delta_prime=prob.delta_prime_factor * real(dp_complex), sc, D_c, W_d_layer)
+end
 
-        # Polarization inputs (Benjamin App. C); lengths in metres map to ψ_N with dr/dψ.
-        v_te = sqrt(2 * E_CHG * T_e / M_E)
-        v_ti = sqrt(2 * E_CHG * T_i / m_i)
-        rho_theta = prob.rho_theta_factor * m_i * v_ti / (g.avg_bpol * E_CHG)
-        rho_theta_psi = rho_theta / abs(dr_dpsi(psi))
-        w_ib = sqrt(g.eps) * rho_theta_psi
-        beta_p = 2 * MU_0 * n_i * E_CHG * T_i / g.avg_bpolsq
-        gradient_ratio = (dn_i / n_i) / (g.q1 / g.q)
-        # Diamagnetic frequencies from the density gradients, in SLAYER's sign convention (charge −1 for electrons).
-        omega_star_i = -n * T_i * (dn_i / n_i) / (z_i * g.psio)
-        omega_star_e = n * T_e * (dn_e / n_e) / g.psio
-        omega_hat_pi = 1 + (dT_i / T_i) / (dn_i / n_i)
-        omega_model =
-            prob.omega_model === :electron_diamagnetic ? omega_star_e * (1 + 0.25 * (dT_e / T_e) / (dn_e / n_e)) :
-            n * (loaded.has_omega_E ? Float64(loaded.profiles.omega_E(psi)) : 0.0)
-        omega_hat = something(prob.omega_ratio, prob.omega_factor * omega_model / omega_star_i)
+# Each term and their switched sum F at the full width w, from a surface's inputs.
+function _mre_terms(prob::ModifiedRutherfordProblem, si, w)
+    (; g, D_I, D_R, n, m) = si
+    wd = transport_width(w; prob.c_wd, si.chi_perp, si.v_te, R0=g.R_major, g.q, g.q1, n, m, g.Wc_prefac)
+    cl = D_I < 0 ? classical_term(si.delta_prime, D_I, w; model=prob.delta_prime_model) : NaN
+    st = D_I < 0 ? saturation_term(si.sc.C_sat, si.K, D_I, w; model=prob.delta_prime_model) : NaN
+    bs = bootstrap_term(si.D_nc, wd, w; prob.k1)
+    cv =
+        D_I >= 0 ? NaN :
+        prob.curvature_model === :lutjens ? lutjens_curvature_term(D_R, D_I, si.K, si.W_d_layer, w; model=prob.delta_prime_model) :
+        curvature_term(D_R, si.H, D_I, wd, w; prob.k1)
+    pl =
+        prob.pol_sign * (
+            prob.pol_model === :full ?
+            polarization_term(w; prob.c_pol, g.eps, si.rho_theta_psi, si.beta_p, si.gradient_ratio, si.omega_hat, si.omega_hat_pi, si.w_ib) :
+            reduced_polarization_term(w; prob.c_pol, prob.C_pol, si.w_ib)
+        )
+    F = prob.classical * cl + prob.saturation * st + prob.bootstrap * bs + prob.curvature * cv + prob.polarization * pl
+    return (; F, classical=cl, saturation=st, bootstrap=bs, curvature=cv, polarization=pl, w_d=wd)
+end
 
-        # Cylindrical: r_s Δ′ = −2m, referred back to ψ_N by K^(−2α), K = r_s dψ_N/dr, α = √(−D_I) (as delta_prime_to_rs_reference).
-        K = r_at(psi) / abs(dr_dpsi(psi))
-        dp_complex = prob.delta_prime_source === :computed ? ffs.delta_prime.matrix[k, k] : complex(-2 * m * K^(-2 * sqrt(max(-D_I, 0.0))))
-        dp_mn = prob.delta_prime_factor * real(dp_complex)
-        # Saturation coefficients from the equilibrium current in the same radial label.
-        sc = saturation_coefficient(J_z, r_at, x -> abs(dr_dpsi(x)), x -> Float64(equil.profiles.q_spline(x)),
-            x -> Float64(equil.profiles.q_deriv(x)), psi; window=prob.saturation_window, psi_lim)
-        flags.saturation_unconverged[k] = !sc.converged
-        # SLAYER's toroidal critical offset at this surface with this χ⊥, so the curvature term meets the gate at small w.
-        D_c, W_d_layer = prob.curvature_model === :lutjens ? _layer_critical_offset(equil, s, loaded, data, chi_perp) : (NaN, NaN)
-        function terms(wj)
-            wd = transport_width(wj; prob.c_wd, chi_perp, v_te, R0=g.R_major, g.q, g.q1, n, m, g.Wc_prefac)
-            cl = D_I < 0 ? classical_term(dp_mn, D_I, wj; model=prob.delta_prime_model) : NaN
-            st = D_I < 0 ? saturation_term(sc.C_sat, K, D_I, wj; model=prob.delta_prime_model) : NaN
-            bs = bootstrap_term(D_nc, wd, wj; prob.k1)
-            cv =
-                D_I >= 0 ? NaN :
-                prob.curvature_model === :lutjens ? lutjens_curvature_term(D_R, D_I, K, W_d_layer, wj; model=prob.delta_prime_model) :
-                curvature_term(D_R, rg.H, D_I, wd, wj; prob.k1)
-            pl =
-                prob.pol_sign * (
-                    prob.pol_model === :full ?
-                    polarization_term(wj; prob.c_pol, g.eps, rho_theta_psi, beta_p,
-                        gradient_ratio, omega_hat, omega_hat_pi, w_ib) :
-                    reduced_polarization_term(wj; prob.c_pol, prob.C_pol, w_ib)
-                )
-            F = prob.classical * cl + prob.saturation * st + prob.bootstrap * bs + prob.curvature * cv + prob.polarization * pl
-            return (; F, cl, st, bs, cv, pl, wd)
-        end
-        for (j, wj) in enumerate(w)
-            t = terms(wj)
-            mats[:F][k, j], mats[:w_d][k, j] = t.F, t.wd
-            mats[:classical][k, j], mats[:saturation][k, j], mats[:bootstrap][k, j] = t.cl, t.st, t.bs
-            mats[:curvature][k, j], mats[:polarization][k, j] = t.cv, t.pl
-        end
+# The linear tearing growth rate and resistive layer width in ψ_N from `tearing`, and the bottom of the root search.
+function _gate(prob::ModifiedRutherfordProblem, ctx, psi)
+    gate = ctx.gate
+    row = gate === nothing ? nothing : _tearing_row(gate, psi)
+    gamma = row === nothing ? NaN : gate.gamma[row]
+    delta_r = row === nothing || isempty(gate.layer_widths) ? NaN : gate.layer_widths[row].delta_s_m / abs(ctx.dr_dpsi(psi))
+    return (; gamma, delta_r, w_lo=isnan(delta_r) ? prob.w_min : max(delta_r, prob.w_min))
+end
 
-        # Gates: the linear tearing growth rate and resistive layer width from `tearing`, and resistive interchange.
-        row = gate === nothing ? nothing : _tearing_row(gate, psi)
-        gamma = row === nothing ? NaN : gate.gamma[row]
-        delta_r = row === nothing || isempty(gate.layer_widths) ? NaN : gate.layer_widths[row].delta_s_m / abs(dr_dpsi(psi))
-        w_lo = isnan(delta_r) ? prob.w_min : max(delta_r, prob.w_min)
-        flags.interchange_unstable[k] = D_R > 0
-        flags.linear_unstable[k] = gamma > 0
-        flags.complex_delta_prime[k] = abs(imag(dp_complex)) > 1e-3 * abs(real(dp_complex))
-        r = mre_roots(wj -> terms(wj).F, w_lo, w)
-        excluded = flags.interchange_unstable[k] || D_I >= 0
-        # A linearly unstable surface grows from noise, so it has no seed threshold; the MRE still sets its saturation.
-        w_m, w_sat = excluded ? (NaN, NaN) : (flags.linear_unstable[k] ? NaN : r.w_m, r.w_sat)
-        flags.fully_stabilized[k], flags.unstable_any_seed[k] = !excluded && r.fully_stabilized, !excluded && r.unstable_any_seed
-        flags.unsaturated[k] = !excluded && r.unsaturated
-        flags.outside_plasma[k] = isfinite(w_sat) && (psi - w_sat / 2 < psi_lim[1] || psi + w_sat / 2 > psi_lim[2])
-        flags.gate_disagrees[k] = !excluded && isfinite(gamma) && (r.unstable_any_seed ? gamma < 0 : gamma > 0)
-        flags.below_w_ib[k] = w_m < w_ib
+# Roots and flags at one surface.
+function _surface_roots(prob::ModifiedRutherfordProblem, ctx, si, gt, w)
+    F(x) = _mre_terms(prob, si, x).F
+    r = mre_roots(F, gt.w_lo, w)
+    interchange_unstable = si.D_R > 0
+    linear_unstable = gt.gamma > 0
+    excluded = interchange_unstable || si.D_I >= 0
+    # A linearly unstable surface grows from noise, so it has no seed threshold; the MRE still sets its saturation.
+    w_m, w_sat = excluded ? (NaN, NaN) : (linear_unstable ? NaN : r.w_m, r.w_sat)
+    psi = si.rational_psi
+    return (; w_m, w_sat, fully_stabilized=!excluded && r.fully_stabilized, unstable_any_seed=!excluded && r.unstable_any_seed,
+        unsaturated=!excluded && r.unsaturated, outside_plasma=isfinite(w_sat) && (psi - w_sat / 2 < ctx.psi_lim[1] || psi + w_sat / 2 > ctx.psi_lim[2]),
+        gate_disagrees=!excluded && isfinite(gt.gamma) && (r.unstable_any_seed ? gt.gamma < 0 : gt.gamma > 0), interchange_unstable,
+        linear_unstable, below_w_ib=w_m < si.w_ib,
         # Δ′(w) w at the root, dimensionless at any D_I.
-        flags.large_delta_prime_w[k] = any(x -> isfinite(x) && abs(terms(x).cl) * x >= 1, (w_m, w_sat))
+        large_delta_prime_w=any(x -> isfinite(x) && abs(_mre_terms(prob, si, x).classical) * x >= 1, (w_m, w_sat)),
+        complex_delta_prime=abs(imag(si.dp_complex)) > 1e-3 * abs(real(si.dp_complex)), saturation_unconverged=!si.sc.converged)
+end
 
-        for (key, val) in pairs((; psi, q=s.q, m, n, delta_prime=dp_mn, delta_prime_imag=imag(dp_complex), D_I, D_R, H=rg.H, D_nc,
-            f_trap=g.f_trap, mu_ratio, zeff, g.Wc_prefac, chi_perp, v_te, R0=g.R_major, omega_star_i, omega_star_e, omega_hat, omega_hat_pi,
-            beta_p, rho_theta, w_ib, g.eps, gamma, delta_r, w_lo, D_c, W_d_layer, sc.alpha_s, sc.beta_s, sc.C_sat, w_m, w_sat))
-            getfield(out, key)[k] = val
-        end
+function CommonSolve.solve(prob::ModifiedRutherfordProblem)
+    validate(prob)
+    ctx = _mre_context(prob)
+    w = exp.(range(log(prob.w_min), log(prob.w_max); length=prob.nw))
+    rows = map(enumerate(prob.ffs.surfaces)) do (k, s)
+        si = _surface_inputs(prob, ctx, k, s)
+        gt = _gate(prob, ctx, si.rational_psi)
+        terms = [_mre_terms(prob, si, wj) for wj in w]
+        extra = (; si.g.f_trap, si.g.Wc_prefac, R0=si.g.R_major, si.g.eps, delta_prime_imag=imag(si.dp_complex), si.sc.alpha_s, si.sc.beta_s, si.sc.C_sat)
+        rowterms = NamedTuple{_MRE_TERMS}(Tuple(getfield.(terms, key) for key in _MRE_TERMS))
+        merge(si, extra, gt, _surface_roots(prob, ctx, si, gt, w), rowterms)
     end
-    valid = filter(!isnan, out.w_m)
-    w_m_star = isempty(valid) ? NaN : minimum(valid)
-    return ModifiedRutherfordResult(prob, collect(w), out.psi, out.q, out.m, out.n, out.delta_prime, out.delta_prime_imag, out.D_I, out.D_R,
-        out.H, out.D_nc, out.f_trap, out.mu_ratio, out.zeff, out.Wc_prefac, out.chi_perp, out.v_te, out.R0, out.omega_star_i,
-        out.omega_star_e, out.omega_hat, out.omega_hat_pi, out.beta_p, out.rho_theta, out.w_ib, out.eps, out.gamma, out.delta_r, out.w_lo,
-        out.D_c, out.W_d_layer, out.alpha_s, out.beta_s, out.C_sat, out.w_m, out.w_sat, w_m_star, Vector{Bool}(flags.fully_stabilized), Vector{Bool}(flags.unstable_any_seed),
-        Vector{Bool}(flags.unsaturated), Vector{Bool}(flags.outside_plasma), Vector{Bool}(flags.gate_disagrees),
-        Vector{Bool}(flags.interchange_unstable), Vector{Bool}(flags.linear_unstable), Vector{Bool}(flags.below_w_ib),
-        Vector{Bool}(flags.large_delta_prime_w), Vector{Bool}(flags.complex_delta_prime),
-        Vector{Bool}(flags.saturation_unconverged),
-        mats[:F], mats[:classical], mats[:saturation], mats[:bootstrap], mats[:curvature], mats[:polarization], mats[:w_d])
+    column(key) = [getfield(r, key) for r in rows]
+    matrix(key) = isempty(rows) ? zeros(0, length(w)) : permutedims(reduce(hcat, column(key)))
+    w_m = column(:w_m)
+    return ModifiedRutherfordResult(; problem=prob, w=collect(w), (key => column(key) for key in _MRE_SCALARS)...,
+        w_m_star=all(isnan, w_m) ? NaN : minimum(filter(!isnan, w_m)), (key => Vector{Bool}(column(key)) for key in _MRE_FLAGS)...,
+        (key => matrix(key) for key in _MRE_TERMS)...)
 end

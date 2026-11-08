@@ -18,30 +18,15 @@ Write `result` into `Tearing/ModifiedRutherford/` of `parent`, replacing any exi
 function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, result::ModifiedRutherfordResult)
     tearing = haskey(parent, "Tearing") ? parent["Tearing"] : create_group(parent, "Tearing")
     g = replace_group!(tearing, "ModifiedRutherford")
-    g["w"] = result.w
-    g["w_m_star"] = result.w_m_star
-    for key in _MRE_PER_SURFACE
-        g["PerSurface/$key"] = getfield(result, key)
-    end
-    # Flags as 0/1 integers, readable without an HDF5 boolean type.
-    for key in _MRE_FLAGS
-        g["PerSurface/$key"] = Int8.(getfield(result, key))
-    end
-    for key in _MRE_TERMS
-        g["Terms/$key"] = getfield(result, key)
+    # One dataset per annotated field; flags as 0/1 integers, readable without an HDF5 boolean type.
+    for (key, _) in MRE_H5_ANNOTATIONS
+        value = getfield(result, Symbol(basename(key)))
+        g[key] = value isa AbstractVector{Bool} ? Int8.(value) : value
     end
     Utilities.HDF5Annotations.annotate!(g, MRE_H5_ANNOTATIONS)
     Utilities.record_inputs!(parent, result)
     return g
 end
-
-const _MRE_PER_SURFACE = (:psi, :q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff, :Wc_prefac,
-    :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma, :delta_r, :w_lo, :D_c, :W_d_layer,
-    :alpha_s, :beta_s, :C_sat, :w_m, :w_sat)
-const _MRE_FLAGS =
-    (:fully_stabilized, :unstable_any_seed, :unsaturated, :outside_plasma, :gate_disagrees, :interchange_unstable, :linear_unstable, :below_w_ib, :large_delta_prime_w,
-        :complex_delta_prime, :saturation_unconverged)
-const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d)
 
 # Julia's surface × width matrices land in HDF5 as (width, surface).
 const _MRE_TERM_DIMS = ("w", "surface")
@@ -49,8 +34,8 @@ const _MRE_TERM_DIMS = ("w", "surface")
 const MRE_H5_ANNOTATIONS = [
     "w" => (; long_name="full island width grid", units="psi_N", dims=("w",)),
     "w_m_star" => (; long_name="smallest seed-threshold full width over the surfaces, NaN if none", units="psi_N"),
-    "PerSurface/psi" => (; long_name="normalized poloidal flux of the rational surface", units="psi_N", dims=("surface",)),
-    "PerSurface/q" => (; long_name="safety factor at the surface", dims=("surface",)),
+    "PerSurface/rational_psi" => (; long_name="normalized poloidal flux of the rational surface", units="psi_N", dims=("surface",)),
+    "PerSurface/rational_q" => (; long_name="safety factor at the surface", dims=("surface",)),
     "PerSurface/m" => (; long_name="resonant poloidal mode number", dims=("surface",)),
     "PerSurface/n" => (; long_name="resonant toroidal mode number", dims=("surface",)),
     "PerSurface/delta_prime" => (;

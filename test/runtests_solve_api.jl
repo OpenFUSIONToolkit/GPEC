@@ -620,7 +620,7 @@ include("display_check.jl")
                 @test all(isfinite, api.D_c) && all(>(0), api.W_d_layer)
                 k = findfirst(==(3), api.m)
                 gate = solve(TearingProblem(reference.ffs), SLAYERModel(; D_c_type=:toroidal, chi_perp_Dc=api.chi_perp[k]))
-                row = findfirst(x -> isapprox(x, api.psi[k]; atol=1e-8), gate.rational_psi)
+                row = findfirst(x -> isapprox(x, api.rational_psi[k]; atol=1e-8), gate.rational_psi)
                 @test gate.params[row].dc_tmp ≈ api.D_c[k] rtol = 1e-10
                 ben = solve(ModifiedRutherfordProblem(reference.ffs; tearing=reference.tearing, nw=40, curvature_model=:benjamin))
                 @test all(isnan, ben.D_c) && !(ben.curvature ≈ api.curvature)
