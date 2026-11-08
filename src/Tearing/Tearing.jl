@@ -37,8 +37,7 @@ import ..InnerLayer as InnerLayer
 using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner, layer_response,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
     GGJModel, GGJParameters,
-    LayerWidths, slayer_layer_thickness
-using .InnerLayer.SLAYER: _slayer_profiles, _layer_zeff, _layer_ion_mass, _layer_mass_per_electron, _build_resistivity_model
+    LayerWidths, slayer_layer_thickness, layer_plasma
 
 include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")

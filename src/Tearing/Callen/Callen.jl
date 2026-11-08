@@ -12,7 +12,7 @@ import ...ForcingTerms
 import ...Utilities: save_to_hdf5
 using ...Utilities.HDF5Annotations: replace_group!
 using ...Utilities.PhysicalConstants: M_P, E_CHG
-using ...InnerLayer.SLAYER: _slayer_profiles
+using ...InnerLayer: layer_plasma
 
 include("Problem.jl")
 include("HDF5Output.jl")

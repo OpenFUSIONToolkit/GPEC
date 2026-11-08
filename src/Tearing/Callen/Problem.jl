@@ -139,10 +139,8 @@ function CommonSolve.solve(prob::CallenProblem)
     prob.delta_prime_source === :cylindrical || (ric !== nothing && !isempty(ric.delta_prime.matrix)) ||
         throw(ArgumentError("CallenProblem with delta_prime_source = :computed needs delta_prime, a Riccati or Galerkin solve carrying Δ′"))
 
-    T_i_of = _slayer_profiles(data, nothing).profiles.T_i
-    species = data.ion_species
-    m_i = sum(s.fraction * s.m for s in species) / sum(s.fraction for s in species) * M_P
-    z_i = Float64(first(species).z)
+    plasma = layer_plasma(equil; log=false)
+    T_i_of, m_i, z_i = plasma.profiles.T_i, plasma.mu_i * M_P, plasma.z_i
     R0, B0 = equil.ro, equil.params.bt0
     chi1 = 2π * equil.psio
     qspl = equil.profiles.q_spline

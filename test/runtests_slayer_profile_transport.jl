@@ -1,7 +1,7 @@
 using Test
 using GeneralizedPerturbedEquilibrium.Equilibrium: KineticProfileData
 using GeneralizedPerturbedEquilibrium: SLAYERModel
-using GeneralizedPerturbedEquilibrium.Tearing: _slayer_profiles
+using GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER: _slayer_profiles
 
 @testset "SLAYER loads only transport profiles used by its model" begin
     psi = collect(range(0.0, 1.0; length=5))

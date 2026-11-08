@@ -34,7 +34,7 @@ model_name(::GGJModel{S}) where {S} = "ggj_$S"
 model_name(::SLAYERModel{S}) where {S} = "slayer_$S"
 
 export InnerLayerModel, InnerLayerParameters, InnerLayerResponse, solve_inner, solve_inner_profile, layer_response
-export layer_eta, layer_rho, layer_omega_E
+export layer_plasma, layer_eta, layer_rho, layer_omega_E
 export GGJ, GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
 export solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_profile
