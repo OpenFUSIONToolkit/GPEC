@@ -438,9 +438,11 @@ function calculate_orbit(tab::OrbitSurfaceTable, n::Int, l::Int, q::Float64, eps
     sig = [[(seg.passing, seg.dir, seg.weight) for seg in tab.segments[il]] for il in 1:nl]
     rows = map(1:nl) do il
         map(tab.segments[il]) do seg
-            spl = cubic_interp(seg.u, Series(hcat(seg.wb, seg.wd, view(seg.dJdJ, :, ih) .* dnorm, seg.dpsibar, seg.gpsi)); bc=CubicFit())
+            # Smooth frequencies are cubic; |δJ_ℓ|², ψ̄ − ψ₀ and the drive factor are PCHIP so a step in them cannot ring.
+            freq = cubic_interp(seg.u, Series(hcat(seg.wb, seg.wd)); bc=CubicFit())
+            mono = [pchip_interp(seg.u, y) for y in (seg.dJdJ[:, ih] .* dnorm, seg.dpsibar, seg.gpsi)]
             us = clamp.(seg.ua .+ t .* (seg.ub - seg.ua), first(seg.u), last(seg.u))
-            vcat(seg.ua, seg.ub, vec(reduce(vcat, [spl(u)' for u in us])))
+            vcat(seg.ua, seg.ub, vec(reduce(vcat, [vcat(freq(u), [f(u) for f in mono])' for u in us])))
         end
     end
     lo, hi = first(tab.lambda), last(tab.lambda)
