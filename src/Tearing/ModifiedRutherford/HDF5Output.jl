@@ -38,8 +38,9 @@ end
 const _MRE_PER_SURFACE = (:psi, :q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff, :Wc_prefac,
     :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma, :delta_r, :w_lo, :D_c, :W_d_layer,
     :alpha_s, :beta_s, :C_sat, :w_m, :w_sat)
-const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :interchange_unstable, :linear_unstable, :below_w_ib, :large_delta_prime_w,
-    :complex_delta_prime, :saturation_unconverged)
+const _MRE_FLAGS =
+    (:fully_stabilized, :unstable_any_seed, :unsaturated, :outside_plasma, :gate_disagrees, :interchange_unstable, :linear_unstable, :below_w_ib, :large_delta_prime_w,
+        :complex_delta_prime, :saturation_unconverged)
 const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d)
 
 # Julia's surface × width matrices land in HDF5 as (width, surface).
@@ -90,10 +91,13 @@ const MRE_H5_ANNOTATIONS = [
     "PerSurface/C_sat" => (; long_name="saturation coefficient 0.8 alpha_s^2 - 0.27 beta_s - 0.09 alpha_s (Fitzpatrick 2023 Eq. 9.15)",
         dims=("surface",)),
     "PerSurface/w_m" => (; long_name="seed threshold: smallest F crossing from negative to positive, NaN if none", units="psi_N", dims=("surface",)),
-    "PerSurface/w_sat" => (; long_name="saturated width: largest F crossing from positive to negative, NaN if none", units="psi_N",
+    "PerSurface/w_sat" => (; long_name="saturated width: first falling F crossing above the island start (w_lo or w_m), NaN if none", units="psi_N",
         dims=("surface",)),
     "PerSurface/fully_stabilized" => (; long_name="1 if F < 0 on the whole search range", dims=("surface",)),
     "PerSurface/unstable_any_seed" => (; long_name="1 if F > 0 at w_lo", dims=("surface",)),
+    "PerSurface/unsaturated" => (; long_name="1 if F > 0 at w_max: no saturation in the search range", dims=("surface",)),
+    "PerSurface/outside_plasma" => (; long_name="1 if psi +- w_sat/2 leaves the equilibrium psi grid", dims=("surface",)),
+    "PerSurface/gate_disagrees" => (; long_name="1 if F(w_lo) > 0 with gamma < 0, or F(w_lo) < 0 with gamma > 0", dims=("surface",)),
     "PerSurface/interchange_unstable" => (; long_name="1 if D_R > 0 (excluded)", dims=("surface",)),
     "PerSurface/linear_unstable" => (; long_name="1 if the gate's growth rate is positive (no seed threshold, w_sat kept)", dims=("surface",)),
     "PerSurface/below_w_ib" => (; long_name="1 if w_m < w_ib", dims=("surface",)),

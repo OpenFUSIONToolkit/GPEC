@@ -93,6 +93,18 @@ using TOML
         s = MR.mre_roots(w -> (0.05 - w) / w, 1e-5, grid)
         @test s.unstable_any_seed && isnan(s.w_m)
         @test s.w_sat ≈ 0.05 rtol = 1e-10
+        # Roots at 2e-3 (falling), 3e-3 (rising), 0.02 (falling), 0.05 (rising): from w_lo the island saturates at 2e-3; F > 0 at the top.
+        f4(w) = (2e-3 - w) * (w - 3e-3) * (0.02 - w) * (w - 0.05) / w^4
+        u = MR.mre_roots(f4, 1e-5, grid)
+        @test u.unstable_any_seed
+        @test u.w_m ≈ 3e-3 rtol = 1e-10
+        @test u.w_sat ≈ 2e-3 rtol = 1e-10
+        @test u.unsaturated
+        # With F < 0 at w_lo the island starts at w_m = 2e-3 and saturates at the next falling root, 3e-3, not at 0.05.
+        v = MR.mre_roots(w -> -f4(w), 1e-5, grid)
+        @test v.w_m ≈ 2e-3 rtol = 1e-10
+        @test v.w_sat ≈ 3e-3 rtol = 1e-10
+        @test !v.unsaturated
     end
 
     @testset "Callen cubic: both positive roots solve it and merge at the critical vacuum width" begin

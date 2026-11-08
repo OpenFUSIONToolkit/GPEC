@@ -19,7 +19,8 @@ the Mercier, resistive-interchange and Pfirsch-Schlüter indices D_I, D_R = E + 
 equilibrium's kinetic data, as every tearing layer reads it. A deck states it as `[Tearing.ModifiedRutherford]`.
 
 The roots of F are refined between grid points from `w_lo = max(δ_r, w_min)`: the seed threshold `w_m` is the
-smallest crossing from F < 0 to F > 0 and the saturated width `w_sat` the largest from F > 0 to F < 0. Surfaces that
+smallest crossing from F < 0 to F > 0 and the saturated width `w_sat` the first crossing from F > 0 to F < 0 above where
+the island starts (`w_lo` when F(w_lo) > 0, else `w_m`). Surfaces that
 are resistive-interchange unstable (D_R > 0) get no roots; linearly tearing unstable ones (γ > 0 in `tearing`) grow
 from noise, so they get no seed threshold but keep `w_sat`.
 
@@ -110,6 +111,9 @@ Output of `solve(::ModifiedRutherfordProblem)`. Per-surface vectors run core to 
   - `w_m_star` - Smallest `w_m` over the surfaces.
   - `fully_stabilized` - F < 0 on the whole search range.
   - `unstable_any_seed` - F > 0 at `w_lo`.
+  - `unsaturated` - F > 0 at `w_max`: an island past its last rising root does not saturate in the search range.
+  - `outside_plasma` - ψ ± `w_sat`/2 leaves the equilibrium's ψ grid.
+  - `gate_disagrees` - F(w_lo) > 0 with γ < 0, or F(w_lo) < 0 with γ > 0.
   - `interchange_unstable`, `linear_unstable` - D_R > 0 (excluded), or γ > 0 (no seed threshold; `w_sat` kept).
   - `below_w_ib` - `w_m` below the ion banana width, where the polarization ordering fails.
   - `large_delta_prime_w` - |Δ′(w)| w ≥ 1 at `w_m` or `w_sat`, with Δ′(w) the classical term.
@@ -158,6 +162,9 @@ struct ModifiedRutherfordResult{P}
     w_m_star::Float64
     fully_stabilized::Vector{Bool}
     unstable_any_seed::Vector{Bool}
+    unsaturated::Vector{Bool}
+    outside_plasma::Vector{Bool}
+    gate_disagrees::Vector{Bool}
     interchange_unstable::Vector{Bool}
     linear_unstable::Vector{Bool}
     below_w_ib::Vector{Bool}
@@ -209,23 +216,27 @@ end
 
 
 """
-    mre_roots(F, w_lo, w_grid) -> (; w_m, w_sat, fully_stabilized, unstable_any_seed)
+    mre_roots(F, w_lo, w_grid) -> (; w_m, w_sat, fully_stabilized, unstable_any_seed, unsaturated)
 
 Roots of `F` on `[w_lo, maximum(w_grid)]`, bracketed on `w_lo` and the grid points above it and refined by Brent's
-method: `w_m` is the smallest crossing from negative to positive, `w_sat` the largest from positive to negative
-(`NaN` when absent).
+method: `w_m` is the smallest crossing from negative to positive, and `w_sat` the first crossing from positive to
+negative above where an island starts, `w_lo` when F(w_lo) > 0, else `w_m` (`NaN` when absent). `unsaturated` is
+F > 0 at the top of the grid.
 """
 function mre_roots(F, w_lo::Real, w_grid::AbstractVector)
     nodes = vcat(Float64(w_lo), filter(>(w_lo), w_grid))
     vals = F.(nodes)
-    w_m, w_sat = NaN, NaN
+    rising, falling = Float64[], Float64[]
     for j in 1:(length(nodes)-1)
         a, b = vals[j], vals[j+1]
         isfinite(a) && isfinite(b) && a != 0 && (a * b < 0 || b == 0) || continue
-        root = find_zero(F, (nodes[j], nodes[j+1]), Brent())
-        a < 0 ? (isnan(w_m) && (w_m = root)) : (w_sat = root)
+        push!(a < 0 ? rising : falling, find_zero(F, (nodes[j], nodes[j+1]), Brent()))
     end
-    return (; w_m, w_sat, fully_stabilized=all(<(0), vals), unstable_any_seed=vals[1] > 0)
+    w_m = isempty(rising) ? NaN : first(rising)
+    start = vals[1] > 0 ? nodes[1] : w_m
+    above = filter(>(start), falling)
+    w_sat = isempty(above) ? NaN : first(above)
+    return (; w_m, w_sat, fully_stabilized=all(<(0), vals), unstable_any_seed=vals[1] > 0, unsaturated=vals[end] > 0)
 end
 
 # SLAYER's toroidal critical offset D_c and the W_d it implies at one surface, with χ⊥ for every χ input.
@@ -273,7 +284,8 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         H=vec0(), D_nc=vec0(), f_trap=vec0(), mu_ratio=vec0(), zeff=vec0(), Wc_prefac=vec0(), chi_perp=vec0(), v_te=vec0(), R0=vec0(),
         omega_star_i=vec0(), omega_star_e=vec0(), omega_hat=vec0(), omega_hat_pi=vec0(), beta_p=vec0(), rho_theta=vec0(), w_ib=vec0(),
         eps=vec0(), gamma=vec0(), delta_r=vec0(), w_lo=vec0(), D_c=vec0(), W_d_layer=vec0(), alpha_s=vec0(), beta_s=vec0(), C_sat=vec0(), w_m=vec0(), w_sat=vec0())
-    flags = (; fully_stabilized=flag0(), unstable_any_seed=flag0(), interchange_unstable=flag0(), linear_unstable=flag0(),
+    flags = (; fully_stabilized=flag0(), unstable_any_seed=flag0(), unsaturated=flag0(), outside_plasma=flag0(), gate_disagrees=flag0(),
+        interchange_unstable=flag0(), linear_unstable=flag0(),
         below_w_ib=flag0(), large_delta_prime_w=flag0(), complex_delta_prime=flag0(),
         saturation_unconverged=flag0())
     mats = Dict(k => zeros(ns, prob.nw) for k in (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :w_d))
@@ -367,6 +379,9 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         # A linearly unstable surface grows from noise, so it has no seed threshold; the MRE still sets its saturation.
         w_m, w_sat = excluded ? (NaN, NaN) : (flags.linear_unstable[k] ? NaN : r.w_m, r.w_sat)
         flags.fully_stabilized[k], flags.unstable_any_seed[k] = !excluded && r.fully_stabilized, !excluded && r.unstable_any_seed
+        flags.unsaturated[k] = !excluded && r.unsaturated
+        flags.outside_plasma[k] = isfinite(w_sat) && (psi - w_sat / 2 < psi_lim[1] || psi + w_sat / 2 > psi_lim[2])
+        flags.gate_disagrees[k] = !excluded && isfinite(gamma) && (r.unstable_any_seed ? gamma < 0 : gamma > 0)
         flags.below_w_ib[k] = w_m < w_ib
         # Δ′(w) w at the root, dimensionless at any D_I.
         flags.large_delta_prime_w[k] = any(x -> isfinite(x) && abs(terms(x).cl) * x >= 1, (w_m, w_sat))
@@ -383,6 +398,7 @@ function CommonSolve.solve(prob::ModifiedRutherfordProblem)
         out.H, out.D_nc, out.f_trap, out.mu_ratio, out.zeff, out.Wc_prefac, out.chi_perp, out.v_te, out.R0, out.omega_star_i,
         out.omega_star_e, out.omega_hat, out.omega_hat_pi, out.beta_p, out.rho_theta, out.w_ib, out.eps, out.gamma, out.delta_r, out.w_lo,
         out.D_c, out.W_d_layer, out.alpha_s, out.beta_s, out.C_sat, out.w_m, out.w_sat, w_m_star, Vector{Bool}(flags.fully_stabilized), Vector{Bool}(flags.unstable_any_seed),
+        Vector{Bool}(flags.unsaturated), Vector{Bool}(flags.outside_plasma), Vector{Bool}(flags.gate_disagrees),
         Vector{Bool}(flags.interchange_unstable), Vector{Bool}(flags.linear_unstable), Vector{Bool}(flags.below_w_ib),
         Vector{Bool}(flags.large_delta_prime_w), Vector{Bool}(flags.complex_delta_prime),
         Vector{Bool}(flags.saturation_unconverged),
