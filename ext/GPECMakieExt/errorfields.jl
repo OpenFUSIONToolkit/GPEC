@@ -21,8 +21,9 @@ function _decade_ticks(lo, hi)
     return (vals, labels)
 end
 
-# The largest bin centre where any of the densities is above 10⁻³ of its peak, so empty tails are not drawn.
+# The largest and smallest bin centres where any of the densities is above 10⁻³ of its peak, so empty tails are not drawn.
 _support_end(c, pdfs...) = maximum(p -> c[findlast(>(1e-3 * maximum(p)), p)], pdfs)
+_support_start(c, pdfs...) = minimum(p -> c[findfirst(>(1e-3 * maximum(p)), p)], pdfs)
 
 # Rows of stems and dots: one row per name, one dot per source, on a linear or log value axis. Values that are roundoff
 # against the largest are left out; returns how many rows that removed.
@@ -81,8 +82,10 @@ function EFA._plot_tolerance_pdf(data; corrected=true, normalize=false, xscale=:
             length(data) == 1 ? "Sampled |δ|: mean $(_num(d1.abs_delta_sampled_mean))" * (designed(d1) ? ", as designed $(_num(d1.abs_delta_total_as_designed))" : "") :
             "Tolerance Monte Carlo"
         xmax = maximum(d -> 1.05 * _support_end(EFA._centers(d.abs_delta_bin_edges), d.abs_delta_pdf, d.abs_delta_efc_pdf), last.(data))
+        xmin = xscale === :log10 ? minimum(d -> _support_start(EFA._centers(d.abs_delta_bin_edges), d.abs_delta_pdf, d.abs_delta_efc_pdf), last.(data)) / 1.5 : 0
         ax = Axis(fig[1, 1]; xlabel="dominant-mode overlap |δ|", ylabel=normalize ? "probability density / its peak" : "probability density", title,
-            xscale=xscale === :log10 ? log10 : identity, xminorticksvisible=false, limits=((xscale === :log10 ? nothing : 0, xmax), (0, nothing)))
+            xscale=xscale === :log10 ? log10 : identity, xminorticksvisible=false, limits=((xmin, xmax), (0, nothing)),
+            xticks=xscale === :log10 ? _decade_ticks(xmin, xmax) : Makie.automatic, xtickformat=xscale === :log10 ? Makie.automatic : (vs -> _num.(vs)))
         for (j, (lbl, d)) in enumerate(data)
             c = EFA._centers(d.abs_delta_bin_edges)
             keep = xscale === :log10 ? c .> 0 : trues(length(c))
