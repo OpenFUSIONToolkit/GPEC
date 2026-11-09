@@ -23,8 +23,8 @@ depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "sr
 script = "make_highlights.jl"
 
 [analysis.pe_summary]
-commit = "316828b2e"
-date = "2026-11-07"
+commit = "ba4d5453b"
+date = "2026-11-09"
 depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
 script = "make_highlights.jl"
 
