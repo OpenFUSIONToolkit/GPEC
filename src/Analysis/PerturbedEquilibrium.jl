@@ -11,7 +11,7 @@ using HDF5
 
 using ..Analysis: register!, _require, _can, capabilities, REASONS, _draw
 import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
-import ..CoilForcing: plot_control_surface
+import ..CoilForcing: plot_control_surface, _control_surface_data
 
 const Source = Union{AbstractString,PerturbedEquilibriumState}
 
@@ -438,6 +438,54 @@ function plot_dominant_mode_surface(src::Union{PlasmaResponse,PerturbedEquilibri
         save_path)
 end
 
+# Each dominant mode's b_n around the control-surface cross-section, rotated in phase so its peak is real and positive
+# and normalized to that peak, with the boundary in (R, Z). c(v) - i c(iv) is the complex field in the displayed sign.
+function _dominant_mode_rz_data(resp::PlasmaResponse, modes; mtheta=512)
+    equil = resp.ffs.equil
+    hint = (Ref(1), Ref(1))
+    return map(modes) do k
+        v = resp.dominant_right_singular_vectors[:, k]
+        d = _control_surface_data(resp, v; nphi=1, mtheta)
+        g = d.field[:, 1] .- im .* _control_surface_data(resp, im .* v; nphi=1, mtheta).field[:, 1]
+        b = real.(g .* cis(-angle(g[argmax(abs.(g))]))) ./ maximum(abs, g)
+        pts = [_rz(equil, equil.rzphi_xs[end], mod(θ / 360, 1), hint) for θ in d.theta]
+        R, Z = first.(pts), last.(pts)
+        (; mode=k, sigma=resp.dominant_singular_values[k], R=[R; R[1]], Z=[Z; Z[1]], b=[b; b[1]])
+    end
+end
+
+function _plot_dominant_mode_rz end
+
+"""
+    plot_dominant_mode_rz(src; modes=nothing, save_path=nothing)
+
+Plot dominant resonant-coupling modes on the control-surface cross-section: the boundary in (R, Z) as a band coloured
+by each mode's normal field b_n, one panel per mode. Each mode is rotated in phase so its peak b_n is real and
+positive, and normalized to that peak. The modes are the stored decomposition's, over the rational surfaces with
+ψ_N ≤ 0.9.
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's modes)
+
+### Keyword arguments
+
+  - `modes`: Which dominant modes, 1 the strongest (default: the first three that exist)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_dominant_mode_rz(src::Union{PlasmaResponse,PerturbedEquilibriumState}; modes=nothing, save_path=nothing)
+    _require(plot_dominant_mode_rz, src)
+    resp = src isa PlasmaResponse ? src : src.response
+    nk = length(resp.dominant_singular_values)
+    ks = something(modes, 1:min(3, nk))
+    all(k -> 1 <= k <= nk, ks) || throw(ArgumentError("plot_dominant_mode_rz: modes must lie in 1 to $nk"))
+    return _draw(_plot_dominant_mode_rz, _dominant_mode_rz_data(resp, collect(ks)); save_path)
+end
+
 # The resonant coupling matrix of toroidal mode number `n` and its SVD C = U Σ Vᴴ: rows are rational surfaces, columns
 # poloidal harmonics; U has rows only for the surfaces inside the SVD's core window, at `retained` in the row order.
 function _coupling_matrix_data(resp::PlasmaResponse, n)
@@ -491,6 +539,8 @@ register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-
 register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
 register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
     "a dominant resonant-coupling mode as b_n on the control surface")
+register!(plot_dominant_mode_rz, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
+    "dominant resonant-coupling modes as b_n on the control-surface cross-section")
 register!(plot_coupling_matrix, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices, :dominant_mode),
     "resonant coupling matrix |C| with its singular values and left and right singular vectors")
 register!(plot_perturbed_field_rz, (PerturbedEquilibriumState,), (:response_n,), "b_n or ξ_n on the poloidal plane (deform = true for the displaced boundary)")

@@ -221,6 +221,23 @@ function _field_rz_panel!(gl, d, component, boundary; clip=0.9)
     return ax
 end
 
+# Each mode's b_n as a band along the boundary cross-section, one panel per mode on one colour scale.
+function PE._plot_dominant_mode_rz(curves)
+    return themed() do
+        n = length(curves)
+        fig = Figure(; size=(330n + 150, 560))
+        for (j, c) in enumerate(curves)
+            title = n == 1 ? rich("Dominant mode $(c.mode) on the control surface, σ = ", _num(c.sigma)) : rich("mode $(c.mode), σ = ", _num(c.sigma))
+            ax = Axis(fig[1, j]; title, aspect=DataAspect(), xlabel="R (m)", ylabel="Z (m)", ylabelvisible=j == 1, yticklabelsvisible=j == 1)
+            lines!(ax, c.R, c.Z; color=c.b, colormap=DIVERGING, colorrange=(-1, 1), linewidth=16)
+            lines!(ax, c.R, c.Z; color=:black, linewidth=1)
+        end
+        Colorbar(fig[1, n+1]; colormap=DIVERGING, limits=(-1, 1), label=rich("b", subscript("n"), " (arb.)"))
+        n > 1 && Label(fig[0, 1:n], "Dominant resonant-coupling modes on the control surface"; font=:bold, fontsize=16)
+        fig
+    end
+end
+
 # |C| with |U| beside it on the shared surface axis, |V| below it on the shared m axis, and σ in the corner.
 function PE._plot_coupling_matrix(d)
     return themed() do
