@@ -221,6 +221,48 @@ function _field_rz_panel!(gl, d, component, boundary; clip=0.9)
     return ax
 end
 
+# |C| with |U| beside it on the shared surface axis, |V| below it on the shared m axis, and σ in the corner.
+function PE._plot_coupling_matrix(d)
+    return themed() do
+        A = abs.(d.C)
+        top = max(maximum(A), floatmin())
+        ns, rank = size(A, 1), length(d.sigma)
+        fig = Figure(; size=(1150, 820))
+        hax = Axis(fig[1, 1]; ylabel="rational surface q = m/n", yticks=(1:ns, d.labels), xticklabelsvisible=false,
+            title=rich("Resonant coupling C: |b̄", subscript("res"), "| per unit b̃", subscript("m")))
+        hm = heatmap!(hax, d.m, 1:ns, permutedims(A); colormap=:viridis, colorscale=log10, colorrange=(1e-4top, top),
+            lowclip=Makie.to_colormap(:viridis)[1])
+        scatter!(hax, d.m_res, 1:ns; marker=:rect, color=:transparent, strokecolor=:white, strokewidth=1.5, markersize=16)
+        for s in setdiff(1:ns, d.retained)
+            poly!(hax, Rect(d.m[1] - 0.5, s - 0.5, length(d.m), 1); color=(:white, 0.55))
+        end
+        Colorbar(fig[1, 3], hm; label="|C|  (T per unit b̃)")
+
+        uax = Axis(fig[1, 2]; xlabel="|U|  (unit norm)", yticks=(1:ns, d.labels), yticklabelsvisible=false, title="left singular vectors",
+            limits=((0, 1.05), nothing))
+        vax = Axis(fig[2, 1]; xlabel="poloidal harmonic m of the applied field b̃", ylabel="|V|  (unit norm)", title="right singular vectors",
+            limits=(nothing, (0, nothing)))
+        for k in 1:rank
+            lw = k == 1 ? 2.5 : 1.5
+            isempty(d.retained) || scatterlines!(uax, abs.(d.U[:, k]), d.retained; color=WONG[mod1(k, 7)], linewidth=lw, markersize=10)
+            stairs!(vax, _steps(d.m, abs.(d.V[:, k]))...; step=:center, color=WONG[mod1(k, 7)], linewidth=lw, label=rich("V", subscript(string(k))))
+        end
+        linkyaxes!(hax, uax)
+        linkxaxes!(hax, vax)
+        axislegend(vax; position=:rt, framevisible=false)
+
+        sax = Axis(fig[2, 2]; xlabel="mode k", ylabel=rich("σ", subscript("k"), "  (T per unit b̃)"), title="singular values", xticks=1:rank,
+            limits=(nothing, (0, 1.12 * maximum(d.sigma))))
+        stem!(sax, 1:rank, d.sigma; color=[WONG[mod1(k, 7)] for k in 1:rank], stemcolor=(:gray, 0.6), markersize=12)
+
+        colsize!(fig.layout, 1, Auto(3))
+        colsize!(fig.layout, 2, Auto(1))
+        rowsize!(fig.layout, 1, Auto(1.6))
+        rowsize!(fig.layout, 2, Auto(1))
+        fig
+    end
+end
+
 function PE._plot_perturbed_field_rz(d, component, boundary; clip=0.9)
     return themed() do
         fig = Figure(; size=(560, boundary === nothing ? 680 : 720))

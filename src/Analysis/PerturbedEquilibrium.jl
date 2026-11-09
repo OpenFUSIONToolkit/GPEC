@@ -438,6 +438,48 @@ function plot_dominant_mode_surface(src::Union{PlasmaResponse,PerturbedEquilibri
         save_path)
 end
 
+# The resonant coupling matrix of toroidal mode number `n` and its SVD C = U Σ Vᴴ: rows are rational surfaces, columns
+# poloidal harmonics; U has rows only for the surfaces inside the SVD's core window, at `retained` in the row order.
+function _coupling_matrix_data(resp::PlasmaResponse, n)
+    n = something(n, first(resp.n_modes))
+    n in resp.n_modes || throw(ArgumentError("plot_coupling_matrix: n = $n is not one of the response's toroidal mode numbers $(unique(resp.n_modes))"))
+    cols = findall(==(n), resp.n_modes)
+    rows = findall(==(n), resp.rational_n)
+    inwindow = [i for (i, r) in enumerate(resp.dominant_rational_index) if r in rows]
+    return (; m=resp.m_modes[cols], labels=["$(resp.rational_m_res[r])/$n" for r in rows], m_res=resp.rational_m_res[rows],
+        C=resp.C_resonant_area_weighted_field[rows, cols], sigma=resp.dominant_singular_values,
+        U=resp.dominant_left_singular_vectors[inwindow, :], retained=[findfirst(==(resp.dominant_rational_index[i]), rows) for i in inwindow],
+        V=resp.dominant_right_singular_vectors[cols, :])
+end
+
+function _plot_coupling_matrix end
+
+"""
+    plot_coupling_matrix(src; n=nothing, save_path=nothing)
+
+Plot the resonant coupling matrix C, the resonant area-weighted field b̄_res at each rational surface per unit applied
+harmonic b̃_m, with its singular value decomposition C = U Σ Vᴴ: |C| against surface and m, the left singular vectors
+|U| on the same surface axis, the right singular vectors |V| on the same m axis (V₁ is the dominant mode), and the
+singular values σ. Surfaces outside the decomposition's core window are shaded.
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's matrix)
+
+### Keyword arguments
+
+  - `n`: Toroidal mode number drawn (default: the first)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_coupling_matrix(src::Union{PlasmaResponse,PerturbedEquilibriumState}; n=nothing, save_path=nothing)
+    _require(plot_coupling_matrix, src)
+    return _draw(_plot_coupling_matrix, _coupling_matrix_data(src isa PlasmaResponse ? src : src.response, n); save_path)
+end
+
 const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
 register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum, ξ^ψ spectrogram and b_n on the poloidal plane";
     any_of=((:singular_coupling,), (:response_b,), (:response_xi,), (:response_n,)))
@@ -449,6 +491,8 @@ register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-
 register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
 register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
     "a dominant resonant-coupling mode as b_n on the control surface")
+register!(plot_coupling_matrix, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices, :dominant_mode),
+    "resonant coupling matrix |C| with its singular values and left and right singular vectors")
 register!(plot_perturbed_field_rz, (PerturbedEquilibriumState,), (:response_n,), "b_n or ξ_n on the poloidal plane (deform = true for the displaced boundary)")
 register!(plot_effective_islands, (PerturbedEquilibriumState,), (:singular_coupling,), "island chains from the effective resonant flux")
 register!(plot_islands, (PerturbedEquilibriumState,), (:penetrated_field,), "island chains from the penetrated field")
