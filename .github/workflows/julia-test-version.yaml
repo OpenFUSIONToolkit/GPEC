@@ -293,6 +293,10 @@ jobs:
         env:
           CACHE_KEY: ${{ needs.precompile.outputs.gpec-key }}
 
+      - name: Update the package registry
+        if: matrix.group != 'plots'
+        run: julia -e 'using Pkg; Pkg.Registry.update()'
+
       # Level 1 can reuse the higher-optimization production package images.
       - name: Run tests
         if: matrix.group != 'plots'
