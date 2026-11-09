@@ -250,7 +250,8 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         @warn "growth_rate: the conjugate-point count at γ² = $gamma_sq had $nflag ambiguous step(s); the result is marked not converged"
     end
     faster(h) = h.nzero + (h.lambda < 0)   # modes growing faster than γ; non-increasing in γ²
-    solves = Dict{Float64,ForceFreeStatesResult}()
+    solves = Dict{Float64,ForceFreeStatesResult}()   # the latest solve on each side of the root: only a bracket end can be returned
+    bracket_end = Dict{Bool,Float64}()   # faster(h) > 0 → the γ² of that side's retained solve
     function finish(gamma_sq, converged)
         r = get(solves, gamma_sq, nothing)
         return IdealGrowthRateResult(sqrt(gamma_sq), gamma_sq, converged && !flagged[], inertia, config, _peak_omega_star_pi(something(r, marginal)), marginal, r, history)
@@ -278,10 +279,13 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         kw = copy(kwargs)
         kw[:kinetic_factor] = gamma_sq
         r = counted_solve(ForceBalanceProblem(prob.equil, prob.wall, kw))
-        solves[gamma_sq] = r
         check_flags(r, gamma_sq)
         push!(history, (gamma_sq=gamma_sq, lambda=lambda_min(r), nzero=r.diagnostics.nzero_conj))
         seen[gamma_sq] = length(history)
+        below = faster(history[end]) > 0   # this γ² is below the fastest root
+        haskey(bracket_end, below) && delete!(solves, bracket_end[below])
+        bracket_end[below] = gamma_sq
+        solves[gamma_sq] = r
         verbose && @info @sprintf("growth_rate: γ² = %.4e  λ_min = %.6e  nzero = %d", gamma_sq, history[end].lambda, history[end].nzero)
         return history[end]
     end
