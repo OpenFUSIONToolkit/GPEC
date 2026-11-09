@@ -442,8 +442,9 @@ plot_linearity_check(h5path::AbstractString; save_path=nothing, kwargs...) = plo
     plot_locking_risk(source; kwargs...)
 
 Plot the locking probability against tolerance scale from each run's `ErrorFields/Risk/ToleranceScan/`, intrinsic and
-(when `corrected`) with error-field correction, with the batch spread as error bars. With `target_percent` the target
-is marked and the title gives the allowable scale where the scan reaches it.
+(when `corrected`) with error-field correction, with the batch spread as error bars, on log-log axes. A scale where no
+sample locked is left off. With `target_percent` the target is marked and the title gives the allowable scale where
+the scan reaches it.
 """
 function plot_locking_risk(sources::Sources; corrected::Bool=true, target_percent=nothing, save_path=nothing)
     data = filter(d -> d[2].scan_scale !== nothing, _labelled(sources))

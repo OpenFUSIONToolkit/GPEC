@@ -257,16 +257,26 @@ function _risk_panel!(pos, data; corrected=true, target_percent=nothing)
             "Allowable scale for $(_num(target_percent)) % risk: $(isnan(a) ? "beyond the scan" : _num(a))" *
             (corrected ? " ($(isnan(ac) ? "beyond the scan" : _num(ac)) corrected)" : "")
     end
+    # Log-log; a scale where no sample locked has P = 0 and is left off the log axis.
+    curves(d) = ((d.scan_locking_probability_percent, d.scan_locking_probability_spread_percent, "intrinsic", :solid, :circle),
+        (d.scan_locking_probability_efc_percent, d.scan_locking_probability_efc_spread_percent, "corrected", :dash, :rect))
+    shown = [v for (_, d) in data for (p, _, name) in curves(d) if corrected || name == "intrinsic" for v in p if v > 0]
+    target_percent === nothing || push!(shown, target_percent)
+    logy = !isempty(shown)
+    lo, hi = logy ? (minimum(shown) / 3, 3 * maximum(shown)) : (0.0, 1.0)
     ax = Axis(pos; xscale=log10, xminorticksvisible=false, xticks=(s, _num.(s)), xlabel="tolerance scale (1 = design)", ylabel="locking probability (%)",
-        title, limits=(nothing, (0, nothing)))
+        title, yscale=logy ? log10 : identity, yminorticksvisible=false, yticks=logy ? _decade_ticks(lo, hi) : Makie.automatic,
+        limits=((minimum(s) / 1.3, 1.3 * maximum(s)), (lo, hi)))
     target_percent === nothing || hlines!(ax, target_percent; color=:black, linestyle=:dash, linewidth=1)
     vlines!(ax, 1.0; color=(:black, 0.3), linewidth=1)
     for (j, (lbl, d)) in enumerate(data)
-        for (p, spread, name, style, marker) in ((d.scan_locking_probability_percent, d.scan_locking_probability_spread_percent, "intrinsic", :solid, :circle),
-            (d.scan_locking_probability_efc_percent, d.scan_locking_probability_efc_spread_percent, "corrected", :dash, :rect))
+        for (p, spread, name, style, marker) in curves(d)
             (name == "corrected" && !corrected) && continue
-            errorbars!(ax, d.scan_scale, p, spread ./ 2; color=(WONG[j], 0.5), whiskerwidth=6)
-            scatterlines!(ax, d.scan_scale, p; color=WONG[j], linestyle=style, marker, markersize=8, label=_with_label(lbl, name))
+            k = logy ? p .> 0 : trues(length(p))
+            any(k) || continue
+            # The lower bar stops short of zero so it stays on a log axis.
+            errorbars!(ax, d.scan_scale[k], p[k], min.(spread[k] ./ 2, 0.9 .* p[k]), spread[k] ./ 2; color=(WONG[j], 0.5), whiskerwidth=6)
+            scatterlines!(ax, d.scan_scale[k], p[k]; color=WONG[j], linestyle=style, marker, markersize=8, label=_with_label(lbl, name))
         end
     end
     axislegend(ax; position=:lt)
