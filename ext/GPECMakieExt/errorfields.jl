@@ -257,13 +257,13 @@ function _risk_panel!(pos, data; corrected=true, target_percent=nothing)
             "Allowable scale for $(_num(target_percent)) % risk: $(isnan(a) ? "beyond the scan" : _num(a))" *
             (corrected ? " ($(isnan(ac) ? "beyond the scan" : _num(ac)) corrected)" : "")
     end
-    # Log-log; a scale where no sample locked has P = 0 and is left off the log axis.
+    # Log-log when any probability is positive; a scale where no sample locked (P = 0) is then left off.
     curves(d) = ((d.scan_locking_probability_percent, d.scan_locking_probability_spread_percent, "intrinsic", :solid, :circle),
         (d.scan_locking_probability_efc_percent, d.scan_locking_probability_efc_spread_percent, "corrected", :dash, :rect))
-    shown = [v for (_, d) in data for (p, _, name) in curves(d) if corrected || name == "intrinsic" for v in p if v > 0]
-    target_percent === nothing || push!(shown, target_percent)
-    logy = !isempty(shown)
-    lo, hi = logy ? (minimum(shown) / 3, 3 * maximum(shown)) : (0.0, 1.0)
+    positive = [v for (_, d) in data for (p, _, name) in curves(d) if corrected || name == "intrinsic" for v in p if v > 0]
+    logy = !isempty(positive)
+    shown = target_percent === nothing ? positive : [positive; target_percent]
+    lo, hi = logy ? (minimum(shown) / 3, 3 * maximum(shown)) : (0.0, nothing)
     ax = Axis(pos; xscale=log10, xminorticksvisible=false, xticks=(s, _num.(s)), xlabel="tolerance scale (1 = design)", ylabel="locking probability (%)",
         title, yscale=logy ? log10 : identity, yminorticksvisible=false, yticks=logy ? _decade_ticks(lo, hi) : Makie.automatic,
         limits=((minimum(s) / 1.3, 1.3 * maximum(s)), (lo, hi)))
