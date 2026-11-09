@@ -296,3 +296,19 @@ Provides the complete theory and implementation details, including NTV in the pr
 > DOI: [10.1063/1.4977898](https://doi.org/10.1063/1.4977898)
 
 Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the KineticForces functionality.
+
+---
+
+## Utilities
+
+> A. Redl, C. Angioni, E. Belli, O. Sauter, "A new set of analytical formulae for the computation of the bootstrap current and the neoclassical conductivity in tokamaks,"
+> *Physics of Plasmas* **28**, 022502 (2021).
+
+Source of the bootstrap-current coefficients L31, L32 and α (Eqs. 10-21) used by the `BootstrapCurrent` utilities, implemented as OpenFUSIONToolkit TokaMaker evaluates them.
+
+---
+
+> O. Sauter, C. Angioni, and Y. R. Lin-Liu, "Neoclassical conductivity and bootstrap current formulas for general axisymmetric equilibria and arbitrary collisionality regime,"
+> *Physics of Plasmas* **6**, 2834 (1999).
+
+Defines the circulating and trapped particle fractions and the collisionality conventions used by `BootstrapCurrent` and `NeoclassicalResistivity`.
