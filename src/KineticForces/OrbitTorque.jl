@@ -159,8 +159,8 @@ Guiding-center orbit segments on one flux surface.
     different from their segment's
   - `lost_fraction`: share of the launch phase space (density weight of the species over √x ≤ umax and v∥/v at θ₀, both
     signs) on lost orbits; `NaN` when not computed
-  - `core_fraction`: share of the same phase space on closed orbits that enter ψ < `psilow`, where the perturbation is the
-    regular extension of [`orbit_surface_table`](@ref) (each segment weighted by the share of its nodes that do); `NaN` when not computed
+  - `core_fraction`: share of the same phase space on closed orbits that enter ψ < `psilow`, where the perturbation is zero
+    (each segment weighted by the share of its nodes that do); `NaN` when not computed
 """
 struct OrbitSurfaceTable
     lambda::Vector{Float64}
@@ -353,17 +353,6 @@ function _sample_segment(orbit, neighbour, measure, passing::Bool, ua, ub, lam, 
     return OrbitSegment(passing, dir, ua, ub, us, col(1), col(2), reduce(vcat, [samples[u][3]' for u in us]), col(5), col(6), col(7), 1 / ncs)
 end
 
-# Inside the first response surface, scale the harmonics taken there by (ψ/ψ_low)^{|m|/2}: the r^|m| of a regular field.
-function _core_extension!(buf, intr, ψ::Float64)
-    s = sqrt(max(ψ, 0.0) / intr.psilow)
-    @inbounds for j in eachindex(buf.dbob)
-        f = s^abs(intr.mfac[j])
-        buf.dbob[j] *= f
-        buf.divx[j] *= f
-    end
-    return nothing
-end
-
 # |δJ_ℓ|² of one orbit for ℓ = -lmax:lmax (the surface path's labels; `flip` maps them to −ℓ along the orbit).
 function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr, lam::Float64, n::Int, lmax::Int,
     divxfac::Float64, flip::Bool, buf)
@@ -380,9 +369,14 @@ function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr,
         τ = (k - 1) * dτ
         u = sol(buf.u, τ)
         ψ, θ, w = u[1], u[2], u[4]
-        intr.dbob_m(buf.dbob, max(ψ, intr.psilow))
-        intr.divx_m(buf.divx, max(ψ, intr.psilow))
-        ψ < intr.psilow && _core_extension!(buf, intr, ψ)
+        # No response is computed inside the first response surface, as on the surface path: the perturbation is zero there.
+        if ψ < intr.psilow
+            fill!(buf.dbob, 0)
+            fill!(buf.divx, 0)
+        else
+            intr.dbob_m(buf.dbob, ψ)
+            intr.divx_m(buf.divx, ψ)
+        end
         e1 = cis(twopi * θ)
         em = cis(twopi * m1 * θ)
         dbob = divx = zero(ComplexF64)

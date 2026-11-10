@@ -137,15 +137,6 @@ using QuadGK
         @test isempty(KF._cell_roots(s -> 2.0, 0.0, 1.0, 5))
     end
 
-    @testset "core extension below the first response surface" begin
-        # Harmonics m = 0, 2, -3 at ψ = ψ_low/4 scale by (1/4)^{|m|/2}.
-        intr = KF.KineticForcesInternal(equil)
-        intr.psilow, intr.mfac = 0.2, [0, 2, -3]
-        buf = (dbob=ComplexF64[1, 1, 1], divx=ComplexF64[2, 2, 2])
-        KF._core_extension!(buf, intr, 0.05)
-        @test buf.dbob ≈ [1, 1 / 4, 1 / 8] && buf.divx ≈ [2, 1 / 2, 1 / 4]
-    end
-
     @testset "orbit-averaged torque reduces to the surface path" begin
         # Synthetic two-mode perturbation: the torque reads only the δB/B and ∇·ξ⊥ Fourier modes.
         intr = KF.KineticForcesInternal(equil)
@@ -196,5 +187,9 @@ using QuadGK
         e1, e2 = err(4, surfaces(4)...), err(1024, sf, so)
         @test e2 < 1e-4
         @test e2 < e1 / 10
+
+        # No response is computed below the first response surface: orbits that stay there carry no torque.
+        intr.psilow = 0.9
+        @test orbit_torque(surfaces(1024)[2].orbit, sf) == 0
     end
 end
