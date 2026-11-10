@@ -195,12 +195,13 @@ end
 function _free_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
     fb = r.free_boundary
     if fb === nothing
-        r.closure === :matched && return "not computed (a matched closure carries no ideal δW)"
         return r.control.vac_flag ? "not computed by the $(r.integrator) integrator" : "not computed (vac_flag = false)"
     end
-    verdict = real(first(fb.et)) < 0 ? "unstable" : "stable"
     e(z) = _energy(r, first(z))
-    return "$verdict: et₁ = $(e(fb.et)), ep₁ = $(e(fb.ep)), ev₁ = $(e(fb.ev)), vacuum λ = $(_fmt(fb.vacuum_eigenvalue))"
+    energies = "et₁ = $(e(fb.et)), ep₁ = $(e(fb.ep)), ev₁ = $(e(fb.ev)), vacuum λ = $(_fmt(fb.vacuum_eigenvalue))"
+    # A matched closure's non-Hermitian W carries no stability verdict.
+    r.closure === :matched && return energies
+    return (real(first(fb.et)) < 0 ? "unstable" : "stable") * ": " * energies
 end
 
 # m/n of each row of the Δ′ matrix: Galerkin solves across its in-band subset of the surfaces.

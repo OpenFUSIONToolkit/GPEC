@@ -49,6 +49,9 @@ function _num(v)
     return trim(string(round(v / 10.0^k; sigdigits=3))) * "×10" * _sup(k)
 end
 
+# A complex number as "a + bi" with `_num` parts.
+_cnum(z) = _num(real(z)) * (imag(z) < 0 ? " − " : " + ") * _num(abs(imag(z))) * "i"
+
 sub(a, b) = rich(a, subscript(b))
 sup(a, b) = rich(a, superscript(b))
 const PSIN = sub("ψ", "N")
