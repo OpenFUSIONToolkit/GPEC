@@ -194,15 +194,18 @@ function _display_scale(R, xi; frac=0.05)
     return max(1, round(Int, floor(s / p) * p))
 end
 
-# b_n or ξ_n on the poloidal plane in `gl`, with its colourbar, and the displaced boundary when given.
-function _field_rz_panel!(gl, d, component, boundary)
+# b_n or ξ_n on the poloidal plane in `gl`, with its colourbar, and the displaced boundary when given. The colour range
+# is ±the `clip` quantile of |value|.
+function _field_rz_panel!(gl, d, component, boundary; clip=0.9)
     glyph, unit = _NORMAL_STYLE[component]
-    values, scale = _decade(d.values)
+    a = sort!(abs.(vec(d.values)))
+    lim = a[clamp(ceil(Int, clip * length(a)), 1, length(a))]
+    factor, scale = _power([lim])
     title =
         boundary === nothing ? rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°") :
         rich(glyph, " at φ = ", _num(rad2deg(d.phi)), "°: largest boundary |ξ", subscript("n"), "| = ", _num(1e3 * maximum(abs, boundary.xi)), " mm")
     ax = Axis(gl[1, 1]; title)
-    hm = _poloidal_slice!(ax, d.R, d.Z, values; outlines=d.outlines)
+    hm = _poloidal_slice!(ax, d.R, d.Z, d.values ./ factor; lim=lim / factor, outlines=d.outlines)
     Colorbar(gl[1, 2], hm; label=rich(glyph, _unit(scale, unit)))
     # The column takes the plasma's own width-to-height ratio, so the panel leaves no empty band beside it.
     colsize!(gl, 1, Aspect(1, (maximum(d.R) - minimum(d.R)) / (maximum(d.Z) - minimum(d.Z))))
@@ -218,11 +221,71 @@ function _field_rz_panel!(gl, d, component, boundary)
     return ax
 end
 
-function PE._plot_perturbed_field_rz(d, component, boundary)
+# Each mode's b_n as a band along the boundary cross-section, one panel per mode on one colour scale.
+function PE._plot_singular_mode_rz(curves)
+    return themed() do
+        n = length(curves)
+        at = "φ = " * _num(rad2deg(first(curves).phi)) * "°"
+        fig = Figure(; size=(330n + 150, 560))
+        for (j, c) in enumerate(curves)
+            title = n == 1 ? rich("Dominant mode $(c.mode) at $at, σ = ", _num(c.sigma)) : rich("mode $(c.mode), σ = ", _num(c.sigma))
+            ax = Axis(fig[1, j]; title, aspect=DataAspect(), xlabel="R (m)", ylabel="Z (m)", ylabelvisible=j == 1, yticklabelsvisible=j == 1)
+            lines!(ax, c.R, c.Z; color=c.b, colormap=DIVERGING, colorrange=(-1, 1), linewidth=16)
+            lines!(ax, c.R, c.Z; color=:black, linewidth=1)
+        end
+        Colorbar(fig[1, n+1]; colormap=DIVERGING, limits=(-1, 1), label=rich("b", subscript("n"), " at $at (arb.)"))
+        n > 1 && Label(fig[0, 1:n], "Dominant resonant-coupling modes on the control surface"; font=:bold, fontsize=16)
+        fig
+    end
+end
+
+# |C| with |U| beside it on the shared surface axis, |V| below it on the shared m axis, and σ in the corner.
+function PE._plot_coupling_matrix(d)
+    return themed() do
+        A = abs.(d.C)
+        top = max(maximum(A), floatmin())
+        ns, rank = size(A, 1), length(d.sigma)
+        fig = Figure(; size=(1150, 820))
+        hax = Axis(fig[1, 1]; ylabel="rational surface q = m/n", yticks=(1:ns, d.labels), xticklabelsvisible=false,
+            title=rich("Resonant coupling C: |b̄", subscript("res"), "| per unit b̃", subscript("m")))
+        hm = heatmap!(hax, d.m, 1:ns, permutedims(A); colormap=:viridis, colorscale=log10, colorrange=(1e-4top, top),
+            lowclip=Makie.to_colormap(:viridis)[1])
+        scatter!(hax, d.m_res, 1:ns; marker=:rect, color=:transparent, strokecolor=:white, strokewidth=1.5, markersize=16)
+        for s in setdiff(1:ns, d.retained)
+            poly!(hax, Rect(d.m[1] - 0.5, s - 0.5, length(d.m), 1); color=(:white, 0.55))
+        end
+        Colorbar(fig[1, 3], hm; label="|C|  (T per unit b̃)")
+
+        uax = Axis(fig[1, 2]; xlabel="|U|  (unit norm)", yticks=(1:ns, d.labels), yticklabelsvisible=false, title="left singular vectors",
+            limits=((0, 1.05), nothing))
+        vax = Axis(fig[2, 1]; xlabel="poloidal harmonic m of the applied field b̃", ylabel="|V|  (unit norm)", title="right singular vectors",
+            limits=(nothing, (0, nothing)))
+        for k in 1:rank
+            lw = k == 1 ? 2.5 : 1.5
+            isempty(d.retained) || scatterlines!(uax, abs.(d.U[:, k]), d.retained; color=WONG[mod1(k, 7)], linewidth=lw, markersize=10)
+            stairs!(vax, _steps(d.m, abs.(d.V[:, k]))...; step=:center, color=WONG[mod1(k, 7)], linewidth=lw, label=rich("V", subscript(string(k))))
+        end
+        linkyaxes!(hax, uax)
+        linkxaxes!(hax, vax)
+        axislegend(vax; position=:rt, framevisible=false)
+
+        sax = Axis(fig[2, 2]; xlabel="mode k", ylabel=rich("σ", subscript("k"), "  (T per unit b̃)"), title="singular values", xticks=1:rank,
+            limits=(nothing, (0, 1.12 * maximum(d.sigma))))
+        stem!(sax, 1:rank, d.sigma; color=[WONG[mod1(k, 7)] for k in 1:rank], stemcolor=(:gray, 0.6), markersize=12)
+
+        colsize!(fig.layout, 1, Auto(3))
+        colsize!(fig.layout, 2, Auto(1))
+        rowsize!(fig.layout, 1, Auto(1.6))
+        rowsize!(fig.layout, 2, Auto(1))
+        fig
+    end
+end
+
+function PE._plot_perturbed_field_rz(d, component, boundary; clip=0.9)
     return themed() do
         fig = Figure(; size=(560, boundary === nothing ? 680 : 720))
         gl = fig[1, 1] = GridLayout()
-        _field_rz_panel!(gl, d, component, boundary)
+        _field_rz_panel!(gl, d, component, boundary; clip)
         fig
     end
 end

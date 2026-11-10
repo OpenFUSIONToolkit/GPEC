@@ -11,7 +11,7 @@ using HDF5
 
 using ..Analysis: register!, _require, _can, capabilities, REASONS, _draw
 import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
-import ..CoilForcing: plot_control_surface
+import ..CoilForcing: plot_control_surface, _control_surface_data, _equil_helicity
 
 const Source = Union{AbstractString,PerturbedEquilibriumState}
 
@@ -328,7 +328,7 @@ function _plot_perturbed_field_rz end
 function _plot_islands end
 
 """
-    plot_perturbed_field_rz(pe; component=:b_n, phi=0.0, deform=false, save_path=nothing)
+    plot_perturbed_field_rz(pe; component=:b_n, phi=0.0, deform=false, clip=0.9, save_path=nothing)
 
 Plot the perturbed normal field b_n or normal displacement ξ_n on the poloidal plane at toroidal angle φ, drawn on the
 flux-surface grid with the rational surfaces outlined; with `deform`, also the boundary displaced along its normal by
@@ -343,17 +343,19 @@ a scaled ξ_n over the equilibrium outline.
   - `component`: `:b_n` (T, default) or `:xi_n` (m)
   - `phi`: Toroidal angle in radians (default: `0.0`)
   - `deform`: Draw the displaced boundary, scaled so its largest displacement is 5 % of the minor radius (default: `false`)
+  - `clip`: Quantile of |value| that sets the symmetric colour range; larger values saturate. `1` shows the full range (default: `0.9`)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_perturbed_field_rz(pe::PerturbedEquilibriumState; component=:b_n, phi=0.0, deform=false, save_path=nothing)
+function plot_perturbed_field_rz(pe::PerturbedEquilibriumState; component=:b_n, phi=0.0, deform=false, clip=0.9, save_path=nothing)
     _require(plot_perturbed_field_rz, pe)
+    0 < clip <= 1 || throw(ArgumentError("plot_perturbed_field_rz: clip must be in (0, 1], got $clip"))
     d = _poloidal_data(pe, component; phi)
     boundary = deform ? _boundary_displacement(pe; phi) : nothing
-    return _draw(_plot_perturbed_field_rz, d, component, boundary; save_path)
+    return _draw(_plot_perturbed_field_rz, d, component, boundary; clip, save_path)
 end
 
 """
@@ -436,6 +438,96 @@ function plot_dominant_mode_surface(src::Union{PlasmaResponse,PerturbedEquilibri
         save_path)
 end
 
+# Each dominant mode's b_n at toroidal angle `phi` around the control-surface cross-section, normalized to its peak there,
+# with the boundary in (R, Z). The map's φ = 0 column of the spectrum rotated by e^{i n h φ} is the field at φ.
+function _singular_mode_rz_data(resp::PlasmaResponse, modes, phi; mtheta=512)
+    equil = resp.ffs.equil
+    hint = (Ref(1), Ref(1))
+    turn = cis(first(resp.n_modes) * _equil_helicity(equil) * phi)
+    return map(modes) do k
+        v = resp.dominant_right_singular_vectors[:, k]
+        d = _control_surface_data(resp, v .* turn; nphi=1, mtheta)
+        b = d.field[:, 1] ./ maximum(abs, d.field[:, 1])
+        pts = [_rz(equil, equil.rzphi_xs[end], mod(θ / 360, 1), hint) for θ in d.theta]
+        R, Z = first.(pts), last.(pts)
+        (; mode=k, sigma=resp.dominant_singular_values[k], phi, R=[R; R[1]], Z=[Z; Z[1]], b=[b; b[1]])
+    end
+end
+
+function _plot_singular_mode_rz end
+
+"""
+    plot_singular_mode_rz(src; modes=nothing, phi=0.0, save_path=nothing)
+
+Plot dominant resonant-coupling modes on the control-surface cross-section: the boundary in (R, Z) as a band coloured
+by each mode's normal field b_n at toroidal angle φ, normalized to its peak, one panel per mode. The modes are the
+stored decomposition's, over the rational surfaces with ψ_N ≤ 0.9.
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's modes)
+
+### Keyword arguments
+
+  - `modes`: Which dominant modes, 1 the strongest (default: the first three that exist)
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_singular_mode_rz(src::Union{PlasmaResponse,PerturbedEquilibriumState}; modes=nothing, phi=0.0, save_path=nothing)
+    _require(plot_singular_mode_rz, src)
+    resp = src isa PlasmaResponse ? src : src.response
+    nk = length(resp.dominant_singular_values)
+    ks = something(modes, 1:min(3, nk))
+    all(k -> 1 <= k <= nk, ks) || throw(ArgumentError("plot_singular_mode_rz: modes must lie in 1 to $nk"))
+    return _draw(_plot_singular_mode_rz, _singular_mode_rz_data(resp, collect(ks), phi); save_path)
+end
+
+# The resonant coupling matrix of toroidal mode number `n` and its SVD C = U Σ Vᴴ: rows are rational surfaces, columns
+# poloidal harmonics; U has rows only for the surfaces inside the SVD's core window, at `retained` in the row order.
+function _coupling_matrix_data(resp::PlasmaResponse, n)
+    n = something(n, first(resp.n_modes))
+    n in resp.n_modes || throw(ArgumentError("plot_coupling_matrix: n = $n is not one of the response's toroidal mode numbers $(unique(resp.n_modes))"))
+    cols = findall(==(n), resp.n_modes)
+    rows = findall(==(n), resp.rational_n)
+    inwindow = [i for (i, r) in enumerate(resp.dominant_rational_index) if r in rows]
+    return (; m=resp.m_modes[cols], labels=["$(resp.rational_m_res[r])/$n" for r in rows], m_res=resp.rational_m_res[rows],
+        C=resp.C_resonant_area_weighted_field[rows, cols], sigma=resp.dominant_singular_values,
+        U=resp.dominant_left_singular_vectors[inwindow, :], retained=[findfirst(==(resp.dominant_rational_index[i]), rows) for i in inwindow],
+        V=resp.dominant_right_singular_vectors[cols, :])
+end
+
+function _plot_coupling_matrix end
+
+"""
+    plot_coupling_matrix(src; n=nothing, save_path=nothing)
+
+Plot the resonant coupling matrix C, the resonant area-weighted field b̄_res at each rational surface per unit applied
+harmonic b̃_m, with its singular value decomposition C = U Σ Vᴴ: |C| against surface and m, the left singular vectors
+|U| on the same surface axis, the right singular vectors |V| on the same m axis (V₁ is the dominant mode), and the
+singular values σ. Surfaces outside the decomposition's core window are shaded.
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's matrix)
+
+### Keyword arguments
+
+  - `n`: Toroidal mode number drawn (default: the first)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_coupling_matrix(src::Union{PlasmaResponse,PerturbedEquilibriumState}; n=nothing, save_path=nothing)
+    _require(plot_coupling_matrix, src)
+    return _draw(_plot_coupling_matrix, _coupling_matrix_data(src isa PlasmaResponse ? src : src.response, n); save_path)
+end
+
 const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
 register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum, ξ^ψ spectrogram and b_n on the poloidal plane";
     any_of=((:singular_coupling,), (:response_b,), (:response_xi,), (:response_n,)))
@@ -447,6 +539,10 @@ register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-
 register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
 register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
     "a dominant resonant-coupling mode as b_n on the control surface")
+register!(plot_singular_mode_rz, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
+    "dominant resonant-coupling modes as b_n on the control-surface cross-section")
+register!(plot_coupling_matrix, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices, :dominant_mode),
+    "resonant coupling matrix |C| with its singular values and left and right singular vectors")
 register!(plot_perturbed_field_rz, (PerturbedEquilibriumState,), (:response_n,), "b_n or ξ_n on the poloidal plane (deform = true for the displaced boundary)")
 register!(plot_effective_islands, (PerturbedEquilibriumState,), (:singular_coupling,), "island chains from the effective resonant flux")
 register!(plot_islands, (PerturbedEquilibriumState,), (:penetrated_field,), "island chains from the penetrated field")

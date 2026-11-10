@@ -200,7 +200,7 @@ function plot_critical_determinant(src::Source; save_path=nothing)
 end
 
 """
-    plot_energy_eigenvectors(src; nmodes=12, save_path=nothing)
+    plot_energy_eigenvectors(src; nmodes=nothing, save_path=nothing)
 
 Plot |v_m| of the free-boundary energy eigenvectors (unit power norm) against poloidal harmonic m, least stable at
 the top.
@@ -211,14 +211,14 @@ the top.
 
 ### Keyword arguments
 
-  - `nmodes`: Number of eigenmodes drawn (default: 12)
+  - `nmodes`: Number of least stable eigenmodes drawn (default: all)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_energy_eigenvectors(src::Source; nmodes=12, save_path=nothing)
+function plot_energy_eigenvectors(src::Source; nmodes=nothing, save_path=nothing)
     _require(plot_energy_eigenvectors, src)
     return _draw(_plot_energy_eigenvectors, _energy_eigenvector_data(src); nmodes, save_path)
 end

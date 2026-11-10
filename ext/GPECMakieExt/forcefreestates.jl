@@ -98,13 +98,13 @@ function _mode_displacement!(gl, d, rat; modes=nothing)
     return ax
 end
 
-function _eigenvectors!(gl, d; nmodes=12)
+function _eigenvectors!(gl, d; nmodes=nothing)
     v = abs.(d.wt)
     m = d.mlow .+ (0:(size(v, 1)-1))
-    k = min(size(v, 2), nmodes)
+    k = min(size(v, 2), something(nmodes, size(v, 2)))
     title = d.matched ? "Free-boundary eigenmodes, lowest Re λ at top" : "Free-boundary eigenmodes, least stable at top"
     ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel="eigenmode", yreversed=true, title,
-        yticks=1:k)
+        yticks=k <= 15 ? (1:k) : [1; 5:5:k])
     hm = heatmap!(ax, m, 1:k, v[:, 1:k]; colormap=:viridis)
     Colorbar(gl[1, 2], hm; label=rich("|v", subscript("m"), "| (unit power norm)"))
     return ax
@@ -128,7 +128,7 @@ end
 FFS._plot_critical_determinant(d, rat) = _single(_critical_determinant!, (820, 460), d, rat)
 FFS._plot_eigenvalues(e; which=(:total, :plasma, :vacuum)) = _single(_energies!, (820, 460), e; which)
 FFS._plot_mode_displacement(d, rat; modes=nothing) = _single(_mode_displacement!, (820, 480), d, rat; modes)
-FFS._plot_energy_eigenvectors(d; nmodes=12) = _single(_eigenvectors!, (820, 520), d; nmodes)
+FFS._plot_energy_eigenvectors(d; nmodes=nothing) = _single(_eigenvectors!, (820, 520), d; nmodes)
 
 function FFS._plot_edge_stability_scan(d)
     return themed() do

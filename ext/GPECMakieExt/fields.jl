@@ -12,13 +12,17 @@ function _surface_slice!(ax, phi, theta, values)
     return heatmap!(ax, phi, theta, permutedims(values); colormap=DIVERGING, colorrange=(-lim, lim))
 end
 
-# A real field on a poloidal plane, drawn on the flux-surface grid (R, Z) so the map follows the plasma shape.
-function _poloidal_slice!(ax, R, Z, values; outlines=())
-    lim = max(maximum(abs, values), floatmin())
+# A real field on a poloidal plane, drawn on the flux-surface grid (R, Z) so the map follows the plasma shape; the
+# colour range is ±`lim`, and values beyond it take the colormap's end colours.
+function _poloidal_slice!(ax, R, Z, values; lim=maximum(abs, values), outlines=())
+    lim = max(lim, floatmin())
+    cmap = Makie.to_colormap(DIVERGING)
+    clipped = lim < maximum(abs, values)
     ax.aspect = DataAspect()
     ax.xlabel = "R (m)"
     ax.ylabel = "Z (m)"
-    hm = surface!(ax, R, Z, zeros(size(R)); color=values, colormap=DIVERGING, colorrange=(-lim, lim), shading=NoShading)
+    hm = surface!(ax, R, Z, zeros(size(R)); color=values, colormap=DIVERGING, colorrange=(-lim, lim), shading=NoShading,
+        lowclip=clipped ? cmap[1] : nothing, highclip=clipped ? cmap[end] : nothing)
     for o in outlines
         lines!(ax, o...; color=(:black, 0.35), linewidth=1)
     end
