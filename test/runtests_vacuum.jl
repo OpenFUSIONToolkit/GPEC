@@ -1203,6 +1203,33 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             @test all(isfinite, patch_out)
             @test size(patch_out) == (3, 3, 3)
         end
+
+        @testset "Kernel3D manufactured exterior solution converges at high order" begin
+            # χ from point charges inside a rotating ellipse is harmonic outside it, so K χ = G b with b = ∇χ · n on the
+            # surface's own (area-weighted) normals, which the kernel uses; solving for χ measures the kernel's error.
+            VAC = GeneralizedPerturbedEquilibrium.Vacuum
+            surf(θ, φ) = (R=1 + 0.3cos(θ) + 0.06cos(θ - 3φ); [R * cos(φ), R * sin(φ), 0.35sin(θ) - 0.06sin(θ - 3φ)])
+            charges = [([cos(a), sin(a), z], q) for (a, z, q) in ((0.3, 0.05, 1.0), (2.1, -0.04, -0.7), (4.0, 0.0, 0.5))]
+            χ(x) = sum(q / norm(x - y) for (y, q) in charges)
+            ∇χ(x) = -sum(q * (x - y) / norm(x - y)^3 for (y, q) in charges)
+            function manufactured_error(mt)
+                nz = 3mt
+                pts = [surf(2π * (i - 1) / mt, 2π * (j - 1) / nz) for j in 1:nz for i in 1:mt]
+                inp = VacuumInput(; x=getindex.(pts, 1), y=getindex.(pts, 2), z=getindex.(pts, 3), mtheta_in=mt, nzeta_in=nz,
+                    m_modes=[0], n_modes=[0], mtheta=mt, nzeta=nz, nfp=1)
+                plasma = VAC.PlasmaGeometry3D(VAC.expand_field_periods(inp))
+                K, G = [zeros(mt * nz, mt * nz)], [zeros(mt * nz, mt * nz)]
+                # The patch, radial order and Lagrange order compute_vacuum_response uses
+                VAC.compute_3D_kernel_matrices!(K, G, plasma, plasma, mt ÷ 3, max(12, round(Int, mt / 2)), 11, [1.0])
+                x = [χ(plasma.r[k, :]) for k in axes(plasma.r, 1)]
+                b = [dot(∇χ(plasma.r[k, :]), plasma.normal[k, :]) for k in axes(plasma.r, 1)]
+                return norm(K[1] \ (G[1] * b) - x) / norm(x)
+            end
+            e16, e32 = manufactured_error(16), manufactured_error(32)
+            @test e16 < 1e-3
+            @test e32 < 5e-6
+            @test e32 < 1e-2 * e16   # faster than h⁶
+        end
     end
 
     @testset "reset_caches! empties the run-filled caches" begin
