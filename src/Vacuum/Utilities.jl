@@ -83,6 +83,39 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
 end
 
 """
+    trig_derivative_matrix(n) -> Matrix{Float64}
+
+Derivative at the nodes of the trigonometric interpolant on `n` equispaced periodic nodes (Trefethen, Spectral Methods in
+MATLAB, ch. 3). For even `n` the Nyquist mode is a cosine, whose derivative vanishes at the nodes.
+"""
+function trig_derivative_matrix(n::Int)
+    D = zeros(n, n)
+    for j in 1:n, i in 1:n
+        r = mod(i - j, n)
+        r == 0 && continue
+        s, c = sincospi(r / n)
+        D[i, j] = (isodd(r) ? -0.5 : 0.5) * (iseven(n) ? c / s : 1 / s)
+    end
+    return D
+end
+
+"""
+    trig_tangents(r, mtheta, nzeta) -> (dr_dθ, dr_dζ)
+
+Tangents of the trigonometric interpolant of the `(mtheta * nzeta, 3)` grid samples `r`.
+"""
+function trig_tangents(r::Matrix{Float64}, mtheta::Int, nzeta::Int)
+    Dθ, Dζ = trig_derivative_matrix(mtheta), trig_derivative_matrix(nzeta)
+    dr_dθ, dr_dζ = similar(r), similar(r)
+    for k in 1:3
+        R = reshape(r[:, k], mtheta, nzeta)
+        dr_dθ[:, k] = vec(Dθ * R)
+        dr_dζ[:, k] = vec(R * transpose(Dζ))
+    end
+    return dr_dθ, dr_dζ
+end
+
+"""
     periodic_wrap(x, n) -> Int
 
 `mod1(x, n)` without a division. Only valid for `1 - n ≤ x ≤ 2n`.
