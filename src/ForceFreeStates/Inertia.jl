@@ -45,8 +45,8 @@ end
 
 The ion diamagnetic frequency in rad/s for toroidal mode number `n`, ω_*pi = n (dp_i/dΨ)/(Z_i e n_i) with Ψ the
 poloidal flux per radian, from the attached kinetic profiles with n_i ∝ n_e and p_i = n_i T_i, the layer
-convention (positive for the usual outward-decreasing profiles). The EPED1 criterion counts a mode as unstable
-when γ > ω_*pi/2 at the pedestal.
+convention (positive for the usual outward-decreasing profiles). Pedestal models compare γ with half of an
+effective ω_*pi built from this profile; the conventions in use are in the stability documentation.
 """
 function ion_diamagnetic_frequency(equil::Equilibrium.PlasmaEquilibrium, n::Integer; z_i::Real=1)
     data = InnerLayer._layer_kinetic_data(equil, "ion diamagnetic frequency ω_*pi")
@@ -178,8 +178,9 @@ The outcome of [`growth_rate`](@ref).
   - `config::Union{Nothing,GrowthRateConfig}` - The deck settings when the solve came from a `[GrowthRate]` section or the three-argument method; `nothing` otherwise.
   - `omega_star_pi::Float64` - Peak ion diamagnetic frequency |ω_*pi| in rad/s over the integration domain, at the toroidal n of the
     least-stable free-boundary mode of the solve at `gamma_sq` (of the marginal solve when stable), from the equilibrium's kinetic
-    profiles (NaN without n_e, T_e and T_i); the EPED1 criterion counts the mode as unstable when `gamma > omega_star_pi/2`. The
-    peak is taken over `[psilow, psilim]`, so a truncated domain can cut off part of a pedestal gradient.
+    profiles (NaN without n_e, T_e and T_i). No diamagnetic threshold is applied to `gamma`; with the EPED1 convention (effective
+    ω_*pi = half the peak) a mode counts as unstable when `gamma > omega_star_pi/4`, and the stability documentation lists the
+    other conventions. The peak is taken over `[psilow, psilim]`, so a truncated domain can cut off part of a pedestal gradient.
   - `marginal::ForceFreeStatesResult` - The ideal (γ² = 0) solve, whose least-stable energy decides stability.
   - `result::Union{Nothing,ForceFreeStatesResult}` - The solve at `gamma_sq`, carrying the eigenmode; `nothing` when stable.
   - `history::Vector` - Every (γ², λ_min, nzero) evaluated, in order, with λ_min the least-stable free-boundary energy at that γ² and

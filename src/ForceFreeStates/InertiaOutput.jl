@@ -1,7 +1,7 @@
 # Writer for an `IdealGrowthRateResult`. Layout under the caller's parent group (inputs live only under Input/):
 #
 #   ForceFreeStates/GrowthRate/
-#   ├── gamma, gamma_sq, converged, omega_star_pi -- growth rate, its square, the stop flag and the EPED1 ω_*pi reference
+#   ├── gamma, gamma_sq, converged, omega_star_pi -- growth rate, its square, the stop flag and the peak ω_*pi (no threshold applied)
 #   ├── psi, rho                       -- inertia density on the marginal solve's ψ_N grid
 #   └── History/                       -- every (γ², λ_min, nzero) evaluated by the root search
 

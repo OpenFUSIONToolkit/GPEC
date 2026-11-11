@@ -150,6 +150,29 @@ Two counts of the conjugate points (fixed-boundary modes fitting inside the ψ i
 
 `nconj_flags` counts the steps where the count cannot be trusted: a rotation above π/2 after bisection, or a unitarity defect max||λ|−1| of Ψ above 1e-3, which means the integrated frame is no longer Lagrangian to working precision (the Solovev regression fixture shows this after its q = 2 crossing, where `nzero` also misfires). `maslov_defect` records the largest defect seen. The count costs two matrix inversions and one eigendecomposition per accepted step, roughly 10–15 % of a solve, so it is off by default; `growth_rate` switches it on for all of its solves and uses it, with the sign of the least free-boundary energy, as the number of modes faster than the trial γ, which is what makes its bracket monotone. Checked on the TJ analytic equilibrium at `qa = 2.9, p0 = 0.8`, where a fixed-boundary mode at γ² ≈ 1.2e8 is invisible to `nzero`: `nzero_conj` is 1 below that eigenvalue and 0 above, and the Morse index `nzero_conj` + (negative free-boundary eigenvalues) is non-increasing in γ² and continuous across the pole, as it must be.
 
+### Diamagnetic stabilization thresholds
+
+`growth_rate` returns the ideal-MHD γ and the peak ion diamagnetic frequency `omega_star_pi` (the maximum of |ω_*pi| over the integration domain, at the mode's n). It applies no stability threshold. Pedestal models call a peeling–ballooning mode unstable only when γ exceeds half of an effective diamagnetic frequency, and the choice of that frequency moves the stability boundary, so every boundary quoted from these numbers must name the convention it used.
+
+| Convention | Unstable when | Ratio in terms of the outputs |
+|:--|:--|:--|
+| Ideal | γ > 0 | none |
+| EPED1 ([Snyder (2009)](citations.md#ForceFreeStates)) | γ > ω_eff/2 with ω_eff half the pedestal maximum of ω_*pi, so ω_eff ∝ n | R₁ = `gamma / (omega_star_pi/4)` > 1 |
+| EPED1.6 ([Snyder (2011)](citations.md#ForceFreeStates)) | γ > ω_eff/2 with ω_eff from a two-segment fit to two-fluid calculations: ∝ n up to n_crit, a weaker slope above | R₁.₆ = R₁/√2 for n ≤ n_crit, and R₁/(√2 (n_crit/n + 0.168 (n − n_crit)/n)) above; unstable when > 1 |
+
+R₁ is the quantity ELITE prints as γ/(ω_*pi,max/4). The EPED1.6 row is written in the form used by the stability-map post-processing of the OMFIT ELITE module, which defaults to n_crit = 6 and is what the conventional pedestal stability diagrams (pressure gradient α against edge current, contour at 1, maximum over n) show.
+
+The motivation for the second fit is that ω_*pi varies strongly across a pedestal while a high-n mode is radially narrow, so the frequency the mode feels grows more slowly than n; a threshold linear in n over-stabilizes high n.
+
+Points to keep in view when using either ratio:
+
+- The two ratios are equal at n ≈ 1.54 n_crit (n ≈ 9 for n_crit = 6). Below that the EPED1.6 form is the more stable one, by √2 at n ≤ n_crit; above it the less stable, by a factor 1.92 at n = 25 and 2.64 at n = 50. The boundary of a map taken as the maximum over n therefore moves, and so does the most-unstable n.
+- With the EPED1.6 form the maximum over n is often set by the highest n computed, so the n range is part of the result.
+- n_crit is a model parameter, not a constant: the value 6 is a default, and a published DIII-D analysis scales it with the edge safety factor (n_crit ≈ 21.7/q at the peak pressure gradient).
+- The factor √2 and the slope 0.168 are quoted from that post-processing; check them against the fit in [Snyder (2011)](citations.md#ForceFreeStates) before relying on them outside a like-for-like comparison.
+- `omega_star_pi` comes from the attached kinetic profiles with n_i ∝ n_e and Z_i = 1, and its peak is taken over `[psilow, psilim]`; a truncated domain can cut off part of the pedestal gradient.
+- A comparison of two codes is independent of the convention as long as both growth rates go through the same one; the boundary location is not.
+
 Local stability (Mercier, resistive interchange and ballooning) is a separate stage on the same equilibrium; see [Local Stability](ballooning.md).
 
 ## API reference
