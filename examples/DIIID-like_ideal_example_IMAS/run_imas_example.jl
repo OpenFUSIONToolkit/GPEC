@@ -22,19 +22,15 @@ using EFIT
 const GEQDSK = joinpath(@__DIR__, "../DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk")
 @assert isfile(GEQDSK) "G-file not found at $GEQDSK"
 
-# Shared settings: both runs use identical ForceFreeStates and Wall config.
+# Shared settings: both runs use identical ForceFreeStates config and no wall.
 # Only the [Equilibrium] section differs between IMAS and g-file paths.
 const SHARED_CONFIG = Dict(
     "ForceFreeStates" => Dict(
-        "nn_low" => 1,
-        "nn_high" => 1,
+        "nn" => 1,
         "vac_flag" => true,
-        "write_outputs_to_HDF5" => false,
-        "verbose" => false,
         "delta_mhigh" => 16,
         "qlow" => 1.02
-    ),
-    "Wall" => Dict("shape" => "nowall")
+    )
 )
 
 const EQ_COMMON = Dict(
@@ -56,8 +52,8 @@ try
     config_imas = merge(SHARED_CONFIG, Dict("Equilibrium" =>
         merge(EQ_COMMON, Dict("eq_type" => "imas", "eq_filename" => "from_dd", "imas_cocos" => 11))))
     open(joinpath(tmpdir_imas, "gpec.toml"), "w") do io
-        ;
-        TOML.print(io, config_imas);
+
+        TOML.print(io, config_imas)
     end
     result_imas = GPEC.main([tmpdir_imas]; dd=dd)
     global et_imas = real(result_imas.ffs.free_boundary.et[1])
@@ -75,8 +71,8 @@ try
     config_gfile = merge(SHARED_CONFIG, Dict("Equilibrium" =>
         merge(EQ_COMMON, Dict("eq_type" => "efit", "eq_filename" => GEQDSK))))
     open(joinpath(tmpdir_gfile, "gpec.toml"), "w") do io
-        ;
-        TOML.print(io, config_gfile);
+
+        TOML.print(io, config_gfile)
     end
     result_gfile = GPEC.main([tmpdir_gfile])
     global et_gfile = real(result_gfile.ffs.free_boundary.et[1])

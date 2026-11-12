@@ -119,9 +119,7 @@ struct ScenarioParameters
     beta_n::Float64
     l_i::Float64
     i_p::Float64
-    # Keyword-only: all five are positive scalars of comparable magnitude, so a positional form
-    # accepts them transposed and the all-positive guard sees nothing wrong — swapping B_T0 and R_0
-    # alone moves the threshold by (R/B)^(α_B − α_R).
+    # Keyword-only: the five positive scalars are easy to transpose positionally without any guard noticing.
     function ScenarioParameters(; n_e, b_t0, r_0, beta_n, l_i, i_p=NaN)
         all(>(0), (n_e, b_t0, r_0, beta_n, l_i)) || throw(ArgumentError("scenario parameters must be positive (got n_e=$n_e, B_T0=$b_t0, R_0=$r_0, β_N=$beta_n, l_i=$l_i)"))
         (isnan(i_p) || i_p > 0) || throw(ArgumentError("the plasma current must be a positive magnitude in MA (got I_p=$i_p)"))
@@ -178,10 +176,8 @@ end
 
 Thresholds with the exponents drawn around their fitted values: `"normal"` (Gaussian with
 the standard error), `"flat"` (uniform within one standard error), or `"normal_truncated"`
-(Gaussian, redrawn beyond 1.5 standard errors). The exponents' uncertainties are far from small
-relative to the sensitivity of a power law, so the distribution is sampled rather than
-propagated to first order. The current exponent is drawn only for fits that have one, so
-the other fits' sample streams do not depend on it.
+(Gaussian, redrawn beyond 1.5 standard errors). The current exponent is drawn only for fits that
+have one, so the other fits' sample streams do not depend on it.
 """
 function threshold_samples(rng::AbstractRNG, sc::ThresholdScaling, scen::ScenarioParameters; nsample::Int=1_000_000, dist::AbstractString="normal")
     draw = if dist == "normal"
@@ -335,11 +331,8 @@ end
 """
     scaling_toroidal_mode(h5path) -> Int
 
-The toroidal mode number whose ITPA threshold scaling applies to a run.
-
-The scalings are fitted per `n`, but a dominant-mode decomposition spans every `n` the run carried,
-so a single scaling only describes the result when the run carried one. Taking the lowest `n` and
-saying nothing would apply an n = 1 threshold to a mode that is partly n = 2.
+The toroidal mode number whose ITPA threshold scaling applies to a run; errors on a multi-n run
+(see [`single_toroidal_mode`](@ref)).
 """
 function scaling_toroidal_mode(h5path::AbstractString)
     return h5open(h5path, "r") do f
@@ -351,8 +344,7 @@ end
     single_toroidal_mode(nlow, nhigh; where="the run") -> nlow
 
 The one toroidal mode number a locking-threshold scaling is fitted for, or an `ArgumentError`
-when the run spans several. One rule for the in-run pipeline and the file-path entry points, so a
-multi-n run cannot have one n's scaling applied to a mode that spans several.
+when the run spans several.
 """
 function single_toroidal_mode(nlow::Integer, nhigh::Integer; where::AbstractString="the run")
     nlow == nhigh || throw(
@@ -444,7 +436,8 @@ end
 The tolerance multiplier at which the locking risk reaches `target_percent`, by linear
 interpolation in the logarithms of both the scale and the risk between the two scan points
 that bracket the target (the scan need not be monotonic; the first bracketing pair from the
-smallest scale is used). Returns `NaN` when no pair brackets the target. `corrected` reads the
+smallest scale is used). A pair that starts at scale 0 is interpolated linearly in the scale.
+Returns `NaN` when no pair brackets the target. `corrected` reads the
 error-field-corrected curve.
 """
 function allowable_tolerance(scan::ToleranceScan, target_percent::Real; corrected::Bool=false)
@@ -456,9 +449,11 @@ function allowable_tolerance(scan::ToleranceScan, target_percent::Real; correcte
         (p1 > 0 && p2 > 0) || continue
         l1, l2 = log10(p1), log10(p2)
         (min(l1, l2) <= lt <= max(l1, l2)) || continue
-        l1 == l2 && return scan.tolerance_scale[i]
+        s1, s2 = scan.tolerance_scale[i], scan.tolerance_scale[i+1]
+        lt == l1 && return s1
+        lt == l2 && return s2
         f = (lt - l1) / (l2 - l1)
-        return 10^(log10(scan.tolerance_scale[i]) + f * (log10(scan.tolerance_scale[i+1]) - log10(scan.tolerance_scale[i])))
+        return s1 > 0 ? 10^(log10(s1) + f * (log10(s2) - log10(s1))) : s1 + f * (s2 - s1)
     end
     return NaN
 end
@@ -466,11 +461,9 @@ end
 """
     risk_convergence(table, tolerances, coil_sets, sc, scen; nsamples, nbins_list, ctrl=MonteCarloControl(), risk_ctrl=RiskControl()) -> NamedTuple
 
-The locking probability against the Monte Carlo's sample count and bin count, with its batch
-spread, so a number at the target risk level can be shown to be free of sampling and binning bias
-before it is quoted: the spread must shrink as `1/√nsample` and the value must not move with
-`nbins` by more than the spread. Each sweep holds the other control at `ctrl`'s value and reuses
-one threshold sample. Fields: `nsample`, `locking_probability_percent_by_nsample`,
+The locking probability and its batch spread against the Monte Carlo's sample count and bin count,
+to check a quoted risk is free of sampling and binning bias. Each sweep holds the other control at
+`ctrl`'s value and reuses one threshold sample. Fields: `nsample`, `locking_probability_percent_by_nsample`,
 `locking_probability_spread_percent_by_nsample`, `nbins`, `locking_probability_percent_by_nbins`,
 `locking_probability_spread_percent_by_nbins`.
 """

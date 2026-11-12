@@ -15,6 +15,7 @@ using Plots
 # analytically) and a tilted one, checked in memory, through the HDF5 writer/reader, and
 # through the post-hoc gpec.h5 entry point that rebuilds the equilibrium from the file.
 include("h5_metadata_check.jl")
+include("display_check.jl")
 
 @testset "error fields" begin
     GPEC = GeneralizedPerturbedEquilibrium
@@ -60,8 +61,8 @@ include("h5_metadata_check.jl")
         @test lower.locking_probability_percent > straddling.locking_probability_percent
     end
 
-    @testset "coil-forced Solovev run: identities, output, and post-hoc entry point" begin
-        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    @testset "coil-forced TJ run: identities, output, and post-hoc entry point" begin
+        template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
 
         mktempdir() do dir
             for name in readdir(template)
@@ -69,32 +70,29 @@ include("h5_metadata_check.jl")
             end
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
-            # Three PF hoops outside the plasma (Solovev R ≈ 0.67–1.33 m): one tilted so the run has
+            # Three PF hoops outside the plasma (R ≈ 9–11 m): one tilted so the run has
             # a nominal n=1 forcing, one axisymmetric so its rigid-motion response is known exactly,
             # and one tilted the other way as the correction array, which is swept but is not an
             # error-field source.
             inputs["ForcingTerms"] = Dict{String,Any}(
                 "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                 "coil_set" => [
-                    Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0]),
-                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 1.5, "height" => -0.4, "currents" => [2.0e3]),
-                    Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 1.5, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
+                    Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 12.0, "height" => 1.2, "currents" => [2.0e3], "tiltx" => [3.0]),
+                    Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 12.0, "height" => -1.2, "currents" => [2.0e3]),
+                    Dict{String,Any}("name" => "hoop_efc", "source" => "pf_hoop", "radius" => 12.0, "height" => 0.0, "currents" => [2.0e3], "tilty" => [2.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_singular_coupling" => true,
-                "verbose" => false, "write_outputs_to_HDF5" => true)
+                "compute_singular_coupling" => true)
             cp(joinpath(@__DIR__, "test_data", "ErrorFields", "tolerances_two_hoops.toml"), joinpath(dir, "tolerances.toml"))
-            # Kinetic profiles consistent with this Solovev pressure, for the NTV torque couplings.
-            cp(joinpath(@__DIR__, "..", "examples", "Solovev_kinetic_NTV_example", "kinetic.dat"), joinpath(dir, "kinetic.dat"))
+            # Kinetic profiles consistent with this pressure, for the NTV torque couplings.
+            cp(joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example", "kinetic.dat"), joinpath(dir, "kinetic.dat"))
             inputs["Equilibrium"]["kinetic_file"] = "kinetic.dat"
             # Exercise the kinetic pipeline at smoke-test precision, retaining all bounce harmonics.
             inputs["KineticForces"] = Dict{String,Any}(
-                "verbose" => false, "write_outputs_to_HDF5" => true,
                 "rtol_psi" => 0.2, "rtol_pitch" => 1e-2, "atol_pitch" => 1e-5,
                 "rtol_x" => 1e-3, "atol_x" => 1e-6)
             # Small batches exercise orchestration; distribution accuracy is tested on synthetic inputs.
-            inputs["ErrorFields"] = Dict{String,Any}("verbose" => false, "tolerance_file" => "tolerances.toml",
+            inputs["ErrorFields"] = Dict{String,Any}("tolerance_file" => "tolerances.toml",
                 "MonteCarlo" => Dict{String,Any}("nsample" => 512, "nbatch" => 2, "seed" => 5, "nbins" => 16),
                 "scenario" => Dict{String,Any}("n_e" => 12.0),
                 "Risk" => Dict{String,Any}("nsample_threshold" => 512, "seed" => 3, "scan_scales" => [0.5, 1.0, 2.0]),
@@ -103,7 +101,7 @@ include("h5_metadata_check.jl")
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             res = GPEC.main([dir])
-            sens, pe, ffs = res.coil_sensitivities, res.pe, res.ffs
+            sens, pe, ffs = res.error_fields.sensitivities, res.pe, res.ffs
             h5path = joinpath(dir, "gpec.h5")
 
             @test sens isa EF.CoilSensitivities
@@ -112,6 +110,7 @@ include("h5_metadata_check.jl")
             h5open(h5path, "r") do h5
                 @test haskey(h5, "Info/Runtimes/error_fields")
                 @test read(h5["Info/Runtimes/error_fields"]) > 0
+                @test haskey(h5, "Info/Runtimes/force_free_states")
                 @test haskey(h5, "Info/Runtimes/perturbed_equilibrium")
                 @test haskey(h5, "Info/Runtimes/kinetic_forces")
                 @test haskey(h5, "Info/Runtimes/total")
@@ -121,6 +120,8 @@ include("h5_metadata_check.jl")
             end
 
             @test sens.coil_names == ["hoop_tilted", "hoop_axi", "hoop_efc"]
+            _check_main_display(res)
+            foreach(_check_display, (res.error_fields.monte_carlo, res.error_fields.risk))
             N = ffs.numpert_total
             @test size(sens.field_as_designed) == (N, 3)
             @test size(sens.shift_sensitivity_per_m) == (N, 3, 3)
@@ -165,7 +166,7 @@ include("h5_metadata_check.jl")
             @test_throws ArgumentError EF.sensitivity_table(sens, shifted)
             # The bare-matrix construction carries no basis, so it stays permitted.
             @test EF.sensitivity_table(sens, PE.dominant_coupling(rc.C, rc.rational_psi)) isa EF.SensitivityTable
-            windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[end]))
+            windowed = EF.sensitivity_table(sens, PE.dominant_coupling(rc; psi_low=rc.rational_psi[1]))
             @test length(windowed.delta_as_designed) == 3
             # The correction array is swept with the others but is not an error-field source: the run
             # excludes the NTV efc_coils from the error field, and the table helper drops them.
@@ -191,7 +192,7 @@ include("h5_metadata_check.jl")
             @test [c.name for c in snapshot.coils] == ["hoop_tilted", "hoop_axi"]
 
             # The run's Monte Carlo (full window, dominant mode) is written and re-runnable from the file.
-            mc = res.monte_carlo
+            mc = res.error_fields.monte_carlo
             @test mc isa EF.MonteCarloResult
             @test mc.nsample == 512 && mc.nbatch == 2 && mc.seed == 5
             @test mc.abs_delta_total_as_designed ≈ abs(sum(ef_table.delta_as_designed))
@@ -206,11 +207,11 @@ include("h5_metadata_check.jl")
             @test mc_file.abs_delta_pdf == mc.abs_delta_pdf && mc_file.abs_delta_bin_edges == mc.abs_delta_bin_edges && mc_file.nsample == 512
             rerun = EF.run_monte_carlo(h5path; nsample=512, nbatch=2, seed=5, nbins=16)
             @test rerun.abs_delta_pdf == mc.abs_delta_pdf
-            windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[end], nsample=256, nbatch=1, seed=5, nbins=16)
+            windowed_mc = EF.run_monte_carlo(h5path; psi_low=rc.rational_psi[1], nsample=256, nbatch=1, seed=5, nbins=16)
             @test windowed_mc.abs_delta_total_as_designed ≈ abs(sum(EF.without_coils(windowed, ["hoop_efc"]).delta_as_designed))
 
             # Locking risk and tolerance scan: written, bounded, and reproducible from the file.
-            risk = res.locking_risk
+            risk = res.error_fields.risk
             @test risk isa EF.RiskResult
             @test risk.scaling.n == 1 && risk.scaling.year == 2020 && risk.scaling.dataset == "O,L" && risk.scaling.fit == "WLS"
             @test risk.threshold_fit == EF.fitted_threshold(risk.scaling, EF.ScenarioParameters(ffs.equil; n_e=12.0))
@@ -372,6 +373,10 @@ include("h5_metadata_check.jl")
             @test norm(two.resonant_field_least_squares_t) < 1e-8 * norm(two.resonant_field_source_t)
             @test two.least_squares_rank == 2 && one.least_squares_rank == 1
             @test two.current_factor_least_squares ≈ [-1.0, 0.0] atol = 1e-6
+            # Identical arrays leave R rank-deficient; the minimum-norm solution splits the current evenly.
+            dup = EF.correction_requirement(ctx_plot, src, [src, src])
+            @test dup.least_squares_rank == 1
+            @test dup.current_factor_least_squares ≈ [-0.5, -0.5] atol = 1e-6
             # With two arrays the dominant-mode condition is one equation in two unknowns: the
             # minimum-current member of its family cancels the mode exactly and carries less current
             # than the exact solution (−1, 0), which is also in the family.
@@ -489,11 +494,20 @@ include("h5_metadata_check.jl")
             @test table_file.shift_sensitivity_per_m == table.shift_sensitivity_per_m && table_file.tilt_sensitivity_per_deg == table.tilt_sensitivity_per_deg
 
             # Post-hoc entry point: equilibrium and coupling rebuilt from the file, same coils.
-            cfg = FT.CoilConfig(GPEC.forcing_terms_control(inputs))
+            cfg = FT.CoilConfig(GPEC.forcing_terms_control(inputs, dir))
+            # The deck's [ErrorFields] stage is error_fields on its plasma response and coil sets; only what is asked for is computed.
+            @test res.error_fields isa ErrorFieldsResult && res.error_fields.response === pe.response
+            script = error_fields(pe.response, pe.coil_sets, cfg; ctrl=EF.ErrorFieldsControl(; exclude_coils=["hoop_efc"]))
+            @test script.sensitivities.field_as_designed == sens.field_as_designed
+            @test script.dominant.right_singular_vectors == res.error_fields.dominant.right_singular_vectors
+            @test all(isnothing, (script.tolerances, script.monte_carlo, script.risk, script.scan, script.couplings))
             sets = FT.load_coil_sets(cfg, 1; equil=ffs.equil)
             rebuilt = GPEC.equilibrium_from_h5(h5path)
             @test rebuilt.psilim == ffs.psilim
             @test rebuilt.equil.params.bt0 ≈ ffs.equil.params.bt0
+            # The run records its kinetic profiles, and the rebuilt equilibrium carries them.
+            @test h5open(f -> haskey(f, "Input/RawInputs/Kinetic"), h5path)
+            @test rebuilt.equil.kinetic.n_e == ffs.equil.kinetic.n_e
             post_hoc = EF.compute_coil_sensitivities(h5path, sets[1:1])
             @test post_hoc.field_as_designed ≈ sens.field_as_designed[:, 1:1] rtol = 1e-10
             @test post_hoc.shift_sensitivity_per_m ≈ sens.shift_sensitivity_per_m[:, :, 1:1] rtol = 1e-10
@@ -502,7 +516,7 @@ include("h5_metadata_check.jl")
             # Correction-coil couplings: the third hoop as the correction array. Its overlap per kAt is
             # the table's nominal overlap over its ampere-turns; the residual field carries no dominant
             # mode; the torques are finite and written with the metadata contract.
-            couplings = res.efc_couplings
+            couplings = res.error_fields.couplings
             @test couplings isa Vector{EF.EFCCoupling} && length(couplings) == 1
             c = couplings[1]
             kat = sets[3].nw * 2.0e3 / 1e3
@@ -551,24 +565,26 @@ include("h5_metadata_check.jl")
             @test with_profiles[3].series_list[2][:y] == c.torque_residual_profile[:, 2]
             attached = pe.response.ffs.equil.kinetic
             pe.response.ffs.equil.kinetic = nothing
-            @test_throws "needs kinetic profiles" GPEC.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
+            @test_throws "needs kinetic profiles" EF.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
             pe.response.ffs.equil.kinetic = attached
 
             # Species-resolved torque of the run's own perturbation, on the diagnostics' axis boundary: the
-            # deck's main ion resolved on its own reproduces the single-ion torque, and a D-T list's torque
-            # is the sum of its members' own torques.
+            # main ion resolved on its own reproduces the single-ion torque, and a D-T list's torque is the
+            # sum of its members' own torques.
             KF, EQ = GPEC.KineticForces, GPEC.Equilibrium
             kf_ctrl = KF.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
+            kin = ffs.equil.kinetic
             kp = KF.ntv_profiles(kf_ctrl, ffs.equil)
-            resolve(list) = EQ.resolve_ntv_species(ffs.equil.kinetic, list; electron=false, zimp=kf_ctrl.impurity_charge, mimp=kf_ctrl.impurity_mass)
+            resolve(list) = EQ.resolve_ntv_species(kin, list; electron=false, zimp=kin.impurity_charge, mimp=kin.impurity_mass)
             kf_intr = KF.KineticForcesInternal(ffs.equil; verbose=false)
             KF.set_perturbation_data!(kf_intr, pe, ffs, ffs.equil, ffs.metric)
             psi_c = KF.axis_validity_boundary(kf_ctrl, nothing, kp, ffs.equil, Float64[sng.psifac for sng in ffs.surfaces])
-            torque(species) = GPEC.ntv_torque_state(kf_intr, kf_ctrl, ffs.equil, kp, species, 0.0; axis_psi_c=psi_c).method_results["fgar"].total_torque
+            torque(species) = EF.ntv_torque_state(kf_intr, kf_ctrl, ffs.equil, kp, species, 0.0; axis_psi_c=psi_c).method_results["fgar"].total_torque
             single = torque(nothing)
             @test isfinite(single) && single != 0
-            @test torque(resolve([KF.IonSpecies(; z=kf_ctrl.ion_charge, m=kf_ctrl.ion_mass, fraction=1.0)])) ≈ single rtol = 1e-6
-            dt = resolve([KF.IonSpecies(; z=kf_ctrl.ion_charge, m=2, fraction=0.5), KF.IonSpecies(; z=kf_ctrl.ion_charge, m=3, fraction=0.5)])
+            zi, mi = KF.main_ion(ffs.equil)
+            @test torque(resolve([EQ.IonSpecies(; z=zi, m=mi, fraction=1.0)])) ≈ single rtol = 1e-6
+            dt = resolve([EQ.IonSpecies(; z=zi, m=2, fraction=0.5), EQ.IonSpecies(; z=zi, m=3, fraction=0.5)])
             @test length(dt) >= 2 && !any(s.electron for s in dt)
             @test torque(dt) ≈ sum(torque(dt[i:i]) for i in eachindex(dt)) rtol = 1e-12
 
@@ -653,17 +669,14 @@ include("h5_metadata_check.jl")
         end
     end
 
-    @testset "runtimes follow the ErrorFields output file when it is the only writer" begin
-        # With every other write switched off, the timings must still land in the file ErrorFields
-        # wrote. Before the orchestrator mirrored this write gate they were dropped silently.
-        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    @testset "[Run] output_file holds every stage and the runtimes" begin
+        template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
         mktempdir() do dir
             for name in readdir(template)
                 cp(joinpath(template, name), joinpath(dir, name))
             end
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
             inputs["ForcingTerms"] = Dict{String,Any}(
                 "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
                 "coil_set" => [
@@ -671,17 +684,18 @@ include("h5_metadata_check.jl")
                         "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0])
                 ])
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_singular_coupling" => true,
-                "verbose" => false, "write_outputs_to_HDF5" => false)
-            inputs["ErrorFields"] = Dict{String,Any}(
-                "verbose" => false, "output_filename" => "ef_only.h5")
+                "compute_singular_coupling" => true)
+            inputs["ErrorFields"] = Dict{String,Any}()
+            inputs["Run"] = Dict{String,Any}("output_file" => "run.h5")
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             GPEC.main([dir])
 
-            h5open(joinpath(dir, "ef_only.h5"), "r") do h5
+            h5open(joinpath(dir, "run.h5"), "r") do h5
+                @test haskey(h5, "ForceFreeStates") && haskey(h5, "ErrorFields/CoilSensitivities")
                 @test haskey(h5, "Info/Runtimes/error_fields")
             end
+            @test !isfile(joinpath(dir, "gpec.h5"))
         end
     end
 end

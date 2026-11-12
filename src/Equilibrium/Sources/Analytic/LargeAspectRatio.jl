@@ -1,7 +1,7 @@
 """
     LargeAspectRatioConfig(...)
 
-A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equilibrium model.
+A struct holding parameters for the Large Aspect Ratio (LAR) plasma equilibrium model.
 
 ## Fields:
 
@@ -9,14 +9,18 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
   - `a`: The minor radius of the plasma [m].
   - `beta0`: The beta value on axis (normalized pressure).
   - `q0`: The safety factor on axis.
+  - `qa`: Edge safety factor; not used by any current `sigma_type`.
+  - `B0`: On-axis toroidal field in T (scales F and P).
   - `p_pres`: The exponent for the pressure profile, defined as `p00 * (1 - (r / a)^2)^p_pres`.
   - `p_sig`: The exponent that determines the shape of the current-related function profile.
-  - `sigma_type`: The type of sigma profile, can be "default" or "wesson". If "wesson", the sigma profile is defined as `sigma0 * (1 - (r / a)^2)^p_sig`.
+  - `sigma_type`: The sigma profile, "default", "wesson" (`sigma0 * (1 - (r / a)^2)^p_sig`) or "hollow"
+    (`sigma0 * (1 + hollow * (r / a)^2) * (1 - (r / a)^2)^p_sig`, reversed shear when `hollow` is large enough).
+  - `hollow`: The off-axis current enhancement of the "hollow" sigma profile (unused by the other profiles).
   - `mtheta`: The number of grid points in the poloidal direction.
   - `ma`: The number of grid points in the radial direction.
   - `zeroth`: If set to true, it neglects the Shafranov shift
 """
-@kwdef mutable struct LargeAspectRatioConfig <: AnalyticEquilibriumConfig
+@kwdef struct LargeAspectRatioConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0
     a::Float64 = 1.0
     beta0::Float64 = 1e-3
@@ -26,23 +30,16 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     p_pres::Float64 = 2.0
     p_sig::Float64 = 1.0
     sigma_type::String = "default"
+    hollow::Float64 = 0.0
     mtheta::Int = 128
     ma::Int = 128
     zeroth::Bool = false
 end
 
 """
-Build a `LargeAspectRatioConfig` from a parsed `[LAR_INPUT]` TOML table.
-"""
-function LargeAspectRatioConfig(input_dict::Dict{String,Any})
-    return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
-end
-
-"""
-    lar_init_conditions(rmin, sigma_type, params)
+    lar_init_conditions(rmin, lar_input) -> (r, y)
 
 Initializes the starting radius and state vector for solving the LAR ODE system.
-Also evaluates the initial derivative using the analytic model.
 
 ## Arguments:
 
@@ -59,8 +56,7 @@ function lar_init_conditions(rmin::Float64, lar_input::LargeAspectRatioConfig)
     lar_r0 = lar_input.r0
     q0 = lar_input.q0
 
-    # Ensure rmin is not too small to avoid numerical issues in LAR equations
-    # Use a physically meaningful minimum (0.001% of minor radius)
+    # Keep rmin away from the r = 0 singularity of the LAR equations.
     if rmin < 1e-6
         @warn "Setting rmin to at least 1e-6 to avoid singularities in LAR equations."
         rmin_safe = 1e-6
@@ -86,6 +82,14 @@ function lar_init_conditions(rmin::Float64, lar_input::LargeAspectRatioConfig)
     return r, y
 end
 
+# Current profile σ(x), x = r/a, with σ(0) = sigma0 for every `sigma_type`.
+function _lar_sigma(x::Float64, sigma0::Float64, lar_input::LargeAspectRatioConfig)
+    p_sig = lar_input.p_sig
+    lar_input.sigma_type == "wesson" && return sigma0 * (1 - x^2)^p_sig
+    lar_input.sigma_type == "hollow" && return sigma0 * (1 + lar_input.hollow * x^2) * (1 - x^2)^p_sig
+    return sigma0 / (1 + x^(2 * p_sig))^(1 + 1 / p_sig)
+end
+
 """
     lar_der(dy, r, y, lar_input)
 
@@ -99,7 +103,7 @@ at a given radius `r`, using the current state vector `y` and equilibrium parame
 - `lar_input`: A `LargeAspectRatioConfig` object containing equilibrium shaping parameters.
 
 ## Returns:
-- 0. The result is stored in-place in `dy`.
+- 0; the derivatives are written to `dy` in place.
 """
 
 function lar_der(dy::Vector{Float64}, r::Float64, y::Vector{Float64}, lar_input::LargeAspectRatioConfig)
@@ -111,19 +115,13 @@ function lar_der(dy::Vector{Float64}, r::Float64, y::Vector{Float64}, lar_input:
     beta0 = lar_input.beta0
     p00 = beta0 / 2.0
     p_pres = lar_input.p_pres
-    p_sig = lar_input.p_sig
 
-    sigma_type = lar_input.sigma_type
     x = r / lar_a
     xfac = 1 - x^2
     pp = -2 * p_pres * p00 * x * xfac^(p_pres - 1)  # p'
     sigma0 = 2.0 / (q0 * lar_r0)
 
-    sigma = if sigma_type == "wesson"
-        sigma0 * xfac^p_sig
-    else
-        sigma0 / (1 + x^(2 * p_sig))^(1 + 1 / p_sig)
-    end
+    sigma = _lar_sigma(x, sigma0, lar_input)
 
     # LAR equations have singularities at r=0; ensure we never evaluate there
     @assert r > 0.0 "LAR equations require r > 0 (called with r=$r)"
@@ -141,28 +139,23 @@ function lar_der(dy::Vector{Float64}, r::Float64, y::Vector{Float64}, lar_input:
 end
 
 """
-    lar_run(lar_input)
+    lar_run(equil_input, lar_config) -> InverseRunInput
 
-Solves the LAR (Large Aspect Ratio) plasma equilibrium ODE system using analytic profiles
-defined by `lar_input`, and returns the full solution table including derived quantities.
-
-## Arguments:
-- `lar_input`: A `LargeAspectRatioConfig` object containing profile and geometric parameters.
-
-## Returns:
- - working on it not yet implemented
+Solve the LAR radial ODE system for the profiles of `lar_config` and return the profiles and
+Shafranov-shifted circular flux surfaces as inverse-solver input.
 """
 
-function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConfig)
+function lar_run(equil_input::EquilibriumConfig, lar_config::LargeAspectRatioConfig)
+    # The profile ODEs need a pressure exponent above 1.
+    fields = (f => getfield(lar_config, f) for f in fieldnames(LargeAspectRatioConfig))
+    lar_input = LargeAspectRatioConfig(; fields..., p_pres=max(lar_config.p_pres, 1.001))
     rmin = 1e-4
     lar_a = lar_input.a
     lar_r0 = lar_input.r0
     q0 = lar_input.q0
     beta0 = lar_input.beta0
-    sigma_type = lar_input.sigma_type
 
     p00 = beta0 / 2.0
-    lar_input.p_pres = max(lar_input.p_pres, 1.001)
 
     sigma0 = 2.0 / (q0 * lar_r0)
 
@@ -194,9 +187,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         x = r / lar_a
         xfac = 1 - x^2
         pval = p00 * xfac^lar_input.p_pres
-        sigma = (sigma_type == "wesson") ?
-                sigma0 * xfac^lar_input.p_sig :
-                sigma0 / (1 + x^(2 * lar_input.p_sig))^(1 + 1 / lar_input.p_sig)
+        sigma = _lar_sigma(x, sigma0, lar_input)
         q = r^2 * y[2] / (lar_r0 * y[1])
         temp[i, 1] = r
         temp[i, 2] = y[1]
@@ -253,9 +244,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     end
 
     sq_in = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
-    # rz_in_xs is ψ_N (see InverseRunInput struct docs).  Passing physical r
-    # works only by accident when lar_a ≈ 1; otherwise the inverse solver
-    # extrapolates the (R, Z) splines at outer surfaces.
+    # rz_in_xs is ψ_N (see InverseRunInput), not physical r; the two only coincide when lar_a ≈ 1.
     rz_in_xs = sq_xs
     rz_in_ys = collect(rzphi_y_nodes)
 
@@ -266,6 +255,6 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)
 
     # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0.
-    # Analytic: ingest=nothing — replay regenerates from the [LAR_INPUT] TOML section.
+    # Analytic: ingest=nothing — replay regenerates from the [LargeAspectRatio] deck section.
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, lar_r0, 0.0, psio, nothing)
 end

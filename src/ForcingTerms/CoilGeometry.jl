@@ -332,7 +332,7 @@ it with the outward unit normal `(nR, nZ)` in the R-Z plane.
 
 The flux-surface splines are parametrized by the SFL angle `theta_sfl`, related to the cylindrical
 angle by `theta_cyl = 2π*(theta_sfl + rzphi_offset(psi, theta_sfl))`. Since the offset is a small
-smooth perturbation, `theta_sfl` is recovered by a damped fixed-point iteration. The tangent is
+smooth perturbation, `theta_sfl` is recovered by fixed-point iteration. The tangent is
 taken by central-differencing `R(theta_sfl), Z(theta_sfl)`, and the normal `(dZ/dθ, -dR/dθ)` is
 normalized and oriented outward (positive dot with `(R-ro, Z-zo)`), matching the normal-flux
 convention of `project_normal_flux!`.
@@ -403,9 +403,7 @@ function make_window_pane_standoff(equil; standoff::Real, poloidal_angle::Real,
     Rc = R + standoff * nR
     Zc = Z + standoff * nZ
 
-    # Tangent: +90° rotation of the outward normal, so the poloidal leg runs lower-Z -> higher-Z
-    # at the outboard midplane, matching make_window_pane's c1->c2 winding (positive current ->
-    # positive b_n_x near the coil). Rotated by poloidal_tilt in the R-Z plane.
+    # Tangent = outward normal rotated +90° (c1->c2 winding, see docstring), then by poloidal_tilt.
     tR, tZ = -nZ, nR
     c, s = cos(deg2rad(poloidal_tilt)), sin(deg2rad(poloidal_tilt))
     uR = c * tR - s * tZ
@@ -413,11 +411,8 @@ function make_window_pane_standoff(equil; standoff::Real, poloidal_angle::Real,
 
     half = poloidal_length / 2
 
-    # Guard against a coil that pokes through the plasma boundary (the standoff is too small for
-    # the tilt/length, e.g. a 90° tilt with standoff < half the leg length). The surface point's
-    # tangent plane supports the (convex) boundary, so the nearest leg corner's clearance from the
-    # boundary along the normal is standoff - half*|sin(tilt)| — the tilt tips the legs toward the
-    # surface, while tangential displacement leaves the normal clearance unchanged.
+    # Reject coils that cross the boundary: on a convex boundary the nearest corner's normal
+    # clearance is standoff - half*|sin(tilt)|.
     clearance = standoff - half * abs(sin(deg2rad(poloidal_tilt)))
     clearance > 0 || error(
         "make_window_pane_standoff: coil intersects the plasma boundary " *
@@ -622,20 +617,12 @@ function make_helical(; R0::Real, a::Real, m::Int, n::Int,
     return CoilSet(name, n_coils, 1, 1.0, nsec, x, y, z, zeros(n_coils))
 end
 
-# ---------------------------------------------------------------------------
-# HDF5 coil geometry I/O (group-based, multi-set, content-tolerant)
-#
-# A coil set is stored as one subgroup per set under a parent group, named by the
-# set's `name`. This mirrors the open-group idiom of `save_forcing_to_h5` so the
-# data can live inside `gpec.h5` (e.g. `Input/RawInputs/Coils/`) next to unrelated
-# content that the reader silently ignores.
-#
+# HDF5 coil geometry I/O: one subgroup per set under a parent group; other content is ignored.
 #   <group>/<set_name>/x         Float64[ncoil, s, nsec]  (shape gives ncoil, s, nsec)
 #   <group>/<set_name>/y         Float64[ncoil, s, nsec]
 #   <group>/<set_name>/z         Float64[ncoil, s, nsec]
 #   <group>/<set_name>/currents  Float64[ncoil]
 #   <group>/<set_name>  attr nw  Float64
-# ---------------------------------------------------------------------------
 
 """
     save_coils_to_h5(coil_sets::Vector{CoilSet}, group)
@@ -832,7 +819,7 @@ end
 
 Apply per-conductor shifts and tilts to a coil set, returning a modified copy.
 
-Replicates the Fortran `coil_read` shift/tilt logic (coil.F lines 240–340):
+Port of the Fortran `coil_read` shift/tilt logic (coil.F):
 
   - Tilts are rotations around the arc-length-weighted center of mass (unless `rotation_center_x/_y/_z` specified)
   - `n_tilt` controls the toroidal periodicity of tilt/shift modulation
@@ -858,7 +845,7 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
     ynom_cfg = _pad(isempty(cfg.rotation_center_y) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_y, ncoil)
     znom_cfg = _pad(isempty(cfg.rotation_center_z) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.rotation_center_z, ncoil)
 
-    # Check if n_tilt = 0 suppresses tilts (Fortran: "no n=0 component")
+    # n_tilt = 0 applies no tilts (Fortran: no n=0 component)
     apply_tilt = n_tilt != 0
 
     new_x = copy(cs.x)
@@ -979,7 +966,7 @@ function _resolve_coil_path(cfg::CoilConfig, set_cfg::CoilSetConfig)
 end
 
 """
-    _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig) -> CoilSet
+    _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig; equil=nothing) -> CoilSet
 
 Produce the un-transformed coil set for a config block, dispatching on `sc.source`:
 analytic generators (`pf_hoop`/`window_pane`/`helical`) or a geometry file

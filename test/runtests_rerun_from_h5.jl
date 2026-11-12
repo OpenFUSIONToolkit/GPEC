@@ -2,7 +2,7 @@ using HDF5
 using TOML
 
 # Tests for the gpec.h5 snapshot + replay feature, kept deliberately light: one full-pipeline
-# source run + replay (the analytic Solovev path), plus pipeline-free ingest round-trip checks
+# source run + replay (the analytic TJ path), plus pipeline-free ingest round-trip checks
 # for the direct (EFIT) and inverse (CHEASE) equilibrium kinds and the override flags.
 
 # Collect every leaf dataset path under an open HDF5 file, skipping the groups/paths that
@@ -50,26 +50,24 @@ function _rerun_dataset_mismatches(source_h5, rerun_h5)
     return n_compared, n_mismatched
 end
 
-# Analytic (Solovev) equilibrium with ASCII file forcing: the single end-to-end source + replay.
+# Analytic (TJ) equilibrium with ASCII file forcing: the single end-to-end source + replay.
 # The forcing file is deleted before replay and the replay runs from a temp directory, proving
 # the snapshot is self-contained (no g-file or forcing data needed), and reproduces the source
 # bit-for-bit across every output dataset, the normalized perturbed equilibrium included.
-@testset "Rerun from gpec.h5 (analytic Solovev)" begin
-    template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+@testset "Rerun from gpec.h5 (analytic TJ)" begin
+    template_dir = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
 
     mktempdir() do snapshot_dir
         for name in readdir(template_dir)
             cp(joinpath(template_dir, name), joinpath(snapshot_dir, name))
         end
         forcing_dat = joinpath(snapshot_dir, "forcing.dat")
-        cp(joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat"), forcing_dat)
+        cp(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"), forcing_dat)
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_singular_coupling" => true,
-            "verbose" => false, "write_outputs_to_HDF5" => true)
+            "compute_singular_coupling" => true)
         open(io -> TOML.print(io, inputs), toml_path, "w")
 
         @info "Generating source gpec.h5 for rerun tests"
@@ -99,13 +97,13 @@ end
         # both override flags are covered through the real code path with no extra runs.
         @testset "override flags propagate through build_inputs_from_h5" begin
             mktempdir() do out_dir
-                inline = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.eulerlagrange_tolerance=1e-6"])
-                @test inline[1]["ForceFreeStates"]["eulerlagrange_tolerance"] == 1e-6
+                inline = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override", "ForceFreeStates.qlow=1.05"])
+                @test inline[1]["ForceFreeStates"]["qlow"] == 1.05
 
                 override_toml = joinpath(out_dir, "overrides.toml")
-                write(override_toml, "[ForceFreeStates]\neulerlagrange_tolerance = 2e-6\n")
+                write(override_toml, "[ForceFreeStates]\nqlow = 1.06\n")
                 from_file = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir, "--override-file", override_toml])
-                @test from_file[1]["ForceFreeStates"]["eulerlagrange_tolerance"] == 2e-6
+                @test from_file[1]["ForceFreeStates"]["qlow"] == 1.06
             end
         end
 
@@ -126,16 +124,26 @@ end
                     inputs["PerturbedEquilibrium"]["fixed_boundary"] = false
                     delete_object(h5, "Input/gpec_toml_raw")
                     h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                    delete_object(h5, "Info/git_version")
+                    h5["Info/git_version"] = "v1.5.0-412-gabc1234-dirty"
                 end
-                @test_throws r"`fixed_boundary`, which is no longer a key; .*older GPEC version" GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+                # The error keeps the per-key advice and tells the user which version wrote the file and how to get it.
+                err = try
+                    GeneralizedPerturbedEquilibrium.main([old_h5, "--output-dir", out_dir])
+                catch e
+                    e
+                end
+                @test err isa ErrorException
+                @test occursin("`fixed_boundary`, which is no longer a key; remove from gpec.toml", err.msg)
+                @test occursin("written by GPEC v1.5.0-412-gabc1234-dirty", err.msg)
+                @test occursin("git checkout abc1234", err.msg) && occursin("uncommitted changes", err.msg)
+                @test occursin("h5read(\"$(abspath(old_h5))\", \"Input/gpec_toml_raw\")", err.msg)
             end
         end
 
-        @testset "the LocalStability section replays" begin
-            mktempdir() do out_dir
-                inputs, = GeneralizedPerturbedEquilibrium.build_inputs_from_h5([source_h5, "--output-dir", out_dir])
-                @test haskey(inputs, "LocalStability")
-                @test !isempty(h5open(f -> read(f, "LocalStability/D_I"), source_h5))
+        @testset "a recorded version names the commit to check out" begin
+            for (version, checkout) in ("v2.0.0" => "v2.0.0", "v2.0.0-3-gdeadbee" => "deadbee", "deadbee" => "deadbee", "unknown" => nothing)
+                @test GeneralizedPerturbedEquilibrium._version_checkout(version) == checkout
             end
         end
 
@@ -143,10 +151,45 @@ end
             # Default output is `<basename>_rerun.h5`, so clobbering only happens if the user
             # routes the rerun back onto the source file; exercise that guard.
             @test_throws ErrorException GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", snapshot_dir, "--output-name", "gpec.h5"])
+            # The same file under another name, as the output or as one of its side files, is refused too.
+            mktempdir() do out_dir
+                symlink(source_h5, joinpath(out_dir, "alias.h5"))
+                @test_throws r"Refusing to overwrite" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--output-name", "alias.h5"])
+                symlink(source_h5, joinpath(out_dir, "run_forcing.h5"))
+                @test_throws r"Refusing to overwrite" GeneralizedPerturbedEquilibrium.main([source_h5, "--output-dir", out_dir, "--output-name", "run.h5"])
+            end
+        end
+
+        @testset "kinetic profiles and a file wall replay from the snapshot" begin
+            mktempdir() do out_dir
+                doctored = joinpath(out_dir, "source.h5")
+                cp(source_h5, doctored)
+                kinetic = GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(joinpath(@__DIR__, "..", "examples", "TJ_kinetic_NTV_example", "kinetic.dat"))
+                wall_text = "3\n1.0\nindex R Z\n1 2.0 0.0\n2 1.5 0.5\n3 1.5 -0.5\n"
+                h5open(doctored, "r+") do h5
+                    inputs = TOML.parse(read(h5, "Input/gpec_toml_raw"))
+                    # Neither file exists: the replay must take both from the snapshot.
+                    inputs["Equilibrium"]["kinetic_file"] = joinpath(out_dir, "gone.dat")
+                    inputs["Wall"] = Dict{String,Any}("shape" => "file", "file" => joinpath(out_dir, "gone_wall.dat"))
+                    delete_object(h5, "Input/gpec_toml_raw")
+                    h5["Input/gpec_toml_raw"] = sprint(TOML.print, inputs)
+                end
+                @test_throws r"records no Input/RawInputs/Kinetic" GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir])
+                h5open(doctored, "r+") do h5
+                    GeneralizedPerturbedEquilibrium.Equilibrium.write_kinetic_group!(create_group(h5, "Input/RawInputs/Kinetic"), kinetic)
+                end
+                @test_throws r"records no Input/RawInputs/Wall" GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir])
+                h5open(h5 -> h5["Input/RawInputs/Wall/wall_file_raw"] = wall_text, doctored, "r+")
+                inputs = first(GeneralizedPerturbedEquilibrium.build_inputs_from_h5([doctored, "--output-dir", out_dir]))
+                @test inputs["Equilibrium"]["kinetic_file"] == "source_rerun_kinetic.h5"
+                @test GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(joinpath(out_dir, "source_rerun_kinetic.h5")).n_e == kinetic.n_e
+                @test inputs["Wall"]["file"] == "source_rerun_wall.dat"
+                @test read(joinpath(out_dir, "source_rerun_wall.dat"), String) == wall_text
+            end
         end
 
         @testset "--coil-source coils errors when source has no coil snapshot" begin
-            # This Solovev source run used ASCII forcing, so there is no
+            # This source run used ASCII forcing, so there is no
             # Input/RawInputs/Coils group to replay from.
             mktempdir() do replay_dir
                 @test_throws ErrorException GeneralizedPerturbedEquilibrium.main([
@@ -163,7 +206,7 @@ end
 # the source run and the replay: the default (recompute-from-TOML) path then
 # fails, while `--coil-source coils` succeeds from the stored geometry.
 @testset "Rerun from gpec.h5: coil geometry snapshot" begin
-    template_dir = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    template_dir = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
     src_dat = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries", "d3d_il.dat")
 
     read_resfield(path) =
@@ -184,10 +227,8 @@ end
 
         toml_path = joinpath(snapshot_dir, "gpec.toml")
         inputs = TOML.parsefile(toml_path)
-        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-            "compute_singular_coupling" => true,
-            "verbose" => false, "write_outputs_to_HDF5" => true)
+            "compute_singular_coupling" => true)
         inputs["ForcingTerms"] = Dict{String,Any}(
             "forcing_data_format" => "coil", "mtheta_coil" => 64, "nzeta_coil" => 32,
             "coil_set" => [Dict{String,Any}(
@@ -334,23 +375,27 @@ end
     @test bad["ForceFreeStates"]["mode"] == "blorp"
 end
 
-# Drift guard for the analytic-equilibrium registry: `run_input` and the rerun builder both
-# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed entry (missing Dict ctor, wrong run_fn,
-# empty section) would silently break one path. Asserting each entry is well-formed and that
-# build_analytic_config resolves it keeps adding a new analytic kind a one-row change.
-@testset "ANALYTIC_EQ registry is well-formed and drives build_analytic_config" begin
-    Equil = GeneralizedPerturbedEquilibrium.Equilibrium
-    bac = GeneralizedPerturbedEquilibrium.build_analytic_config
+# Drift guard for the analytic-equilibrium registry: `run_input` and the deck parser both
+# dispatch off Equilibrium.ANALYTIC_EQ, so a malformed row would silently break one path.
+@testset "ANALYTIC_EQ registry is well-formed and drives the deck's analytic sections" begin
+    GPEC = GeneralizedPerturbedEquilibrium
+    Equil = GPEC.Equilibrium
     for (eq_type, spec) in Equil.ANALYTIC_EQ
-        @test spec.section isa String && !isempty(spec.section)
-        # config_type must build from a parsed TOML table (the embedded-section path).
-        @test hasmethod(spec.config_type, Tuple{Dict{String,Any}})
-        # run_fn must accept (EquilibriumConfig, <its config type>).
+        # The section is the config type's name without "Config".
+        @test spec.section * "Config" == String(nameof(spec.config_type))
         @test hasmethod(spec.run_fn, Tuple{Equil.EquilibriumConfig,spec.config_type})
-        # build_analytic_config resolves the section to the right config type using defaults.
-        cfg = bac(eq_type, Dict{String,Any}(spec.section => Dict{String,Any}()))
-        @test cfg isa spec.config_type
+        # The section alone selects the equilibrium: its config with defaults, and the implied eq_type.
+        deck = Dict{String,Any}("Equilibrium" => Dict{String,Any}(), spec.section => Dict{String,Any}())
+        @test GPEC.analytic_config(deck) isa spec.config_type
+        @test GPEC.equilibrium_config(deck, ".").eq_type == eq_type
+        @test Equil.analytic_eq_type(spec.config_type()) == eq_type
     end
-    # Unregistered kinds are rejected, not silently mis-built.
-    @test_throws ErrorException bac("not_a_real_kind", Dict{String,Any}())
+    # An analytic deck sets no eq_type, holds one analytic section, and does not name the internal token.
+    stated = Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol"), "Solovev" => Dict{String,Any}())
+    @test_throws ErrorException GPEC.equilibrium_config(stated, ".")
+    @test_throws ErrorException GPEC.equilibrium_config(Dict{String,Any}("Equilibrium" => Dict{String,Any}("eq_type" => "sol")), ".")
+    @test_throws ErrorException GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}(), "TJAnalytic" => Dict{String,Any}()))
+    @test_throws ArgumentError GPEC.analytic_config(Dict{String,Any}("Solovev" => Dict{String,Any}("lar_r0" => 1.0)))
+    @test GPEC.analytic_config(Dict{String,Any}("TJAnalytic" => Dict{String,Any}("solver" => "direct"))).solver === :direct
+    @test_throws ErrorException GPEC._stop_on_deprecated_deck_keys(Dict{String,Any}("SOL_INPUT" => Dict{String,Any}()))
 end

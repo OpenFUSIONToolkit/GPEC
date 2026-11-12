@@ -1,4 +1,4 @@
-#!/usr/bin/env julia --project=@.
+#!/usr/bin/env -S julia --project=@script
 # GPEC executable script
 # Usage: ./gpec [path/to/directory]
 # If no path is provided, uses current directory

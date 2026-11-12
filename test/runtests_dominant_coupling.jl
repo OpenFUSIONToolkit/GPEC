@@ -61,8 +61,8 @@ include("h5_metadata_check.jl")
     end
 
     @testset "perturbed-equilibrium run: summary, ResonantCoupling, and normalization" begin
-        template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        forcing = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example", "forcing.dat")
+        template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
+        forcing = joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat")
 
         mktempdir() do dir
             for name in readdir(template)
@@ -71,11 +71,9 @@ include("h5_metadata_check.jl")
             cp(forcing, joinpath(dir, "forcing.dat"))
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = true
             inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
             inputs["PerturbedEquilibrium"] = Dict{String,Any}(
-                "compute_singular_coupling" => true,
-                "verbose" => false, "write_outputs_to_HDF5" => true)
+                "compute_singular_coupling" => true)
             open(io -> TOML.print(io, inputs), toml_path, "w")
 
             run = GPEC.main([dir])
@@ -90,7 +88,7 @@ include("h5_metadata_check.jl")
             @test !isempty(resp.dominant_singular_values)
             rank = length(resp.dominant_singular_values)
             rows = resp.dominant_rational_index
-            @test rows == 1:length(resp.rational_psi)
+            @test rows == findall(ψ -> PE.CORE_PSI_LOW <= ψ <= PE.CORE_PSI_HIGH, resp.rational_psi)
             @test issorted(resp.dominant_singular_values; rev=true)
             V, σ, U = resp.dominant_right_singular_vectors, resp.dominant_singular_values, resp.dominant_left_singular_vectors
             @test size(V) == (length(pe.forcing_b_rootarea), rank)
@@ -122,7 +120,7 @@ include("h5_metadata_check.jl")
             # Windowing is a post-hoc choice on the same object.
             if length(rc.rational_psi) >= 2
                 lo = rc.rational_psi[2]
-                dom_w = PE.dominant_coupling(rc; psi_low=lo)
+                dom_w = PE.dominant_coupling(rc; psi_low=lo, psi_high=1.0)
                 @test dom_w.rational_index == findall(>=(lo), rc.rational_psi)
                 @test dom_w.singular_values ≈ svd(rc.C[dom_w.rational_index, :]).S
             end

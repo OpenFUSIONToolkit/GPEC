@@ -30,6 +30,10 @@ regress --cases diiid_n1 --refs develop,feature/kinetic-damping
 **Build mode.** Every case runs with GPEC's PrecompileTools workload disabled (the harness sets the `precompile_workload` preference per subprocess), so results compare code compiled on first use. `diiid_n1_riccati_precompiled` sets `precompile_workload = true` in its `[case]` table to track the precompiled build users get by default; the two builds can differ at the percent level in Δ′, so compare that case only against itself. That case is a variant: its file sets `base = "diiid_n1_riccati"` and supplies only `name`, `description` and `precompile_workload`, inheriting the base's `example_dir`, `[quantities.*]` and `[overrides]`. Any `[case]` key, `[quantities.*]` block or `[overrides]` entry a variant sets replaces the base's same-named one. The base is read from the sibling `<base>.toml`; a missing base, or a base that itself has a base, is a load error. To check a variant, `regress --list-cases` should show it with the same quantity count as its base. Each run records the build mode it actually ran (`aot` or `jit`) in its environment fingerprint; the report flags two compared runs whose modes differ, and a run whose mode differs from its case's (e.g. the precompiled case at a commit that predates the workload) logs a warning.
 
 All cases requested in a single invocation share one git worktree (and one `Pkg.instantiate`/precompile) per commit, so `--cases a,b,c` in one command is substantially faster than three separate runs.
+
+**Warm workers.** By default each ref's cases run in one long-lived `julia` worker per build mode, which loads GPEC once and runs every case in a fresh module. Compiling GPEC's code paths on first use costs a few minutes, so a fresh process per case used to spend most of a full run compiling; a warm worker pays that once per ref. Tracked quantities are the same either way, but `Runtime (s)` now excludes compilation for every case after the first in a worker, so it depends on case order and is not comparable with isolated runs (each run's fingerprint records `warm` or `isolated`, and the report flags a mismatch). `--isolate` restores one fresh subprocess per case, to rule out state carried from one case to the next. A worker that dies mid-case fails that case only; the next case starts a new worker.
+
+**Parallel lanes.** `--jobs N` runs N cases at a time, each lane with its own warm worker of `GPEC_REGRESS_THREADS` threads, so `N × GPEC_REGRESS_THREADS` should match the CPUs you hold. Results move slightly with thread count (see below), so keep `GPEC_REGRESS_THREADS` the same as the cached baseline's when you can. Cases are dealt longest-first by their last recorded runtime, and each runs in a private copy of its deck so lanes sharing an example cannot overwrite each other's output. Much of a run is serial (compilation, ODE integration), so several narrow lanes keep CPUs busier than one wide one.
 ```
 ================================================================
 Case: diiid_n1 — DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
@@ -72,6 +76,11 @@ singular q values            [4 elements]             [4 elements]             0
 Summary: 23 unchanged, 3 missing/N/A
 ```
 
+Each row's status is `OK` (within the case's noise threshold), `** CHANGED **` (moved past it),
+`** CHANGED (missing) **` (on the earlier ref, gone from the later one), `** CHANGED (type) **` (stored
+with a different shape or type), `NEW` (only on the later ref), `N/A` (on neither ref) or `FAILED`.
+Every `CHANGED` status counts toward `--fail-on-change`; `NEW` and `N/A` do not.
+
 **Compare your uncommitted working tree against develop:**
 ```bash
 regress --cases solovev_n1 --refs develop,local
@@ -102,11 +111,13 @@ regress --cases solovev_n1 --ref-range develop~10..develop
 - `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
 - `--no-pin-manifest` — let each ref resolve its own package set (see below)
 - `--allow-env-mismatch` — reuse cached results produced in a different environment
-- `--fail-on-change` — exit non-zero when any tracked quantity changed
+- `--fail-on-change` — exit non-zero when any tracked quantity changed, disappeared or changed storage type
+- `--jobs N` — run N cases at a time (see *Parallel lanes* above)
+- `--isolate` — run each case in its own fresh subprocess instead of a warm worker
 
-GPEC subprocesses run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are thread-count independent, and the count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines). Thread count is deliberately not part of the cache key, so `Runtime (s)` rows cached from single-threaded runs are not comparable to threaded ones — re-baseline with `--force` if runtime tracking matters.
+GPEC workers run with `-t auto` (all cores) so GPEC's threaded kernels are active; set `GPEC_REGRESS_THREADS=1` to force single-threaded runs. Tracked quantities are not bit-identical across thread counts. Most move only in the last few bits, inside their noise floors; the parallel Riccati integrator splits its domain by thread count, so its energies move by ~5e-9 and its step counts by ~2 between 1 and 16 threads, and the Riccati cases' floors are set above that spread. The count each run actually used is recorded in its environment fingerprint (shown in the report's `env:` lines), and the report flags two compared runs with different counts. Thread count is not part of the cache key; a `CHANGED` row in a comparison across thread counts that sits just above its floor is worth re-checking at a matched `GPEC_REGRESS_THREADS`.
 
-On a machine you share with other people or with your own parallel sessions, `-t auto` is antisocial: set `GPEC_REGRESS_THREADS` to a bounded count, and `JULIA_NUM_PRECOMPILE_TASKS` alongside it, since `Pkg.instantiate()` otherwise fans out to `Sys.CPU_THREADS + 1` precompile workers at the start of every ref. If the machine has a batch scheduler, submit the run through it and pin both variables to the allocation.
+On a machine you share with other people or with your own parallel sessions, `-t auto` is antisocial: set `GPEC_REGRESS_THREADS` to a bounded count, and `JULIA_NUM_PRECOMPILE_TASKS` alongside it, since `Pkg.instantiate()` otherwise fans out to `Sys.CPU_THREADS + 1` precompile workers at the start of every ref. If the machine has a batch scheduler, submit the run through it and pin both variables to the allocation, with `--jobs` × `GPEC_REGRESS_THREADS` equal to the CPUs requested.
 
 ## Three things named "regression"
 
@@ -125,9 +136,11 @@ They share the word and nothing else, which is a reliable source of confusion:
 
 Every git ref in a comparison is checked out into its own detached worktree, so a harness run is
 insulated from whatever you do to the working tree while it runs. The `local` ref is the exception:
-it runs GPEC in the live checkout, as a **fresh `julia` subprocess per case** that loads `src/` from
-disk when it starts. An edit landing between two cases of a `--refs develop,local` run yields a
-single report whose rows were produced by different code — with nothing in the output to say so.
+it runs GPEC in the live checkout, in a warm worker that loads `src/` from disk when it starts. An
+edit made after that is not seen, so the report can describe code that is no longer on disk. With
+`--isolate` each case loads `src/` afresh, and an edit landing between two cases of a
+`--refs develop,local` run yields a single report whose rows were produced by different code — with
+nothing in the output to say so.
 
 For anything you intend to cite — a pull-request report, a bisect, a number you will act on —
 commit the work to the feature branch and compare branch refs:
@@ -200,3 +213,42 @@ If the two refs in a comparison ran under different thread counts, the report fl
 
 - `0` — every run completed (and, with `--fail-on-change`, nothing changed)
 - `1` — a run failed, or a quantity changed under `--fail-on-change`
+
+## Pinned Δ′ and grid convergence
+
+The ideal Δ′ diagonal pinned in `test/runtests_parallel_integration.jl` and tracked by the harness is a
+single-grid snapshot that catches unintended changes, not a converged value. A `psi_accuracy` scan of the
+DIII-D-like SLAYER deck on the automatic grid (`implied` is the knot count `implied_knot_count` asks for
+after the refined solve):
+
+| psi_accuracy | knots | implied | dpm[1,1] | dpm[2,2] | dpm[3,3] | gamma 2/1 (Hz) |
+|---|---|---|---|---|---|---|
+| 2.0e-3   | 172 | –    | 6.850 | -5.783 | -16.308 | 165.3 |
+| 1.0e-3   | 205 | –    | 6.387 | -5.873 | -16.867 | 154.3 |
+| 5.0e-4   | 252 | –    | 8.003 | -6.105 | -16.413 | 192.9 |
+| 2.5e-4   | 307 | 522  | 8.567 | -6.235 | -16.529 | 206.2 |
+| 1.25e-4  | 372 | 666  | 8.146 | -6.285 | -16.649 | 196.2 |
+| 6.25e-5  | 457 | 916  | 8.911 | -6.477 | -16.510 | 214.4 |
+| 3.125e-5 | 559 | 1226 | 9.514 | -6.260 | -16.485 | 228.7 |
+
+The same deck on a fixed `core_edge_packed` grid:
+
+| mpsi | dpm[1,1] | dpm[2,2] | dpm[3,3] | gamma 2/1 (Hz) |
+|---|---|---|---|---|
+| 128  | 5.208 | -8.666 | -19.157 | 126.2 |
+| 256  | 7.097 | -5.187 | -15.729 | 171.2 |
+| 512  | 8.489 | -6.217 | -16.517 | 204.4 |
+| 1024 | 8.932 | -6.298 | -16.529 | 214.9 |
+| 2048 | 8.914 | -6.385 | -16.468 | 214.5 |
+
+- Convergence is per surface: the q = 4 `dpm[3,3]` settles near -16.5 on both grid families, while the q = 2
+  `dpm[1,1]` converges to about 8.91 only on the fixed grid and keeps moving on the automatic one.
+- The SLAYER growth rate is linear in Δ′ here (`gamma/dpm[1,1]` ≈ 24.1 within 0.5%), so a converged Δ′ gives a
+  converged growth rate.
+- The automatic grid stops after its second pass, and the knot count it implies grows faster than the grid in
+  use as `psi_accuracy` tightens, so tightening moves it further from self-consistency.
+
+A plateau criterion (scan `psi_accuracy` and the truncation controls, pin the stationary value per surface)
+would be a real convergence statement; it needs either the fixed grid or knot refinement iterated to a fixed
+point, and is not implemented. Until then, read a pinned diagonal as a sign and order-of-magnitude signal and
+re-pin it when the equilibrium grid changes.

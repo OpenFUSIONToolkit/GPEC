@@ -59,7 +59,7 @@ end
         end
         toml_path = joinpath(run_dir, "gpec.toml")
         # Opt into the Euler-Lagrange matrices so the metadata pass below covers that group too.
-        write(toml_path, replace(read(toml_path, String), "write_outputs_to_HDF5 = false" => "write_el_matrices = true\nwrite_outputs_to_HDF5 = true"))
+        write(toml_path, replace(read(toml_path, String), "[ForceFreeStates]\n" => "[ForceFreeStates]\nwrite_el_matrices = true\n"))
 
         GeneralizedPerturbedEquilibrium.main([run_dir])
         h5_path = joinpath(run_dir, "gpec.h5")

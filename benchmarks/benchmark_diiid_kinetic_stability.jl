@@ -5,7 +5,7 @@
 Benchmark the self-consistent kinetic-DCON path (KF → FFS → PE) against
 Fortran GPEC's kinetic DCON reference.
 
-Runs `GPE.main()` with `kinetic_source="calculated"` and `kinetic_factor=1.0`
+Runs `GPE.main()` with `kinetic = "KineticForces"`
 against the EFIT g-file and `.kin` profile taken from a Fortran GPEC
 kinetic example directory, then compares the least-stable total-energy
 eigenvalue `ForceFreeStates/FreeBoundaryStability/eigenmode_energies[1]` against `W_t_eigenvalue[:, 0]` in the Fortran
@@ -36,7 +36,9 @@ using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 const AnalysisFFS = GPE.Analysis.ForceFreeStates
 
-"Fortran GPEC DIII-D kinetic example run directory, from the environment (no on-disk default)."
+"""
+Fortran GPEC DIII-D kinetic example run directory, from the environment (no on-disk default).
+"""
 default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID_DCON, or pass the Fortran run directory as the first argument"),
     ENV, "GPEC_FORTRAN_DIIID_DCON")
 
@@ -123,8 +125,6 @@ function build_benchmark_tomldir(eq_file::String, kin_file::String)
 [Equilibrium]
 eq_filename = "$eq_name"
 kinetic_file = "$kin_file"
-eq_type = "efit"
-jac_type = "hamada"
 grid_type = "pow1"             # Matches Fortran DIIID_kinetic_example (equil/grid.f90 powspace)
 psilow = 0.01
 psihigh = 0.993
@@ -133,39 +133,30 @@ mtheta = 256
 newq0 = 0
 flux_surface_rtol = 1e-7
 
-[Wall]
-shape = "nowall"
-
 [LocalStability]
 
 [ForceFreeStates]
 vac_flag = true
-force_termination = true       # Skip PE+KF post-processing — we only need FFS eigenvalues
 
 dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
 qhigh = 1e3
-sing_start = 0
 
-nn_low = 1
-nn_high = 1
+nn = 1
 delta_mlow = 8
 delta_mhigh = 8
 mtheta_vacuum = 512
-thmax0 = 1
 
-kinetic_source = "calculated"
-kinetic_factor = 1.0
-eulerlagrange_tolerance = 1e-7
+integrator = "Forward"
+kinetic = "KineticForces"
 singfac_min = 1e-4
+
+[Forward]
+eulerlagrange_tolerance = 1e-7
 renorm_threshold = 1e4
-write_outputs_to_HDF5 = true
 
 [KineticForces]
-nn = 1
-nl = 4
-zi = 1
-mi = 2
+bounce_harmonic_max = 4
 nutype = "harmonic"
 f0type = "maxwellian"
 """
@@ -178,10 +169,10 @@ _p(args...) = (println(stderr, args...); flush(stderr))
 _pf(fmt, args...) = (print(stderr, Printf.format(Printf.Format(fmt), args...)); flush(stderr))
 
 function run_benchmark(fortran_dir::String=default_fortran_dir())
-    _p("=" ^ 70)
+    _p("="^70)
     _p("  DIIID Kinetic-DCON Benchmark: Julia KF→FFS vs Fortran DCON")
     _p("  Fortran example: $fortran_dir")
-    _p("=" ^ 70)
+    _p("="^70)
 
     inputs = discover_inputs(fortran_dir)
     ref = read_dcon_reference(inputs.dcon_nc)
@@ -192,7 +183,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
 
     tomldir = build_benchmark_tomldir(inputs.eq_file, inputs.kin_file)
 
-    _p("\n--- Running GPE.main with kinetic_source=\"calculated\" ---")
+    _p("\n--- Running GPE.main with kinetic = \"KineticForces\" ---")
     t0 = time()
     GPE.main([tomldir])
     wall = time() - t0
@@ -215,9 +206,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     re_err = abs(julia_re - ref.W_t_re) / abs(ref.W_t_re) * 100
     im_err = abs(julia_im - ref.W_t_im) / abs(ref.W_t_im) * 100
 
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     _p("  Results Comparison (kinetic-DCON least-stable eigenvalue)")
-    _p("=" ^ 70)
+    _p("="^70)
     _pf("  Re(et[1]):  Julia = %12.6f  Fortran = %12.6f  err = %6.2f%%\n",
         julia_re, ref.W_t_re, re_err)
     _pf("  Im(et[1]):  Julia = %12.6f  Fortran = %12.6f  err = %6.2f%%\n",
@@ -231,7 +222,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     im_pass = im_err <= 20.0
     im_stretch = im_err <= 5.0
 
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     if re_pass && im_pass
         _p("  PASS — Re within 5 %, Im within 20 %" *
            (im_stretch ? " (stretch: Im within 5 %)" : ""))
@@ -240,7 +231,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
         re_pass || _pf("    Re err %.2f%% > 5%%\n", re_err)
         im_pass || _pf("    Im err %.2f%% > 20%%\n", im_err)
     end
-    _p("=" ^ 70)
+    _p("="^70)
 
     # cond(F̄) vs ψ diagnostic — shows whether kinetic singular surfaces
     # (det(F̄)=0) were found and why peaks were/weren't accepted.

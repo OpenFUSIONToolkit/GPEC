@@ -273,7 +273,7 @@ using TOML
                 for btarget in range(blo, bhi; length=400)[2:end-1]
                     lmda = bo / btarget
                     roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf2, lmda, bo))
-                    ref = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(Bv2, lmda, bo, θ), 0.0, 1.0); rev=true)
+                    ref = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(Bv2, lmda, bo, θ), 0.0, 1.0))
                     @test length(roots) == length(ref)
                     # The crossing inside the shared cell lies strictly between the two
                     # stationary points that bound it.
@@ -295,13 +295,13 @@ using TOML
             hints = ones(Int, length(bf.theta) + 1)
             for lmda in range(lmdatpb * (1 + 1e-6), lmdamax * (1 - 1e-6); length=200)
                 new_roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf, lmda, bo))
-                ref_roots = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(B_vpar, lmda, bo, θ), 0.0, 1.0); rev=true)
+                ref_roots = sort!(KF.Roots.find_zeros(θ -> KF._vpar_from_spline(B_vpar, lmda, bo, θ), 0.0, 1.0))
                 @test length(new_roots) == length(ref_roots)
                 if length(new_roots) == length(ref_roots)
                     @test all(abs.(new_roots .- ref_roots) .< 1e-9)
                 end
-                # Roots are returned in the descending order downstream assumes.
-                @test issorted(new_roots; rev=true)
+                # Roots are returned ascending, as Fortran spline_roots, so the well search pairs neighbours.
+                @test issorted(new_roots)
                 # v_par vanishes at each root.
                 for θ in new_roots
                     # Solved directly from the cell's cubic, so v_par vanishes to
@@ -309,6 +309,44 @@ using TOML
                     @test abs(KF._vpar_from_spline(B_vpar, lmda, bo, θ)) < 1e-13
                 end
             end
+        end
+
+        @testset "deepest well of a four-root surface lies between neighbouring roots" begin
+            # Two B minima give four bounce points at λ between the minima's B values; every well must be a
+            # neighbouring pair, so the chosen window holds no other root and v_par > 0 at its midpoint.
+            xs4 = collect(range(0.0, 1.0; length=257))
+            B4 = @. (1 + 0.1cos(4pi * xs4 + 1.1)) / (1 + 0.05cos(2pi * xs4))
+            B4[end] = B4[1]
+            Bv4 = cubic_interp(xs4, B4; bc=PeriodicBC())
+            bf4 = KF._surface_b_field(Bv4)
+            buf = Float64[]
+            hints = ones(Int, length(bf4.theta) + 1)
+            nfour = 0
+            for lmda in range(1 / maximum(B4), 1 / minimum(B4); length=200)[2:end-1]
+                roots = copy(KF._bounce_points_at_lambda!(buf, hints, bf4, lmda, 1.0))
+                length(roots) == 4 || continue
+                nfour += 1
+                t1, t2 = KF._find_deepest_well(roots, Bv4, lmda, 1.0)
+                @test !any(r -> t1 < r < t2 || t1 < r + 1 < t2, roots)
+                @test KF._vpar_from_spline(Bv4, lmda, 1.0, mod(0.5 * (t1 + t2), 1.0)) > 0
+            end
+            @test nfour > 0
+        end
+
+        @testset "past the midpoint the drift integrand holds its own last value" begin
+            # v_par turns negative at θ = 0.75: the bounce and drift integrands each hold their own previous sample.
+            ntheta = 32
+            pts = collect(range(0.0, 1.0; length=ntheta))
+            wts = fill(1 / (ntheta - 1), ntheta)
+            tspl = (out, θ) -> (out[1] = 1.0; out[2] = 0.5; out[4] = 1.0; out[5] = 0.3; out)
+            Bstep = θ -> θ < 0.75 ? 1.0 : 3.0
+            scr = KF.BounceScratch(ntheta, 1)
+            KF._bounce_samples!(zeros(ntheta), zeros(ComplexF64, ntheta), nothing, nothing, pts, wts, 0.5, 1, 1.0, 1.0, tspl, Bstep, 1.0,
+                [1], [0.0im], [0.0im], 1.0, false, 1, scr)
+            k = findfirst(>=(0.75), pts)
+            @test scr.g_wd[end] == scr.g_wd[k-1] != 0
+            @test scr.g_wb[end] == scr.g_wb[k-1]
+            @test scr.g_wd[end] != scr.g_wb[end]
         end
 
         @testset "resolves the pair straddling an extremum" begin
@@ -623,10 +661,7 @@ using TOML
         ctrl = KF.KineticForcesControl()
         @test ctrl.fgar_flag == true
         @test ctrl.tgar_flag == false
-        @test ctrl.nn == 1
         @test ctrl.bounce_harmonic_max == 1
-        @test ctrl.ion_charge == 1
-        @test ctrl.ion_mass == 2
         @test ctrl.nutype == "harmonic"
         @test ctrl.f0type == "maxwellian"
         @test ctrl.psilims == [0.0, 1.0]
@@ -715,6 +750,16 @@ using TOML
         # Nonzero atol_psi dominating a small torque: the silent-garbage scenario
         ctrl_atol = KF.KineticForcesControl(; atol_psi=1e-2)
         @test_logs (:warn, r"atol_psi") KF.check_psi_quadrature_convergence(1e-3 + 0.0im, 1e-3, ctrl_atol, "fgar")
+        # A NaN torque fails every tolerance comparison, so it must error instead of passing silently
+        @test_throws ErrorException KF.check_psi_quadrature_convergence(complex(NaN), NaN, ctrl, "fgar")
+        @test_throws ErrorException KF.check_psi_quadrature_convergence(total, NaN, ctrl, "fgar")
+    end
+
+    @testset "check_inner_quadrature" begin
+        # An error estimate above tolerance (QuadGK stopped short) or a NaN must not pass silently
+        @test_logs KF.check_inner_quadrature(1.0 + 0im, 1e-6, 0.0, 1e-5, "test converged")
+        @test_logs (:warn, r"did not converge") KF.check_inner_quadrature(1.0 + 0im, 1e-3, 0.0, 1e-5, "test capped")
+        @test_logs (:warn, r"did not converge") KF.check_inner_quadrature([1.0 + 0im, NaN], 0.0, 0.0, 1e-5, "test nan")
     end
 
     @testset "METHOD_REGISTRY" begin
@@ -725,7 +770,7 @@ using TOML
         for entry in KF.METHOD_REGISTRY
             @test entry.flag in fieldnames(KF.KineticForcesControl)
             @test endswith(string(entry.flag), "_flag")
-            @test entry.kind in (:gar, :fcgl, :rlar, :clar)
+            @test entry.kind in (:gar, :fcgl)
             @test KF.method_kind(entry.name) == entry.kind
         end
     end
@@ -793,9 +838,10 @@ using TOML
         end
 
         @testset "schema table matches the data fields" begin
-            # Every profile dataset the reader and writer iterate is a KineticProfileData field, and vice versa.
+            # Every profile dataset the reader and writer iterate is an optional profile field of KineticProfileData, and vice versa.
             table = Set(Symbol(first(p)) for p in E._KINETIC_H5_PROFILES)
-            @test table == setdiff(Set(fieldnames(E.KineticProfileData)), Set([:psi, :species_densities, :provenance]))
+            profiles = Set(f for (f, T) in zip(fieldnames(E.KineticProfileData), fieldtypes(E.KineticProfileData)) if T == Union{Nothing,Vector{Float64}})
+            @test table == profiles
         end
 
         @testset "missing required field errors" begin
@@ -807,9 +853,12 @@ using TOML
         @testset "attached to the equilibrium" begin
             template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
             deck = TOML.parsefile(joinpath(template, "gpec.toml"))
-            sol = E.SolovevConfig(deck["SOL_INPUT"])
+            sol = GeneralizedPerturbedEquilibrium.analytic_config(deck)
             # A relative kinetic_file resolves against the deck directory, like eq_filename.
-            config = E.EquilibriumConfig(merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))), template)
+            config = GeneralizedPerturbedEquilibrium.equilibrium_config(
+                merge(deck, Dict{String,Any}("Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("kinetic_file" => relpath(h5, template))))),
+                template
+            )
             @test config.kinetic_file == normpath(h5)
             raw = E.read_kinetic_file(h5)
             equil = E.PlasmaEquilibrium(config, sol)
@@ -819,7 +868,7 @@ using TOML
             # A re-form passes the data through instead of reading the file again.
             @test E.PlasmaEquilibrium(config, sol; kinetic=equil.kinetic).kinetic === equil.kinetic
 
-            bare = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), sol)
+            bare = E.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(deck, template), sol)
             @test bare.kinetic === nothing
             E.attach_kinetic_profiles!(bare, gpeckf)
             @test bare.kinetic.n_e == E.read_kinetic_file(gpeckf).n_e
@@ -831,17 +880,15 @@ using TOML
             KF = GPEC.KineticForces
             template = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
             deck = TOML.parsefile(joinpath(template, "gpec.toml"))
-            equil = E.PlasmaEquilibrium(E.EquilibriumConfig(deck["Equilibrium"], template), E.SolovevConfig(deck["SOL_INPUT"]))
+            equil = E.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(deck, template), GeneralizedPerturbedEquilibrium.analytic_config(deck))
             kf = KF.KineticForcesControl()
             @test KF.ntv_profiles(kf, equil) === nothing
-            @test_throws "set kinetic_file in [Equilibrium]" GPEC.kinetic_forces_control(
-                Dict{String,Any}("KineticForces" => Dict{String,Any}()), GPEC.ForceFreeStates.ForceFreeStatesControl(), equil)
 
             raw = E.read_kinetic_file(h5)
             E.attach_kinetic_profiles!(equil, raw)
             view = KF.ntv_profiles(kf, equil)
-            ref = E.kinetic_profile_splines(raw; zi=kf.ion_charge, zimp=kf.impurity_charge, mi=kf.ion_mass, mimp=kf.impurity_mass,
-                chi1=2π * equil.psio)
+            zi, mi = KF.main_ion(equil)
+            ref = E.kinetic_profile_splines(raw; zi, zimp=raw.impurity_charge, mi, mimp=raw.impurity_mass, chi1=2π * equil.psio)
             for ψ in 0.0:0.1:1.0
                 @test view.Ti_spline(ψ) == ref.Ti_spline(ψ)
                 @test view.nui_spline(ψ) == ref.nui_spline(ψ)
@@ -850,6 +897,75 @@ using TOML
             @test KF.ntv_species(kf, equil) === nothing
             with_e = KF.ntv_species(KF.KineticForcesControl(; electron=true), equil)
             @test any(sp -> sp.electron, with_e)
+        end
+    end
+
+    # =========================================================================
+    # Multi-n kinetic geometry: each n-block must match an independent single-n build
+    # =========================================================================
+    @testset "multi-n kinetic geometry and F̄ blocks" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # The default Solovev plasma on a coarse 16-interval grid, with the n = 1, 2 mode space truncated at psihigh.
+        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(; eq_type="sol", jac_type="pest",
+            grid_type="core_edge_packed", psilow=1e-4, psihigh=0.9995, mpsi=16, mtheta=256, flux_surface_rtol=1e-7)
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(eq_config, GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig())
+        ctrl = FFS.ForceFreeStatesControl(; nn_low=1, nn_high=2, qlow=1.02, qhigh=1e3, singfac_min=1e-4, truncate_at_rational_offset=false)
+        # One shared poloidal band so the blocks of every mode space are directly comparable.
+        mlow = floor(Int, min(equil.params.qmin, 0)) - 4
+        mhigh = trunc(Int, 2 * equil.params.qmax)
+        function mode_space(nlow, nhigh)
+            intr = FFS.ForceFreeStatesInternal()
+            intr.nlow, intr.nhigh, intr.npert = nlow, nhigh, nhigh - nlow + 1
+            FFS.sing_lim!(intr, ctrl, equil)
+            intr.mlow, intr.mhigh = mlow, mhigh
+            intr.mpert = mhigh - mlow + 1
+            intr.numpert_total = intr.mpert * intr.npert
+            return intr
+        end
+        intr12 = mode_space(1, 2)
+        mpert = intr12.mpert
+        metric = FFS.make_metric(equil, mpert)
+        geom12 = FFS.build_kinetic_metric_matrices(equil, intr12, metric)
+        psis = [0.05, 0.3, 0.61, 0.87]
+
+        # Every geometric matrix of block k equals the single-n build at n = k.
+        for n in 1:2
+            geom_n = FFS.build_kinetic_metric_matrices(equil, mode_space(n, n), metric)
+            for name in (:smats, :tmats, :xmats, :ymats, :zmats), psi in psis
+                @test FFS.kinetic_metric_block(geom12[name], psi, mpert, n) ≈ reshape(geom_n[name](psi), mpert, mpert) rtol = 1e-13
+            end
+        end
+        # Y and Z carry n, so the n = 2 block is not a copy of n = 1.
+        @test !(FFS.kinetic_metric_block(geom12.ymats, 0.3, mpert, 2) ≈ FFS.kinetic_metric_block(geom12.ymats, 0.3, mpert, 1))
+        @test !(FFS.kinetic_metric_block(geom12.zmats, 0.3, mpert, 2) ≈ FFS.kinetic_metric_block(geom12.zmats, 0.3, mpert, 1))
+
+        # The condition number of each F̄ block equals the single-n F̄ built from the same kinetic block.
+        # Single-n kinetic matrices are tiled into a block-diagonal multi-n set, as the calculated source does.
+        mats12 = FFS.build_matrix_splines(equil, intr12, metric)
+        xs = metric.xs
+        mpsi = length(xs)
+        kw12 = zeros(ComplexF64, mpsi, (2mpert)^2, 6)
+        kt12 = zeros(ComplexF64, mpsi, (2mpert)^2, 6)
+        singles = map(1:2) do n
+            intr = mode_space(n, n)
+            mats = FFS.build_matrix_splines(equil, intr, metric)
+            kw, _ = FFS.fixed_kinetic_matrices(mpert, mpert, mpsi, 0.05, mlow, mats, xs)
+            kt = 0.3im .* kw
+            for k in 1:6, j in 1:mpert, i in 1:mpert
+                idx = ((n - 1) * mpert + j - 1) * 2mpert + (n - 1) * mpert + i
+                kw12[:, idx, k] .= kw[:, i+(j-1)*mpert, k]
+                kt12[:, idx, k] .= kt[:, i+(j-1)*mpert, k]
+            end
+            (intr, FFS._compute_fkg_matrices(mats, equil, intr, metric, kw, kt))
+        end
+        kin12 = FFS._compute_fkg_matrices(mats12, equil, intr12, metric, kw12, kt12).kinetic
+        for psi in psis
+            conds12 = FFS.fbar_block_conditions(psi, kin12, equil, intr12)
+            for n in 1:2
+                intr_n, mats_n = singles[n]
+                @test conds12[n] ≈ only(FFS.fbar_block_conditions(psi, mats_n.kinetic, equil, intr_n)) rtol = 1e-8
+            end
+            @test FFS.evaluate_fbar_condition(psi, kin12, equil, intr12) == maximum(conds12)
         end
     end
 end

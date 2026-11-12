@@ -1,81 +1,78 @@
-# Vacuum Module
+# Vacuum
 
-The Vacuum module provides magnetostatic vacuum field calculations with plasma-wall interactions.
-The 2D vacuum calculations follow the approach outlined in [Chance Phys. Plasmas 1997, Chance J. Comp. Phys. 2007] with a pure Julia implementation.
+`Vacuum` computes the magnetostatic response of the region between the plasma boundary and a conducting wall, or of free space when there is no wall, following [Chance (1997)](citations.md#Vacuum) and [Chance et al. (2007)](citations.md#Vacuum).
+It runs inside `ForceFreeStates` whenever `vac_flag = true`, and its matrices are shared with `PerturbedEquilibrium`.
 
-## Overview
+## What it computes
 
-The module provides:
+For a normal displacement ``\xi`` of the plasma boundary, expanded in the poloidal harmonics of the run, the perturbed vacuum field is found from a Green's-function integral over the boundary and the wall, and the vacuum energy is the quadratic form ``\delta W_v = \xi^\dagger W_v \xi``.
+``W_v`` is the vacuum part of the free-boundary energy, ``W = W_\mathrm{plasma} + W_\mathrm{vacuum}``, whose eigenvalues decide the ideal kink stability on the [Stability](stability.md) page: a close conducting wall raises ``W_v`` and stabilizes external modes, no wall gives the free-space limit.
+`ForceFreeStates` scales `wv` by the resonance factors ``(m - nq)(m' - nq)`` of its row and column harmonics, the convention of Chance (1997), before adding it to the plasma energy; `compute_vacuum_response` returns it unscaled.
+When the run needs it, the module also returns the vacuum surface-current matrix ``I_v``, which `PerturbedEquilibrium` inverts into the surface inductance ``L`` of the plasma response.
 
-- Vacuum response calculations (`compute_vacuum_response`)
-- Support for various wall geometries (conformal, elliptical, dee-shaped, or custom)
-- Pre-computed Legendre functions using Bulirsch elliptic integrals for improved accuracy
+## Running it
 
-## Key Structures
+The wall is the optional `[Wall]` section of the deck; omit it for no wall.
+`shape` selects one of five shapes, each with its own keys, and `equal_arc_wall` (default `true`) distributes the wall nodes by equal arc length:
 
-### VacuumInput
-Contains plasma boundary data and calculation parameters including:
-- Plasma boundary coordinates (r, z) on GPEC theta grid
-- Free toroidal angle parameter (ν) where ϕ = 2πζ + ν(ψ, θ)
-- Poloidal mode numbers (mlow, mpert)
-- Toroidal mode number (n)
-- Grid resolution (mtheta) for vacuum calculations
-- Optional kernel sign and symmetry flags
+```toml
+# one [Wall] section per deck; the five shapes:
+[Wall]
+shape = "conformal"       # the plasma boundary expanded by standoff_fraction minor radii
+standoff_fraction = 0.3
 
-### WallShapeSettings
-Specifies wall geometry configuration with options for:
-- No wall, conformal, elliptical, dee-shaped, or custom walls
-- Geometric parameters (a, aw, bw, cw, dw, tw)
-- Equal arc length spacing option
+[Wall]
+shape = "elliptical"      # an ellipse of the given minor radius
+minor_radius = 0.3
 
-## API Reference
+[Wall]
+shape = "dee"             # a D-shaped wall: standoff_fraction, half_thickness, elongation, center_offset, triangularity, corner_sharpness
+standoff_fraction = 0.3
+elongation = 1.5
+triangularity = 0.5
+
+[Wall]
+shape = "mod_dee"         # the same shape placed by minor_radius instead of standoff_fraction
+minor_radius = 0.3
+
+[Wall]
+shape = "file"            # a wall contour read from a file
+file = "wall.dat"
+```
+
+`examples/Solovev_ideal_example` holds a near-marginal kink by a conformal wall; the DIII-D-like examples run without one.
+In a script the shapes are `ConformalWall`, `EllipticalWall`, `DeeWall`, `ModDeeWall` and `FileWall`, passed as the `wall` keyword of the solve (`nothing` for no wall), and the response itself is
+
+```julia
+using GeneralizedPerturbedEquilibrium
+
+inputs = Vacuum.VacuumInput(eq, 0.995, 256, 1, 1:10, [1])   # the surface at ψ_N = 0.995: mtheta, nzeta, m_modes, n_modes
+vac = Vacuum.compute_vacuum_response(inputs, Vacuum.ConformalWall(; standoff_fraction=0.3); compute_Iv=true)
+vac.wv, vac.I_v, vac.plasma_pts, vac.wall_pts            # I_v is zero unless compute_Iv=true
+```
+
+with `eq` a `PlasmaEquilibrium`; `VacuumInput(; x, z, ν, mtheta_in, m_modes, n_modes, mtheta, nzeta)` takes a boundary given point by point instead, where `ν(ψ, θ)` is the toroidal-angle offset of the straight-field-line coordinates, ``\phi = 2\pi\zeta + \nu`` with ``\phi`` the internal toroidal angle of the [Conventions Reference](conventions.md) (the laboratory angle carries the helicity sign).
+With `[ForceFreeStates] nzeta_vacuum > 1` the response is evaluated on a toroidal grid, with the singular correction of the [3D kernel](citations.md#3D-vacuum-singular-correction) (`examples/Solovev_ideal_example_3D`).
+
+## Outputs
+
+| Dataset | Meaning |
+|---|---|
+| `ForceFreeStates/FreeBoundaryStability/W_vacuum`, `vacuum_eigenvalue` | the vacuum energy matrix on the control surface and its least eigenvalue |
+| `PerturbedEquilibrium/ResponseMatrices/surface_inductance` | the surface inductance ``L`` derived from ``I_v`` |
+| `SurfaceGeometries/Plasma/x`, `y`, `z` and `SurfaceGeometries/Wall/x`, `y`, `z` | the plasma boundary and wall point clouds, for visualization |
+
+## Numerical notes
+
+- The Legendre functions of the Green's function are evaluated from Bulirsch's elliptic integrals, and by 32-point Gaussian quadrature for large arguments (``n\hat\rho \geq 0.1``).
+- For n = 0 with a closed wall the kernel is regularized automatically.
+
+## API reference
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Vacuum]
 ```
 
-## Functions
-
-### compute_vacuum_response
 ```@docs
 GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response
 ```
-
-## Example Usage
-
-### Basic Vacuum Response Calculation
-
-```julia
-using GeneralizedPerturbedEquilibrium
-
-# Create VacuumInput struct with plasma boundary data
-# Note: ν is the free toroidal angle parameter where ϕ = 2πζ + ν(ψ, θ)
-inputs = GeneralizedPerturbedEquilibrium.Vacuum.VacuumInput(
-    r = plasma_r_coords,      # Plasma R coordinates on GPEC theta grid
-    z = plasma_z_coords,      # Plasma Z coordinates on GPEC theta grid
-    ν = nu_array,             # Toroidal angle parameter (formerly delta/qa)
-    mlow = 1,                 # Lowest poloidal mode number
-    mpert = 10,               # Number of poloidal modes
-    n = 1,                    # Toroidal mode number
-    mtheta = 256,             # Number of poloidal grid points
-    kernelsign = 1.0          # Kernel sign (+1 or -1)
-)
-
-# Define wall settings
-wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(
-    shape = "conformal",      # Wall shape type
-    a = 0.3,                  # Wall distance parameter
-    equal_arc_wall = true     # Use equal arc length spacing
-)
-
-# Compute vacuum response; returns a VacuumResponse with wv, I_v, plasma_pts, wall_pts
-vac = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wall_settings)
-```
-
-## Notes
-
-- The Julia implementation uses Bulirsch's algorithm for elliptic integrals, providing improved accuracy over polynomial approximations
-- For large mode numbers (nρ̂ ≥ 0.1), 32-point Gaussian quadrature is used for Legendre function evaluation
-- For n=0 modes with closed walls, automatic regularization is applied
-- Wall shapes support: nowall, conformal, elliptical, dee, mod_dee, or custom from file
-- The vacuum response matrix wv is scaled by the singular factor (m - nq)(m' - nq) per [Chance Phys. Plasmas 1997]

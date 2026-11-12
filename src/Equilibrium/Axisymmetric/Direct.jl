@@ -26,8 +26,7 @@ end
 """
     FieldLineDerivParams
 
-A struct to hold constant parameters for the ODE integration, making them
-easily accessible within the derivative function `direct_fieldline_der!`.
+Constant parameters of the field-line ODE, read by `direct_fieldline_der!` and `arclength_fieldline_der!`.
 """
 struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastInterpolations.CubicSeriesInterpolant,D}
     ro::Float64
@@ -46,21 +45,15 @@ end
 """
     direct_get_bfield!(bf_out, r, z, psi_in, sq_in, sq_in_deriv, psio; derivs=0)
 
-Calculates the magnetic field and its derivatives at a given (R,Z) point.
-The results are stored in-place in the `bf_out` object. This is equivalent
-to the `direct_get_bfield` subroutine in the Fortran code, adapted for
-the Julia spline implementation.
+Evaluates ψ, the profiles F and P, and the poloidal field with its derivatives at (R, Z), in place in `bf_out`.
+Port of Fortran `direct_get_bfield`.
 
-## Arguments:
+## Arguments
 
-  - `bf_out`: A mutable `DirectBField` struct to store the results
-  - `r`: R-coordinate to evaluate at
-  - `z`: Z-coordinate to evaluate at
-  - `psi_in`: 2D cubic interpolant for poloidal flux `ψ(R,Z)`
-  - `sq_in`: 1D cubic spline for profiles `F(ψ_norm)` and `P(ψ_norm)`
-  - `sq_in_deriv`: Pre-computed derivative view of sq_in
-  - `psio`: total toroidal flux
-  - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
+  - `psi_in`: 2D cubic interpolant of the poloidal flux `ψ(R,Z)`
+  - `sq_in`, `sq_in_deriv`: profile series `F(ψ_norm)`, `P(ψ_norm)` and its derivative
+  - `psio`: ψ at the magnetic axis; ψ_norm = 1 - ψ/psio
+  - `derivs`: number of ψ derivatives to evaluate (0, 1, or 2)
 """
 @with_pool pool function direct_get_bfield!(
     bf_out::DirectBField,
@@ -116,113 +109,223 @@ the Julia spline implementation.
     bf_out.bzz = -bf_out.psirz / r
 end
 
+# Numerical controls of the magnetic-axis search.
+const AXIS_MARCH_STEPS = 200      # midplane march steps allowed before giving up on a B_z sign change
+const AXIS_NEWTON_ITERATIONS = 200
+const AXIS_SINGULAR_DET = 1e-20   # absolute floor on |det ∂(B_R,B_Z)/∂(R,Z)| in T²/m²; it does not scale with ψ₀ or machine size
+const AXIS_STEP_RTOL = 1e-12      # Newton step test, relative to R
+const AXIS_RESIDUAL_RTOL = 1e-10  # bound on |B_p| relative to B_scale, applied on the restart path only
+const AXIS_SEED_CELL_TOL = 0.1    # the bisection sweep has settled when a pass moves the point by less than this many cells
+const AXIS_SEED_PASSES = 50
+const AXIS_PSI_RATIO = (0.5, 2.0) # accepted band of ψ(axis)/ψ₀; every reader puts ψ = ψ₀ at the axis
+const SEPARATRIX_STEPS = 2000     # the Fortran allows more Newton steps here than for the axis solve
+
+_axis_jacobian_det(bf::DirectBField) = bf.brr * bf.bzz - bf.brz * bf.bzr
+
+# Poloidal-field scale |ψ₀| / (R ΔR), about a sixth of the edge poloidal field.
+_axis_field_scale(rp::DirectRunInput, r::Float64) = abs(rp.psio) / (r * (rp.rmax - rp.rmin))
+
+"""
+    _midplane_axis_guess(rp, bfield, sq_in_deriv) -> (r, z, step)
+
+Initial guess for the axis: march outward along the grid's midplane `Z`, in steps of a twentieth of the grid width, until
+`B_z ≥ 0`.
+"""
+function _midplane_axis_guess(rp::DirectRunInput, bfield::DirectBField, sq_in_deriv)
+    r = (rp.rmax + rp.rmin) / 2.0
+    z = (rp.zmax + rp.zmin) / 2.0
+    step = (rp.rmax - rp.rmin) / 20.0
+    for _ in 1:AXIS_MARCH_STEPS
+        direct_get_bfield!(bfield, r, z, rp.psi_in, rp.sq_in, sq_in_deriv, rp.psio; derivs=1)
+        bfield.bz >= 0.0 && return r, z, step
+        r += step
+    end
+    error("Took too many iterations to get bz=0.")
+end
+
+"""
+    _axis_newton(rp, bfield, sq_in_deriv, r, z, cap) -> (r, z, failure)
+
+Newton iteration for the O-point `B_R = B_Z = 0`, each step capped at `cap`. `failure` is `nothing` once a step passes
+`|δR|, |δZ| ≤ AXIS_STEP_RTOL × R`, else why the iteration stopped. A singular Jacobian stops it, where the Fortran divides
+by the determinant unguarded.
+"""
+function _axis_newton(rp::DirectRunInput, bfield::DirectBField, sq_in_deriv, r::Float64, z::Float64, cap::Float64)
+    for _ in 1:AXIS_NEWTON_ITERATIONS
+        direct_get_bfield!(bfield, r, z, rp.psi_in, rp.sq_in, sq_in_deriv, rp.psio; derivs=2)
+        det = _axis_jacobian_det(bfield)
+        abs(det) < AXIS_SINGULAR_DET && return r, z, "stopped on a singular Jacobian, |det ∂(B_R,B_Z)/∂(R,Z)| < $AXIS_SINGULAR_DET"
+        # Δx = -J⁻¹ F
+        δr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
+        δz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
+        step = hypot(δr, δz)
+        step > cap && ((δr, δz) = (δr * cap / step, δz * cap / step))
+        r += δr
+        z += δz
+        abs(δr) <= AXIS_STEP_RTOL * abs(r) && abs(δz) <= AXIS_STEP_RTOL * abs(r) && return r, z, nothing
+    end
+    return r, z, "stopped without convergence in $AXIS_NEWTON_ITERATIONS iterations"
+end
+
+"""
+    _axis_bisection_seed(rp, bfield, sq_in_deriv, r, z, halfwidth; passes) -> (r, z, failure)
+
+Seed for the Newton restart: alternate 1-D bisections on `B_Z` along `R` and on `B_R` along `Z`, each bracketed by doubling
+`halfwidth` up to the grid edges. The sweep is a nonlinear Gauss–Seidel iteration that contracts by ψ_RZ²/(ψ_RR ψ_ZZ) per
+pass, so stopping once a pass moves the point by less than `AXIS_SEED_CELL_TOL` cells leaves it within about a cell of the
+axis for contractions up to 0.9. `failure` names a missing sign change or a sweep that did not settle in `passes` passes.
+"""
+function _axis_bisection_seed(rp::DirectRunInput, bfield::DirectBField, sq_in_deriv, r::Float64, z::Float64, halfwidth::Float64;
+    passes::Int=AXIS_SEED_PASSES)
+    _bz(rr, zz) = (direct_get_bfield!(bfield, rr, zz, rp.psi_in, rp.sq_in, sq_in_deriv, rp.psio; derivs=1); bfield.bz)
+    _br(rr, zz) = (direct_get_bfield!(bfield, rr, zz, rp.psi_in, rp.sq_in, sq_in_deriv, rp.psio; derivs=1); bfield.br)
+    hr = (rp.rmax - rp.rmin) / (length(rp.psi_in_xs) - 1)
+    hz = (rp.zmax - rp.zmin) / (length(rp.psi_in_ys) - 1)
+    # Nearest sign change of f around x, bisected to a hundredth of a cell h; `nothing` if the whole grid line has none.
+    function _bracketed_root(f, x, xmin, xmax, h)
+        hw = halfwidth
+        while true
+            lo, hi = max(x - hw, xmin), min(x + hw, xmax)
+            sign(f(lo)) * sign(f(hi)) <= 0 && return find_zero(f, (lo, hi), Roots.Bisection(); xatol=0.01 * h)
+            (lo == xmin && hi == xmax) && return nothing
+            hw *= 2
+        end
+    end
+    for _ in 1:passes
+        r_new = _bracketed_root(rr -> _bz(rr, z), r, rp.rmin, rp.rmax, hr)
+        r_new === nothing && return r, z, "B_z has no sign change along Z = $z"
+        z_new = _bracketed_root(zz -> _br(r_new, zz), z, rp.zmin, rp.zmax, hz)
+        z_new === nothing && return r, z, "B_r has no sign change along R = $r_new"
+        moved = max(abs(r_new - r) / hr, abs(z_new - z) / hz)
+        r, z = r_new, z_new
+        moved < AXIS_SEED_CELL_TOL && return r, z, nothing
+    end
+    return r, z, "the bisection sweep did not settle in $passes passes"
+end
+
+"""
+    _axis_failure(rp, bfield, sq_in_deriv, r, z; bound_residual) -> failure
+
+Why `(r, z)` is not an acceptable magnetic axis, or `nothing`. It must lie on the ψ grid (a root off it is an artifact of
+spline extrapolation), be an O-point (`det ∂(B_R,B_Z)/∂(R,Z) = det(Hess ψ)/R² > 0`; an X-point has `det < 0`) that is a
+maximum of ψ (`ψ_RR < 0` and `ψ > 0`), and carry ψ within `AXIS_PSI_RATIO` of ψ₀, which rejects a secondary maximum
+elsewhere in the grid. With `bound_residual`, `|B_p| ≤ AXIS_RESIDUAL_RTOL × B_scale` must hold as well.
+"""
+function _axis_failure(rp::DirectRunInput, bfield::DirectBField, sq_in_deriv, r::Float64, z::Float64; bound_residual::Bool)
+    (rp.rmin <= r <= rp.rmax && rp.zmin <= z <= rp.zmax) ||
+        return "converged at (R, Z) = ($r, $z), outside the ψ grid R ∈ [$(rp.rmin), $(rp.rmax)], Z ∈ [$(rp.zmin), $(rp.zmax)]"
+    direct_get_bfield!(bfield, r, z, rp.psi_in, rp.sq_in, sq_in_deriv, rp.psio; derivs=2)
+    det = _axis_jacobian_det(bfield)
+    residual = hypot(bfield.br, bfield.bz)
+    det > 0 || return "converged at (R, Z) = ($r, $z), which is not an O-point (det ∂(B_R,B_Z)/∂(R,Z) = $det ≤ 0, |B_p| = $residual T)"
+    (bfield.psirr < 0 && bfield.psi > 0) ||
+        return "converged at (R, Z) = ($r, $z), an O-point that is not the maximum of ψ (ψ = $(bfield.psi), ψ_RR = $(bfield.psirr))"
+    lo, hi = AXIS_PSI_RATIO
+    lo < bfield.psi / rp.psio < hi ||
+        return "converged at (R, Z) = ($r, $z), a maximum of ψ that is not the main axis (ψ/ψ₀ = $(bfield.psi / rp.psio), outside ($lo, $hi))"
+    if bound_residual
+        bound = AXIS_RESIDUAL_RTOL * _axis_field_scale(rp, r)
+        residual <= bound || return "converged at (R, Z) = ($r, $z) with |B_p| = $residual T, above $AXIS_RESIDUAL_RTOL × B_scale = $bound T"
+    end
+    return nothing
+end
+
+# Field diagnostics at an accepted axis, for the restart warning.
+function _axis_diagnostics(rp::DirectRunInput, bfield::DirectBField, sq_in_deriv, r::Float64, z::Float64)
+    direct_get_bfield!(bfield, r, z, rp.psi_in, rp.sq_in, sq_in_deriv, rp.psio; derivs=2)
+    residual = hypot(bfield.br, bfield.bz)
+    return "at (R, Z) = ($r, $z) with |B_p| = $residual T ($(residual / _axis_field_scale(rp, r)) × B_scale) and " *
+           "det ∂(B_R,B_Z)/∂(R,Z) = $(_axis_jacobian_det(bfield)) T²/m²"
+end
+
+"""
+    _find_magnetic_axis(rp, bfield, sq_in_deriv, r0, z0, march_step) -> (r, z)
+
+The magnetic axis, by the first attempt whose Newton result passes `_axis_failure`: plain Newton from the midplane guess
+`(r0, z0)`, accepted on the step test alone, then Newton restarted from
+a bisection seed with steps capped at one march step and the residual bound added. A restart warns with the field at the
+axis; two failures error.
+"""
+function _find_magnetic_axis(rp::DirectRunInput, bfield::DirectBField, sq_in_deriv, r0::Float64, z0::Float64, march_step::Float64)
+    restart_cap = march_step    # Newton step cap on the restart path
+    seed_halfwidth = march_step # initial bracket half-width of the bisection seed
+    attempts = (
+        (label="Newton from the midplane guess", seed=() -> (r0, z0, nothing), cap=Inf, bound_residual=false),
+        (label="Newton restarted from a first-derivative bisection seed",
+            seed=() -> _axis_bisection_seed(rp, bfield, sq_in_deriv, r0, z0, seed_halfwidth), cap=restart_cap, bound_residual=true)
+    )
+    failures = String[]
+    for a in attempts
+        rs, zs, why = a.seed()
+        if why !== nothing
+            push!(failures, "$(a.label): the seed failed, $why")
+            continue
+        end
+        r, z, why = _axis_newton(rp, bfield, sq_in_deriv, rs, zs, a.cap)
+        why === nothing && (why = _axis_failure(rp, bfield, sq_in_deriv, r, z; bound_residual=a.bound_residual))
+        if why === nothing
+            isempty(failures) || @warn "$(join(failures, "; ")); magnetic axis found by $(a.label) " *
+                  "$(_axis_diagnostics(rp, bfield, sq_in_deriv, r, z)). Check ψ near the axis in the equilibrium file."
+            return r, z
+        end
+        push!(failures, "$(a.label) $why")
+    end
+    error("Failed to find magnetic axis: $(join(failures, "; ")).")
+end
+
+"""
+    _separatrix_crossing(rp, bfield, sq_in_deriv, ro, zo, r_edge, label) -> r
+
+Midplane separatrix crossing on the `r_edge` side of the axis: unbracketed Newton `δR = −ψ/ψ_R` toward ψ = 0 of the
+renormalized spline, as in the Fortran, so that it extrapolates past the grid edge for limited equilibria whose box hugs
+the LCFS. Each failed attempt moves the initial guess, a blend of `r_edge` and the axis, inward.
+"""
+function _separatrix_crossing(rp::DirectRunInput, bfield::DirectBField, sq_in_deriv, ro::Float64, zo::Float64, r_edge::Float64, label::String)
+    for restart in 0:5
+        r = ((3 - 0.5 * restart) * r_edge + ro) / (4 - 0.5 * restart)
+        for _ in 1:SEPARATRIX_STEPS
+            direct_get_bfield!(bfield, r, zo, rp.psi_in, rp.sq_in, sq_in_deriv, rp.psio; derivs=1)
+            dr = -bfield.psi / bfield.psir
+            r += dr
+            if abs(dr) <= AXIS_STEP_RTOL * abs(r)
+                @info "$label separatrix found at R = $(@sprintf("%.3f", r))"
+                return r
+            end
+        end
+    end
+    error("Took too many steps to find $label separatrix.")
+end
+
 """
     direct_position!(raw_profile)
 
-Finds the key geometric locations of the equilibrium: the magnetic axis (O-point)
-and the inboard/outboard separatrix crossings on the midplane. It also updates the
-spline representing the poloidal flux `ψ(R,Z)` based on the new magnetic axis location.
-This function performs the same overall function as the Fortran `direct_position`
-subroutine with better iteration control and error handling. We have also added a
-helper function for separatrix finding.
+Finds the magnetic axis (O-point, see `_find_magnetic_axis`) and the inboard and outboard separatrix crossings on its
+midplane, and replaces the `ψ(R, Z)` spline in `raw_profile` by one renormalized so that ψ at the axis equals ψ₀.
+A g-file whose header signs disagree with its ψ grid errors here.
 
-## Arguments:
+## Returns
 
-  - `raw_profile`: A `DirectRunInput` object containing splines and parameters.
-
-## Returns:
-
-  - `ro`: R-coordinate of the magnetic axis [m].
-  - `zo`: Z-coordinate of the magnetic axis [m].
-  - `rs1`: R-coordinate of the inboard separatrix crossing [m].
-  - `rs2`: R-coordinate of the outboard separatrix crossing [m].
-  - `psi_in_new` : returns psi_in renormalized by * psio/psi(ro,zo)
+  - `ro`, `zo`: magnetic axis coordinates, in m
+  - `rs1`, `rs2`: R of the inboard and outboard separatrix crossings, in m
 """
 function direct_position!(raw_profile::DirectRunInput)
-
     bfield = DirectBField()
-    max_iterations = 200
     sq_in_deriv = deriv1(raw_profile.sq_in)
 
-    # For an axis initial guess, we find zero crossing of Bz on the midplane
-    # Note the Fortran had this wrapped in a if ro == 0 block, which we omit here
-    # because I don't think it's ever used. If needed, it can be re-added.
-    r = (raw_profile.rmax + raw_profile.rmin) / 2.0
-    z = (raw_profile.zmax + raw_profile.zmin) / 2.0
-    dr = (raw_profile.rmax - raw_profile.rmin) / 20.0
-
-    for _ in 1:max_iterations
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
-        if bfield.bz >= 0.0
-            break
-        end
-        r += dr
-    end
-
-    # If we never exited early, the loop failed to find bz = 0
-    !(bfield.bz >= 0) && error("Took too many iterations to get bz=0.")
-
-    # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0
-    dr, dz = 0.0, 0.0
-    for _ in 1:max_iterations
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
-        det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
-        if abs(det) < 1e-20
-            error("Jacobian matrix is singular near ($r, $z).")
-        end
-        # Δx = -J⁻¹ F
-        dr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
-        dz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
-        r += dr
-        z += dz
-        if abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r)
-            @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
-            break
-        end
-    end
-
-    if !(abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r))
-        error("Failed to find magnetic axis after $max_iterations iterations.")
-    end
-
-    ro = r
-    zo = z
+    r0, z0, march_step = _midplane_axis_guess(raw_profile, bfield, sq_in_deriv)
+    ro, zo = _find_magnetic_axis(raw_profile, bfield, sq_in_deriv, r0, z0, march_step)
+    @info "Magnetic axis found at R = $(@sprintf("%.3f", ro)), Z = $(@sprintf("%.3f", zo))"
 
     # Renormalize psi based on the value at the magnetic axis
     direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
     x_coords = raw_profile.psi_in_xs
     y_coords = raw_profile.psi_in_ys
-    # Access nodal values from psi_in interpolant: partials[1,:,:] = function values
+    # partials[1, :, :] holds the nodal ψ values
     new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
-    # Because DirectRunInput is a mutable struct, we can update the spline here
     raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; extrap=ExtendExtrap())
 
-    # Replicate Fortran direct.f direct_position: unbracketed Newton iteration dr=-ψ/ψ_r toward
-    # ψ=0 (the renormalized separatrix). Newton extrapolates past the grid edge, so it finds the
-    # separatrix even for limited equilibria whose grid box hugs the LCFS (ψ>0 to the edge, no
-    # sign change to bracket). Fortran allows more steps here than for the axis solve (2000 vs 200).
-    max_separatrix_steps = 2000
-    function find_separatrix_crossing(r_edge, label)
-        # On each failed attempt, shift the initial guess (a weighted blend of r_edge and the axis
-        # ro) from near the grid edge toward the axis (Fortran direct.f restart counter ird = 0..5).
-        for restart in 0:5
-            r = ((3 - 0.5 * restart) * r_edge + ro) / (4 - 0.5 * restart)
-            for _ in 1:max_separatrix_steps
-                direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
-                dr = -bfield.psi / bfield.psir
-                r += dr
-                if abs(dr) <= 1e-12 * abs(r)
-                    @info "$label separatrix found at R = $(@sprintf("%.3f", r))"
-                    return r
-                end
-            end
-        end
-        error("Took too many steps to find $label separatrix.")
-    end
-
-    # Find inboard (rs1) and outboard (rs2) separatrix positions
-    rs1 = find_separatrix_crossing(raw_profile.rmin, "inboard")
-    rs2 = find_separatrix_crossing(raw_profile.rmax, "outboard")
+    rs1 = _separatrix_crossing(raw_profile, bfield, sq_in_deriv, ro, zo, raw_profile.rmin, "inboard")
+    rs2 = _separatrix_crossing(raw_profile, bfield, sq_in_deriv, ro, zo, raw_profile.rmax, "outboard")
 
     return ro, zo, rs1, rs2
 end
@@ -274,29 +377,20 @@ end
 """
     direct_fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)
 
-Performs the field-line integration for a single flux surface. This is a Julia adaptation
-of the Fortran `direct_fl_int` subroutine. Note that the array `y_out` is now indexed
-from 1:5 rather than 0:4 as in Fortran.
+Traces the flux surface `psifac` (ψ_norm) in the geometric angle η from the outboard midplane, refining onto the
+surface after every step.
 
-## Arguments:
+## Arguments
 
-  - `psifac`: normalized psi value for the surface (ψ_norm).
-  - `raw_profile`: `DirectRunInput` object containing splines and parameters.
-  - `ro`, `zo`: Coordinates of the magnetic axis [m].
-  - `rs2`: R-coordinate of the outboard separatrix [m].
-  - `theta_nodes`: straight-fieldline angles (0 to 1) at which to sample the surface.
+  - `ro`, `zo`: magnetic axis coordinates, in m
+  - `rs2`: R of the outboard separatrix crossing, in m
+  - `theta_nodes`: straight-fieldline angles (0 to 1) at which to sample the surface
 
-## Returns:
+## Returns
 
-    - `y_out`: A matrix containing the integrated quantities at each of `theta_nodes`
-      (see `sample_trace_at_sfl_angles`).
-        - `y_out[:, 1]`: η (geometric poloidal angle)
-        - `y_out[:, 2]`: ∫(dl/Bp)
-        - `y_out[:, 3]`: rfac (radial distance from magnetic axis)
-        - `y_out[:, 4]`: ∫(dl/(R²Bp))
-        - `y_out[:, 5]`: ∫(jac*dl/Bp)
-
-  - `bfield`: A `DirectBField` object with values at the integration start point.
+  - `y_out`: rows at `theta_nodes` (see `sample_trace_at_sfl_angles`), columns η, ∫dl/Bp, rfac (distance from the axis),
+    ∫dl/(R²Bp), ∫jac·dl/Bp
+  - `bfield`: the `DirectBField` at the start point
 """
 function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64,
     theta_nodes)::Tuple{Matrix{Float64},DirectBField}
@@ -319,8 +413,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
     psi0 = bfield.psi
 
-    # Set up and solve the ODE for fieldline following
-    # Initial condition
+    # Initial state [∫dl/Bp, rfac, ∫dl/(R²Bp), ∫jac·dl/Bp]
     u0 = zeros(Float64, 4)
     u0[2] = sqrt((r - ro)^2 + (z - zo)^2)
 
@@ -335,7 +428,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
         integrator.u[2] = direct_refine(integrator.u[2], integrator.t, psi0, params)
     end
 
-    # We save the solution at each step before refinement (before=true, after=false) to match Fortran
+    # Save each step before refinement, as the Fortran does
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
@@ -370,16 +463,8 @@ end
 """
     direct_fieldline_der!(dy, y, params, eta)
 
-The derivative function for the field-line integration ODE. This is passed to
-the `DifferentialEquations.jl` solver. This is a Julia adaptation of the Fortran
-`direct_fl_der` subroutine, with an added safeguard against division by zero.
-
-## Arguments:
-
-  - `dy`: The derivative vector (output, modified in-place).
-  - `y`: The state vector `[∫(dl/Bp), rfac, ∫(dl/(R²Bp)), ∫(jac*dl/Bp)]`.
-  - `params`: A `FieldLineDerivParams` struct with all necessary parameters.
-  - `eta`: The independent variable (geometric angle `η`).
+Right-hand side of the geometric-angle field-line ODE, with state `y = [∫dl/Bp, rfac, ∫dl/(R²Bp), ∫jac·dl/Bp]` and
+independent variable the geometric angle `eta`. Port of Fortran `direct_fl_der`, guarded against a vanishing denominator.
 """
 function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
 
@@ -402,7 +487,6 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
         return
     end
 
-    # Compute derivatives
     # d/dη [∫(dl/Bp)] = 1/|B_P| dl/d(eta) = rfac/denominator
     dy[1] = y[2] / denominator
     # d(rfac)/d(eta) = rfac/denom *( Br cos(eta) + Bz sin(eta) )
@@ -414,21 +498,9 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
 end
 
 """
-    direct_refine(rfac, eta, psi0, params)
+    direct_refine(rfac, eta, psi0, params) -> Float64
 
-Refines the radial distance `rfac` at a given angle `eta` to ensure the
-point lies exactly on the target flux surface `psi0`.
-
-## Arguments:
-
-  - `rfac`: The current guess for the radial distance from the magnetic axis.
-  - `eta`: The geometric poloidal angle.
-  - `psi0`: The target `ψ` value for the flux surface.
-  - `params`: A `FieldLineDerivParams` struct.
-
-## Returns:
-
-  - The refined `rfac` value.
+Newton-refines the distance `rfac` from the axis at geometric angle `eta` so the point lies on the surface ψ = `psi0`.
 """
 function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::FieldLineDerivParams)::Float64
     cos_eta, sin_eta = cos(eta), sin(eta)
@@ -454,26 +526,16 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
 end
 
 """
-    equilibrium_solver(raw_profile)
+    equilibrium_solver(raw_profile, fieldline_int=direct_fieldline_int; override_psi_nodes=nothing) -> PlasmaEquilibrium
 
-The main driver for the direct equilibrium reconstruction. It orchestrates the entire
-process from finding the magnetic axis to integrating along field lines and
-constructing the final coordinate and physics quantity splines. This performs the same
-overall function as the Fortran `direct_run` subroutine, with better checks for numerical
-robustness.
+Direct equilibrium driver: locates the axis, traces each flux surface with `fieldline_int`, and builds the profile,
+`rzphi` coordinate and `eqfun` splines in straight-fieldline coordinates.
 
-## Arguments:
+## Arguments
 
-  - `raw_profile`: A `DirectRunInput` object containing the initial splines (`psi_in`, `sq_in`)
-    and run parameters (`equil_input`).
-  - `fieldline_int`: the flux-surface tracer, called as `fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)` with `y_out` already sampled at `theta_nodes` through
-    `sample_trace_at_sfl_angles`.
-
-## Returns:
-
-  - A `PlasmaEquilibrium` object containing the final, processed equilibrium data,
-    including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
-    the physics quantity spline (`eqfun`).
+  - `fieldline_int`: flux-surface tracer, called as `fieldline_int(psifac, raw_profile, ro, zo, rs2, theta_nodes) -> (y_out, bfield)`
+    with `y_out` sampled at `theta_nodes` through `sample_trace_at_sfl_angles`
+  - `override_psi_nodes`: explicit ψ grid used instead of the configured one
 """
 @with_pool pool function equilibrium_solver(raw_profile::DirectRunInput, fieldline_int=direct_fieldline_int;
     override_psi_nodes::Union{Nothing,Vector{Float64}}=nothing)
@@ -547,18 +609,13 @@ robustness.
     if q0 <= 0.0
         @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
     end
-    # The -1 sentinel means "flip the extrapolated q0"; resolve it into a local so the
-    # config stays the user's request (matches equilibrium_solver(::InverseRunInput)).
     newq0 = equil_params.newq0
-    if newq0 == -1
-        newq0 = -q0
-    end
     if newq0 != 0.0
         @info "Revising q-profile for newq0 = $(@sprintf("%.3f", newq0))"
         f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
         f0fac = f0^2 * ((newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(newq0)
+            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
@@ -617,7 +674,6 @@ function _eqfun_from_geometry(profiles, rzphi_rsquared, rzphi_offset, rzphi_nu, 
         f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            # Access nodal derivatives from the interpolants (grid points)
             # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
             f = (
                 rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],

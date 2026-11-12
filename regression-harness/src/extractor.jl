@@ -155,21 +155,26 @@ function _json_element_abs(x)::Float64
 end
 
 """
-Compare two extracted values. Returns (abs_diff, rel_diff, status).
-For arrays, returns max element-wise absolute diff.
+Compare two extracted values, `q1` from the baseline ref and `q2` from the newer one. Returns
+(abs_diff, rel_diff, status). For arrays, returns max element-wise absolute diff. A quantity
+missing from both refs is `N/A`; one that disappears or changes storage type is a change, and
+one that only the newer ref has is `NEW`.
 """
 function compare_values(q1::NamedTuple, q2::NamedTuple)
     vtype = q1.value_type
 
-    # Handle missing values
-    if vtype == "missing" || q2.value_type == "missing"
+    if vtype == "missing" && q2.value_type == "missing"
         return (NaN, NaN, "N/A")
+    elseif q2.value_type == "missing"
+        return (NaN, NaN, "CHANGED (missing)")
+    elseif vtype == "missing"
+        return (NaN, NaN, "NEW")
     end
 
     # Storage type differs between refs (e.g. a quantity whose schema changed from a
     # vector to a scalar across the two commits); the values are not directly comparable.
     if vtype != q2.value_type
-        return (NaN, NaN, "N/A (type changed)")
+        return (NaN, NaN, "CHANGED (type)")
     end
 
     threshold = q1.noise_threshold

@@ -1,0 +1,45 @@
+# Regression case: large-aspect-ratio TJ equilibrium, n=1 GGJ tearing growth rates.
+# Reuses the LAR ideal-match deck via [overrides]: its Galerkin Δ′ drives the GGJ inner layer in a
+# [Tearing] solve with fixed η and ρ, each surface solved in its own frame. The only harness coverage
+# of GGJ tearing.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "lar_ggj_tearing_n1"
+description = "LAR TJ equilibrium, n=1, GGJ tearing growth rates per surface from the Galerkin Δ′ (reuses the LAR ideal-match deck via overrides)"
+example_dir = "examples/LAR_ideal_match_test"
+# The tearing solve replaces the ideal match, and local stability is not tracked here.
+remove_sections = ["Match", "LocalStability", "Ballooning"]
+
+[overrides]
+"Run.output_file" = "gpec.h5"             # the harness reads gpec.h5; this deck names its own file
+"Tearing.inner_model" = "GGJ"
+"Tearing.eta" = 1.0e-7
+"Tearing.rho" = 1.0e-7
+"Tearing.search.gamma_range" = [600.0, 2600.0]
+"Tearing.search.omega_range" = [-1500.0, 1500.0]
+
+# Growth rate, frequency and root flag of each surface (2/1, 3/1)
+[quantities.ggj_gamma]
+h5path = "Tearing/Roots/gamma"
+type = "real_vector"
+extract = "all_real"
+label = "GGJ γ in 1/s"
+noise_threshold = 1e-1
+order = 10
+
+[quantities.ggj_omega]
+h5path = "Tearing/Roots/omega"
+type = "real_vector"
+extract = "all_real"
+label = "GGJ ω in rad/s"
+noise_threshold = 1.0
+order = 11
+
+[quantities.ggj_no_root]
+h5path = "Tearing/Roots/no_root"
+type = "real_vector"
+extract = "all_real"
+label = "GGJ no_root flags"
+noise_threshold = 0
+order = 12

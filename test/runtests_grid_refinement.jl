@@ -108,6 +108,23 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         for c in (0.3, 0.7)
             @test !any(g -> abs(g - c) < 1e-12, b)
         end
+
+        # Close centers (e.g. two reverse-shear crossings near q_min) get brackets capped at half their gap, so each
+        # still sits alone in its own interval; the cut below the stencil floor warns.
+        b = @test_logs (:warn, r"capped") match_mode = :any GridRef.bracket_mandatory_nodes(grid, [0.5, 0.51], [0.01, 0.01], 1e-4)
+        @test all(diff(b) .> 0)
+        for c in (0.5, 0.51)
+            k = searchsortedlast(b, c)
+            @test b[k] < c < b[k+1] && isapprox(c - b[k], b[k+1] - c; rtol=1e-6)
+        end
+        @test searchsortedlast(b, 0.5) != searchsortedlast(b, 0.51)
+        # A near-tangent surface (huge or infinite stencil) is capped by the domain edges instead of clearing the grid.
+        for hw in (1e6, Inf)
+            b = @test_logs (:warn, r"capped") match_mode = :any GridRef.bracket_mandatory_nodes(grid, [0.3], [hw], 1e-4)
+            @test count(<(0.3), b) >= 3 && count(>(0.3), b) >= 3
+        end
+        # Centers within collapse_atol still share one bracket instead of erroring.
+        @test all(diff(GridRef.bracket_mandatory_nodes(grid, [0.5, 0.5 + 1e-9], [0.01, 0.01], 1e-4)) .> 0)
     end
 
     @testset "_validate_psi_nodes" begin
@@ -148,10 +165,6 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         sol_config = GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig()
 
         @test GridRef.wants_two_pass(eq_config)
-        # Legacy alias still selects the two-pass grid
-        alias_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
-            eq_type="sol", grid_type="log_asymptotic", mpsi=0, psi_accuracy=1e-3)
-        @test GridRef.wants_two_pass(alias_config)
 
         equil1 = GridRef.PlasmaEquilibrium(eq_config, sol_config)
 
@@ -183,12 +196,9 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         @test equil2.profiles.xs == grid
         @test equil2.rzphi_xs == grid
 
-        # The equilibrium keeps a private copy of its config, so reform needs no input and
-        # ignores later edits to the caller's config.
-        @test equil1.analytic isa GridRef.SolovevConfig && equil1.analytic !== sol_config
-        sol_config.elongation += 0.1
+        # The equilibrium keeps its config, so reform needs no input.
+        @test equil1.analytic === sol_config
         equil2r = GridRef.reform(equil1, grid)
-        sol_config.elongation -= 0.1
         @test equil2r.rzphi_xs == equil2.rzphi_xs
         @test map(equil2r.profiles.q_spline, grid) == map(equil2.profiles.q_spline, grid)
         @test equil2r.rzphi_rsquared((0.5, 0.3)) == equil2.rzphi_rsquared((0.5, 0.3))
@@ -198,7 +208,7 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         @test equil1c.config.eq_type == "sol" && equil1c.rzphi_xs == equil1.rzphi_xs
         @test_throws ErrorException GridRef.PlasmaEquilibrium(sol_config; eq_type="lar")
         @test_throws ErrorException GridRef.PlasmaEquilibrium(eq_config)  # analytic kind without its config
-        @test GridRef._analytic_eq_type(GridRef.TJAnalyticConfig()) == "tj_analytic"
+        @test GridRef.analytic_eq_type(GridRef.TJAnalyticConfig()) == "tj_analytic"
 
         # Solovev has finite edge q, so the auto grid must classify it as limited: no separatrix
         # log law, on either pass, even with the absolute r² floor disabled (the relative
@@ -212,7 +222,7 @@ const GridRef = GeneralizedPerturbedEquilibrium.Equilibrium
         using TOML
         dir_path = joinpath(dirname(@__DIR__), "examples", "DIIID-like_ideal_example")
         inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-        equil = GridRef.PlasmaEquilibrium(GridRef.EquilibriumConfig(inputs["Equilibrium"], dir_path), nothing)
+        equil = GridRef.PlasmaEquilibrium(GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, dir_path), nothing)
         fit = GridRef.edge_q_law(equil)
         @test fit !== nothing
         @test fit.A < 0

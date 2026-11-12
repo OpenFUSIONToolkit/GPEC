@@ -24,7 +24,7 @@ Torque-balance inputs at one rational surface.
 
 ## Fields
 
-  - `model`     -- inner-layer model passed to `solve_inner`
+  - `model`     -- inner-layer model whose `layer_response` gives Δ
   - `params`    -- that model's layer parameters at the surface; must carry `Q_e`, `Q_i`, `m`, `n`
   - `Q0`        -- normalized natural E×B rotation of the m/n mode, τ_k·n·ω_E
   - `prandtl`   -- magnetic Prandtl number τ_R/τ_V (the layer's P_φ)
@@ -45,11 +45,10 @@ end
 """
     cole_delta(model, params, Q::Real) -> ComplexF64
 
-Inner-layer Δ at real frequency `Q` on Cole's axis. `solve_inner` evaluates the layer
-at `i·conj(Q)`, which mirrors the real axis, so Cole's Δ(Q) is `conj(Δ_solve_inner(−Q))`.
+Inner-layer Δ at real frequency `Q` on Cole's axis, which runs opposite to the dispersion scans' Re Q, so Cole's Δ(Q)
+is the scans' layer response at −Q.
 """
-cole_delta(model::InnerLayerModel, params, Q::Real) =
-    conj(solve_inner(model, params, ComplexF64(-Q)).tearing)
+cole_delta(model::InnerLayerModel, params, Q::Real) = layer_response(model, params, ComplexF64(-Q)).tearing
 
 """
     torque_balance_value(tb::TorqueBalance, Q::Real) -> (bal, Δ)
@@ -108,7 +107,7 @@ function torque_balance_scan(tb::TorqueBalance; Qmin=nothing, Qmax=nothing, n::I
 
     # Follow the first resolved interior maximum without joining samples across excluded intervals.
     path = [i for i in sort(eachindex(Qs); by=i -> abs(Qs[i] - Qa))
-                  if min(Qa, Qb) < Qs[i] < max(Qa, Qb) && isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha]
+            if min(Qa, Qb) < Qs[i] < max(Qa, Qb) && isfinite(bal[i]) && bal[i] > 0 && abs(Δs[i]) > tb.alpha]
     idx = 0
     valley = peak = previous = 0
     for i in path
