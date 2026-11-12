@@ -197,6 +197,24 @@ include("h5_metadata_check.jl")
         @test any(h.nzero > 0 for h in walled.history)
     end
 
+    @testset "root iteration with a dominant end value" begin
+        # An end value 21 orders above the other puts the interpolated point on the opposite end in floating point
+        f(x) = x < 1.5e11 ? -1e21 : log(x / 3e11)
+        x, converged, lo, hi = FFS._sign_change_root(f, 1e11, 1e12, f(1e11), f(1e12); rtol=1e-3, ftol=1e-6, scale=1.0, maxiter=30)
+        @test converged
+        @test abs(x / 3e11 - 1) < 2e-3
+        # A well-conditioned sign change keeps the plain interpolation steps
+        nev = Ref(0)
+        g(x) = (nev[] += 1; x / 4e10 - 1)
+        x, converged, _, _ = FFS._sign_change_root(g, 1e10, 1e11, g(1e10), g(1e11); rtol=1e-3, ftol=1e-6, scale=1.0, maxiter=30)
+        @test converged
+        @test x ≈ 4e10 rtol = 1e-6
+        @test nev[] == 3
+        # maxiter exhausted is reported, never an end of the bracket as converged
+        x, converged, lo, hi = FFS._sign_change_root(f, 1e11, 1e12, f(1e11), f(1e12); rtol=1e-12, ftol=0.0, scale=1.0, maxiter=3)
+        @test !converged && lo < x <= hi && x < 1e12
+    end
+
     @testset "kinetic data without T_e" begin
         ktemplate = joinpath(@__DIR__, "test_data", "regression_tj_kinetic_calculated")
         kdeck = TOML.parsefile(joinpath(ktemplate, "gpec.toml"))

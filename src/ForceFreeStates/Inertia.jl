@@ -199,6 +199,37 @@ struct IdealGrowthRateResult
 end
 
 """
+    _sign_change_root(lambda_at, lo, hi, flo, fhi; rtol, ftol, scale, maxiter) -> (x, converged, lo, hi)
+
+Root of `lambda_at` in the bracket `(lo, hi)` with `flo < 0 < fhi`, by the Illinois iteration (the retained
+end's value is halved when it is kept twice running) safeguarded by geometric bisection. The interpolated
+point is replaced by `sqrt(lo * hi)` when it is not strictly inside the bracket, which happens in floating
+point when one end value dwarfs the other, or when the same end has been kept three times running.
+Stops when `|lambda_at(x)| <= ftol * scale` or the bracket is narrower than `rtol * hi`.
+"""
+function _sign_change_root(lambda_at, lo::Float64, hi::Float64, flo::Float64, fhi::Float64; rtol::Real, ftol::Real, scale::Real, maxiter::Int)
+    x, side, kept = hi, 0, 0
+    for _ in 1:maxiter
+        x = (lo * fhi - hi * flo) / (fhi - flo)
+        (kept >= 3 || !(lo < x < hi)) && (x = sqrt(lo * hi))
+        lam = lambda_at(x)
+        abs(lam) <= ftol * scale && return x, true, lo, hi
+        newside = lam < 0 ? -1 : 1
+        kept = newside == side ? kept + 1 : 1
+        if lam < 0
+            lo, flo = x, lam
+            side == -1 && (fhi /= 2)
+        else
+            hi, fhi = x, lam
+            side == 1 && (flo /= 2)
+        end
+        side = newside
+        hi - lo <= rtol * hi && return x, true, lo, hi
+    end
+    return x, false, lo, hi
+end
+
+"""
     growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia, gamma_sq_init=1e9, gamma_sq_min=1e4, gamma_sq_max=1e16,
                 rtol=1e-3, ftol=1e-6, maxiter=30, marginal=nothing, config=nothing, verbose=false) -> IdealGrowthRateResult
     growth_rate(prob::ForceBalanceProblem, alg::Forward, config::GrowthRateConfig; marginal=nothing, verbose=false)
@@ -213,7 +244,7 @@ zero the plasma is stable and `gamma` is 0. Otherwise the count is bracketed by 
 present at the lower end is a fixed-boundary eigenvalue inside the bracket, where λ_min has a pole; since
 the fastest mode is free-boundary and at least as fast as any fixed-boundary one, the lower end is lifted
 above it by bisecting on the count. Then only λ_min changes sign in the bracket and a bracketed secant
-(Illinois) iteration brings it to zero, stopping when |λ_min| falls below `ftol` times the reference
+(Illinois) iteration, safeguarded by bisection, brings it to zero, stopping when |λ_min| falls below `ftol` times the reference
 |λ_min| (the marginal value, or the bracket's negative end when the marginal energy is positive) or the
 bracket is narrower than `rtol` in γ², within `maxiter` steps (a warning and `converged = false`
 otherwise). Every evaluation is one force-balance solve. `gamma_sq_min` is the floor below which the mode
@@ -326,33 +357,13 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         return finish(hi, true)
     end
 
-    # Illinois iteration on the sign change; the retained end's λ is halved when it is kept twice running
     scale = history[1].lambda < 0 ? abs(history[1].lambda) : abs(h_lo.lambda)
-    flo, fhi = h_lo.lambda, h_hi.lambda
-    gamma_sq, side, converged = hi, 0, false
-    for _ in 1:maxiter
-        gamma_sq = (lo * fhi - hi * flo) / (fhi - flo)
+    function lambda_at(gamma_sq)
         h = evaluate(gamma_sq)
         h.nzero == 0 || error("growth_rate: an interior zero crossing appeared inside the bracket at γ² = $gamma_sq; the free-boundary energy is not monotone there")
-        lam = h.lambda
-        if abs(lam) <= ftol * scale
-            converged = true
-            break
-        end
-        if lam < 0
-            lo, flo = gamma_sq, lam
-            side == -1 && (fhi /= 2)
-            side = -1
-        else
-            hi, fhi = gamma_sq, lam
-            side == 1 && (flo /= 2)
-            side = 1
-        end
-        if hi - lo <= rtol * hi
-            converged = true
-            break
-        end
+        return h.lambda
     end
+    gamma_sq, converged, lo, hi = _sign_change_root(lambda_at, lo, hi, h_lo.lambda, h_hi.lambda; rtol, ftol, scale, maxiter)
     converged || @warn "growth_rate: no convergence in $maxiter steps; γ² lies in [$lo, $hi] and the last iterate $gamma_sq is reported"
     return finish(gamma_sq, converged)
 end
