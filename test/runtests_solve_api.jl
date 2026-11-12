@@ -404,6 +404,32 @@ using HDF5
         @test MatchProblem(kgal; rotation=1.0).rotation == fill(1.0, n)
     end
 
+    @testset "CCC matching" begin
+        ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs...)
+        n = length(ric.surfaces)
+        layer = (eta=1e-7, rho=1e-7, rotation=1.0)
+        ggj = solve(MatchProblem(ric; layer...), GGJModel())
+        # Q* = 0, M⊥/M = 1 is the GGJ layer, through CCC's own Wasow basis and splitting solve.
+        @test solve(MatchProblem(ric; layer...), CCCModel(; Qstar=0.0)).bpen ≈ ggj.bpen rtol = 1e-6
+        drift = solve(MatchProblem(ric; layer...), CCCModel(; Qstar=0.05, mperp=1.2))
+        @test drift.closure === :matched && all(isfinite, drift.bpen) && drift.bpen != ggj.bpen
+        @test drift.match.model === CCCModel(; Qstar=0.05, mperp=1.2) && all(p -> p.Qstar == 0.05 && p.mperp == 1.2, drift.match.inner_params)
+        # Without kinetic data CCC needs Q* given.
+        @test_throws "give Qstar, or load kinetic profiles" solve(MatchProblem(ric; layer...), CCCModel())
+        # From kinetic data, ω*ₑ = (2π/χ₁)(T_e n_e′/n_e + T_e′) per unit n, so a flat density and T_e = 1 keV·(1 − ψ/2) give
+        # (2π/χ₁)·(−500 eV); Q* = −n·ω*ₑ/Q₀ at each surface.
+        psi = collect(range(0.0, 1.0; length=64))
+        keq = deepcopy(ric.equil)
+        attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=fill(5e19, 64), n_i=fill(5e19, 64), T_e=1e3 .* (1 .- psi ./ 2),
+            T_i=fill(1e3, 64), omega_E=fill(2π * 1e3, 64)))
+        ωse = GPEC.InnerLayer.layer_omega_star_e(keq, ric.surfaces)
+        @test ωse ≈ fill(-500 / keq.psio, n) rtol = 1e-6
+        ggj1 = FFS.ggj_parameters(ric.surfaces[1], keq; eta=1e-7, rho=1e-7, ising=1)
+        p = GPEC.InnerLayer.layer_parameters(CCCModel(), ggj1, keq, ric.surfaces[1])
+        @test p.ggj === ggj1 && p.mperp == 1.0
+        @test p.Qstar ≈ -ric.nlow * ωse[1] / GPEC.InnerLayer.growth_rate_scale(ggj1) rtol = 1e-12
+    end
+
     @testset "matched inner profiles: opt-in, and parity columns agree across inner models" begin
         mktempdir() do dir
             gal = solve(equil, Galerkin(; nx=32, rpec_flag=true, cut_solution=true); nn=1, ffs_kwargs...)
@@ -510,6 +536,21 @@ using HDF5
             end
         end
 
+        @testset "deck tearing under [Tearing] with the CCC layer" begin
+            t = GPEC.tearing_from_deck(
+                Dict{String,Any}("Tearing" => Dict{String,Any}("inner_model" => "CCC"),
+                    "CCC" => Dict{String,Any}("cfl" => 0.1, "Qstar" => [0.05, 0.1], "mperp" => 1.2))
+            )
+            @test t.model isa CCCModel{:ray} && t.model.options == (; cfl=0.1) && t.model.Qstar == [0.05, 0.1] && t.model.mperp == 1.2
+            # The model's deck section round-trips.
+            @test GPEC.toroidal_layer_model(GPEC.deck_sections(t.model), "CCC").Qstar == [0.05, 0.1]
+            # A [CCC] section no stage uses is refused.
+            mktempdir() do dir
+                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("CCC" => Dict{String,Any}("cfl" => 0.1)))
+                @test_throws "[CCC] is set but neither" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+        end
+
         @testset "deck matching under [Match]" begin
             layer = (eta=1e-7, rho=1e-7, rotation=1.0)
             # The deck's [Match] section for `n` surfaces and the [GGJ] solver.
@@ -541,6 +582,21 @@ using HDF5
                     extra_sections=match_sections(length(ric.surfaces), "ray"))]).ffs
 
                 @test reference.closure === :matched
+                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.match.cout ≈ reference.match.cout rtol = 1e-12
+            end
+
+            # The CCC layer under [Match], named by inner_model with its options in [CCC].
+            mktempdir() do dir
+                ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs...)
+                n = length(ric.surfaces)
+                api = solve(MatchProblem(ric; layer...), CCCModel(; Qstar=fill(0.05, n), mperp=fill(1.2, n)))
+                sections = Dict{String,Any}("CCC" => Dict{String,Any}("solver" => "ray", "Qstar" => fill(0.05, n), "mperp" => fill(1.2, n)),
+                    "Match" => Dict{String,Any}("inner_model" => "CCC", "eta" => fill(layer.eta, n), "rho" => fill(layer.rho, n),
+                        "rotation" => fill(layer.rotation, n)))
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"), extra_sections=sections)]).ffs
+
+                @test reference.closure === :matched && reference.match.model isa CCCModel{:ray} && reference.match.model.Qstar == fill(0.05, n)
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
             end

@@ -155,7 +155,7 @@ Derives the toroidal resistive-layer equations with electron diamagnetic drift, 
 > *Physics of Fluids* **31**, 2659 (1988).
 > DOI: [10.1063/1.866543](https://doi.org/10.1063/1.866543)
 
-States those equations as Eqs. (1a)–(1c), with the electron diamagnetic frequency Q* and the perpendicular-transport weight M⊥/M, and their large-x exponents (Eq. 2): the form `CCCModel` implements. Its tearing dispersion curves (Figs. 1b, 2b) are reproduced by `CCCModel` up to a constant normalization of Δ.
+States those equations as Eqs. (1a)–(1c), with the electron diamagnetic frequency Q* and the perpendicular-transport weight M⊥/M, and their large-x exponents (Eq. 2): the form `CCCModel` implements. Its tearing dispersion curves (Figs. 1b, 2b) plot the Fourier-space Δ_o, which its Eq. (10b) relates to the real-space Δ that `CCCModel` returns.
 
 ---
 

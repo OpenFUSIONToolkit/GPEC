@@ -12,7 +12,7 @@ using LinearAlgebra
 using StaticArrays
 
 using ..InnerLayer
-using ..InnerLayer: InnerLayerModel, layer_response, GGJModel, GGJParameters,
+using ..InnerLayer: InnerLayerModel, layer_response, ToroidalLayerModel, ToroidalLayerParameters,
     SLAYERModel, SLAYERParameters
 
 include("SurfaceCoupling.jl")

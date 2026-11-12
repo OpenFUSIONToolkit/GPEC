@@ -6,7 +6,7 @@ import ..Utilities.HDF5Annotations: replace_group!, write_ragged!
 # Writer for a `TearingResult`. Layout under the caller's parent group (inputs live only under Input/):
 #
 #   Tearing/
-#   ├── PerSurface/            -- layer parameters (SLAYER or GGJ set), Δ' matrix, omega_E, q_shift
+#   ├── PerSurface/            -- the layer model's parameters, Δ' matrix, omega_E, q_shift
 #   ├── Roots/                 -- Q_root, omega, gamma, no_root (lab frame)
 #   ├── LayerWidths/           -- resistive layer thickness per surface
 #   ├── Diagnostics/           -- ValidRoots, Poles, FilteredRoots (+ *Winding), flat-plus-offsets ragged;
@@ -25,8 +25,8 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     result::TearingResult)
     g = replace_group!(parent, "Tearing")
     g["enabled"] = Int(result.enabled)
-    # Which inner-layer model produced PerSurface/: the SLAYER and GGJ branches write
-    # disjoint field sets, so readers must not have to infer it from the schema.
+    # Which inner-layer model produced PerSurface/: each model writes its own field set,
+    # so readers must not have to infer it from the schema.
     attrs(g)["layer_model"] = result.enabled ? _layer_model_token(eltype(result.params)) : "none"
     attrs(g)["inner_model"] = result.model === nothing ? "none" : InnerLayer.model_name(result.model)
 
@@ -37,7 +37,7 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     end
 
     _write_per_surface!(g, result.params, result.dp_matrix)
-    if result.model isa GGJModel && result.problem !== nothing
+    if result.model isa ToroidalLayerModel && result.problem !== nothing
         g["PerSurface/Delta_prime_raw"] = result.problem.ffs.delta_prime.raw
     end
     # E×B rotation resolved per surface, and the Doppler offset it applies to the inner-layer Q.
@@ -77,10 +77,9 @@ function _write_critical_resonant_field!(g, crf::CriticalResonantFieldResult)
     return nothing
 end
 
-# Token recorded in the Tearing group's layer_model attribute; keyed by the
-# per-surface parameter type since the SLAYER and GGJ branches write disjoint fields.
-_layer_model_token(::Type{SLAYERParameters}) = "slayer"
-_layer_model_token(::Type{GGJParameters}) = "ggj"
+# Token recorded in the Tearing group's layer_model attribute, from the per-surface parameter type:
+# SLAYERParameters → "slayer", GGJParameters → "ggj", CCCParameters → "ccc".
+_layer_model_token(::Type{P}) where {P<:InnerLayerParameters} = lowercase(replace(String(nameof(P)), "Parameters" => ""))
 
 # Metadata table for the Tearing group (paths relative to it); ragged Diagnostics
 # subgroups and Scan/Surface_<k> groups are annotated by iteration below.
@@ -123,14 +122,6 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/k_ref" => (; long_name="reference-length ratio K = r_s·(dψ_N/dr) at each surface", dims=("surface",)),
     "PerSurface/alpha_mercier" => (; long_name="Mercier Frobenius exponent α = √(−D_I) at each surface (Glasser-Greene-Johnson 1975 Eq. 48)", dims=("surface",)),
     "PerSurface/delta_prime_conversion" => (; long_name="ψ_N → r_s reference-length factor K^(2α) applied to each Δ' diagonal", dims=("surface",)),
-    "PerSurface/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", dims=("surface",)),
-    "PerSurface/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", dims=("surface",)),
-    "PerSurface/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", dims=("surface",)),
-    "PerSurface/H" => (; long_name="Glasser-Greene-Johnson coefficient H per surface", dims=("surface",)),
-    "PerSurface/K" => (; long_name="Glasser-Greene-Johnson coefficient K per surface", dims=("surface",)),
-    "PerSurface/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", dims=("surface",)),
-    "PerSurface/tau_A" => (; long_name="Alfvén time τ_A per surface (GGJ layer parameters)", units="s", dims=("surface",)),
-    "PerSurface/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", dims=("surface",)),
     "PerSurface/Delta_prime_matrix" => (;
         long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)",
         dims=("surface_row", "surface_col")
@@ -265,18 +256,15 @@ function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
     return nothing
 end
 
-# GGJ per-surface parameters carry the geometric coefficients (E,F,G,H,K,M)
-# and resistive/Alfvén times rather than the SLAYER dimensionless set.
-function _write_per_surface!(g, params::AbstractVector{GGJParameters},
-    dp_matrix::Matrix{ComplexF64})
+# A toroidal layer model's per-surface parameters are its own output columns (InnerLayer.layer_parameter_columns).
+function _write_per_surface!(g, params::AbstractVector{<:ToroidalLayerParameters}, dp_matrix::Matrix{ComplexF64})
     ps = create_group(g, "PerSurface")
-    ps["rational_index"] = Int[p.ising for p in params]
-    for fname in (:E, :F, :G, :H, :K, :M)
-        ps[String(fname)] = Float64[getfield(p, fname) for p in params]
+    ps["rational_index"] = collect(1:length(params))
+    columns = InnerLayer.layer_parameter_columns(params)
+    for (name, column) in columns
+        ps[name] = column.values
     end
-    ps["tau_A"] = Float64[p.taua for p in params]
-    ps["tau_R"] = Float64[p.taur for p in params]
-    ps["dVdpsi"] = Float64[p.v1 for p in params]
+    Utilities.HDF5Annotations.annotate!(ps, [name => (; column.long_name, column.units, dims=("surface",)) for (name, column) in columns])
     ps["Delta_prime_matrix"] = dp_matrix
     return nothing
 end

@@ -42,7 +42,12 @@ subtype only through this interface, so each model keeps whatever numbers its eq
     far-field rates that set the ray contour and mesh, with optional [`parabolic_resolution_rate`](@ref) and
     [`ray_angle_admissible`](@ref) for models whose exponential pairs have different rates;
   - [`inner_Q`](@ref), [`rescale_delta`](@ref) and [`profile_conversions`](@ref) - the normalization between the
-    physical growth rate, the outer region and the layer variables.
+    physical growth rate, the outer region and the layer variables;
+  - [`mercier_di`](@ref), [`growth_rate_scale`](@ref) and [`layer_parameter_columns`](@ref) - what the tearing and
+    matching stages read.
+
+A model builds its parameters with [`layer_parameters`](@ref) and checks its own inputs with
+[`check_layer_inputs`](@ref).
 """
 abstract type ToroidalLayerParameters <: InnerLayerParameters end
 
@@ -155,6 +160,42 @@ Sum of the fast exponential rates every Hermite cell resolves, alongside the par
 """
 function fast_rates end
 
+"""
+    layer_parameters(model, ggj, equil, surface) -> ToroidalLayerParameters
+
+The per-surface parameters `model` solves on, from the surface's GGJ coefficients and times `ggj` (a
+`GGJParameters`), the equilibrium `equil` and the singular surface `surface`.
+"""
+function layer_parameters end
+
+"""
+    check_layer_inputs(model, nsurfaces) -> nothing
+
+Throws if the inputs `model` carries do not fit a problem with `nsurfaces` rational surfaces; a no-op by default.
+"""
+check_layer_inputs(::ToroidalLayerModel, ::Integer) = nothing
+
+"""
+    mercier_di(params) -> Float64
+
+Mercier interchange index D_I of the surface; the layer needs D_I < 0.
+"""
+function mercier_di end
+
+"""
+    growth_rate_scale(params) -> Float64
+
+The rate Q₀ in 1/s that scales the physical growth rate to the layer's, Q = γ/Q₀.
+"""
+function growth_rate_scale end
+
+"""
+    layer_parameter_columns(params::AbstractVector) -> Vector{Pair{String,NamedTuple}}
+
+The per-surface parameters as output columns, `name => (; values, long_name, units)`, one value per surface.
+"""
+function layer_parameter_columns end
+
 include("InnerAsymptotics.jl")
 include("Galerkin.jl")
 include("Ray.jl")
@@ -164,6 +205,7 @@ export ToroidalLayerModel, ToroidalLayerParameters
 export layer_rows, layer_weak_form, wasow_basis, split_block, power_exponents, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
 export parabolic_resolution_rate, ray_angle_admissible
 export inner_Q, rescale_delta, profile_conversions
+export layer_parameters, check_layer_inputs, mercier_di, growth_rate_scale, layer_parameter_columns
 export solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_profile
 export ray_response, ray_profile, galerkin_response, galerkin_profile, backend_options
 

@@ -7,7 +7,7 @@
 
 Driven inner-layer matching on a finished force-free-states solve `ffs`: each rational surface
 is matched at the forced eigenvalue γ = 2πi·n·f, with f the plasma rotation frequency there.
-`solve(prob, GGJModel())` returns a copy of `ffs` with the matched solution and the penetrated
+`solve(prob, GGJModel())` (or another toroidal layer model, e.g. `CCCModel()`) returns a copy of `ffs` with the matched solution and the penetrated
 field `bpen`. `ffs` needs the Δ′ coil block, from `Galerkin(; rpec_flag=true)` or `Riccati()`
 with `vac_flag=true`.
 
@@ -84,11 +84,11 @@ end
 """
     closure_capable(model) -> Bool
 
-Whether `model` can solve a [`MatchProblem`](@ref): `GGJModel` with the `:ray` or `:galerkin`
-backend can (they reconstruct the layer profiles); `SLAYERModel` (slab, tearing parity only)
+Whether `model` can solve a [`MatchProblem`](@ref): a toroidal layer model (`GGJModel`, `CCCModel`) with the
+`:ray` or `:galerkin` backend can (they reconstruct the layer profiles); `SLAYERModel` (slab, tearing parity only)
 cannot.
 """
-closure_capable(::InnerLayer.GGJModel{S}) where {S} = S in (:ray, :galerkin)
+closure_capable(::InnerLayer.ToroidalLayerModel{S}) where {S} = S in (:ray, :galerkin)
 closure_capable(::InnerLayer.SLAYERModel) = false
 
 """
@@ -107,7 +107,7 @@ function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel
 end
 
 # Inner-layer Δ per surface, the matching system, then the matched outer and inner profiles.
-function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
+function _compute_match(prob::MatchProblem, model::InnerLayer.ToroidalLayerModel)
     ffs = prob.ffs
     dp = ffs.delta_prime
     sings = ffs.surfaces
@@ -128,7 +128,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         inner_psi = Vector{Float64}[]
         inner_xi = Matrix{ComplexF64}[]
         inner_b = Matrix{ComplexF64}[]
-        inner_params = InnerLayer.GGJParameters[]
+        inner_params = InnerLayer.ToroidalLayerParameters[]
         rpec_eig = zeros(ComplexF64, msing)
         residual = 0.0
     else
@@ -142,12 +142,12 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₊, even
         inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₋, even
         inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₊, odd
-        inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
+        InnerLayer.check_layer_inputs(model, msing)
+        inner_params = [InnerLayer.layer_parameters(model, ggj_parameters(sings[i], equil; eta=prob.eta[i], rho=prob.rho[i], gamma=prob.gamma, ising=i),
+            equil, sings[i]) for i in 1:msing]
         profiles = true
         for i in 1:msing
-            params = ggj_parameters(sings[i], equil; eta=prob.eta[i], rho=prob.rho[i],
-                gamma=prob.gamma, ising=i)
-            inner_params[i] = params
+            params = inner_params[i]
             γ = 2π * im * nn * prob.rotation[i]    # forced eigenvalue, f in Hz
             rpec_eig[i] = γ
             inner = InnerLayer.solve_inner_profile(model, params, γ)   # parity columns (Δ₊, Δ₋)

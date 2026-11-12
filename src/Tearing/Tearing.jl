@@ -8,7 +8,7 @@
 #                  resonant field of error-field penetration
 #   TearingProblem / TearingConfig / TearingResult -- the public solve,
 #                  `solve(TearingProblem(ffs; ...), model; config)`, with one
-#                  method per inner-layer model (SLAYERModel, GGJModel)
+#                  method for SLAYERModel and one for every ToroidalLayerModel (GGJ, CCC)
 #
 # `InnerLayer` itself lives at the top level (`src/InnerLayer/`) and is loaded
 # before `ForceFreeStates`, which depends on it for the matched-Δ′ Galerkin
@@ -32,7 +32,7 @@ import ..ForceFreeStates: layer_overlap_scan
 import ..InnerLayer as InnerLayer
 using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner, layer_response,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
-    GGJModel, GGJParameters,
+    ToroidalLayerModel, ToroidalLayerParameters,
     LayerWidths, slayer_layer_thickness
 using .InnerLayer.SLAYER: _slayer_profiles, _layer_zeff, _layer_ion_mass, _layer_mass_per_electron, _build_resistivity_model
 

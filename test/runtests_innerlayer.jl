@@ -252,6 +252,14 @@ end
         @test_throws ArgumentError IL.CCCModel(; solver=:galerkin)
         @test_throws ArgumentError IL.CCCModel(; nx=10)
         @test_throws ArgumentError IL.CCCParameters(q4, 0.1, -1.0)
+        # Per-surface inputs live on the model: a number for every surface or one value per surface.
+        m = IL.CCCModel(; Qstar=[0.1, 0.2], mperp=1.2)
+        @test m.Qstar == [0.1, 0.2] && m.mperp === 1.2 && m.options == (;)
+        @test_throws ArgumentError IL.CCCModel(; mperp=0.0)
+        @test_throws "Qstar has length 2, expected 3" IL.check_layer_inputs(m, 3)
+        @test IL.check_layer_inputs(m, 2) === nothing && IL.check_layer_inputs(IL.GGJModel(), 3) === nothing
+        @test IL.layer_parameters(m, IL.GGJParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, ising=2), nothing, nothing).Qstar == 0.2
+        @test [c.first for c in IL.layer_parameter_columns([ccc(; Qstar=0.3)])] == ["E", "F", "G", "H", "K", "M", "tau_A", "tau_R", "dVdpsi", "Q_star", "M_perp_ratio"]
         # An angle past the decaying sector of the slower family is refused.
         @test_throws ArgumentError TL.solve_ray(p, 5.0im; θ=1.2)
         @test IL.CCCParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, Qstar=0.5).ggj.E == q4.E

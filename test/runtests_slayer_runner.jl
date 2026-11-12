@@ -1,7 +1,7 @@
 @testset "Tearing: TearingProblem + TearingConfig + HDF5 output" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium: GGJModel, SLAYERModel, TearingProblem, TearingConfig, solve
+    using GeneralizedPerturbedEquilibrium: GGJModel, CCCModel, SLAYERModel, TearingProblem, TearingConfig, solve
     using GeneralizedPerturbedEquilibrium.Tearing
     using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using HDF5
@@ -192,6 +192,25 @@
                 TearingProblem(ffs; eta=1e-7, rho=1e-7,
                     critical_resonant_field=GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantFieldControl()), GGJModel();
                 config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
+
+            # CCC tearing on the same solve: at Q* = 0, M⊥/M = 1 it is the GGJ layer, through its own Wasow basis and splitting solve.
+            box = TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0), nre=4, nim=4, amr_passes=1)
+            ccc = solve(TearingProblem(ffs; eta=1e-7, rho=1e-7), CCCModel(; Qstar=0.0); config=box)
+            @test ccc.model === CCCModel(; Qstar=0.0) && eltype(ccc.params) <: CCCParameters
+            @test ccc.gamma ≈ still.gamma rtol = 1e-6
+            @test ccc.omega ≈ still.omega atol = 1e-3 * maximum(abs, still.gamma)
+            mktemp() do path, io
+                close(io)
+                h5open(f -> save_to_hdf5(f, ccc), path, "w")
+                h5open(path, "r") do f
+                    @test read(attributes(f["Tearing"])["layer_model"]) == "ccc"
+                    @test read(f["Tearing/PerSurface/Q_star"]) == zeros(length(ffs.surfaces))
+                    @test read(f["Tearing/PerSurface/M_perp_ratio"]) == ones(length(ffs.surfaces))
+                end
+            end
+            # Without kinetic data CCC needs Q* given, and a per-surface Q* needs one value per surface.
+            @test_throws "give Qstar, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7, rho=1e-7), CCCModel(); config=box)
+            @test_throws "Qstar has length" solve(TearingProblem(ffs; eta=1e-7, rho=1e-7), CCCModel(; Qstar=zeros(length(ffs.surfaces) + 1)); config=box)
         end
     end
 

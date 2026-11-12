@@ -39,3 +39,11 @@ inner_Q(p::CCCParameters, γ::Number) = inner_Q(p.ggj, γ)
 rescale_delta(Δ::AbstractVector, p::CCCParameters) = rescale_delta(Δ, p.ggj)
 profile_conversions(p::CCCParameters) = profile_conversions(p.ggj)
 power_exponents(p::CCCParameters) = power_exponents(p.ggj)
+mercier_di(p::CCCParameters) = mercier_di(p.ggj)
+growth_rate_scale(p::CCCParameters) = growth_rate_scale(p.ggj)
+
+function layer_parameter_columns(params::AbstractVector{CCCParameters})
+    return [layer_parameter_columns([p.ggj for p in params]);
+        "Q_star" => (; values=Float64[p.Qstar for p in params], long_name="scaled electron diamagnetic frequency Q* = −n·ω*ₑ/Q₀ per surface", units="1");
+        "M_perp_ratio" => (; values=Float64[p.mperp for p in params], long_name="perpendicular-transport weight M⊥/M per surface", units="1")]
+end

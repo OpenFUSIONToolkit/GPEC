@@ -36,7 +36,7 @@ end
 
 # Doppler-shift a scanned value into the layer's own frequency variable: real for SLAYER's Q, imaginary for GGJ's s.
 layer_argument(sc::SurfaceCoupling, Q::Number) = ComplexF64(Q) + sc.q_shift
-layer_argument(sc::SurfaceCoupling{<:GGJModel}, s::Number) = ComplexF64(s) + im * sc.q_shift
+layer_argument(sc::SurfaceCoupling{<:ToroidalLayerModel}, s::Number) = ComplexF64(s) + im * sc.q_shift
 
 """
     surface_coupling(model::SLAYERModel, params::SLAYERParameters,
@@ -54,10 +54,10 @@ function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
 end
 
 """
-    surface_coupling(model::GGJModel, params::GGJParameters,
+    surface_coupling(model::ToroidalLayerModel, params::ToroidalLayerParameters,
                      dp_diag::Number; omega_E::Real=0.0, n::Integer=0) -> SurfaceCoupling
 
-GGJ convenience constructor. `scale = 1` (GGJ's `rescale_delta` already returns Δ in outer units) and `tauk = 1`.
+Toroidal-layer (GGJ, CCC) convenience constructor. `scale = 1` (GGJ's `rescale_delta` already returns Δ in outer units) and `tauk = 1`.
 
 `omega_E` is the surface's E×B rotation per unit toroidal mode number, in rad/s, and `n` the toroidal mode number
 (required when `omega_E` is nonzero). GGJ is a plasma-frame layer (Johnson & Greene 1967, Plasma Phys. 9, 611,
@@ -66,7 +66,7 @@ Appendix B), so a rotating surface sees the Doppler-shifted growth rate `s + i·
 There is no `dc` keyword: the GGJ residual already includes the interchange channel, so a Δ_crit offset would
 double-count it; `dc` is 0.
 """
-function surface_coupling(model::GGJModel, params::GGJParameters, dp_diag::Number; omega_E::Real=0.0, n::Integer=0)
+function surface_coupling(model::ToroidalLayerModel, params::ToroidalLayerParameters, dp_diag::Number; omega_E::Real=0.0, n::Integer=0)
     iszero(omega_E) || n >= 1 ||
         throw(ArgumentError("surface_coupling: E×B rotation omega_E=$(omega_E) rad/s needs the toroidal mode number n ≥ 1; got n=$(n)"))
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),

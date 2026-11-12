@@ -9,7 +9,7 @@
     GGJDispersion(mc::MultiSurfaceCouplingFull)
 
 The GGJ full-matching determinant on the scan plane, `g(Q) = mc(−i·Q·Q₀)`, where `Q₀ = S^(−1/3)/τ_A`
-of the reference surface `mc.surfaces[mc.ref_idx]`. Every surface must use a `GGJModel`.
+of the reference surface `mc.surfaces[mc.ref_idx]`. Every surface must use a `ToroidalLayerModel`.
 """
 struct GGJDispersion{M<:MultiSurfaceCouplingFull}
     mc::M
@@ -17,9 +17,9 @@ struct GGJDispersion{M<:MultiSurfaceCouplingFull}
 end
 
 function GGJDispersion(mc::MultiSurfaceCouplingFull)
-    all(sc -> sc.model isa GGJModel, mc.surfaces) ||
-        throw(ArgumentError("GGJDispersion: every surface must use a GGJModel"))
-    return GGJDispersion(mc, InnerLayer.GGJ.q0(mc.surfaces[mc.ref_idx].params))
+    all(sc -> sc.model isa ToroidalLayerModel, mc.surfaces) ||
+        throw(ArgumentError("GGJDispersion: every surface must use a ToroidalLayerModel"))
+    return GGJDispersion(mc, InnerLayer.growth_rate_scale(mc.surfaces[mc.ref_idx].params))
 end
 
 (g::GGJDispersion)(Q::Number) = g.mc(-im * ComplexF64(Q) * g.Q0)

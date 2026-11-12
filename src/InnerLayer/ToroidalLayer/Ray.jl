@@ -425,6 +425,13 @@ function asymptotic_profile(params::ToroidalLayerParameters, res::RaySolveResult
     return (; s=collect(float.(srange)), x=cis(res.θ) .* srange, Ψ=Ψ, Ξ=Ξ, Υ=Υ)
 end
 
+# The contour-angle knob of delta_convergence: outward by 20%, or inward by 20% when outward is inadmissible.
+function θ_variation(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64)
+    θout = θ == 0 ? 0.1 : 1.2 * θ
+    ray_angle_admissible(params, Q, θout) && return ("θ → 1.2θ", (; θ=θout))
+    return ("θ → 0.8θ", (; θ=0.8 * θ))
+end
+
 """
     delta_convergence(params, Q; verbose=true, kwargs...) -> (; Δ, spread, base, table)
 
@@ -433,13 +440,6 @@ angle, mesh, series order and radius, march tolerance, BVP edge s_m, decaying-pa
 report the relative change of (Δ₊, Δ₋); `spread` is the worst case per parity. θ moves outward, away from the
 pseudo-resonance x² = −Q²(G+KF), or inward when the outward angle is not [`ray_angle_admissible`](@ref).
 """
-# The contour-angle knob of delta_convergence: outward by 20%, or inward by 20% when outward is inadmissible.
-function θ_variation(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64)
-    θout = θ == 0 ? 0.1 : 1.2 * θ
-    ray_angle_admissible(params, Q, θout) && return ("θ → 1.2θ", (; θ=θout))
-    return ("θ → 0.8θ", (; θ=0.8 * θ))
-end
-
 function delta_convergence(params::ToroidalLayerParameters, Q::ComplexF64; verbose::Bool=true, kwargs...)
     base = solve_ray(params, Q; kwargs...)
     variations = [

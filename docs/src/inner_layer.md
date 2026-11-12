@@ -5,15 +5,16 @@ The outer region, ideal MHD everywhere except at the rational surfaces, gives th
 
 ## What it computes
 
-Two layer models are available, selected by `[Tearing] inner_model`:
+Three layer models are available, selected by `[Tearing] inner_model`:
 
 - `"SLAYER"`, the two-fluid drift-MHD slab layer equations of Cole and Fitzpatrick (2006), in the form Park's SLAYER solver takes them with a few terms dropped ([Park (2022)](citations.md#Tearing), [Burgess et al. (2026)](citations.md#Tearing)), with resistivity, perpendicular and toroidal transport, diamagnetic drifts and E×B rotation taken from the kinetic profiles of the equilibrium; its options are in `[SLAYER]`.
 - `"GGJ"`, the toroidal resistive-MHD layer of Glasser, Greene and Johnson ([Glasser, Wang and Park (2016)](citations.md#Tearing), [Glasser and Wang (2020)](citations.md#Tearing)), whose coefficients E, F, G, H, K are the flux-surface averages stored under `SingularSurfaces/`; its solver options are in `[GGJ]`.
+- `"CCC"`, the GGJ layer with electron diamagnetic drift and perpendicular transport of [Cho, Choi and Choi (1987)](citations.md#Tearing) (see [CCC](@ref "CCC: diamagnetic drift and perpendicular transport") below); its solver options, Q* and M⊥/M are in `[CCC]`.
 
 For each surface the `Dispersion` search scans the complex frequency plane, extracts the roots of the dispersion relation and classifies them, and `[Tearing.search]` sets the scan.
 With `[Tearing.CriticalResonantField]` the stage also computes, for the `SLAYER` layer, the resonant field at which a static error field overcomes the layer's shielding: the error-field penetration threshold.
 
-The same GGJ layer serves the `[Match]` stage of the [Workflow](workflow.md), which does the complementary job: instead of finding the free modes it imposes the layer response on the driven force-free states and writes the matched solution to `SingularSurfaces/Match/`.
+The same GGJ layer, or the CCC layer, serves the `[Match]` stage of the [Workflow](workflow.md), which does the complementary job: instead of finding the free modes it imposes the layer response on the driven force-free states and writes the matched solution to `SingularSurfaces/Match/`.
 
 ## Governing equations
 
@@ -54,7 +55,7 @@ From `examples/DIIID-like_SLAYER_example/gpec.toml`, after a `[ForceFreeStates]`
 
 ```toml
 [Tearing]
-inner_model = "SLAYER"            # or "GGJ"
+inner_model = "SLAYER"            # or "GGJ", "CCC"
 coupling_mode = "uncoupled"       # one dispersion relation per surface; "coupled" uses the full Δ′ matrix
 
 [Tearing.search]
@@ -95,8 +96,8 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | Dataset | Meaning |
 |---|---|
 | `Tearing/PerSurface/rational_psi`, `rational_q`, `m`, `n` | the analyzed surfaces |
-| `Tearing/PerSurface/S`, `tau`, `c_beta`, `P_perp`, `P_tor`, `Q_e`, `Q_i`, `tau_k`, `tau_R`, `eta`, `rs`, … | the layer parameters of each surface (SLAYER); `E`, `F`, `G`, `H`, `K`, `M`, `tau_A` and `tau_R` for GGJ |
-| `Tearing/PerSurface/Delta_prime_raw` and `Delta_prime_matrix_rs` (SLAYER) or `Delta_prime_matrix` (GGJ) | the outer matrix each layer was matched to |
+| `Tearing/PerSurface/S`, `tau`, `c_beta`, `P_perp`, `P_tor`, `Q_e`, `Q_i`, `tau_k`, `tau_R`, `eta`, `rs`, … | the layer parameters of each surface (SLAYER); `E`, `F`, `G`, `H`, `K`, `M`, `tau_A` and `tau_R` for GGJ, with `Q_star` and `M_perp_ratio` for CCC |
+| `Tearing/PerSurface/Delta_prime_raw` and `Delta_prime_matrix_rs` (SLAYER) or `Delta_prime_matrix` (GGJ, CCC) | the outer matrix each layer was matched to |
 | `Tearing/PerSurface/Delta_prime_norm`, `delta_prime_conversion` | the Δ′ normalization of the SLAYER layer |
 | `Tearing/Roots/Q_root`, `omega`, `gamma`, `no_root` | the dispersion root of each surface in the lab frame (`frequency_frame` attribute), its real frequency and growth rate, and the flag of a surface with no usable root |
 | `Tearing/LayerWidths/delta_s`, `delta_s_abs`, `d_beta` | the complex resistive layer thickness, its magnitude in metres, and the ion drift scale |
@@ -144,6 +145,7 @@ p = GGJ.q4_surface_benchmark()      # GGJParameters for the q = 4 benchmark surf
 [`CCCParameters`](@ref InnerLayer.CCC.CCCParameters) holds a `GGJParameters` plus `Qstar` and `mperp`; ``Q_* = 0``, ``M_\perp/M = 1`` give the GGJ equations, and the GGJ scales, Mercier exponents and Δ normalization carry over unchanged.
 Its far field splits GGJ's double exponential pair into two families with scales ``\sigma_j`` set by Kim's Eq. (2) ([`parabolic_scales`](@ref InnerLayer.CCC.parabolic_scales)), so the asymptotic basis uses a general Sylvester splitting solve and the ray is centred between the families, ``\theta = (\arg\sigma_1 + \arg\sigma_2)/4``; an angle at which either family stops decaying between the real axis and the ray is refused.
 Only the `:ray` backend is available.
+In a deck, `[Tearing]` or `[Match]` takes `inner_model = "CCC"`, and `[CCC]` holds the solver options with `Qstar` and `mperp`, each a scalar or one value per surface, as the `CCCModel` keywords of the same names; without `Qstar`, Q* = −n·ω*ₑ/Q₀ comes from the kinetic data ([`layer_omega_star_e`](@ref InnerLayer.layer_omega_star_e)), and `mperp` defaults to 1.
 When the two families decay at very different rates (large ``K Q Q_*^2``) the march resolves the faster one across the slower one's whole band, and a solve can take tens of seconds.
 
 ```julia
