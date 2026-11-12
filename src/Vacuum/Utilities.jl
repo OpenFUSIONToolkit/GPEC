@@ -85,14 +85,16 @@ end
 """
     trig_derivative_matrix(n) -> Matrix{Float64}
 
-Derivative at the nodes of the trigonometric interpolant on `n` equispaced periodic nodes (Trefethen, Spectral Methods in
-MATLAB, ch. 3). For even `n` the Nyquist mode is a cosine, whose derivative vanishes at the nodes.
+Derivative at the nodes of the trigonometric interpolant on `n` equispaced periodic nodes.
+For even `n` the Nyquist mode is a cosine, whose derivative vanishes at the nodes.
 """
 function trig_derivative_matrix(n::Int)
     D = zeros(n, n)
     for j in 1:n, i in 1:n
         r = mod(i - j, n)
         r == 0 && continue
+        # Symmetric range keeps sin(πr/n) away from π, where it loses relative precision; the sign factor absorbs the shift
+        r > n ÷ 2 && (r -= n)
         s, c = sincospi(r / n)
         D[i, j] = (isodd(r) ? -0.5 : 0.5) * (iseven(n) ? c / s : 1 / s)
     end
@@ -113,6 +115,44 @@ function trig_tangents(r::Matrix{Float64}, mtheta::Int, nzeta::Int)
         dr_dζ[:, k] = vec(R * transpose(Dζ))
     end
     return dr_dθ, dr_dζ
+end
+
+"""
+    trig_upsample_matrix(n) -> Matrix{Float64}
+
+Values at the `2n` nodes of the twice finer grid of the trigonometric interpolant on `n` equispaced periodic nodes.
+Odd rows are the identity.
+"""
+function trig_upsample_matrix(n::Int)
+    U = zeros(2n, n)
+    for j in 1:n, i in 1:2n
+        # Offset of fine node i from coarse node j, in fine spacings
+        r = mod(i - 2j + 1, 2n)
+        if iseven(r)
+            U[i, j] = r == 0
+        else
+            # Symmetric range, as in `trig_derivative_matrix`; mod(r, 4) flips with the shift exactly when csc does (odd n)
+            r > n && (r -= 2n)
+            s, c = sincospi(r / 2n)
+            # Periodic sinc at a midpoint: sign alternates every other midpoint; cot for even n (Nyquist cosine), csc for odd n
+            U[i, j] = (mod(r, 4) == 1 ? 1 : -1) * (iseven(n) ? c / s : 1 / s) / n
+        end
+    end
+    return U
+end
+
+"""
+    trig_upsample(a, Uθ, Uζ, mtheta, nzeta) -> Matrix{Float64}
+
+Columns of the `(mtheta * nzeta, k)` grid samples `a` on the 2× finer grid; `Uθ`, `Uζ` from [`trig_upsample_matrix`](@ref).
+"""
+function trig_upsample(a::AbstractMatrix{Float64}, Uθ::Matrix{Float64}, Uζ::Matrix{Float64}, mtheta::Int, nzeta::Int)
+    # 2× in θ and 2× in ζ → 4× the nodes, still θ-fastest
+    a_up = Matrix{Float64}(undef, 4 * mtheta * nzeta, size(a, 2))
+    for k in axes(a, 2)
+        a_up[:, k] = vec(Uθ * reshape(a[:, k], mtheta, nzeta) * transpose(Uζ))
+    end
+    return a_up
 end
 
 """
