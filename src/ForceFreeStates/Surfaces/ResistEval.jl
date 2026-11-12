@@ -3,7 +3,8 @@
 #
 # θ-integrands, each weighted by `jac / v1` before integration (1-6 follow Fortran `resist_eval`):
 #   1: B² / |∇ψ|²   2: 1 / |∇ψ|²   3: 1 / B²   4: 1 / (B² · |∇ψ|²)   5: B²   6: |∇ψ|² / B²
-#   7: B (for the Lin-Liu & Miller 1995 trapped fraction)   8: |∇ψ|² (toroidal critical-Δ, ⟨|∇V|²⟩ = v1²⟨|∇ψ_N|²⟩)
+#   7: B   8: |∇ψ|² (toroidal critical-Δ, ⟨|∇V|²⟩ = v1²⟨|∇ψ_N|²⟩)
+#   9…8+nλ: √(1 − λₖ h), h = B/B_max, at the pitch-angle nodes λₖ of the exact trapped-fraction integral
 
 """
     ResistGeometry
@@ -22,7 +23,7 @@ averages (⟨1⟩ = 1), and `‖∇ψ_N‖` is the gradient of the normalized po
 | `avg_bsq_over_dpsisq` | ⟨B²/‖∇ψ_N‖²⟩ — needed for τ_R                            |
 | `avg_bsq`             | ⟨B²⟩ — needed for τ_R                                    |
 | `avg_dpsisq`          | ⟨‖∇ψ_N‖²⟩ — needed for the toroidal critical-Δ           |
-| `f_trap`              | Lin-Liu & Miller 1995 trapped-particle fraction          |
+| `f_trap`              | trapped-particle fraction, exact pitch-angle integral    |
 | `R_major`             | major radius (R_max + R_min)/2 over the surface, in m    |
 | `eps_local`           | (R_max − R_min)/2 / R_major — local inverse aspect ratio |
 | `p_local`             | Plasma pressure at this surface [Pa]                     |
@@ -86,11 +87,12 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     v2 = profiles.dVdpsi_deriv(psi_f)
     q = profiles.q_spline(psi_f)
 
-    # θ-integrands (see file header) plus running extrema of B and R for f_trap and ε.
+    # θ-integrands (see file header) plus running B_max (f_trap) and R extrema (ε).
     ntheta = length(equil.rzphi_ys)
-    ff = zeros(Float64, ntheta, 8)
+    lambda, lambda_weight = Utilities.NeoclassicalResistivity.trapped_fraction_nodes()
+    ff = zeros(Float64, ntheta, 8 + length(lambda))
+    weight = zeros(Float64, ntheta)
     B_max = -Inf
-    B_min = Inf
     R_max = -Inf
     R_min = Inf
     for itheta in 1:ntheta
@@ -115,7 +117,6 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
 
         B_here = sqrt(bsq)
         B_max = max(B_max, B_here)
-        B_min = min(B_min, B_here)
         R_max = max(R_max, r)
         R_min = min(R_min, r)
 
@@ -127,8 +128,13 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
         ff[itheta, 6] = dpsisq / bsq
         ff[itheta, 7] = B_here
         ff[itheta, 8] = dpsisq
-        @views ff[itheta, :] .*= jac / v1
+        weight[itheta] = jac / v1
     end
+    # The pitch-angle columns need B_max over the whole surface, so they are filled after the θ loop.
+    for itheta in 1:ntheta, (k, lam) in enumerate(lambda)
+        ff[itheta, 8+k] = sqrt(max(1.0 - lam * ff[itheta, 7] / B_max, 0.0))
+    end
+    ff .*= weight
     # Snap the repeated endpoint exactly equal to the start
     @views ff[end, :] .= ff[1, :]
 
@@ -138,7 +144,7 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     avg_B = avg[7]
     R_major = 0.5 * (R_max + R_min)
     eps_local = R_major > 0 ? 0.5 * (R_max - R_min) / R_major : 0.0
-    f_trap = Utilities.NeoclassicalResistivity.trapped_fraction(avg_B, avg[5], B_min, B_max)
+    f_trap = Utilities.NeoclassicalResistivity.trapped_fraction(avg[5] / B_max^2, avg[9:end], lambda_weight)
 
     # GGJ coefficients (Fortran RDCON resist_eval)
     E_coef = p1 * v1 / (q1 * chi1^2)^2 * avg[1] *
