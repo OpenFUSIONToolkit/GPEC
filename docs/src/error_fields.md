@@ -90,6 +90,7 @@ rotation_offset_factor = 2.0
 The tilt pivot matters for multi-filament winding packs: `"conductor"` rotates each filament about its own centre, `"set"` rotates the pack rigidly about its common centre, which is what an engineering axis-line tolerance constrains.
 A coil set that is not an error-field source (a correction array or anything in `exclude_coils`) is swept like the others but left out of the as-designed field, the Monte Carlo and the scans; a tolerance that names it is an error.
 The NTV limits need a `[KineticForces]` section, since each array's torque per kAt² is one kinetic torque evaluation of its unit-current spectrum, with and without the dominant mode projected out.
+With several ion species or `electron = true`, that torque is the same species sum as the NTV diagnostics; the reference rotation is the main ion's.
 
 The tolerances are engineering data, reviewed independently of any run, so they live in their own file, echoed into `Input/RawInputs/ErrorFields/tolerance_toml_raw` for replay; every key is checked against the schema.
 Its tables are `[ErrorFields.defaults]` (fallbacks for every coil block), one `[[ErrorFields.coil]]` per coil set that moves on its own, `[[ErrorFields.coherent_group]]` for coil sets that move together, `[ErrorFields.correctability]` and `[ErrorFields.other_field]`:
