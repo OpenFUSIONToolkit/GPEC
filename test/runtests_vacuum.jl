@@ -1191,17 +1191,16 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
         end
 
         @testset "Kernel3D extract_patch!" begin
-            # 4×4 grid (npol=4, ntor=4), PATCH_DIM=3, center at (2,2); data is (16, 3)
-            data = zeros(16, 3)
-            data[:, 1] .= 1.0:16.0
-            data[:, 2] .= 1.0
-            data[:, 3] .= 0.0
-            patch_out = zeros(3, 3, 3)
+            # 4×4 grid (npol=4, ntor=4), PATCH_DIM=3, center at (2,2)
+            data = collect(1.0:16.0)
+            patch_out = zeros(3, 3)
             GeneralizedPerturbedEquilibrium.Vacuum.extract_patch!(patch_out, data, 2, 2, 4, 4, 3)
             # Center of patch should be data at (2,2) = index 2+4*(2-1)=6
-            @test isapprox(patch_out[2, 2, 1], 6.0)
-            @test all(isfinite, patch_out)
-            @test size(patch_out) == (3, 3, 3)
+            @test patch_out[2, 2] == 6.0
+            @test patch_out[1, 1] == 1.0
+            # Periodic wrap: centered at (1,1), corner (0,0) wraps to (4,4) = 16
+            GeneralizedPerturbedEquilibrium.Vacuum.extract_patch!(patch_out, data, 1, 1, 4, 4, 3)
+            @test patch_out[1, 1] == 16.0
         end
 
         @testset "Kernel3D manufactured exterior solution converges at high order" begin

@@ -290,16 +290,23 @@ class operator real and splitting a self-conjugate class into two half-size bloc
         grad_blocks = [zeros!(pool, T, nb * sz, nb * sz) for sz in sizes]
         green_blocks = [zeros!(pool, T, nb * sz, sz) for sz in sizes]
 
-        # Plasma–Plasma block
-        compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+        # The kernel's small per-row BLAS products run inside its threaded loop; a threaded BLAS would oversubscribe the cores
+        blas_nthreads = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            # Plasma–Plasma block
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
 
-        if !wall.nowall
-            # Plasma–Wall block
-            compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
-            # Wall–Wall block
-            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
-            # Wall–Plasma block
-            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+            if !wall.nowall
+                # Plasma–Wall block
+                compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+                # Wall–Wall block
+                compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+                # Wall–Plasma block
+                compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+            end
+        finally
+            BLAS.set_num_threads(blas_nthreads)
         end
 
         # Factor once per group (conjugate partner reuses it)
