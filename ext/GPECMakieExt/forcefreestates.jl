@@ -37,14 +37,22 @@ const _ENERGY_STYLE = Dict(
     :vacuum => (:ev, rich("vacuum  δW", subscript("v")), :rect, 3)
 )
 
+# A matched closure's W is non-Hermitian at the layers' forcing frequencies: its complex energies get Re on the main
+# axis and Im (∝ −torque) below it, with no stability verdict.
 function _energies!(gl, e; which=(:total, :plasma, :vacuum))
     et = real.(e.et)
     nu = count(<(0), et)
-    title = nu == 0 ? rich("Free boundary: stable, least stable δW = ", _num(et[1])) : "Free boundary: $(_plural(nu, "unstable eigenmode"))"
+    title = if e.matched
+        rich("Matched free-boundary energies, λ", subscript("1"), " = ", _cnum(e.et[1]))
+    else
+        nu == 0 ? rich("Free boundary: stable, least stable δW = ", _num(et[1])) : "Free boundary: $(_plural(nu, "unstable eigenmode"))"
+    end
     vals = reduce(vcat, (real.(getfield(e, _ENERGY_STYLE[w][1])) for w in which))
     lims = _symlims(vals)
-    ax = Axis(gl[1, 1]; xlabel="eigenmode (most unstable first)", ylabel="eigenvalue of W·v = λN·v", title, yscale=Makie.pseudolog10, limits=(nothing, lims))
-    hspan!(ax, lims[1], 0; color=(:firebrick, 0.06))
+    xlabel = e.matched ? "eigenmode (lowest Re λ first)" : "eigenmode (most unstable first)"
+    ax = Axis(gl[1, 1]; xlabel, ylabel=e.matched ? "Re λ of W·v = λN·v" : "eigenvalue of W·v = λN·v", title, yscale=Makie.pseudolog10,
+        limits=(nothing, lims))
+    e.matched || hspan!(ax, lims[1], 0; color=(:firebrick, 0.06))
     hlines!(ax, 0; color=:black, linewidth=1)
     for w in which
         field, label, marker, k = _ENERGY_STYLE[w]
@@ -52,20 +60,35 @@ function _energies!(gl, e; which=(:total, :plasma, :vacuum))
         scatter!(ax, 1:length(v), v; color=WONG[k], marker, markersize=k == 1 ? 9 : 7, label)
     end
     length(which) > 1 && axislegend(ax; position=:rb)
+    if e.matched
+        hidexdecorations!(ax; grid=false)
+        ai = Axis(gl[2, 1]; xlabel, ylabel=rich("Im λ (torque ∝ −Im λ)"), yscale=Makie.pseudolog10)
+        hlines!(ai, 0; color=:black, linewidth=1)
+        scatter!(ai, 1:length(e.et), imag.(e.et); color=WONG[1], markersize=9)
+        linkxaxes!(ax, ai)
+        rowsize!(gl, 2, Relative(0.3))
+    end
     return ax
 end
 
 function _mode_displacement!(gl, d, rat; modes=nothing)
     amp = abs.(d.xi)
+    shown = ifelse.(d.keep, amp, 0.0)   # each harmonic away from its resonance sets the harmonic choice and the y-range
     rows = if modes === nothing
-        sort(sortperm(vec(maximum(amp; dims=2)); rev=true)[1:min(6, size(amp, 1))])
+        sort(sortperm(vec(maximum(shown; dims=2)); rev=true)[1:min(6, size(amp, 1))])
     else
         [m - d.mlow + 1 for m in modes if 1 <= m - d.mlow + 1 <= size(amp, 1)]
     end
     isempty(rows) && throw(ArgumentError("plot_mode_displacement: no requested m lies in $(d.mlow):$(d.mlow + size(amp, 1) - 1)"))
-    scaled, scale = _decade(amp[rows, :])
-    ax = Axis(gl[1, 1]; xlabel=PSIN, ylabel=rich("|ξ", superscript("ψ"), subscript("m"), "|", _unit(scale, "")), limits=((0, 1), (0, nothing)))
-    title = rich("ξ", superscript("ψ"), subscript("m"), " of the least stable free-boundary eigenmode", d.dW === nothing ? "" : ", δW = " * _num(real(d.dW)))
+    factor, scale = _power(shown[rows, :])
+    scaled = amp[rows, :] ./ factor
+    ytop = 1.05 * maximum(shown[rows, :]) / factor
+    ax = Axis(gl[1, 1]; xlabel=PSIN, ylabel=rich("|ξ", superscript("ψ"), subscript("m"), "|", _unit(scale, "")), limits=((0, 1), (0, ytop)))
+    title = if d.matched
+        rich("ξ", superscript("ψ"), subscript("m"), " of the lowest Re λ free-boundary eigenmode", d.dW === nothing ? "" : ", λ = " * _cnum(d.dW))
+    else
+        rich("ξ", superscript("ψ"), subscript("m"), " of the least stable free-boundary eigenmode", d.dW === nothing ? "" : ", δW = " * _num(real(d.dW)))
+    end
     _titled_rationals!(gl[1, 1], ax, rat, title)
     colors = Makie.resample_cmap(:viridis, length(rows) + 1)
     for (j, i) in enumerate(rows)
@@ -79,7 +102,8 @@ function _eigenvectors!(gl, d; nmodes=nothing)
     v = abs.(d.wt)
     m = d.mlow .+ (0:(size(v, 1)-1))
     k = min(size(v, 2), something(nmodes, size(v, 2)))
-    ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel="eigenmode", yreversed=true, title="Free-boundary eigenmodes, least stable at top",
+    title = d.matched ? "Free-boundary eigenmodes, lowest Re λ at top" : "Free-boundary eigenmodes, least stable at top"
+    ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel="eigenmode", yreversed=true, title,
         yticks=k <= 15 ? (1:k) : [1; 5:5:k])
     hm = heatmap!(ax, m, 1:k, v[:, 1:k]; colormap=:viridis)
     Colorbar(gl[1, 2], hm; label=rich("|v", subscript("m"), "| (unit power norm)"))
@@ -214,16 +238,16 @@ function FFS._plot_delta_prime_raw(dp; part=:real)
     end
 end
 
-function FFS._plot_delta_coil(dp; part=:real)
+function FFS._plot_delta_ef(dp; part=:real)
     return themed() do
         ns = length(dp.labels)
-        me = dp.mlow .+ (0:(size(dp.coil, 1)-1))
+        me = dp.mlow .+ (0:(size(dp.ef, 1)-1))
         fig = Figure(; size=(900, 560))
         ax = _surface_side_axes!(fig[1, 1], dp.labels; xgroups=false, xlabel="applied edge harmonic m",
-            title=rich(_part_label(part, sub("Δ", "coil")), ": surface response to each edge harmonic"),
+            title=rich(_part_label(part, sub("Δ", "EF")), ": surface response to each edge harmonic"),
             limits=((me[1] - 0.5, me[end] + 0.5), (0.5, 2ns + 0.5)))
-        hm = _complex_heatmap!(ax, me, 1:(2ns), _part(dp.coil, part), part)
-        Colorbar(fig[1, 2], hm; label=_part_label(part, sub("Δ", "coil")))
+        hm = _complex_heatmap!(ax, me, 1:(2ns), _part(dp.ef, part), part)
+        Colorbar(fig[1, 2], hm; label=_part_label(part, sub("Δ", "EF")))
         fig
     end
 end

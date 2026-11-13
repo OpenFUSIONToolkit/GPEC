@@ -129,7 +129,7 @@ ffs = solve(eq, Riccati(; nchunks=40); nn=1, vac_flag=true)                     
 ffs = solve(eq, Galerkin(; nx=512); nn=1)                                        # finite-element outer-region Δ′
 ```
 
-A result carries `nothing` in the fields its integrator does not produce, and consumers warn and skip rather than erroring; `plasma_response` in particular needs a `Forward()` solve with `wall=nothing` (it errors on a wall or a Galerkin result and skips with a warning on a Riccati one), see [Stability](stability.md).
+A result carries `nothing` in the fields its integrator does not produce, and consumers warn and skip rather than erroring; `plasma_response` in particular needs a `Forward()` solve, or a `Galerkin(; error_field_response=true)` solve with `vac_flag=true`, with `wall=nothing` (it errors on a wall, any other Galerkin result or a matched one, and skips with a warning on a Riccati one), see [Stability](stability.md).
 A kinetic solve takes `Forward()` with the problem's `kinetic` keyword: `kinetic=KineticForcesControl(; ...)` evaluates the drift-kinetic matrices on the equilibrium's kinetic profiles, `kinetic=TestKineticMatrices(; scale)` uses synthetic matrices, `kinetic_factor` scales either, and `km = kinetic_matrices(prob)` evaluates the source once for reuse in later solves ([`KineticMatrices`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.KineticMatrices)).
 
 ## Inner-layer matching
@@ -137,13 +137,13 @@ A kinetic solve takes `Forward()` with the problem's `kinetic` keyword: `kinetic
 A `MatchProblem` holds the outer Δ′ a solve published plus per-surface layer parameters, and the inner-layer model passed to `solve` computes the layer response at the prescribed rotation; the result is a new `ForceFreeStatesResult` with the closure changed from `:ideal` to `:matched` and the eigenfunctions replaced, so layer-parameter scans cost one cheap match per point:
 
 ```julia
-ffs = solve(eq, Galerkin(; rpec_flag=true, cut_solution=true); nn=1)
+ffs = solve(eq, Galerkin(; error_field_response=true, cut_solution=true); nn=1)
 matched = solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=0.0), GGJModel())
 bpens = [solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=f), GGJModel()).bpen for f in 0.0:50.0:500.0]
 ```
 
 A scalar applies to every surface and a vector gives one value per entry of `ffs.surfaces`, core to edge.
-The problem needs a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the resonant data but keeps `solution === nothing`.
+The problem needs a Δ′ payload with error-field (EF) columns, so it accepts Galerkin and Riccati results with `error_field_response=true` (the default; Riccati also needs `vac_flag=true`); a Riccati-fed match fills `bpen`, the resonant data and the matched `wp` but keeps `solution === nothing`.
 `GGJModel()` is the closure-capable model; `SLAYERModel()` is slab-only and drives the tearing solve instead.
 
 ## Tearing stability

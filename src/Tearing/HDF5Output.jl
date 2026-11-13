@@ -38,7 +38,8 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
 
     _write_per_surface!(g, result.params, result.dp_matrix)
     if result.model isa GGJModel && result.problem !== nothing
-        g["PerSurface/Delta_prime_raw"] = result.problem.ffs.delta_prime.raw
+        dp = result.problem.ffs.delta_prime
+        g["PerSurface/Delta_prime_raw"] = result.problem.fixed_boundary ? dp.raw_fixedboundary : dp.raw_freeboundary
     end
     # E×B rotation resolved per surface, and the Doppler offset it applies to the inner-layer Q.
     g["PerSurface/omega_E"] = result.omega_E

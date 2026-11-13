@@ -6,17 +6,17 @@
     MatchResult
 
 Matching coefficients and matched profiles, found in `result.match`. The profile
-fields are empty when the solve kept no Galerkin basis; the inner fields are empty with `ideal`.
+fields are empty when the solve kept no Galerkin basis.
 
 ## Fields
 
-  - `cout`, `cin`: `(2msing, ncoil)` outer and inner coefficients.
+  - `cout`, `cin`: `(2msing, nef)` outer and inner coefficients.
   - `deltar`: `(msing, 2)` inner-layer Δ per surface, columns (Δ₊, Δ₋) = (interchange, tearing).
-  - `rpec_eig`: forced eigenvalue γ = 2πi·n·f per surface.
+  - `forced_eigenvalue`: forced eigenvalue γ = 2πi·n·f per surface.
   - `residual`: relative residual of the linear solve.
-  - `bpen`: `(msing, ncoil)` penetrated resonant field at each layer center.
-  - `reconnected_flux`: `(2msing, ncoil)` `Δ_coil + Δ_outᵀ·cout`.
-  - `xi`, `xi_deriv`: `(mpert, ngrid, ncoil)` matched outer ξ and ξ′, one column per coil.
+  - `bpen`: `(msing, nef)` penetrated resonant field at each layer center.
+  - `reconnected_flux`: `(2msing, nef)` `Δ_EF + Δ_outᵀ·cout`.
+  - `xi`, `xi_deriv`: `(mpert, ngrid, nef)` matched outer ξ and ξ′, one column per EF column.
   - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it; empty unless the
     inner model returns real-ψ profiles (`GGJModel(; solver=:galerkin)` or `GGJModel(; real_profiles=true)`).
   - `inner_params`: per-surface `GGJParameters` used.
@@ -27,7 +27,7 @@ struct MatchResult{P}
     cout::Matrix{ComplexF64}
     cin::Matrix{ComplexF64}
     deltar::Matrix{ComplexF64}
-    rpec_eig::Vector{ComplexF64}
+    forced_eigenvalue::Vector{ComplexF64}
     residual::Float64
     bpen::Matrix{ComplexF64}
     reconnected_flux::Matrix{ComplexF64}
@@ -42,13 +42,13 @@ struct MatchResult{P}
 end
 
 # Solve the 4·msing system mat·[cout; cin] = rmat (rmatch match_rpec).
-function _match_system(dp_raw::AbstractMatrix, dp_coil::AbstractMatrix, deltar::AbstractMatrix)
+function _match_system(dp_raw::AbstractMatrix, dp_ef::AbstractMatrix, deltar::AbstractMatrix)
     msing = size(dp_raw, 1) ÷ 2
-    ncoil = size(dp_coil, 2)
+    nef = size(dp_ef, 2)
     mat = zeros(ComplexF64, 4msing, 4msing)
-    rmat = zeros(ComplexF64, 4msing, ncoil)
+    rmat = zeros(ComplexF64, 4msing, nef)
     @views mat[(2msing+1):4msing, 1:2msing] .= transpose(dp_raw)   # Δ_out
-    @views rmat[(2msing+1):4msing, :] .= .-dp_coil                 # −Δ_coil
+    @views rmat[(2msing+1):4msing, :] .= .-dp_ef                 # −Δ_EF
     for ising in 1:msing
         idx1 = 2ising - 1
         idx2 = 2ising
@@ -82,7 +82,7 @@ function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, m::MatchResult)
     out_h5["$g/Delta_r"] = m.deltar
     out_h5["$g/bpen"] = m.bpen
     out_h5["$g/reconnected_flux"] = m.reconnected_flux
-    out_h5["$g/rpec_eig"] = m.rpec_eig
+    out_h5["$g/forced_eigenvalue"] = m.forced_eigenvalue
     # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
     for i in eachindex(m.inner_psi)
         out_h5["$g/Inner/psi_$i"] = m.inner_psi[i]
@@ -107,20 +107,20 @@ function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, m::MatchResult)
     return nothing
 end
 
-# Matching quantities are per unit coil-response column (the Δ′ coil block's normalization).
+# Matching quantities are per unit EF column (the Δ′ EF block's normalization).
 const _MATCH_SURF = (; dims=("surface",))
 const MATCH_H5_ANNOTATIONS = [
     "SingularSurfaces/Match/cout" =>
-        (; long_name="outer-region matching coefficients per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
+        (; long_name="outer-region matching coefficients per surface parity, per unit EF column", dims=("surface_parity", "ef")),
     "SingularSurfaces/Match/cin" =>
-        (; long_name="inner-region matching coefficients per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
+        (; long_name="inner-region matching coefficients per surface parity, per unit EF column", dims=("surface_parity", "ef")),
     "SingularSurfaces/Match/Delta_r" =>
         (; long_name="inner-layer Δ per surface and parity, (Δ₊ interchange, Δ₋ tearing)", dims=("surface", "parity")),
     "SingularSurfaces/Match/bpen" =>
-        (; long_name="penetrated resonant field b^ψ at each layer center, per unit coil-response column", dims=("surface", "coil")),
+        (; long_name="penetrated resonant field b^ψ at each layer center, per unit EF column", dims=("surface", "ef")),
     "SingularSurfaces/Match/reconnected_flux" =>
-        (; long_name="reconnected flux Δ_coil + Δ_outᵀ·cout per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
-    "SingularSurfaces/Match/rpec_eig" => (; long_name="forced eigenvalue γ = 2πi·n·f at each surface", units="rad/s", _MATCH_SURF...),
+        (; long_name="reconnected flux Δ_EF + Δ_outᵀ·cout per surface parity, per unit EF column", dims=("surface_parity", "ef")),
+    "SingularSurfaces/Match/forced_eigenvalue" => (; long_name="forced eigenvalue γ = 2πi·n·f at each surface", units="rad/s", _MATCH_SURF...),
     "SingularSurfaces/Match/residual" => (; long_name="relative residual of the matching linear solve"),
     "SingularSurfaces/Match/InnerParams/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", _MATCH_SURF...),
     "SingularSurfaces/Match/InnerParams/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", _MATCH_SURF...),
@@ -134,6 +134,6 @@ const MATCH_H5_ANNOTATIONS = [
 ]
 const _MATCH_INNER_H5_ANNOTATIONS = [
     "psi" => (; long_name="normalized poloidal flux ψ_N grid across the inner layer of this surface", dims=("inner_psi",)),
-    "xi" => (; long_name="composite inner-layer ξ^ψ per unit coil-response column", dims=("inner_psi", "coil")),
-    "b" => (; long_name="composite inner-layer b^ψ per unit coil-response column", dims=("inner_psi", "coil"))
+    "xi" => (; long_name="composite inner-layer ξ^ψ per unit EF column", dims=("inner_psi", "ef")),
+    "b" => (; long_name="composite inner-layer b^ψ per unit EF column", dims=("inner_psi", "ef"))
 ]

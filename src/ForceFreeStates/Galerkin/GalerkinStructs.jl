@@ -150,6 +150,8 @@ Solver internals and FEM diagnostics of the outer-region Galerkin solve. The Δ�
   - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
     gal-native grid; `nothing` if no resonant surfaces.
   - `solver::String` — factorization actually used: `"cholesky"`, `"LU"`, or `"none"` when no resonant surfaces were present.
+  - `edge_response::Matrix{ComplexF64}` — `(mpert, nsol)` edge momentum FΞ′ + KΞ of every solution column
+    (`gal_edge_response`); the EF columns give `W_P·ψ₀²`. Empty if no resonant surfaces.
 """
 struct GalerkinResult
     msing::Int
@@ -161,4 +163,5 @@ struct GalerkinResult
     alpha::Vector{ComplexF64}
     solution::Union{Nothing,GalerkinSolution}
     solver::String
+    edge_response::Matrix{ComplexF64}
 end

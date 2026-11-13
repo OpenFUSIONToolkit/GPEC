@@ -23,24 +23,24 @@ integrator = "Galerkin"
 [Galerkin]
 nx = 256                # Hermite-cubic elements per interval between singular surfaces
 pfac = 0.03             # grid packing ratio toward the singular surfaces
-rpec_flag = true        # edge coil-response columns (Delta_coil), needed by [Match] and [Tearing]
+error_field_response = true        # error-field (EF) columns (Delta_EF): the ideal ξ solution and W_plasma, needed by [Match]
 ```
 
 `cut_solution = true` (default `false`) adds the cut solution that composite inner-region profiles need.
 
-It replaces the radial integration rather than supplementing it: the run computes its own vacuum response at the control surface (with `vac_flag`) but produces no free-boundary energies, no ODE trace and no `crit` scan, it does not support the kinetic solve, and its result cannot drive `[PerturbedEquilibrium]`, which needs the free-boundary δW of a `"Forward"` solve.
-A `[Match]` section matches the inner layer to its Δ′ and gives a driven ``\xi`` solution; the composite inner-region profiles need `cut_solution = true` (`Galerkin(; cut_solution=true)` followed by `solve(MatchProblem(ffs))` in a script).
+It replaces the radial integration rather than supplementing it: the run computes its own vacuum response at the control surface (with `vac_flag`), produces no ODE trace and no `crit` scan, and does not support the kinetic solve. With `error_field_response = true` and `vac_flag = true` it also produces the free-boundary energies of its ideal solution, so it can drive `[PerturbedEquilibrium]` like a `"Forward"` solve; a `[Match]`ed result cannot yet.
+With `error_field_response = true` the error-field (EF) columns, one per edge mode with unit edge displacement and no inner-layer drive, are solved with the edge held fixed; their small-solution coefficients are `Delta_EF`, they are the ideal (perfectly shielded) ``\xi`` solution, and the force they exert on the edge is the fixed-boundary plasma energy matrix ``W_P`` of Eq. 66 of [Glasser (2016)](citations.md#ForceFreeStates).
+A `[Match]` section matches the inner layer to its Δ′ and replaces them with the driven ``\xi`` solution, whose edge response ``W_P`` is complex: its anti-Hermitian part is the torque absorbed in the layers. The composite inner-region profiles need `cut_solution = true` (`Galerkin(; cut_solution=true)` followed by `solve(MatchProblem(ffs))` in a script).
 
 ## Outputs
 
 | Dataset | Meaning |
 |---|---|
-| `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, on the same path as the Riccati result, so downstream stages never branch on which formalism ran |
-| `SingularSurfaces/Delta_prime_raw`, `Delta_coil` | the side-major matching matrix and the coil-response columns (`rpec_flag = true`) |
-| `SingularSurfaces/pest3_A`, `pest3_B`, `pest3_Gamma` | the PEST-3 interchange and mixed blocks ``A'``, ``B'``, ``\Gamma'`` |
+| `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, on the same path as the Riccati result, so downstream stages never branch on which formalism ran; free-boundary with `vac_flag = true` (with `error_field_response = true` a second factorization re-solves the big-solution columns with the vacuum edge, so the EF columns never enter it; `free_boundary_delta_prime = false` skips it for matching-only scans, leaving no tearing Δ′) and fixed-boundary otherwise |
+| `SingularSurfaces/Delta_prime_raw_freeboundary`, `Delta_prime_raw_fixedboundary`, `Delta_EF`, `edge_response` | the side-major matching matrices with the vacuum and the fixed edge, the error-field (EF) response (`error_field_response = true`), and the edge momentum of each fixed-edge big-solution column |
+| `SingularSurfaces/pest3_A`, `pest3_B`, `pest3_Gamma` (and `_fixedboundary`) | the PEST-3 interchange and mixed blocks ``A'``, ``B'``, ``\Gamma'`` |
 | `ForceFreeStates/Solutions/GalerkinIntegration/` | the closed ``\xi`` profiles on the Galerkin grid, the surface list, the factorization used (`solver`) and, with `basis_output = true`, the `Basis/` group |
-
-Nothing is written under `ForceFreeStates/FreeBoundaryStability/`.
+| `ForceFreeStates/FreeBoundaryStability/` | `W_plasma`, the plasma energy matrix ``W_P`` of the closed solution (`error_field_response = true`), and with `vac_flag = true` the vacuum and free-boundary energies and eigenmodes as for a `"Forward"` solve |
 
 ## Numerical notes
 

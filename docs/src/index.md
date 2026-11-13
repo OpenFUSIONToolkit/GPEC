@@ -24,7 +24,7 @@ The [Workflow](workflow.md) page maps every stage to its physics, deck sections 
 | `ForceFreeStates` — ideal (or drift-kinetic) MHD stability by the Newcomb criterion, with the `Vacuum` response of the `[Wall]` (a wall case is a separate deck from a response case) | `[ForceFreeStates]` | `ForceFreeStates/FreeBoundaryStability/`, `SingularSurfaces/Delta_prime_matrix` |
 | `LocalStability` — Mercier, resistive-interchange and ballooning criteria | `[LocalStability]` | `LocalStability/` |
 | `Match` — the resistive inner layer matched to the outer-region Δ′ | `[Match]` | `SingularSurfaces/Match/` |
-| `PerturbedEquilibrium` — the plasma response to the field of `[ForcingTerms]`: resonant fields, islands, overlap; needs a `"Forward"` solve without a wall | `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/` |
+| `PerturbedEquilibrium` — the plasma response to the field of `[ForcingTerms]`: resonant fields, islands, overlap; needs a `"Forward"` (or `error_field_response` `"Galerkin"`) solve without a wall | `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/` |
 | `KineticForces` — the neoclassical toroidal viscosity torque of that response | `[KineticForces]` | `KineticForces/` |
 | `ErrorFields` — coil tolerances, locking risk and correction limits | `[ErrorFields]` | `ErrorFields/Risk/` |
 | `Tearing` — tearing growth rates and critical resonant fields from an inner-layer model | `[Tearing]` | `Tearing/Roots/` |

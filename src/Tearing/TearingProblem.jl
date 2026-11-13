@@ -11,7 +11,7 @@ GGJ layer inputs; the SLAYER layer closures belong to [`SLAYERModel`](@ref) and 
 Z_eff and transport defaults, confinement time and resistivity closure) is the equilibrium's kinetic
 data, `ffs.equil.kinetic` (see [`KineticProfileData`](@ref)), so every layer model sees one plasma.
 Solve with `solve(problem, GGJModel(); config)` or `solve(problem, SLAYERModel(); config)`.
-GGJ needs the raw Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`).
+Both read the free-boundary Δ′ of `ffs.delta_prime`, or the fixed-boundary one with `fixed_boundary`.
 Both models report lab-frame roots from each surface's E×B rotation.
 
 ## Fields
@@ -24,6 +24,7 @@ Both models report lab-frame roots from each surface's E×B rotation.
     (core to edge), as in [`MatchProblem`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.MatchProblem). `nothing` (default) derives them from the kinetic data:
     η from its resistivity closure, the one SLAYER uses, and ρ = μ·m_p·n_e as SLAYER takes it. Unused by `SLAYERModel`.
   - `gamma` - GGJ ratio of specific heats.
+  - `fixed_boundary` - Use the fixed-boundary Δ′ (a conformal wall on the plasma) instead of the free-boundary one.
 """
 @kwdef struct TearingProblem{R,E,D}
     ffs::R
@@ -34,6 +35,7 @@ Both models report lab-frame roots from each surface's E×B rotation.
     msing_max::Int = 3
     omega_E_kHz::Dict{String,Float64} = Dict{String,Float64}()
     critical_resonant_field::Union{Nothing,CriticalResonantFieldControl} = nothing
+    fixed_boundary::Bool = false
 end
 
 TearingProblem(ffs; eta=nothing, rho=nothing, kwargs...) =
@@ -90,6 +92,10 @@ function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::Tea
 
     validate(prob, config)
     isempty(surfaces) && return empty_tearing_result(prob, config, model)
+    dp = ffs.delta_prime
+    blocks = dp === nothing ? nothing : prob.fixed_boundary ? dp.fixedboundary : dp.freeboundary
+    dp !== nothing && blocks === nothing &&
+        error("TearingProblem: the solve did not compute the $(prob.fixed_boundary ? "fixed" : "free")-boundary Δ′")
 
     equil.kinetic === nothing &&
         error("TearingProblem: the equilibrium carries no kinetic profiles; set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
@@ -99,7 +105,7 @@ function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::Tea
     params = _tearing_params(model, equil, surfaces, loaded)
 
     # Prefer the full inter-surface Δ' matrix; fall back to a diagonal of each surface's scalar delta_prime.
-    dpm = ffs.delta_prime === nothing ? Matrix{ComplexF64}(undef, 0, 0) : ffs.delta_prime.matrix
+    dpm = blocks === nothing ? Matrix{ComplexF64}(undef, 0, 0) : blocks.Delta
     dp = if !isempty(dpm) && size(dpm) == (length(params), length(params))
         Matrix{ComplexF64}(dpm)
     else

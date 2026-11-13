@@ -22,6 +22,10 @@ const _FBS = "ForceFreeStates/FreeBoundaryStability"
 # Least-stable total energy, or `nothing` without free-boundary energies.
 _first_energy(et) = isempty(et) ? nothing : et[1]
 
+# A matched closure's energies are complex and carry no stability verdict.
+_matched(r::ForceFreeStatesResult) = r.closure === :matched
+_matched(fid::HDF5.File) = haskey(fid, "SingularSurfaces/Match")
+
 # The rational surfaces as (ψ_N, "m/n" labels).
 _rationals(r::ForceFreeStatesResult) = (; psi=[s.psifac for s in r.surfaces], labels=["$(s.m[1])/$(s.n[1])" for s in r.surfaces])
 function _rationals(h5path::AbstractString)
@@ -32,30 +36,51 @@ function _rationals(h5path::AbstractString)
     end
 end
 
+# |m − nq| below which harmonic m is left out of the mode plot's y-range and harmonic choice: it diverges there toward
+# its rational, inside the domain or just past the edge.
+const _RESONANCE_MASK = 0.1
+
+# (harmonic × ψ) points with |m − nq| ≥ _RESONANCE_MASK, harmonics m = mlow, mlow+1, … of toroidal mode n.
+_unmasked(q, mlow, nrow, n) = [abs(mlow + i - 1 - n * qj) >= _RESONANCE_MASK for i in 1:nrow, qj in q]
+
+# ξ^ψ of the least stable free-boundary eigenmode. Forward stores its solution already rotated into the eigenmodes
+# (scaled by 2π·ψ₀·10⁻³); Galerkin stores one column per unit edge displacement, so its columns are combined by the
+# least stable eigenvector with the same scaling.
+_least_stable(xi, wt, psio, gal::Bool) =
+    gal ? reduce(hcat, [xi[:, :, i] * (wt[:, 1] .* (2π * psio * 1e-3)) for i in axes(xi, 3)]) : xi[:, 1, :]
+
 function _mode_displacement_data(r::ForceFreeStatesResult)
     sol = r.solution
-    return (; mlow=r.mlow, psi=sol.psi_store, xi=sol.u_store[:, 1, 1, :], dW=r.free_boundary === nothing ? nothing : _first_energy(r.free_boundary.et))
+    xi = _least_stable(sol.u_store[:, :, 1, :], r.free_boundary === nothing ? nothing : r.free_boundary.wt, r.equil.psio,
+        sol.basis === :gal_native && r.free_boundary !== nothing)
+    keep = _unmasked(sol.q_store, r.mlow, size(xi, 1), r.nlow)
+    return (; mlow=r.mlow, psi=sol.psi_store, xi, keep, dW=r.free_boundary === nothing ? nothing : _first_energy(r.free_boundary.et), matched=_matched(r))
 end
 
 function _mode_displacement_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
-        # Forward integration stores its profiles in ForwardIntegration, a matched Galerkin solve in GalerkinIntegration.
+        # Forward integration stores its profiles in ForwardIntegration, a Galerkin solve in GalerkinIntegration.
         group = isempty(fid["$_FWD/xi_psi"]) ? _GAL : _FWD
-        (; mlow=read(fid["Info/mlow"]), psi=read(fid["$group/psi"]), xi=read(fid["$group/xi_psi"])[:, 1, :],
-            dW=_first_energy(read(fid["$_FBS/eigenmode_energies"])))
+        psi = read(fid["$group/psi"])
+        xi = _least_stable(read(fid["$group/xi_psi"]), read(fid["$_FBS/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psi_total"]), group == _GAL)
+        mlow = read(fid["Info/mlow"])
+        keep = _unmasked(read(fid["$group/q"]), mlow, size(xi, 1), read(fid["Info/nlow"]))
+        (; mlow, psi, xi, keep, dW=_first_energy(read(fid["$_FBS/eigenmode_energies"])), matched=_matched(fid))
     end
 end
 
 _criterion_data(r::ForceFreeStatesResult) = (; psi=r.diagnostics.psi_store, crit=r.diagnostics.crit_store)
 _criterion_data(h5path::AbstractString) = h5open(fid -> (; psi=read(fid["$_FWD/psi"]), crit=read(fid["$_FWD/crit"])), h5path, "r")
 
-_energy_eigenvector_data(r::ForceFreeStatesResult) = (; wt=r.free_boundary.wt, mlow=r.mlow)
-_energy_eigenvector_data(h5path::AbstractString) = h5open(fid -> (; wt=read(fid["$_FBS/W_freeboundary_eigenmodes"]), mlow=read(fid["Info/mlow"])), h5path, "r")
+_energy_eigenvector_data(r::ForceFreeStatesResult) = (; wt=r.free_boundary.wt, mlow=r.mlow, matched=_matched(r))
+_energy_eigenvector_data(h5path::AbstractString) =
+    h5open(fid -> (; wt=read(fid["$_FBS/W_freeboundary_eigenmodes"]), mlow=read(fid["Info/mlow"]), matched=_matched(fid)), h5path, "r")
 
-_energy_data(r::ForceFreeStatesResult) = (; et=r.free_boundary.et, ep=r.free_boundary.ep, ev=r.free_boundary.ev)
+_energy_data(r::ForceFreeStatesResult) = (; et=r.free_boundary.et, ep=r.free_boundary.ep, ev=r.free_boundary.ev, matched=_matched(r))
 function _energy_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
-        (; et=read(fid["$_FBS/eigenmode_energies"]), ep=read(fid["$_FBS/eigenmode_plasma_energies"]), ev=read(fid["$_FBS/eigenmode_vacuum_energies"]))
+        (; et=read(fid["$_FBS/eigenmode_energies"]), ep=read(fid["$_FBS/eigenmode_plasma_energies"]), ev=read(fid["$_FBS/eigenmode_vacuum_energies"]),
+            matched=_matched(fid))
     end
 end
 
@@ -72,23 +97,27 @@ function _edge_scan_data(h5path::AbstractString)
 end
 
 # The Δ′ family with "m/n" labels for the surfaces it spans: Galerkin solves across its in-band subset of the rational surfaces.
-# `coil` is (edge harmonic × surface side), empty when the run computed no coil response.
+# The free-boundary Δ′ and raw D′, or the fixed-boundary ones when the run has no vacuum. `ef` is Δ_EF as
+# (edge harmonic × surface side), empty when the run computed none.
 function _delta_prime_data(r::ForceFreeStatesResult)
     dp = r.delta_prime
-    k = size(dp.matrix, 1)
+    blocks, raw = dp.freeboundary === nothing ? (dp.fixedboundary, dp.raw_fixedboundary) : (dp.freeboundary, dp.raw_freeboundary)
+    k = size(blocks.Delta, 1)
     g = r.galerkin
     m, n = g !== nothing && length(g.sing_m) == k ? (g.sing_m, g.sing_n) : ([s.m[1] for s in r.surfaces[1:k]], [s.n[1] for s in r.surfaces[1:k]])
-    return (; matrix=dp.matrix, raw=dp.raw, coil=permutedims(dp.coil), labels=["$mi/$ni" for (mi, ni) in zip(m, n)], mlow=r.mlow)
+    return (; matrix=blocks.Delta, raw, ef=permutedims(dp.ef), labels=["$mi/$ni" for (mi, ni) in zip(m, n)], mlow=r.mlow)
 end
 
 function _delta_prime_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
-        matrix = read(fid["SingularSurfaces/Delta_prime_matrix"])
+        suffix = haskey(fid, "SingularSurfaces/Delta_prime_matrix") ? "" : "_fixedboundary"
+        matrix = read(fid["SingularSurfaces/Delta_prime_matrix$suffix"])
         k = size(matrix, 1)
         group = haskey(fid, "$_GAL/rational_m") && length(fid["$_GAL/rational_m"]) == k ? _GAL : "SingularSurfaces"
         m, n = vec(read(fid["$group/rational_m"]))[1:k], vec(read(fid["$group/rational_n"]))[1:k]
-        coil = haskey(fid, "SingularSurfaces/Delta_coil") ? read(fid["SingularSurfaces/Delta_coil"]) : zeros(ComplexF64, 0, 2k)
-        (; matrix, raw=read(fid["SingularSurfaces/Delta_prime_raw"]), coil, labels=["$mi/$ni" for (mi, ni) in zip(m, n)], mlow=read(fid["Info/mlow"]))
+        ef = haskey(fid, "SingularSurfaces/Delta_EF") ? read(fid["SingularSurfaces/Delta_EF"]) : zeros(ComplexF64, 0, 2k)
+        raw = read(fid["SingularSurfaces/Delta_prime_raw_$(isempty(suffix) ? "freeboundary" : "fixedboundary")"])
+        (; matrix, raw, ef, labels=["$mi/$ni" for (mi, ni) in zip(m, n)], mlow=read(fid["Info/mlow"]))
     end
 end
 
@@ -117,7 +146,7 @@ function _plot_eigenvalues end
 function _plot_edge_stability_scan end
 function _plot_delta_prime end
 function _plot_delta_prime_raw end
-function _plot_delta_coil end
+function _plot_delta_ef end
 function _plot_cond_fbar end
 function _plot_ballooning_alpha_boundary end
 function _plot_ballooning_alpha_boundaries end
@@ -298,14 +327,14 @@ function plot_delta_prime_raw(src::Source; part=:real, save_path=nothing)
 end
 
 """
-    plot_delta_coil(src; part=:real, save_path=nothing)
+    plot_delta_ef(src; part=:real, save_path=nothing)
 
-Plot Δ_coil, the response at each side of each rational surface to a unit source on each edge poloidal harmonic,
-as a heatmap.
+Plot Δ_EF, the small-solution coefficient at each side of each rational surface for a unit edge displacement in each
+edge poloidal harmonic, as a heatmap.
 
 ### Arguments
 
-  - `src`: A Riccati `ForceFreeStatesResult` or a Galerkin one solved with `rpec_flag = true`, or the path of a `gpec.h5` it was saved to
+  - `src`: A Riccati or Galerkin `ForceFreeStatesResult` solved with `error_field_response = true`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -316,10 +345,10 @@ as a heatmap.
 
 A Makie `Figure`.
 """
-function plot_delta_coil(src::Source; part=:real, save_path=nothing)
+function plot_delta_ef(src::Source; part=:real, save_path=nothing)
     _check_part(part)
-    _require(plot_delta_coil, src)
-    return _draw(_plot_delta_coil, _delta_prime_data(src); part, save_path)
+    _require(plot_delta_ef, src)
+    return _draw(_plot_delta_ef, _delta_prime_data(src); part, save_path)
 end
 
 """
@@ -436,7 +465,7 @@ register!(plot_energy_eigenvectors, (ForceFreeStatesResult, AbstractString), (:f
 register!(plot_edge_stability_scan, (ForceFreeStatesResult, AbstractString), (:edge_scan,), "edge energies against the truncation q")
 register!(plot_delta_prime, (ForceFreeStatesResult, AbstractString), (:delta_prime,), "Δ′ matrix between rational surfaces")
 register!(plot_delta_prime_raw, (ForceFreeStatesResult, AbstractString), (:delta_prime,), "raw outer-region matching matrix D′")
-register!(plot_delta_coil, (ForceFreeStatesResult, AbstractString), (:delta_coil,), "Δ_coil: surface response to each edge harmonic")
+register!(plot_delta_ef, (ForceFreeStatesResult, AbstractString), (:delta_ef,), "Δ_EF: surface response to each edge harmonic")
 register!(plot_cond_fbar, (ForceFreeStatesResult, AbstractString), (:kinetic_scan,), "cond(F̄) scan for kinetic singular surfaces")
 register!(plot_ballooning_alpha_boundary, (LocalStabilityResult, AbstractString), (:ballooning_scan,), "ballooning α against its first stability boundary")
 

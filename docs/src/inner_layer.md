@@ -50,7 +50,7 @@ Penetration is the first resolved saddle-node bifurcation on the path from ``Q_0
 
 ## Running it
 
-From `examples/DIIID-like_SLAYER_example/gpec.toml`, after a `[ForceFreeStates]` solve with `integrator = "Riccati"` and `vac_flag = true` (or `"Galerkin"` with `rpec_flag = true`), which provides the Δ′ matrix, and with a kinetic file on the equilibrium:
+From `examples/DIIID-like_SLAYER_example/gpec.toml`, after a `[ForceFreeStates]` solve with `integrator = "Riccati"` or `"Galerkin"` and `vac_flag = true`, which provides the Δ′ matrix, and with a kinetic file on the equilibrium:
 
 ```toml
 [Tearing]

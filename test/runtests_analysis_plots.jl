@@ -154,7 +154,7 @@ using TOML
             @test A.ForceFreeStates.plot_ffs_summary(ret.ffs) isa Figure
             # The Δ′ family draws any part of its complex entries and refuses others.
             @test A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:abs) isa Figure
-            @test A.ForceFreeStates.plot_delta_coil(h5; part=:imag) isa Figure
+            @test A.ForceFreeStates.plot_delta_ef(h5; part=:imag) isa Figure
             @test_throws ArgumentError A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:phase)
         end
     end

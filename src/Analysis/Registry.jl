@@ -44,12 +44,12 @@ What each capability needs, worded as what to change in the run to get it.
 const REASONS = Dict{Symbol,String}(
     :equilibrium => "needs an equilibrium",
     :singular_surfaces => "needs rational surfaces in the integration domain",
-    :solution_profiles => "needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)",
+    :solution_profiles => "needs stored ξ profiles: use the Forward integrator, or Galerkin with error_field_response = true (Riccati stores none)",
     :fixed_boundary_criterion => "needs the critical determinant scan: use the Forward or Riccati integrator (Galerkin computes none)",
-    :free_boundary => "needs the free-boundary energies: run with vac_flag = true and the Forward or Riccati integrator",
+    :free_boundary => "needs the free-boundary energies: run with vac_flag = true (Galerkin also needs error_field_response = true)",
     :edge_scan => "needs the edge stability scan: set dW_edge_scan_start below psilim",
     :delta_prime => "needs the Δ′ matrix: use the Riccati or Galerkin integrator (Forward computes none)",
-    :delta_coil => "needs Δ_coil: use the Riccati integrator, or Galerkin with rpec_flag = true",
+    :delta_ef => "needs Δ_EF: use Galerkin, or Riccati with vac_flag = true, with error_field_response = true",
     :kinetic_scan => "needs the kinetic singular-surface scan: run with a kinetic source and singfac_min > 0",
     :ballooning_scan => "needs the ballooning scan: add a [LocalStability] section",
     :singular_coupling => "needs the singular coupling: run PerturbedEquilibrium with compute_singular_coupling = true",
@@ -89,8 +89,8 @@ function capabilities(r::ForceFreeStatesResult)
     diag === nothing || isempty(diag.crit_store) || push!(caps, :fixed_boundary_criterion)
     diag === nothing || isempty(diag.edge_scan.psi) || push!(caps, :edge_scan)
     r.free_boundary === nothing || isempty(r.free_boundary.et) || push!(caps, :free_boundary)
-    r.delta_prime === nothing || isempty(r.delta_prime.matrix) || push!(caps, :delta_prime)
-    r.delta_prime === nothing || isempty(r.delta_prime.coil) || push!(caps, :delta_coil)
+    r.delta_prime === nothing || push!(caps, :delta_prime)
+    r.delta_prime === nothing || isempty(r.delta_prime.ef) || push!(caps, :delta_ef)
     isempty(r.kinetic.scan_psi) || push!(caps, :kinetic_scan)
     return caps
 end
@@ -136,8 +136,8 @@ const _H5_CAPABILITIES = (
     :fixed_boundary_criterion => "ForceFreeStates/Solutions/ForwardIntegration/crit",
     :edge_scan => "ForceFreeStates/EdgeScan/psi",
     :free_boundary => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",
-    :delta_prime => "SingularSurfaces/Delta_prime_matrix",
-    :delta_coil => "SingularSurfaces/Delta_coil",
+    :delta_prime => ("SingularSurfaces/Delta_prime_matrix", "SingularSurfaces/Delta_prime_matrix_fixedboundary"),
+    :delta_ef => "SingularSurfaces/Delta_EF",
     :kinetic_scan => "SingularSurfaces/Kinetic/scan_psi",
     :ballooning_scan => "LocalStability/alpha",
     :singular_coupling => "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field",

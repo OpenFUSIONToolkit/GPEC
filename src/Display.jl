@@ -134,8 +134,9 @@ function Base.show(io::IO, fb::FreeBoundaryResult)
 end
 
 function Base.show(io::IO, d::DeltaPrimeData)
-    source = d.A === nothing ? "Riccati" : "Galerkin"
-    return print(io, "DeltaPrimeData(", source, ", ", _shape(d.matrix), ")")
+    boundaries = join([b for (b, blocks) in (("free", d.freeboundary), ("fixed", d.fixedboundary)) if blocks !== nothing], " + ")
+    msing = size(something(d.freeboundary, d.fixedboundary).Delta, 1)
+    return print(io, "DeltaPrimeData(", boundaries, " boundary, ", _plural(msing, "surface"), isempty(d.ef) ? "" : ", Δ_EF", ")")
 end
 
 function Base.show(io::IO, g::GalerkinResult)
@@ -194,17 +195,18 @@ end
 function _free_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
     fb = r.free_boundary
     if fb === nothing
-        r.closure === :matched && return "not computed (a matched closure carries no ideal δW)"
         return r.control.vac_flag ? "not computed by the $(r.integrator) integrator" : "not computed (vac_flag = false)"
     end
-    verdict = real(first(fb.et)) < 0 ? "unstable" : "stable"
     e(z) = _energy(r, first(z))
-    return "$verdict: et₁ = $(e(fb.et)), ep₁ = $(e(fb.ep)), ev₁ = $(e(fb.ev)), vacuum λ = $(_fmt(fb.vacuum_eigenvalue))"
+    energies = "et₁ = $(e(fb.et)), ep₁ = $(e(fb.ep)), ev₁ = $(e(fb.ev)), vacuum λ = $(_fmt(fb.vacuum_eigenvalue))"
+    # A matched closure's non-Hermitian W carries no stability verdict.
+    r.closure === :matched && return energies
+    return (real(first(fb.et)) < 0 ? "unstable" : "stable") * ": " * energies
 end
 
 # m/n of each row of the Δ′ matrix: Galerkin solves across its in-band subset of the surfaces.
 function _delta_prime_labels(r::ForceFreeStates.ForceFreeStatesResult)
-    k = minimum(size(r.delta_prime.matrix))
+    k = size(something(r.delta_prime.freeboundary, r.delta_prime.fixedboundary).Delta, 1)
     g = r.galerkin
     g !== nothing && length(g.sing_m) == k && return ["$(m)/$(n)" for (m, n) in zip(g.sing_m, g.sing_n)]
     length(r.surfaces) == k && return _surface_label.(r.surfaces)
@@ -221,8 +223,9 @@ function Base.show(io::IO, ::MIME"text/plain", r::ForceFreeStates.ForceFreeState
     _row(io, "Fixed boundary", _fixed_boundary_note(r))
     _row(io, "Free boundary", _free_boundary_note(r))
     if r.delta_prime !== nothing
-        dp = r.delta_prime.matrix
-        _row(io, "Δ′_ii (ψ_N)", _list(["$l: $(_fmt(real(dp[i, i])))" for (i, l) in enumerate(_delta_prime_labels(r))]; max=4))
+        free = r.delta_prime.freeboundary !== nothing
+        dp = something(r.delta_prime.freeboundary, r.delta_prime.fixedboundary).Delta
+        _row(io, free ? "Δ′_ii (ψ_N)" : "Δ′_ii fixed boundary (ψ_N)", _list(["$l: $(_fmt(real(dp[i, i])))" for (i, l) in enumerate(_delta_prime_labels(r))]; max=4))
     end
     _row(io, "Solution", _solution_note(r))
     r.galerkin === nothing || _row(io, "Galerkin", "$(_plural(r.galerkin.msing, "surface")), $(r.galerkin.solver) factorization")
@@ -241,7 +244,7 @@ function Base.show(io::IO, ::MIME"text/plain", m::MatchResult)
     print(io, "MatchResult  ", InnerLayer.model_name(m.model))
     _row(io, "Surfaces", "$(size(m.deltar, 1)) matched, $(size(m.cout, 2)) edge drives")
     _row(io, "Residual", _fmt(m.residual))
-    _row(io, "Forced γ [rad/s]", isempty(m.rpec_eig) ? "none" : _list(_fmt.(m.rpec_eig); max=3))
+    _row(io, "Forced γ [rad/s]", isempty(m.forced_eigenvalue) ? "none" : _list(_fmt.(m.forced_eigenvalue); max=3))
     outer = isempty(m.xi) ? "not computed" : "$(_shape(m.xi)) (one column per edge drive)"
     _row(io, "Stored", "matched outer ξ $outer, inner profiles $(isempty(m.inner_psi) ? "not computed" : "on $(length(m.inner_psi)) surfaces")")
     return nothing

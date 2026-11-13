@@ -2,7 +2,7 @@ using Test
 using LinearAlgebra
 
 # gal_banded_solve! on a full-band (gbtrf layout) system built like the Galerkin matrix: Hermitian, with
-# Dirichlet identity rows (row zeroed, column kept) and nonzero prescribed values, as in the rpec coil columns.
+# Dirichlet identity rows (row zeroed, column kept) and nonzero prescribed values, as in the EF columns.
 @testset "Galerkin banded solve: Cholesky first, LU fallback" begin
     FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
     @test FFS.empty_galerkin_result().solver == "none"

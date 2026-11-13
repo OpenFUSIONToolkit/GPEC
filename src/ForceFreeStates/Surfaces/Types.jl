@@ -14,7 +14,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
   - `delta_prime::Vector{ComplexF64}` - **Debug stub, not physically valid.** Per-surface ca-based Δ' estimate;
-    use `ForceFreeStatesInternal.delta_prime_matrix` (STRIDE global BVP, Glasser 2018 PoP 25, 032501) for tearing stability.
+    use the BVP Δ' (`DeltaPrimeData`) (STRIDE global BVP, Glasser 2018 PoP 25, 032501) for tearing stability.
   - `delta_prime_col::Matrix{ComplexF64}` - **Debug stub, not physically valid.** Per-surface ca-based Δ' columns, `(numpert_total, n_res_modes)`,
     `delta_prime_col[j, i] = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio)`; diagonal matches `delta_prime`. Riccati/parallel paths only.
 """

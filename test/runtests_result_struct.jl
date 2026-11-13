@@ -110,13 +110,16 @@ include("display_check.jl")
             @test iszero(ffs.bpen)
 
             @test ffs.delta_prime !== nothing
-            @test size(ffs.delta_prime.matrix) == (length(ffs.surfaces), length(ffs.surfaces))
-            @test size(ffs.delta_prime.raw) == (2 * length(ffs.surfaces), 2 * length(ffs.surfaces))
-            # Riccati persists only the raw D′ and recovers the parity blocks on demand.
-            @test ffs.delta_prime.A === nothing
-            @test ffs.delta_prime.B === nothing
-            @test ffs.delta_prime.Gamma === nothing
-            @test ffs.delta_prime.matrix ≈ FFS.pest3_decompose(ffs.delta_prime.raw).Δ
+            dp = ffs.delta_prime
+            @test size(dp.raw_freeboundary) == (2 * length(ffs.surfaces), 2 * length(ffs.surfaces))
+            @test size(dp.raw_fixedboundary) == size(dp.raw_freeboundary) && dp.raw_fixedboundary != dp.raw_freeboundary
+            # The PEST-3 blocks of both boundaries are stored, whichever formalism ran.
+            for (blocks, raw) in ((dp.freeboundary, dp.raw_freeboundary), (dp.fixedboundary, dp.raw_fixedboundary))
+                ref = FFS.pest3_decompose(raw)
+                @test blocks.A ≈ ref.A && blocks.B ≈ ref.B && blocks.Gamma ≈ ref.Gamma && blocks.Delta ≈ ref.Delta
+            end
+            @test size(dp.ef) == (2 * length(ffs.surfaces), ffs.numpert_total)
+            @test size(dp.edge_response) == (ffs.numpert_total, 2 * length(ffs.surfaces)) && !iszero(dp.edge_response)
             @test ffs.free_boundary !== nothing
 
             foreach(_check_display, (ffs, ffs.delta_prime))
@@ -179,9 +182,9 @@ include("display_check.jl")
         end
     end
 
-    # Standalone Galerkin with the RPEC inner-layer match: the matched outer solution becomes
-    # the result's ξ solution, and the closure records whether an inner layer was matched in.
-    @testset "matched Galerkin publishes a gal-native solution" begin
+    # Standalone Galerkin publishes its ideal-closed EF columns as the ξ solution; with the RPEC
+    # inner-layer match the matched outer solution replaces them, and the closure records which.
+    @testset "Galerkin publishes a gal-native solution" begin
         for (deck, ideal) in (("LAR_ideal_match_test", true), ("LAR_resistive_match_test", false))
             @testset "$deck" begin
                 mktempdir() do dir
@@ -191,7 +194,7 @@ include("display_check.jl")
 
                     @test ffs.integrator === :galerkin
                     @test ffs.galerkin !== nothing
-                    @test ffs.match !== nothing
+                    @test (ffs.match === nothing) == ideal
 
                     sol = ffs.solution
                     @test sol isa FFS.SolutionProfiles
@@ -200,44 +203,41 @@ include("display_check.jl")
                     @test !iszero(sol.du_store)      # analytic galerkin Ξ′
                     @test !iszero(sol.xi_s_store)
 
-                    # Galerkin runs no Euler-Lagrange sweep and computes no free-boundary energies.
+                    # Galerkin runs no Euler-Lagrange sweep; the edge response of its closed columns gives the
+                    # free-boundary energies (vac_flag = true in both decks).
                     @test ffs.diagnostics === nothing
-                    @test ffs.free_boundary === nothing
-                    @test ffs.wp === nothing
+                    @test size(ffs.wp) == (ffs.numpert_total, ffs.numpert_total)
+                    @test ffs.free_boundary !== nothing && ffs.free_boundary.wp == ffs.wp
+                    @test ffs.free_boundary.wt0 ≈ ffs.wp + ffs.free_boundary.wv rtol = 1e-12
 
                     # Galerkin publishes its Δ′ through the same unified field the Riccati BVP
                     # uses, in the same PEST-3 convention and the same shared layout.
                     dp = ffs.delta_prime
                     @test dp !== nothing
                     msing = ffs.galerkin.msing
-                    @test size(dp.matrix) == (msing, msing)
-                    @test size(dp.raw) == (2msing, 2msing)
-                    @test dp.matrix ≈ FFS.pest3_decompose(dp.raw).Δ
-
-                    # Unlike Riccati, the Galerkin solve persists the remaining parity blocks.
-                    for (blk, ref) in ((dp.A, :A), (dp.B, :B), (dp.Gamma, :Γ))
-                        @test blk !== nothing
-                        @test size(blk) == (msing, msing)
-                        @test blk ≈ getfield(FFS.pest3_decompose(dp.raw), ref)
+                    for (blocks, raw) in ((dp.freeboundary, dp.raw_freeboundary), (dp.fixedboundary, dp.raw_fixedboundary))
+                        @test size(raw) == (2msing, 2msing)
+                        ref = FFS.pest3_decompose(raw)
+                        @test blocks.A ≈ ref.A && blocks.B ≈ ref.B && blocks.Gamma ≈ ref.Gamma && blocks.Delta ≈ ref.Delta
                     end
 
-                    # The rpec coil block is normalized to the Riccati orientation at pack time.
-                    @test size(dp.coil) == (2msing, ffs.numpert_total)
-                    @test !iszero(dp.coil)
+                    # The EF block is normalized to the Riccati orientation at pack time.
+                    @test size(dp.ef) == (2msing, ffs.numpert_total)
+                    @test !iszero(dp.ef)
+                    @test dp.edge_response == ffs.galerkin.edge_response[:, 1:(2msing)]
 
                     _check_main_display(ret)
                     foreach(_check_display, (ffs, ffs.galerkin, ffs.solution))
 
-                    # The ideal-flag match skips the inner layer, so its basis is ideal-closed.
+                    # Without a match the EF columns are the ideal closure, with a Hermitian δW.
                     if ideal
                         @test ffs.closure === :ideal
                         @test iszero(ffs.bpen)
+                        @test norm(ffs.wp - ffs.wp') <= 1e-8 * norm(ffs.wp)
                     else
                         @test ffs.closure === :matched
                         @test ffs.bpen == ffs.match.bpen
                         @test !iszero(ffs.bpen)
-                        # The ideal δW does not describe the matched plasma.
-                        @test ffs.wp === nothing && ffs.free_boundary === nothing
                     end
 
                     # The closed profiles land in the shared Solutions layout: same names and
@@ -251,16 +251,19 @@ include("display_check.jl")
                         @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
                         @test read(f["$gal/dxi_psidpsi"]) == sol.du_store
                         @test read(f["$gal/xi_s"]) == sol.xi_s_store
+                        @test read(f["ForceFreeStates/FreeBoundaryStability/W_plasma"]) == ffs.wp
                         # Matching diagnostics sit with the other per-surface results, and the
                         # raw outer basis is debug-gated off by default.
-                        @test haskey(f, "SingularSurfaces/Match/cout")
+                        @test haskey(f, "SingularSurfaces/Match/cout") != ideal
                         @test !haskey(f, "$gal/Match")
-                        # Match/ is self-describing: rows follow SingularSurfaces/rational_psi, and it names the model that ran.
-                        mg = f["SingularSurfaces/Match"]
-                        @test size(read(mg["bpen"]), 1) == length(read(f["SingularSurfaces/rational_psi"]))
-                        @test read(mg["reconnected_flux"]) == ffs.match.reconnected_flux
-                        @test attrs(mg)["inner_model"] == GeneralizedPerturbedEquilibrium.InnerLayer.model_name(ffs.match.model)
-                        @test isempty(_collect_metadata_violations(mg))
+                        if !ideal
+                            # Match/ is self-describing: rows follow SingularSurfaces/rational_psi, and it names the model that ran.
+                            mg = f["SingularSurfaces/Match"]
+                            @test size(read(mg["bpen"]), 1) == length(read(f["SingularSurfaces/rational_psi"]))
+                            @test read(mg["reconnected_flux"]) == ffs.match.reconnected_flux
+                            @test attrs(mg)["inner_model"] == GeneralizedPerturbedEquilibrium.InnerLayer.model_name(ffs.match.model)
+                            @test isempty(_collect_metadata_violations(mg))
+                        end
                         @test !haskey(f, "$gal/Basis")
                         @test !haskey(f, "$gal/Solution")
                     end
