@@ -603,6 +603,20 @@ function _forcing_table(ctrl::ForcingTerms.ForcingTermsControl)
     return table
 end
 
+# [ForcingTerms] of a single forcing source: a file by path, coils by their settings and the non-default keys of each set.
+_forcing_table(f::ForcingTerms.ForcingFile) = Dict{String,Any}("forcing_data_file" => f.path, "forcing_data_format" => f.format)
+
+function _forcing_table(f::ForcingTerms.ForcingCoils)
+    cfg, default = f.config, ForcingTerms.CoilSetConfig()
+    table = Dict{String,Any}("forcing_data_format" => "coil", "machine" => cfg.machine, "mtheta_coil" => cfg.mtheta_coil, "nzeta_coil" => cfg.nzeta_coil)
+    cfg.dat_dir == ForcingTerms.BUNDLED_COIL_DIR || (table["dat_dir"] = cfg.dat_dir)
+    table["coil_set"] = Any[
+        Dict{String,Any}(String(k) => _deck_out(getfield(sc, k)) for k in fieldnames(ForcingTerms.CoilSetConfig) if !isequal(getfield(sc, k), getfield(default, k)))
+        for sc in cfg.coil_sets
+    ]
+    return table
+end
+
 # [ErrorFields] with its sub-tables, from the settings an error-field assessment takes.
 function _error_fields_sections(settings, tolerance_file::AbstractString)
     table = _deck_table(settings.ctrl)
@@ -646,7 +660,7 @@ function deck_sections(pe::PerturbedEquilibrium.PerturbedEquilibriumState)
     sections = Dict{String,Any}("PerturbedEquilibrium" => table)
     forcing === nothing && return sections
     sections["ForcingTerms"] =
-        forcing isa ForcingTerms.ForcingSource && forcing.scale == 1 ? _forcing_table(forcing.ctrl) :
+        forcing isa Union{ForcingTerms.ForcingFile,ForcingTerms.ForcingCoils} && forcing.scale == 1 ? _forcing_table(forcing) :
         Dict{String,Any}("forcing_data_format" => "hdf5", "forcing_data_file" => _RECORDED_FORCING)
     return sections
 end

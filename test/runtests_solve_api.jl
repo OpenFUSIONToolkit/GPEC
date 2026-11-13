@@ -308,18 +308,29 @@ include("display_check.jl")
     end
 
     @testset "ForcingField infers its format and carries its scale" begin
-        @test ForcingField(table).ctrl.forcing_data_format == "ascii"
-        @test ForcingField(table_h5).ctrl.forcing_data_format == "hdf5"
-        @test isabspath(ForcingField(table).ctrl.forcing_data_file)
+        @test ForcingField(table) isa GPEC.ForcingTerms.ForcingFile
+        @test ForcingField(table).format == "ascii"
+        @test ForcingField(table_h5).format == "hdf5"
+        @test isabspath(ForcingField(table).path)
         @test ForcingField(table; scale=3.0).scale == 3.0
         # One coil set or several, as NamedTuples or Dicts with the [[ForcingTerms.coil_set]] keys.
         c_coil = (name="c", currents=[1e3, 500, -500, -1e3, -500, 500])
         coil_field = ForcingField(c_coil; machine="d3d")
-        @test coil_field.ctrl.forcing_data_format == "coil"
-        @test coil_field.ctrl.machine == "d3d"
-        @test coil_field.ctrl.coil_sets_raw == [Dict{String,Any}("name" => "c", "currents" => c_coil.currents)]
-        @test length(ForcingField([c_coil, Dict("name" => "iu", "currents" => fill(1e3, 6))]; machine="d3d").ctrl.coil_sets_raw) == 2
+        @test coil_field isa GPEC.ForcingTerms.ForcingCoils
+        @test coil_field.config.machine == "d3d"
+        @test [sc.name for sc in coil_field.config.coil_sets] == ["c"]
+        @test coil_field.config.coil_sets[1].currents == c_coil.currents
+        @test length(ForcingField([c_coil, Dict("name" => "iu", "currents" => fill(1e3, 6))]; machine="d3d").config.coil_sets) == 2
+        @test ForcingField(coil_field.config) isa GPEC.ForcingTerms.ForcingCoils
         @test repr(coil_field) == "ForcingField(d3d coils c)"
+        # A source's [ForcingTerms] table builds the same source back; the bundled geometry directory stays implicit.
+        coil_table = GPEC._forcing_table(coil_field)
+        @test !haskey(coil_table, "dat_dir")
+        rebuilt = ForcingField(GPEC.forcing_terms_control(Dict{String,Any}("ForcingTerms" => coil_table), forcing_dir))
+        @test rebuilt.config.machine == "d3d" && rebuilt.config.dat_dir == coil_field.config.dat_dir
+        @test [(sc.name, sc.currents) for sc in rebuilt.config.coil_sets] == [(sc.name, sc.currents) for sc in coil_field.config.coil_sets]
+        file_table = GPEC._forcing_table(ForcingField(table_h5))
+        @test ForcingField(GPEC.forcing_terms_control(Dict{String,Any}("ForcingTerms" => file_table), forcing_dir)).path == table_h5
     end
 
     @testset "ForcingField checks its source when built" begin

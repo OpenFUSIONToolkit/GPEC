@@ -266,8 +266,9 @@ drive several solves.
 
 ## Construction
 
-    ForcingField(path; format=..., scale=1.0, kwargs...)
+    ForcingField(path; format=..., scale=1.0)
     ForcingField(coil_sets; scale=1.0, kwargs...)
+    ForcingField(cfg::CoilConfig; scale=1.0)
     ForcingField(ctrl::ForcingTermsControl; scale=1.0)
     ForcingField(modes::Vector{ForcingMode}; scale=1.0)
 
@@ -281,10 +282,11 @@ ForcingField([(name="iu", currents=iu), (name="il", currents=il)]; machine="d3d"
 ForcingField((source="pf_hoop", radius=12.0, height=1.2, currents=[2e3]))
 ```
 
-Remaining `kwargs` are
-[`ForcingTermsControl`](@ref) fields. These three return a single-source leaf
-([`ForcingSource`](@ref)). The last form takes a control-surface spectrum computed elsewhere, already in
-the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`ForcingSpectrum`](@ref)).
+Its remaining `kwargs` are the [`ForcingTermsControl`](@ref) coil settings (`machine`, `dat_dir`, `mtheta_coil`,
+`nzeta_coil`). The third form takes the same coil description already parsed, and the fourth a deck's `[ForcingTerms]`
+section. The file forms return a [`ForcingFile`](@ref) leaf and the coil forms a [`ForcingCoils`](@ref) leaf. The last form
+takes a control-surface spectrum computed elsewhere, already in the unit-norm `Φ_x` convention, and returns a
+spectrum-literal leaf ([`ForcingSpectrum`](@ref)).
 
 ## Algebra
 
@@ -308,18 +310,36 @@ failed conductor is `nominal - failed_coil`, not `0.9 * nominal`.
 abstract type ForcingField end
 
 """
-    ForcingSource
+    ForcingFile
 
-A single-source [`ForcingField`](@ref) leaf: one forcing description plus a complex weight.
-Built by the `ForcingField` constructors; scalar multiplication rescales the weight.
+A forcing-mode file [`ForcingField`](@ref) leaf: a table of (n, m) amplitudes plus a complex weight.
+Built by `ForcingField(path)`; scalar multiplication rescales the weight.
 
 ## Fields
 
-  - `ctrl::ForcingTermsControl` - The forcing source: format, file path or machine, and the raw coil-set blocks.
+  - `path::String` - Absolute path of the forcing-mode table.
+  - `format::String` - `"ascii"` or `"hdf5"`; see [`load_forcing_data!`](@ref).
   - `scale::ComplexF64` - The source's weight in a linear combination, applied to the materialized control-surface spectrum (complex = phase rotation). Not a physical amplitude.
 """
-struct ForcingSource <: ForcingField
-    ctrl::ForcingTermsControl
+struct ForcingFile <: ForcingField
+    path::String
+    format::String
+    scale::ComplexF64
+end
+
+"""
+    ForcingCoils
+
+A coil [`ForcingField`](@ref) leaf: coil sets with their currents, whose Biot-Savart field is sampled on the control
+surface, plus a complex weight. Built by `ForcingField(coil_sets)`; scalar multiplication rescales the weight.
+
+## Fields
+
+  - `config::CoilConfig` - The coil sets and the boundary grid their field is sampled on.
+  - `scale::ComplexF64` - The source's weight in a linear combination, as for [`ForcingFile`](@ref).
+"""
+struct ForcingCoils <: ForcingField
+    config::CoilConfig
     scale::ComplexF64
 end
 
@@ -333,27 +353,30 @@ unit-norm `Φ_x` convention the response consumes, plus a complex weight. Built 
 ## Fields
 
   - `modes::Vector{ForcingMode}` - The control-surface spectrum, copied at construction.
-  - `scale::ComplexF64` - The leaf's weight in a linear combination, as for [`ForcingSource`](@ref).
+  - `scale::ComplexF64` - The leaf's weight in a linear combination, as for [`ForcingFile`](@ref).
 """
 struct ForcingSpectrum <: ForcingField
     modes::Vector{ForcingMode}
     scale::ComplexF64
 end
 
+# A single-source ForcingField: one forcing description plus its weight.
+const ForcingLeaf = Union{ForcingFile,ForcingCoils,ForcingSpectrum}
+
 """
     ForcingFieldSum
 
-A lazy linear combination of [`ForcingSource`](@ref) and [`ForcingSpectrum`](@ref) leaves, built by `+`/`-` on
-[`ForcingField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
+A lazy linear combination of [`ForcingFile`](@ref), [`ForcingCoils`](@ref) and [`ForcingSpectrum`](@ref) leaves, built by `+`/`-`
+on [`ForcingField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
 the leaves. Materialization evaluates each term against the equilibrium and sums the mode
 amplitudes — valid because the perturbed-equilibrium response is linear in the forcing.
 
 ## Fields
 
-  - `terms::Vector{Union{ForcingSource,ForcingSpectrum}}` - The flattened weighted leaves.
+  - `terms::Vector{Union{ForcingFile,ForcingCoils,ForcingSpectrum}}` - The flattened weighted leaves.
 """
 struct ForcingFieldSum <: ForcingField
-    terms::Vector{Union{ForcingSource,ForcingSpectrum}}
+    terms::Vector{ForcingLeaf}
 end
 
 """
@@ -366,16 +389,15 @@ _infer_format(path::AbstractString) = lowercase(splitext(path)[2]) in (".h5", ".
 const _NORMALIZATIONS = ("normal_field_T", "sfl_flux_Wb", "unit_flux")
 
 # Read a forcing-mode file now, so a missing or malformed file fails when the source is built.
-function _check_forcing_file(ctrl::ForcingTermsControl)
-    path = ctrl.forcing_data_file
+function _check_forcing_file(path::AbstractString, format::AbstractString)
     isfile(path) || throw(ArgumentError("ForcingField: no forcing file at $path"))
     modes = ForcingMode[]
     tag = try
-        load_forcing_data!(modes, path, ctrl.forcing_data_format)
+        load_forcing_data!(modes, path, format)
     catch err
         throw(
             ArgumentError(
-                "ForcingField: $path is not a forcing-mode table (format $(ctrl.forcing_data_format)): $(sprint(showerror, err)). " *
+                "ForcingField: $path is not a forcing-mode table (format $format): $(sprint(showerror, err)). " *
                 "A mode table holds rows of n, m, Re, Im (see `load_forcing_data!`); a coil geometry file goes in a coil set, " *
                 "as in ForcingField((name=\"set\", dat_file=path, currents=[...]))."
             )
@@ -388,9 +410,8 @@ end
 
 # Resolve every coil set now, so an unknown key, a missing geometry file or a missing current fails when the source is
 # built; window-pane sets placed by standoff need the plasma surface and are resolved when materialized.
-function _check_coil_sets(ctrl::ForcingTermsControl)
-    isempty(ctrl.coil_sets_raw) && throw(ArgumentError("ForcingField: a coil source needs at least one coil set"))
-    cfg = CoilConfig(ctrl)
+function _check_coil_sets(cfg::CoilConfig)
+    isempty(cfg.coil_sets) && throw(ArgumentError("ForcingField: a coil source needs at least one coil set"))
     for sc in cfg.coil_sets
         label = isempty(sc.name) ? "a coil set" : "coil set \"$(sc.name)\""
         all(iszero, sc.currents) && throw(ArgumentError("ForcingField: $label has no currents; give `currents` in amperes, one per conductor"))
@@ -409,16 +430,21 @@ function _check_coil_sets(ctrl::ForcingTermsControl)
     return nothing
 end
 
-function ForcingField(ctrl::ForcingTermsControl; scale::Number=1.0)
-    fmt = ctrl.forcing_data_format
-    fmt == "coil" ? _check_coil_sets(ctrl) :
-    fmt in ("ascii", "hdf5") ? _check_forcing_file(ctrl) :
-    throw(ArgumentError("ForcingField: forcing_data_format \"$fmt\" is not \"ascii\", \"hdf5\" or \"coil\""))
-    return ForcingSource(ctrl, ComplexF64(scale))
+function ForcingField(cfg::CoilConfig; scale::Number=1.0)
+    _check_coil_sets(cfg)
+    return ForcingCoils(cfg, ComplexF64(scale))
 end
 
-ForcingField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0, kwargs...) =
-    ForcingField(ForcingTermsControl(; forcing_data_file=abspath(path), forcing_data_format=format, kwargs...); scale)
+function ForcingField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0)
+    format in ("ascii", "hdf5") || throw(ArgumentError("ForcingField: forcing_data_format \"$format\" is not \"ascii\", \"hdf5\" or \"coil\""))
+    _check_forcing_file(abspath(path), format)
+    return ForcingFile(abspath(path), format, ComplexF64(scale))
+end
+
+function ForcingField(ctrl::ForcingTermsControl; scale::Number=1.0)
+    ctrl.forcing_data_format == "coil" && return ForcingField(CoilConfig(ctrl); scale)
+    return ForcingField(ctrl.forcing_data_file; format=ctrl.forcing_data_format, scale)
+end
 
 # A coil set as the [[ForcingTerms.coil_set]] table: a Dict or NamedTuple, keys as strings or symbols.
 _coil_dict(d::AbstractDict) = Dict{String,Any}(string(k) => v for (k, v) in d)
@@ -438,29 +464,28 @@ end
 """
 Flattened weighted-leaf list of any [`ForcingField`](@ref).
 """
-_field_terms(f::Union{ForcingSource,ForcingSpectrum}) = Union{ForcingSource,ForcingSpectrum}[f]
+_field_terms(f::ForcingLeaf) = ForcingLeaf[f]
 _field_terms(f::ForcingFieldSum) = f.terms
 
 Base.:+(a::ForcingField, b::ForcingField) = ForcingFieldSum(vcat(_field_terms(a), _field_terms(b)))
 Base.:-(a::ForcingField) = -1 * a
 Base.:-(a::ForcingField, b::ForcingField) = a + (-1 * b)
-Base.:*(c::Number, f::ForcingSource) = ForcingSource(f.ctrl, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::ForcingFile) = ForcingFile(f.path, f.format, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::ForcingCoils) = ForcingCoils(f.config, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::ForcingSpectrum) = ForcingSpectrum(f.modes, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::ForcingFieldSum) = ForcingFieldSum([c * t for t in f.terms])
 Base.:*(f::ForcingField, c::Number) = c * f
 
 """
-    snapshot_forcing_modes(ft_ctrl; verbose=false) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
+    snapshot_forcing_modes(f::ForcingFile; verbose=false) -> Tuple{Vector{ForcingMode},String}
 
-The raw file-based forcing modes of `ft_ctrl` and their normalization tag, so they land in
-`Input/RawInputs/ForcingTerms/` alongside the TOML blob; `nothing` for coil forcing, which is
-recomputed from the `[[coil_set]]` TOML blob on replay. They feed only the writer:
+The raw forcing modes of the file `f` and their normalization tag, so they land in
+`Input/RawInputs/ForcingTerms/` alongside the TOML blob. They feed only the writer:
 the PE stage reads and normalizes the forcing file itself.
 """
-function snapshot_forcing_modes(ft_ctrl::ForcingTermsControl; verbose::Bool=false)
-    ft_ctrl.forcing_data_format in ("ascii", "hdf5") || return nothing
+function snapshot_forcing_modes(f::ForcingFile; verbose::Bool=false)
     modes = ForcingMode[]
-    normalization = load_forcing_data!(modes, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, verbose)
+    normalization = load_forcing_data!(modes, f.path, f.format, verbose)
     return modes, normalization
 end
 
