@@ -10,7 +10,7 @@ eq   = PlasmaEquilibrium("input.geqdsk"; jac_type="hamada", kinetic_file="kineti
 ffs  = solve(eq, Forward(); nn=1, delta_mlow=8, delta_mhigh=8, vac_flag=true)           # [ForceFreeStates]: Forward, no wall, for the response below
 ls   = solve(LocalStabilityProblem(eq; alpha_boundary_scan=true), Ballooning())          # [LocalStability]
 resp = plasma_response(ffs; compute_singular_coupling=true)                               # [PerturbedEquilibrium]
-pe   = perturbed_equilibrium(resp, RMPField("coils.dat"))                                 #   with the [ForcingTerms] drive
+pe   = perturbed_equilibrium(resp, ForcingField("coils.dat"))                             #   with the [ForcingTerms] drive
 kf   = kinetic_torque(pe, KineticForcesControl())                                         # [KineticForces]
 ef   = error_fields(resp, pe.coil_sets, ForcingTerms.CoilConfig(ft_ctrl);                  # [ErrorFields]; ft_ctrl: the [ForcingTerms] control
                     tolerances=ErrorFields.read_tolerance_toml("tolerances.toml"))
@@ -29,8 +29,8 @@ foreach(r -> save_to_hdf5("gpec.h5", r), (pe, kf, ef, tear))
 | ForceFreeStates | `[ForceFreeStates]` + `[Forward]`, `[Riccati]` or `[Galerkin]` | `solve(ForceBalanceProblem(eq; ...), Forward() \| Riccati() \| Galerkin())` | `ForceFreeStatesResult` |
 | LocalStability | `[LocalStability]` + `[Ballooning]` | `solve(LocalStabilityProblem(eq; ...), Ballooning(; ...))` | `LocalStabilityResult` |
 | Match | `[Match]` + `[GGJ]` | `solve(MatchProblem(ffs; ...), GGJModel())` | `ForceFreeStatesResult` with `closure == :matched` |
-| Drive | `[ForcingTerms]` | `RMPField(ft_ctrl)` (a `ForcingTermsControl`), `RMPField(file)`, `RMPField(modes)` | `RMPField` |
-| PerturbedEquilibrium | `[PerturbedEquilibrium]` | `plasma_response(ffs; ...)`, then `perturbed_equilibrium(resp, rmp; ...)` | `PlasmaResponse`, `PerturbedEquilibriumState` |
+| Drive | `[ForcingTerms]` | `ForcingField(ft_ctrl)` (a `ForcingTermsControl`), `ForcingField(file)`, `ForcingField(modes)` | `ForcingField` |
+| PerturbedEquilibrium | `[PerturbedEquilibrium]` | `plasma_response(ffs; ...)`, then `perturbed_equilibrium(resp, field; ...)` | `PlasmaResponse`, `PerturbedEquilibriumState` |
 | KineticForces | `[KineticForces]` | `kinetic_torque(pe, KineticForcesControl(; ...))` | `KineticForcesResult` |
 | ErrorFields | `[ErrorFields]` | `error_fields(resp, pe.coil_sets, CoilConfig(...); ...)` | `ErrorFieldsResult` |
 | Tearing | `[Tearing]` + `[SLAYER]` or `[GGJ]` | `solve(TearingProblem(ffs; ...), SLAYERModel() \| GGJModel(); config=TearingConfig(...))` | `TearingResult` |
@@ -107,16 +107,16 @@ The `kinetic_file` (and, for HDF5, `kinetic_group`) keyword reads the kinetic pr
 
 ## Combining forcing sources
 
-`RMPField`s form a vector space: `+`, `-` and scalar `*` build lazy linear combinations that compute nothing until `perturbed_equilibrium` materializes them, and because the response is linear in the forcing, driving with a combination equals combining the materialized fields; a complex scalar phase-rotates a source.
+`ForcingField`s form a vector space: `+`, `-` and scalar `*` build lazy linear combinations that compute nothing until `perturbed_equilibrium` materializes them, and because the response is linear in the forcing, driving with a combination equals combining the materialized fields; a complex scalar phase-rotates a source.
 
 ```julia
-nominal    = RMPField("nominal_efc.dat")
-weld_field = RMPField("weld_fields.h5")
+nominal    = ForcingField("nominal_efc.dat")
+weld_field = ForcingField("weld_fields.h5")
 pe = perturbed_equilibrium(resp, 2.0 * nominal + 0.5 * weld_field)
 ```
 
 This is the substrate for error-field workflows: build per-unit sources (a coil set per ampere, a displacement field per millimetre), then assemble physical cases by weighting and summing, with one `plasma_response` serving every combination.
-`RMPField(modes)` wraps a control-surface spectrum computed elsewhere, in the unit-norm ``\Phi_x`` convention, as a leaf.
+`ForcingField(modes)` wraps a control-surface spectrum computed elsewhere, in the unit-norm ``\Phi_x`` convention, as a leaf.
 The weights are linear-combination coefficients, not physical amplitudes: a coil set with a failed conductor is `nominal - failed_coil`, not `0.9 * nominal`.
 
 ## Choosing an integrator

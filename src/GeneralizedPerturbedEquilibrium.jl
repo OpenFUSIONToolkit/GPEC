@@ -77,7 +77,7 @@ using .InnerLayer: GGJModel, SLAYERModel
 using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
-using .ForcingTerms: RMPField
+using .ForcingTerms: ForcingField
 using .PerturbedEquilibrium: plasma_response, perturbed_equilibrium, PlasmaResponse
 using .KineticForces: kinetic_torque, KineticForcesControl, KineticForcesResult
 using .ErrorFields: error_fields, ErrorFieldsResult
@@ -199,8 +199,8 @@ function main_from_inputs(
     if deck.perturbed_equilibrium !== nothing
         pe = _timed_stage(runtimes, "perturbed_equilibrium", "Perturbed Equilibrium") do
             # A replay from stored coil geometry skips the source checks: the geometry files they read may be gone.
-            rmp = preloaded_coil_sets === nothing ? RMPField(deck.forcing) : ForcingTerms.RMPSource(deck.forcing, 1)
-            perturbed_equilibrium(plasma_response(ffs; verbose, deck.perturbed_equilibrium.response...), rmp;
+            field = preloaded_coil_sets === nothing ? ForcingField(deck.forcing) : ForcingTerms.ForcingCoils(ForcingTerms.CoilConfig(deck.forcing), 1)
+            perturbed_equilibrium(plasma_response(ffs; verbose, deck.perturbed_equilibrium.response...), field;
                 coil_sets=preloaded_coil_sets, verbose, deck.perturbed_equilibrium.drive...)
         end
         resp = pe.response
@@ -312,7 +312,8 @@ end
 export main, write_imas
 export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fields
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
-export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
+export PlasmaEquilibrium,
+    ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, ForcingField, PlasmaResponse
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult

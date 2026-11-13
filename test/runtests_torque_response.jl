@@ -146,8 +146,8 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
 
         @testset "forcing-source matrix: a forcing file is one source" begin
             file_state = deepcopy(pe)
-            file_ctrl = _GPE_TR.ForcingTerms.ForcingTermsControl(; forcing_data_file="forcing.dat")
-            _PE_TR.apply_torque_response!(file_state, file_ctrl)
+            file_source = _GPE_TR.ForcingTerms.ForcingFile(abspath("forcing.dat"), "ascii", 1)
+            _PE_TR.apply_torque_response!(file_state, file_source)
             ts = file_state.torque_response
             @test ts.source_names == ["forcing.dat"]
             @test size(ts.T_source) == (1, 1, npsi)
@@ -157,7 +157,7 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
         @testset "regularization on a kinetic result" begin
             # No regularization by default; an explicit width still reaches the regularized profiles.
             @test pe.regularization_width == 0.0
-            reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.RMPField(ft_ctrl); regularization_width=0.05,
+            reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.ForcingField(ft_ctrl); regularization_width=0.05,
                 coil_sets=pe.coil_sets, verbose=false)
             @test reg.regularization_width == 0.05
             @test reg.forcing_b ≈ pe.forcing_b rtol = 1e-12
@@ -169,7 +169,7 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
             # A response without its operators cannot carry a torque response.
             @test_throws ArgumentError _PE_TR.build_torque_response!(_PE_TR.PlasmaResponse(; ffs))
             # The torque response is opt-in: a response built without it contracts nothing.
-            plain = perturbed_equilibrium(plasma_response(ffs; compute_singular_coupling=false, verbose=false), _GPE_TR.ForcingTerms.RMPField(ft_ctrl);
+            plain = perturbed_equilibrium(plasma_response(ffs; compute_singular_coupling=false, verbose=false), _GPE_TR.ForcingTerms.ForcingField(ft_ctrl);
                 coil_sets=pe.coil_sets, verbose=false)
             @test isempty(plain.response.T_xe) && plain.torque_response === nothing
         end
