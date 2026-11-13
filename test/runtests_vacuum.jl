@@ -1205,7 +1205,10 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             # χ from point charges inside a rotating ellipse is harmonic outside it, so K χ = G b with b = ∇χ · n on the
             # surface's own (area-weighted) normals, which the kernel uses; solving for χ measures the kernel's error.
             VAC = GeneralizedPerturbedEquilibrium.Vacuum
-            surf(θ, φ) = (R=1 + 0.3cos(θ) + 0.06cos(θ - 3φ); [R * cos(φ), R * sin(φ), 0.35sin(θ) - 0.06sin(θ - 3φ)])
+            function surf(θ, φ)
+                R = 1 + 0.3cos(θ) + 0.06cos(θ - 3φ)
+                return [R * cos(φ), R * sin(φ), 0.35sin(θ) - 0.06sin(θ - 3φ)]
+            end
             charges = [([cos(a), sin(a), z], q) for (a, z, q) in ((0.3, 0.05, 1.0), (2.1, -0.04, -0.7), (4.0, 0.0, 0.5))]
             χ(x) = sum(q / norm(x - y) for (y, q) in charges)
             ∇χ(x) = -sum(q * (x - y) / norm(x - y)^3 for (y, q) in charges)
