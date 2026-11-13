@@ -253,7 +253,7 @@ function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group):
 end
 
 """
-    RMPField
+    ForcingField
 
 Abstract supertype of every external-forcing description the scripting API accepts: a
 resonant-magnetic-perturbation field, described by where it comes from and how strongly it
@@ -261,30 +261,30 @@ drives (a forcing-mode file, a coil set with currents, or a precomputed spectrum
 
 Construction checks the description and throws an `ArgumentError` naming the problem: a forcing file must exist and
 parse as a mode table with a known normalization, and every coil set must resolve to geometry and carry currents. The
-modes are materialized against an equilibrium only when the perturbed-equilibrium stage runs, so one `RMPField` can
+modes are materialized against an equilibrium only when the perturbed-equilibrium stage runs, so one `ForcingField` can
 drive several solves.
 
 ## Construction
 
-    RMPField(path; format=..., scale=1.0, kwargs...)
-    RMPField(coil_sets; scale=1.0, kwargs...)
-    RMPField(ctrl::ForcingTermsControl; scale=1.0)
-    RMPField(modes::Vector{ForcingMode}; scale=1.0)
+    ForcingField(path; format=..., scale=1.0, kwargs...)
+    ForcingField(coil_sets; scale=1.0, kwargs...)
+    ForcingField(ctrl::ForcingTermsControl; scale=1.0)
+    ForcingField(modes::Vector{ForcingMode}; scale=1.0)
 
 The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
 or `.hdf5` extension and `"ascii"` otherwise. The second form takes one coil set or a vector of them, each a
 NamedTuple or Dict with the `[[ForcingTerms.coil_set]]` keys, and selects the coil format:
 
 ```julia
-RMPField((name="c", currents=[1e3, 500, -500, -1e3, -500, 500]); machine="d3d")   # the DIII-D C-coil, in amperes
-RMPField([(name="iu", currents=iu), (name="il", currents=il)]; machine="d3d")
-RMPField((source="pf_hoop", radius=12.0, height=1.2, currents=[2e3]))
+ForcingField((name="c", currents=[1e3, 500, -500, -1e3, -500, 500]); machine="d3d")   # the DIII-D C-coil, in amperes
+ForcingField([(name="iu", currents=iu), (name="il", currents=il)]; machine="d3d")
+ForcingField((source="pf_hoop", radius=12.0, height=1.2, currents=[2e3]))
 ```
 
 Remaining `kwargs` are
 [`ForcingTermsControl`](@ref) fields. These three return a single-source leaf
-([`RMPSource`](@ref)). The last form takes a control-surface spectrum computed elsewhere, already in
-the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`RMPSpectrum`](@ref)).
+([`ForcingSource`](@ref)). The last form takes a control-surface spectrum computed elsewhere, already in
+the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`ForcingSpectrum`](@ref)).
 
 ## Algebra
 
@@ -293,8 +293,8 @@ perturbation) build lazy linear combinations. The response is linear in the forc
 is materialized on the control surface and the mode amplitudes are summed.
 
 ```julia
-nominal = RMPField("nominal_efc.dat")
-weld_field = RMPField("weld_fields.h5"; scale=0.5)
+nominal = ForcingField("nominal_efc.dat")
+weld_field = ForcingField("weld_fields.h5"; scale=0.5)
 total = 2.0 * nominal + weld_field       # lazy: records terms and weights, computes nothing
 pe = perturbed_equilibrium(plasma_response(ffs), total)   # materializes each term, sums, drives PE
 ```
@@ -305,55 +305,55 @@ in a linear combination, applied uniformly to the materialized spectrum of every
 A source that is not a scalar multiple of another needs its own description: a coil set with a
 failed conductor is `nominal - failed_coil`, not `0.9 * nominal`.
 """
-abstract type RMPField end
+abstract type ForcingField end
 
 """
-    RMPSource
+    ForcingSource
 
-A single-source [`RMPField`](@ref) leaf: one forcing description plus a complex weight.
-Built by the `RMPField` constructors; scalar multiplication rescales the weight.
+A single-source [`ForcingField`](@ref) leaf: one forcing description plus a complex weight.
+Built by the `ForcingField` constructors; scalar multiplication rescales the weight.
 
 ## Fields
 
   - `ctrl::ForcingTermsControl` - The forcing source: format, file path or machine, and the raw coil-set blocks.
   - `scale::ComplexF64` - The source's weight in a linear combination, applied to the materialized control-surface spectrum (complex = phase rotation). Not a physical amplitude.
 """
-struct RMPSource <: RMPField
+struct ForcingSource <: ForcingField
     ctrl::ForcingTermsControl
     scale::ComplexF64
 end
 
 """
-    RMPSpectrum
+    ForcingSpectrum
 
-A spectrum-literal [`RMPField`](@ref) leaf: control-surface forcing modes computed elsewhere, in the
+A spectrum-literal [`ForcingField`](@ref) leaf: control-surface forcing modes computed elsewhere, in the
 unit-norm `Φ_x` convention the response consumes, plus a complex weight. Built by
-`RMPField(modes::Vector{ForcingMode})`; scalar multiplication rescales the weight.
+`ForcingField(modes::Vector{ForcingMode})`; scalar multiplication rescales the weight.
 
 ## Fields
 
   - `modes::Vector{ForcingMode}` - The control-surface spectrum, copied at construction.
-  - `scale::ComplexF64` - The leaf's weight in a linear combination, as for [`RMPSource`](@ref).
+  - `scale::ComplexF64` - The leaf's weight in a linear combination, as for [`ForcingSource`](@ref).
 """
-struct RMPSpectrum <: RMPField
+struct ForcingSpectrum <: ForcingField
     modes::Vector{ForcingMode}
     scale::ComplexF64
 end
 
 """
-    RMPFieldSum
+    ForcingFieldSum
 
-A lazy linear combination of [`RMPSource`](@ref) and [`RMPSpectrum`](@ref) leaves, built by `+`/`-` on
-[`RMPField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
+A lazy linear combination of [`ForcingSource`](@ref) and [`ForcingSpectrum`](@ref) leaves, built by `+`/`-` on
+[`ForcingField`](@ref)s. Holds the flattened term list; scalar multiplication distributes onto
 the leaves. Materialization evaluates each term against the equilibrium and sums the mode
 amplitudes — valid because the perturbed-equilibrium response is linear in the forcing.
 
 ## Fields
 
-  - `terms::Vector{Union{RMPSource,RMPSpectrum}}` - The flattened weighted leaves.
+  - `terms::Vector{Union{ForcingSource,ForcingSpectrum}}` - The flattened weighted leaves.
 """
-struct RMPFieldSum <: RMPField
-    terms::Vector{Union{RMPSource,RMPSpectrum}}
+struct ForcingFieldSum <: ForcingField
+    terms::Vector{Union{ForcingSource,ForcingSpectrum}}
 end
 
 """
@@ -368,32 +368,32 @@ const _NORMALIZATIONS = ("normal_field_T", "sfl_flux_Wb", "unit_flux")
 # Read a forcing-mode file now, so a missing or malformed file fails when the source is built.
 function _check_forcing_file(ctrl::ForcingTermsControl)
     path = ctrl.forcing_data_file
-    isfile(path) || throw(ArgumentError("RMPField: no forcing file at $path"))
+    isfile(path) || throw(ArgumentError("ForcingField: no forcing file at $path"))
     modes = ForcingMode[]
     tag = try
         load_forcing_data!(modes, path, ctrl.forcing_data_format)
     catch err
         throw(
             ArgumentError(
-                "RMPField: $path is not a forcing-mode table (format $(ctrl.forcing_data_format)): $(sprint(showerror, err)). " *
+                "ForcingField: $path is not a forcing-mode table (format $(ctrl.forcing_data_format)): $(sprint(showerror, err)). " *
                 "A mode table holds rows of n, m, Re, Im (see `load_forcing_data!`); a coil geometry file goes in a coil set, " *
-                "as in RMPField((name=\"set\", dat_file=path, currents=[...]))."
+                "as in ForcingField((name=\"set\", dat_file=path, currents=[...]))."
             )
         )
     end
-    isempty(modes) && throw(ArgumentError("RMPField: $path holds no forcing modes"))
-    tag in _NORMALIZATIONS || throw(ArgumentError("RMPField: $path declares normalization \"$tag\"; use one of $(join(_NORMALIZATIONS, ", "))"))
+    isempty(modes) && throw(ArgumentError("ForcingField: $path holds no forcing modes"))
+    tag in _NORMALIZATIONS || throw(ArgumentError("ForcingField: $path declares normalization \"$tag\"; use one of $(join(_NORMALIZATIONS, ", "))"))
     return nothing
 end
 
 # Resolve every coil set now, so an unknown key, a missing geometry file or a missing current fails when the source is
 # built; window-pane sets placed by standoff need the plasma surface and are resolved when materialized.
 function _check_coil_sets(ctrl::ForcingTermsControl)
-    isempty(ctrl.coil_sets_raw) && throw(ArgumentError("RMPField: a coil source needs at least one coil set"))
+    isempty(ctrl.coil_sets_raw) && throw(ArgumentError("ForcingField: a coil source needs at least one coil set"))
     cfg = CoilConfig(ctrl)
     for sc in cfg.coil_sets
         label = isempty(sc.name) ? "a coil set" : "coil set \"$(sc.name)\""
-        all(iszero, sc.currents) && throw(ArgumentError("RMPField: $label has no currents; give `currents` in amperes, one per conductor"))
+        all(iszero, sc.currents) && throw(ArgumentError("ForcingField: $label has no currents; give `currents` in amperes, one per conductor"))
         isnan(sc.standoff) || continue
         cs = try
             _build_raw_coil_set(cfg, sc)
@@ -401,53 +401,53 @@ function _check_coil_sets(ctrl::ForcingTermsControl)
             hint =
                 isempty(cfg.machine) && sc.source in ("", "file") && isempty(sc.dat_file) && isempty(sc.h5_file) ?
                 " (a named set is read from <machine>_<name>.dat: pass machine=\"d3d\", say, or give a dat_file)" : ""
-            throw(ArgumentError("RMPField: $label: $(sprint(showerror, err))$hint"))
+            throw(ArgumentError("ForcingField: $label: $(sprint(showerror, err))$hint"))
         end
         length(sc.currents) > cs.ncoil &&
-            throw(ArgumentError("RMPField: $label has $(length(sc.currents)) currents for its $(cs.ncoil) conductors"))
+            throw(ArgumentError("ForcingField: $label has $(length(sc.currents)) currents for its $(cs.ncoil) conductors"))
     end
     return nothing
 end
 
-function RMPField(ctrl::ForcingTermsControl; scale::Number=1.0)
+function ForcingField(ctrl::ForcingTermsControl; scale::Number=1.0)
     fmt = ctrl.forcing_data_format
     fmt == "coil" ? _check_coil_sets(ctrl) :
     fmt in ("ascii", "hdf5") ? _check_forcing_file(ctrl) :
-    throw(ArgumentError("RMPField: forcing_data_format \"$fmt\" is not \"ascii\", \"hdf5\" or \"coil\""))
-    return RMPSource(ctrl, ComplexF64(scale))
+    throw(ArgumentError("ForcingField: forcing_data_format \"$fmt\" is not \"ascii\", \"hdf5\" or \"coil\""))
+    return ForcingSource(ctrl, ComplexF64(scale))
 end
 
-RMPField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0, kwargs...) =
-    RMPField(ForcingTermsControl(; forcing_data_file=abspath(path), forcing_data_format=format, kwargs...); scale)
+ForcingField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0, kwargs...) =
+    ForcingField(ForcingTermsControl(; forcing_data_file=abspath(path), forcing_data_format=format, kwargs...); scale)
 
 # A coil set as the [[ForcingTerms.coil_set]] table: a Dict or NamedTuple, keys as strings or symbols.
 _coil_dict(d::AbstractDict) = Dict{String,Any}(string(k) => v for (k, v) in d)
 _coil_dict(nt::NamedTuple) = Dict{String,Any}(string(k) => v for (k, v) in pairs(nt))
-_coil_dict(x) = throw(ArgumentError("RMPField: a coil set is a Dict or NamedTuple of [[ForcingTerms.coil_set]] keys, not a $(typeof(x))"))
+_coil_dict(x) = throw(ArgumentError("ForcingField: a coil set is a Dict or NamedTuple of [[ForcingTerms.coil_set]] keys, not a $(typeof(x))"))
 
-RMPField(coil_sets::AbstractVector; scale::Number=1.0, kwargs...) =
-    RMPField(ForcingTermsControl(; forcing_data_format="coil", coil_sets_raw=_coil_dict.(coil_sets), kwargs...); scale)
-RMPField(coil_set::Union{AbstractDict,NamedTuple}; kwargs...) = RMPField([coil_set]; kwargs...)
+ForcingField(coil_sets::AbstractVector; scale::Number=1.0, kwargs...) =
+    ForcingField(ForcingTermsControl(; forcing_data_format="coil", coil_sets_raw=_coil_dict.(coil_sets), kwargs...); scale)
+ForcingField(coil_set::Union{AbstractDict,NamedTuple}; kwargs...) = ForcingField([coil_set]; kwargs...)
 
-function RMPField(modes::Vector{ForcingMode}; scale::Number=1.0)
-    isempty(modes) && throw(ArgumentError("RMPField: a spectrum needs at least one forcing mode"))
-    all(m -> isfinite(m.amplitude), modes) || throw(ArgumentError("RMPField: a spectrum amplitude is not finite"))
-    return RMPSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
+function ForcingField(modes::Vector{ForcingMode}; scale::Number=1.0)
+    isempty(modes) && throw(ArgumentError("ForcingField: a spectrum needs at least one forcing mode"))
+    all(m -> isfinite(m.amplitude), modes) || throw(ArgumentError("ForcingField: a spectrum amplitude is not finite"))
+    return ForcingSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
 end
 
 """
-Flattened weighted-leaf list of any [`RMPField`](@ref).
+Flattened weighted-leaf list of any [`ForcingField`](@ref).
 """
-_rmp_terms(f::Union{RMPSource,RMPSpectrum}) = Union{RMPSource,RMPSpectrum}[f]
-_rmp_terms(f::RMPFieldSum) = f.terms
+_field_terms(f::Union{ForcingSource,ForcingSpectrum}) = Union{ForcingSource,ForcingSpectrum}[f]
+_field_terms(f::ForcingFieldSum) = f.terms
 
-Base.:+(a::RMPField, b::RMPField) = RMPFieldSum(vcat(_rmp_terms(a), _rmp_terms(b)))
-Base.:-(a::RMPField) = -1 * a
-Base.:-(a::RMPField, b::RMPField) = a + (-1 * b)
-Base.:*(c::Number, f::RMPSource) = RMPSource(f.ctrl, ComplexF64(c) * f.scale)
-Base.:*(c::Number, f::RMPSpectrum) = RMPSpectrum(f.modes, ComplexF64(c) * f.scale)
-Base.:*(c::Number, f::RMPFieldSum) = RMPFieldSum([c * t for t in f.terms])
-Base.:*(f::RMPField, c::Number) = c * f
+Base.:+(a::ForcingField, b::ForcingField) = ForcingFieldSum(vcat(_field_terms(a), _field_terms(b)))
+Base.:-(a::ForcingField) = -1 * a
+Base.:-(a::ForcingField, b::ForcingField) = a + (-1 * b)
+Base.:*(c::Number, f::ForcingSource) = ForcingSource(f.ctrl, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::ForcingSpectrum) = ForcingSpectrum(f.modes, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::ForcingFieldSum) = ForcingFieldSum([c * t for t in f.terms])
+Base.:*(f::ForcingField, c::Number) = c * f
 
 """
     snapshot_forcing_modes(ft_ctrl; verbose=false) -> Union{Nothing,Tuple{Vector{ForcingMode},String}}
@@ -465,6 +465,6 @@ function snapshot_forcing_modes(ft_ctrl::ForcingTermsControl; verbose::Bool=fals
 end
 
 
-export ForcingTermsControl, ForcingMode, RMPField, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
+export ForcingTermsControl, ForcingMode, ForcingField, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
 
 end # module ForcingTerms

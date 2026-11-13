@@ -458,7 +458,7 @@ kinetic profiles attached to its equilibrium. A multi-species plasma adds each s
 Call `save_to_hdf5(target, kf)` to save the result.
 
 ```julia
-pe = perturbed_equilibrium(plasma_response(ffs), RMPField("forcing.dat"))
+pe = perturbed_equilibrium(plasma_response(ffs), ForcingField("forcing.dat"))
 kf = kinetic_torque(pe, KineticForcesControl())
 ```
 """
