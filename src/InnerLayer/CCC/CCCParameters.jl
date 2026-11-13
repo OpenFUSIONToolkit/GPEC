@@ -13,8 +13,9 @@ of Kim, Cho & Choi, Phys. Fluids 31, 2659 (1988), Eqs. (1a)–(1c), at one ratio
 
   - `ggj::GGJParameters` - GGJ coefficients E, F, G, H, K, M and local times; Kim's coefficients are GGJ's, and
     so are the time and length scales, the Mercier exponents of the far field and the Δ normalization.
-  - `Qstar::Float64` - Electron diamagnetic frequency scaled like Q, Q* = ω*ₑ/Q₀, in the sign convention of the
-    growth rate s = γ − iω (Kim's Ohm's law carries Q + iQ*).
+  - `Qstar::Float64` - Electron diamagnetic frequency of the mode scaled like Q, Q* = ω*ₑ/Q₀, with ω*ₑ = n times
+    [`layer_omega_star_e`](@ref), SLAYER's. With the growth rate s = γ − iω, Kim's Ohm's law carries Q + iQ*, which
+    vanishes at ω = ω*ₑ in the E×B frame, where the layer co-rotates with the electrons.
   - `mperp::Float64` - Perpendicular-transport weight M⊥/M of the QΥ'' term; must be positive.
 """
 struct CCCParameters <: ToroidalLayerParameters
@@ -44,6 +45,6 @@ growth_rate_scale(p::CCCParameters) = growth_rate_scale(p.ggj)
 
 function layer_parameter_columns(params::AbstractVector{CCCParameters})
     return [layer_parameter_columns([p.ggj for p in params]);
-        "Q_star" => (; values=Float64[p.Qstar for p in params], long_name="scaled electron diamagnetic frequency Q* = −n·ω*ₑ/Q₀ per surface", units="1");
+        "Q_star" => (; values=Float64[p.Qstar for p in params], long_name="scaled electron diamagnetic frequency Q* = n·ω*ₑ/Q₀ per surface", units="1");
         "M_perp_ratio" => (; values=Float64[p.mperp for p in params], long_name="perpendicular-transport weight M⊥/M per surface", units="1")]
 end

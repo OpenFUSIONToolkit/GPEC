@@ -417,17 +417,53 @@ using HDF5
         # Without kinetic data CCC needs Q* given.
         @test_throws "give Qstar, or load kinetic profiles" solve(MatchProblem(ric; layer...), CCCModel())
         # From kinetic data, ω*ₑ = (2π/χ₁)(T_e n_e′/n_e + T_e′) per unit n, so a flat density and T_e = 1 keV·(1 − ψ/2) give
-        # (2π/χ₁)·(−500 eV); Q* = −n·ω*ₑ/Q₀ at each surface.
+        # (2π/χ₁)·(−500 eV); Q* = n·ω*ₑ/Q₀ at each surface.
         psi = collect(range(0.0, 1.0; length=64))
         keq = deepcopy(ric.equil)
-        attach_kinetic_profiles!(keq, KineticProfileData(; psi, n_e=fill(5e19, 64), n_i=fill(5e19, 64), T_e=1e3 .* (1 .- psi ./ 2),
-            T_i=fill(1e3, 64), omega_E=fill(2π * 1e3, 64)))
+        attach_kinetic_profiles!(
+            keq,
+            KineticProfileData(; psi, n_e=fill(5e19, 64), n_i=fill(5e19, 64), T_e=1e3 .* (1 .- psi ./ 2),
+                T_i=1e3 .* (1 .- psi ./ 2), omega_E=fill(2π * 1e3, 64))
+        )
         ωse = GPEC.InnerLayer.layer_omega_star_e(keq, ric.surfaces)
         @test ωse ≈ fill(-500 / keq.psio, n) rtol = 1e-6
         ggj1 = FFS.ggj_parameters(ric.surfaces[1], keq; eta=1e-7, rho=1e-7, ising=1)
         p = GPEC.InnerLayer.layer_parameters(CCCModel(), ggj1, keq, ric.surfaces[1])
         @test p.ggj === ggj1 && p.mperp == 1.0
-        @test p.Qstar ≈ -ric.nlow * ωse[1] / GPEC.InnerLayer.growth_rate_scale(ggj1) rtol = 1e-12
+        @test p.Qstar ≈ ric.nlow * ωse[1] / GPEC.InnerLayer.growth_rate_scale(ggj1) rtol = 1e-12
+    end
+
+    @testset "CCC and SLAYER put the electron-frame resonance at the same lab frequency" begin
+        # With s = γ − iω, SLAYER's layer co-rotates with the electrons where ĝ − i·Q_e = 0, and CCC's where Q + i·Q* = 0 (Kim
+        # Eq. 1a). Both drift terms come from the same kinetic data, so at γ = 0 both zeros sit at ω_lab = n·Ω_E + ω*ₑ.
+        ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs...)
+        psi = collect(range(0.0, 1.0; length=64))
+        keq = deepcopy(ric.equil)
+        attach_kinetic_profiles!(
+            keq,
+            KineticProfileData(; psi, n_e=fill(5e19, 64), n_i=fill(5e19, 64), T_e=1e3 .* (1 .- psi ./ 2),
+                T_i=1e3 .* (1 .- psi ./ 2), omega_E=fill(2π * 1e3, 64))
+        )
+        TR, DS, IL = GPEC.Tearing, GPEC.Tearing.Dispersion, GPEC.InnerLayer
+        sing = ric.surfaces[1]
+        nn = only(sing.n)
+        slayer_model = SLAYERModel(; P_perp_model=:chi_perp_e)
+        sp = only(TR._tearing_params(slayer_model, keq, [sing], TR._slayer_profiles(keq.kinetic, slayer_model)))
+        cp = IL.layer_parameters(CCCModel(), FFS.ggj_parameters(sing, keq; eta=1e-7, rho=1e-7, ising=1), keq, sing)
+        ω_star_e = -sp.Q_e / sp.tauk                       # SLAYER's ω*ₑ (Q_e = −τ_k·ω*ₑ), the full mode's
+        @test ω_star_e ≈ nn * IL.layer_omega_star_e(keq, [sing])[1] rtol = 1e-10
+        # A linear residual's zero in the real lab frequency ω.
+        zero_of(f) = (f0 = f(0.0); -real(f0 / (f(1.0) - f0)))
+        for Ω_E in (0.0, 2π * 3e3)
+            # SLAYER scans Q_lab = τ_k·ω_lab (γ = 0); its layer sees ĝ = −i·(Q_lab + q_shift).
+            slayer = DS.surface_coupling(slayer_model, sp, 0.0; q_shift=TR._q_shift(sp, Ω_E))
+            ω_slayer = zero_of(ω -> -im * DS.layer_argument(slayer, sp.tauk * ω) - im * sp.Q_e)
+            # CCC's determinant takes the lab-frame s = −i·ω (γ = 0); its layer sees Q = inner_Q(s + i·n·Ω_E).
+            ccc = DS.surface_coupling(CCCModel(), cp, 0.0; omega_E=Ω_E, n=nn)
+            ω_ccc = zero_of(ω -> IL.inner_Q(cp, DS.layer_argument(ccc, -im * ω)) + im * cp.Qstar)
+            @test ω_slayer ≈ nn * Ω_E + ω_star_e rtol = 1e-10
+            @test ω_ccc ≈ nn * Ω_E + ω_star_e rtol = 1e-10
+        end
     end
 
     @testset "matched inner profiles: opt-in, and parity columns agree across inner models" begin

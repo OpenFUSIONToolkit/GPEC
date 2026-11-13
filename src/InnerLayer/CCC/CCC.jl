@@ -40,7 +40,7 @@ the parameters the tearing and matching stages build ([`layer_parameters`](@ref)
 
   - `options::NamedTuple` - Backend keywords forwarded to every solve; call-site keywords win.
   - `Qstar` - Scaled electron diamagnetic frequency Q* at every surface (a number), at each surface core to edge
-    (a vector), or `nothing` to take Q* = −n·ω*ₑ/Q₀ from the equilibrium's kinetic data
+    (a vector), or `nothing` to take Q* = n·ω*ₑ/Q₀ from the equilibrium's kinetic data
     ([`layer_omega_star_e`](@ref)).
   - `mperp` - Perpendicular-transport weight M⊥/M at every surface (a number) or at each surface core to edge (a
     vector); positive.
@@ -100,7 +100,7 @@ function layer_parameters(model::CCCModel, ggj::GGJParameters, equil, surface)
     Qstar = if model.Qstar === nothing
         equil.kinetic === nothing &&
             throw(ArgumentError("CCC layer: give Qstar, or load kinetic profiles (kinetic_file in [Equilibrium], or attach_kinetic_profiles!)"))
-        -only(surface.n) * only(layer_omega_star_e(equil, (surface,))) / q0(ggj)
+        only(surface.n) * only(layer_omega_star_e(equil, (surface,))) / q0(ggj)
     else
         _at_surface(model.Qstar, ggj.ising)
     end

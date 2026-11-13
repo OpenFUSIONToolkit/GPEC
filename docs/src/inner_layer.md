@@ -145,7 +145,7 @@ p = GGJ.q4_surface_benchmark()      # GGJParameters for the q = 4 benchmark surf
 [`CCCParameters`](@ref InnerLayer.CCC.CCCParameters) holds a `GGJParameters` plus `Qstar` and `mperp`; ``Q_* = 0``, ``M_\perp/M = 1`` give the GGJ equations, and the GGJ scales, Mercier exponents and Δ normalization carry over unchanged.
 Its far field splits GGJ's double exponential pair into two families with scales ``\sigma_j`` set by Kim's Eq. (2) ([`parabolic_scales`](@ref InnerLayer.CCC.parabolic_scales)), so the asymptotic basis uses a general Sylvester splitting solve and the ray is centred between the families, ``\theta = (\arg\sigma_1 + \arg\sigma_2)/4``; an angle at which either family stops decaying between the real axis and the ray is refused.
 Only the `:ray` backend is available.
-In a deck, `[Tearing]` or `[Match]` takes `inner_model = "CCC"`, and `[CCC]` holds the solver options with `Qstar` and `mperp`, each a scalar or one value per surface, as the `CCCModel` keywords of the same names; without `Qstar`, Q* = −n·ω*ₑ/Q₀ comes from the kinetic data ([`layer_omega_star_e`](@ref InnerLayer.layer_omega_star_e)), and `mperp` defaults to 1.
+In a deck, `[Tearing]` or `[Match]` takes `inner_model = "CCC"`, and `[CCC]` holds the solver options with `Qstar` and `mperp`, each a scalar or one value per surface, as the `CCCModel` keywords of the same names; without `Qstar`, Q* = n·ω*ₑ/Q₀ comes from the kinetic data ([`layer_omega_star_e`](@ref InnerLayer.layer_omega_star_e)), and `mperp` defaults to 1.
 When the two families decay at very different rates (large ``K Q Q_*^2``) the march resolves the faster one across the slower one's whole band, and a solve can take tens of seconds.
 
 ```julia
