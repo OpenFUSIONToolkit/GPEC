@@ -958,12 +958,10 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             # or an offset built on the wrong side, which finiteness and Hermiticity both pass.
             @test real(wv[1, 1]) > real(compute_vacuum_response(inputs, nothing).wv[1, 1])
 
-            # This configuration clears the one-cell floor, so it draws no sub-cell or near-fold warning
-            @test_logs min_level = Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
-                inputs,
-                GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs),
-                settings
-            )
+            # This configuration clears the one-cell floor, so the wall draws no sub-cell or near-fold warning.
+            # The plasma is built outside the check: its 24 x 24 grid is anisotropic and warns about that.
+            plasma = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
+            @test_logs min_level = Base.CoreLogging.Warn GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, plasma, settings)
         end
 
         # Field-periodic (layer-2) reduction: an nfp-periodic boundary makes the boundary-integral
