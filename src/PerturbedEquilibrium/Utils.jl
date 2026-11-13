@@ -195,7 +195,7 @@ end
 function _record_forcing_snapshot!(file, state::PerturbedEquilibriumState)
     forcing = state.forcing
     forcing === nothing && return nothing
-    snapshot = forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? ForcingTerms.snapshot_forcing_modes(forcing.ctrl) :
+    snapshot = forcing isa ForcingTerms.ForcingSource && forcing.scale == 1 ? ForcingTerms.snapshot_forcing_modes(forcing.ctrl) :
                (state.forcing_modes, "unit_flux")
     snapshot === nothing && return nothing
     modes, normalization = snapshot

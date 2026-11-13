@@ -132,13 +132,13 @@ referred to b̃ through `R = S·A`, so `T_source = B̃†·T_xe·B̃` with `B̃ 
 """
 function apply_torque_response!(
     state::PerturbedEquilibriumState,
-    forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField};
+    forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.ForcingField};
     verbose::Bool=false
 )
     resp = state.response
     ffs = resp.ffs
     ft_ctrl = forcing isa ForcingTerms.ForcingTermsControl ? forcing :
-              forcing isa ForcingTerms.RMPSource ? forcing.ctrl : nothing
+              forcing isa ForcingTerms.ForcingSource ? forcing.ctrl : nothing
     source_b = zeros(ComplexF64, ffs.numpert_total, 0)
     source_names = String[]
     if !isempty(state.coil_sets) && ft_ctrl !== nothing && ft_ctrl.forcing_data_format == "coil"

@@ -1,7 +1,7 @@
 # Forcing Terms
 
 `ForcingTerms` specifies the external magnetic perturbation that drives the perturbed equilibrium: the spectrum of the normal field on the control surface at `psilim`, given either as a file of (m, n) amplitudes or computed by Biot–Savart from coil geometry.
-The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs; its result is the `RMPField` that `perturbed_equilibrium` applies to the plasma response.
+The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs; its result is the `ForcingField` that `perturbed_equilibrium` applies to the plasma response.
 
 ## Normalization
 

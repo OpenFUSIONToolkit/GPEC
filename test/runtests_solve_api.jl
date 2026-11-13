@@ -232,7 +232,7 @@ include("display_check.jl")
 
             ffs = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
             resp = plasma_response(ffs; verbose=false)
-            pe = perturbed_equilibrium(resp, RMPField(forcing); pe_kw...)
+            pe = perturbed_equilibrium(resp, ForcingField(forcing); pe_kw...)
 
             # The response matrices depend on the equilibrium and the solve, not on the drive.
             @test resp isa PlasmaResponse && pe.response === resp
@@ -241,38 +241,38 @@ include("display_check.jl")
             @test size(resp.C_delta_prime) == size(reference.response.C_delta_prime)
             @test !isempty(pe.resonant_area_weighted_field)
 
-            # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
+            # The deck reads and normalizes its forcing file exactly as a fresh ForcingField does.
             @test pe.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
             @test pe.forcing_b ≈ reference.forcing_b rtol = 1e-10
 
             # One response serves any number of fields: forcing it again reproduces the result.
-            again = perturbed_equilibrium(resp, RMPField(forcing); pe_kw...)
+            again = perturbed_equilibrium(resp, ForcingField(forcing); pe_kw...)
             @test again.forcing_b == pe.forcing_b
             @test again.resonant_area_weighted_field == pe.resonant_area_weighted_field
 
             # `scale` is a uniform multiplier on the materialized forcing, and the response is
             # linear in it.
-            scaled = perturbed_equilibrium(resp, RMPField(forcing; scale=2.0); pe_kw...)
+            scaled = perturbed_equilibrium(resp, ForcingField(forcing; scale=2.0); pe_kw...)
             @test scaled.forcing_b ≈ 2 .* pe.forcing_b rtol = 1e-10
             @test scaled.resonant_area_weighted_field ≈ 2 .* pe.resonant_area_weighted_field rtol = 1e-10
 
             # Lazy source algebra materializes to the combined field: 3A - A == 2A drives
             # the same perturbed equilibrium as scale=2 (exercises +, -, * and the merge).
-            combo = perturbed_equilibrium(resp, 3 * RMPField(forcing) - RMPField(forcing); pe_kw...)
+            combo = perturbed_equilibrium(resp, 3 * ForcingField(forcing) - ForcingField(forcing); pe_kw...)
             @test combo.forcing_b ≈ scaled.forcing_b rtol = 1e-10
             @test combo.resonant_area_weighted_field ≈ scaled.resonant_area_weighted_field rtol = 1e-10
 
             # A spectrum-literal leaf of the materialized modes drives the same perturbed equilibrium,
             # takes a weight, and sums with a file leaf.
-            literal = perturbed_equilibrium(resp, RMPField(pe.forcing_modes); pe_kw...)
+            literal = perturbed_equilibrium(resp, ForcingField(pe.forcing_modes); pe_kw...)
             @test literal.forcing_b == pe.forcing_b
             @test literal.resonant_area_weighted_field == pe.resonant_area_weighted_field
-            @test perturbed_equilibrium(resp, 2 * RMPField(pe.forcing_modes); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
-            @test perturbed_equilibrium(resp, RMPField(pe.forcing_modes) + RMPField(forcing); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
+            @test perturbed_equilibrium(resp, 2 * ForcingField(pe.forcing_modes); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
+            @test perturbed_equilibrium(resp, ForcingField(pe.forcing_modes) + ForcingField(forcing); pe_kw...).forcing_b ≈ scaled.forcing_b rtol = 1e-10
 
             # No regularization by default; an explicit width changes the regularized profiles, not the control-surface quantities.
             @test pe.regularization_width == 0.0
-            reg = perturbed_equilibrium(resp, RMPField(forcing); regularization_width=0.05, pe_kw...)
+            reg = perturbed_equilibrium(resp, ForcingField(forcing); regularization_width=0.05, pe_kw...)
             @test reg.regularization_width == 0.05
             @test reg.forcing_b == pe.forcing_b
             @test !(reg.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
@@ -288,12 +288,12 @@ include("display_check.jl")
         f["n"], f["m"], f["amplitude_real"], f["amplitude_imag"] = [1, 1], [2, 3], [1e-4, 5e-5], [0.0, 0.0]
     end
 
-    @testset "RMPField algebra is lazy and flattens" begin
-        a = RMPField(table)
-        b = RMPField(table; scale=0.5)
-        c = RMPField(table_h5)
+    @testset "ForcingField algebra is lazy and flattens" begin
+        a = ForcingField(table)
+        b = ForcingField(table; scale=0.5)
+        c = ForcingField(table_h5)
         s = a + b
-        @test s isa GPEC.ForcingTerms.RMPFieldSum
+        @test s isa GPEC.ForcingTerms.ForcingFieldSum
         @test length(s.terms) == 2
         @test length((a + b + c).terms) == 3
         d = 2.0 * s
@@ -303,37 +303,37 @@ include("display_check.jl")
         @test (a * 3).scale == 3.0 + 0.0im
         @test (a-b).terms[2].scale == -0.5 + 0.0im
         @test (-a).scale == -1.0 + 0.0im
-        @test repr(a) == "RMPField(forcing.dat (ascii))" && repr(3 * a) == "RMPField(3 × forcing.dat (ascii))"
+        @test repr(a) == "ForcingField(forcing.dat (ascii))" && repr(3 * a) == "ForcingField(3 × forcing.dat (ascii))"
         @test occursin("-0.5im × forcing.h5 (hdf5)", repr(MIME"text/plain"(), a - 0.5im * c))
     end
 
-    @testset "RMPField infers its format and carries its scale" begin
-        @test RMPField(table).ctrl.forcing_data_format == "ascii"
-        @test RMPField(table_h5).ctrl.forcing_data_format == "hdf5"
-        @test isabspath(RMPField(table).ctrl.forcing_data_file)
-        @test RMPField(table; scale=3.0).scale == 3.0
+    @testset "ForcingField infers its format and carries its scale" begin
+        @test ForcingField(table).ctrl.forcing_data_format == "ascii"
+        @test ForcingField(table_h5).ctrl.forcing_data_format == "hdf5"
+        @test isabspath(ForcingField(table).ctrl.forcing_data_file)
+        @test ForcingField(table; scale=3.0).scale == 3.0
         # One coil set or several, as NamedTuples or Dicts with the [[ForcingTerms.coil_set]] keys.
         c_coil = (name="c", currents=[1e3, 500, -500, -1e3, -500, 500])
-        coil_field = RMPField(c_coil; machine="d3d")
+        coil_field = ForcingField(c_coil; machine="d3d")
         @test coil_field.ctrl.forcing_data_format == "coil"
         @test coil_field.ctrl.machine == "d3d"
         @test coil_field.ctrl.coil_sets_raw == [Dict{String,Any}("name" => "c", "currents" => c_coil.currents)]
-        @test length(RMPField([c_coil, Dict("name" => "iu", "currents" => fill(1e3, 6))]; machine="d3d").ctrl.coil_sets_raw) == 2
-        @test repr(coil_field) == "RMPField(d3d coils c)"
+        @test length(ForcingField([c_coil, Dict("name" => "iu", "currents" => fill(1e3, 6))]; machine="d3d").ctrl.coil_sets_raw) == 2
+        @test repr(coil_field) == "ForcingField(d3d coils c)"
     end
 
-    @testset "RMPField checks its source when built" begin
-        @test_throws "no forcing file" RMPField(joinpath(forcing_dir, "missing.dat"))
+    @testset "ForcingField checks its source when built" begin
+        @test_throws "no forcing file" ForcingField(joinpath(forcing_dir, "missing.dat"))
         geometry = joinpath(pkgdir(GPEC), "src", "ForcingTerms", "coil_geometries", "d3d_c.dat")
-        @test_throws "is not a forcing-mode table" RMPField(geometry)
-        @test_throws "is not a forcing-mode table" RMPField(table; format="hdf5")
-        @test_throws "is not \"ascii\", \"hdf5\" or \"coil\"" RMPField(table; format="csv")
-        @test_throws "has no currents" RMPField((name="c",); machine="d3d")
-        @test_throws "currents for its 6 conductors" RMPField((name="c", currents=ones(7)); machine="d3d")
-        @test_throws "pass machine" RMPField((name="c", currents=ones(6)))
-        @test_throws "unknown keys" RMPField((name="c", curents=ones(6)); machine="d3d")
-        @test_throws "a coil set is a Dict or NamedTuple" RMPField([1, 2])
-        @test_throws "at least one forcing mode" RMPField(GPEC.ForcingTerms.ForcingMode[])
+        @test_throws "is not a forcing-mode table" ForcingField(geometry)
+        @test_throws "is not a forcing-mode table" ForcingField(table; format="hdf5")
+        @test_throws "is not \"ascii\", \"hdf5\" or \"coil\"" ForcingField(table; format="csv")
+        @test_throws "has no currents" ForcingField((name="c",); machine="d3d")
+        @test_throws "currents for its 6 conductors" ForcingField((name="c", currents=ones(7)); machine="d3d")
+        @test_throws "pass machine" ForcingField((name="c", currents=ones(6)))
+        @test_throws "unknown keys" ForcingField((name="c", curents=ones(6)); machine="d3d")
+        @test_throws "a coil set is a Dict or NamedTuple" ForcingField([1, 2])
+        @test_throws "at least one forcing mode" ForcingField(GPEC.ForcingTerms.ForcingMode[])
     end
 
     @testset "rejected keyword combinations" begin
@@ -512,10 +512,10 @@ include("display_check.jl")
                         "PerturbedEquilibrium" => Dict{String,Any}(String(k) => v for (k, v) in pairs(pe_kwargs))))
                 reference = GPEC.main([dir])
                 resp = plasma_response(reference.ffs; compute_singular_coupling=true, verbose=false)
-                pe = perturbed_equilibrium(resp, RMPField(joinpath(dir, "forcing.h5")); verbose=false)
+                pe = perturbed_equilibrium(resp, ForcingField(joinpath(dir, "forcing.h5")); verbose=false)
 
                 @test pe.response.permeability ≈ reference.pe.response.permeability rtol = 1e-10
-                # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
+                # The deck reads and normalizes its forcing file exactly as a fresh ForcingField does.
                 @test pe.forcing_b ≈ reference.pe.forcing_b rtol = 1e-10
             end
         end

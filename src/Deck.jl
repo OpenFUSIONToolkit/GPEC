@@ -646,7 +646,7 @@ function deck_sections(pe::PerturbedEquilibrium.PerturbedEquilibriumState)
     sections = Dict{String,Any}("PerturbedEquilibrium" => table)
     forcing === nothing && return sections
     sections["ForcingTerms"] =
-        forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? _forcing_table(forcing.ctrl) :
+        forcing isa ForcingTerms.ForcingSource && forcing.scale == 1 ? _forcing_table(forcing.ctrl) :
         Dict{String,Any}("forcing_data_format" => "hdf5", "forcing_data_file" => _RECORDED_FORCING)
     return sections
 end
