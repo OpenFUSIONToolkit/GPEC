@@ -58,6 +58,18 @@ function power_norm_matrix!(Nmat::AbstractMatrix{ComplexF64}, jmat::AbstractVect
 end
 
 """
+    plasma_response_matrix(u::AbstractArray{ComplexF64,3}) -> Matrix{ComplexF64}
+
+Return the plasma response matrix `W = U₂ U₁⁻¹` of the Euler-Lagrange frame `u`. Each column is scaled to unit `U₁` norm before the
+solve, which leaves `W` unchanged and keeps the solve accurate when the column magnitudes differ by many decades.
+"""
+function plasma_response_matrix(u::AbstractArray{ComplexF64,3})
+    @views u1, u2 = u[:, :, 1], u[:, :, 2]
+    column_scale = Diagonal([inv(norm(column)) for column in eachcol(u1)])
+    return (u2 * column_scale) / (u1 * column_scale)
+end
+
+"""
     normalize_eigenfunctions!(odet::OdeState, wt::AbstractMatrix{ComplexF64}, psio::Float64) -> OdeState
 
 Rescale the stored EL solution vectors in `odet.u_store` (and `du_store`/`xi_s_store` when a
@@ -128,7 +140,7 @@ plasma/vacuum/total energies as a [`FreeBoundaryResult`](@ref).
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     wp = zeros(ComplexF64, numpert_total, numpert_total)
-    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    wp .= plasma_response_matrix(odet.u) ./ equil.psio^2
 
     wv, vac = compute_scaled_wv(ctrl, equil, intr)
 
@@ -267,7 +279,7 @@ NamedTuple `(total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue)`
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
     # Compute plasma response matrix
-    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    wp .= plasma_response_matrix(odet.u) ./ equil.psio^2
 
     # Retrieve raw vacuum matrix from spline and apply singfac analytically at the local q.
     # Singfac is not pre-applied in the spline (see free_compute_wv_spline) to avoid interpolating
