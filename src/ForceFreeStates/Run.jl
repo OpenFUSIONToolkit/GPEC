@@ -61,20 +61,20 @@ function run_force_free_states(
     odet = nothing
     free_energies = nothing
     gal_data = nothing
-    gal_dp = nothing
+    delta_prime = nothing
     if ctrl.algorithm isa Galerkin
         ctrl.kinetic === nothing ||
             error("Galerkin() does not support kinetic runs; use Forward().")
         gal_start = time()
         wv = ctrl.vac_flag ? first(compute_scaled_wv(ctrl, equil, intr)) : nothing
-        gal_data, gal_dp = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
+        gal_data, delta_prime = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
         gal_dt = time() - gal_start
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
     else
         if intr.verbose
             @info "Integrating Euler-Lagrange equation"
         end
-        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, mats, intr)
+        odet, riccati = eulerlagrange_integration(ctrl, equil, mats, intr)
         if odet.nzero > 0 && intr.verbose
             @warn "Fixed-boundary mode unstable for n = $nstring"
         end
@@ -85,7 +85,7 @@ function run_force_free_states(
                 @info "Computing free boundary energies ($wall_desc)"
             end
             free_energies = free_run(odet, ctrl, equil, mats, intr)
-            normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
+            odet.u_store_el_basis && normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
             if real(free_energies.et[1]) < 0
                 if intr.verbose
                     @warn "Free-boundary mode unstable for n = $nstring"
@@ -97,20 +97,18 @@ function run_force_free_states(
             end
 
             # Inter-surface Δ' (STRIDE BVP): needs Riccati() propagators and wv from free_run.
-            if ctrl.kinetic === nothing && intr.msing > 0 && fm_propagators !== nothing
+            if ctrl.kinetic === nothing && intr.msing > 0 && riccati !== nothing
                 if intr.verbose
                     @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
                 end
-                compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
-                    wv=free_energies.wv, psio=equil.psio, debug=intr.verbose,
-                    S_at_surface_left=fm_S_left,
-                    ctrl=ctrl, equil=equil, mats=mats)
+                delta_prime = compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.bases, riccati.axis_state;
+                    wv=free_energies.wv, wp=free_energies.wp, psio=equil.psio, extended_precision=ctrl.algorithm.extended_precision_bvp)
             end
         end
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    result = build_result(_integrator_symbol(ctrl.algorithm), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+    result = build_result(_integrator_symbol(ctrl.algorithm), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, delta_prime)
 
     return result
 end

@@ -74,18 +74,10 @@
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
-            delta_prime=ComplexF64[],
-            delta_prime_col=zeros(ComplexF64, 0, 0),
-            ua_left=zeros(ComplexF64, 0, 0, 0),
-            ua_right=zeros(ComplexF64, 0, 0, 0),
-            psi_ua_left=0.0, psi_ua_right=0.0)
+            delta_prime=ComplexF64[])
         s2 = SingType(; psifac=0.7, rho=sqrt(0.7), m=[3], n=[1],
             q=3.0, q1=dq(0.7),
-            delta_prime=ComplexF64[],
-            delta_prime_col=zeros(ComplexF64, 0, 0),
-            ua_left=zeros(ComplexF64, 0, 0, 0),
-            ua_right=zeros(ComplexF64, 0, 0, 0),
-            psi_ua_left=0.0, psi_ua_right=0.0)
+            delta_prime=ComplexF64[])
 
         @test s1.restype === nothing
         @test s2.restype === nothing
@@ -105,11 +97,7 @@
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
-            delta_prime=ComplexF64[],
-            delta_prime_col=zeros(ComplexF64, 0, 0),
-            ua_left=zeros(ComplexF64, 0, 0, 0),
-            ua_right=zeros(ComplexF64, 0, 0, 0),
-            psi_ua_left=0.0, psi_ua_right=0.0)
+            delta_prime=ComplexF64[])
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
 
@@ -138,11 +126,7 @@
     @testset "ggj_parameters: errors when restype not populated" begin
         s_unpop = SingType(; psifac=0.5, rho=sqrt(0.5), m=[2], n=[1],
             q=2.0, q1=1.0,
-            delta_prime=ComplexF64[],
-            delta_prime_col=zeros(ComplexF64, 0, 0),
-            ua_left=zeros(ComplexF64, 0, 0, 0),
-            ua_right=zeros(ComplexF64, 0, 0, 0),
-            psi_ua_left=0.0, psi_ua_right=0.0)
+            delta_prime=ComplexF64[])
         @test s_unpop.restype === nothing
         @test_throws ArgumentError ggj_parameters(s_unpop, equil; eta=1e-7, rho=1e-7)
     end
@@ -151,11 +135,7 @@
         dq = deriv_view(equil.profiles.q_spline, 1)
         s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
             q=2.0, q1=dq(0.3),
-            delta_prime=ComplexF64[],
-            delta_prime_col=zeros(ComplexF64, 0, 0),
-            ua_left=zeros(ComplexF64, 0, 0, 0),
-            ua_right=zeros(ComplexF64, 0, 0, 0),
-            psi_ua_left=0.0, psi_ua_right=0.0)
+            delta_prime=ComplexF64[])
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
         gs = [ggj_parameters(intr.sing[1], equil; eta=eta, rho=rho, ising=1)]

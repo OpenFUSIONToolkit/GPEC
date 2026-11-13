@@ -26,11 +26,7 @@
     # Helper to build a minimal SingType without touching unused fields
     _mk_sing(; psi, q, q1, m, n, delta_prime=-10.0 + 0im) = SingType(;
         psifac=psi, rho=sqrt(psi), m=[m], n=[n], q=q, q1=q1,
-        delta_prime=ComplexF64[delta_prime],
-        delta_prime_col=zeros(ComplexF64, 0, 0),
-        ua_left=zeros(ComplexF64, 0, 0, 0),
-        ua_right=zeros(ComplexF64, 0, 0, 0),
-        psi_ua_left=0.0, psi_ua_right=0.0)
+        delta_prime=ComplexF64[delta_prime])
 
     @testset "surface_minor_radius: continuity + outboard > 0" begin
         # Minor radius grows monotonically with ψ (outboard midplane).

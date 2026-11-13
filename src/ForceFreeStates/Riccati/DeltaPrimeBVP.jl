@@ -1,123 +1,70 @@
 # STRIDE global boundary-value problem: Delta-prime matrix assembly, solve, PEST-3 decomposition.
 
+# Relative difference between the two plasma response matrices above which `compute_delta_prime_matrix` warns.
+const DELTA_PRIME_RESPONSE_MISMATCH = 1e-6
+
 """
-    compute_delta_prime_matrix!(intr, propagators, chunks; wv, psio, debug, S_at_surface_left, ctrl, equil, mats)
+    compute_delta_prime_matrix(intr, propagators, chunks, bases, axis_state; wv=nothing, wp=nothing, psio=0.0, extended_precision=false) -> Union{Nothing,DeltaPrimeData}
 
-Compute the inter-surface tearing stability matrix (msing × msing) using the
-STRIDE global BVP formulation [Glasser 2018 Phys. Plasmas 25, 032501, Sec. III.B].
+Solve the STRIDE boundary-value problem for the inter-surface Δ' matrix
+[Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eq. 37].
 
-The BVP encodes the full plasma response with unknowns at each surface boundary:
+### Arguments
 
-```
-  x_axis      (N):  free IC parameters at the axis  (U₁ = 0 regular solutions)
-  x_left[j]  (2N):  state at left inner-layer boundary of surface j
-  x_right[j] (2N):  state at right inner-layer boundary of surface j
-  x_edge      (N):  free IC parameters at the edge
-  Total unknowns: nMat = (2 + 4·msing)·N
-```
+  - `intr`: Read for its mode space and singular surfaces.
+  - `propagators`, `chunks`, `bases`, `axis_state`: From `riccati_eulerlagrange_integration`.
+  - `wv`: Singfac-scaled vacuum response for the edge condition `wp + wv = 0`; `nothing` puts a conducting wall there.
+  - `wp`: Plasma response from `free_run`. A warning is issued when the BVP's own differs from it by more than
+    `DELTA_PRIME_RESPONSE_MISMATCH`.
+  - `psio`: Poloidal flux normalization.
+  - `extended_precision`: Solve in `Complex{Double64}`.
 
-## Boundary conditions
+### Returns
 
-With `wv` (the singfac-scaled vacuum response) the edge BC is `U₁ = c, U₂ = -wv·ψ₀²·c`, i.e.
-`wp + wv = 0`; with `wv = nothing` it is a conducting wall (`U₁ = 0`). When `S_at_surface_left`
-is given (one per crossed surface), the axis is matched through a QR-conditioned axis propagator and
-ua-initialized shooting propagators; otherwise through a Gaussian-reduced axis FM (STRIDE `ode_fixup`),
-which requires forward crossing chunks.
-
-## Output: PEST3-convention Δ' (deltap)
-
-The raw BVP solution is a 2·msing × 2·msing matrix `dp` with left/right
-sub-indices at each surface, stored in `intr.delta_prime_raw`. The PEST3-convention Δ' is
-[Chance, PPPL-2527]:
-
-```
-  deltap(i,j) = dp(2i,2j) - dp(2i,2j-1) - dp(2i-1,2j) + dp(2i-1,2j-1)
-```
-
-stored in `intr.delta_prime_matrix` (msing × msing).
-
-## Limitations
-
-Assumes one resonant mode per surface: if any surface carries several (a multi-`n` run where one
-q satisfies two `(m, n)`, e.g. q = 2 with (2, 1) and (4, 2)), it warns and skips the BVP.
-
-`intr.delta_prime_matrix` is the only physically valid Δ'; the per-surface ca-based
-`intr.sing[*].delta_prime` is a diagnostic placeholder and need not agree with it.
+A [`DeltaPrimeData`](@ref) whose `coil` is Δ_EF (empty without `wv`), or `nothing` when no surface is crossed
+or, with a warning, when a surface carries more than one resonant mode.
 """
-function compute_delta_prime_matrix!(
+function compute_delta_prime_matrix(
     intr::ForceFreeStatesInternal,
     propagators::Vector{ChunkPropagator},
-    chunks::Vector{IntegrationChunk};
+    chunks::Vector{IntegrationChunk},
+    bases::AbstractDict,
+    axis_state::Matrix{ComplexF64};
     wv::Union{Nothing,Matrix{ComplexF64}}=nothing,
+    wp::Union{Nothing,Matrix{ComplexF64}}=nothing,
     psio::Float64=0.0,
-    debug::Bool=false,
-    S_at_surface_left::Union{Nothing,Vector{Matrix{ComplexF64}}}=nothing,
-    ctrl::Union{Nothing,ForceFreeStatesControl}=nothing,
-    equil::Union{Nothing,Equilibrium.PlasmaEquilibrium}=nothing,
-    mats::Union{Nothing,MatrixSplines}=nothing
+    extended_precision::Bool=false
 )
-    intr.msing == 0 && return
-    _has_unsupported_multi_resonance(intr) && return
+    intr.msing == 0 && return nothing
+    _has_unsupported_multi_resonance(intr) && return nothing
 
     sing, i_crossings, msing = _select_active_surfaces(intr, chunks)
-    msing == 0 && return
+    msing == 0 && return nothing
     N = intr.numpert_total
+    ipert_all = [1 + sing[j].m[1] - intr.mlow + (sing[j].n[1] - intr.nlow) * intr.mpert for j in 1:msing]
 
-    use_S_axis = S_at_surface_left !== nothing && length(S_at_surface_left) == msing
+    uShootR, uShootL = _shooting_matrices(propagators, chunks, bases, i_crossings)
+    uAxis = Matrix(qr(axis_state).Q)[:, 1:N]
+    M, col_edge = _assemble_bvp(uShootR, uShootL, uAxis, ipert_all, msing, N, wv, psio)
 
-    # The FM-axis fallback uses crossing-chunk propagators as forward maps; backward chunks would give a wrong Δ'.
-    if !use_S_axis
-        for ic in i_crossings
-            chunks[ic].direction == 1 ||
-                error(
-                    "compute_delta_prime_matrix!: FM-axis fallback (use_S_axis=false) requires forward crossing chunks; " *
-                    "chunk $ic has direction=$(chunks[ic].direction). Either provide S_at_surface_left or use bidirectional=false."
-                )
+    # Δ_EF: needs a vacuum edge in the assembled matrix.
+    delta_ef = Matrix{ComplexF64}(undef, 0, 0)
+    if wv !== nothing
+        delta_ef, edge_coefficients = _solve_bvp_delta_ef(M, col_edge, msing, N, ipert_all)
+        if wp !== nothing
+            # Unit edge displacement, so the edge U₂ is the plasma response times ψ₀².
+            wp_bvp = uShootR[msing][(N+1):(2N), :] * edge_coefficients ./ psio^2
+            mismatch = norm(wp_bvp - wp) / norm(wp)
+            if mismatch > DELTA_PRIME_RESPONSE_MISMATCH
+                @warn "Riccati: the plasma response from the Δ' system differs from the axis-to-edge one by $(@sprintf("%.1e", mismatch)) " *
+                      "(relative), so the chunk propagators have lost accuracy. Raise [Riccati] nchunks (now $(length(chunks)) chunks); " *
+                      "beyond about 150 poloidal harmonics also set extended_precision_bvp."
+            end
         end
     end
-
-    Phi_L_mats, Phi_R_mats, Phi_R_halves = _assemble_segment_propagators(
-        propagators, chunks, i_crossings, msing, N, use_S_axis)
-
-    ipert_all = [1 + sing[j].m[1] - intr.mlow + (sing[j].n[1] - intr.nlow) * intr.mpert for j in 1:msing]
-    has_ua = all(j -> !isempty(sing[j].ua_left), 1:msing)
-    T_left_mats, T_right_mats, T_left_inv, T_right_inv =
-        _build_asymptotic_basis_matrices(sing, has_ua, N, msing)
-
-    debug && _log_bvp_setup(chunks, sing, S_at_surface_left, use_S_axis, has_ua,
-        Phi_L_mats, Phi_R_mats, Phi_R_halves, ipert_all, wv, psio, N, msing)
-
-    if use_S_axis
-        uShootR, uShootL, uAxis = _build_S_axis_shooting_propagators(
-            propagators, chunks, i_crossings, sing, msing, N,
-            T_left_mats, T_right_mats, has_ua, ctrl, equil, mats, intr, debug)
-        debug && _log_S_axis_shooting_propagators(uShootR, uShootL, uAxis,
-            S_at_surface_left, T_left_mats,
-            ipert_all, has_ua, msing, N)
-        M, nMat, col_edge = _assemble_bvp_S_axis(
-            uShootR, uShootL, uAxis, ipert_all, msing, N, wv, psio)
-    else
-        M, nMat, col_edge = _assemble_bvp_FM_axis(
-            Phi_L_mats, Phi_R_mats, ipert_all, msing, N,
-            T_left_inv, T_right_inv, has_ua, wv, psio)
-    end
-
-    if debug
-        @info "Δ' BVP: nMat=$nMat, rank(M)=$(rank(M)), cond(M)=$(@sprintf("%.2e", cond(M)))"
-    end
-
-    # rpec coil-response block: needs the S-axis row layout that `_solve_bvp_edge_coil` assumes
-    # for its edge rows, and a vacuum edge in the assembled matrix (col_edge in junc_rows).
-    if use_S_axis && wv !== nothing
-        intr.delta_coil = _solve_bvp_edge_coil(M, col_edge, msing, N, ipert_all)
-    end
-
-    deltap, dp_raw_persisted = _solve_bvp_and_combine_pest3(
-        M, msing, N, nMat, use_S_axis, ipert_all, col_edge, ctrl, debug)
-
-    # The raw side-major D' (Fortran gal_write_delta layout) feeds `pest3_decompose`.
-    intr.delta_prime_matrix = deltap
-    intr.delta_prime_raw = dp_raw_persisted
+    # The raw side-major D' (Fortran gal_write_delta layout) feeds `pest3_decompose`; Riccati leaves the blocks unfilled.
+    delta_prime, delta_prime_raw = _solve_bvp_and_combine_pest3(M, msing, N, ipert_all, extended_precision)
+    return DeltaPrimeData(delta_prime, delta_prime_raw, delta_ef, nothing, nothing, nothing)
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -131,7 +78,7 @@ function _has_unsupported_multi_resonance(intr::ForceFreeStatesInternal)
     n_res_per_surface = [length(intr.sing[j].m) for j in 1:msing]
     any(>(1), n_res_per_surface) || return false
     offenders = [(j, intr.sing[j].m, intr.sing[j].n) for j in 1:msing if n_res_per_surface[j] > 1]
-    @warn "compute_delta_prime_matrix!: skipping inter-surface Δ' BVP because some surfaces carry more than one resonant mode " *
+    @warn "compute_delta_prime_matrix: skipping inter-surface Δ' BVP because some surfaces carry more than one resonant mode " *
           "(multi-n collision; generalization tracked as follow-up). " *
           "Per-surface Δ' is unaffected. Multi-resonance surfaces: $offenders"
     return true
@@ -148,120 +95,36 @@ function _select_active_surfaces(intr::ForceFreeStatesInternal, chunks::Vector{I
     if msing_active < msing
         excluded = setdiff(1:msing, sing_indices)
         excluded_ms = [intr.sing[j].m for j in excluded]
-        @debug "compute_delta_prime_matrix!: $msing singular surfaces, $msing_active crossed (excluded: m=$excluded_ms)"
+        @debug "compute_delta_prime_matrix: $msing singular surfaces, $msing_active crossed (excluded: m=$excluded_ms)"
     end
     sing = [intr.sing[si] for si in sing_indices]
     return sing, i_crossings, msing_active
 end
 
-# Assemble per-surface crossing FMs (Phi_L), inter-surface and edge FMs (Phi_R; Phi_R[1] only for the
-# FM-axis fallback), and midpoint-split halves (Phi_R_halves) used only by the debug diagnostics.
-function _assemble_segment_propagators(propagators::Vector{ChunkPropagator},
-    chunks::Vector{IntegrationChunk},
-    i_crossings::Vector{Int}, msing::Int, N::Int,
-    use_S_axis::Bool)
-    Phi_L_mats = [assemble_fm_matrix(propagators, i_crossings[j]:i_crossings[j]) for j in 1:msing]
-    Phi_R_mats = Vector{Matrix{ComplexF64}}(undef, msing + 1)
-    if !use_S_axis
-        Phi_R_mats[1] = assemble_fm_matrix(propagators, 1:(i_crossings[1]-1); condition=true)
-    end
-    for j in 2:msing
-        Phi_R_mats[j] = assemble_fm_matrix(propagators, (i_crossings[j-1]+1):(i_crossings[j]-1))
-    end
-    Phi_R_mats[msing+1] = assemble_fm_matrix(propagators, (i_crossings[msing]+1):length(chunks))
-
-    Phi_R_halves = Vector{Tuple{Matrix{ComplexF64},Matrix{ComplexF64}}}(undef, msing - 1)
-    for j in 1:(msing-1)
-        chunk_start = i_crossings[j] + 1
-        chunk_end = i_crossings[j+1] - 1
-        n_chunks = chunk_end - chunk_start + 1
-        if n_chunks >= 2
-            i_mid = chunk_start + div(n_chunks, 2) - 1
-            Phi_left_half = assemble_fm_matrix(propagators, chunk_start:i_mid)
-            Phi_right_half = assemble_fm_matrix(propagators, (i_mid+1):chunk_end)
-            Phi_R_halves[j] = (Phi_left_half, Phi_right_half)
-        else
-            Phi_R_halves[j] = (Matrix{ComplexF64}(I, 2N, 2N), Phi_R_mats[j+1])
-        end
-    end
-    return Phi_L_mats, Phi_R_mats, Phi_R_halves
-end
-
-# Asymptotic-basis transformation T = [ua[:,:,1]; ua[:,:,2]] maps (big, small) coefficients to the raw
-# state; ua columns 1:N are big (z^{-α}) and N+1:2N small (z^{+α}) solutions.
-function _build_asymptotic_basis_matrices(sing::Vector{SingType}, has_ua::Bool, N::Int, msing::Int)
-    T_left_mats = Vector{Matrix{ComplexF64}}(undef, msing)
-    T_right_mats = Vector{Matrix{ComplexF64}}(undef, msing)
-    T_left_inv = Vector{Matrix{ComplexF64}}(undef, msing)
-    T_right_inv = Vector{Matrix{ComplexF64}}(undef, msing)
-    if has_ua
-        for j in 1:msing
-            sp = sing[j]
-            T_left_mats[j] = [sp.ua_left[:, :, 1]; sp.ua_left[:, :, 2]]
-            T_right_mats[j] = [sp.ua_right[:, :, 1]; sp.ua_right[:, :, 2]]
-            T_left_inv[j] = inv(T_left_mats[j])
-            T_right_inv[j] = inv(T_right_mats[j])
-        end
-    end
-    return T_left_mats, T_right_mats, T_left_inv, T_right_inv
-end
-
-# Build the S-axis shooting propagators uShootR (surface j right → midpoint), uShootL (surface j
-# left → midpoint, backward), and the QR-conditioned axis propagator uAxis that uShootL[1] meets.
-function _build_S_axis_shooting_propagators(
-    propagators::Vector{ChunkPropagator}, chunks::Vector{IntegrationChunk},
-    i_crossings::Vector{Int}, sing::Vector{SingType}, msing::Int, N::Int,
-    T_left_mats::Vector{Matrix{ComplexF64}}, T_right_mats::Vector{Matrix{ComplexF64}},
-    has_ua::Bool, ctrl, equil, mats, intr::ForceFreeStatesInternal, debug::Bool)
-
-    can_reintegrate = has_ua && ctrl !== nothing && equil !== nothing && mats !== nothing
+# Shooting matrices of the BVP [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eqs. 33-35]: `uShootR[j]` and
+# `uShootL[j]` map the asymptotic coefficients right and left of surface j to the state at the matching point
+# toward the next and the previous surface.
+function _shooting_matrices(propagators::Vector{ChunkPropagator}, chunks::Vector{IntegrationChunk},
+    bases::AbstractDict, i_crossings::Vector{Int})
+    msing = length(i_crossings)
+    matrix(i) = [propagators[i].u[:, :, 1]; propagators[i].u[:, :, 2]]
     uShootR = Vector{Matrix{ComplexF64}}(undef, msing)
-    uShootL = Vector{Matrix{ComplexF64}}(undef, msing)   # uShootL[1] handled separately below
-
+    uShootL = Vector{Matrix{ComplexF64}}(undef, msing)
     for j in 1:msing
-        shoot_range_R = _midpoint_shoot_range(chunks, i_crossings, j, msing; side=:right)
-        if debug && !isempty(shoot_range_R)
-            psi_surf_R = chunks[first(shoot_range_R)].psi_start
-            psi_mid_R = chunks[last(shoot_range_R)].psi_end
-            psi_ua_R = sing[j].psi_ua_right
-            @info "    uShootR[$j]: shoot_range=$(shoot_range_R), psi_chunk=$(@sprintf("%.6f", psi_surf_R)), psi_ua=$(@sprintf("%.6f", psi_ua_R)), psi_mid=$(@sprintf("%.6f", psi_mid_R)), Δψ_fix=$(@sprintf("%.6e", psi_ua_R - psi_surf_R))"
-        end
-        if can_reintegrate && !isempty(shoot_range_R)
-            uShootR[j] = integrate_fm_with_ua_ic(chunks, shoot_range_R, sing[j].ua_right,
-                ctrl, equil, mats, intr; backward=false, psi_ua=sing[j].psi_ua_right)
+        if i_crossings[j] == length(chunks)
+            # The edge is the surface's right inner-layer boundary.
+            right = bases[chunks[i_crossings[j]].ising].right
+            uShootR[j] = [right[:, :, 1]; right[:, :, 2]]
         else
-            T_init = has_ua ? T_right_mats[j] : nothing
-            uShootR[j] = assemble_fm_matrix(propagators, shoot_range_R; T_init=T_init)
+            # The chunk after the surface starts from the right basis; the rest multiply on.
+            range_R = _midpoint_shoot_range(chunks, i_crossings, j, msing; side=:right)
+            uShootR[j] = foldl((X, i) -> matrix(i) * X, range_R[2:end]; init=matrix(first(range_R)))
         end
-
-        # uShootL[j>=2]: backward from surface j left to midpoint. uShootL[1] handled below.
-        j == 1 && continue
-        shoot_range_L = _midpoint_shoot_range(chunks, i_crossings, j, msing; side=:left)
-        if debug
-            psi_mid = chunks[first(shoot_range_L)].psi_start
-            psi_surf = chunks[last(shoot_range_L)].psi_end
-            psi_ua_L = sing[j].psi_ua_left
-            @info "    uShootL[$j]: shoot_range=$(shoot_range_L), psi_mid=$(@sprintf("%.6f", psi_mid)), psi_chunk=$(@sprintf("%.6f", psi_surf)), psi_ua=$(@sprintf("%.6f", psi_ua_L)), Δψ_fix=$(@sprintf("%.6e", psi_ua_L - psi_surf))"
-        end
-        if can_reintegrate && !isempty(shoot_range_L)
-            uShootL[j] = integrate_fm_with_ua_ic(chunks, shoot_range_L, sing[j].ua_left,
-                ctrl, equil, mats, intr; backward=true, psi_ua=sing[j].psi_ua_left)
-        else
-            T_init = has_ua ? T_left_mats[j] : nothing
-            uShootL[j] = assemble_fm_matrix(propagators, shoot_range_L; T_init=T_init)
-        end
+        # The crossing chunk carries the left basis back to its start; forward chunks before it are inverted.
+        range_L = j == 1 ? (1:0) : _midpoint_shoot_range(chunks, i_crossings, j, msing; side=:left)
+        uShootL[j] = foldl((X, i) -> matrix(i) \ X, reverse(range_L); init=matrix(i_crossings[j]))
     end
-
-    uAxis, i_axis_mid = _build_conditioned_axis_propagator(propagators, i_crossings, N)
-    uShootL[1] = _build_uShootL_first(propagators, chunks, i_crossings, sing,
-        T_left_mats, has_ua, can_reintegrate, i_axis_mid,
-        ctrl, equil, mats, intr, N)
-    if debug
-        shoot_range_L1 = (i_axis_mid+1):(i_crossings[1]-1)
-        @info "  Axis propagator: $(i_axis_mid) chunks, cond=$(@sprintf("%.2e", cond(uAxis)))"
-        @info "  uShootL[1]: range=$(shoot_range_L1), cond=$(@sprintf("%.2e", cond(uShootL[1])))"
-    end
-    return uShootR, uShootL, uAxis
+    return uShootR, uShootL
 end
 
 # Chunk range from surface j to the ψ midpoint toward the next surface (`:right`; the edge for
@@ -289,59 +152,14 @@ function _midpoint_shoot_range(chunks::Vector{IntegrationChunk}, i_crossings::Ve
     return side === :right ? (chunk_start:i_mid_inter) : ((i_mid_inter+1):chunk_end)
 end
 
-# Propagate [0; I] from the axis with a QR fixup after each chunk (Fortran ode_fixup), stopping one
-# chunk before the first surface so uShootL[1] spans a single well-conditioned chunk.
-function _build_conditioned_axis_propagator(propagators::Vector{ChunkPropagator},
-    i_crossings::Vector{Int}, N::Int)
-    n_pre_cross = i_crossings[1] - 1
-    i_axis_mid = max(1, n_pre_cross - 1)
-    uAxis = zeros(ComplexF64, 2N, N)
-    for i in 1:N
-        uAxis[N+i, i] = 1
-    end
-    for ic in 1:i_axis_mid
-        prop = propagators[ic]
-        upper_old = uAxis[1:N, :]
-        lower_old = uAxis[(N+1):2N, :]
-        uAxis[1:N, :] .= prop.block_upper_ic[:, :, 1] * upper_old .+ prop.block_lower_ic[:, :, 1] * lower_old
-        uAxis[(N+1):2N, :] .= prop.block_upper_ic[:, :, 2] * upper_old .+ prop.block_lower_ic[:, :, 2] * lower_old
-        Q, _ = qr(uAxis)
-        uAxis .= Matrix(Q)[:, 1:N]
-    end
-    for j in 1:N
-        uAxis[:, j] ./= norm(@view uAxis[:, j])
-    end
-    return uAxis, i_axis_mid
-end
-
-# uShootL[1]: backward propagator from surface 1's left boundary to the axis midpoint; T_left_mats[1]
-# (or the identity without ua) when that range is empty.
-function _build_uShootL_first(propagators::Vector{ChunkPropagator},
-    chunks::Vector{IntegrationChunk}, i_crossings::Vector{Int},
-    sing::Vector{SingType}, T_left_mats::Vector{Matrix{ComplexF64}},
-    has_ua::Bool, can_reintegrate::Bool, i_axis_mid::Int,
-    ctrl, equil, mats, intr::ForceFreeStatesInternal, N::Int)
-    shoot_range_L1 = (i_axis_mid+1):(i_crossings[1]-1)
-    if can_reintegrate && !isempty(shoot_range_L1)
-        return integrate_fm_with_ua_ic(chunks, shoot_range_L1, sing[1].ua_left,
-            ctrl, equil, mats, intr;
-            backward=true, psi_ua=sing[1].psi_ua_left)
-    elseif !isempty(shoot_range_L1)
-        return assemble_fm_matrix(propagators, shoot_range_L1;
-            T_init=has_ua ? T_left_mats[1] : nothing)
-    else
-        return has_ua ? T_left_mats[1] : Matrix{ComplexF64}(I, 2N, 2N)
-    end
-end
-
-# Assemble the BVP matrix M with the axis matched to the conditioned axis propagator, avoiding the
-# ill-conditioned full axis FM. Fortran-matched layout, nMat = (2 + 4·msing)·N. Returns (M, nMat, col_edge).
-function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
+# Assemble the BVP matrix M with the axis matched to the axis-regular solutions `uAxis` at the start of the first
+# crossing chunk. Fortran-matched layout, nMat = (2 + 4·msing)·N. Returns (M, col_edge).
+function _assemble_bvp(uShootR::Vector{Matrix{ComplexF64}},
     uShootL::Vector{Matrix{ComplexF64}},
     uAxis::Matrix{ComplexF64}, ipert_all::Vector{Int},
     msing::Int, N::Int,
     wv::Union{Nothing,Matrix{ComplexF64}}, psio::Float64)
-    # STRIDE global BVP block structure [Glasser-Kolemen 2018 PoP 25, 032501 Eq. 37].
+    # STRIDE global BVP block structure [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eq. 37].
     nMat = (2 + 4 * msing) * N
     col_axis = 1:N
     col_edge = (nMat-N+1):nMat
@@ -390,90 +208,35 @@ function _assemble_bvp_S_axis(uShootR::Vector{Matrix{ComplexF64}},
         M[row_offset, _col_right(j, N)[ipert_j]] = 1
     end
     @assert row_offset == nMat "Row count mismatch: expected $nMat, got $row_offset"
-    return M, nMat, col_edge
+    return M, col_edge
 end
 
-# Coil-response block for the Eq. (37) edge [Glasser-Kolemen 2018 PoP 25, 032501]: impose the rpec edge BC
-# (RDCON `gal_set_boundary`, unit source per poloidal mode) and read the small-solution coefficient at each
-# surface side, solving all N modes with one factorization. Returns delta_coil (2·msing × N).
-function _solve_bvp_edge_coil(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
+# Δ_EF (2·msing × N): the small-solution coefficient at each surface side per unit displacement of each edge mode,
+# from the BVP with its edge fixed. Also returns the coefficients right of the last surface (2N × N).
+function _solve_bvp_delta_ef(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
     nMat = size(M, 1)
     bot = (nMat-2msing-N+1):(nMat-2msing)   # Eq. (38) bottom rows, carrying the W_V block
     Mc = copy(M)
     Mc[bot, :] .= 0
     Mc[bot, col_edge] .= I(N)               # Dirichlet edge: the edge coefficients equal the source
     B = zeros(ComplexF64, nMat, N)
-    B[bot, :] .= I(N)                       # unit drive, one column per edge poloidal mode
+    B[bot, :] .= I(N)                       # unit displacement, one column per edge poloidal mode
     X = lu(Mc) \ B
-    delta_coil = zeros(ComplexF64, 2msing, N)
+    delta_ef = zeros(ComplexF64, 2msing, N)
     for j in 1:msing
         row_left = _col_left(j, N)[ipert_all[j]+N]
         row_right = _col_right(j, N)[ipert_all[j]+N]
-        @views delta_coil[2j-1, :] .= X[row_left, :]
-        @views delta_coil[2j, :] .= X[row_right, :]
+        @views delta_ef[2j-1, :] .= X[row_left, :]
+        @views delta_ef[2j, :] .= X[row_right, :]
     end
-    return delta_coil
+    return delta_ef, X[_col_right(msing, N), :]
 end
 
-# Fallback BVP assembly with FM-based axis BC (used when no Riccati S matrices are available).
-# Uses the conditioned axis propagator Phi_R[1][:,N+1:2N] in place of S-axis matching.
-function _assemble_bvp_FM_axis(Phi_L_mats::Vector{Matrix{ComplexF64}},
-    Phi_R_mats::Vector{Matrix{ComplexF64}}, ipert_all::Vector{Int},
-    msing::Int, N::Int,
-    T_left_inv::Vector{Matrix{ComplexF64}},
-    T_right_inv::Vector{Matrix{ComplexF64}}, has_ua::Bool,
-    wv::Union{Nothing,Matrix{ComplexF64}}, psio::Float64)
-    nMat = (2 + 4 * msing) * N
-    col_axis = 1:N
-    col_edge = (N+4N*msing+1):nMat
-    M = zeros(ComplexF64, nMat, nMat)
-
-    M[1:2N, (N+1):(N+2N)] .= Phi_L_mats[1]
-    M[1:2N, col_axis] .= -view(Phi_R_mats[1], :, (N+1):2N)
-
-    row_drive_base = 2N + (4N - 2) * msing
-    for j in 1:msing
-        ipert_j = ipert_all[j]
-        cl = _col_left(j, N)
-        cr = _col_right(j, N)
-        row_cont = 2N + (4N - 2) * (j - 1)
-        for i in 1:2N
-            if i != ipert_j && i != ipert_j + N
-                row_cont += 1
-                M[row_cont, cl[i]] = 1
-                M[row_cont, cr[i]] = -1
-            end
-        end
-        junc_rows = (row_cont+1):(2N+(4N-2)*j)
-        if j < msing
-            M[junc_rows, cr] .= Phi_R_mats[j+1]
-            M[junc_rows, _col_left(j + 1, N)] .= -Phi_L_mats[j+1]
-        else
-            M[junc_rows, cr] .= Phi_R_mats[msing+1]
-            if wv !== nothing
-                M[junc_rows[1:N], col_edge] .= -I(N)
-                M[junc_rows[(N+1):end], col_edge] .= wv .* psio^2
-            else
-                M[junc_rows[(N+1):end], col_edge] .= -I(N)
-            end
-        end
-        if has_ua
-            M[row_drive_base+2j-1, cl] .= T_left_inv[j][ipert_j, :]
-            M[row_drive_base+2j, cr] .= T_right_inv[j][ipert_j, :]
-        else
-            M[row_drive_base+2j-1, cl[ipert_j]] = 1
-            M[row_drive_base+2j, cr[ipert_j]] = 1
-        end
-    end
-    return M, nMat, col_edge
-end
-
-# Solve the BVP and apply the PEST3 four-term combination.
-function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, nMat::Int,
-    use_S_axis::Bool, ipert_all::Vector{Int}, col_edge,
-    ctrl, debug::Bool)
+# Solve the BVP and apply the PEST3 four-term combination, in Complex{Double64} when `extended_precision`.
+function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int}, extended_precision::Bool)
+    nMat = size(M, 1)
     s2 = 2 * msing
-    Tc = (ctrl === nothing || ctrl.algorithm.extended_precision_bvp) ? Complex{Double64} : ComplexF64
+    Tc = extended_precision ? Complex{Double64} : ComplexF64
     M_solve = Tc.(M)
     M_lu = lu(M_solve; check=false)
     use_lu = issuccess(M_lu)
@@ -482,18 +245,13 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
         @warn "Δ' BVP: LU factorization singular (rank $(rank(M))/$nMat), using pseudo-inverse fallback"
     end
 
+    # One solve per surface side, driving that side's big-solution coefficient.
     dp_raw = zeros(Tc, s2, s2)
     b = zeros(Tc, nMat)
-    for jsing in 1:msing, side in 1:2
-        dRow = 2jsing - (2 - side)
+    for dRow in 1:s2
         fill!(b, 0)
-        drive_row = use_S_axis ? (nMat - s2 + dRow) : (2N + (4N - 2) * msing + dRow)
-        b[drive_row] = 1
+        b[nMat-s2+dRow] = 1
         x = use_lu ? (M_lu \ b) : (M_pinv * b)
-
-        debug && _log_bvp_solve(x, b, M_solve, jsing, side, dRow, msing, N,
-            ipert_all, col_edge, use_S_axis)
-
         for ksing in 1:msing
             ipert_k = ipert_all[ksing]
             dp_raw[dRow, 2ksing-1] = x[_col_left(ksing, N)[ipert_k+N]]
@@ -501,121 +259,12 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
         end
     end
 
-    # PEST3 four-term combination [Chance PPPL-2527; Glasser-Kolemen 2018 PoP 25, 032501 Eq. 31].
-    # Δ'[i,j] = (NW − NE − SW + SE) on each 2×2 block of dp_raw.
+    # PEST3 four-term combination [Chance PPPL-2527]: Δ'[i,j] = (NW − NE − SW + SE) on each 2×2 block of dp_raw.
     deltap = zeros(Tc, msing, msing)
     for i in 1:msing, j in 1:msing
         deltap[i, j] = dp_raw[2i, 2j] - dp_raw[2i, 2j-1] - dp_raw[2i-1, 2j] + dp_raw[2i-1, 2j-1]
     end
-
-    debug && _log_bvp_pest3(dp_raw, deltap, s2, msing)
     return ComplexF64.(deltap), ComplexF64.(dp_raw)
-end
-
-# Logging helpers for `compute_delta_prime_matrix!`. Called only when debug=true.
-function _log_bvp_setup(chunks, sing, S_at_surface_left, use_S_axis, has_ua,
-    Phi_L_mats, Phi_R_mats, Phi_R_halves, ipert_all, wv, psio, N, msing)
-    @info "Δ' BVP: $(length(chunks)) chunks, $msing surfaces, N=$N"
-    @info "Δ' BVP: Axis BC: $(use_S_axis ? "S-based (Riccati)" : "FM-based (conditioned)")"
-    @info "Δ' BVP: Asymptotic basis: $(has_ua ? "available" : "NOT available (raw basis driving)")"
-    if use_S_axis
-        for j in 1:msing
-            @info "  S_left[$j]: max=$(@sprintf("%.2e", maximum(abs, S_at_surface_left[j]))), cond=$(@sprintf("%.2e", cond(S_at_surface_left[j])))"
-        end
-    end
-    if has_ua
-        for j in 1:msing
-            sp = sing[j]
-            T_l = [sp.ua_left[:, :, 1]; sp.ua_left[:, :, 2]]
-            T_r = [sp.ua_right[:, :, 1]; sp.ua_right[:, :, 2]]
-            @info "  Surface $j: cond(T_left)=$(@sprintf("%.2e", cond(T_l))), cond(T_right)=$(@sprintf("%.2e", cond(T_r)))"
-            ipert_j = ipert_all[j]
-            @info "  Surface $j ua_left (ipert=$ipert_j, psi_ua_left=$(@sprintf("%.8f", sp.psi_ua_left))):"
-            for i in 1:min(5, N)
-                @info "    ua($i,$ipert_j,1)=$(@sprintf("%16.8e %16.8e", real(sp.ua_left[i,ipert_j,1]), imag(sp.ua_left[i,ipert_j,1])))  ua($i,$ipert_j,2)=$(@sprintf("%16.8e %16.8e", real(sp.ua_left[i,ipert_j,2]), imag(sp.ua_left[i,ipert_j,2])))"
-            end
-            @info "    small: ua(1,$(ipert_j+N),1)=$(@sprintf("%16.8e %16.8e", real(sp.ua_left[1,ipert_j+N,1]), imag(sp.ua_left[1,ipert_j+N,1])))"
-        end
-    end
-    for j in 1:(msing-1)
-        Phi_L_h, Phi_R_h = Phi_R_halves[j]
-        @info "  Inter-surface $j→$(j+1): half_L cond=$(@sprintf("%.2e",cond(Phi_L_h))), half_R cond=$(@sprintf("%.2e",cond(Phi_R_h))), full cond=$(@sprintf("%.2e",cond(Phi_R_mats[j+1])))"
-    end
-    @info "  Phi_R[$(msing+1)] (edge): cond=$(@sprintf("%.2e",cond(Phi_R_mats[msing+1])))"
-    for j in 1:msing
-        @info "  Surface $j (m=$(sing[j].m[1])): ipert=$(ipert_all[j]), cond(Phi_L)=$(@sprintf("%.2e", cond(Phi_L_mats[j])))"
-    end
-    @info "Δ' BVP: Vacuum BC $(wv === nothing ? "off (conducting wall)" : "on (psio=$psio)")"
-    for j in 1:msing
-        if !isempty(sing[j].delta_prime)
-            @info "  Surface $j ca-based Δ' = $(@sprintf("%.6f%+.6fi", real(sing[j].delta_prime[1]), imag(sing[j].delta_prime[1])))"
-        end
-    end
-end
-
-function _log_S_axis_shooting_propagators(uShootR, uShootL, uAxis, S_at_surface_left,
-    T_left_mats, ipert_all, has_ua, msing, N)
-    @info "  Shooting propagators (S-based axis BC, no axis unknowns):"
-    for j in 1:msing
-        shoot_R_str = @sprintf("%.2e", cond(uShootR[j]))
-        shoot_L_str = j >= 2 ? @sprintf("%.2e", cond(uShootL[j])) : "N/A (S axis BC)"
-        @info "    uShootL[$j]: cond=$shoot_L_str, uShootR[$j]: cond=$shoot_R_str"
-    end
-    S1 = S_at_surface_left[1]
-    if has_ua
-        T1 = T_left_mats[1]
-        axis_BC = T1[1:N, :] - S1 * T1[(N+1):2N, :]
-        @info "    S-axis BC matrix: cond=$(@sprintf("%.2e", cond(axis_BC)))"
-    end
-    for j in 1:msing
-        ipert_j = ipert_all[j]
-        col_norms_R = [norm(view(uShootR[j], :, k)) for k in 1:2N]
-        @info "    uShootR[$j] column norms: min=$(@sprintf("%.2e", minimum(col_norms_R))), max=$(@sprintf("%.2e", maximum(col_norms_R)))"
-        @info "    uShootR[$j] col ipert=$ipert_j norm=$(@sprintf("%.2e", col_norms_R[ipert_j])), col ipert+N=$(ipert_j+N) norm=$(@sprintf("%.2e", col_norms_R[ipert_j+N]))"
-        if j >= 2
-            col_norms_L = [norm(view(uShootL[j], :, k)) for k in 1:2N]
-            @info "    uShootL[$j] column norms: min=$(@sprintf("%.2e", minimum(col_norms_L))), max=$(@sprintf("%.2e", maximum(col_norms_L)))"
-            @info "    uShootL[$j] col ipert=$ipert_j norm=$(@sprintf("%.2e", col_norms_L[ipert_j])), col ipert+N=$(ipert_j+N) norm=$(@sprintf("%.2e", col_norms_L[ipert_j+N]))"
-        end
-    end
-    for j in 1:(msing-1)
-        mid_block = hcat(uShootR[j], -uShootL[j+1])
-        @info "    Midpoint $j→$(j+1): cond([uShootR[$j] | -uShootL[$(j+1)]]) = $(@sprintf("%.2e", cond(mid_block)))"
-        col_norms_Ljp1 = [norm(view(uShootL[j+1], :, k)) for k in 1:2N]
-        @info "    uShootL[$(j+1)] all col norms: $([(@sprintf("%.2e", c)) for c in col_norms_Ljp1])"
-    end
-end
-
-function _log_bvp_solve(x, b, M_solve, jsing, side, dRow, msing, N,
-    ipert_all, col_edge, use_S_axis)
-    residual = norm(ComplexF64.(M_solve * x - b))
-    side_str = side == 1 ? "left" : "right"
-    @info "  BVP solve: jsing=$jsing side=$side_str (dRow=$dRow): ||Mx-b||=$(@sprintf("%.2e", residual)), ||x||=$(@sprintf("%.2e", Float64(norm(x))))"
-    for ks in 1:msing
-        ipert_ks = ipert_all[ks]
-        cl = _col_left(ks, N)
-        cr = _col_right(ks, N)
-        xl_big = ComplexF64(x[cl[ipert_ks]])
-        xl_small = ComplexF64(x[cl[ipert_ks+N]])
-        xr_big = ComplexF64(x[cr[ipert_ks]])
-        xr_small = ComplexF64(x[cr[ipert_ks+N]])
-        @info "    surf $ks: x_left[big]=$(@sprintf("%+.4e%+.4ei", real(xl_big), imag(xl_big))), x_left[small]=$(@sprintf("%+.4e%+.4ei", real(xl_small), imag(xl_small)))"
-        @info "    surf $ks: x_right[big]=$(@sprintf("%+.4e%+.4ei", real(xr_big), imag(xr_big))), x_right[small]=$(@sprintf("%+.4e%+.4ei", real(xr_small), imag(xr_small)))"
-        @info "    surf $ks: ||x_left||=$(@sprintf("%.2e", Float64(norm(x[cl])))), ||x_right||=$(@sprintf("%.2e", Float64(norm(x[cr]))))"
-    end
-    if use_S_axis
-        @info "    ||x_edge||=$(@sprintf("%.2e", Float64(norm(x[col_edge]))))"
-    end
-end
-
-function _log_bvp_pest3(dp_raw, deltap, s2, msing)
-    @info "Δ' BVP: Full dp_raw matrix ($(s2)×$(s2)):"
-    for i in 1:s2
-        row_str = join([@sprintf("%+.6e", Float64(real(dp_raw[i, j]))) for j in 1:s2], "  ")
-        @info "  dp_raw[$i,:] = $row_str"
-    end
-    @info "Δ' BVP: Raw dp diagonal = $([@sprintf("%.4f%+.4fi", Float64(real(dp_raw[i,i])), Float64(imag(dp_raw[i,i]))) for i in 1:s2])"
-    @info "Δ' BVP: deltap diagonal = $([@sprintf("%.4f%+.4fi", real(deltap[i,i]), imag(deltap[i,i])) for i in 1:msing])"
 end
 
 """
@@ -638,12 +287,11 @@ where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
 
 No Pletzer–Dewar ½ prefactor, matching Fortran RDCON; it cancels in `det(D' − D(γ)) = 0`.
 
-The Δ' block returned here equals `intr.delta_prime_matrix` (the m×m PEST3
-tearing projection computed inside `compute_delta_prime_matrix!`).
+The Δ' block returned here equals `DeltaPrimeData.matrix`.
 
 # Arguments
 
-  - `dp_raw` — 2m×2m complex matrix (typically `intr.delta_prime_raw`).
+  - `dp_raw` — 2m×2m complex matrix (typically `DeltaPrimeData.raw`).
 
 # Returns
 

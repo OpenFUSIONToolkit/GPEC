@@ -112,7 +112,7 @@ GPEC will eventually implement resistive MHD stability analysis based on:
 
 - **Glasser (2018)**: "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time"
   - Location: `docs/resources/2018-Glasser-A robust solution for the resistive MHD toroidal Delta-prime matrix in near real-time.pdf`
-  - Published: Physics of Plasmas **25**, 032501 (2018)
+  - Published: Physics of Plasmas **25**, 082502 (2018)
   - Describes: Fast computation of Δ' matrix for resistive stability
 
 - **Wang et al. (2020)**: "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach"

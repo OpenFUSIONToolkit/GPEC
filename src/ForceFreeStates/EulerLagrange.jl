@@ -53,7 +53,7 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `du_store::Array{ComplexF64,3}` - du₁/dψ at each stored step, shape `(numpert_total, numpert_total, step)`; empty until `materialize_derivative_stores!` fills it (the
     galerkin-matched path supplies it at construction).
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s (Glasser 2016 Eq. 18) at each stored step; empty until materialized, like `du_store`.
-  - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state; false on the sparse parallel path (Riccati-basis chunk endpoints), where derivative
+  - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state; false on the Riccati path (stored states are the Riccati matrix), where derivative
     stores cannot be materialized.
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final basis.
   - `crit_store::Vector{Float64}` - Critical eigenvalue (smallest eigenvalue of W⁻¹) at each stored step.
@@ -133,9 +133,9 @@ OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int
 """
     compute_delta_prime_from_ca!(odet, intr, equil)
 
-**Stub, not physically valid.** Per-surface Δ' estimate `(ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)`
-from the asymptotic coefficients. It ignores inter-surface coupling and the vacuum, so it does not
-agree with the physical `ForceFreeStatesInternal.delta_prime_matrix`. Used only by tests.
+**Stub, not physically valid.** Fill each surface's `delta_prime` with the per-surface estimate
+`(ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)` from the asymptotic coefficients. It ignores inter-surface
+coupling and the vacuum, so it does not agree with the physical `ForceFreeStatesResult.delta_prime`.
 """
 function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl
@@ -182,80 +182,60 @@ end
 """
     balance_integration_chunks(chunks, ctrl, intr) -> Vector{IntegrationChunk}
 
-Split the highest-`ode_itime_cost` chunk at its equal-cost midpoint until the count reaches
-`ctrl.algorithm.nchunks` (`0` = auto). The target never depends on the thread count, so Riccati
-output is thread-count independent. Only the last sub-chunk of a split keeps its crossing.
+Split every crossing chunk once, then the costliest chunk (`ode_itime_cost`) until there are
+`ctrl.algorithm.nchunks` (`0` = auto). Splits are at the equal-cost point; the upper part keeps the crossing.
 """
 function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
-    min_chunks = 2 * intr.msing + 3
-    # Enough sub-chunks per segment that no single long-span propagator is too ill-conditioned for the BVP
-    min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
-    if ctrl.algorithm.nchunks > 0
-        if ctrl.algorithm.nchunks < min_chunks
-            @warn "nchunks = $(ctrl.algorithm.nchunks) is below the $min_chunks chunks required by $(intr.msing) singular surfaces; clamping up."
-        end
-        target_n = max(ctrl.algorithm.nchunks, min_chunks)
-    else
-        target_n = max(min_chunks, min_bvp_intervals)
-    end
-
-    result = collect(chunks)
-
-    while length(result) < target_n
-        # Find the highest-cost splittable chunk
-        best_idx = 0
-        best_cost = -Inf
-        for (i, chunk) in enumerate(result)
-            width = chunk.psi_end - chunk.psi_start
-            if width > 1e-8
-                c = ode_itime_cost(chunk.psi_start, chunk.psi_end, intr)
-                if c > best_cost
-                    best_cost = c
-                    best_idx = i
-                end
-            end
-        end
-
-        best_idx == 0 && break  # No more splittable chunks
-
-        chunk = result[best_idx]
-        total_cost = best_cost
-        target_cost = total_cost / 2.0
-
-        # Bisect for ψ_mid with cost(psi_start, ψ_mid) ≈ target_cost
+    function split(chunk::IntegrationChunk)
+        half_cost = ode_itime_cost(chunk.psi_start, chunk.psi_end, intr) / 2
         lo, hi = chunk.psi_start, chunk.psi_end
         for _ in 1:50
-            mid = (lo + hi) / 2.0
-            if ode_itime_cost(chunk.psi_start, mid, intr) < target_cost
+            mid = (lo + hi) / 2
+            if ode_itime_cost(chunk.psi_start, mid, intr) < half_cost
                 lo = mid
             else
                 hi = mid
             end
         end
-        psi_mid = (lo + hi) / 2.0
+        psi_mid = (lo + hi) / 2
+        return [IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid, needs_crossing=false),
+            IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end, chunk.needs_crossing, chunk.ising, chunk.direction)]
+    end
 
-        left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
-            needs_crossing=false, ising=0, direction=1)
-        right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
-            needs_crossing=chunk.needs_crossing, ising=chunk.ising,
-            direction=chunk.direction)
-        splice!(result, best_idx, [left, right])
+    result = IntegrationChunk[]
+    for chunk in chunks
+        append!(result, chunk.needs_crossing ? split(chunk) : [chunk])
+    end
+
+    target_n = length(result)
+    if ctrl.algorithm.nchunks > 0
+        if ctrl.algorithm.nchunks < target_n
+            @warn "nchunks = $(ctrl.algorithm.nchunks) is below the $target_n chunks required by the singular surfaces crossed; clamping up."
+        end
+        target_n = max(ctrl.algorithm.nchunks, target_n)
+    else
+        # Enough sub-chunks per segment that no single long-span propagator is too ill-conditioned for the BVP
+        target_n = max(target_n, 8 * (intr.msing + 1) + intr.msing)
+    end
+
+    while length(result) < target_n
+        costs = [c.psi_end - c.psi_start > 1e-8 ? ode_itime_cost(c.psi_start, c.psi_end, intr) : -Inf for c in result]
+        cost, costliest = findmax(costs)
+        isfinite(cost) || break  # nothing left wide enough to split
+        splice!(result, costliest, split(result[costliest]))
     end
 
     return result
 end
 
 """
-    eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, propagators, chunks, S_left)
+    eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, riccati)
 
 Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
 surface on the way. Dispatches on `ctrl.algorithm` to
 [`riccati_eulerlagrange_integration`](@ref) (the chunked propagator BVP) or
-[`forward_eulerlagrange_integration`](@ref).
-
-Only the Riccati branch populates `propagators` / `chunks` / `S_left`, which
-`compute_delta_prime_matrix!` consumes for the Δ' BVP; the forward branch returns `nothing`
-for all three.
+[`forward_eulerlagrange_integration`](@ref). `riccati` holds the inputs of
+`compute_delta_prime_matrix`; it is `nothing` on the forward branch.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
@@ -272,13 +252,12 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=intr.verbose) -> (odet, nothing, nothing, nothing)
+    forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=intr.verbose) -> (odet, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
 applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.algorithm.renorm_threshold` and undoing it
-via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
-directly to force this branch regardless of `ctrl.algorithm`; `verbose` overrides
-`intr.verbose` for progress logging.
+via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. `ctrl.algorithm`
+must be a `Forward`, whose settings it reads; `verbose` overrides `intr.verbose` for progress logging.
 """
 function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal;
     verbose::Bool=intr.verbose)
@@ -322,7 +301,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
 
-    return (odet, nothing, nothing, nothing)
+    return odet, nothing
 end
 
 """
@@ -630,7 +609,7 @@ function cross_ideal_singular_surf!(
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
     odet.ca_populated = true
 
-    # No Δ' here: it needs the Riccati gauge (U₂ = I); see compute_delta_prime_matrix!
+    # No Δ' here: it needs the Riccati propagators; see compute_delta_prime_matrix
     odet.q = equil.profiles.q_spline(odet.psifac; hint=odet.spline_hint)
     store_ode_data!(odet, odet.psifac, odet.u)
 end
@@ -697,14 +676,16 @@ end
 const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refresh_column_abstol!; save_positions=(false, false))
 
 """
-    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK, save_everystep=false)
 
-Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
+Vern9 solve of an Euler-Lagrange problem with the per-column abstol of `column_abstol!`, returning the end state
+or, with `save_everystep`, the state at every solver step.
 A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
 Errors when the solver stops short of the interval's end (e.g. the step size underflows), naming the ψ reached.
 """
-function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
+function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK, save_everystep::Bool=false)
+    # dense=false: saved steps keep the state only, not the interpolation stages.
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep, dense=false, save_end=true)
     SciMLBase.successful_retcode(sol) ||
         error(
             "Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
@@ -1011,7 +992,7 @@ end
 
 In-place Euler-Lagrange derivative du/dψ at `psieval` [Glasser Phys. Plasmas 2016 112506 Eq. 24],
 ideal or kinetic, in the `(du, u, p, t)` form the ODE solver calls; `du` and `u` have shape
-`(numpert_total, numpert_total, 2)`. Ξ_s is not computed here; see [`compute_node_xi_s!`](@ref).
+`(numpert_total, ncolumns, 2)`. Ξ_s is not computed here; see [`compute_node_xi_s!`](@ref).
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
@@ -1039,7 +1020,7 @@ end
     el_derivatives!(du, u, kinetic, equil, mats, intr, psieval, spline_hint, mats_hint) -> q
 
 Euler-Lagrange (or, when `kinetic` is true, FKG) derivative kernel: writes du₁/dψ and du₂/dψ at
-`psieval` into `du` and returns q there. Holds no state of its own — the two hints are the
+`psieval` into `du` and returns q there, for any number of solution columns. Holds no state of its own — the two hints are the
 caller's interval-search accelerators, so concurrent callers just pass their own.
 """
 @with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
@@ -1054,7 +1035,7 @@ caller's interval-search accelerators, so concurrent callers just pass their own
     fmat_lower = acquire!(pool, ComplexF64, Npert, Npert)
     kmat = similar!(pool, fmat_lower)
     gmat = similar!(pool, fmat_lower)
-    tmp_mat = similar!(pool, fmat_lower)
+    tmp_mat = acquire!(pool, ComplexF64, Npert, size(u, 2))
 
     fill!(tmp_mat, zero(ComplexF64))
     u1 = @view(u[:, :, 1])

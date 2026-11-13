@@ -143,7 +143,7 @@ using TOML
     @testset "Riccati run offers Δ′ but no solution profiles" begin
         mktempdir() do dir
             ret, h5 = _run_fixture(dir, "regression_solovev_ideal_example";
-                edit=d -> (d["ForceFreeStates"]["integrator"] = "Riccati"; d["Riccati"] = pop!(d, "Forward")))
+                edit=d -> (d["ForceFreeStates"]["integrator"] = "Riccati"; d["Riccati"] = delete!(pop!(d, "Forward"), "renorm_threshold")))
             _check_sources(ret.ffs, h5)
             @test :delta_prime in A.capabilities(ret.ffs) && :solution_profiles ∉ A.capabilities(ret.ffs)
             @test_throws A.REASONS[:solution_profiles] A.ForceFreeStates.plot_mode_displacement(ret.ffs)

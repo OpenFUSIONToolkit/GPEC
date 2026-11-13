@@ -34,14 +34,14 @@ where ``\mathbf{L}`` is built from the Fourier-space metric matrices ``\bar{F}``
 The resonance factor vanishes at each rational surface, so the solutions there behave as ``|\psi - \psi_s|^{-1/2 \pm \sqrt{-D_I}}``, a large and a small solution governed by the Mercier index ``D_I``; GPEC assembles the right-hand side from reduced matrices that carry explicit ``(m - nq)`` factors rather than their inverses, the convention used on every page.
 The Newcomb criterion states that the plasma is fixed-boundary stable if and only if the solution that is regular at the axis remains nonsingular across every rational surface and up to the edge.
 
-The Riccati integrator works with the matrix ``S = U_1 U_2^{-1}`` ([Glasser, Kolemen and Glasser (2018)](citations.md#ForceFreeStates), Eq. 19), which obeys a quadratic matrix ODE and stays bounded where ``U_1`` and ``U_2`` grow exponentially, so that the rational surfaces can be crossed without the Gaussian reduction of the forward integration.
+The Riccati integrator works with the matrix ``S = U_1 U_2^{-1}`` ([Glasser, Kolemen and Glasser (2018)](citations.md#ForceFreeStates), Eq. 36), which obeys a quadratic matrix ODE and stays bounded where ``U_1`` and ``U_2`` grow exponentially, so that the rational surfaces can be crossed without the Gaussian reduction of the forward integration.
 Its global boundary-value problem over all surfaces gives the Δ′ matrix of [Glasser and Kolemen (2018)](citations.md#Tearing), stored in the PEST-3 convention: the diagonal entry of each surface is its outer-region Δ′, positive when the outer region drives the tearing mode, and the off-diagonal entries couple the surfaces.
 
 ## Integrators
 
 `[ForceFreeStates] integrator` selects the radial method; its numerical settings sit in a section of the same name.
 
-- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in the Riccati basis and assembles the Δ′ matrix. It stores the chunk endpoints only, so it yields no dense ``\xi`` profiles.
+- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in its asymptotic basis and assembles the Δ′ matrix. It stores the Riccati matrix ``S`` at every solver step, not the displacement, so it yields no ``\xi`` profiles.
 - `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction at each rational surface. It returns dense displacement profiles, and is the only integrator whose result `plasma_response` accepts (the response operators are built from the dense ``\xi`` solution; a wall is refused too) and the only one that supports the kinetic solve.
 - `"Galerkin"` (`[Galerkin]`) solves the outer region variationally on a finite-element basis, giving the resistive Δ′ matrix and the PEST-3 blocks but no free-boundary energies; see [Galerkin Solver](galerkin.md).
 
@@ -69,7 +69,7 @@ save_interval = 1        # save every Nth ODE step; steps near rational surfaces
 renorm_threshold = 1e3   # renormalize the solution basis above this column norm
 ```
 
-`examples/DIIID-like_riccati_deltaprime_example` sets the same three keys under `[Riccati]`.
+`examples/DIIID-like_riccati_deltaprime_example` sets `eulerlagrange_tolerance` and `save_interval` under `[Riccati]`; `renorm_threshold` belongs to `[Forward]` only.
 
 The same solve from a script takes the deck keys as keywords of the problem and the integrator:
 
@@ -136,10 +136,10 @@ The perpendicular diffusivities that set the layer widths are described with the
 
 ## Numerical notes
 
-- The Riccati integrator splits the domain into chunks whose count is derived from the number of singular surfaces (`[Riccati] nchunks` overrides the target, `0` is automatic); every chunk integrates from identity initial conditions, so the result is independent of the thread count.
-- The chunk ending at each rational surface is integrated backward, from the surface inward, because the forward propagator is ill-conditioned there; the Δ′ boundary-value problem is assembled from the split forward and backward propagators for the same reason.
-- Both integrators use the adaptive ninth-order `Vern9` solver at `eulerlagrange_tolerance`; the Riccati basis is recovered by renormalizing whenever the solution exceeds `renorm_threshold`.
-- The two crossing conventions differ slightly, so Riccati and Forward free-boundary energies agree to within a few percent, not to machine precision.
+- The Riccati integrator splits the domain into chunks whose count is derived from the number of singular surfaces (`[Riccati] nchunks` overrides the target, `0` is automatic); every chunk integrates from its own start (the identity, or the asymptotic solutions of [Glasser and Kolemen (2018)](citations.md#Tearing) for the two chunks next to a rational surface), so the result is independent of the thread count.
+- The chunk ending at each rational surface is integrated backward, from the surface inward, because the forward propagator is ill-conditioned there; the Δ′ boundary-value problem is assembled from products of the same propagators, matched midway between the surfaces.
+- Both integrators use the adaptive ninth-order `Vern9` solver at `eulerlagrange_tolerance`; the Riccati integrator reduces its state to ``(S, I)`` after every chunk, and Forward applies Gaussian reduction whenever a solution norm grows past `renorm_threshold`.
+- The two integrators cross a rational surface differently. Riccati carries the nonresonant asymptotic coefficients across it (Glasser and Kolemen (2018), Eq. 36), so its energies do not depend on `singfac_min`. Forward takes a trapezoidal step between the two sides, with an error of first order in `singfac_min`, so its energies converge to Riccati's as `singfac_min` shrinks.
 
 Local stability (Mercier, resistive interchange and ballooning) is a separate stage on the same equilibrium; see [Local Stability](ballooning.md).
 

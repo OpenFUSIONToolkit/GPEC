@@ -22,6 +22,7 @@ include("display_check.jl")
         merge!(inputs["ForceFreeStates"], ffs_overrides)
         new = get(inputs["ForceFreeStates"], "integrator", "Riccati")
         old == new || haskey(inputs, old) && (new == "Galerkin" ? delete!(inputs, old) : (inputs[new] = pop!(inputs, old)))
+        haskey(inputs, "Riccati") && delete!(inputs["Riccati"], "renorm_threshold")
         for (name, section) in extra_sections
             haskey(inputs, name) ? merge!(inputs[name], section) : (inputs[name] = section)
         end

@@ -12,6 +12,22 @@ Supertype for objects that carry the resolved (m, n) mode space — `mlow`, `mhi
 abstract type ModeSpace end
 
 """
+    ModeIndices(modes::ModeSpace)
+
+Immutable copy of a mode space's indexing, for code that must not see the rest of its source.
+"""
+struct ModeIndices <: ModeSpace
+    mlow::Int
+    mhigh::Int
+    mpert::Int
+    nlow::Int
+    nhigh::Int
+    npert::Int
+    numpert_total::Int
+end
+ModeIndices(m::ModeSpace) = ModeIndices(m.mlow, m.mhigh, m.mpert, m.nlow, m.nhigh, m.npert, m.numpert_total)
+
+"""
     ForceFreeStatesInternal
 
 Solve-time scratch state for a force-balance solve: the resolved mode space, singular surfaces and integration limits.
@@ -59,26 +75,6 @@ Solve-time scratch state for a force-balance solve: the resolved mode space, sin
     q1lim::Float64 = 0.0
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
     verbose::Bool = false
-    """
-    Inter-surface Δ' matrix, `msing × msing`, PEST3 convention: the odd-parity projection of
-    `delta_prime_raw`, set by `compute_delta_prime_matrix!` (Riccati path only).
-    """
-    delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-
-    """
-    Edge coil-response matrix, `2msing × numpert_total`: column k is the resonant small-solution
-    response at each surface side to a unit source on edge mode k (Eq. 37 rpec edge condition,
-    `_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
-    """
-    delta_coil::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-
-    """
-    Raw `2msing × 2msing` outer-region matching matrix D' (Pletzer–Dewar 1991, before parity
-    rotation), side-major ordering `[L_s1, R_s1, …, L_sm, R_sm]`. `pest3_decompose` recovers the
-    A', B', Γ', Δ' blocks. No ½ prefactor (matches Fortran rdcon; the paper applies ½).
-    Empty unless the Riccati integrator was used.
-    """
-    delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """

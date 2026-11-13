@@ -175,15 +175,15 @@ function _matched_gal_profiles(gal_result::GalerkinResult, m::MatchResult, mats:
 end
 
 """
-    build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+    build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, delta_prime)
         -> ForceFreeStatesResult
 
 Assemble the published result once the solve is finished, with the ideal or regular closure (a
 `MatchProblem` solve transforms it afterwards). Materializes the forward path's derivative stores and forms `W_p`
 when the free-boundary stage did not run; everything else is copied or aliased.
 
-`odet` is the ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` are the Galerkin internals and
-its Δ′ payload (`nothing` otherwise).
+`odet` is the ODE state (`nothing` for Galerkin), `gal_data` the Galerkin internals (`nothing` otherwise),
+and `delta_prime` the Δ′ payload of a Riccati or Galerkin solve (`nothing` otherwise).
 """
 function build_result(
     integrator::Symbol,
@@ -195,7 +195,7 @@ function build_result(
     odet::Union{Nothing,OdeState},
     free_energies::Union{Nothing,FreeBoundaryResult},
     gal_data::Union{Nothing,GalerkinResult},
-    gal_dp::Union{Nothing,DeltaPrimeData}
+    delta_prime::Union{Nothing,DeltaPrimeData}
 )
     # The forward sweep is the only formalism whose stores need materializing; doing it here
     # keeps `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
@@ -207,15 +207,6 @@ function build_result(
         nothing
     end
 
-    # One Δ′ payload whichever formalism produced it; Riccati leaves the PEST-3 blocks unfilled
-    # because it persists only the raw D′ and recovers them on demand via `pest3_decompose`.
-    delta_prime = if gal_dp !== nothing
-        gal_dp
-    elseif !isempty(intr.delta_prime_matrix)
-        DeltaPrimeData(intr.delta_prime_matrix, intr.delta_prime_raw, intr.delta_coil, nothing, nothing, nothing)
-    else
-        nothing
-    end
     kinetic = (kmsing=intr.kmsing, kinsing=intr.kinsing, scan_psi=intr.kinsing_scan_psi,
         scan_cond=intr.kinsing_scan_cond, scan_threshold=intr.kinsing_scan_threshold)
 

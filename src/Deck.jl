@@ -20,7 +20,8 @@ const _RUN_SECTION_KEYS = ("verbose", "HDF5_filename", "output_filename", "write
 const _RUN_KEY_SECTIONS = ("Equilibrium", "LocalStability", "ForceFreeStates", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
 
 # Keys that moved to another section, each with where it lives now.
-const _ODE_DECK_KEYS = ("eulerlagrange_tolerance", "renorm_threshold", "numsteps_init", "numunorms_init", "save_interval")
+const _ODE_DECK_KEYS = ("eulerlagrange_tolerance", "save_interval")
+const _FORWARD_DECK_KEYS = ("renorm_threshold", "numsteps_init", "numunorms_init")
 const _SEARCH_DECK_KEYS = ("scan_mode", "Q_re_range", "Q_im_range", "nre", "nim", "amr_passes", "amr_max_cells", "boxes",
     "multi_box_prescreen_n", "pole_threshold", "pole_threshold_adaptive", "filter_above_poles", "filter_outside_re",
     "gamma_gap_threshold", "polish_roots", "validity_rtol", "root_classification", "store_scan")
@@ -35,6 +36,7 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "gal_ideal_flag" => "moved to [Match] as ideal",
         "gal_inner_solver" => "moved to [GGJ] as solver",
         (k => "moved to the integrator's section, [Forward] or [Riccati]" for k in _ODE_DECK_KEYS)...,
+        (k => "moved to [Forward]" for k in _FORWARD_DECK_KEYS)...,
         ("gal_$k" => "moved to [Match] as $k" for k in ("eta", "rho", "rotation", "gamma"))...,
         ("gal_inner_$k" => "moved to [GGJ] as $k" for k in ("xfac", "nx", "nq", "cutoff", "kmax"))...,
         ("gal_$k" => "moved to [Galerkin] as $k" for k in ("nx", "nq", "pfac", "dx0", "dx1", "dx2", "cutoff", "tol", "gnstep",

@@ -1,0 +1,12 @@
+# Regression case: the diiid_n1_riccati deck with the q = 1 surface inside the integration domain.
+# The on-axis q is lowered to 0.9 and the integration starts inside q = 1, so the m = 1 surface is
+# crossed like the others. It tracks the energies and Δ' where the singular-surface crossing
+# matters most: the base deck starts outside q = 1.02 and never crosses that surface.
+[case]
+name = "diiid_n1_riccati_q1"
+base = "diiid_n1_riccati"   # Inherit example_dir, [quantities.*] and [overrides] from this case
+description = "DIII-D-like equilibrium, n=1, Riccati integrator with the q = 1 surface inside the domain"
+
+[overrides]
+"Equilibrium.newq0" = 0.9      # On-axis q below 1, so a q = 1 surface exists
+"ForceFreeStates.qlow" = 0.1   # Start the integration inside q = 1

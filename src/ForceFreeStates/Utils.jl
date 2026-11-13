@@ -84,8 +84,8 @@ Euler-Lagrange system is linear in `u`, and both operations right-multiply the s
 mixing matrix `T`, so `du(ψ, u·T) = du(ψ, u)·T`.
 
 Returns `false` without allocating when there is nothing to work from — no `mats`, no stored
-steps, or a solution held in a basis the Euler-Lagrange kernel does not apply to (the sparse
-parallel path, which stores chunk-endpoint Riccati matrices).
+steps, or a solution held in a basis the Euler-Lagrange kernel does not apply to (the
+Riccati path, which stores Riccati matrices).
 """
 function materialize_derivative_stores!(
     odet::OdeState,

@@ -9,6 +9,7 @@ function _prepared_solovev(integrator::String="Forward"; nchunks=nothing)
     if integrator != "Forward"
         inputs["ForceFreeStates"]["integrator"] = integrator
         integrator == "Galerkin" ? delete!(inputs, "Forward") : (inputs[integrator] = pop!(inputs, "Forward"))
+        integrator == "Riccati" && delete!(inputs["Riccati"], "renorm_threshold")
     end
     nchunks === nothing || (inputs[integrator]["nchunks"] = nchunks)
     equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
@@ -17,7 +18,7 @@ function _prepared_solovev(integrator::String="Forward"; nchunks=nothing)
     return ctrl, intr, equil, metric, mats
 end
 
-@testset "BVP without controls preserves extended precision" begin
+@testset "BVP solve precision" begin
     FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
     M = ComplexF64[1 / (i + j - 1) + 0.02im / (i + j) for i in 1:6, j in 1:6]
     reference = setprecision(BigFloat, 256) do
@@ -32,123 +33,71 @@ end
         delta = reshape([raw[2, 2] - raw[2, 1] - raw[1, 2] + raw[1, 1]], 1, 1)
         return ComplexF64.(delta), ComplexF64.(raw)
     end
-    default = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, nothing, false)
-    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(), false)
-    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, 6, false, [1], nothing, FFS.ForceFreeStatesControl(; algorithm=Riccati(; extended_precision_bvp=false)), false)
-    @test default == reference
+    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], true)
+    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], false)
     @test extended == reference
     @test ordinary != reference
+    @test all(isapprox.(ordinary, reference; rtol=1e-8))
+    @test !Riccati().extended_precision_bvp
 end
 
 @testset "Riccati FM Integration Tests" begin
 
-    @testset "ChunkPropagator identity on trivial interval" begin
-        # Integrating over a zero-width interval should give the identity propagator.
-        # We test that apply_propagator! on an identity state preserves the state.
+    @testset "apply_propagator! and its inverse" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         N = 3
-        prop = GeneralizedPerturbedEquilibrium.ForceFreeStates.ChunkPropagator(N)
-
-        # Set propagator to identity (block_upper_ic = (I, 0), block_lower_ic = (0, I))
-        for i in 1:N
-            prop.block_upper_ic[i, i, 1] = 1  # U1 block from IC=(I,0)
-            prop.block_lower_ic[i, i, 2] = 1  # U2 block from IC=(0,I)
-        end
-
-        # Apply identity propagator to an arbitrary state
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(N, 10, 5, 0)
-        u1_in = [1.0+0.5im 0.2im 0.0;
-            0.1+0.1im 1.2+0.1im 0.0;
-            0.0im 0.0 0.9+0.3im]
-        u2_in = [0.8+0.1im 0.1im 0.0;
-            0.0im 1.0+0.2im 0.1;
-            0.1im 0.0 1.1+0.0im]
-        odet.u[:, :, 1] .= u1_in
-        odet.u[:, :, 2] .= u2_in
-
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
-
-        @test odet.u[:, :, 1] ≈ u1_in rtol = 1e-12
-        @test odet.u[:, :, 2] ≈ u2_in rtol = 1e-12
-    end
-
-    @testset "apply_propagator! linearity" begin
-        # Verify that apply_propagator! applies the correct linear map.
-        N = 3
-        prop = GeneralizedPerturbedEquilibrium.ForceFreeStates.ChunkPropagator(N)
-
-        # Fill block_upper_ic and block_lower_ic with random data
-        rng_upper = [1.1+0.2im 0.1im 0.05;
-            0.0im 0.9+0.3im 0.1;
-            0.2+0.1im 0.0 1.0+0.1im]
-        rng_lower = [0.8+0.1im 0.1im 0.0;
-            0.0im 1.2+0.2im 0.1;
-            0.0im 0.1 0.9+0.1im]
-        prop.block_upper_ic[:, :, 1] .= rng_upper
-        prop.block_upper_ic[:, :, 2] .= 0.5 * rng_upper
-        prop.block_lower_ic[:, :, 1] .= 0.3 * rng_lower
-        prop.block_lower_ic[:, :, 2] .= rng_lower
-
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(N, 10, 5, 0)
-        u1_in = 0.5 * I(N) .+ 0.1im * ones(N, N)
-        u2_in = I(N) .+ 0.2im * ones(N, N)
-        odet.u[:, :, 1] .= u1_in
-        odet.u[:, :, 2] .= u2_in
-
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
-
-        # Manual computation of expected result
-        U1_upper = prop.block_upper_ic[:, :, 1]
-        U2_upper = prop.block_upper_ic[:, :, 2]
-        U1_lower = prop.block_lower_ic[:, :, 1]
-        U2_lower = prop.block_lower_ic[:, :, 2]
-        u1_expected = U1_upper * u1_in + U1_lower * u2_in
-        u2_expected = U2_upper * u1_in + U2_lower * u2_in
-
-        @test odet.u[:, :, 1] ≈ u1_expected rtol = 1e-12
-        @test odet.u[:, :, 2] ≈ u2_expected rtol = 1e-12
-    end
-
-    @testset "apply_propagator_inverse! is inverse of apply_propagator!" begin
-        # Verify that apply_propagator_inverse! is the algebraic inverse of apply_propagator!:
-        # applying inverse then forward should recover the original state exactly.
-        # This checks the LU-solve path: Φ \ (Φ * u) = u for an arbitrary invertible Φ.
-        N = 3
-        prop = GeneralizedPerturbedEquilibrium.ForceFreeStates.ChunkPropagator(N)
-
-        # Near-identity blocks guarantee the 2N×2N matrix [A B; C D] is invertible
         A = I(N) .+ 0.15 * [1.0+0.2im 0.1im 0.05; 0.0im 0.9+0.3im 0.1; 0.2+0.1im 0.0 1.0+0.1im]
         B = 0.1 * [0.8+0.1im 0.1im 0.0; 0.0im 1.2+0.2im 0.1; 0.0im 0.1 0.9+0.1im]
         C = 0.1 * [0.5+0.1im 0.0im 0.1; 0.1im 0.8+0.2im 0.0; 0.0im 0.0 0.7+0.1im]
         D = I(N) .+ 0.15 * [0.9+0.1im 0.0im 0.05; 0.0im 1.0+0.2im 0.0; 0.1+0.1im 0.0 0.95+0.1im]
+        # Fundamental matrix [A B; C D] in the propagator layout: U₁ rows in slice 1, U₂ rows in slice 2.
+        prop = FFS.ChunkPropagator(cat([A B], [C D]; dims=3), Float64[], Array{ComplexF64,3}[])
 
-        prop.block_upper_ic[:, :, 1] .= A
-        prop.block_lower_ic[:, :, 1] .= B
-        prop.block_upper_ic[:, :, 2] .= C
-        prop.block_lower_ic[:, :, 2] .= D
-
-        u1_in = [1.0+0.5im 0.2im 0.0;
-            0.1+0.1im 1.2+0.1im 0.0;
-            0.0im 0.0 0.9+0.3im]
+        u1_in = [1.0+0.5im 0.2im 0.0; 0.1+0.1im 1.2+0.1im 0.0; 0.0im 0.0 0.9+0.3im]
         u2_in = I(N) .+ 0.1im * ones(N, N)
-
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(N, 10, 5, 0)
+        odet = FFS.OdeState(N, 10, 5, 0)
         odet.u[:, :, 1] .= u1_in
         odet.u[:, :, 2] .= u2_in
 
-        # Round-trip: inverse then forward = identity
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator_inverse!(odet, prop)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_propagator!(odet, prop)
+        FFS.apply_propagator!(odet, prop)
+        @test odet.u[:, :, 1] ≈ A * u1_in + B * u2_in rtol = 1e-12
+        @test odet.u[:, :, 2] ≈ C * u1_in + D * u2_in rtol = 1e-12
 
+        FFS.apply_propagator_inverse!(odet, prop)
         @test odet.u[:, :, 1] ≈ u1_in rtol = 1e-12
         @test odet.u[:, :, 2] ≈ u2_in rtol = 1e-12
     end
 
+    @testset "propagator steps reproduce a direct integration" begin
+        # The fundamental matrix at a solver step, applied to a start state, is the solution from that state.
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ctrl, intr, equil, metric, mats = _prepared_solovev("Riccati")
+        N = intr.numpert_total
+        odet = FFS.OdeState(N, 1, 1, intr.msing)
+        FFS.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+        chunks = FFS.balance_integration_chunks(FFS.chunk_el_integration_bounds(odet, ctrl, intr), ctrl, intr)
+        chunk = chunks[1]
+        start = FFS.propagator_start(chunks, 1, Dict{Int,Any}(), N)
+        prop = FFS.chunk_propagator(chunk, start, ctrl.algorithm.eulerlagrange_tolerance, equil, mats, FFS.ModeIndices(intr))
+        @test length(prop.psi) == length(prop.steps)
+        @test prop.psi[1] == chunk.psi_start && prop.psi[end] == chunk.psi_end
+        @test prop.steps[1][:, :, 1] == [I(N) zeros(N, N)] && prop.steps[1][:, :, 2] == [zeros(N, N) I(N)]
+        @test prop.steps[end] == prop.u
+
+        k = length(prop.psi) ÷ 2
+        direct = FFS.solve_el(FFS.ODEProblem(FFS.sing_der!, copy(odet.u), (chunk.psi_start, prop.psi[k]),
+                (ctrl, equil, mats, intr, FFS.OdeState(N, 1, 1, 0), chunk)), ctrl.algorithm.eulerlagrange_tolerance).u[end]
+        x = [odet.u[:, :, 1]; odet.u[:, :, 2]]
+        @test prop.steps[k][:, :, 1] * x ≈ direct[:, :, 1] rtol = 1e-5
+        @test prop.steps[k][:, :, 2] * x ≈ direct[:, :, 2] rtol = 1e-5
+    end
+
     @testset "balance_integration_chunks produces target count" begin
-        # Verify that balance_integration_chunks creates at least
-        # max(2*msing+3, 8*(msing+1)+msing) chunks from a small set of base chunks.
+        # Verify that balance_integration_chunks creates 8*(msing+1)+msing chunks from a small set of
+        # base chunks, and never fewer than the base chunks with every crossing chunk split once.
         ctrl, intr, equil, metric, mats = _prepared_solovev("Riccati")
 
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, 1, 1, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
@@ -158,7 +107,8 @@ end
         # (src/ForceFreeStates/EulerLagrange.jl). Keep this in sync. The formula reads only
         # intr.msing — no thread count enters it, which is what makes Riccati outputs
         # independent of how many threads `julia -t` provides.
-        target_n = max(2 * intr.msing + 3, 8 * (intr.msing + 1) + intr.msing)
+        min_chunks = length(base_chunks) + count(c -> c.needs_crossing, base_chunks)
+        target_n = max(min_chunks, 8 * (intr.msing + 1) + intr.msing)
 
         # After balancing, chunk count equals target_n: the while-loop adds exactly one
         # chunk per iteration (a bisection split) and exits when length(result) >= target_n,
@@ -201,11 +151,12 @@ end
         balanced_more = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_more, intr)
         @test length(balanced_more) == target_n + 7
 
-        # An nchunks below the singular-surface floor is clamped up, with a warning.
-        min_chunks = 2 * intr.msing + 3
+        # An nchunks below the singular-surface floor is clamped up, with a warning. At the floor a
+        # forward chunk still separates every crossing chunk from the previous surface or the axis.
         ctrl_few = first(_prepared_solovev("Riccati"; nchunks=1))
         balanced_few = @test_logs (:warn,) match_mode = :any GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl_few, intr)
-        @test length(balanced_few) == max(min_chunks, length(base_chunks))
+        @test length(balanced_few) == min_chunks
+        @test all(i > 1 && !balanced_few[i-1].needs_crossing for i in eachindex(balanced_few) if balanced_few[i].needs_crossing)
     end
 
     @testset "chunk_el_integration_bounds direction field — bidirectional mode" begin
@@ -214,7 +165,7 @@ end
         # the right sub-chunk inherits direction from the parent, the left sub-chunk is always +1.
         ctrl, intr, equil, metric, mats = _prepared_solovev("Riccati")
 
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, 1, 1, intr.msing)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
         # Default (bidirectional=false): all chunks should have direction=+1
@@ -253,7 +204,7 @@ end
         # on this small multi-surface fixture.
         function run_solovev(integrator)
             ctrl, intr, equil, metric, mats = _prepared_solovev(integrator)
-            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
+            odet = first(GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr))
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
             return real(vac.et[1]), intr
         end
@@ -298,14 +249,12 @@ end
     # physically meaningful. BVP Δ' regression is concentrated on the DIIID-like
     # fixture below (intrinsically stable, well-conditioned BVP Δ').
 
-    @testset "Riccati leaves a sparse u_store in the Riccati basis" begin
-        # The Riccati path stores only chunk-endpoint snapshots, so u_store / psi_store have
-        # strictly fewer entries than the forward path's dense saved steps, and the stored
-        # state is not in the Euler-Lagrange axis basis. Downstream ξ consumers must therefore
-        # be fed by the forward integrator; this test pins that contract.
+    @testset "Riccati leaves its u_store in the Riccati basis" begin
+        # The stored Riccati states are (S, I), not the Euler-Lagrange axis basis. Downstream ξ consumers
+        # must therefore be fed by the forward integrator; this test pins that contract.
         function run_and_capture(integrator)
             ctrl, intr, equil, metric, mats = _prepared_solovev(integrator)
-            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr)
+            odet = first(GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr))
             # Derivatives are recomputed on demand; materialize so the stores can be compared.
             GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, mats, intr)
             return odet
@@ -313,9 +262,6 @@ end
 
         odet_fwd = run_and_capture("Forward")
         odet_ric = run_and_capture("Riccati")
-
-        @test odet_ric.step < odet_fwd.step
-        @test length(odet_ric.psi_store) < length(odet_fwd.psi_store)
 
         # The forward path returns dense ξ in the axis basis, ready for PerturbedEquilibrium.
         @test odet_fwd.u_store_el_basis

@@ -14,9 +14,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
   - `delta_prime::Vector{ComplexF64}` - **Debug stub, not physically valid.** Per-surface ca-based Δ' estimate;
-    use `ForceFreeStatesInternal.delta_prime_matrix` (STRIDE global BVP, Glasser 2018 PoP 25, 032501) for tearing stability.
-  - `delta_prime_col::Matrix{ComplexF64}` - **Debug stub, not physically valid.** Per-surface ca-based Δ' columns, `(numpert_total, n_res_modes)`,
-    `delta_prime_col[j, i] = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio)`; diagonal matches `delta_prime`. Riccati/parallel paths only.
+    use `ForceFreeStatesResult.delta_prime` (STRIDE global BVP, Glasser & Kolemen 2018, Phys. Plasmas 25, 082502) for tearing stability.
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -26,11 +24,6 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     q::Float64 = 0.0
     q1::Float64 = 0.0
     delta_prime::Vector{ComplexF64} = ComplexF64[]
-    delta_prime_col::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-    ua_left::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)   # asymptotic basis at left inner-layer boundary
-    ua_right::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)  # asymptotic basis at right inner-layer boundary
-    psi_ua_left::Float64 = 0.0   # ψ where ua_left was evaluated (left inner-layer boundary)
-    psi_ua_right::Float64 = 0.0  # ψ where ua_right was evaluated (right inner-layer boundary)
     restype::Any = nothing       # ResistGeometry from ResistEval.jl (populated by resist_eval_all!); typed `Any` to avoid a cross-file type reference
 end
 
