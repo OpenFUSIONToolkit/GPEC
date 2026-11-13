@@ -117,3 +117,13 @@ profile_conversions(p::GGJParameters) = (; dψdx=x0(p) / p.v1, rescale=(p.v1 / x
 
 # Mercier Frobenius exponents r± = 3/2 ± √(−D_I) — GW2020 Eq. (49).
 power_exponents(p::GGJParameters) = (p1v = p1(p); SVector{2,Float64}(p1v + 1.5, -p1v + 1.5))
+
+growth_rate_scale(p::GGJParameters) = q0(p)
+
+function layer_parameter_columns(params::AbstractVector{GGJParameters})
+    coefficient(name) = name => (; values=Float64[getfield(p, Symbol(name)) for p in params], long_name="Glasser-Greene-Johnson coefficient $name per surface", units="1")
+    return [coefficient.(("E", "F", "G", "H", "K", "M"))...,
+        "tau_A" => (; values=Float64[p.taua for p in params], long_name="Alfvén time τ_A per surface", units="s"),
+        "tau_R" => (; values=Float64[p.taur for p in params], long_name="resistive diffusion time τ_R per surface", units="s"),
+        "dVdpsi" => (; values=Float64[p.v1 for p in params], long_name="dV/dψ_N at each surface", units="m^3")]
+end

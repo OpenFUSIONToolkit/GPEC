@@ -183,3 +183,85 @@ end
     @test full.Ψ[2, 2] ≈ c.Ψ[1, 2] rtol = 1e-2      # odd Ψ is even, so smooth through x = 0
     @test full.certΔ < 1e-5
 end
+
+@testset "InnerLayer CCC (Cho, Choi & Choi drift-resistive layer)" begin
+    q4 = IL.GGJ.q4_surface_benchmark()
+    ccc(; Qstar=0.0, mperp=1.0) = IL.CCCParameters(q4, Qstar, mperp)
+    TL = IL.ToroidalLayer
+    reldiff(a, b) = maximum(abs.(a .- b) ./ abs.(b))
+    p = ccc(; Qstar=0.5, mperp=1.4)
+
+    @testset "Wasow basis matches the layer equations" begin
+        Q = 0.07 + 0.11im
+        T, J = IL.CCC._build_tjmat(p, Q)
+        # J₀ is block-diagonal: power-like (1:2) and exponential (3:6) subspaces split.
+        @test norm(J[1][1:2, 3:6]) + norm(J[1][3:6, 1:2]) < 1e-12
+        # x(A₀ + A₁/x² + A₂/x⁴), A = TJT⁻¹, is ode_matrix in the state u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x).
+        x = 1.7 + 0.4im
+        Sx = Matrix{ComplexF64}(Diagonal([x, 1, 1, 1, 1 / x, 1 / x]))
+        Sx[4, 1] = 1 / x
+        dSx = zeros(ComplexF64, 6, 6)
+        dSx[1, 1] = 1
+        dSx[4, 1] = -1 / x^2
+        dSx[5, 5] = dSx[6, 6] = -1 / x^2
+        A = [T * J[i] / T for i in 1:3]
+        @test (Sx * TL.ode_matrix(p, Q, x) + dSx) / Sx ≈ x * (A[1] + A[2] / x^2 + A[3] / x^4) rtol = 1e-12
+        # The series solves the equations: its residual (GW2020 Eq. 54) reaches round-off at moderate s.
+        c = TL.build_asymptotics(p, Q; kmax=12)
+        @test maximum(TL.asymptotic_residual(c, 10.0 * cis(TL.default_ray_angle(p, Q)))) < 1e-12
+    end
+
+    @testset "first-order Ξ coefficient matches the closed form" begin
+        # Q* enters the power-like solutions first through Ξ = x^{r−2}(1 + b₁/x² + …):
+        # b₁ − b₁^GGJ = −(i/8) K Q Q* (2s − 1)(1 + 4E + 4F + 4s + 4s²), s = ±√(−D_I) for the large/small column.
+        Q = 0.07 + 0.11im
+        cK = TL.build_asymptotics(ccc(; Qstar=0.3), Q; kmax=12)
+        cG = TL.build_asymptotics(q4, Q; kmax=12)
+        for (col, s) in ((1, GGJ.p1(q4)), (2, -GGJ.p1(q4)))
+            ratio(c, x) = (ua = TL.physical_ua_dua(c, x)[1]; x * ua[2, col] / ua[1, col])
+            est(x) = x^2 * (ratio(cK, x) - ratio(cG, x))
+            Δb1 = (4 * est(200.0) - est(100.0)) / 3
+            @test Δb1 ≈ -(im / 8) * q4.K * Q * 0.3 * (2s - 1) * (1 + 4q4.E + 4q4.F + 4s + 4s^2) rtol = 1e-5
+        end
+    end
+
+    @testset "Δ is independent of the contour angle" begin
+        for Q in (0.5 + 0.5im, 5.0im)
+            r = TL.solve_ray(p, Q)
+            θ = TL.default_ray_angle(p, Q)
+            @test TL.ray_angle_admissible(p, Q, θ)
+            @test reldiff(TL.solve_ray(p, Q; θ=0.5 * θ).Δ, r.Δ) < 1e-5
+        end
+        # Pin at Q = 5i (delta_convergence spread ~1e-7 there).
+        Δ = IL.solve_inner(IL.CCCModel(), p, 5.0im * GGJ.q0(q4))
+        @test Δ.interchange ≈ 433.38897 + 2358.8069im rtol = 1e-5
+        @test Δ.tearing ≈ 22.378564 + 127.277im rtol = 1e-5
+    end
+
+    @testset "reduces to GGJ" begin
+        for Q in (0.1 + 0.05im, 5.0im)
+            g = TL.solve_ray(q4, Q)
+            @test reldiff(TL.solve_ray(ccc(), Q).Δ, g.Δ) < 1e-8          # same equations, separate basis and split
+            @test reldiff(TL.solve_ray(ccc(; Qstar=1e-7, mperp=1 + 1e-7), Q).Δ, g.Δ) < 1e-5
+        end
+    end
+
+    @testset "model and guards" begin
+        @test IL.CCCModel() === IL.CCCModel{:ray}()
+        @test IL.model_name(IL.CCCModel()) == "ccc_ray"
+        @test_throws ArgumentError IL.CCCModel(; solver=:galerkin)
+        @test_throws ArgumentError IL.CCCModel(; nx=10)
+        @test_throws ArgumentError IL.CCCParameters(q4, 0.1, -1.0)
+        # Per-surface inputs live on the model: a number for every surface or one value per surface.
+        m = IL.CCCModel(; Qstar=[0.1, 0.2], mperp=1.2)
+        @test m.Qstar == [0.1, 0.2] && m.mperp === 1.2 && m.options == (;)
+        @test_throws ArgumentError IL.CCCModel(; mperp=0.0)
+        @test_throws "Qstar has length 2, expected 3" IL.check_layer_inputs(m, 3)
+        @test IL.check_layer_inputs(m, 2) === nothing && IL.check_layer_inputs(IL.GGJModel(), 3) === nothing
+        @test IL.layer_parameters(m, IL.GGJParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, ising=2), nothing, nothing).Qstar == 0.2
+        @test [c.first for c in IL.layer_parameter_columns([ccc(; Qstar=0.3)])] == ["E", "F", "G", "H", "K", "M", "tau_A", "tau_R", "dVdpsi", "Q_star", "M_perp_ratio"]
+        # An angle past the decaying sector of the slower family is refused.
+        @test_throws ArgumentError TL.solve_ray(p, 5.0im; θ=1.2)
+        @test IL.CCCParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, Qstar=0.5).ggj.E == q4.E
+    end
+end

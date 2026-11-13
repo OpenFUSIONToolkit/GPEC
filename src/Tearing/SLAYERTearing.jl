@@ -48,7 +48,7 @@ _surface_label(p::SLAYERParameters) = "m=$(p.m), n=$(p.n)"
 _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 
 # Is this a GGJ inner-layer model? Its growth rates come from `ggj_growth_rates`, not this runner.
-_is_ggj(::GGJModel) = true
+_is_ggj(::ToroidalLayerModel) = true
 _is_ggj(::Any) = false
 
 # Scan dispatch

@@ -1,6 +1,6 @@
 # GGJTearing.jl
 #
-# `solve(TearingProblem, GGJModel)`: tearing growth rates from the full GGJ matching
+# `solve(TearingProblem, model::ToroidalLayerModel)` (GGJ, CCC): tearing growth rates from the full matching
 # determinant (Dispersion.ggj_growth_rates), each surface on its own when uncoupled,
 # the leading `msing_max` surfaces together when coupled.
 
@@ -51,10 +51,11 @@ end
 # The SLAYER-only physics fields must stay at their defaults, so a GGJ solve never silently ignores one.
 const _SLAYER_ONLY_FIELDS = (:critical_resonant_field,)
 
-function _check_ggj_inputs(prob::TearingProblem, config::TearingConfig)
+function _check_ggj_inputs(prob::TearingProblem, config::TearingConfig, model::ToroidalLayerModel)
     defaults = TearingProblem(prob.ffs)
     for key in _SLAYER_ONLY_FIELDS
-        getfield(prob, key) == getfield(defaults, key) || throw(ArgumentError("TearingProblem: `$key` is a SLAYER input; GGJModel does not use it"))
+        getfield(prob, key) == getfield(defaults, key) ||
+            throw(ArgumentError("TearingProblem: `$key` is a SLAYER input; $(nameof(typeof(model))) does not use it"))
     end
     prob.gamma > 0 && isfinite(prob.gamma) || throw(ArgumentError("TearingProblem: gamma (ratio of specific heats) must be positive and finite"))
     config.gamma_range === nothing && throw(ArgumentError("GGJ tearing needs TearingConfig(; gamma_range=(γ_min, γ_max)) in 1/s"))
@@ -64,19 +65,21 @@ function _check_ggj_inputs(prob::TearingProblem, config::TearingConfig)
     return nothing
 end
 
-function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::TearingConfig=TearingConfig())
+function CommonSolve.solve(prob::TearingProblem, model::ToroidalLayerModel; config::TearingConfig=TearingConfig())
     validate(prob, config)
-    _check_ggj_inputs(prob, config)
+    _check_ggj_inputs(prob, config, model)
     ffs = prob.ffs
     surfaces = ffs.surfaces
     isempty(surfaces) && return empty_tearing_result(prob, config, model)
     raw = _ggj_delta_prime_raw(ffs)
     count = length(surfaces)
+    InnerLayer.check_layer_inputs(model, count)
     eta, rho = _ggj_layer_inputs(prob)
-    params = [ggj_parameters(s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k) for (k, s) in enumerate(surfaces)]
+    params = [InnerLayer.layer_parameters(model, ggj_parameters(s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k), ffs.equil, s)
+              for (k, s) in enumerate(surfaces)]
     labels = ["$(only(s.m))/$(only(s.n))" for s in surfaces]
     # The layer needs D_I < 0 at every surface; check them all before any scan runs.
-    unstable = [labels[k] for (k, p) in enumerate(params) if InnerLayer.GGJ.mercier_di(p) >= 0]
+    unstable = [labels[k] for (k, p) in enumerate(params) if InnerLayer.mercier_di(p) >= 0]
     isempty(unstable) ||
         throw(ArgumentError("GGJ tearing: the layer needs Mercier-stable surfaces (D_I < 0); $(join(unstable, ", ")) have D_I ≥ 0"))
     coupled = prob.coupling_mode === :coupled
@@ -114,7 +117,7 @@ function CommonSolve.solve(prob::TearingProblem, model::GGJModel; config::Tearin
         for (k, e) in enumerate(extractions)
             :no_root in e.warning_flags && continue
             omega[k] += n * Ω_shift[k]
-            Q_root[k] += n * Ω_shift[k] / InnerLayer.GGJ.q0(params[k])
+            Q_root[k] += n * Ω_shift[k] / InnerLayer.growth_rate_scale(params[k])
         end
     end
     return TearingResult(prob, true, config, model, params,

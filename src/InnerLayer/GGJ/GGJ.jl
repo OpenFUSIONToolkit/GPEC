@@ -36,6 +36,7 @@ import ..InnerLayerResponse
 import ..solve_inner, ..solve_inner_profile
 using ..ToroidalLayer
 import ..ToroidalLayer: inner_Q, rescale_delta, profile_conversions, power_exponents
+import ..ToroidalLayer: layer_parameters, mercier_di, growth_rate_scale, layer_parameter_columns
 import ..ToroidalLayer: solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_profile
 import ..ToroidalLayer: layer_rows, layer_weak_form, wasow_basis, split_block, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
 # Also reached as GGJ.<name> by callers and tests.
@@ -83,6 +84,8 @@ include("GGJParameters.jl")
 include("Equations.jl")
 include("Reference.jl")
 include("Shooting.jl")
+
+layer_parameters(::GGJModel, ggj::GGJParameters, equil, surface) = ggj
 
 """
     solve_inner(::GGJModel{:ray}, params::GGJParameters, γ::Number; kwargs...) -> InnerLayerResponse

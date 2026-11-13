@@ -68,7 +68,7 @@ Page: [Local Stability](ballooning.md).
 
 ### Match
 
-Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the only model, with its options in an optional `[GGJ]` section) and rebuilds the force-free states with the resulting layer response, writing the matched solution and the penetrated resonant fields to `SingularSurfaces/Match/`; `ideal = true` keeps the shielded limit for comparison.
+Matches the outer-region Δ′ to a resistive inner layer (`inner_model = "GGJ"`, the default, or the drift-resistive `"CCC"`, with its options in an optional section of the same name) and rebuilds the force-free states with the resulting layer response, writing the matched solution and the penetrated resonant fields to `SingularSurfaces/Match/`; `ideal = true` keeps the shielded limit for comparison.
 Outputs: `SingularSurfaces/Match/`.
 Page: [Tearing](inner_layer.md).
 
@@ -98,7 +98,7 @@ Page: [Error Fields](error_fields.md).
 
 ### Tearing
 
-Solves the tearing dispersion relation of each rational surface by matching the outer-region Δ′ to an inner-layer model: the two-fluid slab `SLAYER` (`[SLAYER]`) or the toroidal resistive-MHD `GGJ` (`[GGJ]`), selected by `[Tearing] inner_model`.
+Solves the tearing dispersion relation of each rational surface by matching the outer-region Δ′ to an inner-layer model: the two-fluid slab `SLAYER` (`[SLAYER]`), the toroidal resistive-MHD `GGJ` (`[GGJ]`) or its drift-resistive extension `CCC` (`[CCC]`), selected by `[Tearing] inner_model`.
 `[Tearing.search]` sets the root search in the complex frequency plane, and `[Tearing.CriticalResonantField]` adds the resonant field at which the layer's shielding is overcome.
 Needs the Δ′ matrix of `"Riccati"` with `vac_flag = true` or `"Galerkin"` with `[Galerkin] rpec_flag = true`, and the kinetic profiles of `[Equilibrium] kinetic_file` (`SLAYER` reads its densities, temperatures, rotation and diffusivities there).
 Outputs: `Tearing/PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/`.
