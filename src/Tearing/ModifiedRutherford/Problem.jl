@@ -54,7 +54,9 @@ units (Fortran GPEC 1.6.0's w_pol, Δ_RMP and Δ_c), so its roots are the full w
   - `curvature_model` - `:lutjens` (default; Lütjens et al. 2001, [`lutjens_curvature_term`](@ref), whose small-w limit is
     the SLAYER toroidal critical offset D_c of the linear gate) or `:benjamin` (Benjamin Eq. 12, [`curvature_term`](@ref),
     for comparison with the tearing-physics suite). `:lutjens` takes W_d and D_c from SLAYER's toroidal layer parameters
-    built on each surface with this problem's χ⊥.
+    built on each surface with this problem's χ⊥. The source is a D_I = −¼ form; its extension to D_I ≠ −¼ is this
+    code's convention, chosen to keep the gate. Its W_d (`W_d_layer`) comes from the layer's χ⊥ and is not the bootstrap
+    w_d (`w_d`).
   - `k1` - Bootstrap coefficient k₁, and curvature coefficient of `curvature_model = :benjamin`.
   - `c_wd` - Prefactor of the transport threshold width w_d.
   - `chi_perp_factor` - Multiplier on χ⊥,e (the kinetic `chi_e` profile, else its `chi_e_default`).
@@ -63,7 +65,7 @@ units (Fortran GPEC 1.6.0's w_pol, Δ_RMP and Δ_c), so its roots are the full w
   - `c_pol`, `C_pol` - Polarization coefficients.
   - `pol_sign` - ±1, multiplies the polarization term.
   - `omega_model` - Island frequency ω in the E_r = 0 frame: `:electron_diamagnetic`, ω = ω_*e(1 + η_e/4) (Wilson
-    1996), or `:exb`, the lab-frame ω = n Ω_E from the kinetic `omega_E`.
+    1996), or `:locked`, an island at rest in the laboratory, ω = −n Ω_E from the kinetic `omega_E`.
   - `omega_factor` - Multiplier on the ω of `omega_model`; 0 is a stalled island.
   - `omega_ratio` - ω/ω_*i on every surface, replacing `omega_model`; `nothing` (default) uses the model.
   - `w_min`, `w_max`, `nw` - Log-spaced width grid in ψ_N.
@@ -125,6 +127,7 @@ surface × width.
   - `rational_psi`, `rational_q`, `m`, `n` - Surface identity.
   - `delta_prime`, `delta_prime_imag`, `D_I`, `D_R`, `H` - Outer-region and layer indices (Δ′ after `delta_prime_factor`).
   - `D_nc`, `f_trap`, `mu_ratio`, `zeff` - Bootstrap coefficient, Sauter 2002 trapped fraction, μ_e/(ν_e + μ_e), Z_eff.
+  - `nu_star_e` - Electron collisionality ν*_e (Sauter et al. 1999 Eq. 18b); `D_nc` is its banana limit.
   - `Wc_prefac`, `chi_perp`, `v_te`, `R0` - Inputs of w_d.
   - `omega_star_i`, `omega_star_e`, `omega_hat`, `omega_hat_pi` - Ion and electron diamagnetic frequencies [rad/s] from
     the density gradients, ω/ω_*i and ω_*pi/ω_*i.
@@ -161,6 +164,7 @@ surface × width.
   - `large_delta_prime_w` - |Δ′(w)| w ≥ 1 at `w_m` or `w_sat`, with Δ′(w) the classical term.
   - `complex_delta_prime` - |Im Δ′_mn| > 10⁻³ |Re Δ′_mn|.
   - `saturation_unconverged` - `C_sat` not converged in the fit window (see [`saturation_coefficient`](@ref)).
+  - `collisional` - ν*_e > 1, outside the banana limit of `D_nc`.
   - `F`, `classical`, `saturation`, `bootstrap`, `curvature`, `polarization`, `forcing`, `w_d` - F(w), each term, and
     w_d(w); `forcing` is 0 without `pe`.
 """
@@ -180,6 +184,7 @@ surface × width.
     f_trap::Vector{Float64}
     mu_ratio::Vector{Float64}
     zeff::Vector{Float64}
+    nu_star_e::Vector{Float64}
     Wc_prefac::Vector{Float64}
     chi_perp::Vector{Float64}
     v_te::Vector{Float64}
@@ -231,6 +236,7 @@ surface × width.
     large_delta_prime_w::Vector{Bool}
     complex_delta_prime::Vector{Bool}
     saturation_unconverged::Vector{Bool}
+    collisional::Vector{Bool}
     F::Matrix{Float64}
     classical::Matrix{Float64}
     saturation::Matrix{Float64}
@@ -266,7 +272,7 @@ function validate(prob::ModifiedRutherfordProblem)
         pffs = pe.response.ffs
         pffs.npert == 1 && pffs.nlow == ffs.nlow || throw(ArgumentError("ModifiedRutherfordProblem: pe must be single-n with the n of ffs"))
     end
-    prob.omega_model in (:electron_diamagnetic, :exb) || throw(ArgumentError("omega_model must be :electron_diamagnetic or :exb"))
+    prob.omega_model in (:electron_diamagnetic, :locked) || throw(ArgumentError("omega_model must be :electron_diamagnetic or :locked"))
     abs(prob.pol_sign) == 1 || throw(ArgumentError("pol_sign must be +1 or -1"))
     0 < prob.w_min < prob.w_max && prob.nw >= 2 || throw(ArgumentError("the width grid needs 0 < w_min < w_max and nw ≥ 2"))
     prob.k1 > 0 && prob.c_wd > 0 && prob.chi_perp_factor > 0 && prob.rho_theta_factor > 0 ||
@@ -330,11 +336,11 @@ end
 
 # Per-surface scalars, flags and width rows of the result, in field order.
 const _MRE_SCALARS = (:rational_psi, :rational_q, :m, :n, :delta_prime, :delta_prime_imag, :D_I, :D_R, :H, :D_nc, :f_trap, :mu_ratio, :zeff,
-    :Wc_prefac, :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma,
+    :nu_star_e, :Wc_prefac, :chi_perp, :v_te, :R0, :omega_star_i, :omega_star_e, :omega_hat, :omega_hat_pi, :beta_p, :rho_theta, :w_ib, :eps, :gamma,
     :delta_r, :w_lo, :D_c, :W_d_layer, :alpha_s, :beta_s, :C_sat, :w_m, :w_sat, :w_seed_unsaturated, :n_sat, :b_m, :b_seed_unsaturated, :b_vac, :b_res, :delta_rmp, :w_v,
     :b_crit, :b_trigger, :w_crit)
 const _MRE_FLAGS = (:fully_stabilized, :unstable_any_seed, :unsaturated, :multiple_saturated, :outside_plasma, :gate_disagrees, :interchange_unstable,
-    :linear_unstable, :below_w_ib, :large_delta_prime_w, :complex_delta_prime, :saturation_unconverged)
+    :linear_unstable, :below_w_ib, :large_delta_prime_w, :complex_delta_prime, :saturation_unconverged, :collisional)
 const _MRE_TERMS = (:F, :classical, :saturation, :bootstrap, :curvature, :polarization, :forcing, :w_d)
 
 # SLAYER's toroidal critical offset D_c and the W_d it implies at one surface, with χ⊥ for every χ input.
@@ -402,7 +408,7 @@ function _surface_inputs(prob::ModifiedRutherfordProblem, ctx, k, s)
     omega_star_e = n * T_e * (dn_e / n_e) / g.psio
     omega_model =
         prob.omega_model === :electron_diamagnetic ? omega_star_e * (1 + 0.25 * (dT_e / T_e) / (dn_e / n_e)) :
-        n * (plasma.has_omega_E ? Float64(prof.omega_E(psi)) : 0.0)
+        -n * (plasma.has_omega_E ? Float64(prof.omega_E(psi)) : 0.0)
 
     # Cylindrical: r_s Δ′ = −2m, referred back to ψ_N by K^(−2α), K = r_s dψ_N/dr, α = √(−D_I) (as delta_prime_to_rs_reference).
     K = r_at(psi) / abs(dr_dpsi(psi))
@@ -423,6 +429,7 @@ function _surface_inputs(prob::ModifiedRutherfordProblem, ctx, k, s)
     b_vac, b_res, delta_rmp, w_v = row === nothing ? (NaN, NaN, NaN, NaN) : (rf.b_vac[row], rf.b_res[row], rf.delta_rmp[row], 2 * rf.hw_v[row])
     forcing_amp = row === nothing ? 0.0 : delta_rmp * drho * w_v^2
     return (; rational_psi=psi, rational_q=s.q, m, n, g, b_per_w2=vacuum_island_field(equil, psi, n, s.q1, 1.0), D_I, D_R, H=rg.H, D_nc=prob.D_nc_factor * D_nc, mu_ratio, zeff,
+        nu_star_e=nu_star_e(n_e, T_e, g.R_major, g.eps, s.q, zeff),
         chi_perp, v_te,
         omega_star_i, omega_star_e, omega_hat=something(prob.omega_ratio, prob.omega_factor * omega_model / omega_star_i),
         omega_hat_pi=1 + (dT_i / T_i) / (dn_i / n_i), beta_p=2 * MU_0 * n_i * E_CHG * T_i / g.avg_bpolsq, rho_theta, rho_theta_psi,
@@ -490,7 +497,8 @@ function _surface_roots(prob::ModifiedRutherfordProblem, ctx, si, gt, w)
         linear_unstable, below_w_ib=w_m < si.w_ib,
         # Δ′(w) w at the root, dimensionless at any D_I.
         large_delta_prime_w=any(x -> isfinite(x) && abs(_mre_terms(prob, si, x).classical) * x >= 1, (w_m, w_sat)),
-        complex_delta_prime=abs(imag(si.dp_complex)) > 1e-3 * abs(real(si.dp_complex)), saturation_unconverged=!si.sc.converged)
+        complex_delta_prime=abs(imag(si.dp_complex)) > 1e-3 * abs(real(si.dp_complex)), saturation_unconverged=!si.sc.converged,
+        collisional=si.nu_star_e > 1)
 end
 
 function CommonSolve.solve(prob::ModifiedRutherfordProblem)

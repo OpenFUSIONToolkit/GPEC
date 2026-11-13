@@ -13,6 +13,7 @@ import ...Equilibrium
 import ...Utilities: save_to_hdf5
 using ...Utilities.HDF5Annotations: replace_group!
 using ...Utilities.PhysicalConstants: M_E, M_P, E_CHG, MU_0
+using ...Utilities.NeoclassicalResistivity: nu_star_e
 using ...InnerLayer: layer_plasma
 using ...InnerLayer.SLAYER: radial_label, build_slayer_inputs
 using Roots: find_zero, Brent

@@ -126,7 +126,7 @@ When ``F`` crosses zero more than once, every saturated width is kept: an island
 When the deck also has a `[Tearing]` layer solve, its uncoupled growth rates gate the roots (a surface with ``\gamma>0`` grows from noise, so it has no seed threshold ``w_m``, but keeps its saturated width) and its resistive layer width, converted to ``\psi_N`` with the layer's own radial label, sets the lower end of the search; in a script, pass it as `ModifiedRutherfordProblem(ffs; tearing)`.
 Surfaces with ``D_R>0`` are excluded as resistive-interchange unstable, and roots below the ion banana width or with ``|\Delta'|w\ge1`` are flagged.
 Lengths in metres (the layer width, the poloidal ion Larmor radius and the banana width) map to ``\psi_N`` with the toroidal-flux label of `radial_label`, as SLAYER's do.
-The island frequency in ``\Delta_\mathrm{pol}`` is ``\omega_{*e}(1+\eta_e/4)`` (Wilson 1996) by default, or the lab-frame ``n\omega_E`` with `omega_model = "exb"`.
+The island frequency in ``\Delta_\mathrm{pol}`` is ``\omega_{*e}(1+\eta_e/4)`` (Wilson 1996) by default, or ``-n\omega_E``, an island at rest in the laboratory, with `omega_model = "locked"`.
 
 ### Applied-field forcing and critical fields
 

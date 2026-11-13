@@ -24,9 +24,11 @@ using TOML
         @test MR.bootstrap_term(D_nc, w_d, 1e-3 * w_d; k1) ≈ 0.5 * D_nc * 1e-3 * w_d / w_d^2 rtol = 1e-5
     end
 
-    @testset "curvature term: stabilizing for D_R < 0" begin
-        @test MR.curvature_term(-0.02, 0.01, -0.27, 1e-3, 0.01) < 0
-        @test MR.curvature_term(0.02, 0.01, -0.27, 1e-3, 0.01) > 0
+    @testset "curvature term: k₁D_R/((α₊ − H) w) far above w_d, stabilizing for D_R < 0" begin
+        D_R, H, D_I, w_d = -0.02, 0.01, -0.27, 1e-3
+        alpha_plus = 0.5 + sqrt(-D_I)
+        @test MR.curvature_term(D_R, H, D_I, w_d, 1e4 * w_d) ≈ 1.7 * D_R / ((alpha_plus - H) * 1e4 * w_d) rtol = 1e-3
+        @test MR.curvature_term(D_R, H, D_I, w_d, 0.01) < 0 < MR.curvature_term(-D_R, H, D_I, w_d, 0.01)
     end
 
     @testset "polarization term: sign follows ω̂(ω̂ − ω̂_pi), zero at ω̂ = 0" begin
@@ -53,7 +55,7 @@ using TOML
     end
 
     @testset "saturation term: Wesson cylinder of Fitzpatrick 2023 Fig. 9.2" begin
-        # q0 = 0.8, q(a) = 4.4, r = √ψ (a = 1), J_z = (2/q0)(1 − r²)^ν; reference α_s, β_s from the independent shooting script.
+        # q0 = 0.8, q(a) = 4.4, r = √ψ (a = 1), J_z = (2/q0)(1 − r²)^ν, whose α_s and β_s have closed forms in r.
         q0, qa = 0.8, 4.4
         nu = qa / q0 - 1
         q(x) = qa * x / (1 - (1 - x)^(nu + 1))
@@ -67,8 +69,13 @@ using TOML
         sc = MR.saturation_coefficient(x -> (2 / q0) * (1 - x)^nu, sqrt, x -> 0.5 / sqrt(x), q, dq, psi_s; window=0.005)
         @test sc.converged
         @test sqrt(psi_s) ≈ 0.65942681 rtol = 1e-6
-        @test sc.alpha_s ≈ 1.642673 rtol = 1e-4
-        @test sc.beta_s ≈ -7.204691 rtol = 1e-3
+        rs = sqrt(psi_s)
+        u, D = 1 - rs^2, 1 - (1 - rs^2)^(nu + 1)
+        s = 2 - 2 * rs^2 * (nu + 1) * u^nu / D
+        J1 = -(4 * nu * rs / q0) * u^(nu - 1)
+        J2 = -(4 * nu / q0) * (u^(nu - 1) - 2 * (nu - 1) * rs^2 * u^(nu - 2))
+        @test sc.alpha_s ≈ -rs * q(psi_s) * J1 / s rtol = 1e-4
+        @test sc.beta_s ≈ -rs^2 * q(psi_s) * J2 / s rtol = 1e-3
         # Classical plus saturation vanish at W_pw/r_s = r_sΔ′(0)/C_sat (Eq. 9.21); r_sΔ′(0) = 1.64 from the cylindrical
         # tearing equation, which puts W_pw/a at the 0.27 peak of the r_w = a curve. K = r_s dψ/dr = 2ψ_s.
         E_ss, K = 1.64, 2 * psi_s

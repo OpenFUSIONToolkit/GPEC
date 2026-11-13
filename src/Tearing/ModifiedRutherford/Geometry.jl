@@ -131,13 +131,15 @@ end
 """
     current_density_profile(equil) -> Function
 
-Dimensionless toroidal current density `J_z(ψ_N) = (R₀²/B₀) ⟨μ₀ j_φ/R⟩` of the cylindrical saturation theory, from the
+Dimensionless toroidal current density `J_z(ψ_N) = (R₀²/B₀) ⟨μ₀ j_φ/R⟩` of the cylindrical saturation theory, with
+`B₀` the vacuum toroidal field at the mean major radius `R₀` (`params.bt0`, `params.rmean`), from the
 Grad–Shafranov flux-surface identity `⟨μ₀ j_φ/R⟩ = μ₀ dp/dψ + F dF/dψ ⟨R⁻²⟩` (ψ the poloidal flux per radian), signed
 positive in the core. It reduces to `R₀μ₀j_z/B_z` in the large-aspect-ratio cylinder.
 """
 function current_density_profile(equil)
     profiles = equil.profiles
-    R0, B0, psio = Float64(equil.ro), Float64(equil.params.b0), Float64(equil.psio)
+    (equil.params.bt0 === nothing || equil.params.rmean === nothing) && throw(ArgumentError("current_density_profile needs the equilibrium's global parameters (bt0, rmean)"))
+    R0, B0, psio = Float64(equil.params.rmean), Float64(equil.params.bt0), Float64(equil.psio)
     ys = equil.rzphi_ys
     function avg_inv_Rsq(psi)
         ff = zeros(Float64, length(ys), 2)
