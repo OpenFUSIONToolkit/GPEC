@@ -84,9 +84,9 @@ function integrate_psi_quadgk(
     is_matrix_method = occursin("mm", method)
     mpert = intr.mpert
 
-    # Start at psilow (degenerate bounce/drift frequencies at the axis); stop at intr.psilim, where the
-    # perturbation data ends.
-    x0 = max(psi_min, equil.config.psilow)
+    # Start at psilow (degenerate bounce/drift frequencies at the axis) or where the perturbation data starts, if later;
+    # stop at intr.psilim, where it ends.
+    x0 = max(psi_min, equil.config.psilow, intr.psilow)
     xout = min(psi_max, intr.psilim, 1.0 - 1e-6)
 
     if x0 >= xout

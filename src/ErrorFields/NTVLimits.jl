@@ -465,6 +465,29 @@ function efc_current_curve(c::EFCCoupling; delta_threshold::Real, torque_budget:
 end
 
 """
+    ntv_torque_state(kf_intr, kf_ctrl, equil, kinetic_profiles, species, Δω; axis_psi_c=0.0) -> KineticForcesState
+
+The NTV torque of the perturbation held by `kf_intr` with the E×B rotation rigidly shifted by `Δω`
+(rad/s): the main ion on `kinetic_profiles` when `species` is `nothing`, otherwise the sum over the
+resolved species (`KineticForces.ntv_species`), each on its own shifted profiles. `Δω = 0` uses the
+profiles unshifted.
+"""
+function ntv_torque_state(kf_intr, kf_ctrl::KineticForces.KineticForcesControl, equil, kinetic_profiles, species, Δω::Real; axis_psi_c::Float64=0.0)
+    shifted(p) = Δω == 0 ? p : Equilibrium.shift_exb_rotation(p, Δω)
+    if species === nothing
+        st = KineticForces.KineticForcesState()
+        KineticForces.compute_torque_all_methods!(st, kf_intr, kf_ctrl, equil, shifted(kinetic_profiles); axis_psi_c)
+        return st
+    end
+    states = map(species) do sp
+        st = KineticForces.KineticForcesState()
+        KineticForces.compute_torque_all_methods!(st, kf_intr, kf_ctrl, equil, shifted(sp.profiles); axis_psi_c, z=sp.z, m=sp.m, electron=sp.electron)
+        st
+    end
+    return KineticForces.combine_species_states(states)
+end
+
+"""
     efc_couplings(resp, coil_sets, rc, dom, cfg, kf_ctrl; mode=1, method="fgar", rotation_scan=true, scan_points=9,
                   scan_max_points=21, scan_tolerance=0.05, span_factor=1.0, offset_factor=2.0,
                   regularization_width=0.0, verbose=false) -> Vector{EFCCoupling}
@@ -474,8 +497,9 @@ dominant-mode overlap and resonant fraction from its spectrum on the control sur
 NTV torque (kinetic method `method`, with sign) for the whole field and for the field with mode `mode`
 of `dom` projected out, tabulated against the rotation shift when `rotation_scan`. `cfg` is the run's
 `[ForcingTerms]` coil configuration and `rc` must be the coupling of `resp`; the torque uses the kinetic
-profiles attached to `resp.ffs.equil`. The spectrum is normalized by `|nw| × max|I|`, keeping the
-array's winding sense and current pattern as the phase reference.
+profiles attached to `resp.ffs.equil`, summed over the resolved species when the run has several or
+`kf_ctrl.electron`; the reference rotation is the main ion's. The spectrum is normalized by `|nw| × max|I|`,
+keeping the array's winding sense and current pattern as the phase reference.
 """
 function efc_couplings(
     resp::PerturbedEquilibrium.PlasmaResponse,
@@ -506,6 +530,7 @@ function efc_couplings(
     # Reference rotation and scan span from the kinetic profiles, with the torque kernel's own
     # diamagnetic frequencies (Logan & Park 2013 Eq. 7): ω_φ = ω_E + ω_*n + ω_*T.
     kp = KineticForces.ntv_profiles(kf_ctrl, equil)
+    species = KineticForces.ntv_species(kf_ctrl, equil)
     chi1 = 2π * equil.psio
     chrg = KineticForces.main_ion(equil)[1] * Utilities.E_CHG
     ψk = kp.xs
@@ -532,11 +557,10 @@ function efc_couplings(
     end
     # One quiet logger for the whole scan, so a `maxlog` warning prints once per scan rather than once per point.
     logger = verbose ? Base.CoreLogging.current_logger() : Base.CoreLogging.SimpleLogger(stderr, Base.CoreLogging.Warn)
-    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation.
-    function torque_of(kf_intr, profiles)
-        kf_state = KineticForces.KineticForcesState()
-        Base.CoreLogging.with_logger(logger) do
-            KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, profiles)
+    # Torque and cumulative torque profile (resampled onto the kinetic ψ grid) of one perturbation at one rotation shift.
+    function torque_of(kf_intr, Δ)
+        kf_state = Base.CoreLogging.with_logger(logger) do
+            ntv_torque_state(kf_intr, kf_ctrl, equil, kp, species, Δ)
         end
         r = kf_state.method_results[String(method)]
         T = real(r.total_torque)
@@ -576,9 +600,8 @@ function efc_couplings(
         profiles_full = Dict{Float64,Vector{Float64}}()
         profiles_res = Dict{Float64,Vector{Float64}}()
         function torques(Δ)
-            profiles = Δ == 0 ? kp : Equilibrium.shift_exb_rotation(kp, Δ)
-            T_f, p_f = torque_of(kf_full, profiles)
-            T_r, p_r = torque_of(kf_res, profiles)
+            T_f, p_f = torque_of(kf_full, Δ)
+            T_r, p_r = torque_of(kf_res, Δ)
             profiles_full[Δ] = p_f
             profiles_res[Δ] = p_r
             verbose && @info "    $(cs.name) Δω = $(@sprintf("%+.3e", Δ)) rad/s: torque $(@sprintf("%.3e", T_f)) N·m per kAt² (residual $(@sprintf("%.3e", T_r)))"
