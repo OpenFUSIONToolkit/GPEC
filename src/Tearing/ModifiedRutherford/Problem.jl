@@ -281,10 +281,7 @@ function validate(prob::ModifiedRutherfordProblem)
 end
 
 # Value and ψ-derivative of a kinetic profile column at ψ.
-function _profile_at(psi_xs, values, psi)
-    itp = cubic_interp(psi_xs, collect(Float64, values))
-    return Float64(itp(psi)), Float64(itp(psi; deriv=DerivOp(1)))
-end
+_profile_at(itp, psi) = (Float64(itp(psi)), Float64(itp(psi; deriv=DerivOp(1))))
 
 
 """
@@ -367,7 +364,10 @@ function _mre_context(prob::ModifiedRutherfordProblem)
     gate = prob.tearing
     # Metres map to ψ_N with the toroidal-flux radial label's dr/dψ, the label SLAYER's layer widths use.
     r_at, dr_dpsi = radial_label(equil)
-    return (; equil, plasma, data, psi_xs=collect(Float64, data.psi), usable, gate, r_at, dr_dpsi, J_z=current_density_profile(equil),
+    # The kinetic profiles the plasma does not spline, interpolated once for every surface.
+    psi_xs = collect(Float64, data.psi)
+    spline(v) = usable(v) ? cubic_interp(psi_xs, collect(Float64, v)) : nothing
+    return (; equil, plasma, data, n_i=spline(data.n_i), chi_e=spline(data.chi_e), gate, r_at, dr_dpsi, J_z=current_density_profile(equil),
         forcing=prob.pe === nothing ? nothing : resonant_forcing(prob.pe),
         psi_lim=(first(equil.profiles.xs), last(equil.profiles.xs)),
         chi_gate=gate === nothing || !hasproperty(gate.model, :chi_perp_Dc) ? nothing : gate.model.chi_perp_Dc)
@@ -375,7 +375,7 @@ end
 
 # Geometry, indices, plasma and term inputs at the k-th rational surface.
 function _surface_inputs(prob::ModifiedRutherfordProblem, ctx, k, s)
-    (; equil, plasma, data, psi_xs, usable, r_at, dr_dpsi) = ctx
+    (; equil, plasma, data, r_at, dr_dpsi) = ctx
     rg = s.restype
     rg === nothing && throw(ArgumentError("ModifiedRutherfordProblem: the surface at ψ = $(s.psifac) has no ResistGeometry"))
     psi = s.psifac
@@ -390,18 +390,18 @@ function _surface_inputs(prob::ModifiedRutherfordProblem, ctx, k, s)
     n_e, dn_e = Float64(prof.n_e(psi)), Float64(prof.n_e(psi; deriv=DerivOp(1)))
     T_e, dT_e = Float64(prof.T_e(psi)), Float64(prof.T_e(psi; deriv=DerivOp(1)))
     T_i, dT_i = Float64(prof.T_i(psi)), Float64(prof.T_i(psi; deriv=DerivOp(1)))
-    n_i, dn_i = usable(data.n_i) ? _profile_at(psi_xs, data.n_i, psi) : (n_e, dn_e)
+    n_i, dn_i = ctx.n_i === nothing ? (n_e, dn_e) : _profile_at(ctx.n_i, psi)
     zeff = plasma.zeff isa Real ? Float64(plasma.zeff) : Float64(plasma.zeff(psi))
-    chi_perp = prob.chi_perp_factor * (usable(data.chi_e) ? first(_profile_at(psi_xs, data.chi_e, psi)) : data.chi_e_default)
+    chi_perp = prob.chi_perp_factor * (ctx.chi_e === nothing ? data.chi_e_default : Float64(ctx.chi_e(psi)))
     ctx.chi_gate === nothing || isapprox(ctx.chi_gate, chi_perp; rtol=1e-6) ||
         @warn "ModifiedRutherfordProblem: the gate's chi_perp_Dc = $(ctx.chi_gate) differs from the w_d χ⊥ = $chi_perp at the $m/$n surface"
     D_nc, mu_ratio = bootstrap_coefficient(g, zeff)
 
-    # Polarization inputs (Benjamin App. C); lengths in metres map to ψ_N with dr/dψ.
+    # Polarization inputs (Benjamin App. C), thermal speeds √(2T/m); lengths in metres map to ψ_N with dr/dψ.
     m_i, z_i = plasma.mu_i * M_P, plasma.z_i
     v_te = sqrt(2 * E_CHG * T_e / M_E)
     v_ti = sqrt(2 * E_CHG * T_i / m_i)
-    rho_theta = prob.rho_theta_factor * m_i * v_ti / (g.avg_bpol * E_CHG)
+    rho_theta = prob.rho_theta_factor * m_i * v_ti / (z_i * g.avg_bpol * E_CHG)
     rho_theta_psi = rho_theta / abs(dr_dpsi(psi))
     # Diamagnetic frequencies from the density gradients, in SLAYER's sign convention (charge −1 for electrons).
     omega_star_i = -n * T_i * (dn_i / n_i) / (z_i * g.psio)
@@ -421,7 +421,7 @@ function _surface_inputs(prob::ModifiedRutherfordProblem, ctx, k, s)
     # Callen's toroidal-flux radius (without the F/B₀R₀ factor of the layer label), his Δ_c and w_pol, in ψ_N.
     rho, drho = toroidal_flux_radius(equil, psi, s.q)
     delta_c = prob.delta_prime_source === :computed ? (rho / drho)^(2 * sqrt(max(-D_I, 0.0))) * real(dp_complex) / rho : -2 * m / rho
-    w_pol_callen = callen_polarization_width(equil, plasma, psi, s.q)[2] / drho
+    w_pol_callen = prob.pol_model === :callen ? callen_polarization_width(equil, plasma, psi, s.q)[2] / drho : NaN
     delta_prime = prob.delta_prime_factor * (prob.delta_prime_model === :callen ? delta_c * drho : real(dp_complex))
     # The coil forcing at this surface: Δ_RMP (dρ/dψ_N) w_v² is the coefficient of 1/w², proportional to B_vac.
     rf = ctx.forcing

@@ -82,7 +82,6 @@ function mre_geometry(equil, psifac::Real, q1::Real)
     profiles = equil.profiles
     chi1 = 2π * equil.psio
     psi = Float64(psifac)
-    twopif = profiles.F_spline(psi)
     p1 = profiles.P_deriv(psi)
     v1 = profiles.dVdpsi_spline(psi)
     q = profiles.q_spline(psi)
@@ -107,7 +106,7 @@ function mre_geometry(equil, psifac::Real, q1::Real)
         v33 = 2π * r / jac
         bsq = chi1^2 * (v21^2 + v22^2 + (v23 + q * v33)^2)
         dpsisq = (2π * r)^2 * (v21^2 + v22^2)
-        bpolsq = max(bsq - (twopif / (2π * r))^2, 0.0)
+        bpolsq = chi1^2 * (v21^2 + v22^2)
 
         R_max, R_min = max(R_max, r), min(R_min, r)
         z > Z_max && ((Z_max, R_at_Zmax) = (z, r))

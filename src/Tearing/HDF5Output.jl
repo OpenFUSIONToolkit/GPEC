@@ -183,15 +183,15 @@ const TEARING_RAGGED_H5_ANNOTATIONS = [
     "offsets" => (; long_name="ragged-array offsets: row k spans offsets[k]+1:offsets[k+1]")
 ]
 
-# Groups under Tearing/ that other results own, so a TearingResult write keeps them.
-const _TEARING_FOREIGN_GROUPS = ("ModifiedRutherford",)
+# What a TearingResult writes directly under Tearing/; a rewrite clears only these, so other results' groups stay.
+const _TEARING_OWN_KEYS = ("enabled", "PerSurface", "Roots", "LayerWidths", "Diagnostics", "Scan", "CriticalResonantField")
 
 # Empty Tearing/ of everything a TearingResult writes, or create it.
 function _reset_tearing_group!(parent)
     haskey(parent, "Tearing") || return create_group(parent, "Tearing")
     g = parent["Tearing"]
     for k in keys(g)
-        k in _TEARING_FOREIGN_GROUPS || HDF5.delete_object(g, k)
+        k in _TEARING_OWN_KEYS && HDF5.delete_object(g, k)
     end
     for a in keys(attrs(g))
         HDF5.delete_attribute(g, a)
