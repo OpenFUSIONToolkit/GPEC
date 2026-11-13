@@ -37,6 +37,8 @@ Select with `Riccati()`, or `integrator = "Riccati"` in a deck's `[ForceFreeStat
 `singfac_min != 0`. Results do not depend on the thread count; `ctrl.algorithm.nchunks` is the only
 tunable. `odet.u_store` holds chunk-endpoint Riccati states, not the EL basis
 (`odet.u_store_el_basis == false`), so PerturbedEquilibrium and the HDF5 ξ datasets require `Forward()`.
+`odet.nzero` counts the zero crossings of each chunk before the outer plasma from its propagator (principal
+solution plus `crossings_beyond_principal`), and those of the re-integrated outer plasma from its stored steps.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -51,7 +53,7 @@ function riccati_eulerlagrange_integration(
     # Harvest thread-local solver-step counts; the outer re-integration counts via its own callback.
     odet.total_steps += sum(p.total_steps for p in odet_proxies)
 
-    S_at_surface_left, last_crossing_step =
+    S_at_surface_left, last_crossing_step, chunk_nzero =
         _assemble_propagators_serially!(odet, propagators, chunks, ctrl, equil, mats, intr)
 
     _reintegrate_outer_plasma!(odet, last_crossing_step, ctrl, equil, mats, intr)
@@ -63,7 +65,9 @@ function riccati_eulerlagrange_integration(
     if intr.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
-    odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
+    # Chunks before the outer re-integration (or a truncated edge) count their own crossings; crit checks the stored steps after.
+    ncore = min(last_crossing_step, odet.step)
+    odet.nzero = sum(@view chunk_nzero[1:ncore]) + evaluate_stability_criterion!(odet, equil.profiles; first_step=ncore)
     transform_u!(odet, intr)  # no-op when ifix=0 (no Gaussian reduction)
 
     return odet, propagators, chunks, S_at_surface_left
@@ -123,7 +127,9 @@ end
 # Apply chunk propagators serially, renormalizing to (S, I) after each (STRIDE's ode_fixup role:
 # keeps conditioning at O(cond_per_chunk) instead of its K-th power). Backward chunks are applied
 # via apply_propagator_inverse!. S_at_surface_left is the Riccati S at each surface's left boundary,
-# the Δ' BVP axis BC. Returns (S_at_surface_left, last_crossing_step).
+# the Δ' BVP axis BC. Each chunk stores one step, so last_crossing_step also indexes the last crossing
+# chunk. chunk_nzero[i] counts the zero crossings of the solution in chunk i.
+# Returns (S_at_surface_left, last_crossing_step, chunk_nzero).
 function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{ChunkPropagator},
     chunks::Vector{IntegrationChunk},
     ctrl::ForceFreeStatesControl,
@@ -132,12 +138,18 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
     N = intr.numpert_total
     S_at_surface_left = Matrix{ComplexF64}[]
     last_crossing_step = 1
+    chunk_nzero = zeros(Int, length(chunks))
     for (i, chunk) in enumerate(chunks)
+        # The solution at the chunk's integration start (u_s) and end (u_e), in one column basis until the renorm
+        u_left = copy(odet.u)
         if chunk.direction == -1
             apply_propagator_inverse!(odet, propagators[i])
+            u_s, u_e = odet.u, u_left
         else
             apply_propagator!(odet, propagators[i])
+            u_s, u_e = u_left, odet.u
         end
+        chunk_nzero[i] = propagators[i].principal_nzero + crossings_beyond_principal(view(propagators[i].block_lower_ic, :, :, 1), u_s, u_e, chunk.direction)
         renormalize_riccati_inplace!(odet.u, N)
         odet.psifac = chunk.psi_end
         odet.q = equil.profiles.q_spline(odet.psifac)
@@ -164,7 +176,7 @@ function _assemble_propagators_serially!(odet::OdeState, propagators::Vector{Chu
             odet.step += 1
         end
     end
-    return S_at_surface_left, last_crossing_step
+    return S_at_surface_left, last_crossing_step, chunk_nzero
 end
 
 # Re-integrate last rational surface → psilim with Riccati: FM propagation loses precision there at
