@@ -158,6 +158,14 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer]
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.GGJ]
 ```
 
+### ToroidalLayer
+
+The shared library behind the GGJ `:ray` and `:galerkin` backends: the Wasow far-field construction, the rotated-ray solver and the Hermite assembly. A layer model supplies its equations through the interface on [`ToroidalLayerParameters`](@ref InnerLayer.ToroidalLayer.ToroidalLayerParameters).
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.ToroidalLayer]
+```
+
 ### SLAYER
 
 ```@autodocs

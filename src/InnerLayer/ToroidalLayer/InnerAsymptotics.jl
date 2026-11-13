@@ -1,15 +1,17 @@
 # InnerAsymptotics.jl
 #
-# Wasow asymptotic basis ("inps" basis) for the GGJ inner-layer system.
+# Wasow asymptotic basis ("inps" basis) of a toroidal inner-layer system. The model supplies A₀–A₂, the
+# block-diagonalizing T and the splitting solve (`wasow_basis`, `split_block`); the recursion
+# and evaluation below are shared.
 #
 # Reference: A. H. Glasser & Z. R. Wang, Phys. Plasmas 27, 012506 (2020)
 # ("GW2020"), Secs. II.A–II.G (Eqs. 1–53) and III (Eqs. 54–55). Notation map (all equation
 # numbers are GW2020):
 #
 #   A0/A1/A2  -> Eqs. 3–5      (A = A₀+x⁻²A₁+x⁻⁴A₂ (Eq. 3); A₀, A₂ Eq. 4; A₁ Eq. 5)
-#   T, Tinv   -> Eqs. 6–8      (Jordan basis of A₀; u = Tv, v' = xJv, λ = Q^{-1/2})
+#   T, Tinv   -> Eqs. 6–8      (block-diagonalizing basis of A₀; u = Tv, v' = xJv)
 #   J0/J1/J2  -> Eqs. 9–10     (Jₖ = T^{-1} Aₖ T)
-#   P_k, B_k  -> Eqs. 11–24    (splitting transformation V = PW; Lyapunov solve Eq. 22)
+#   P_k, B_k  -> Eqs. 11–24    (splitting transformation V = PW; splitting solve Eq. 22)
 #   Q_k, C_k  -> Eqs. 25–39    (2×2 inner-block diagonalization W = QX)
 #   D_k       -> Eqs. 40–43    (shearing transformation X = SY)
 #   Y0, R     -> Eqs. 48–49    (lowest-order solution; Mercier Frobenius exponents r±)
@@ -23,7 +25,7 @@ using StaticArrays
 """
     InnerAsymptoticsCache
 
-Frozen `inps` Wasow asymptotic-basis construction for one `(GGJParameters, Q)`
+Frozen `inps` Wasow asymptotic-basis construction for one `(params, Q)`
 pair, stored as `SMatrix`/`SVector` for allocation-free evaluation. Index
 convention: `P[k+1]` holds the k-th-order matrix `P_k`, etc.
 
@@ -37,8 +39,8 @@ convention: `P[k+1]` holds the k-th-order matrix `P_k`, etc.
   - `Qmat` — 2×2 inner-block transformation matrices, k = 0..kmax+2 (Eqs. 32–39).
   - `Y` — 2×2 series matrices Y_k = Y₀Z_k, k = 0..kmax (Eqs. 50–52).
 """
-struct InnerAsymptoticsCache
-    params::GGJParameters
+struct InnerAsymptoticsCache{P<:ToroidalLayerParameters}
+    params::P
     Q::ComplexF64
     kmax::Int
     R::SVector{2,Float64}
@@ -49,126 +51,8 @@ struct InnerAsymptoticsCache
     Y::Vector{SMatrix{2,2,ComplexF64,4}}
 end
 
-# T, T⁻¹, λ = Q^{-1/2} and J_i = T⁻¹A_iT from the coefficient matrices A₀–A₂ (GW2020 Eqs. 3–10).
-
-function _build_tjmat(p::GGJParameters, Q::ComplexF64)
-    e = ComplexF64(p.E)
-    f = ComplexF64(p.F)
-    h = ComplexF64(p.H)
-    g = ComplexF64(p.G)
-    k = ComplexF64(p.K)
-    q = Q
-    q2 = q * q
-    λ = 1 / sqrt(q)
-
-    # T (Eq. 7) and T⁻¹ (Eq. 8), listed row by row.
-    #! format: off
-    T = @SMatrix ComplexF64[
-        1 0 h*q q2/λ h*q -q2/λ
-        0 0 0 -1/λ 0 1/λ
-        0 0 -1/λ 0 1/λ 0
-        0 1 -h/λ -q2 h/λ -q2
-        0 0 0 1 0 1
-        0 0 1 0 1 0
-    ]
-
-    Tinv = @SMatrix ComplexF64[
-        1 q2 0 0 0 -h*q
-        0 0 -h 1 q2 0
-        0 0 -λ/2 0 0 1/2
-        0 -λ/2 0 0 1/2 0
-        0 0 λ/2 0 0 1/2
-        0 λ/2 0 0 1/2 0
-    ]
-    #! format: on
-
-    # A₀ and A₂: GW2020 Eq. (4); A₁: Eq. (5).
-    A0 = zeros(ComplexF64, 6, 6)
-    A1 = zeros(ComplexF64, 6, 6)
-    A2 = zeros(ComplexF64, 6, 6)
-
-    # A0
-    A0[4, 2] = -q
-    A0[5, 2] = 1 / q
-    A0[6, 3] = 1 / q
-    A0[1, 4] = 1
-    A0[2, 5] = 1
-    A0[3, 6] = 1
-    A0[4, 6] = h
-
-    # A1
-    A1[4, 1] = q
-    A1[5, 1] = -1 / q
-    A1[6, 1] = -1 / q
-    A1[6, 2] = -(g - k * e) * q
-    A1[5, 3] = -(e + f) / q2
-    A1[6, 3] = (g + k * f) * q
-    A1[4, 4] = 1
-    A1[5, 4] = -h / q2
-    A1[6, 4] = h * k * q
-    A1[5, 5] = -1
-    A1[6, 6] = -1
-
-    # A2
-    A2[4, 1] = -2
-    A2[5, 1] = h / q2
-    A2[6, 1] = -h * k * q
-
-    A0s = SMatrix{6,6,ComplexF64}(A0)
-    A1s = SMatrix{6,6,ComplexF64}(A1)
-    A2s = SMatrix{6,6,ComplexF64}(A2)
-
-    J0 = Tinv * A0s * T
-    J1 = Tinv * A1s * T
-    J2 = Tinv * A2s * T
-
-    return T, (J0, J1, J2), λ
-end
-
-# Closed-form solve of the GW2020 Eq. (22) Lyapunov equations for the off-diagonal blocks of P_k,
-# using the structure of J₀'s lower-right block; B_k is the block-diagonal part of K_k (Eq. 21).
-function _lyap_solve(K::SMatrix{6,6,ComplexF64}, λ::ComplexF64)
-    Bm = zeros(ComplexF64, 6, 6)
-    Pm = zeros(ComplexF64, 6, 6)
-
-    # B is block-diagonal in the (r1, r2) split.
-    Bm[1, 1] = K[1, 1]
-    Bm[1, 2] = K[1, 2]
-    Bm[2, 1] = K[2, 1]
-    Bm[2, 2] = K[2, 2]
-    for i in 3:6, j in 3:6
-        Bm[i, j] = K[i, j]
-    end
-
-    # P[r1, r2] = P[1:2, 3:6] (top-right off-diagonal block)
-    @inbounds begin
-        Pm[2, 3] = -K[2, 3] / λ
-        Pm[2, 4] = -K[2, 4] / λ
-        Pm[2, 5] = K[2, 5] / λ
-        Pm[2, 6] = K[2, 6] / λ
-        Pm[1, 3] = -(K[1, 3] + Pm[2, 3]) / λ
-        Pm[1, 4] = -(K[1, 4] + Pm[2, 4]) / λ
-        Pm[1, 5] = (K[1, 5] + Pm[2, 5]) / λ
-        Pm[1, 6] = (K[1, 6] + Pm[2, 6]) / λ
-    end
-
-    # P[r2, r1] = P[3:6, 1:2] (bottom-left off-diagonal block)
-    @inbounds begin
-        Pm[3, 1] = K[3, 1] / λ
-        Pm[4, 1] = K[4, 1] / λ
-        Pm[5, 1] = -K[5, 1] / λ
-        Pm[6, 1] = -K[6, 1] / λ
-        Pm[3, 2] = (K[3, 2] - Pm[3, 1]) / λ
-        Pm[4, 2] = (K[4, 2] - Pm[4, 1]) / λ
-        Pm[5, 2] = -(K[5, 2] - Pm[5, 1]) / λ
-        Pm[6, 2] = -(K[6, 2] - Pm[6, 1]) / λ
-    end
-
-    return SMatrix{6,6,ComplexF64}(Bm), SMatrix{6,6,ComplexF64}(Pm)
-end
-
-# Splitting recurrence (GW2020 Eqs. 14–19): P_k, B_k for k = 0..kmax+2, each order by `_lyap_solve` of K_k.
-function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64, kmax::Int)
+# Splitting recurrence (GW2020 Eqs. 14–19): P_k, B_k for k = 0..kmax+2, each order by the model's `split_block` of K_k.
+function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, splitter, kmax::Int)
     N = kmax + 3                          # store k = 0..kmax+2
     P = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
     B = Vector{SMatrix{6,6,ComplexF64,36}}(undef, N)
@@ -193,7 +77,7 @@ function _split_recurrence(J::NTuple{3,SMatrix{6,6,ComplexF64}}, λ::ComplexF64,
             end
             Kacc = Kacc - P[l+1] * B[kml+1]
         end
-        Bk, Pk = _lyap_solve(Kacc, λ)
+        Bk, Pk = split_block(splitter, Kacc)
         B[kk] = Bk
         P[kk] = Pk
     end
@@ -286,24 +170,22 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
 end
 
 """
-    build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8) -> InnerAsymptoticsCache
+    build_asymptotics(params, Q::ComplexF64; kmax::Int=8) -> InnerAsymptoticsCache
 
 Construct the `inps` Wasow asymptotic basis (GW2020 Eqs. 7–53), truncating
 each power series at order `kmax`. Evaluate with [`evaluate_asymptotics`](@ref);
 pick a matching radius with [`pick_smax`](@ref).
 """
-function build_asymptotics(params::GGJParameters, Q::ComplexF64; kmax::Int=8)
-    p1v = p1(params)
-    # Mercier Frobenius exponents r± = 3/2 ± √(−D_I) — GW2020 Eq. (49).
-    R = SVector{2,Float64}(p1v + 1.5, -p1v + 1.5)
+function build_asymptotics(params::ToroidalLayerParameters, Q::ComplexF64; kmax::Int=8)
+    R = power_exponents(params)
 
-    T, J, λ = _build_tjmat(params, Q)
-    P, B = _split_recurrence(J, λ, kmax)
+    T, J, splitter = wasow_basis(params, Q)
+    P, B = _split_recurrence(J, splitter, kmax)
     Qm, Y = _coefs(B, R, kmax)
     return InnerAsymptoticsCache(params, Q, kmax, R, T, J, P, Qm, Y)
 end
 
-build_asymptotics(params::GGJParameters, Q::Number; kmax::Int=8) =
+build_asymptotics(params::ToroidalLayerParameters, Q::Number; kmax::Int=8) =
     build_asymptotics(params, ComplexF64(Q); kmax=kmax)
 
 # Horner sum y[i] = (Σ_{k=0..n} c[i,k+1] zᵏ)·z^rvec[i] and its z-derivative, z = 1/x² (GW2020 Eq. 14 form);
@@ -410,7 +292,7 @@ end
 Evaluate the inps asymptotic basis at `x`, real (`x > 0`) or complex on a
 rotated contour (principal branch of `x^r`; the series is in 1/x², so valid for |arg x| < π/2).
 Returns the 6×2 complex matrix `U` whose two columns are the power-like (Mercier) solutions of
-the GGJ system (column 1 large, column 2 small), and (if `derivative=true`) the
+the layer system (column 1 large, column 2 small), and (if `derivative=true`) the
 6×2 matrix `dU` of their derivatives `dU/dx`.
 
 If `apply_T=false`, the result is left in the J-rotated basis (used by `asymptotic_residual`).
@@ -550,15 +432,15 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Number)
 end
 
 """
-    pick_smax(params, Q; θ=angle(Q)/4, eps=1e-9, kmax=12, cache=nothing,
+    pick_smax(params, Q; θ=default_ray_angle(params, Q), eps=1e-9, kmax=12, cache=nothing,
               slogmin=-1.0, slogmax=6.5, dslog=0.01) -> (S, cache, achieved)
 
 Sweep `s` log-uniformly upward and return the smallest `s` at which the series residual
 (GW2020 Eq. 54) along `x = e^{iθ}s` drops below `eps`. If never reached, returns the
 residual-minimizing `s` with `achieved = false`.
 """
-function pick_smax(params::GGJParameters, Q::ComplexF64;
-    θ::Float64=angle(Q) / 4, eps::Float64=1e-9, kmax::Int=12,
+function pick_smax(params::ToroidalLayerParameters, Q::ComplexF64;
+    θ::Float64=default_ray_angle(params, Q), eps::Float64=1e-9, kmax::Int=12,
     cache::Union{Nothing,InnerAsymptoticsCache}=nothing,
     slogmin::Float64=-1.0, slogmax::Float64=6.5, dslog::Float64=0.01)
     c = cache === nothing ? build_asymptotics(params, Q; kmax=kmax) : cache
@@ -581,5 +463,5 @@ function pick_smax(params::GGJParameters, Q::ComplexF64;
     return best_s, c, false
 end
 
-pick_smax(params::GGJParameters, Q::Number; kwargs...) =
+pick_smax(params::ToroidalLayerParameters, Q::Number; kwargs...) =
     pick_smax(params, ComplexF64(Q); kwargs...)
