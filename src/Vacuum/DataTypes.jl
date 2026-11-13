@@ -477,12 +477,14 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     normal_orient = normal[idx, 1] < 0 ? 1 : -1
     normal .*= normal_orient
 
-    # Warn if grid spacing is highly anisotropic
+    # Warn for unresolved grids
     spacing_θ = sqrt(sum(abs2, dr_dθ) / size(dr_dθ, 1)) * dθ
     spacing_ζ = sqrt(sum(abs2, dr_dζ) / size(dr_dζ, 1)) * dζ
     aspect_ratio = spacing_ζ / spacing_θ
     @info "Average grid spacing [m]: dθ=$(round(spacing_θ, digits=4)), dζ=$(round(spacing_ζ, digits=4)), aspect ratio=$(round(aspect_ratio, digits=2))"
-    aspect_ratio > 10.0 && @warn "Grid aspect ratio is highly anisotropic, which may degrade quadrature accuracy"
+    inputs.nzeta_in > 1 && aspect_ratio > 1.75 &&
+        @warn "Toroidal grid spacing is $(round(aspect_ratio, digits=2))× the poloidal one, which degrades the quadrature accuracy. " *
+              "Raise nzeta by about $(round(aspect_ratio, digits=1))× for equal spacing."
 
     return PlasmaGeometry3D(
         mtheta,
@@ -820,6 +822,12 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         )
         (min_align < 0.5 || min_area_ratio < 0.5) &&
             @warn "Conformal wall is close to folding: min(n̂_wall·n̂_plasma)=$((@sprintf "%.3f" min_align)), min area-element ratio=$((@sprintf "%.3f" min_area_ratio)). Reduce the wall distance a."
+        # An exact normal offset has n̂_wall ∥ n̂_plasma, so their angle is the interpolation error of the wall surface:
+        # a sharp convex plasma edge fans out over the gap faster than the grid follows it. 2° ≈ 1e-4 relative error in Wᵛ.
+        misalign = acosd(clamp(min_align, -1.0, 1.0))
+        min_align >= 0.5 && misalign > 2.0 &&
+            @warn "Conformal wall is under-resolved by the $(mtheta)×$(nzeta) grid: wall and plasma normals differ by up to $((@sprintf "%.1f" misalign))° " *
+                  "(0° when resolved), where a sharp convex edge of the plasma fans out across the gap. Refine mtheta and nzeta until this is below 2°, or reduce the wall distance a."
     end
 
     # The 3D singular quadrature resolves the double-layer kernel well only while the plasma-wall gap spans a
