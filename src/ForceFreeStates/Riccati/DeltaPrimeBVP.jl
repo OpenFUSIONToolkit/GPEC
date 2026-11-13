@@ -4,7 +4,7 @@
 const DELTA_PRIME_RESPONSE_MISMATCH = 1e-6
 
 """
-    compute_delta_prime_matrix(intr, propagators, chunks, bases, axis_state; wv=nothing, wp=nothing, psio=0.0, extended_precision=false) -> Union{Nothing,DeltaPrimeData}
+    compute_delta_prime_matrix(intr, propagators, chunks, axis_state; wv=nothing, wp=nothing, psio=0.0, extended_precision=false) -> Union{Nothing,DeltaPrimeData}
 
 Solve the STRIDE boundary-value problem for the inter-surface Δ' matrix
 [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eq. 37].
@@ -12,7 +12,7 @@ Solve the STRIDE boundary-value problem for the inter-surface Δ' matrix
 ### Arguments
 
   - `intr`: Read for its mode space and singular surfaces.
-  - `propagators`, `chunks`, `bases`, `axis_state`: From `riccati_eulerlagrange_integration`.
+  - `propagators`, `chunks`, `axis_state`: From `riccati_eulerlagrange_integration`.
   - `wv`: Singfac-scaled vacuum response for the edge condition `wp + wv = 0`; `nothing` puts a conducting wall there.
   - `wp`: Plasma response from `free_run`. A warning is issued when the BVP's own differs from it by more than
     `DELTA_PRIME_RESPONSE_MISMATCH`.
@@ -28,7 +28,6 @@ function compute_delta_prime_matrix(
     intr::ForceFreeStatesInternal,
     propagators::Vector{ChunkPropagator},
     chunks::Vector{IntegrationChunk},
-    bases::AbstractDict,
     axis_state::Matrix{ComplexF64};
     wv::Union{Nothing,Matrix{ComplexF64}}=nothing,
     wp::Union{Nothing,Matrix{ComplexF64}}=nothing,
@@ -43,7 +42,7 @@ function compute_delta_prime_matrix(
     N = intr.numpert_total
     ipert_all = [1 + sing[j].m[1] - intr.mlow + (sing[j].n[1] - intr.nlow) * intr.mpert for j in 1:msing]
 
-    uShootR, uShootL = _shooting_matrices(propagators, chunks, bases, i_crossings)
+    uShootR, uShootL = _shooting_matrices(propagators, chunks, i_crossings)
     uAxis = Matrix(qr(axis_state).Q)[:, 1:N]
     M, col_edge = _assemble_bvp(uShootR, uShootL, uAxis, ipert_all, msing, N, wv, psio)
 
@@ -104,22 +103,15 @@ end
 # Shooting matrices of the BVP [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eqs. 33-35]: `uShootR[j]` and
 # `uShootL[j]` map the asymptotic coefficients right and left of surface j to the state at the matching point
 # toward the next and the previous surface.
-function _shooting_matrices(propagators::Vector{ChunkPropagator}, chunks::Vector{IntegrationChunk},
-    bases::AbstractDict, i_crossings::Vector{Int})
+function _shooting_matrices(propagators::Vector{ChunkPropagator}, chunks::Vector{IntegrationChunk}, i_crossings::Vector{Int})
     msing = length(i_crossings)
     matrix(i) = [propagators[i].u[:, :, 1]; propagators[i].u[:, :, 2]]
     uShootR = Vector{Matrix{ComplexF64}}(undef, msing)
     uShootL = Vector{Matrix{ComplexF64}}(undef, msing)
     for j in 1:msing
-        if i_crossings[j] == length(chunks)
-            # The edge is the surface's right inner-layer boundary.
-            right = bases[chunks[i_crossings[j]].ising].right
-            uShootR[j] = [right[:, :, 1]; right[:, :, 2]]
-        else
-            # The chunk after the surface starts from the right basis; the rest multiply on.
-            range_R = _midpoint_shoot_range(chunks, i_crossings, j, msing; side=:right)
-            uShootR[j] = foldl((X, i) -> matrix(i) * X, range_R[2:end]; init=matrix(first(range_R)))
-        end
+        # The chunk after the surface starts from the right basis; the rest multiply on.
+        range_R = _midpoint_shoot_range(chunks, i_crossings, j, msing; side=:right)
+        uShootR[j] = foldl((X, i) -> matrix(i) * X, range_R[2:end]; init=matrix(first(range_R)))
         # The crossing chunk carries the left basis back to its start; forward chunks before it are inverted.
         range_L = j == 1 ? (1:0) : _midpoint_shoot_range(chunks, i_crossings, j, msing; side=:left)
         uShootL[j] = foldl((X, i) -> matrix(i) \ X, reverse(range_L); init=matrix(i_crossings[j]))

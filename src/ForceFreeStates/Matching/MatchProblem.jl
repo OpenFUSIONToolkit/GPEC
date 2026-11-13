@@ -276,8 +276,9 @@ end
 # Copy of ffs with the match applied; the ideal reference keeps closure :ideal, its zero bpen and δW.
 function _matched_result(ffs::ForceFreeStatesResult, match::MatchResult, ideal::Bool)
     gal = ffs.galerkin
+    # Without a matched ξ, the ideal solution stands only for the ideal reference.
     solution = (gal !== nothing && gal.solution !== nothing && !isempty(match.xi)) ?
-               _matched_gal_profiles(gal, match, ffs.mats, ffs) : ffs.solution
+               _matched_gal_profiles(gal, match, ffs.mats, ffs) : (ideal ? ffs.solution : nothing)
     ideal && return _with(ffs; match=match, solution=solution)
     # The ideal δW does not describe the matched plasma; PE gates on its absence.
     return _with(ffs; closure=:matched, bpen=match.bpen, match=match, solution=solution,

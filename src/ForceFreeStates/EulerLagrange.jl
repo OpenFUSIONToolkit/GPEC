@@ -53,8 +53,6 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `du_store::Array{ComplexF64,3}` - du₁/dψ at each stored step, shape `(numpert_total, numpert_total, step)`; empty until `materialize_derivative_stores!` fills it (the
     galerkin-matched path supplies it at construction).
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s (Glasser 2016 Eq. 18) at each stored step; empty until materialized, like `du_store`.
-  - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state; false on the Riccati path (stored states are the Riccati matrix), where derivative
-    stores cannot be materialized.
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final basis.
   - `crit_store::Vector{Float64}` - Critical eigenvalue (smallest eigenvalue of W⁻¹) at each stored step.
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients right of each singular surface, shape `(numpert_total, numpert_total, 2, msing)`.
@@ -94,7 +92,6 @@ records needed to undo it, and singular-surface asymptotic coefficients.
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
     du_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
     xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
-    u_store_el_basis::Bool = true
     du_store_populated::Bool = false
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     ca_r::Array{ComplexF64,4} = zeros(ComplexF64, numpert_total, numpert_total, 2, msing)

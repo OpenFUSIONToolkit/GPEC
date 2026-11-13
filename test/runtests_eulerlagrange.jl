@@ -455,7 +455,6 @@ end
         @test size(odet.du_store) == (numpert_total, numpert_total, 0)
         @test size(odet.xi_s_store) == (numpert_total, numpert_total, 0)
         @test odet.du_store_populated == false
-        @test odet.u_store_el_basis == true
         @test length(odet.psi_store) == numsteps_init
         @test length(odet.q_store) == numsteps_init
         @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
@@ -727,15 +726,6 @@ end
             @test isapprox(odet_t.du_store[:, :, istep], odet.du_store[:, :, istep] * T; rtol=1e-10)
             @test isapprox(odet_t.xi_s_store[:, :, istep], odet.xi_s_store[:, :, istep] * T; rtol=1e-10)
         end
-    end
-
-    @testset "refuses a solution outside the Euler-Lagrange basis" begin
-        odet.du_store_populated = false
-        odet.du_store = Array{ComplexF64}(undef, intr.numpert_total, intr.numpert_total, 0)
-        odet.u_store_el_basis = false
-        @test !FFS.materialize_derivative_stores!(odet, equil, mats, intr)
-        @test isempty(odet.du_store)
-        @test !odet.du_store_populated
     end
 end
 

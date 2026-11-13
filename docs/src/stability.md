@@ -41,7 +41,7 @@ Its global boundary-value problem over all surfaces gives the Δ′ matrix of [G
 
 `[ForceFreeStates] integrator` selects the radial method; its numerical settings sit in a section of the same name.
 
-- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in its asymptotic basis and assembles the Δ′ matrix. It stores the Riccati matrix ``S`` at every solver step, not the displacement, so it yields no ``\xi`` profiles.
+- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in its asymptotic basis and assembles the Δ′ matrix. It stores the solution at every solver step, like Forward, so its result carries ``\xi`` profiles; `plasma_response` does not accept a Riccati result yet.
 - `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction at each rational surface. It returns dense displacement profiles, and is the only integrator whose result `plasma_response` accepts (the response operators are built from the dense ``\xi`` solution; a wall is refused too) and the only one that supports the kinetic solve.
 - `"Galerkin"` (`[Galerkin]`) solves the outer region variationally on a finite-element basis, giving the resistive Δ′ matrix and the PEST-3 blocks but no free-boundary energies; see [Galerkin Solver](galerkin.md).
 

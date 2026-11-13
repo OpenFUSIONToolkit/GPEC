@@ -104,12 +104,35 @@ end
         @test isapprox(real(et_far[1]), real(et_forward[1]); rtol=5e-3)
     end
 
-    @testset "stored states" begin
-        # Every solver step of every chunk is stored, reduced to (S, I), in increasing ψ.
+    @testset "stored solution" begin
+        # Every solver step of every chunk is stored, in increasing ψ, ending at the edge state.
         @test odet_ric.step == length(odet_ric.psi_store) == size(odet_ric.u_store, 4)
         @test all(diff(odet_ric.psi_store) .> 0)
-        @test all(odet_ric.u_store[:, :, 2, k] ≈ I(N) for k in 1:odet_ric.step)
         @test odet_ric.u_store[:, :, :, end] ≈ odet_ric.u
+
+        # Each stored column is a solution: integrated directly from one stored node it lands on the next.
+        psi = odet_ric.psi_store
+        for k in (1, odet_ric.step ÷ 4, odet_ric.step ÷ 2, odet_ric.step - 1)
+            any(s -> psi[k] < s.psifac < psi[k+1], intr_ric.sing) && continue
+            params = (ctrl, equil, mats, intr_ric, FFS.OdeState(N, 1, 1, 0), FFS.IntegrationChunk(psi[k], psi[k+1], false, 0, 1))
+            direct = FFS.solve_el(FFS.ODEProblem(FFS.sing_der!, odet_ric.u_store[:, :, :, k], (psi[k], psi[k+1]), params),
+                ctrl.algorithm.eulerlagrange_tolerance).u[end]
+            @test isapprox(direct, odet_ric.u_store[:, :, :, k+1]; rtol=1e-5)
+        end
+
+        # Across the surfaces they are the solutions Forward stores: scaled to a unit edge displacement, the
+        # conjugate momenta agree on each side of every surface. (ξ itself differs there by Forward's crossing
+        # condition, which leaves a big-solution term next to each surface.)
+        function edge_scaled_momentum(integrator)
+            ctrl, intr, equil, _, mats = prepared_solovev(; integrator, singfac_min=1e-6)
+            odet = first(FFS.eulerlagrange_integration(ctrl, equil, mats, intr))
+            return odet, intr, [odet.u_store[:, :, 2, k] / odet.u_store[:, :, 1, odet.step] for k in 1:odet.step]
+        end
+        ric, intr, momentum_ric = edge_scaled_momentum("Riccati")
+        fwd, _, momentum_fwd = edge_scaled_momentum("Forward")
+        shared = [(findfirst(==(p), ric.psi_store), k) for (k, p) in enumerate(fwd.psi_store[1:fwd.step]) if p in ric.psi_store]
+        @test length(shared) >= 2 * intr.msing
+        @test maximum(norm(momentum_ric[i] - momentum_fwd[k]) / norm(momentum_fwd[k]) for (i, k) in shared) < 1e-2
     end
 
     # Note: a Solovev per-surface Δ' regression testset previously lived here,
@@ -130,8 +153,8 @@ end
             ctrl, intr, equil, _, mats = prepared_solovev(; fixture="regression_tj_ideal_example", nchunks)
             odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
             wv = FFS.free_run(odet, ctrl, equil, mats, intr).wv
-            delta_prime = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.bases, riccati.axis_state; wv, psio=equil.psio)
-            return delta_prime.matrix, riccati.chunks
+            result = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
+            return result.matrix, riccati.chunks
         end
         dp_auto, chunks_auto = delta_prime(0)
         dp_few, chunks_few = delta_prime(1)
@@ -144,18 +167,19 @@ end
         # The chunks, their propagators and the Δ′ system follow the edge to the peak.
         ctrl, intr, equil, _, mats = prepared_solovev(; over=Dict{String,Any}("truncate_at_dW_peak" => true))
         odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
-        (; propagators, chunks, bases, axis_state) = riccati
+        (; propagators, chunks) = riccati
+        axis_state = riccati.columns.axis_state
         @test intr.psilim == odet.psi_store[end] == chunks[end].psi_end
         @test length(propagators) == length(chunks) && count(c -> c.needs_crossing, chunks) == intr.msing
         @test odet.u_store[:, :, :, end] ≈ odet.u
         free = FFS.free_run(odet, ctrl, equil, mats, intr)
         @test isfinite(free.et[1])
         # The Δ′ system reproduces the plasma response of the axis-to-edge products, and says so when it does not.
-        delta_prime = @test_logs min_level = Logging.Warn FFS.compute_delta_prime_matrix(intr, propagators, chunks, bases, axis_state;
+        delta_prime = @test_logs min_level = Logging.Warn FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
             wv=free.wv, wp=free.wp, psio=equil.psio)
         @test size(delta_prime.matrix) == (intr.msing, intr.msing) && all(isfinite, delta_prime.matrix)
         @test size(delta_prime.coil) == (2 * intr.msing, intr.numpert_total)
-        @test_logs (:warn, r"differs from the axis-to-edge one") FFS.compute_delta_prime_matrix(intr, propagators, chunks, bases, axis_state;
+        @test_logs (:warn, r"differs from the axis-to-edge one") FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
             wv=free.wv, wp=1.01 .* free.wp, psio=equil.psio)
     end
 

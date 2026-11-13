@@ -95,7 +95,7 @@ include("display_check.jl")
         end
     end
 
-    @testset "riccati run publishes Δ′ and diagnostics but no ξ solution" begin
+    @testset "riccati run publishes Δ′, diagnostics and a ξ solution" begin
         mktempdir() do dir
             _stage_deck(dir, template; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"))
             ret = GeneralizedPerturbedEquilibrium.main([dir])
@@ -103,10 +103,9 @@ include("display_check.jl")
             ffs = ret.ffs
             riccati_result[] = ffs
             @test ffs.integrator === :riccati
-            # Chunk-endpoint Riccati states are not a ξ solution; only the raw state is carried.
-            @test ffs.solution === nothing
+            @test ffs.solution !== nothing && ffs.solution.basis === :el_axis
+            @test ffs.solution.step == length(ffs.solution.psi_store) == size(ffs.solution.du_store, 3)
             @test ffs.diagnostics !== nothing
-            @test !ffs.diagnostics.u_store_el_basis
             @test ffs.closure === :ideal
             @test iszero(ffs.bpen)
 
@@ -131,7 +130,7 @@ include("display_check.jl")
             @test !(@test_logs (:warn,) FFS.require(ffs, :galerkin, "a calculation"))
 
             # `require_solution` is the ξ-specific presence gate.
-            @test !(@test_logs (:warn,) FFS.require_solution(ffs, "a calculation"))
+            @test @test_logs FFS.require_solution(ffs, "a calculation")
         end
     end
 
@@ -154,11 +153,11 @@ include("display_check.jl")
             @test ret.pe !== nothing
             @test isempty(ret.pe.response.permeability)
             @test isempty(ret.pe.response.C_delta_prime)
-            @test ret.ffs.free_boundary !== nothing && ret.ffs.solution === nothing
+            @test ret.ffs.free_boundary !== nothing && ret.ffs.solution !== nothing
             @test ret.resp.compute_singular_coupling
             for result in (ret.resp, ret.pe)
                 plain = _check_display(result)
-                @test occursin("needs stored ξ profiles", plain)
+                @test occursin("a Riccati result is not accepted yet", plain)
                 @test !occursin("needs a free-boundary result", plain)
                 @test !occursin("singular coupling off", plain)
                 @test !occursin(" 0 J", plain)

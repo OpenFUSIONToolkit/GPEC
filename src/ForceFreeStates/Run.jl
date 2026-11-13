@@ -85,7 +85,7 @@ function run_force_free_states(
                 @info "Computing free boundary energies ($wall_desc)"
             end
             free_energies = free_run(odet, ctrl, equil, mats, intr)
-            odet.u_store_el_basis && normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
+            normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
             if real(free_energies.et[1]) < 0
                 if intr.verbose
                     @warn "Free-boundary mode unstable for n = $nstring"
@@ -101,7 +101,7 @@ function run_force_free_states(
                 if intr.verbose
                     @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
                 end
-                delta_prime = compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.bases, riccati.axis_state;
+                delta_prime = compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state;
                     wv=free_energies.wv, wp=free_energies.wp, psio=equil.psio, extended_precision=ctrl.algorithm.extended_precision_bvp)
             end
         end

@@ -249,30 +249,16 @@ end
     # physically meaningful. BVP Δ' regression is concentrated on the DIIID-like
     # fixture below (intrinsically stable, well-conditioned BVP Δ').
 
-    @testset "Riccati leaves its u_store in the Riccati basis" begin
-        # The stored Riccati states are (S, I), not the Euler-Lagrange axis basis. Downstream ξ consumers
-        # must therefore be fed by the forward integrator; this test pins that contract.
-        function run_and_capture(integrator)
+    @testset "both ODE integrators leave solution profiles" begin
+        # Either store materializes into dΞ_ψ/dψ and Ξ_s, which is what PerturbedEquilibrium consumes.
+        for integrator in ("Forward", "Riccati")
             ctrl, intr, equil, metric, mats = _prepared_solovev(integrator)
             odet = first(GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr))
-            # Derivatives are recomputed on demand; materialize so the stores can be compared.
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, mats, intr)
-            return odet
+            @test GeneralizedPerturbedEquilibrium.ForceFreeStates.materialize_derivative_stores!(odet, equil, mats, intr)
+            @test odet.du_store_populated
+            @test size(odet.du_store) == size(odet.xi_s_store) == (intr.numpert_total, intr.numpert_total, odet.step)
+            @test all(isfinite, odet.du_store) && all(isfinite, odet.xi_s_store)
         end
-
-        odet_fwd = run_and_capture("Forward")
-        odet_ric = run_and_capture("Riccati")
-
-        # The forward path returns dense ξ in the axis basis, ready for PerturbedEquilibrium.
-        @test odet_fwd.u_store_el_basis
-        @test odet_fwd.du_store_populated
-
-        # The Riccati solution is in the Riccati basis, so the derivative stores cannot be
-        # materialized from it and stay empty rather than holding unusable values.
-        @test !odet_ric.u_store_el_basis
-        @test !odet_ric.du_store_populated
-        @test isempty(odet_ric.du_store)
-        @test isempty(odet_ric.xi_s_store)
     end
 
     # Production DIII-D energies and Δ′ are tracked by the diiid_n1_riccati harness cases.

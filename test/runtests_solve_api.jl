@@ -75,7 +75,7 @@ include("display_check.jl")
 
             @test api.integrator === :riccati
             @test api.control.algorithm.nchunks == 40
-            @test api.solution === nothing
+            @test api.solution !== nothing && api.solution.basis === :el_axis
             @test api.delta_prime !== nothing
             msing = length(api.surfaces)
             @test size(api.delta_prime.matrix) == (msing, msing)

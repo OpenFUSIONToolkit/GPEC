@@ -140,17 +140,13 @@ using TOML
         end
     end
 
-    @testset "Riccati run offers Δ′ but no solution profiles" begin
+    @testset "Riccati run offers Δ′ and solution profiles" begin
         mktempdir() do dir
             ret, h5 = _run_fixture(dir, "regression_solovev_ideal_example";
                 edit=d -> (d["ForceFreeStates"]["integrator"] = "Riccati"; d["Riccati"] = delete!(pop!(d, "Forward"), "renorm_threshold")))
             _check_sources(ret.ffs, h5)
-            @test :delta_prime in A.capabilities(ret.ffs) && :solution_profiles ∉ A.capabilities(ret.ffs)
-            @test_throws A.REASONS[:solution_profiles] A.ForceFreeStates.plot_mode_displacement(ret.ffs)
-            @test occursin("✗ plot_mode_displacement", repr(MIME"text/plain"(), available_plots(ret.ffs)))
-            # The summary leaves out the ξ panel rather than failing, keeping the other four.
-            caps = A.capabilities(ret.ffs)
-            @test count(((f, _),) -> A._can(f, caps), A.ForceFreeStates._ffs_panels(ret.ffs)) == 4
+            @test :delta_prime in A.capabilities(ret.ffs) && :solution_profiles in A.capabilities(ret.ffs)
+            @test A.ForceFreeStates.plot_mode_displacement(ret.ffs) isa Figure
             @test A.ForceFreeStates.plot_ffs_summary(ret.ffs) isa Figure
             # The Δ′ family draws any part of its complex entries and refuses others.
             @test A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:abs) isa Figure

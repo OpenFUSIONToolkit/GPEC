@@ -44,7 +44,7 @@ What each capability needs, worded as what to change in the run to get it.
 const REASONS = Dict{Symbol,String}(
     :equilibrium => "needs an equilibrium",
     :singular_surfaces => "needs rational surfaces in the integration domain",
-    :solution_profiles => "needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)",
+    :solution_profiles => "needs stored ξ profiles: use the Forward or Riccati integrator, or a matched Galerkin solve (unmatched Galerkin stores none)",
     :fixed_boundary_criterion => "needs the critical determinant scan: use the Forward or Riccati integrator (Galerkin computes none)",
     :free_boundary => "needs the free-boundary energies: run with vac_flag = true and the Forward or Riccati integrator",
     :edge_scan => "needs the edge stability scan: set dW_edge_scan_start below psilim",

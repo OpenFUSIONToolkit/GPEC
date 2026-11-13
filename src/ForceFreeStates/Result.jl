@@ -63,7 +63,7 @@ Every final result records how its basis crosses the rational surfaces, so bpen 
     inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` and `:regular` closure.
   - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
-    formalism produced none (Riccati, and Galerkin without a match).
+    formalism produced none (Galerkin without a match).
   - `diagnostics::Union{Nothing,OdeState}` - The integrator's raw ODE state (ψ trace, `crit`,
     edge scan, asymptotic coefficients). Written to HDF5; not a consumable solution.
   - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix `W_p = (U₂·U₁⁻¹)/ψ₀²` at
@@ -138,7 +138,7 @@ with a message naming what a solution takes to produce.
 """
 function require_solution(result::ForceFreeStatesResult, calc::AbstractString)
     result.solution === nothing || return true
-    @warn "Skipping $calc: no ξ solution — dense profiles require a Forward (or matched Galerkin) run; " *
+    @warn "Skipping $calc: no ξ solution — dense profiles require a Forward, Riccati or matched Galerkin run; " *
           "this result came from the $(result.integrator) integrator"
     return false
 end
@@ -197,9 +197,9 @@ function build_result(
     gal_data::Union{Nothing,GalerkinResult},
     delta_prime::Union{Nothing,DeltaPrimeData}
 )
-    # The forward sweep is the only formalism whose stores need materializing; doing it here
-    # keeps `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
-    solution = if integrator === :forward && odet !== nothing
+    # The ODE integrators' stores need materializing; doing it here keeps
+    # `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
+    solution = if odet !== nothing
         materialize_derivative_stores!(odet, equil, mats, intr)
         SolutionProfiles(:el_axis, odet.step, odet.psi_store, odet.q_store,
             odet.u_store, odet.du_store, odet.xi_s_store)

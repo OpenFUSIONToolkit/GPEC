@@ -39,6 +39,8 @@ solver step.
 """
 function chunk_propagator(chunk::IntegrationChunk, u0::Array{ComplexF64,3}, rtol::Float64,
     equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, modes::ModeIndices)
+    # A zero-width chunk only carries its start basis.
+    chunk.psi_start == chunk.psi_end && return ChunkPropagator(copy(u0), [chunk.psi_start], [copy(u0)])
     tspan = chunk.direction == 1 ? (chunk.psi_start, chunk.psi_end) : (chunk.psi_end, chunk.psi_start)
     spline_hint, mats_hint = Ref(1), Ref(1)
     function derivative!(du, u, _, psi)
