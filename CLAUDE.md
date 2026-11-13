@@ -56,6 +56,16 @@ using GeneralizedPerturbedEquilibrium
 
 Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to compare performance between branches or commits (default case: `examples/DIIID-like_ideal_example`). Full usage, flags, and benchmark-script conventions (never duplicate example inputs into `benchmarks/`; outputs go under `benchmarks/`, not committed) are in **[`docs/development/benchmarking.md`](docs/development/benchmarking.md)**.
 
+### Running cases and scans
+
+A fresh Julia process spends ~12 s loading GPEC and tens of seconds compiling its first case before computing anything, and an edit under `src/` adds a ~3 min package rebuild. Structure runs to pay that once:
+- Loop over deck variants in one process, each case in its own directory with its own log; never one `julia` per case. Parallelize with a job array of chunks (one process per task) rather than threads.
+- Build the image once before submitting (`Pkg.precompile()`), with a `JULIA_CPU_TARGET` covering every node type when login and compute CPUs differ.
+- Run scans from a worktree pinned to a commit and do not edit it while jobs run; keep edit-test loops in one warm Julia session with Revise.
+- Keep threads, build mode and commit fixed across compared points, and log load/first-case time separately from compute.
+
+Measurements, a scan script, a warm-worker pattern for agents, and the state-isolation rules are in **[`docs/development/running-scans.md`](docs/development/running-scans.md)**.
+
 ### Regression Harness
 
 ***This should be used at least once every single pull request before merging into develop. This test harness is what tracks values as they evolve across changes to the code, and must be both kept up to date and used consistently. Do not forget this and make sure to suggest any new regression cases or updates to existing ones as needed. Remind the user of its existence and report back the output regression report you get when modifying the code significantly. This is extremely important, do not forget this tidbit.***
@@ -92,7 +102,7 @@ Full branch-naming table, hotfix workflow, versioning scheme, and merge-conflict
 
 ## Agent Team
 
-This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them.
+This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them. They register only in a session started in this repository; from a session started elsewhere, paste the agent file's body into a general-purpose agent's prompt rather than writing your own checklist.
 
 Roster, the recommended review pipeline (physics fidelity → readability → performance → regression), and per-consultation budget rules are in **[`.claude/agents/README.md`](.claude/agents/README.md)**.
 
