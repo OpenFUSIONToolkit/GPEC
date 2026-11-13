@@ -417,7 +417,7 @@ end
 
 Build the 3D plasma surface on the `mtheta × nzeta` grid in (θ, ζ). An axisymmetric boundary (`nzeta_in == 1`) is
 revolved from its 2D contour, placing each point at ϕ = ζ + ν(θ); a 3D boundary is interpolated from its input grid.
-Tangents come from periodic bicubic splines and normals point into the plasma.
+Tangents are those of the trigonometric interpolant of the grid samples, and normals point into the plasma.
 
 # Arguments
 
@@ -439,8 +439,6 @@ function PlasmaGeometry3D(inputs::VacuumInput)
 
     # Allocate output arrays
     r = zeros(num_points, 3)
-    dr_dθ = zeros(num_points, 3)
-    dr_dζ = zeros(num_points, 3)
     normal = zeros(num_points, 3)
 
     if inputs.nzeta_in == 1
@@ -468,15 +466,9 @@ function PlasmaGeometry3D(inputs::VacuumInput)
         assert_counterclockwise(hypot.(r[1:mtheta, 1], r[1:mtheta, 2]), r[1:mtheta, 3], "Plasma boundary ζ = 0 cross-section")
     end
 
-    # Compute tangent vectors and normal vectors via periodic bicubic splines
-    itps = [cubic_interp((θ_grid, ζ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
-    for i in 1:mtheta, j in 1:nzeta
-        idx = i + (j - 1) * mtheta
-        for k in 1:3
-            partials = itps[k].nodal_derivs.partials
-            dr_dθ[idx, k] = partials[2, i, j]
-            dr_dζ[idx, k] = partials[3, i, j]
-        end
+    # Tangent and normal vectors of the trigonometric interpolant, which converge spectrally with the grid
+    dr_dθ, dr_dζ = trig_tangents(r, mtheta, nzeta)
+    for idx in 1:num_points
         cross3!(normal, dr_dθ, dr_dζ, idx)
     end
 
@@ -485,12 +477,14 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     normal_orient = normal[idx, 1] < 0 ? 1 : -1
     normal .*= normal_orient
 
-    # Warn if grid spacing is highly anisotropic
+    # Warn for unresolved grids
     spacing_θ = sqrt(sum(abs2, dr_dθ) / size(dr_dθ, 1)) * dθ
     spacing_ζ = sqrt(sum(abs2, dr_dζ) / size(dr_dζ, 1)) * dζ
     aspect_ratio = spacing_ζ / spacing_θ
     @info "Average grid spacing [m]: dθ=$(round(spacing_θ, digits=4)), dζ=$(round(spacing_ζ, digits=4)), aspect ratio=$(round(aspect_ratio, digits=2))"
-    aspect_ratio > 10.0 && @warn "Grid aspect ratio is highly anisotropic, which may degrade quadrature accuracy"
+    inputs.nzeta_in > 1 && aspect_ratio > 1.75 &&
+        @warn "Toroidal grid spacing is $(round(aspect_ratio, digits=2))× the poloidal one, which degrades the quadrature accuracy. " *
+              "Raise nzeta by about $(round(aspect_ratio, digits=1))× for equal spacing."
 
     return PlasmaGeometry3D(
         mtheta,
@@ -731,7 +725,6 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
 
     dθ = 2π / mtheta
     dζ = 2π / nzeta
-    θ_grid = range(; start=0, length=mtheta, step=dθ)
     ϕ_grid = range(; start=0, length=nzeta, step=dζ)
     num_points = mtheta * nzeta
 
@@ -798,15 +791,9 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         error("Wall shape $(nameof(typeof(wall_settings))) is not available for a non-axisymmetric boundary (nzeta_in > 1).")
     end
 
-    # Compute tangent vectors and normal vectors via periodic bicubic splines
-    itps = [cubic_interp((θ_grid, ϕ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
-    for i in 1:mtheta, j in 1:nzeta
-        idx = i + (j - 1) * mtheta
-        for k in 1:3
-            partials = itps[k].nodal_derivs.partials
-            dr_dθ[idx, k] = partials[2, i, j]
-            dr_dζ[idx, k] = partials[3, i, j]
-        end
+    # Tangent and normal vectors of the trigonometric interpolant, as on the plasma
+    dr_dθ, dr_dζ = trig_tangents(r, mtheta, nzeta)
+    for idx in 1:num_points
         cross3!(normal, dr_dθ, dr_dζ, idx)
     end
 
@@ -835,6 +822,12 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         )
         (min_align < 0.5 || min_area_ratio < 0.5) &&
             @warn "Conformal wall is close to folding: min(n̂_wall·n̂_plasma)=$((@sprintf "%.3f" min_align)), min area-element ratio=$((@sprintf "%.3f" min_area_ratio)). Reduce the wall distance a."
+        # An exact normal offset has n̂_wall ∥ n̂_plasma, so their angle is the interpolation error of the wall surface:
+        # a sharp convex plasma edge fans out over the gap faster than the grid follows it. 2° ≈ 1e-4 relative error in Wᵛ.
+        misalign = acosd(clamp(min_align, -1.0, 1.0))
+        min_align >= 0.5 && misalign > 2.0 &&
+            @warn "Conformal wall is under-resolved by the $(mtheta)×$(nzeta) grid: wall and plasma normals differ by up to $((@sprintf "%.1f" misalign))° " *
+                  "(0° when resolved), where a sharp convex edge of the plasma fans out across the gap. Refine mtheta and nzeta until this is below 2°, or reduce the wall distance a."
     end
 
     # The 3D singular quadrature resolves the double-layer kernel well only while the plasma-wall gap spans a

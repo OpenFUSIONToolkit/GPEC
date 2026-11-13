@@ -241,11 +241,11 @@ class operator real and splitting a self-conjugate class into two half-size bloc
     # exp(-i(mθ − nζ)) on one field period
     exp_mn_basis = compute_fourier_coefficients(mtheta, m_modes, nzeta * nfp, n_modes; nfp=nfp)
 
-    # 23×23 patch, 20 radial / 40 angular polar nodes, 5-point Lagrange. Malhotra JCP 397 (2019) 108791 sec 3.2.2
-    # grows these as N^(1/4); over our grids that spans M = 19..35 with no measured accuracy gain, so they are fixed.
-    PATCH_RAD = 11
-    RAD_DIM = 20
-    INTERP_ORDER = 5
+    # Patch half-width mtheta/3 and max(12, mtheta/2) radial / twice as many angular polar nodes, 11-point Lagrange. The patch
+    # and quadrature grow with the grid; a fixed patch floors the error (Malhotra JCP 397 (2019) 108791 sec 3.2.2).
+    PATCH_RAD = mtheta ÷ 3
+    RAD_DIM = max(12, round(Int, mtheta / 2))
+    INTERP_ORDER = 11
 
     # Shared within-period reflection when both surfaces allow it; `nothing` leaves the operator untransformed
     σ_map = stell_sym_map(plasma_surf, wall, nfp)
@@ -290,16 +290,23 @@ class operator real and splitting a self-conjugate class into two half-size bloc
         grad_blocks = [zeros!(pool, T, nb * sz, nb * sz) for sz in sizes]
         green_blocks = [zeros!(pool, T, nb * sz, sz) for sz in sizes]
 
-        # Plasma–Plasma block
-        compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+        # The kernel's small per-row BLAS products run inside its threaded loop; a threaded BLAS would oversubscribe the cores
+        blas_nthreads = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            # Plasma–Plasma block
+            compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
 
-        if !wall.nowall
-            # Plasma–Wall block
-            compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
-            # Wall–Wall block
-            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
-            # Wall–Plasma block
-            compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+            if !wall.nowall
+                # Plasma–Wall block
+                compute_3D_kernel_matrices!(grad_blocks, green_blocks, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+                # Wall–Wall block
+                compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+                # Wall–Plasma block
+                compute_3D_kernel_matrices!(grad_blocks, green_blocks, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis)
+            end
+        finally
+            BLAS.set_num_threads(blas_nthreads)
         end
 
         # Factor once per group (conjugate partner reuses it)
