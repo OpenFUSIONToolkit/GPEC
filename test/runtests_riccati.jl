@@ -1,20 +1,32 @@
-using LinearAlgebra, Random, TOML
+using LinearAlgebra, Logging, TOML
 
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
-# The Solovev fixture prepared as solve prepares it, up to the integration. Each integration mutates its
+# A fixture (Solovev by default) prepared as solve prepares it, up to the integration. Each integration mutates its
 # intr (sing[s].delta_prime etc.), so every run takes a freshly prepared one.
-function prepared_solovev()
+function prepared_solovev(; fixture="regression_solovev_ideal_example", integrator="Riccati", singfac_min=nothing, nchunks=0, over=Dict{String,Any}())
     GPEC = GeneralizedPerturbedEquilibrium
-    ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    ex = joinpath(@__DIR__, "test_data", fixture)
     inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-    # The fixture's [Forward] settings drive both paths; the Riccati control also carries the chunking.
-    inputs["ForceFreeStates"]["integrator"] = "Riccati"
-    inputs["Riccati"] = pop!(inputs, "Forward")
+    # The fixture's [Forward] tolerance drives both integrators; the Riccati control also carries the chunking.
+    inputs["ForceFreeStates"]["integrator"] = integrator
+    if integrator == "Riccati"
+        inputs["Riccati"] = delete!(pop!(inputs, "Forward"), "renorm_threshold")
+        inputs["Riccati"]["nchunks"] = nchunks
+    end
+    singfac_min === nothing || (inputs["ForceFreeStates"]["singfac_min"] = singfac_min)
+    merge!(inputs["ForceFreeStates"], over)
     equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
     prob = GPEC.ForceBalanceProblem(equil; GPEC.force_balance_keywords(inputs, ex)...)
     ctrl, intr, equil, metric, mats = GPEC._prepare_solve(prob, GPEC.force_balance_algorithm(inputs))
     return ctrl, intr, equil, metric, mats
+end
+
+# Free-boundary energy eigenvalues of a Solovev fixture, crossing each surface at `singfac_min`.
+function solovev_energies(integrator, singfac_min; fixture="regression_solovev_ideal_example")
+    ctrl, intr, equil, _, mats = prepared_solovev(; fixture, integrator, singfac_min)
+    odet = first(FFS.eulerlagrange_integration(ctrl, equil, mats, intr))
+    return FFS.free_run(odet, ctrl, equil, mats, intr).et
 end
 
 @testset "Riccati Integration Tests" begin
@@ -59,69 +71,68 @@ end
         @test u[:, :, 1] ≈ S rtol = 1e-12
     end
 
-    @testset "renormalize_riccati! (OdeState)" begin
-        N = 3
-        rng = [1.0+0.5im 0.2im 0.1;
-            0.0im 1.2+0.1im 0.0;
-            0.1+0.1im 0.0 0.9+0.3im]
-        U1 = rng .+ 0.5 * I(N)
-        U2 = 0.2 * rng .+ I(N)
-
-        odet = FFS.OdeState(N, 10, 5, 1)
-        odet.u[:, :, 1] .= U1
-        odet.u[:, :, 2] .= U2
-
-        S_expected = U1 / U2
-        intr = FFS.ForceFreeStatesInternal(; mpert=N, numpert_total=N)
-
-        FFS.renormalize_riccati!(odet, intr)
-
-        @test odet.u[:, :, 2] ≈ I(N)
-        @test odet.u[:, :, 1] ≈ S_expected rtol = 1e-12
-    end
-
     # ── Shared Solovev setup ──────────────────────────────────────────────────
     #
     # equil (Grad-Shafranov solve) and mats (metric matrices) are expensive and
     # immutable after construction — built ONCE and shared across all tests below.
     # intr is cheap to (re)initialize but is mutated by each integration run
     # (sing[s].delta_prime etc.), so a fresh copy is made for each integration.
-    #
-    # Integration runs:
-    #   intr_ric / odet_ric — Riccati path (shared by most tests)
-    #   intr_fwd / odet_fwd — Forward path (energy comparison only)
 
     ctrl, intr_ric, equil, metric, mats = prepared_solovev()
     N = intr_ric.numpert_total
 
-    # Riccati integration. The driver returns (odet, propagators, chunks, S_at_surface_left);
-    # only odet is used here.
-    odet_ric, _, _, _ = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr_ric)
-
-    # Save inline Δ' values before any test that calls compute_delta_prime_from_ca!
-    # (which overwrites intr_ric.sing[s].delta_prime)
-    delta_prime_inline = [copy(intr_ric.sing[s].delta_prime) for s in 1:intr_ric.msing]
-
-    vac_ric = FFS.free_run(odet_ric, ctrl, equil, mats, intr_ric)
-    et_ric = real(vac_ric.et[1])
-
-    # Forward integration (needed only for energy comparison).
-    _, intr_fwd, _, _, _ = prepared_solovev()
-    odet_fwd, _, _, _ = FFS.forward_eulerlagrange_integration(ctrl, equil, mats, intr_fwd)
-    vac_fwd = FFS.free_run(odet_fwd, ctrl, equil, mats, intr_fwd)
-    et_fwd = real(vac_fwd.et[1])
+    odet_ric = first(FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr_ric))
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    @testset "Riccati integration matches forward ODE — Solovev example" begin
-        # The two formalisms solve the same system, so the leading energy eigenvalue must
-        # agree closely; the measured Solovev disagreement is ≈5e-5. A regression of the
-        # Riccati/renormalization algorithm to ~1 % error would fail here loudly.
-        @test isapprox(et_ric, et_fwd; rtol=1e-4)
+    @testset "energy does not depend on the crossing distance" begin
+        et_far = solovev_energies("Riccati", 1e-3)
+        et_near = solovev_energies("Riccati", 1e-5)
+        @test isapprox(et_far[1], et_near[1]; rtol=1e-6)
+        # Forward's trapezoid crossing reaches the same energy only as the distance shrinks.
+        et_forward = solovev_energies("Forward", 1e-6)
+        @test isapprox(real(et_far[1]), real(et_forward[1]); rtol=1e-3)
+    end
 
-        # Riccati stores chunk endpoints, the forward path stores every saved ODE step,
-        # so the Riccati store is always the sparser of the two.
-        @test odet_ric.step <= odet_fwd.step
+    @testset "surface with two resonances" begin
+        fixture = "regression_solovev_ideal_example_multi_n"
+        et_far = solovev_energies("Riccati", 1e-3; fixture)
+        et_near = solovev_energies("Riccati", 1e-5; fixture)
+        et_forward = solovev_energies("Forward", 1e-6; fixture)
+        # The least-stable multi-n eigenvalue is near marginal, so its relative tolerances are looser.
+        @test isapprox(et_far[1], et_near[1]; rtol=1e-4)
+        @test isapprox(real(et_far[1]), real(et_forward[1]); rtol=5e-3)
+    end
+
+    @testset "stored solution" begin
+        # Every solver step of every chunk is stored, in increasing ψ, ending at the edge state.
+        @test odet_ric.step == length(odet_ric.psi_store) == size(odet_ric.u_store, 4)
+        @test all(diff(odet_ric.psi_store) .> 0)
+        @test odet_ric.u_store[:, :, :, end] ≈ odet_ric.u
+
+        # Each stored column is a solution: integrated directly from one stored node it lands on the next.
+        psi = odet_ric.psi_store
+        for k in (1, odet_ric.step ÷ 4, odet_ric.step ÷ 2, odet_ric.step - 1)
+            any(s -> psi[k] < s.psifac < psi[k+1], intr_ric.sing) && continue
+            params = (ctrl, equil, mats, intr_ric, FFS.OdeState(N, 1, 1, 0), FFS.IntegrationChunk(psi[k], psi[k+1], false, 0, 1))
+            direct = FFS.solve_el(FFS.ODEProblem(FFS.sing_der!, odet_ric.u_store[:, :, :, k], (psi[k], psi[k+1]), params),
+                ctrl.algorithm.eulerlagrange_tolerance).u[end]
+            @test isapprox(direct, odet_ric.u_store[:, :, :, k+1]; rtol=1e-5)
+        end
+
+        # Across the surfaces they are the solutions Forward stores: scaled to a unit edge displacement, the
+        # conjugate momenta agree on each side of every surface. (ξ itself differs there by Forward's crossing
+        # condition, which leaves a big-solution term next to each surface.)
+        function edge_scaled_momentum(integrator)
+            ctrl, intr, equil, _, mats = prepared_solovev(; integrator, singfac_min=1e-6)
+            odet = first(FFS.eulerlagrange_integration(ctrl, equil, mats, intr))
+            return odet, intr, [odet.u_store[:, :, 2, k] / odet.u_store[:, :, 1, odet.step] for k in 1:odet.step]
+        end
+        ric, intr, momentum_ric = edge_scaled_momentum("Riccati")
+        fwd, _, momentum_fwd = edge_scaled_momentum("Forward")
+        shared = [(findfirst(==(p), ric.psi_store), k) for (k, p) in enumerate(fwd.psi_store[1:fwd.step]) if p in ric.psi_store]
+        @test length(shared) >= 2 * intr.msing
+        @test maximum(norm(momentum_ric[i] - momentum_fwd[k]) / norm(momentum_fwd[k]) for (i, k) in shared) < 1e-2
     end
 
     # Note: a Solovev per-surface Δ' regression testset previously lived here,
@@ -132,79 +143,44 @@ end
     # STRIDE BVP Δ' matrix (see runtests_parallel_integration.jl).
 
     @testset "Riccati end state has U₂ ≈ I" begin
-        # The outer-region re-integration that closes riccati_eulerlagrange_integration
-        # leaves odet.u[:,:,2] as the identity (canonical Riccati convention after final renorm)
+        # The edge state is reduced to the canonical Riccati form (S, I).
         @test odet_ric.u[:, :, 2] ≈ I(N) rtol = 1e-10
     end
 
-    @testset "riccati_der! formula — Glasser 2018 Eq. 19" begin
-        # Verify riccati_der! correctly evaluates dS/dψ = w†·F̄⁻¹·w − S·Ḡ·S, w = Q − K̄·S.
-        #
-        # Test states are Hermitian (physical constraint: the EL system preserves S†=S from
-        # the axis). Non-Hermitian states would give ~5% disagreement — not a bug, but a
-        # consequence of the derivation assuming the physical symmetry.
-        #
-        # See benchmarks/benchmark_riccati_der.jl for the extended version with output.
-
-        # Use an initialized OdeState just for spline_hint and chunk bounds
-        odet_tmp = FFS.OdeState(N, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr_ric.msing)
-        FFS.initialize_el_at_axis!(odet_tmp, ctrl, mats, equil.profiles, intr_ric)
-        chunks = FFS.chunk_el_integration_bounds(odet_tmp, ctrl, intr_ric)
-
-        # 30% into each chunk: away from singularities at psi_end
-        test_psis = [c.psi_start + 0.3 * (c.psi_end - c.psi_start) for c in chunks]
-
-        rng = Random.MersenneTwister(42)
-        for psi in test_psis
-            # Hermitian S: physical Riccati matrix is Hermitian (preserved by EL symmetry)
-            A = randn(rng, ComplexF64, N, N)
-            S = (A + A') / 2
-
-            # Manual RHS: w†·F̄⁻¹·w − S·Ḡ·S
-            L = zeros(ComplexF64, N, N)
-            Kmat = zeros(ComplexF64, N, N)
-            Gmat = zeros(ComplexF64, N, N)
-            mats.ideal.F_spline_lower(vec(L), psi; hint=mats._hint)
-            mats.ideal.K_spline(vec(Kmat), psi; hint=mats._hint)
-            mats.ideal.G_spline(vec(Gmat), psi; hint=mats._hint)
-            q = equil.profiles.q_spline(psi)
-            singfac = vec(1.0 ./ ((intr_ric.mlow:intr_ric.mhigh) .-
-                                  q .* (intr_ric.nlow:intr_ric.nhigh)'))
-            w = -Kmat * S
-            for i in 1:N
-                w[i, i] += singfac[i]
-            end
-            v = copy(w)
-            ldiv!(LowerTriangular(L), v)
-            ldiv!(UpperTriangular(L'), v)
-            dS_manual = adjoint(w) * v - S * Gmat * S
-
-            # riccati_der! RHS
-            u_ric = zeros(ComplexF64, N, N, 2)
-            du_ric = zeros(ComplexF64, N, N, 2)
-            u_ric[:, :, 1] .= S
-            u_ric[:, :, 2] .= Matrix{ComplexF64}(I, N, N)
-            dummy = FFS.IntegrationChunk(psi, psi, false, 0, 1)
-            params = (ctrl, equil, mats, intr_ric, odet_tmp, dummy)
-            FFS.riccati_der!(du_ric, u_ric, params, psi)
-
-            rel_err = norm(du_ric[:, :, 1] - dS_manual) / max(norm(dS_manual), 1e-10)
-            @test rel_err < 1e-10
+    @testset "Δ′ does not depend on the chunk layout" begin
+        # The TJ fixture has a well-conditioned Δ′; the smallest layout has two chunks per segment.
+        function delta_prime(nchunks)
+            ctrl, intr, equil, _, mats = prepared_solovev(; fixture="regression_tj_ideal_example", nchunks)
+            odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
+            wv = FFS.free_run(odet, ctrl, equil, mats, intr).wv
+            result = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
+            return result.matrix, riccati.chunks
         end
+        dp_auto, chunks_auto = delta_prime(0)
+        dp_few, chunks_few = delta_prime(1)
+        @test length(chunks_few) < length(chunks_auto)
+        @test !isempty(dp_auto) && all(isfinite, dp_auto)
+        @test isapprox(dp_few, dp_auto; rtol=1e-4)
     end
 
-    @testset "compute_delta_prime_from_ca! matches inline Δ'" begin
-        # Verify the standalone Δ' formula matches the inline Riccati crossing computation.
-        # Both apply the identical diagonal formula to the same ca_l/ca_r arrays, so the
-        # result must be bit-for-bit identical (not just approximately equal).
-        #
-        # Note: this call overwrites intr_ric.sing[s].delta_prime; delta_prime_inline was
-        # saved before free_run above so it holds the original inline values.
-        #
-        FFS.compute_delta_prime_from_ca!(odet_ric, intr_ric, equil)
-        for s in 1:intr_ric.msing
-            @test intr_ric.sing[s].delta_prime == delta_prime_inline[s]
-        end
+    @testset "truncation at the edge energy peak" begin
+        # The chunks, their propagators and the Δ′ system follow the edge to the peak.
+        ctrl, intr, equil, _, mats = prepared_solovev(; over=Dict{String,Any}("truncate_at_dW_peak" => true))
+        odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
+        (; propagators, chunks) = riccati
+        axis_state = riccati.columns.axis_state
+        @test intr.psilim == odet.psi_store[end] == chunks[end].psi_end
+        @test length(propagators) == length(chunks) && count(c -> c.needs_crossing, chunks) == intr.msing
+        @test odet.u_store[:, :, :, end] ≈ odet.u
+        free = FFS.free_run(odet, ctrl, equil, mats, intr)
+        @test isfinite(free.et[1])
+        # The Δ′ system reproduces the plasma response of the axis-to-edge products, and says so when it does not.
+        delta_prime = @test_logs min_level = Logging.Warn FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
+            wv=free.wv, wp=free.wp, psio=equil.psio)
+        @test size(delta_prime.matrix) == (intr.msing, intr.msing) && all(isfinite, delta_prime.matrix)
+        @test size(delta_prime.coil) == (2 * intr.msing, intr.numpert_total)
+        @test_logs (:warn, r"differs from the axis-to-edge one") FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
+            wv=free.wv, wp=1.01 .* free.wp, psio=equil.psio)
     end
 
 end

@@ -135,18 +135,25 @@ end
 
     @testset "truncate_chunks! cuts the Riccati chunks back to the edge" begin
         F = GeneralizedPerturbedEquilibrium.ForceFreeStates
-        # Crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
+        # Backward crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
         chunks() = [
-            F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0)
+            F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0, direction=i <= 3 ? -1 : 1)
             for (i, (a, b)) in enumerate(((0.10, 0.29), (0.31, 0.59), (0.61, 0.89), (0.91, 0.99)))
         ]
         cs = chunks()
         @test F.truncate_chunks!(cs, 0.75, 2) == 3  # straddling chunk shortened, so re-integrate it
         @test length(cs) == 3 && cs[3].psi_end == 0.75 && count(c -> c.needs_crossing, cs) == 2
+        @test cs[3].direction == 1  # no surface left to cross: a forward chunk
 
+        # Edge exactly at a crossing chunk's end: its surface is dropped, so it turns forward and is re-integrated.
         cs = chunks()
-        @test F.truncate_chunks!(cs, 0.89, 2) === nothing  # edge exactly at a chunk end: nothing to re-integrate
-        @test count(c -> c.needs_crossing, cs) == 2  # but its crossing onto the dropped surface is still cleared
+        @test F.truncate_chunks!(cs, 0.89, 2) == 3
+        @test cs[3].psi_end == 0.89 && !cs[3].needs_crossing && cs[3].direction == 1
+
+        # Edge at the end of the last chunk with every surface kept: nothing changes.
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.99, 3) === nothing
+        @test cs[3].needs_crossing && cs[3].direction == -1 && cs[4].psi_end == 0.99
     end
 
     @testset "transform_u!" begin
@@ -321,9 +328,8 @@ end
         @test FFS.column_abstol!(tol, u, 1e-6) === tol
         @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
         # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
-        c = FFS.ForceFreeStatesControl()
-        @test c.algorithm.renorm_threshold == 1e3
-        @test c.algorithm.save_interval == 1
+        @test Forward().renorm_threshold == 1e3
+        @test Forward().save_interval == 1 && Riccati().save_interval == 1
     end
 
     @testset "compute_solution_norms!" begin
@@ -449,7 +455,6 @@ end
         @test size(odet.du_store) == (numpert_total, numpert_total, 0)
         @test size(odet.xi_s_store) == (numpert_total, numpert_total, 0)
         @test odet.du_store_populated == false
-        @test odet.u_store_el_basis == true
         @test length(odet.psi_store) == numsteps_init
         @test length(odet.q_store) == numsteps_init
         @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
@@ -666,7 +671,7 @@ end
         intr.numpert_total = intr.mpert * intr.npert
         metric = FFS.make_metric(equil, intr.mpert)
         mats = FFS.build_matrix_splines(equil, intr, metric)
-        odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
+        odet = first(FFS.eulerlagrange_integration(ctrl, equil, mats, intr))
         return odet, ctrl, equil, mats, intr
     end
 
@@ -721,15 +726,6 @@ end
             @test isapprox(odet_t.du_store[:, :, istep], odet.du_store[:, :, istep] * T; rtol=1e-10)
             @test isapprox(odet_t.xi_s_store[:, :, istep], odet.xi_s_store[:, :, istep] * T; rtol=1e-10)
         end
-    end
-
-    @testset "refuses a solution outside the Euler-Lagrange basis" begin
-        odet.du_store_populated = false
-        odet.du_store = Array{ComplexF64}(undef, intr.numpert_total, intr.numpert_total, 0)
-        odet.u_store_el_basis = false
-        @test !FFS.materialize_derivative_stores!(odet, equil, mats, intr)
-        @test isempty(odet.du_store)
-        @test !odet.du_store_populated
     end
 end
 

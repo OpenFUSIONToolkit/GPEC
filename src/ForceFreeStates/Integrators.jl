@@ -14,7 +14,7 @@ Serial forward integration with Gaussian reduction and dense solution profiles.
 ## Fields
 
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration.
-  - `renorm_threshold::Float64` - Column-norm growth threshold for Gaussian reduction or Riccati renormalization.
+  - `renorm_threshold::Float64` - Column-norm growth threshold for Gaussian reduction.
   - `numsteps_init::Int` - Initial capacity for stored ODE solution steps.
   - `numunorms_init::Int` - Initial capacity for solution-normalization records.
   - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.
@@ -35,21 +35,15 @@ Chunked Riccati integration and the singular-surface boundary-value solve.
 ## Fields
 
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration.
-  - `renorm_threshold::Float64` - Column-norm growth threshold for Gaussian reduction or Riccati renormalization.
-  - `numsteps_init::Int` - Initial capacity for stored ODE solution steps.
-  - `numunorms_init::Int` - Initial capacity for solution-normalization records.
-  - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.
+  - `save_interval::Int` - Store every Nth solver step of each chunk; chunk ends and the edge-dW scan band are always stored.
   - `nchunks::Int` - Target chunk count; zero derives the count from the singular surfaces.
-  - `extended_precision_bvp::Bool` - Use Complex{Double64} for the Delta-prime BVP and PEST3 combination to reduce cancellation error.
+  - `extended_precision_bvp::Bool` - Solve the Delta-prime BVP in Complex{Double64} instead of ComplexF64; far slower, and needed only beyond about 150 poloidal harmonics.
 """
 @kwdef struct Riccati <: AbstractIntegrator
     eulerlagrange_tolerance::Float64 = 1e-8
-    renorm_threshold::Float64 = 1e3
-    numsteps_init::Int = 4000
-    numunorms_init::Int = 100
     save_interval::Int = 1
     nchunks::Int = 0
-    extended_precision_bvp::Bool = true
+    extended_precision_bvp::Bool = false
 end
 
 """

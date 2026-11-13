@@ -180,13 +180,12 @@ end
 
 function _solution_note(r::ForceFreeStates.ForceFreeStatesResult)
     r.solution === nothing || return "ξ profiles stored ($(r.solution.step) ψ nodes, $(r.solution.basis) basis)"
-    return r.integrator === :riccati ? "not computed (Riccati stores no ξ profiles)" : "not computed ($(r.integrator) without a match)"
+    return "not computed ($(r.integrator) without a match)"
 end
 
 # The crit sign-change count is not yet a validated stability verdict, so it is reported raw.
 function _fixed_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
     r.diagnostics === nothing && return "not computed by the $(r.integrator) integrator"
-    r.integrator === :riccati && return "not reported (the Riccati (S, I) history cannot show crossings)"
     r.control.kinetic === nothing || return "not reported (crit assumes a Hermitian W)"
     return "$(_plural(r.diagnostics.nzero, "crit sign change")) (unvalidated, not a stability verdict)"
 end
@@ -254,6 +253,7 @@ _resonances(r::PlasmaResponse) = ["$(m)/$(n)" for (m, n) in zip(r.rational_m_res
 function _missing_operators_note(r::PlasmaResponse)
     r.ffs.free_boundary === nothing && return "not computed (needs a free-boundary result)"
     r.ffs.solution === nothing && return "not computed (needs stored ξ profiles)"
+    r.ffs.integrator === :riccati && return "not computed (a Riccati result is not accepted yet)"
     return "not computed"
 end
 

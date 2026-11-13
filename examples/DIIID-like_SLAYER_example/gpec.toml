@@ -56,8 +56,7 @@ rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rati
 # Numerical settings of the Riccati integrator
 [Riccati]
 eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
-save_interval = 1              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
-renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
+save_interval = 1              # Store every Nth solver step of each chunk (1=all); chunk ends and the edge-dW scan band are always stored
 
 # SLAYER tearing-mode growth-rate analysis on the DIII-D-like H-mode equilibrium.
 # Runs off the ForceFreeStates result (no PE). The plasma (profiles incl. the χ⊥/χ_φ

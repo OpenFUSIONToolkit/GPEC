@@ -22,7 +22,7 @@ import Logging
         for formalism in ("Riccati", "Forward")
             inputs["ForceFreeStates"]["integrator"] = formalism
             foreach(name -> delete!(inputs, name), ("Riccati", "Forward"))
-            inputs[formalism] = Dict{String,Any}("renorm_threshold" => 1e3, "eulerlagrange_tolerance" => 1e-7)
+            inputs[formalism] = Dict{String,Any}("eulerlagrange_tolerance" => 1e-7)
             mktempdir() do workdir
                 open(io -> TOML.print(io, inputs), joinpath(workdir, "gpec.toml"), "w")
                 Logging.with_logger(Logging.NullLogger()) do
