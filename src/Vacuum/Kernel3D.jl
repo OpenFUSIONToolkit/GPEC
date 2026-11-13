@@ -342,6 +342,7 @@ function compute_3D_kernel_matrices!(
     phases::AbstractVector{<:Number},
     sym_basis::Union{Nothing,StellSymBasis}=nothing
 )
+    @assert (observer.mtheta, observer.nzeta) == (source.mtheta, source.nzeta) "observer and source must share one grid"
     num_points = observer.mtheta * observer.nzeta
     @assert num_points % length(phases) == 0 "full-torus grid ($num_points points) is not divisible by nfp ($(length(phases)))"
     num_points_per_fp = num_points ÷ length(phases) # observer/source points in one field period
@@ -382,6 +383,10 @@ function compute_3D_kernel_matrices!(
     end
     wrap_phase = phases[min(2, end)]
 
+    # Source point and normal packed per node, and each node's (field period, period-0 column), read on every observer row
+    src = [SVector{6}(source.r[k, 1], source.r[k, 2], source.r[k, 3], source.normal[k, 1], source.normal[k, 2], source.normal[k, 3]) for k in 1:num_points]
+    period_col = [fldmod1(k, num_points_per_fp) for k in 1:num_points]
+
     # One operator row is accumulated per observer, so the field-period fold and the basis change both happen before anything is stored.
     # `store_kernel_row!` needs two rows of scratch: the reconstructed partner and their combination.
     nsym = sym_basis === nothing ? 0 : 2 * num_points_per_fp
@@ -398,17 +403,16 @@ function compute_3D_kernel_matrices!(
         idx_obs = observers[i_pair]
         i_obs = mod1(idx_obs, observer.mtheta)
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
-        r_obs = @view observer.r[idx_obs, :]
+        r_obs = SVector(observer.r[idx_obs, 1], observer.r[idx_obs, 2], observer.r[idx_obs, 3])
 
         # Far field: trapezoidal rule over all sources (the kernels return zero at r_src = r_obs)
         @inbounds for idx_src in 1:num_points
             # Evaluate kernels at grid points
-            r_src = @view source.r[idx_src, :]
-            n_src = @view source.normal[idx_src, :]
-            far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], r_src[1], r_src[2], r_src[3], n_src[1], n_src[2], n_src[3])
+            s = src[idx_src]
+            far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], s[1], s[2], s[3], s[4], s[5], s[6])
 
             # Periodic trapezoidal rule (constant weights); fold this source's field period onto period 0
-            d, idx_col = fldmod1(idx_src, num_points_per_fp)
+            d, idx_col = period_col[idx_src]
             populate_greenfunction && (row_single[idx_col] += phases[d] * (far_single * dθdζ))
             row_double[idx_col] += phases[d] * (far_double * dθdζ)
         end
@@ -440,12 +444,11 @@ function compute_3D_kernel_matrices!(
             idx_pol = periodic_wrap(i_obs - patch_rad + i - 1, source.mtheta)
             idx_tor = periodic_wrap(j_obs - patch_rad + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
-            d, idx_col = fldmod1(idx_src, num_points_per_fp)
+            d, idx_col = period_col[idx_src]
 
             # Far field at this patch node (weighted by Gpou = −χ)
-            r_src = @view source.r[idx_src, :]
-            n_src = @view source.normal[idx_src, :]
-            far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], r_src[1], r_src[2], r_src[3], n_src[1], n_src[2], n_src[3])
+            s = src[idx_src]
+            far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], s[1], s[2], s[3], s[4], s[5], s[6])
 
             populate_greenfunction && (row_single[idx_col] += phases[d] * (far_single * Gpou[i, j] * dθdζ))
             row_double[idx_col] += phases[d] * (far_double * Gpou[i, j] * dθdζ)
