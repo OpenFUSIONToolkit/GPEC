@@ -121,13 +121,7 @@ Roster, the recommended review pipeline (physics fidelity → readability → pe
 - **Default output**: `gpec.h5` (previously `euler.h5` in older versions)
 
 ### Plotting
-Spectrum-plot (`seriestype=:steppre` / `step_series`) and figure-saving conventions are in **[`docs/development/plotting.md`](docs/development/plotting.md)** — read before writing any plotting code.
-
-**Adding a plot.** Every plot in `src/Analysis/` takes a result in memory or a `gpec.h5` path and is registered in `src/Analysis/Registry.jl`, which `available_plots` and the REPL summaries read:
-- Read the data through one `_x_data(src)` method per source (the result's fields, and the same datasets from the file), and draw from the returned NamedTuple only, so both sources go through one plotting body.
-- Start the public `plot_x(src; ...)` with `_require(plot_x, src)`, which throws the registry's reason when the source lacks the data; never draw a "No data" placeholder or return `nothing`. Composite summaries skip the panels they cannot draw (`_can`) and throw only when none can.
-- Call `register!(plot_x, sources, needs, description)` after the definition. `needs` names capabilities; a new one gets a `capabilities` predicate for each result type that can hold it, a dataset in `_H5_CAPABILITIES`, and a `REASONS` sentence saying what to change in the run.
-- `test/runtests_analysis_plots.jl` checks every registered plot from both sources automatically; add an extractor to its list when the plot reads new data.
+Figures are drawn with Makie through the package extension `ext/GPECMakieExt/`. Read **[`docs/development/plotting.md`](docs/development/plotting.md)** before writing any plotting code: it has the figure conventions and the guide to adding an Analysis plot. In short, Analysis plots are added sparingly (frequent everyday-workflow figures only, approved by a human), and each is registered, follows the shared theme, carries little text, and throws an `ArgumentError` when its data are absent. Never offer to add an Analysis plot unprompted.
 
 **REPL summaries.** `src/Display.jl` gives every result type a one-line `show` and a short `text/plain` summary. A new result type gets both, plus an entry in `_DISPLAY_FIELDS`; a new field on a summarized type is classified there as shown or omitted, which `test/display_check.jl` enforces.
 

@@ -7,7 +7,8 @@ using HDF5
 import ..Equilibrium: PlasmaEquilibrium
 import ..LocalStability: LocalStabilityResult
 import ..ForceFreeStates: ForceFreeStatesResult
-import ..PerturbedEquilibrium: PerturbedEquilibriumState
+import ..PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
+import ..ForcingTerms as FT
 import ..ErrorFields as EF
 
 """
@@ -21,18 +22,21 @@ A registered plot.
   - `sources::Tuple` - The types it accepts as its first argument; `AbstractString` means a `gpec.h5` path.
   - `needs::Tuple{Vararg{Symbol}}` - The capabilities (see [`capabilities`](@ref)) a source must have for it to draw.
   - `description::String` - One line on what it draws.
+  - `any_of::Tuple` - For a summary, the capabilities of each of its panels: it draws when a source has every capability
+    of at least one panel, and is empty for a single plot.
 """
 struct PlotEntry
     fn::Function
     sources::Tuple
     needs::Tuple{Vararg{Symbol}}
     description::String
+    any_of::Tuple
 end
 
 const PLOTS = PlotEntry[]
 
 # Add a plot to the registry; called by each plotting submodule as it loads.
-register!(fn, sources, needs, description) = (push!(PLOTS, PlotEntry(fn, Tuple(sources), Tuple(needs), description)); fn)
+register!(fn, sources, needs, description; any_of=()) = (push!(PLOTS, PlotEntry(fn, Tuple(sources), Tuple(needs), description, Tuple(any_of))); fn)
 
 """
 What each capability needs, worded as what to change in the run to get it.
@@ -45,16 +49,20 @@ const REASONS = Dict{Symbol,String}(
     :free_boundary => "needs the free-boundary energies: run with vac_flag = true and the Forward or Riccati integrator",
     :edge_scan => "needs the edge stability scan: set dW_edge_scan_start below psilim",
     :delta_prime => "needs the Δ′ matrix: use the Riccati or Galerkin integrator (Forward computes none)",
+    :delta_coil => "needs Δ_coil: use the Riccati integrator, or Galerkin with rpec_flag = true",
     :kinetic_scan => "needs the kinetic singular-surface scan: run with a kinetic source and singfac_min > 0",
     :ballooning_scan => "needs the ballooning scan: add a [LocalStability] section",
-    :gse_files => "needs gse.h5 next to the file: set diagnose_src = true in [Equilibrium]",
     :singular_coupling => "needs the singular coupling: run PerturbedEquilibrium with compute_singular_coupling = true",
     :response_xi => "needs the reconstructed displacement ξ: run PerturbedEquilibrium on a Forward free-boundary result",
+    :response_n => "needs the stored normal field and displacement: run PerturbedEquilibrium on a Forward free-boundary result",
+    :penetrated_field => "needs a penetrated field: ideal runs have none; it comes from a matched (resistive) run",
     :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a Forward free-boundary result",
     :coil_sets => "needs coil forcing: give ForcingTerms coil sets (forcing_data_format = \"coil\")",
     :forcing_modes => "needs forcing modes: give ForcingTerms a forcing",
     :ef_sensitivities => "needs the coil sensitivities: add an [ErrorFields] section",
     :dominant_mode => "needs the dominant resonant-coupling mode: run PerturbedEquilibrium with compute_singular_coupling = true",
+    :coil_source => "needs a coil source: give RMPField coil sets (a mode table or spectrum has no geometry to draw)",
+    :coupling_matrices => "needs the resonant coupling matrices: run plasma_response with compute_singular_coupling = true",
     :ef_monte_carlo => "needs the tolerance Monte Carlo: give ErrorFields a tolerance file",
     :ef_risk => "needs the locking risk: give ErrorFields a tolerance file and a scenario",
     :ef_scan => "needs the tolerance scan: set RiskControl scan_scales"
@@ -82,17 +90,31 @@ function capabilities(r::ForceFreeStatesResult)
     diag === nothing || isempty(diag.edge_scan.psi) || push!(caps, :edge_scan)
     r.free_boundary === nothing || isempty(r.free_boundary.et) || push!(caps, :free_boundary)
     r.delta_prime === nothing || isempty(r.delta_prime.matrix) || push!(caps, :delta_prime)
+    r.delta_prime === nothing || isempty(r.delta_prime.coil) || push!(caps, :delta_coil)
     isempty(r.kinetic.scan_psi) || push!(caps, :kinetic_scan)
     return caps
 end
 
 capabilities(r::LocalStabilityResult) = isempty(r.alpha) ? Set{Symbol}() : Set([:ballooning_scan])
 
-function capabilities(s::PerturbedEquilibriumState)
+capabilities(r::FT.RMPField) =
+    any(t -> t isa FT.RMPSource && t.ctrl.forcing_data_format == "coil", FT._rmp_terms(r)) ? Set([:coil_source]) : Set{Symbol}()
+
+function capabilities(r::PlasmaResponse)
     caps = Set{Symbol}()
+    isempty(r.C_resonant_area_weighted_field) || push!(caps, :coupling_matrices)
+    isempty(r.dominant_singular_values) || push!(caps, :dominant_mode)
+    return caps
+end
+
+# A perturbed equilibrium holds its response's capabilities as well as those of its own drive.
+function capabilities(s::PerturbedEquilibriumState)
+    caps = capabilities(s.response)
     isempty(s.resonant_area_weighted_field) || push!(caps, :singular_coupling)
     s.xi_modes === nothing || push!(caps, :response_xi)
     s.b_modes === nothing || push!(caps, :response_b)
+    s.b_n_modes === nothing || s.xi_n_modes === nothing || push!(caps, :response_n)
+    any(!iszero, s.penetrated_area_weighted_field) && push!(caps, :penetrated_field)
     isempty(s.coil_sets) || push!(caps, :coil_sets)
     isempty(s.forcing_modes) || push!(caps, :forcing_modes)
     return caps
@@ -115,6 +137,7 @@ const _H5_CAPABILITIES = (
     :edge_scan => "ForceFreeStates/EdgeScan/psi",
     :free_boundary => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",
     :delta_prime => "SingularSurfaces/Delta_prime_matrix",
+    :delta_coil => "SingularSurfaces/Delta_coil",
     :kinetic_scan => "SingularSurfaces/Kinetic/scan_psi",
     :ballooning_scan => "LocalStability/alpha",
     :singular_coupling => "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field",
@@ -137,7 +160,6 @@ function capabilities(h5path::AbstractString)
             any(has, keys isa Tuple ? keys : (keys,)) && push!(caps, cap)
         end
     end
-    isfile(joinpath(dirname(h5path), "gse.h5")) && push!(caps, :gse_files)
     return caps
 end
 
@@ -149,7 +171,12 @@ function _entry(fn)
 end
 
 _accepts(e::PlotEntry, src) = any(T -> src isa T, e.sources)
-_missing(e::PlotEntry, caps) = [k for k in e.needs if k ∉ caps]
+# The capabilities `caps` lacks for plot `e`; for a summary, every panel's when no panel can be drawn.
+function _missing(e::PlotEntry, caps)
+    own = [k for k in e.needs if k ∉ caps]
+    panels = [[k for k in panel if k ∉ caps] for panel in e.any_of]
+    return isempty(panels) || any(isempty, panels) ? own : unique(vcat(own, panels...))
+end
 _why(missing) = join((REASONS[k] for k in missing), "; ")
 
 """
@@ -210,19 +237,23 @@ end
 
 Base.length(c::PlotCatalog) = sum(length(rows) for (_, rows) in c.sections; init=0)
 
-_qualified(e::PlotEntry) = string(nameof(parentmodule(e.fn)), ".", nameof(e.fn))
-
 function Base.show(io::IO, ::MIME"text/plain", c::PlotCatalog)
     isempty(c.sections) && return print(io, "PlotCatalog: no registered plots accept this source")
     for (i, (label, rows)) in enumerate(c.sections)
-        i > 1 && print(io, "\n")
+        i > 1 && print(io, "\n\n")
         ok = count(r -> isempty(r[2]), rows)
         print(io, "Plots for ", label, ": ", ok, " of ", length(rows), " available")
-        width = maximum((length(_qualified(e)) for (e, _) in rows); init=0)
-        for (e, missing) in rows
-            mark = isempty(missing) ? "✓" : "✗"
-            note = isempty(missing) ? e.description : _why(missing)
-            print(io, "\n  ", mark, " ", rpad(_qualified(e), width), "  ", note)
+        # One group per Analysis submodule, in registration order, each aligned on its own longest name.
+        for mod in unique(parentmodule(e.fn) for (e, _) in rows)
+            group = [(e, missing) for (e, missing) in rows if parentmodule(e.fn) === mod]
+            width = maximum(length(string(nameof(e.fn))) for (e, _) in group)
+            print(io, "\n\n", nameof(mod))
+            for (e, missing) in group
+                mark = isempty(missing) ? "✓" : "✗"
+                # A summary's reasons are its panels', listed on their own rows.
+                note = isempty(missing) ? e.description : isempty(e.any_of) ? _why(missing) : "no panel can be drawn: see the reasons of the plots it combines"
+                print(io, "\n  ", mark, " ", rpad(string(nameof(e.fn)), width), "  ", note)
+            end
         end
     end
     return nothing

@@ -53,29 +53,31 @@ ForceFreeStatesResult  Riccati, ideal closure
   Δ′_ii (ψ_N)        2/1: 0.1781, 3/1: -215.7
   Solution           not computed (Riccati stores no ξ profiles)
   Wall               ConformalWall, standoff = 0.2415 a
-  Plots              11 of 13 available (see available_plots)
+  Plots              13 of 15 available (see available_plots)
 ```
 
 The fields themselves are documented in each type's docstring.
 
 ## Plotting a result
 
-Every plot in [`Analysis`](analysis.md) takes the result in memory or the path of the `gpec.h5` it was saved to. `available_plots` lists the plots for a result, a path, or the named tuple `main` returns, and for each one the run cannot draw, what to change:
+Every plot in [`Analysis`](analysis.md) takes the result in memory or the path of the `gpec.h5` it was saved to, and draws with the Makie backend the session has loaded (`using CairoMakie` or `using GLMakie`). `available_plots` lists the plots for a result, a path, or the named tuple `main` returns, and for each one the run cannot draw, what to change:
 
 ```julia-repl
 julia> available_plots(ffs)
-Plots for ForceFreeStatesResult (riccati): 11 of 13 available
-  ✓ ForceFreeStates.plot_ffs_summary                         the stability panels the run supplies
-  ✗ ForceFreeStates.plot_mode_displacement                   needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)
-  ✓ ForceFreeStates.plot_fixed_boundary_stability_criterion  critical determinant against ψ_N
+Plots for ForceFreeStatesResult (riccati): 13 of 15 available
+
+ForceFreeStates
+  ✓ plot_ffs_summary           the stability panels the run supplies
+  ✗ plot_mode_displacement     needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)
+  ✓ plot_critical_determinant  critical determinant against ψ_N
   ⋮
 ```
 
 A plot the source cannot draw throws an `ArgumentError` with the same reason, and a summary leaves out the panels it cannot draw:
 
 ```julia
-Analysis.ForceFreeStates.plot_ffs_summary(ffs)         # the result in memory
-Analysis.ForceFreeStates.plot_ffs_summary("gpec.h5")   # or the file to which it was saved
+plot_ffs_summary(ffs)         # the result in memory
+plot_ffs_summary("gpec.h5")   # or the file to which it was saved
 ```
 
 ## Saving and rerunning

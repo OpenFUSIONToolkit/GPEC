@@ -4,6 +4,30 @@
 # list changes the numbers it shows — see docs/DOC_STANDARD.md.
 
 
+[analysis.coils_3d]
+commit = "316828b2e"
+date = "2026-11-07"
+depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
+script = "make_highlights.jl"
+
+[analysis.equilibrium_summary]
+commit = "316828b2e"
+date = "2026-11-07"
+depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
+script = "make_highlights.jl"
+
+[analysis.ffs_summary]
+commit = "4f1274edc"
+date = "2026-11-09"
+depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
+script = "make_highlights.jl"
+
+[analysis.pe_summary]
+commit = "ba4d5453b"
+date = "2026-11-09"
+depends = ["src/Analysis/Equilibrium.jl", "src/Analysis/ForceFreeStates.jl", "src/Analysis/PerturbedEquilibrium.jl", "src/Analysis/CoilForcing.jl"]
+script = "make_highlights.jl"
+
 [ballooning.delta_prime_matching]
 commit = "legacy"
 date = "unknown"
