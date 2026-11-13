@@ -87,7 +87,7 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `index::Array{Int,2}` - Pivot column order for each reduction, shape `(numpert_total, numunorms_init)`.
   - `sing_flag::Vector{Bool}` - Whether each reduction was at a singular surface.
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal crossing, the positions in `index` of the zeroed resonant solutions.
-  - `fixfac::Array{ComplexF64,3}` - Gaussian-reduction factors, shape `(numpert_total, numpert_total, numunorms_init)`.
+  - `fixfac::Array{ComplexF64,3}` - Gaussian-reduction factors, shape `(numpert_total, numpert_total, numunorms_init)`; the diagonal holds the column scales of `rescale_reduced_columns!`.
   - `fixstep::Vector{Int64}` - Last stored step before each reduction.
   - `spline_hint::Base.RefValue{Int}` - Shared interval hint for profile splines evaluated at the same ψ.
   - `mats_hint::Base.RefValue{Int}` - Interval hint for the matrix splines; per `OdeState`, so per-thread copies do not race.
@@ -811,6 +811,7 @@ end
 
 Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
 growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
+Each reduction ends with `rescale_reduced_columns!`, so the column norms stay bounded along the integration.
 The first call after a reduction records reference norms; if `sing_flag` forces a reduction there, it keeps
 the previous reduction's pivot order. Errors if any norm is zero. Port of Fortran `ode_unorm`.
 
@@ -851,7 +852,24 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
             Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
         end
         apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
+        rescale_reduced_columns!(u, odet, intr)
         odet.new = true
+    end
+end
+
+"""
+    rescale_reduced_columns!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal)
+
+Scale every solution column of `u` to unit norm over both blocks, in place, recording the scales on the diagonal of
+`odet.fixfac` for `transform_u!`. The reductions only combine columns, so without this the column norms grow
+without bound and W = U₂U₁⁻¹ loses accuracy; the rescaling leaves W unchanged.
+"""
+function rescale_reduced_columns!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal)
+    @views for jsol in 1:intr.numpert_total
+        colnorm = norm(u[:, jsol, :])
+        (colnorm > 0 && isfinite(colnorm)) || continue
+        u[:, jsol, :] ./= colnorm
+        odet.fixfac[jsol, jsol, odet.ifix] = inv(colnorm)
     end
 end
 
@@ -969,8 +987,8 @@ end
 """
     transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
-Undo the Gaussian reductions applied during integration, transforming the stored solutions in
-`odet` in place into the true solution vectors.
+Undo the Gaussian reductions and column rescalings applied during integration, transforming the stored
+solutions in `odet` in place into the true solution vectors.
 """
 function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
@@ -997,6 +1015,10 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             end
             mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
+        end
+        # The column rescaling that followed the reduction
+        for jsol in 1:intr.numpert_total
+            gauss[:, jsol, ifix] .*= odet.fixfac[jsol, jsol, ifix]
         end
         # Drop the resonant solutions zeroed at an ideal crossing
         if odet.sing_flag[ifix]
