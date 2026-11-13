@@ -16,7 +16,9 @@ function _check_main_display(ret)
     for x in ret
         x === nothing && continue
         @test parentmodule(which(show, Tuple{IO,MIME"text/plain",typeof(x)})) === GPEC
-        _check_display(x)
+        plain = _check_display(x)
+        # A result with registered plots says how many it can draw.
+        @test occursin("Plots", plain) == (last(GPEC.Analysis.plot_counts(x)) > 0)
     end
     @test !occursin('\n', repr(ret))
 end

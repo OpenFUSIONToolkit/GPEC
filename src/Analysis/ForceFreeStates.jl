@@ -1,8 +1,9 @@
 """
     ForceFreeStates
 
-Post-processing and visualization functions for ForceFreeStates (DCON-style ideal MHD stability)
-results stored in GPEC HDF5 output files.
+Post-processing and visualization functions for ForceFreeStates (DCON-style ideal MHD stability) results. Each plot
+takes the `ForceFreeStatesResult` in memory or the path of a `gpec.h5` it was saved to, and throws an `ArgumentError`
+naming what to change in the run when the source lacks the data it draws (see `Analysis.available_plots`).
 """
 module ForceFreeStates
 
@@ -12,15 +13,45 @@ using Plots
 using Printf
 using Statistics: quantile
 
+using ..Analysis: register!, _require, _can, _missing, _entry, _why, capabilities
+import ...ForceFreeStates: ForceFreeStatesResult
+import ...LocalStability: LocalStabilityResult
+
+const Source = Union{AbstractString,ForceFreeStatesResult}
+
+const _FWD = "ForceFreeStates/Solutions/ForwardIntegration"
+const _GAL = "ForceFreeStates/Solutions/GalerkinIntegration"
+const _FBS = "ForceFreeStates/FreeBoundaryStability"
+
+_label(h5path::AbstractString) = h5path
+_label(::ForceFreeStatesResult) = "in memory"
+
+# Least-stable total energy, or `nothing` without free-boundary energies.
+_first_energy(et) = isempty(et) ? nothing : et[1]
+
+function _mode_displacement_data(r::ForceFreeStatesResult)
+    sol = r.solution
+    return (; mlow=r.mlow, psi=sol.psi_store, xi=sol.u_store[:, 1, 1, :], dW=r.free_boundary === nothing ? nothing : _first_energy(r.free_boundary.et))
+end
+
+function _mode_displacement_data(h5path::AbstractString)
+    h5open(h5path, "r") do fid
+        # Forward integration stores its profiles in ForwardIntegration, a matched Galerkin solve in GalerkinIntegration.
+        group = isempty(fid["$_FWD/xi_psi"]) ? _GAL : _FWD
+        (; mlow=read(fid["Info/mlow"]), psi=read(fid["$group/psi"]), xi=read(fid["$group/xi_psi"])[:, 1, :],
+            dW=_first_energy(read(fid["$_FBS/eigenmode_energies"])))
+    end
+end
+
 """
-    plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
+    plot_mode_displacement(src; modes=1:5, save_path=nothing)
 
 Plot |ξ_ψ| vs ψ_N for the least stable eigenmode, showing one curve per requested
 poloidal mode number m. The title includes the first eigenvalue dW = et[1].
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file (e.g. `"gpec.h5"`)
+  - `src`: A `ForceFreeStatesResult` with stored ξ profiles, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -31,17 +62,18 @@ poloidal mode number m. The title includes the first eigenvalue dW = et[1].
 
 A `Plots.jl` plot object.
 """
-function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
-    mlow, xi_psi, psi, et = h5open(h5path, "r") do fid
-        read(fid["Info/mlow"]), read(fid["ForceFreeStates/Solutions/ForwardIntegration/xi_psi"]),
-        read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]), read(fid["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])
-    end
+function plot_mode_displacement(src::Source; modes=1:5, save_path=nothing)
+    _require(plot_mode_displacement, src)
+    p = _plot_mode_displacement(_mode_displacement_data(src); modes)
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    mpert = size(xi_psi, 1)
-    mhigh = mlow + mpert - 1
-    dW = isempty(et) ? nothing : et[1]
-    title_str = isnothing(dW) ? "Least stable mode" :
-                "Least stable mode, δW = $(round(real(dW), sigdigits=4))"
+function _plot_mode_displacement(d; modes=1:5)
+    mpert = size(d.xi, 1)
+    mhigh = d.mlow + mpert - 1
+    title_str = isnothing(d.dW) ? "Least stable mode" :
+                "Least stable mode, δW = $(round(real(d.dW), sigdigits=4))"
 
     p = plot(;
         xlims=(0, 1),
@@ -52,24 +84,24 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
         bottom_margin=5Plots.mm
     )
     for m in modes
-        mlow <= m <= mhigh || continue
-        plot!(p, psi, abs.(xi_psi[m-mlow+1, 1, :]); label="m=$m")
+        d.mlow <= m <= mhigh || continue
+        plot!(p, d.psi, abs.(d.xi[m-d.mlow+1, :]); label="m=$m")
     end
-
-    isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
+_criterion_data(r::ForceFreeStatesResult) = (; psi=r.diagnostics.psi_store, crit=r.diagnostics.crit_store)
+_criterion_data(h5path::AbstractString) = h5open(fid -> (; psi=read(fid["$_FWD/psi"]), crit=read(fid["$_FWD/crit"])), h5path, "r")
 
 """
-    plot_fixed_boundary_stability_criterion(h5path; save_path=nothing)
+    plot_fixed_boundary_stability_criterion(src; save_path=nothing)
 
-Plot the stability criterion (smallest eigenvalue of W⁻¹, `crit`) vs ψ_N.
+Plot the critical determinant (smallest eigenvalue of W⁻¹, `crit`) vs ψ_N.
 A sign change in `crit` during integration indicates an ideal fixed-boundary instability.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file
+  - `src`: A Forward or Riccati `ForceFreeStatesResult`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -79,13 +111,16 @@ A sign change in `crit` during integration indicates an ideal fixed-boundary ins
 
 A `Plots.jl` plot object.
 """
-function plot_fixed_boundary_stability_criterion(h5path; save_path=nothing)
-    psi, crit = h5open(h5path, "r") do fid
-        read(fid["ForceFreeStates/Solutions/ForwardIntegration/psi"]), read(fid["ForceFreeStates/Solutions/ForwardIntegration/crit"])
-    end
+function plot_fixed_boundary_stability_criterion(src::Source; save_path=nothing)
+    _require(plot_fixed_boundary_stability_criterion, src)
+    p = _plot_fixed_boundary_stability_criterion(_criterion_data(src))
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
+function _plot_fixed_boundary_stability_criterion(d)
     p = plot(
-        psi, crit;
+        d.psi, d.crit;
         xlims=(0, 1),
         xlabel="Norm. Poloidal Flux",
         ylabel="|Dᶜ|",
@@ -95,25 +130,26 @@ function plot_fixed_boundary_stability_criterion(h5path; save_path=nothing)
         bottom_margin=5Plots.mm
     )
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
-
-    isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
+_energy_eigenvector_data(r::ForceFreeStatesResult) = (; wt=r.free_boundary.wt, psio=r.equil.psio, mlow=r.mlow)
+_energy_eigenvector_data(h5path::AbstractString) =
+    h5open(fid -> (; wt=read(fid["$_FBS/W_freeboundary_eigenmodes"]), psio=read(fid["Equilibrium/psi_total"]), mlow=read(fid["Info/mlow"])), h5path, "r")
+
 """
-    plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
+    plot_energy_eigenvectors(src; matrix_type=:total, save_path=nothing)
 
 Heatmap of energy eigenvector magnitudes vs (m, mode index).
 
-Only `matrix_type=:total` is supported (the total energy eigenvector matrix `Wₜ` is stored in
-`FreeBoundaryStability/W_freeboundary_eigenmodes`). Plasma and vacuum eigenvectors are not
-stored separately in the HDF5 output.
+Only `matrix_type=:total` is supported (the total energy eigenvector matrix `Wₜ`). Plasma and vacuum eigenvectors
+are not stored separately.
 
 Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC conventions.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with vacuum data (`vac_flag = true`)
+  - `src`: A `ForceFreeStatesResult` with free-boundary energies (`vac_flag = true`), or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -124,24 +160,24 @@ Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC convention
 
 A `Plots.jl` plot object.
 """
-function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
+function plot_energy_eigenvectors(src::Source; matrix_type=:total, save_path=nothing)
     matrix_type == :total ||
-        error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
+        throw(ArgumentError("matrix_type=$matrix_type not supported; only :total has an eigenvector matrix (ep/ev are eigenvalue vectors, not matrices)"))
+    _require(plot_energy_eigenvectors, src)
+    p = _plot_energy_eigenvectors(_energy_eigenvector_data(src))
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psi_total"]), read(fid["Info/mlow"])
-    end
-
-    isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
-
-    chi1 = 2π * psio
-    wt_scaled = wt * (chi1 * 1e-3)
+function _plot_energy_eigenvectors(d)
+    chi1 = 2π * d.psio
+    wt_scaled = d.wt * (chi1 * 1e-3)
 
     nmn = size(wt_scaled, 1)
     nmodes = size(wt_scaled, 2)
-    m_vals = (0:(nmn-1)) .+ mlow
+    m_vals = (0:(nmn-1)) .+ d.mlow
 
-    p = heatmap(
+    return heatmap(
         m_vals, 1:nmodes, abs.(wt_scaled');
         xlabel="Poloidal Harmonic",
         ylabel="Eigenmode Index",
@@ -151,13 +187,23 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         right_margin=20Plots.mm,
         bottom_margin=5Plots.mm
     )
+end
 
-    isnothing(save_path) || savefig(p, save_path)
-    return p
+function _edge_scan_data(r::ForceFreeStatesResult)
+    es = r.diagnostics.edge_scan
+    return (; q=es.q, et=es.total_eigenvalue, ep=es.plasma_energy, ev=es.vacuum_energy, evonly=es.vacuum_eigenvalue, qlim=r.qlim, label=_label(r))
+end
+
+function _edge_scan_data(h5path::AbstractString)
+    h5open(h5path, "r") do fid
+        (; q=read(fid["ForceFreeStates/EdgeScan/q"]), et=read(fid["ForceFreeStates/EdgeScan/total_energy"]),
+            ep=read(fid["ForceFreeStates/EdgeScan/plasma_energy"]), ev=read(fid["ForceFreeStates/EdgeScan/vacuum_energy"]),
+            evonly=read(fid["ForceFreeStates/EdgeScan/vacuum_eigenvalue"]), qlim=read(fid["Info/qlim"]), label=_label(h5path))
+    end
 end
 
 """
-    plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
+    plot_edge_stability_scan(src; save_path=nothing, ylims=(-2, 3), kwargs...)
 
 Plot the edge stability scan energy components (et, ep, ev, evonly) vs ψ_N.
 
@@ -177,7 +223,7 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file produced with `dW_edge_scan_start < psilim`
+  - `src`: A `ForceFreeStatesResult` produced with `dW_edge_scan_start < psilim`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -187,55 +233,41 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 
 ### Returns
 
-A `Plots.jl` plot object, or `nothing` if no `EdgeScan/` group is present in the file.
+A `Plots.jl` plot object.
 """
-function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
-    has_scan, q, et, ep, ev, evonly, qlim = h5open(h5path, "r") do fid
-        if !haskey(fid, "ForceFreeStates/EdgeScan/psi")
-            return false, Float64[], ComplexF64[], ComplexF64[], ComplexF64[], Float64[], NaN
-        end
-        true,
-        read(fid["ForceFreeStates/EdgeScan/q"]),
-        read(fid["ForceFreeStates/EdgeScan/total_energy"]),
-        read(fid["ForceFreeStates/EdgeScan/plasma_energy"]),
-        read(fid["ForceFreeStates/EdgeScan/vacuum_energy"]),
-        read(fid["ForceFreeStates/EdgeScan/vacuum_eigenvalue"]),
-        read(fid["Info/qlim"])
-    end
-
-    if !has_scan
-        @warn "No edge_scan group in $h5path. Run with dW_edge_scan_start < psilim to generate it."
-        return nothing
-    end
+function plot_edge_stability_scan(src::Source; save_path=nothing, ylims=(-2, 3), kwargs...)
+    _require(plot_edge_stability_scan, src)
+    d = _edge_scan_data(src)
+    q, qlim = d.q, d.qlim
 
     kw_re = (xlabel="q", label="Re", ylims=ylims, kwargs...)
     kw_im = (xlabel="q", label="Im", ls=:dash, ylims=ylims, kwargs...)
     vl_kw = (color=:gray, lw=1, ls=:dot, label=false)
     hl_kw = (color=:black, lw=1, ls=:dash, label=false)
 
-    p_et = plot(q, real.(et); ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw_re...)
-    plot!(p_et, q, imag.(et); kw_im...)
+    p_et = plot(q, real.(d.et); ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw_re...)
+    plot!(p_et, q, imag.(d.et); kw_im...)
     hline!(p_et, [0.0]; hl_kw...)
     vline!(p_et, [qlim]; vl_kw...)
 
-    p_ep = plot(q, real.(ep); ylabel="Plasma Energy", kw_re...)
-    plot!(p_ep, q, imag.(ep); kw_im...)
+    p_ep = plot(q, real.(d.ep); ylabel="Plasma Energy", kw_re...)
+    plot!(p_ep, q, imag.(d.ep); kw_im...)
     hline!(p_ep, [0.0]; hl_kw...)
     vline!(p_ep, [qlim]; vl_kw...)
 
-    p_ev = plot(q, real.(ev); ylabel="Vacuum Energy", kw_re...)
-    plot!(p_ev, q, imag.(ev); kw_im...)
+    p_ev = plot(q, real.(d.ev); ylabel="Vacuum Energy", kw_re...)
+    plot!(p_ev, q, imag.(d.ev); kw_im...)
     hline!(p_ev, [0.0]; hl_kw...)
     vline!(p_ev, [qlim]; vl_kw...)
 
-    p_evonly = plot(q, evonly; ylabel="Min Vac. Eigenvalue", legend=false, xlabel="q", ylims=ylims, kwargs...)
+    p_evonly = plot(q, d.evonly; ylabel="Min Vac. Eigenvalue", legend=false, xlabel="q", ylims=ylims, kwargs...)
     hline!(p_evonly, [0.0]; hl_kw...)
     vline!(p_evonly, [qlim]; vl_kw...)
 
     p = plot(p_et, p_ep, p_ev, p_evonly;
         layout=(4, 1),
         size=(900, 1100),
-        plot_title="Edge stability scan: $h5path",
+        plot_title="Edge stability scan: $(d.label)",
         left_margin=12Plots.mm,
         bottom_margin=4Plots.mm)
 
@@ -243,15 +275,21 @@ function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwar
     return p
 end
 
-"""
-    plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
+const _ENERGY_FIELDS = Dict(:total => :et, :plasma => :ep, :vacuum => :ev)
+const _ENERGY_DATASETS = Dict(:total => "eigenmode_energies", :plasma => "eigenmode_plasma_energies", :vacuum => "eigenmode_vacuum_energies")
 
-Scatter plot of energy eigenvalues vs mode index. Points are colored red (unstable, Re > 0)
-or green (stable, Re < 0), with a dashed reference line at zero.
+_eigenvalue_data(r::ForceFreeStatesResult, matrix_type) = getfield(r.free_boundary, _ENERGY_FIELDS[matrix_type])
+_eigenvalue_data(h5path::AbstractString, matrix_type) = h5open(fid -> read(fid["$_FBS/$(_ENERGY_DATASETS[matrix_type])"]), h5path, "r")
+
+"""
+    plot_eigenvalues(src; matrix_type=:total, save_path=nothing)
+
+Scatter plot of energy eigenvalues vs mode index. Points are colored red (unstable, Re < 0)
+or blue (stable, Re > 0), with a dashed reference line at zero.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with vacuum data (`vac_flag = true`)
+  - `src`: A `ForceFreeStatesResult` with free-boundary energies (`vac_flag = true`), or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -262,19 +300,10 @@ or green (stable, Re < 0), with a dashed reference line at zero.
 
 A `Plots.jl` plot object.
 """
-function plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
-    dataset = Dict(
-        :total => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",
-        :plasma => "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies",
-        :vacuum => "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
-    )
-    haskey(dataset, matrix_type) || error("matrix_type must be :total, :plasma, or :vacuum")
-
-    et = h5open(h5path, "r") do fid
-        read(fid[dataset[matrix_type]])
-    end
-
-    isempty(et) && error("No vacuum data in $h5path; rerun with vac_flag = true")
+function plot_eigenvalues(src::Source; matrix_type=:total, save_path=nothing)
+    haskey(_ENERGY_FIELDS, matrix_type) || throw(ArgumentError("matrix_type must be :total, :plasma, or :vacuum"))
+    _require(plot_eigenvalues, src)
+    et = _eigenvalue_data(src, matrix_type)
 
     nmodes = length(et)
     ev_real = real.(et)
@@ -297,19 +326,33 @@ function plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
     return p
 end
 
+# Δ′_ii on the surfaces the Δ′ matrix spans: Galerkin solves across its in-band subset of the rational surfaces.
+function _delta_prime_data(r::ForceFreeStatesResult)
+    dp = r.delta_prime.matrix
+    k = minimum(size(dp))
+    g = r.galerkin
+    psi, q = g !== nothing && length(g.sing_psi) == k ? (g.sing_psi, g.sing_q) : ([s.psifac for s in r.surfaces[1:k]], [s.q for s in r.surfaces[1:k]])
+    return (; psi, q, delta_prime=[dp[i, i] for i in 1:k])
+end
+
+function _delta_prime_data(h5path::AbstractString)
+    h5open(h5path, "r") do fid
+        dp = read(fid["SingularSurfaces/Delta_prime_matrix"])
+        k = minimum(size(dp))
+        group = haskey(fid, "$_GAL/rational_psi") && length(fid["$_GAL/rational_psi"]) == k ? _GAL : "SingularSurfaces"
+        (; psi=read(fid["$group/rational_psi"])[1:k], q=read(fid["$group/rational_q"])[1:k], delta_prime=[dp[i, i] for i in 1:k])
+    end
+end
+
 """
-    plot_delta_prime(h5path; save_path=nothing)
+    plot_delta_prime(src; save_path=nothing)
 
-Scatter plot of `Re(Δ')` per singular surface vs ψ_N, computed from the stored asymptotic
-coefficients `ca_left` and `ca_right`. Points are colored red (tearing unstable, Re(Δ') > 0)
-or blue (tearing stable). Integer-valued q rational surfaces are annotated.
-
-Δ' is computed as `(ca_right[resnum,resnum,2,s] - ca_left[resnum,resnum,2,s]) / (4π² ψ₀)`,
-where `resnum` is the linear mode index of the (m,n) resonant pair at surface `s`.
+Scatter plot of the diagonal `Re(Δ′_ii)` of the inter-surface Δ′ matrix (PEST-3 convention, ψ_N-referenced) vs ψ_N
+of each rational surface it spans. Points are colored red (tearing unstable, Re(Δ′) > 0) or blue (tearing stable).
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file
+  - `src`: A Riccati or Galerkin `ForceFreeStatesResult`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -319,43 +362,22 @@ where `resnum` is the linear mode index of the (m,n) resonant pair at surface `s
 
 A `Plots.jl` plot object.
 """
-function plot_delta_prime(h5path; save_path=nothing)
-    msing, psi_sing, q_sing, ca_l, ca_r, psio, mn_index = h5open(h5path, "r") do fid
-        read(fid["SingularSurfaces/rational_count"]), read(fid["SingularSurfaces/rational_psi"]), read(fid["SingularSurfaces/rational_q"]),
-        read(fid["SingularSurfaces/ca_left"]), read(fid["SingularSurfaces/ca_right"]),
-        read(fid["Equilibrium/psi_total"]), read(fid["Info/mn_index"])
-    end
+function plot_delta_prime(src::Source; save_path=nothing)
+    _require(plot_delta_prime, src)
+    p = _plot_delta_prime(_delta_prime_data(src))
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    msing == 0 && return plot(; title="No singular surfaces found", legend=false)
-    # ca_left/ca_right are zero-extent sentinels on kinetic/galerkin-matched runs (never computed there).
-    isempty(ca_l) && return plot(; title="No asymptotic coefficients — ca_left/ca_right not computed for this run", legend=false)
-
-    numpert_total = size(ca_l, 1)
-    chi1 = 2π * psio
-
-    dp_vals = ComplexF64[]
-    for s in 1:msing
-        q_s = q_sing[s]
-        resnum = findfirst(1:numpert_total) do j
-            n_j = mn_index[j, 2]
-            n_j != 0 && abs(mn_index[j, 1] / n_j - q_s) < 1e-6
-        end
-        if isnothing(resnum)
-            push!(dp_vals, 0.0 + 0.0im)
-        else
-            dp = (ca_r[resnum, resnum, 2, s] - ca_l[resnum, resnum, 2, s]) / (2π * chi1)
-            push!(dp_vals, dp)
-        end
-    end
-
-    dp_real = real.(dp_vals)
+function _plot_delta_prime(d)
+    dp_real = real.(d.delta_prime)
     colors = [v > 0 ? :red : :steelblue for v in dp_real]
 
     p = scatter(
-        psi_sing, dp_real;
+        d.psi, dp_real;
         xlims=(0, 1),
         xlabel="Norm. Poloidal Flux",
-        ylabel="Re(Δ')",
+        ylabel="Re(Δ'_ii)",
         title="Tearing stability Δ'",
         legend=false,
         color=colors,
@@ -365,23 +387,24 @@ function plot_delta_prime(h5path; save_path=nothing)
         bottom_margin=5Plots.mm
     )
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
-
-    isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
+_ballooning_data(r::LocalStabilityResult) = (; psi=r.ballooning_psi, alpha=r.alpha, alpha_crit=r.alpha_critical)
+_ballooning_data(h5path::AbstractString) =
+    h5open(fid -> (; psi=read(fid["LocalStability/ballooning_psi"]), alpha=read(fid["LocalStability/alpha"]), alpha_crit=read(fid["LocalStability/alpha_critical"])), h5path, "r")
+
 """
-    plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
+    plot_ballooning_alpha_boundary(src; save_path=nothing, psi_min=0.0)
 
 Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
 pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
 normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
-are ballooning-unstable. Reads `LocalStability/ballooning_psi`, `LocalStability/alpha`, and
-`LocalStability/alpha_critical` (populated when the deck has a `[LocalStability]` section).
+are ballooning-unstable.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file (e.g. `"gpec.h5"`)
+  - `src`: A `LocalStabilityResult`, or the path of a `gpec.h5` written with a `[LocalStability]` section
 
 ### Keyword arguments
 
@@ -393,13 +416,9 @@ are ballooning-unstable. Reads `LocalStability/ballooning_psi`, `LocalStability/
 
 A `Plots.jl` plot object.
 """
-function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
-    psi, alpha, alpha_crit = h5open(h5path, "r") do fid
-        haskey(fid, "LocalStability/alpha") || return (Float64[], Float64[], Float64[])
-        read(fid["LocalStability/ballooning_psi"]), read(fid["LocalStability/alpha"]), read(fid["LocalStability/alpha_critical"])
-    end
-
-    isempty(alpha) && return plot(; title="No local stability data (add a [LocalStability] section)", legend=false)
+function plot_ballooning_alpha_boundary(src::Union{AbstractString,LocalStabilityResult}; save_path=nothing, psi_min=0.0)
+    _require(plot_ballooning_alpha_boundary, src)
+    d = _ballooning_data(src)
 
     p = plot(;
         xlims=(psi_min, 1),
@@ -414,18 +433,31 @@ function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
 
     # NaN entries leave natural gaps over always-stable surfaces; isfinite masking would
     # wrongly connect across such gaps with a straight line.
-    plot!(p, psi, alpha; lw=2, color=:black, label="Experimental gradient")
-    plot!(p, psi, alpha_crit; lw=2, linestyle=:dash, color=:red, label="1st stability boundary")
+    plot!(p, d.psi, d.alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, d.psi, d.alpha_crit; lw=2, linestyle=:dash, color=:red, label="1st stability boundary")
 
     isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
-"""
-    plot_cond_fbar(h5path; save_path=nothing, zoom=false)
+function _cond_fbar_data(r::ForceFreeStatesResult)
+    k = r.kinetic
+    return (; scan_psi=k.scan_psi, scan_cond=k.scan_cond, thr=k.scan_threshold, k_psi=[s.psifac for s in k.kinsing],
+        i_psi=[s.psifac for s in r.surfaces], i_q=[s.q for s in r.surfaces], kmsing=k.kmsing)
+end
 
-Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan stored in
-`SingularSurfaces/Kinetic/` (populated when ForceFreeStates runs with
+function _cond_fbar_data(h5path::AbstractString)
+    h5open(h5path, "r") do fid
+        kg = fid["SingularSurfaces/Kinetic"]
+        (; scan_psi=read(kg["scan_psi"]), scan_cond=read(kg["scan_cond"]), thr=read(kg["scan_threshold"]), k_psi=read(kg["rational_psi"]),
+            i_psi=read(fid["SingularSurfaces/rational_psi"]), i_q=read(fid["SingularSurfaces/rational_q"]), kmsing=read(kg["rational_count"]))
+    end
+end
+
+"""
+    plot_cond_fbar(src; save_path=nothing, zoom=false)
+
+Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan (populated when ForceFreeStates runs with
 a `kinetic` source and `singfac_min > 0`).
 
 `F̄` is the kinetic Euler-Lagrange matrix formed by Schur-reducing the six
@@ -443,7 +475,7 @@ kinetic resonances land relative to the ideal ones.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file produced with kinetic mode enabled
+  - `src`: A kinetic `ForceFreeStatesResult`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -454,27 +486,11 @@ kinetic resonances land relative to the ideal ones.
 
 ### Returns
 
-A `Plots.jl` plot object, or `nothing` if no kinetic scan is stored in the file.
+A `Plots.jl` plot object.
 """
-function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
-    scan_psi, scan_cond, thr, k_psi, i_psi, i_q, kmsing = h5open(h5path, "r") do fid
-        if !(haskey(fid, "SingularSurfaces") && haskey(fid["SingularSurfaces"], "Kinetic"))
-            return Float64[], Float64[], 0.0, Float64[], Float64[], Float64[], 0
-        end
-        kg = fid["SingularSurfaces/Kinetic"]
-        (read(kg["scan_psi"]),
-            read(kg["scan_cond"]),
-            read(kg["scan_threshold"]),
-            read(kg["rational_psi"]),
-            read(fid["SingularSurfaces/rational_psi"]),
-            read(fid["SingularSurfaces/rational_q"]),
-            read(kg["rational_count"]))
-    end
-
-    if isempty(scan_psi)
-        @warn "No kinetic-singular-surface scan in $h5path — rerun with a kinetic source and singfac_min>0"
-        return nothing
-    end
+function plot_cond_fbar(src::Source; save_path=nothing, zoom=false)
+    _require(plot_cond_fbar, src)
+    (; scan_psi, scan_cond, thr, k_psi, i_psi, i_q, kmsing) = _cond_fbar_data(src)
 
     finite_cond = filter(isfinite, scan_cond)
     data_max = isempty(finite_cond) ? 1.0 : maximum(finite_cond)
@@ -527,22 +543,29 @@ function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
     return p
 end
 
-"""
-    plot_ffs_summary(h5path; save_path=nothing)
+# The summary's panels in drawing order, each with the plot whose capabilities it needs.
+_ffs_panels(src) = (
+    plot_energy_eigenvectors => () -> _plot_energy_eigenvectors(_energy_eigenvector_data(src)),
+    plot_fixed_boundary_stability_criterion => () -> _plot_fixed_boundary_stability_criterion(_criterion_data(src)),
+    plot_mode_displacement => () -> _plot_mode_displacement(_mode_displacement_data(src)),
+    plot_delta_prime => () -> _plot_delta_prime(_delta_prime_data(src))
+)
 
-Four-panel summary of ForceFreeStates (DCON-style) stability results, combining:
+"""
+    plot_ffs_summary(src; save_path=nothing)
+
+Summary of ForceFreeStates (DCON-style) stability results, with each panel the source can supply:
 
   - Energy eigenvector heatmap (`plot_energy_eigenvectors`)
-  - Fixed-boundary stability criterion |D_c| vs ψ_N (`plot_stability_criterion`)
-  - Eigenvalue spectrum (`plot_eigenvalues`)
+  - Critical determinant |D_c| vs ψ_N (`plot_fixed_boundary_stability_criterion`)
+  - Least stable mode displacement (`plot_mode_displacement`)
   - Tearing stability Δ' at each rational surface (`plot_delta_prime`)
 
-If no vacuum data is present (`vac_flag = false`), only the stability criterion and Δ'
-panels are shown.
+Panels the source cannot draw are left out; it throws an `ArgumentError` only when none can be drawn.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file
+  - `src`: A `ForceFreeStatesResult`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -552,27 +575,34 @@ panels are shown.
 
 A `Plots.jl` plot object.
 """
-function plot_ffs_summary(h5path; save_path=nothing)
-    has_vac = h5open(h5path, "r") do fid
-        haskey(fid, "ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes") &&
-            !isempty(read(fid["ForceFreeStates/FreeBoundaryStability/W_freeboundary_eigenmodes"]))
-    end
-
-    p_crit = plot_fixed_boundary_stability_criterion(h5path)
-    p_dp = plot_delta_prime(h5path)
-
-    if has_vac
-        p_evec = plot_energy_eigenvectors(h5path; matrix_type=:total)
-        p_modes = plot_mode_displacement(h5path)
-        p = plot(p_evec, p_crit, p_modes, p_dp; layout=(2, 2), size=(1100, 900), right_margin=10Plots.mm)
-    else
-        title!(p_crit, "Stability criterion (no vacuum data — rerun with vac_flag = true)")
-        p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500), right_margin=10Plots.mm)
-    end
-
+function plot_ffs_summary(src::Source; save_path=nothing)
+    p = _summary(_ffs_panels(src), capabilities(src), plot_ffs_summary)
     isnothing(save_path) || savefig(p, save_path)
     return p
 end
+
+# Draw the panels `caps` allows, two per row; throw naming every reason when none can be drawn.
+function _summary(panels, caps, fn)
+    drawn = [draw() for (panel_fn, draw) in panels if _can(panel_fn, caps)]
+    if isempty(drawn)
+        missing = unique(reduce(vcat, (_missing(_entry(panel_fn), caps) for (panel_fn, _) in panels)))
+        throw(ArgumentError("$(nameof(fn)): no panel can be drawn: $(_why(missing))"))
+    end
+    n = length(drawn)
+    n <= 2 && return plot(drawn...; layout=(1, n), size=(550n, 500), right_margin=10Plots.mm)
+    n == 3 && push!(drawn, plot(; framestyle=:none))
+    return plot(drawn...; layout=(2, 2), size=(1100, 900), right_margin=10Plots.mm)
+end
+
+register!(plot_ffs_summary, (ForceFreeStatesResult, AbstractString), (), "the stability panels the run supplies")
+register!(plot_mode_displacement, (ForceFreeStatesResult, AbstractString), (:solution_profiles,), "|ξ_ψ| per m of the least stable mode")
+register!(plot_fixed_boundary_stability_criterion, (ForceFreeStatesResult, AbstractString), (:fixed_boundary_criterion,), "critical determinant against ψ_N")
+register!(plot_energy_eigenvectors, (ForceFreeStatesResult, AbstractString), (:free_boundary,), "free-boundary energy eigenvectors per m")
+register!(plot_eigenvalues, (ForceFreeStatesResult, AbstractString), (:free_boundary,), "free-boundary energy eigenvalues")
+register!(plot_edge_stability_scan, (ForceFreeStatesResult, AbstractString), (:edge_scan,), "edge energies against the truncation q")
+register!(plot_delta_prime, (ForceFreeStatesResult, AbstractString), (:delta_prime,), "Δ′_ii at each rational surface")
+register!(plot_cond_fbar, (ForceFreeStatesResult, AbstractString), (:kinetic_scan,), "cond(F̄) scan for kinetic singular surfaces")
+register!(plot_ballooning_alpha_boundary, (LocalStabilityResult, AbstractString), (:ballooning_scan,), "ballooning α against its first stability boundary")
 
 """
     plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
