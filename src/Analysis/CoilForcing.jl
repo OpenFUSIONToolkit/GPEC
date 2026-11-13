@@ -237,13 +237,13 @@ end
 function _field_coil_sets(field::FT.ForcingField; n=1)
     sets, skipped, complex_weight = FT.CoilSet[], 0, false
     for t in FT._field_terms(field)
-        if !(t isa FT.ForcingSource && t.ctrl.forcing_data_format == "coil")
+        if !(t isa FT.ForcingCoils)
             skipped += 1
             continue
         end
         complex_weight |= !isreal(t.scale)
         w = isreal(t.scale) ? real(t.scale) : abs(t.scale)
-        for cs in FT.load_coil_sets(FT.CoilConfig(t.ctrl), n)
+        for cs in FT.load_coil_sets(t.config, n)
             push!(sets, FT.CoilSet(cs.name, cs.ncoil, cs.s, cs.nw, cs.nsec, cs.x, cs.y, cs.z, w .* cs.currents))
         end
     end

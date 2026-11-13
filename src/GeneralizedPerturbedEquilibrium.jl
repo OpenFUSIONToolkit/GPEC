@@ -199,7 +199,7 @@ function main_from_inputs(
     if deck.perturbed_equilibrium !== nothing
         pe = _timed_stage(runtimes, "perturbed_equilibrium", "Perturbed Equilibrium") do
             # A replay from stored coil geometry skips the source checks: the geometry files they read may be gone.
-            field = preloaded_coil_sets === nothing ? ForcingField(deck.forcing) : ForcingTerms.ForcingSource(deck.forcing, 1)
+            field = preloaded_coil_sets === nothing ? ForcingField(deck.forcing) : ForcingTerms.ForcingCoils(ForcingTerms.CoilConfig(deck.forcing), 1)
             perturbed_equilibrium(plasma_response(ffs; verbose, deck.perturbed_equilibrium.response...), field;
                 coil_sets=preloaded_coil_sets, verbose, deck.perturbed_equilibrium.drive...)
         end

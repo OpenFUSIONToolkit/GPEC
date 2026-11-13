@@ -126,28 +126,22 @@ end
 
 Contract the torque response of `state.response` with the forcing of `state` into
 `state.torque_response`. Every forcing source is one column of `T_source`: each coil set
-(`state.coil_sets`, on the grid `forcing` carries) when the forcing is coils, otherwise the
-applied spectrum as a single source named after its forcing file. A source's Φ_x column is
+(`state.coil_sets`, on the grid `forcing` carries) when the forcing is a coil leaf, otherwise the
+applied spectrum as a single source, named after its forcing file when it is one. A source's Φ_x column is
 referred to b̃ through `R = S·A`, so `T_source = B̃†·T_xe·B̃` with `B̃ = R⁻¹·Φ_source` (the Fortran `gcoil`).
 """
-function apply_torque_response!(
-    state::PerturbedEquilibriumState,
-    forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.ForcingField};
-    verbose::Bool=false
-)
+function apply_torque_response!(state::PerturbedEquilibriumState, forcing::ForcingTerms.ForcingField; verbose::Bool=false)
     resp = state.response
     ffs = resp.ffs
-    ft_ctrl = forcing isa ForcingTerms.ForcingTermsControl ? forcing :
-              forcing isa ForcingTerms.ForcingSource ? forcing.ctrl : nothing
     source_b = zeros(ComplexF64, ffs.numpert_total, 0)
     source_names = String[]
-    if !isempty(state.coil_sets) && ft_ctrl !== nothing && ft_ctrl.forcing_data_format == "coil"
+    if forcing isa ForcingTerms.ForcingCoils && !isempty(state.coil_sets)
         flux_conform = resp.rootarea_to_area_weight .* resp.surface_area
-        source_b = flux_conform \ coil_flux_spectra(ffs, state.coil_sets, ForcingTerms.CoilConfig(ft_ctrl))
+        source_b = flux_conform \ coil_flux_spectra(ffs, state.coil_sets, forcing.config)
         source_names = [cs.name for cs in state.coil_sets]
     elseif !isempty(state.forcing_b_rootarea)
         source_b = reshape(state.forcing_b_rootarea, :, 1)
-        source_names = [ft_ctrl === nothing ? "forcing" : basename(ft_ctrl.forcing_data_file)]
+        source_names = [forcing isa ForcingTerms.ForcingFile ? basename(forcing.path) : "forcing"]
     end
 
     T_xe = resp.T_xe

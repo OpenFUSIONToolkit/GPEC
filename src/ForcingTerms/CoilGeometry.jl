@@ -156,15 +156,16 @@ Base.@kwdef struct CoilConfig
     coil_sets::Vector{CoilSetConfig} = CoilSetConfig[]
 end
 
+# The coil geometry files shipped with the package, the default `dat_dir`.
+const BUNDLED_COIL_DIR = joinpath(@__DIR__, "coil_geometries")
+
 """
     CoilConfig(ft_ctrl::ForcingTermsControl)
 
 Construct a `CoilConfig` from a `ForcingTermsControl` populated from TOML.
 """
 function CoilConfig(ft_ctrl::ForcingTermsControl)
-    dat_dir = isempty(ft_ctrl.dat_dir) ?
-              joinpath(@__DIR__, "coil_geometries") :
-              ft_ctrl.dat_dir
+    dat_dir = isempty(ft_ctrl.dat_dir) ? BUNDLED_COIL_DIR : ft_ctrl.dat_dir
 
     coil_sets = CoilSetConfig[_parse_coil_set_config(d) for d in ft_ctrl.coil_sets_raw]
 

@@ -97,8 +97,7 @@ end
 
 capabilities(r::LocalStabilityResult) = isempty(r.alpha) ? Set{Symbol}() : Set([:ballooning_scan])
 
-capabilities(r::FT.ForcingField) =
-    any(t -> t isa FT.ForcingSource && t.ctrl.forcing_data_format == "coil", FT._field_terms(r)) ? Set([:coil_source]) : Set{Symbol}()
+capabilities(r::FT.ForcingField) = any(t -> t isa FT.ForcingCoils, FT._field_terms(r)) ? Set([:coil_source]) : Set{Symbol}()
 
 function capabilities(r::PlasmaResponse)
     caps = Set{Symbol}()

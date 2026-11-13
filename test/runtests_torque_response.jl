@@ -146,8 +146,8 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
 
         @testset "forcing-source matrix: a forcing file is one source" begin
             file_state = deepcopy(pe)
-            file_ctrl = _GPE_TR.ForcingTerms.ForcingTermsControl(; forcing_data_file="forcing.dat")
-            _PE_TR.apply_torque_response!(file_state, file_ctrl)
+            file_source = _GPE_TR.ForcingTerms.ForcingFile(abspath("forcing.dat"), "ascii", 1)
+            _PE_TR.apply_torque_response!(file_state, file_source)
             ts = file_state.torque_response
             @test ts.source_names == ["forcing.dat"]
             @test size(ts.T_source) == (1, 1, npsi)
