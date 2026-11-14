@@ -78,7 +78,7 @@ const _RETIRED_SECTIONS = Dict("DEBUG" => "[DEBUG] is retired: output_benchmark_
 
 # Every section a deck may hold, besides the analytic-equilibrium sections.
 const _DECK_SECTIONS = ("Run", "Equilibrium", "Wall", "LocalStability", "Ballooning", "ForceFreeStates", "Forward", "Riccati",
-    "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "ForcingTerms", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
+    "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "GrowthRate", "ForcingTerms", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
 const _INTEGRATORS = ("Forward" => Forward, "Riccati" => Riccati, "Galerkin" => Galerkin)
 
 # Stop the run when a parsed gpec.toml section sets keys that no longer exist, so the deck is updated.
@@ -378,6 +378,16 @@ function tearing_from_deck(inputs::AbstractDict)
 end
 
 """
+    growth_rate_from_deck(inputs) -> Union{Nothing,GrowthRateConfig}
+
+The `GrowthRateConfig` of `[GrowthRate]`; `nothing` without that section.
+"""
+function growth_rate_from_deck(inputs::AbstractDict)
+    haskey(inputs, "GrowthRate") || return nothing
+    return GrowthRateConfig(; section_keywords(inputs["GrowthRate"], "GrowthRate", _struct_fields(GrowthRateConfig))...)
+end
+
+"""
     perturbed_equilibrium_from_deck(inputs) -> Union{Nothing,NamedTuple}
 
 `(; response, drive)`: the `plasma_response` and `perturbed_equilibrium` keywords of
@@ -447,7 +457,7 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     end
     has_ffs = haskey(inputs, "ForceFreeStates")
     if !has_ffs
-        for section in ("Wall", "Forward", "Riccati", "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "LocalStability", "Ballooning",
+        for section in ("Wall", "Forward", "Riccati", "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "GrowthRate", "LocalStability", "Ballooning",
             "ForcingTerms", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
             haskey(inputs, section) && error("[$section] is set but there is no [ForceFreeStates] section, so the run stops after the equilibrium")
         end
@@ -462,6 +472,15 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
         error("[KineticForces] is set but neither [PerturbedEquilibrium] (the torque) nor [ForceFreeStates] kinetic = \"KineticForces\" uses it")
     (haskey(inputs, "KineticForces") || kinetic_source) && isempty(get(get(inputs, "Equilibrium", Dict{String,Any}()), "kinetic_file", "")) &&
         error("this run needs kinetic profiles ([KineticForces], or kinetic = \"KineticForces\"): set kinetic_file in [Equilibrium]")
+    growth_rate = growth_rate_from_deck(inputs)
+    # The growth-rate solve needs the plain ideal solve as its marginal one and the free-boundary energy of a Forward solve.
+    if growth_rate !== nothing
+        (; keywords, algorithm) = force_balance
+        haskey(inputs, "Match") && error("[GrowthRate] needs the ideal solve as its marginal one: remove the [Match] section")
+        get(keywords, :kinetic, nothing) === nothing || error("[GrowthRate] needs an ideal force-balance solve: remove kinetic from [ForceFreeStates]")
+        get(keywords, :vac_flag, false) || error("[GrowthRate] needs the free-boundary energy: set [ForceFreeStates] vac_flag = true")
+        algorithm isa Forward || error("[GrowthRate] needs integrator = \"Forward\" in [ForceFreeStates]")
+    end
     match = match_from_deck(inputs)
     # The MatchProblem guards, checked before the force-free-states solve rather than after it.
     if match !== nothing
@@ -483,7 +502,7 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
         error("[GGJ] is set but neither [Match] nor [Tearing] inner_model = \"GGJ\" uses it")
     haskey(inputs, "SLAYER") && tearing_model != "SLAYER" && !(has_ffs && get(inputs["ForceFreeStates"], "psilim_from_layer_overlap", false) === true) &&
         error("[SLAYER] is set but neither [Tearing] inner_model = \"SLAYER\" nor [ForceFreeStates] psilim_from_layer_overlap = true uses it")
-    return (; run=run_settings(inputs, path), force_balance, local_stability=local_stability_from_deck(inputs), match, tearing,
+    return (; run=run_settings(inputs, path), force_balance, local_stability=local_stability_from_deck(inputs), match, tearing, growth_rate,
         kinetic_forces=haskey(inputs, "KineticForces") ? kinetic_forces_control(inputs) : nothing, perturbed_equilibrium, forcing,
         error_fields=error_fields_from_deck(inputs, path))
 end
@@ -578,6 +597,7 @@ function deck_inputs(deck::NamedTuple, config::Equilibrium.EquilibriumConfig, an
         merge!(inputs, _tearing_sections(filter(p -> p.first != :critical_resonant_field, problem), get(problem, :critical_resonant_field, nothing),
             model, config))
     end
+    deck.growth_rate === nothing || (inputs["GrowthRate"] = _deck_table(deck.growth_rate))
     deck.kinetic_forces === nothing || merge!(inputs, deck_sections(deck.kinetic_forces))
     pe = deck.perturbed_equilibrium
     pe === nothing || (inputs["PerturbedEquilibrium"] = _deck_table(merge(pe.response, pe.drive)))
@@ -625,6 +645,7 @@ deck_sections(ls::LocalStabilityResult) = Dict{String,Any}("LocalStability" => _
 deck_sections(m::ForceFreeStates.MatchResult) =
     merge(deck_sections(m.model), Dict{String,Any}("Match" => merge(_deck_table(m.problem, (:ffs,)), Dict{String,Any}("inner_model" => "GGJ"))))
 deck_sections(kf::KineticForcesResult) = deck_sections(kf.control)
+deck_sections(g::IdealGrowthRateResult) = g.config === nothing ? Dict{String,Any}() : Dict{String,Any}("GrowthRate" => _deck_table(g.config))
 deck_sections(t::TearingResult) = t.model === nothing ? Dict{String,Any}() : _tearing_sections(t.problem, t.problem.critical_resonant_field, t.model, t.config)
 deck_sections(ef::ErrorFieldsResult) = _error_fields_sections(ef.settings, ef.tolerances === nothing ? "" : _RECORDED_TOLERANCES)
 

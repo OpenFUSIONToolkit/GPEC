@@ -305,6 +305,51 @@ end
         @test abs(odet.u[pivot_idx, 1, 1] - u_before[pivot_idx, 1, 1]) < 1e-10
     end
 
+    @testset "rescale_reduced_columns!" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        mpert = 4
+        intr = FFS.ForceFreeStatesInternal(; numpert_total=mpert)
+        ctrl = FFS.ForceFreeStatesControl()
+        odet = FFS.OdeState(mpert, 10, 10, 10)
+        # Graded columns, as a run of reductions leaves them
+        base = randn(ComplexF64, mpert, mpert, 2)
+        u0 = base .* reshape(10.0 .^ (0:40:120), 1, mpert, 1)
+        odet.u .= u0
+        odet.step = 2
+        odet.u_store[:, :, :, 1] .= u0
+        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+        @test all(j -> norm(odet.u[:, j, :]) ≈ 1, 1:mpert)
+        # The plasma response is unchanged, and transform_u! maps the stored pre-reduction state onto the reduced one
+        @test odet.u[:, :, 2] / odet.u[:, :, 1] ≈ base[:, :, 2] / base[:, :, 1] rtol = 1e-8
+        odet.u_store[:, :, :, 2] .= odet.u
+        FFS.transform_u!(odet, intr)
+        @test odet.u_store[:, :, :, 1] ≈ odet.u rtol = 1e-8
+    end
+
+    @testset "zero-crossing check across a rescaling reduction" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+        odet = F.OdeState(2, 10, 5, 0)
+        odet.step = 2
+        odet.psi_store[1:2] = [0.40, 0.50]
+        # W⁻¹ = U₁U₂⁻¹ has eigenvalue -0.2 at the first step and +0.2 at the second, zero at the midpoint
+        colscale = [1e-3, 1e-5]
+        odet.u_store[:, :, 1, 1] = ComplexF64[-0.2 0; 0 3]
+        odet.u_store[:, :, 2, 1] = ComplexF64[1 0; 0 1]
+        odet.u_store[:, :, 1, 2] = ComplexF64[0.2 0; 0 3] .* colscale'
+        odet.u_store[:, :, 2, 2] = ComplexF64[1 0; 0 1] .* colscale'
+        # A reduction between the two steps that only rescaled the columns
+        odet.ifix = 1
+        odet.fixstep[1] = 1
+        odet.index[:, 1] = [1, 2]
+        odet.fixfac[:, :, 1] = Diagonal(ComplexF64.(colscale))
+        @test F.evaluate_stability_criterion!(odet, equil.profiles) == 1
+    end
+
     @testset "column_abstol" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         u = zeros(ComplexF64, 2, 2, 2)
@@ -404,7 +449,7 @@ end
         odet.unorm0 .= norm.(eachcol(u0[:, :, 1]))  # every column grown alike since the last reduction
         FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
         @test odet.index[1, 1] == 2
-        @test odet.u[3, 2, 1] == u0[3, 2, 1]
+        @test odet.u[3, 2, 1] ≈ u0[3, 2, 1] * odet.fixfac[2, 2, 1]  # the lead column is only rescaled
         @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0  # only the lead column keeps the resonant harmonic
         @test odet.sing_flag[1]
 

@@ -21,7 +21,7 @@ foreach(r -> save_to_hdf5("gpec.h5", r), (pe, kf, ef, tear))
 ```
 
 `solve(eq, alg; kwargs...)` is sugar for the problem form `solve(ForceBalanceProblem(eq; kwargs...), alg)`: the problem names what is solved (the force-balance equation on this equilibrium, with this mode range, wall and closure) and the algorithm names how.
-`main` translates each deck section into the problem, algorithm or control it names, calls these functions for every section present, saves each result into `[Run] output_file`, and returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing)`, each `nothing` when its section is absent.
+`main` translates each deck section into the problem, algorithm or control it names, calls these functions for every section present, saves each result into `[Run] output_file`, and returns `(; equil, local_stability, ffs, match, growth_rate, resp, pe, kinetic, error_fields, tearing)`, each `nothing` when its section is absent.
 
 | Stage | Deck section | Call | Result |
 |---|---|---|---|
@@ -29,11 +29,15 @@ foreach(r -> save_to_hdf5("gpec.h5", r), (pe, kf, ef, tear))
 | ForceFreeStates | `[ForceFreeStates]` + `[Forward]`, `[Riccati]` or `[Galerkin]` | `solve(ForceBalanceProblem(eq; ...), Forward() \| Riccati() \| Galerkin())` | `ForceFreeStatesResult` |
 | LocalStability | `[LocalStability]` + `[Ballooning]` | `solve(LocalStabilityProblem(eq; ...), Ballooning(; ...))` | `LocalStabilityResult` |
 | Match | `[Match]` + `[GGJ]` | `solve(MatchProblem(ffs; ...), GGJModel())` | `ForceFreeStatesResult` with `closure == :matched` |
+| GrowthRate | `[GrowthRate]` | `growth_rate(ForceBalanceProblem(eq; ...), Forward(), GrowthRateConfig(; ...); marginal=ffs)` | `IdealGrowthRateResult` |
 | Drive | `[ForcingTerms]` | `RMPField(ft_ctrl)` (a `ForcingTermsControl`), `RMPField(file)`, `RMPField(modes)` | `RMPField` |
 | PerturbedEquilibrium | `[PerturbedEquilibrium]` | `plasma_response(ffs; ...)`, then `perturbed_equilibrium(resp, rmp; ...)` | `PlasmaResponse`, `PerturbedEquilibriumState` |
 | KineticForces | `[KineticForces]` | `kinetic_torque(pe, KineticForcesControl(; ...))` | `KineticForcesResult` |
 | ErrorFields | `[ErrorFields]` | `error_fields(resp, pe.coil_sets, CoilConfig(...); ...)` | `ErrorFieldsResult` |
 | Tearing | `[Tearing]` + `[SLAYER]` or `[GGJ]` | `solve(TearingProblem(ffs; ...), SLAYERModel() \| GGJModel(); config=TearingConfig(...))` | `TearingResult` |
+
+`[GrowthRate]` runs the ideal growth-rate solve after the force-free-states stage; its keys are the `GrowthRateConfig` fields, and its `rho`, left at NaN, derives the mass density from the equilibrium's kinetic profiles.
+It needs `[ForceFreeStates] vac_flag = true` and `integrator = "Forward"`, and cannot share a deck with `[Match]`, since its marginal solve is the plain ideal one.
 
 The [Workflow](workflow.md) page describes what each stage computes; the module pages document the keywords, which are the deck keys of the matching section.
 

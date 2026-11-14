@@ -561,6 +561,84 @@ include("display_check.jl")
             end
         end
 
+        @testset "deck growth rate under [GrowthRate]" begin
+            config = GrowthRateConfig(; rho=1e-7)
+            growth_section = Dict{String,Any}("GrowthRate" => Dict{String,Any}("rho" => 1e-7))
+            # The fixture is ideal-stable, so both paths stop at the marginal solve with γ = 0.
+            mktempdir() do dir
+                ffs = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
+                api = growth_rate(ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs...), forward, config; marginal=ffs)
+                reference = GPEC.main([_stage_deck(dir; extra_sections=growth_section)])
+
+                @test reference.growth_rate isa IdealGrowthRateResult
+                @test reference.growth_rate.gamma == api.gamma == 0
+                @test length(reference.growth_rate.history) == length(api.history)
+                @test [h.gamma_sq for h in reference.growth_rate.history] ≈ [h.gamma_sq for h in api.history] rtol = 1e-10
+                @test [h.lambda for h in reference.growth_rate.history] ≈ [h.lambda for h in api.history] rtol = 1e-10
+                @test isequal(reference.growth_rate.omega_star_pi, api.omega_star_pi)
+                @test reference.growth_rate.config == api.config
+                h5file = joinpath(dir, "gpec.h5")
+                @test h5open(f -> haskey(f, "Info/Runtimes/growth_rate"), h5file)
+                @test h5open(f -> haskey(f, "ForceFreeStates/GrowthRate/gamma"), h5file)
+                # The recorded input carries the [GrowthRate] section.
+                recorded = TOML.parse(h5open(f -> read(f, "Input/gpec_toml_raw"), h5file))
+                @test haskey(recorded, "GrowthRate")
+                @test recorded["GrowthRate"]["rho"] == 1e-7
+            end
+
+            # Lowering q_a to 2.9 makes the fixture free-boundary unstable, so the root find runs and γ > 0 is compared.
+            kink_deck = merge(deck, Dict{String,Any}("TJAnalytic" => merge(deck["TJAnalytic"], Dict{String,Any}("qa" => 2.9))))
+            mktempdir() do dir
+                kink_equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(kink_deck, template), GPEC.analytic_config(kink_deck))
+                ffs = solve(kink_equil, forward; nn=1, wall=wall, ffs_kwargs...)
+                @test minimum(real, ffs.free_boundary.et) < 0
+                api = growth_rate(ForceBalanceProblem(kink_equil; nn=1, wall=wall, ffs_kwargs...), forward, config; marginal=ffs)
+                reference = GPEC.main([_stage_deck(dir; extra_sections=merge(growth_section, Dict{String,Any}("TJAnalytic" => kink_deck["TJAnalytic"])))])
+
+                @test api.gamma > 0
+                @test reference.growth_rate.gamma ≈ api.gamma rtol = 1e-12
+                @test length(reference.growth_rate.history) == length(api.history) > 1
+                @test [h.gamma_sq for h in reference.growth_rate.history] ≈ [h.gamma_sq for h in api.history] rtol = 1e-10
+                @test [h.lambda for h in reference.growth_rate.history] ≈ [h.lambda for h in api.history] rtol = 1e-10
+                @test [h.nzero for h in reference.growth_rate.history] == [h.nzero for h in api.history]
+            end
+
+            parse_staged(dir; kwargs...) = (deck_dir = _stage_deck(dir; kwargs...); GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir))
+            # On the two-pass auto grid the deck must hand growth_rate the problem its marginal solve came from, so both paths re-form from pass 1.
+            auto_overrides = Dict{String,Any}("grid_type" => "auto", "mpsi" => 0, "psi_accuracy" => 3e-2)
+            mktempdir() do dir
+                auto_deck = merge(kink_deck, Dict{String,Any}("Equilibrium" => merge(kink_deck["Equilibrium"], auto_overrides)))
+                pass1 = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(auto_deck, template), GPEC.analytic_config(auto_deck))
+                api = growth_rate(ForceBalanceProblem(pass1; nn=1, wall=wall, ffs_kwargs...), forward, config)
+                reference =
+                    GPEC.main([_stage_deck(dir; eq_overrides=auto_overrides, extra_sections=merge(growth_section, Dict{String,Any}("TJAnalytic" => kink_deck["TJAnalytic"])))])
+                @test api.gamma > 0
+                @test reference.growth_rate.gamma ≈ api.gamma rtol = 1e-10
+                @test [h.lambda for h in reference.growth_rate.history] ≈ [h.lambda for h in api.history] rtol = 1e-10
+            end
+
+            # A kinetic source in [ForceFreeStates] would make the marginal solve kinetic-MHD while the inertial ones are ideal.
+            mktempdir() do dir
+                deck_dir = _stage_deck(dir; eq_overrides=Dict{String,Any}("kinetic_file" => "kinetic.dat"), ffs_overrides=Dict{String,Any}("kinetic" => "KineticForces"),
+                    extra_sections=growth_section)
+                cp(joinpath(@__DIR__, "test_data", "regression_tj_kinetic_calculated", "kinetic.dat"), joinpath(deck_dir, "kinetic.dat"))
+                @test_throws "[GrowthRate] needs an ideal force-balance solve" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+
+            # The root find needs a Forward free-boundary solve as its plain ideal marginal one, so the deck stops at parse time.
+            mktempdir() do dir
+                @test_throws "[GrowthRate] needs the free-boundary energy" parse_staged(dir; ffs_overrides=Dict{String,Any}("vac_flag" => false), extra_sections=growth_section)
+            end
+            mktempdir() do dir
+                @test_throws "[GrowthRate] needs integrator" parse_staged(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"), extra_sections=growth_section)
+            end
+            mktempdir() do dir
+                matched = merge(growth_section, Dict{String,Any}("Match" => Dict{String,Any}("eta" => 1e-7, "rho" => 1e-7, "rotation" => 1.0)))
+                @test_throws "[GrowthRate] needs the ideal solve as its marginal one" parse_staged(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
+                    extra_sections=matched)
+            end
+        end
+
         @testset "kinetic_format" begin
             # A rates-v1 kinetic file read through the deck's [Equilibrium] keys and through the API keyword.
             mktempdir() do dir
