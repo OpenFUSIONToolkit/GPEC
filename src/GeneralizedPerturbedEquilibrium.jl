@@ -74,7 +74,7 @@ include("Rerun.jl")
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult
 using .ForceFreeStates: MatchProblem
 using .InnerLayer: GGJModel, SLAYERModel
-using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl
+using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl, IslandFlatteningResult, island_flattening
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
 using .ForcingTerms: RMPField
@@ -140,7 +140,7 @@ equilibrium and writes nothing. The raw forcing file contents are captured in
 `Input/RawInputs/ForcingTerms/`, and `preloaded_coil_sets` lets the rerun path inject the coil
 geometry stored in `Input/RawInputs/Coils/`.
 
-Returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing)`, each
+Returns `(; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, island_flattening)`, each
 `nothing` when its section is absent. `equil` is the equilibrium the stages used (the solve's, on
 the two-pass grid), `ffs` the result the later stages read (the matched one when the deck has
 `[Match]`), and `match` its `MatchResult`.
@@ -158,7 +158,7 @@ function main_from_inputs(
     runtimes = Vector{Pair{String,Float64}}()
     deck = parse_deck(inputs, path)
     (; output_file, verbose) = deck.run
-    local_stability = ffs = match = resp = pe = kinetic = error_fields = tearing = nothing
+    local_stability = ffs = match = resp = pe = kinetic = error_fields = tearing = island_flat = nothing
 
     equil = _timed_stage(runtimes, "equilibrium", "Equilibrium") do
         Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
@@ -224,12 +224,20 @@ function main_from_inputs(
         save_to_hdf5(output_file, tearing)
     end
 
+    # After the tearing save, which rewrites Tearing/.
+    if deck.island_flattening !== nothing
+        island_flat = _timed_stage(runtimes, "island_flattening", "Island Flattening") do
+            island_flattening(equil; widths=deck.island_flattening)
+        end
+        save_to_hdf5(output_file, island_flat)
+    end
+
     total_dt = time() - total_start
     push!(runtimes, "total" => total_dt)
     ffs === nothing || _write_runtimes!(output_file, runtimes)
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", total_dt)) s\n$_BANNER"
 
-    return (; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing)
+    return (; equil, local_stability, ffs, match, resp, pe, kinetic, error_fields, tearing, island_flattening=island_flat)
 end
 
 """
@@ -306,6 +314,7 @@ export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fiel
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
 export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
+export IslandFlatteningResult, island_flattening
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
 
