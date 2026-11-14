@@ -56,7 +56,16 @@ only if the interpolated midpoint confirms it is a genuine crossing rather than 
         # Reject noise: crit at the interpolated crossing must lie between and well below both neighbors
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
-        u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep-1]))
+        # A reduction between the two stored steps rescaled the columns; bring the previous step to the same scales
+        u_prev = acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
+        u_prev .= @view odet.u_store[:, :, :, istep-1]
+        for ifix in 1:odet.ifix
+            odet.fixstep[ifix] == istep - 1 || continue
+            @views for jsol in axes(u_prev, 2)
+                u_prev[:, jsol, :] .*= odet.fixfac[jsol, jsol, ifix]
+            end
+        end
+        u_mid = u .- fac .* (u .- u_prev)
         dVdpsi = profiles.dVdpsi_spline(psi_mid; hint=odet.spline_hint)
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2

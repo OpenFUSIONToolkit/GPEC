@@ -867,9 +867,11 @@ without bound and W = U₂U₁⁻¹ loses accuracy; the rescaling leaves W uncha
 function rescale_reduced_columns!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal)
     @views for jsol in 1:intr.numpert_total
         colnorm = norm(u[:, jsol, :])
-        (colnorm > 0 && isfinite(colnorm)) || continue
-        u[:, jsol, :] ./= colnorm
-        odet.fixfac[jsol, jsol, odet.ifix] = inv(colnorm)
+        isfinite(colnorm) || error("Solution vector $jsol is not finite at ψ = $(odet.psifac)")
+        scale = inv(colnorm)
+        isfinite(scale) || continue
+        u[:, jsol, :] .*= scale
+        odet.fixfac[jsol, jsol, odet.ifix] = scale
     end
 end
 
@@ -1027,6 +1029,11 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             end
         end
     end
+
+    # The rescalings compound toward the axis, where the transformed solutions can fall below the floating-point range
+    scale_decades = sum(ifix -> log10(minimum(jsol -> abs(odet.fixfac[jsol, jsol, ifix]), 1:intr.numpert_total)), 1:odet.ifix; init=0.0)
+    scale_decades < log10(floatmin(Float64)) &&
+        @warn "The stored solutions span $(round(Int, -scale_decades)) decades; those nearest the axis underflow after the reductions are undone"
 
     # Region i lies between fixups i-1 and i; its transform is the product of all later reductions
     transforms[:, :, end] .= identity

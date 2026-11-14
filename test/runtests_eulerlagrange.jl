@@ -326,6 +326,30 @@ end
         @test odet.u_store[:, :, :, 1] ≈ odet.u rtol = 1e-8
     end
 
+    @testset "zero-crossing check across a rescaling reduction" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+        odet = F.OdeState(2, 10, 5, 0)
+        odet.step = 2
+        odet.psi_store[1:2] = [0.40, 0.50]
+        # W⁻¹ = U₁U₂⁻¹ has eigenvalue -0.2 at the first step and +0.2 at the second, zero at the midpoint
+        colscale = [1e-3, 1e-5]
+        odet.u_store[:, :, 1, 1] = ComplexF64[-0.2 0; 0 3]
+        odet.u_store[:, :, 2, 1] = ComplexF64[1 0; 0 1]
+        odet.u_store[:, :, 1, 2] = ComplexF64[0.2 0; 0 3] .* colscale'
+        odet.u_store[:, :, 2, 2] = ComplexF64[1 0; 0 1] .* colscale'
+        # A reduction between the two steps that only rescaled the columns
+        odet.ifix = 1
+        odet.fixstep[1] = 1
+        odet.index[:, 1] = [1, 2]
+        odet.fixfac[:, :, 1] = Diagonal(ComplexF64.(colscale))
+        @test F.evaluate_stability_criterion!(odet, equil.profiles) == 1
+    end
+
     @testset "column_abstol" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         u = zeros(ComplexF64, 2, 2, 2)
