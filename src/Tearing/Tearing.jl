@@ -6,6 +6,8 @@
 #                  extraction (consumes any InnerLayerModel)
 #   CriticalResonantField -- real-Q torque-balance scan for the critical
 #                  resonant field of error-field penetration
+#   ModifiedRutherford -- terms of the steady modified Rutherford equation and
+#                  F(w) per surface, `solve(ModifiedRutherfordProblem(ffs; ...))`
 #   TearingProblem / TearingConfig / TearingResult -- the public solve,
 #                  `solve(TearingProblem(ffs; ...), model; config)`, with one
 #                  method per inner-layer model (SLAYERModel, GGJModel)
@@ -33,15 +35,19 @@ import ..InnerLayer as InnerLayer
 using .InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner, layer_response,
     SLAYERModel, SLAYERParameters, build_slayer_inputs,
     GGJModel, GGJParameters,
-    LayerWidths, slayer_layer_thickness
-using .InnerLayer.SLAYER: _slayer_profiles, _layer_zeff, _layer_ion_mass, _layer_mass_per_electron, _build_resistivity_model
+    LayerWidths, slayer_layer_thickness, layer_plasma
 
 include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")
 include("CriticalResonantField/CriticalResonantField.jl")
+include("ResonantForcing.jl")
+include("ModifiedRutherford/ModifiedRutherford.jl")
 
 import .Dispersion as Dispersion
 import .CriticalResonantField as CriticalResonantField
+import .ModifiedRutherford as ModifiedRutherford
+import .ResonantForcing as ResonantForcing
+using .ModifiedRutherford: ModifiedRutherfordProblem, ModifiedRutherfordResult
 using .Dispersion: SurfaceCoupling, surface_coupling,
     MultiSurfaceCoupling, multi_surface_coupling,
     ScanResult, brute_force_scan,
@@ -57,7 +63,8 @@ include("SLAYERTearing.jl")
 include("GGJTearing.jl")
 include("HDF5Output.jl")
 
-export InnerLayer, Dispersion, CriticalResonantField
+export InnerLayer, Dispersion, CriticalResonantField, ModifiedRutherford
+export ModifiedRutherfordProblem, ModifiedRutherfordResult
 export resistive_layer_overlap, layer_overlap_scan, LayerOverlapScan
 export TearingProblem, TearingConfig, TearingResult
 export run_slayer_from_inputs

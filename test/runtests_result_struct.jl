@@ -45,8 +45,9 @@ include("display_check.jl")
             ret = GeneralizedPerturbedEquilibrium.main([dir])
 
             # One field per stage, nothing for the sections the deck does not hold.
-            @test keys(ret) == (:equil, :local_stability, :ffs, :match, :resp, :pe, :kinetic, :error_fields, :tearing)
-            @test ret.equil === ret.ffs.equil && all(isnothing, (ret.match, ret.resp, ret.pe, ret.kinetic, ret.error_fields, ret.tearing))
+            @test keys(ret) == (:equil, :local_stability, :ffs, :match, :resp, :pe, :kinetic, :error_fields, :tearing, :modified_rutherford)
+            @test ret.equil === ret.ffs.equil &&
+                  all(isnothing, (ret.match, ret.resp, ret.pe, ret.kinetic, ret.error_fields, ret.tearing, ret.modified_rutherford))
             ffs = ret.ffs
             forward_result[] = ffs
             @test ffs isa FFS.ForceFreeStatesResult

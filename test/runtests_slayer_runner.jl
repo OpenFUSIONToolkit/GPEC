@@ -117,7 +117,7 @@
     @testset "SLAYER view of the kinetic profiles" begin
         kin_path = joinpath(dirname(@__DIR__), "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode_kinetic.h5")
         data = GeneralizedPerturbedEquilibrium.Equilibrium.read_kinetic_file(kin_path)
-        view = Tearing._slayer_profiles(data, SLAYERModel())
+        view = GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER._slayer_profiles(data, SLAYERModel())
         j = length(data.psi) ÷ 2
         @test view.profiles.n_e(data.psi[j]) ≈ data.n_e[j]
         @test view.profiles.omega_E(data.psi[j]) ≈ data.omega_E[j]
@@ -126,16 +126,17 @@
         @test view.has_omega_E
         # Without an E×B rotation profile the view records its absence and carries zero rotation.
         no_rotation = GeneralizedPerturbedEquilibrium.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_e=data.T_e, T_i=data.T_i)
-        bare_view = Tearing._slayer_profiles(no_rotation, SLAYERModel())
+        bare_view = GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER._slayer_profiles(no_rotation, SLAYERModel())
         @test !bare_view.has_omega_E
         @test bare_view.profiles.omega_E(data.psi[j]) == 0.0
-        @test_throws "missing required dataset 'T_i'" Tearing._slayer_profiles(
+        @test_throws "missing required dataset 'T_i'" GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER._slayer_profiles(
             GeneralizedPerturbedEquilibrium.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_e=data.T_e), SLAYERModel())
         # A non-positive chi_e stops the run only where it is used: chi_perp_Dc replaces it in the critical Δ.
         bad_chi_e = GeneralizedPerturbedEquilibrium.Equilibrium.KineticProfileData(; psi=data.psi, n_e=data.n_e, T_e=data.T_e, T_i=data.T_i,
             chi_e=fill(-1.0, length(data.psi)))
-        @test_throws "chi_e" Tearing._slayer_profiles(bad_chi_e, SLAYERModel(; P_perp_model=:tau_E, D_c_type=:toroidal))
-        @test Tearing._slayer_profiles(bad_chi_e, SLAYERModel(; P_perp_model=:tau_E, D_c_type=:toroidal, chi_perp_Dc=1.4)).chi_perp_e === nothing
+        @test_throws "chi_e" GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER._slayer_profiles(bad_chi_e, SLAYERModel(; P_perp_model=:tau_E, D_c_type=:toroidal))
+        @test GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER._slayer_profiles(bad_chi_e, SLAYERModel(; P_perp_model=:tau_E, D_c_type=:toroidal, chi_perp_Dc=1.4)).chi_perp_e ===
+              nothing
     end
 
     # Δ′ is unified across formalisms, so a Galerkin run feeds SLAYER exactly as a Riccati one
