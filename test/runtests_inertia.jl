@@ -166,6 +166,22 @@ include("h5_metadata_check.jl")
         @test all(h.nzero == 0 for h in gr.history)
         @test abs(minimum(real, gr.result.free_boundary.et)) <= 1e-6 * abs(gr.history[1].lambda)
         @test gr.result.closure == :regular && isnan(gr.omega_star_pi)
+        # The root is closed by Newton steps: with the Illinois iteration alone this search took 8 solves (7 inertial after the
+        # marginal one) to γ = 13543.63 s⁻¹, and rtol = 1e-3 on γ² is 5e-4 on γ
+        @test length(gr.history) < 8
+        @test gr.gamma ≈ 13543.63 rtol = 5e-4
+        # dλ_min/dγ² from the eigenmode's inertial energy against a central difference of λ_min. At the relative step
+        # h = 1e-3 the difference's truncation error is ~h²/6 (λ_min is smooth in γ² at this scale, λ″γ²/λ′ ≈ −0.25) and
+        # the 1e-8 integration tolerance adds ~1e-5, so the 1 % bound is two decades above the reference's own error;
+        # the measured disagreement is 1.3e-4.
+        gamma_sq, h = gr.gamma_sq, 1e-3
+        inertial_prob(factor, kinetic) = ForceBalanceProblem(kink_equil; nn=1, wall, ffs_kwargs..., singfac_min=0.0, kinetic, kinetic_factor=factor)
+        km = FFS.kinetic_matrices(inertial_prob(gamma_sq, inertia), forward)
+        below, at_root, above = (solve(inertial_prob(gamma_sq * f, km), forward) for f in (1 - h, 1, 1 + h))
+        slope = FFS.lambda_min_slope(at_root, FFS.inertia_band_splines(km))
+        @test slope > 0
+        @test slope ≈ (lambda_min(above) - lambda_min(below)) / (2h * gamma_sq) rtol = 1e-2
+        @test isnan(FFS.lambda_min_slope(gr.marginal, FFS.inertia_band_splines(km)))   # the ideal solve carries no inertia
         # Running out of iterations is reported, not hidden
         short = @test_logs (:warn, r"no convergence in 1 steps") match_mode = :any FFS.growth_rate(kink_prob, forward; inertia, maxiter=1, marginal=gr.marginal)
         @test !short.converged && short.gamma > 0 && short.result !== nothing
@@ -210,6 +226,24 @@ include("h5_metadata_check.jl")
         @test converged
         @test x ≈ 4e10 rtol = 1e-6
         @test nev[] == 3
+        # Newton steps from the end values' slopes reach the same root in fewer evaluations
+        function count_evaluations(; kwargs...)
+            n = Ref(0)
+            l(x) = (n[] += 1; log(x / 3e11))
+            x, converged, _, _ = FFS._sign_change_root(l, 1e11, 1e12, log(1 / 3), log(10 / 3); rtol=1e-3, ftol=1e-6, scale=1.0, maxiter=30, kwargs...)
+            return x, converged, n[]
+        end
+        x_secant, converged_secant, n_secant = count_evaluations()
+        x_newton, converged_newton, n_newton = count_evaluations(; slope=x -> 1 / x)
+        @test converged_secant && converged_newton
+        @test abs(x_newton / 3e11 - 1) < 1e-3 && abs(x_secant / 3e11 - 1) < 1e-3
+        @test n_newton < n_secant
+        # A slope that is missing or points out of the bracket leaves the bracketed iteration unchanged
+        @test count_evaluations(; slope=x -> NaN) == (x_secant, converged_secant, n_secant)
+        @test count_evaluations(; slope=x -> -1 / x) == (x_secant, converged_secant, n_secant)
+        # A Newton step that stalls hands over to the bracketed iteration: a slope 100 times too steep still converges
+        x_steep, converged_steep, _ = count_evaluations(; slope=x -> 100 / x)
+        @test converged_steep && abs(x_steep / 3e11 - 1) < 1e-3
         # maxiter exhausted is reported, never an end of the bracket as converged
         x, converged, lo, hi = FFS._sign_change_root(f, 1e11, 1e12, f(1e11), f(1e12); rtol=1e-12, ftol=0.0, scale=1.0, maxiter=3)
         @test !converged && lo < x <= hi && x < 1e12

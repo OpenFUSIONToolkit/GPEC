@@ -199,31 +199,120 @@ struct IdealGrowthRateResult
 end
 
 """
-    _sign_change_root(lambda_at, lo, hi, flo, fhi; rtol, ftol, scale, maxiter) -> (x, converged, lo, hi)
+    inertia_band_splines(km::KineticMatrices) -> (A, C, H)
 
-Root of `lambda_at` in the bracket `(lo, hi)` with `flo < 0 < fhi`, by the Illinois iteration (the retained
-end's value is halved when it is kept twice running) safeguarded by geometric bisection. The interpolated
-point is replaced by `sqrt(lo * hi)` when it is not strictly inside the bracket, which happens in floating
-point when one end value dwarfs the other, or when the same end has been kept three times running.
-Stops when `|lambda_at(x)| <= ftol * scale` or the bracket is narrower than `rtol * hi`.
+ψ-interpolants of the perpendicular-inertia bands per unit γ² (components A, C and H of `km.kw`), the
+kernel of the inertial energy in [`lambda_min_slope`](@ref).
 """
-function _sign_change_root(lambda_at, lo::Float64, hi::Float64, flo::Float64, fhi::Float64; rtol::Real, ftol::Real, scale::Real, maxiter::Int)
+inertia_band_splines(km::KineticMatrices) = ntuple(i -> cubic_interp(km.psi, Series(km.kw[:, :, (1, 3, 6)[i]]); extrap=ExtendExtrap()), 3)
+
+"""
+    lambda_min_slope(r::ForceFreeStatesResult, bands) -> Float64
+
+Derivative dλ_min/dγ² of the least-stable free-boundary energy of the inertial solve `r`, with `bands`
+the inertia bands of [`inertia_band_splines`](@ref). The edge energy Ξ†WΞ is the stationary value of
+δW + γ²K over the interior displacement at fixed edge Ξ, so its γ² derivative is the inertial energy of
+the solution itself, and for the Hermitian pencil W·v = λ·N·v of the free-boundary step
+(Hellmann–Feynman)
+
+    dλ_min/dγ² = ∫ (Ξ_s†A_ρΞ_s + 2Re Ξ_s†C_ρΞ + Ξ†H_ρΞ) dψ / (ψ₀² Ξ_a†NΞ_a),
+
+with Ξ the saved least-stable eigenmode, Ξ_s = −A⁻¹(BΞ′ + CΞ) its eliminated in-surface displacement
+[Glasser 2016 Eq. 18] with the inertial A and C, A_ρ, C_ρ, H_ρ the bands per unit γ², Ξ_a the edge value
+and N the power norm of the pencil. The integral is Simpson's rule over each saved step, with the midpoint
+Ξ and Ξ′ from the cubic Hermite interpolant of the stored Ξ, Ξ′ (both fourth-order there). The start
+of the integration at `psilow` is taken as γ²-independent. NaN when `r` carries no saved solution, no
+free-boundary energies or no kinetic matrices.
+"""
+function lambda_min_slope(r::ForceFreeStatesResult, bands)
+    sol, kin = r.solution, r.mats.kinetic
+    (sol === nothing || r.free_boundary === nothing || kin === nothing) && return NaN
+    nstep = size(sol.du_store, 3)
+    (nstep >= 2 && nstep == size(sol.u_store, 4)) || return NaN
+    np = r.numpert_total
+    amat, bmat, cmat = (Matrix{ComplexF64}(undef, np, np) for _ in 1:3)
+    xi_mid, dxi_mid, xi_s_mid = (Vector{ComplexF64}(undef, np) for _ in 1:3)
+    hint = Ref(1)
+    function density(psi, xi, xi_s)   # inertial energy density per unit γ²
+        bands[1](vec(amat), psi; hint)
+        bands[2](vec(cmat), psi; hint)
+        bands[3](vec(bmat), psi; hint)
+        return real(dot(xi_s, amat, xi_s) + 2 * dot(xi_s, cmat, xi) + dot(xi, bmat, xi))
+    end
+    mode(i) = (@view(sol.u_store[:, 1, 1, i]), @view(sol.du_store[:, 1, i]), @view(sol.xi_s_store[:, 1, i]))
+
+    energy = 0.0
+    xi0, dxi0, xi_s0 = mode(1)
+    d0 = density(sol.psi_store[1], xi0, xi_s0)
+    for i in 2:nstep
+        xi1, dxi1, xi_s1 = mode(i)
+        d1 = density(sol.psi_store[i], xi1, xi_s1)
+        h = sol.psi_store[i] - sol.psi_store[i-1]
+        if h > 0
+            psi = sol.psi_store[i-1] + h / 2
+            @. xi_mid = (xi0 + xi1) / 2 + h * (dxi0 - dxi1) / 8
+            @. dxi_mid = 3 * (xi1 - xi0) / (2h) - (dxi0 + dxi1) / 4
+            kin.A_spline(vec(amat), psi; hint)
+            kin.B_spline(vec(bmat), psi; hint)
+            kin.C_spline(vec(cmat), psi; hint)
+            mul!(xi_s_mid, bmat, dxi_mid)
+            mul!(xi_s_mid, cmat, xi_mid, -1, -1)
+            ldiv!(lu!(amat), xi_s_mid)
+            energy += h * (d0 + 4 * density(psi, xi_mid, xi_s_mid) + d1) / 6
+        end
+        xi0, dxi0, d0 = xi1, dxi1, d1
+    end
+
+    nmat = Matrix{ComplexF64}(undef, np, np)
+    jmat = Vector{ComplexF64}(undef, 2 * r.mpert - 1)
+    r.mats.ideal.J_spline(jmat, r.psilim; hint=Ref(1))
+    power_norm_matrix!(nmat, jmat, r.mpert, r.npert, r.equil.profiles.dVdpsi_spline(r.psilim))
+    xi_edge = @view sol.u_store[:, 1, 1, nstep]
+    return energy / (r.equil.psio^2 * real(dot(xi_edge, nmat, xi_edge)))
+end
+
+"""
+    _sign_change_root(lambda_at, lo, hi, flo, fhi; rtol, ftol, scale, maxiter, slope=nothing) -> (x, converged, lo, hi)
+
+Root of `lambda_at` in the bracket `(lo, hi)` with `flo < 0 < fhi`. With `slope` (a function giving
+dλ/dx at a point `lambda_at` has evaluated, the bracket ends included), each step is a Newton step from
+the bracket end with the smaller |λ| whenever that lands strictly inside the bracket; after a Newton step
+that does not at least halve |λ| the slope is no longer used. The fallback, and the whole iteration
+without `slope`, is the Illinois iteration (the retained end's value is halved when it is kept twice
+running) safeguarded by geometric bisection: the interpolated point is replaced by `sqrt(lo * hi)` when it
+is not strictly inside the bracket, which happens in floating point when one end value dwarfs the other,
+or when the same end has been kept three times running. Stops when `|lambda_at(x)| <= ftol * scale` or the
+bracket is narrower than `rtol * hi`.
+"""
+function _sign_change_root(lambda_at, lo::Float64, hi::Float64, flo::Float64, fhi::Float64; rtol::Real, ftol::Real, scale::Real, maxiter::Int, slope=nothing)
     x, side, kept = hi, 0, 0
+    lam_lo, lam_hi = flo, fhi   # the end values themselves; flo and fhi carry the Illinois halvings
+    newton_ok = slope !== nothing
     for _ in 1:maxiter
-        x = (lo * fhi - hi * flo) / (fhi - flo)
-        (kept >= 3 || !(lo < x < hi)) && (x = sqrt(lo * hi))
+        base, lam_base = abs(lam_lo) <= abs(lam_hi) ? (lo, lam_lo) : (hi, lam_hi)
+        x = newton_ok ? base - lam_base / slope(base) : NaN
+        newton = lo < x < hi   # false for a NaN or non-positive slope
+        if !newton
+            x = (lo * fhi - hi * flo) / (fhi - flo)
+            (kept >= 3 || !(lo < x < hi)) && (x = sqrt(lo * hi))
+        end
         lam = lambda_at(x)
         abs(lam) <= ftol * scale && return x, true, lo, hi
+        halved = newton && 2 * abs(lam) <= abs(lam_base)
+        newton_ok = newton_ok && (!newton || halved)
         newside = lam < 0 ? -1 : 1
         kept = newside == side ? kept + 1 : 1
         if lam < 0
-            lo, flo = x, lam
+            lo, flo, lam_lo = x, lam, lam
             side == -1 && (fhi /= 2)
         else
-            hi, fhi = x, lam
+            hi, fhi, lam_hi = x, lam, lam
             side == 1 && (flo /= 2)
         end
         side = newside
+        if halved   # a successful Newton step restarts the Illinois bookkeeping from the end values
+            flo, fhi, side, kept = lam_lo, lam_hi, 0, 0
+        end
         hi - lo <= rtol * hi && return x, true, lo, hi
     end
     return x, false, lo, hi
@@ -243,8 +332,11 @@ zero the plasma is stable and `gamma` is 0. Otherwise the count is bracketed by 
 `gamma_sq_init` (down while nothing is faster, up while something still is). An interior crossing still
 present at the lower end is a fixed-boundary eigenvalue inside the bracket, where λ_min has a pole; since
 the fastest mode is free-boundary and at least as fast as any fixed-boundary one, the lower end is lifted
-above it by bisecting on the count. Then only λ_min changes sign in the bracket and a bracketed secant
-(Illinois) iteration, safeguarded by bisection, brings it to zero, stopping when |λ_min| falls below `ftol` times the reference
+above it by bisecting on the count. Then only λ_min changes sign in the bracket and Newton steps on γ² bring it to
+zero, each from the bracket end with the smaller |λ_min| and with the slope dλ_min/dγ² taken from that solve's own
+eigenmode as its inertial energy ([`lambda_min_slope`](@ref)), at no further solve; a step that would leave the
+bracket, and every step after a Newton step that did not halve |λ_min|, is a bracketed secant (Illinois) step
+safeguarded by bisection instead. The iteration stops when |λ_min| falls below `ftol` times the reference
 |λ_min| (the marginal value, or the bracket's negative end when the marginal energy is positive) or the
 bracket is narrower than `rtol` in γ², within `maxiter` steps (a warning and `converged = false`
 otherwise). Every evaluation is one force-balance solve. `gamma_sq_min` is the floor below which the mode
@@ -304,6 +396,8 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
     kwargs[:kinetic] = inertia
     kwargs[:kinetic_factor] = Float64(gamma_sq_init)
     kwargs[:kinetic] = kinetic_matrices(ForceBalanceProblem(prob.equil, prob.wall, kwargs), alg; verbose)   # the bands once, reused at every γ²
+    bands = inertia_band_splines(kwargs[:kinetic])
+    slopes = Dict{Float64,Float64}()   # γ² → dλ_min/dγ² of that solve's eigenmode
     seen = Dict{Float64,Int}()   # γ² → history index; each γ² is one solve
     function evaluate(gamma_sq)
         gamma_sq = Float64(gamma_sq)
@@ -314,6 +408,7 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         check_flags(r, gamma_sq)
         push!(history, (gamma_sq=gamma_sq, lambda=lambda_min(r), nzero=r.diagnostics.nzero_conj))
         seen[gamma_sq] = length(history)
+        slopes[gamma_sq] = lambda_min_slope(r, bands)
         below = faster(history[end]) > 0   # this γ² is below the fastest root
         haskey(bracket_end, below) && delete!(solves, bracket_end[below])
         bracket_end[below] = gamma_sq
@@ -363,7 +458,7 @@ function growth_rate(prob::ForceBalanceProblem, alg::Forward; inertia::Perpendic
         h.nzero == 0 || error("growth_rate: an interior zero crossing appeared inside the bracket at γ² = $gamma_sq; the free-boundary energy is not monotone there")
         return h.lambda
     end
-    gamma_sq, converged, lo, hi = _sign_change_root(lambda_at, lo, hi, h_lo.lambda, h_hi.lambda; rtol, ftol, scale, maxiter)
+    gamma_sq, converged, lo, hi = _sign_change_root(lambda_at, lo, hi, h_lo.lambda, h_hi.lambda; rtol, ftol, scale, maxiter, slope=x -> slopes[x])
     converged || @warn "growth_rate: no convergence in $maxiter steps; γ² lies in [$lo, $hi] and the last iterate $gamma_sq is reported"
     return finish(gamma_sq, converged)
 end
