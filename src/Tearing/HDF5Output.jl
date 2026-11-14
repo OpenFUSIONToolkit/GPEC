@@ -13,7 +13,7 @@ import ..Utilities.HDF5Annotations: replace_group!, ensure_group, write_ragged!
 #   │                             uncoupled entries are in each surface's E×B frame
 #   ├── Scan/                  -- optional: full Q/Δ scan data
 #   ├── CriticalResonantField/ -- optional: torque-balance critical b_r/B_φ per surface
-#   └── IslandFlattening/      -- its own result; a TearingResult save replaces Tearing/, so it is written after
+#   └── IslandFlattening/      -- its own result, written after the TearingResult in a deck run
 
 using HDF5
 

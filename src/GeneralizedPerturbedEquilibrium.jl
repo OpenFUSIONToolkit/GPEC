@@ -224,7 +224,7 @@ function main_from_inputs(
         save_to_hdf5(output_file, tearing)
     end
 
-    # After the tearing save, which replaces Tearing/.
+    # After the tearing save, which rewrites Tearing/.
     if deck.island_flattening !== nothing
         island_flat = _timed_stage(runtimes, "island_flattening", "Island Flattening") do
             island_flattening(equil; widths=deck.island_flattening)
