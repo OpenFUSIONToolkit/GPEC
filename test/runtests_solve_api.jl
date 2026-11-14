@@ -645,5 +645,26 @@ include("display_check.jl")
                 @test minimum(raised.kinetic.total.method_results["fgar"].psi_grid) >= raised.pe.psi_grid[1]
             end
         end
+
+        @testset "island flattening" begin
+            # [Tearing.IslandFlattening] alone runs no layer solve; it is island_flattening on the solve's equilibrium.
+            widths = Dict{String,Any}("2/1" => 0.05, "3/1" => 0.02)
+            extra = Dict{String,Any}("Tearing" => Dict{String,Any}("IslandFlattening" => Dict{String,Any}("widths" => widths)))
+            mktempdir() do dir
+                reference = GPEC.main([_stage_deck(dir; extra_sections=extra)])
+                @test reference.tearing === nothing
+                api = island_flattening(reference.ffs.equil; widths)
+                @test api.delta_W == reference.island_flattening.delta_W
+                @test api.p_mod == reference.island_flattening.p_mod
+                h5open(joinpath(dir, "gpec.h5")) do f
+                    @test read(f["Tearing/IslandFlattening/delta_W"]) == api.delta_W
+                    replay = GPEC.parse_deck(TOML.parse(read(f["Input/gpec_toml_raw"])), dir)
+                    @test replay.island_flattening == Dict{String,Float64}(widths)
+                    @test replay.tearing === nothing
+                end
+                @test_throws ArgumentError GPEC.island_flattening_from_deck(Dict("Tearing" => Dict("IslandFlattening" => Dict("widths" => 0.05))))
+                @test_throws ArgumentError GPEC.island_flattening_from_deck(Dict("Tearing" => Dict("IslandFlattening" => Dict("width" => widths))))
+            end
+        end
     end
 end

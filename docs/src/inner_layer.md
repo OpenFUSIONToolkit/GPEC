@@ -12,6 +12,7 @@ Two layer models are available, selected by `[Tearing] inner_model`:
 
 For each surface the `Dispersion` search scans the complex frequency plane, extracts the roots of the dispersion relation and classifies them, and `[Tearing.search]` sets the scan.
 With `[Tearing.CriticalResonantField]` the stage also computes, for the `SLAYER` layer, the resonant field at which a static error field overcomes the layer's shielding: the error-field penetration threshold.
+`[Tearing.IslandFlattening]` flattens the equilibrium pressure across islands of given width and reports the stored energy and pressure they remove; it needs no layer solve and runs alone when it is the only part of `[Tearing]`.
 
 The same GGJ layer serves the `[Match]` stage of the [Workflow](workflow.md), which does the complementary job: instead of finding the free modes it imposes the layer response on the driven force-free states and writes the matched solution to `SingularSurfaces/Match/`.
 
@@ -48,6 +49,22 @@ Each surface uses its own stability parameter ``\alpha = S^{-1/3}(\Delta_\mathrm
 Penetration is the first resolved saddle-node bifurcation on the path from ``Q_0`` toward the electron fluid at ``Q_e``, above which the shielded branch no longer exists; small numerical extrema and the unshielded zone next to ``Q_e`` are excluded, and a surface without a resolved bifurcation reports NaN.
 `br_crit` is normalized by the toroidal field, and `br_crit_tesla = br_crit·|B0|` is the quantity to compare with `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, the total resonant field of the ideal response; the comparison is approximate, since the theory's ``b_r`` is a cylindrical field at the layer.
 
+### Island flattening
+
+Inside a magnetic island the pressure is flattened along the field, so ``dp/d\psi = 0`` there; outside it the gradient is unchanged.
+For a set of islands of full width ``w`` (ψ_N) centred on their rational surfaces, the flattened intervals are merged where islands overlap, so an overlap is counted once, and the pressure is anchored at its value on the last profile point and integrated inward, as in Fortran GPEC's saturated-island profile.
+For merged intervals ``[a_k, b_k]`` the integral is exact:
+
+```math
+p_\mathrm{mod}(\psi) = p(\psi) + \sum_{k:\, b_k > \psi} \left[p(b_k) - p(\max(\psi, a_k))\right],
+\qquad
+\Delta W = \tfrac{3}{2}\int (p - p_\mathrm{mod})\, dV .
+```
+
+Every point inward of an interval drops by ``p(a_k) - p(b_k)``, the pedestal-top pressure change when the interval is at the edge.
+Given a bootstrap profile ``\langle j_\mathrm{bs}\cdot B\rangle(\psi)`` (the `jbs_B` keyword of `island_flattening`), the result also carries the bootstrap current removed: to leading order ``j_\mathrm{bs} \propto p'``, so it vanishes on the flattened intervals and is unchanged elsewhere.
+The flattening is static: the equilibrium is not re-solved with the modified pressure, and island widths are inputs rather than evolved.
+
 ## Running it
 
 From `examples/DIIID-like_SLAYER_example/gpec.toml`, after a `[ForceFreeStates]` solve with `integrator = "Riccati"` and `vac_flag = true` (or `"Galerkin"` with `rpec_flag = true`), which provides the Δ′ matrix, and with a kinetic file on the equilibrium:
@@ -78,6 +95,14 @@ D_c_type = "none"                 # critical-Δ offset from parallel transport (
 P_perp_model = "D_perp"           # how the perpendicular Prandtl number is built (below)
 ```
 
+The flattening takes full island widths in ψ_N keyed by surface; every q = m/n surface of the equilibrium gets its key's width:
+
+```toml
+[Tearing.IslandFlattening]
+widths = { "2/1" = 0.05, "3/2" = 0.03 }
+```
+
+In a script, `island_flattening(ffs.equil; widths=Dict("2/1" => 0.05))` gives the same result.
 In a script, `solve(TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl()), SLAYERModel(); config=TearingConfig(...))` runs the same stage, and `solve_inner(GGJModel(), p, γ)` evaluates one GGJ layer at a growth rate ``\gamma``.
 GGJ's η and ρ default from the kinetic data (η by the resistivity closure SLAYER uses, ρ = μ·m_p·n_e); pass `eta` and `rho` to `TearingProblem` to override them.
 
@@ -103,6 +128,9 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/Diagnostics/ValidRoots`, `Poles`, `FilteredRoots` | the root classification of the scan |
 | `Tearing/Scan/Surface_<k>/` | the scanned Δ(Q) with `store_scan = true` |
 | `Tearing/CriticalResonantField/br_crit`, `br_crit_tesla`, `Q_peak`, `Q0` | the penetration threshold as ``b_r/B_\phi`` and in tesla, the Q of the balance maximum and the natural rotation |
+| `Tearing/IslandFlattening/W`, `delta_W`, `delta_W_over_W`, `delta_p0` | the stored energy, the part the islands remove and its fraction, and the on-axis pressure drop |
+| `Tearing/IslandFlattening/Islands/`, `Intervals/` | each island (m, n, ψ_N, w, its clipped interval) and the merged flattened intervals with the pressure drop across each |
+| `Tearing/IslandFlattening/Profiles/psi`, `p`, `p_mod` | the equilibrium and flattened pressure (Pa), with `jbs_B` and `jbs_B_mod` when a bootstrap profile was given |
 
 ## Numerical notes
 
@@ -174,4 +202,10 @@ Modules = [GeneralizedPerturbedEquilibrium.Tearing.Dispersion]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantField]
+```
+
+### IslandFlattening
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Tearing.IslandFlattening]
 ```

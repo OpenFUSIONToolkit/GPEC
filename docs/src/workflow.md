@@ -161,7 +161,7 @@ The keys each section accepts are the fields of its control struct, listed in th
 | `[ForcingTerms]`, `[[ForcingTerms.coil_set]]` | the external field: a file or coil sets | [Forcing Terms](forcing_terms.md) |
 | `[PerturbedEquilibrium]` | the plasma response stage and its singular-coupling options | [Perturbed Equilibrium](perturbed_equilibrium.md) |
 | `[KineticForces]` | the NTV torque stage and the kinetic solve of `ForceFreeStates` | [Kinetic Forces](kinetic_forces.md) |
-| `[Tearing]`, `[Tearing.search]`, `[Tearing.CriticalResonantField]`, `[SLAYER]` | the tearing stage, its root search, the critical field and the SLAYER layer model | [Tearing](inner_layer.md) |
+| `[Tearing]`, `[Tearing.search]`, `[Tearing.CriticalResonantField]`, `[Tearing.IslandFlattening]`, `[SLAYER]` | the tearing stage, its root search, the critical field, the island pressure flattening and the SLAYER layer model | [Tearing](inner_layer.md) |
 | `[ErrorFields]`, `[ErrorFields.MonteCarlo]`, `[ErrorFields.scenario]`, `[ErrorFields.Risk]`, `[ErrorFields.NTV]` | the error-field tolerance stage | [Error Fields](error_fields.md) |
 
 ## Running it
@@ -216,7 +216,7 @@ All results are written to one HDF5 file (`[Run] output_file`, default `gpec.h5`
 | `PerturbedEquilibrium/` | `ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/` |
 | `KineticForces/` | `<method>/` torque and energy profiles; `PerSpecies/<species>/<method>/` for multi-ion runs |
 | `ErrorFields/` | `CoilSensitivities/`, `MonteCarlo/`, `Risk/`, `NTV/` |
-| `Tearing/` | `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/` |
+| `Tearing/` | `PerSurface/`, `Roots/`, `LayerWidths/`, `Diagnostics/`, `CriticalResonantField/`, `IslandFlattening/` |
 | `SurfaceGeometries/` | Plasma and wall surface point clouds for visualization |
 
 ### Replaying a run
