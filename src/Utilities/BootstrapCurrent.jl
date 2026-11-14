@@ -199,7 +199,8 @@ function bootstrap_current(equil, kinetic=equil.kinetic; psi_N=range(0.05, 0.95;
         throw(ArgumentError("bootstrap_current: psi_N needs at least three strictly increasing points inside (0, 1)"))
     interp(y) = (itp = cubic_interp(kinetic.psi, y); [itp(xi) for xi in x])
     ne, ni, Te, Ti = interp(kinetic.n_e), interp(kinetic.n_i), interp(kinetic.T_e), interp(kinetic.T_i)
-    # Z_eff as the inner layers take it: the file's profile, else quasi-neutrality with one impurity and a charge-1 main ion.
+    # Z_eff as the inner layers take it: the file's profile, else quasi-neutrality with one impurity and a charge-1 main ion;
+    # the floor at 1 hides an n_i > n_e inconsistency in the file.
     # An all-zero `zeff` column counts as absent.
     Zeff = if kinetic.zeff !== nothing && !all(iszero, kinetic.zeff)
         minimum(kinetic.zeff) >= 1 - 1e-8 || throw(ArgumentError("bootstrap_current: zeff = $(minimum(kinetic.zeff)) < 1 is unphysical"))
