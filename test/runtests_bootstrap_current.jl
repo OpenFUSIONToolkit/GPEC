@@ -89,6 +89,11 @@ using GeneralizedPerturbedEquilibrium
         end
     end
 
+    @testset "Second-order gradient is exact for quadratics on a non-uniform grid" begin
+        x = [0.0, 0.1, 0.25, 0.3, 0.5, 0.8, 0.85, 1.0]
+        @test BC._gradient(x, 3 .* x .^ 2 .- 2 .* x .+ 1) ≈ 6 .* x .- 2 rtol = 1e-12
+    end
+
     @testset "End to end on a DIII-D-like equilibrium with kinetic profiles" begin
         dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_SLAYER_example")
         inputs = TOML.parsefile(joinpath(dir, "gpec.toml"))
@@ -108,8 +113,9 @@ using GeneralizedPerturbedEquilibrium
         vp = [prof.dVdpsi_spline(xi) for xi in x]
         trapz(f) = sum((f[1:(end-1)] .+ f[2:end]) ./ 2 .* diff(x))
         frac = trapz(jphiR_bs .* vp) / trapz(jphiR_tot .* vp)
-        @info "Bootstrap end-to-end" fraction = frac jdotB_at = Dict(xi => r.jdotB[findmin(abs.(x .- xi))[2]] for xi in (0.2, 0.5, 0.8, 0.9)) f_t_mid = r.f_t[46] nu_e_mid =
-            r.nu_e_star[46]
         @test 0.02 < frac < 0.8
+        @test_throws ArgumentError BC.bootstrap_current(equil; psi_N=[0.2, 0.5])
+        @test_throws ArgumentError BC.bootstrap_current(equil; psi_N=[0.5, 0.3, 0.7])
+        @test_throws ArgumentError BC.bootstrap_current(equil; psi_N=[0.0, 0.5, 0.9])
     end
 end

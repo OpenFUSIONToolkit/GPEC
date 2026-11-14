@@ -163,7 +163,7 @@ function surface_moments(equil, psi_N::Real)
         avg_B2=avg(B .^ 2), avg_invR=avg(1 ./ R), avg_invR2=avg(1 ./ R .^ 2))
 end
 
-# numpy.gradient(y, x, edge_order=2) on a non-uniform grid
+# Second-order differences on a non-uniform grid, as TokaMaker's gradient_ (numpy.gradient, edge_order=2)
 function _gradient(x::AbstractVector, y::AbstractVector)
     n = length(x)
     d = zeros(n)
@@ -184,8 +184,10 @@ end
 Bootstrap current profiles on `psi_N` for a `PlasmaEquilibrium` and its `KineticProfileData` (needs `n_e`, `n_i`, `T_e`, `T_i`; `Z_eff` is the
 `zeff` profile, else quasi-neutrality with one impurity of `impurity_charge` and a charge-1 main ion). The kinetic columns are cubic-spline interpolated onto `psi_N` and differentiated by
 second-order finite differences in ψ = psio ψ_N, as TokaMaker does, so a fine `psi_N` grid is needed for smooth gradients.
+`psi_N` must hold at least three strictly increasing points inside (0, 1).
 Returns `psi_N`, `jdotB` (⟨j_bs·B⟩ [T A/m²]), `jphi_bs = ⟨j_bs·B⟩ F⟨1/R⟩/⟨B²⟩` [A/m²], `f_t`, `nu_e_star`, `nu_i_star`, `eps`, `R_geo`, `q`, `F`,
-`avg_B2`, `avg_invR`, `avg_invR2`, `L31`, `L32`, `L34`, `alpha`.
+`avg_B2`, `avg_invR`, `avg_invR2`, `L31`, `L32`, `L34`, `alpha`. `jphi_bs` is the field-aligned part only; TokaMaker's `jphi_bs`
+also adds the pressure-driven term P′(⟨R⟩ − F²⟨1/R⟩/⟨B²⟩).
 """
 function bootstrap_current(equil, kinetic=equil.kinetic; psi_N=range(0.05, 0.95; length=91), Z_dom::Real=1)
     kinetic === nothing && throw(ArgumentError("bootstrap_current: no kinetic profiles attached"))
@@ -193,13 +195,18 @@ function bootstrap_current(equil, kinetic=equil.kinetic; psi_N=range(0.05, 0.95;
         getfield(kinetic, name) === nothing && throw(ArgumentError("bootstrap_current: kinetic profile $name is missing"))
     end
     x = collect(Float64, psi_N)
+    (length(x) >= 3 && all(>(0), diff(x)) && 0 < x[1] && x[end] < 1) ||
+        throw(ArgumentError("bootstrap_current: psi_N needs at least three strictly increasing points inside (0, 1)"))
     interp(y) = (itp = cubic_interp(kinetic.psi, y); [itp(xi) for xi in x])
     ne, ni, Te, Ti = interp(kinetic.n_e), interp(kinetic.n_i), interp(kinetic.T_e), interp(kinetic.T_i)
     # Z_eff as the inner layers take it: the file's profile, else quasi-neutrality with one impurity and a charge-1 main ion.
+    # An all-zero `zeff` column counts as absent.
     Zeff = if kinetic.zeff !== nothing && !all(iszero, kinetic.zeff)
+        minimum(kinetic.zeff) >= 1 - 1e-8 || throw(ArgumentError("bootstrap_current: zeff = $(minimum(kinetic.zeff)) < 1 is unphysical"))
         interp(kinetic.zeff)
     else
         zimp = Float64(kinetic.impurity_charge)
+        zimp >= 1 || throw(ArgumentError("bootstrap_current: impurity_charge = $zimp < 1 is unphysical"))
         [max(zimp - (nii / nee) * (zimp - 1), 1.0) for (nii, nee) in zip(ni, ne)]
     end
     psi = equil.psio .* x
