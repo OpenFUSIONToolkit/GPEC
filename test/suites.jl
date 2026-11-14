@@ -1,6 +1,7 @@
 # Keep the full suite order while assigning each file to exactly one CI group.
 const TEST_SUITES = [
     "runtests_utilities.jl" => "core",
+    "runtests_bootstrap_current.jl" => "core",
     "runtests_fouriertransforms.jl" => "core",
     "runtests_vacuum.jl" => "core",
     "runtests_equil.jl" => "core",
