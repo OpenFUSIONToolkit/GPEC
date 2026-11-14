@@ -94,7 +94,9 @@ a comparison, and the exit-status contract are documented in
 
 ### Precompile workload
 
-Building the package runs a small Solovev case through the solver so that a fresh Julia process
+Building the package runs two small cases through every stage of a full run (a Solovev case through
+the Riccati, forward and Galerkin stability solves, and a TJ-analytic case with kinetic profiles and
+coil forcing through the perturbed equilibrium and the kinetic torque) so that a fresh Julia process
 skips most first-call compilation, at the cost of a longer one-time build. Code compiled into the
 package image can round differently in the last bit from code compiled on first use, and
 near-marginal quantities such as Δ′ amplify that, so results are reproducible only within one
