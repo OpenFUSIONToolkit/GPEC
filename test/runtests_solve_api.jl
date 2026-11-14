@@ -657,7 +657,7 @@ include("display_check.jl")
                 @test api.delta_W == reference.island_flattening.delta_W
                 @test api.p_mod == reference.island_flattening.p_mod
                 h5open(joinpath(dir, "gpec.h5")) do f
-                    @test read(f["Tearing/IslandFlattening/delta_W"]) == api.delta_W
+                    @test read(f["Tearing/IslandFlattening/Delta_W"]) == api.delta_W
                     replay = GPEC.parse_deck(TOML.parse(read(f["Input/gpec_toml_raw"])), dir)
                     @test replay.island_flattening == Dict{String,Float64}(widths)
                     @test replay.tearing === nothing

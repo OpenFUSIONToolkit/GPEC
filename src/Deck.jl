@@ -362,7 +362,7 @@ function tearing_from_deck(inputs::AbstractDict)
     haskey(inputs, "Tearing") || return nothing
     # A [Tearing] holding only [Tearing.IslandFlattening] runs the flattening without a layer solve.
     table = _without(inputs["Tearing"], "IslandFlattening")
-    isempty(table) && return nothing
+    isempty(table) && haskey(inputs["Tearing"], "IslandFlattening") && return nothing
     get(table, "omega_E_kHz", Dict{String,Any}()) isa AbstractDict ||
         throw(ArgumentError("[Tearing] omega_E_kHz must be a table keyed by m/n, e.g. omega_E_kHz = { \"2/1\" = 3.0 }"))
     fields = _struct_fields(TearingProblem, (:ffs, :critical_resonant_field))

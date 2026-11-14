@@ -42,10 +42,11 @@ Static flattening of the equilibrium pressure across `islands`.
     flattened pressures on it (Pa)
   - `W`, `delta_W`: stored energy (3/2)∫p dV and the part the islands remove (J)
   - `delta_p0`: on-axis pressure drop, the sum of `delta_p` (Pa)
-  - `jbs_B`, `jbs_B_mod`, `jbs_fraction_lost`: the given bootstrap ⟨j_bs·B⟩ on `psi`, the
-    same with the flattened intervals removed, and the volume-integrated fraction removed;
-    empty and NaN when no profile was given. To leading order j_bs ∝ p′, so it vanishes
-    where p′ does and is unchanged elsewhere.
+  - `jbs_B`, `jbs_B_mod`, `jbs_fraction_lost`: the given bootstrap profile on `psi`, the same
+    with the flattened intervals removed, and the fraction of its volume integral on them;
+    empty and NaN when no profile was given. To leading order j_bs ∝ p′, so it vanishes where
+    p′ does and is unchanged elsewhere. For ⟨j_bs·B⟩ the fraction is of ∫⟨j_bs·B⟩dV; for the
+    toroidal bootstrap current pass j_φ⟨1/R⟩, since dA = ⟨1/R⟩dV/2π.
 """
 struct IslandFlatteningResult
     widths::Dict{String,Float64}
@@ -100,8 +101,10 @@ end
     island_flattening(equil; widths, jbs_B=nothing) -> IslandFlatteningResult
 
 Flatten the pressure of `equil` across an island of full width `widths["m/n"]` (ψ_N) at
-every rational surface q = m/n. `jbs_B`, a function of ψ_N giving ⟨j_bs·B⟩, adds the
-bootstrap current the flattening removes.
+every rational surface q = m/n (m, n > 0). `jbs_B`, a function of ψ_N giving a bootstrap
+profile, adds the part the flattening removes. The pressure is anchored at the last point of
+the equilibrium profile grid, so for an island reaching the edge the result depends on where
+that grid ends.
 """
 function island_flattening(equil::PlasmaEquilibrium; widths::AbstractDict, jbs_B=nothing)
     prof = equil.profiles

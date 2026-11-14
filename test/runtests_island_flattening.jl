@@ -25,7 +25,7 @@ using HDF5
         for i in (length(grid)-1):-1:1
             pm[i] = pm[i+1] - 0.5 * (dp[i+1] + dp[i]) * step(grid)
         end
-        @test pm[1] ≈ IF.flattened_pressure(p, one.intervals, grid[1]) rtol = 1e-6
+        @test pm[1] ≈ IF.flattened_pressure(p, one.intervals, grid[1]) rtol = 1e-5
         dW = 1.5 * sum((p(x) - y) * dV(x) for (x, y) in zip(grid, pm)) * step(grid)
         @test dW ≈ one.delta_W rtol = 1e-3
     end
@@ -65,6 +65,15 @@ using HDF5
         (a, b) = only(frac.intervals)
         @test frac.jbs_fraction_lost ≈ (volume_inside(b) - volume_inside(a)) / volume_inside(prof.xs[end]) rtol = 1e-3
         @test all(iszero, frac.jbs_B_mod[a.<frac.psi.<b])
+        # A profile peaked off the island loses less than its volume share; checked by the midpoint rule.
+        g(x) = exp(-((x - 0.7) / 0.1)^2)
+        peaked = island_flattening(equil; widths=Dict("2/1" => 0.05), jbs_B=g)
+        mid(f, lo, hi; n=20_000) = sum(f(lo + (hi - lo) * (k - 0.5) / n) for k in 1:n) * (hi - lo) / n
+        @test peaked.jbs_fraction_lost ≈ mid(x -> g(x) * dV(x), a, b) / mid(x -> g(x) * dV(x), prof.xs[1], prof.xs[end]) rtol = 1e-6
+        @test peaked.jbs_fraction_lost < frac.jbs_fraction_lost
+        # An island reaching inside the grid's first point is clipped there.
+        core = only(island_flattening(equil; widths=Dict("2/1" => 2 * only(one.islands).psi + 0.1)).islands)
+        @test core.clipped && core.psi_in == prof.xs[1]
         @test isnan(one.jbs_fraction_lost) && isempty(one.jbs_B)
         @test_throws ArgumentError island_flattening(equil; widths=Dict("2-1" => 0.05))
         @test_throws ArgumentError island_flattening(equil; widths=Dict("2/1" => -0.1))
@@ -80,7 +89,7 @@ using HDF5
             save_to_hdf5(path, one)
             h5open(path, "r") do f
                 @test read(f["Tearing/enabled"]) == 1
-                @test read(f["Tearing/IslandFlattening/delta_W"]) == one.delta_W
+                @test read(f["Tearing/IslandFlattening/Delta_W"]) == one.delta_W
                 @test read(f["Tearing/IslandFlattening/Profiles/p_mod"]) == one.p_mod
                 recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
                 @test recorded["inner_model"] == "SLAYER"

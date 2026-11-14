@@ -62,7 +62,9 @@ p_\mathrm{mod}(\psi) = p(\psi) + \sum_{k:\, b_k > \psi} \left[p(b_k) - p(\max(\p
 ```
 
 Every point inward of an interval drops by ``p(a_k) - p(b_k)``, the pedestal-top pressure change when the interval is at the edge.
-Given a bootstrap profile ``\langle j_\mathrm{bs}\cdot B\rangle(\psi)`` (the `jbs_B` keyword of `island_flattening`), the result also carries the bootstrap current removed: to leading order ``j_\mathrm{bs} \propto p'``, so it vanishes on the flattened intervals and is unchanged elsewhere.
+Given a bootstrap profile (the `jbs_B` keyword of `island_flattening`), the result also carries the part the islands remove: to leading order ``j_\mathrm{bs} \propto p'``, so it vanishes on the flattened intervals and is unchanged elsewhere, and `jbs_fraction_lost` is the fraction of its volume integral on them.
+For ``\langle j_\mathrm{bs}\cdot B\rangle`` that is a fraction of ``\int\langle j_\mathrm{bs}\cdot B\rangle\,dV``; for the toroidal bootstrap current pass ``j_\phi\langle R^{-1}\rangle``, since ``dA = \langle R^{-1}\rangle\,dV/2\pi`` on axisymmetric surfaces.
+The pressure is anchored at the last point of the equilibrium profile grid, so for an island reaching the edge the result depends on where that grid ends.
 The flattening is static: the equilibrium is not re-solved with the modified pressure, and island widths are inputs rather than evolved.
 
 ## Running it
@@ -103,6 +105,7 @@ widths = { "2/1" = 0.05, "3/2" = 0.03 }
 ```
 
 In a script, `island_flattening(ffs.equil; widths=Dict("2/1" => 0.05))` gives the same result.
+
 In a script, `solve(TearingProblem(ffs; critical_resonant_field=CriticalResonantFieldControl()), SLAYERModel(); config=TearingConfig(...))` runs the same stage, and `solve_inner(GGJModel(), p, γ)` evaluates one GGJ layer at a growth rate ``\gamma``.
 GGJ's η and ρ default from the kinetic data (η by the resistivity closure SLAYER uses, ρ = μ·m_p·n_e); pass `eta` and `rho` to `TearingProblem` to override them.
 
@@ -128,8 +131,8 @@ The DIII-D-like kinetic file of the examples carries analytic χ profiles of the
 | `Tearing/Diagnostics/ValidRoots`, `Poles`, `FilteredRoots` | the root classification of the scan |
 | `Tearing/Scan/Surface_<k>/` | the scanned Δ(Q) with `store_scan = true` |
 | `Tearing/CriticalResonantField/br_crit`, `br_crit_tesla`, `Q_peak`, `Q0` | the penetration threshold as ``b_r/B_\phi`` and in tesla, the Q of the balance maximum and the natural rotation |
-| `Tearing/IslandFlattening/W`, `delta_W`, `delta_W_over_W`, `delta_p0` | the stored energy, the part the islands remove and its fraction, and the on-axis pressure drop |
-| `Tearing/IslandFlattening/Islands/`, `Intervals/` | each island (m, n, ψ_N, w, its clipped interval) and the merged flattened intervals with the pressure drop across each |
+| `Tearing/IslandFlattening/W`, `Delta_W`, `Delta_W_over_W`, `Delta_p0` | the stored energy, the part the islands remove and its fraction, and the on-axis pressure drop |
+| `Tearing/IslandFlattening/Islands/`, `Intervals/` | each island (`rational_m`, `rational_n`, `rational_psi`, its clipped interval) and the merged flattened intervals with the pressure drop `Delta_p` across each |
 | `Tearing/IslandFlattening/Profiles/psi`, `p`, `p_mod` | the equilibrium and flattened pressure (Pa), with `jbs_B` and `jbs_B_mod` when a bootstrap profile was given |
 
 ## Numerical notes

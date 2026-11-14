@@ -370,26 +370,25 @@ end
 
 # ---------- island flattening ----------
 const ISLAND_FLATTENING_H5_ANNOTATIONS = [
-    "Islands/m" => (; long_name="poloidal mode number m of each island", dims=("island",)),
-    "Islands/n" => (; long_name="toroidal mode number n of each island", dims=("island",)),
-    "Islands/psi" => (; long_name="rational surface ψ_N of each island", dims=("island",)),
-    "Islands/w" => (; long_name="full island width in ψ_N", dims=("island",)),
+    "Islands/rational_m" => (; long_name="poloidal mode number m of each island", dims=("island",)),
+    "Islands/rational_n" => (; long_name="toroidal mode number n of each island", dims=("island",)),
+    "Islands/rational_psi" => (; long_name="rational surface ψ_N of each island", dims=("island",)),
     "Islands/psi_in" => (; long_name="inner end of the flattened interval (ψ_N, clipped to the profile grid)", dims=("island",)),
     "Islands/psi_out" => (; long_name="outer end of the flattened interval (ψ_N, clipped to the profile grid)", dims=("island",)),
     "Islands/clipped" => (; long_name="flag: the island reaches past an end of the profile grid", dims=("island",)),
     "Intervals/psi_in" => (; long_name="inner end of each merged flattened interval (ψ_N)", dims=("interval",)),
     "Intervals/psi_out" => (; long_name="outer end of each merged flattened interval (ψ_N)", dims=("interval",)),
-    "Intervals/delta_p" => (; long_name="pressure drop p(ψ_in) − p(ψ_out) across each merged interval", units="Pa", dims=("interval",)),
+    "Intervals/Delta_p" => (; long_name="pressure drop p(ψ_in) − p(ψ_out) across each merged interval", units="Pa", dims=("interval",)),
     "Profiles/psi" => (; long_name="normalized poloidal flux ψ_N (profile grid with the interval ends added)", dims=("psi",)),
     "Profiles/p" => (; long_name="equilibrium pressure", units="Pa", dims=("psi",)),
     "Profiles/p_mod" => (; long_name="pressure flattened across the islands, anchored at the boundary", units="Pa", dims=("psi",)),
-    "Profiles/jbs_B" => (; long_name="given bootstrap ⟨j_bs·B⟩", units="A*T/m^2", dims=("psi",)),
-    "Profiles/jbs_B_mod" => (; long_name="bootstrap ⟨j_bs·B⟩ with the flattened intervals removed (j_bs ∝ p′ to leading order)", units="A*T/m^2", dims=("psi",)),
+    "Profiles/jbs_B" => (; long_name="given bootstrap profile (⟨j_bs·B⟩, or a current density for a current fraction)", dims=("psi",)),
+    "Profiles/jbs_B_mod" => (; long_name="given bootstrap profile with the flattened intervals removed (j_bs ∝ p′ to leading order)", dims=("psi",)),
     "W" => (; long_name="stored energy (3/2)∫p dV", units="J"),
-    "delta_W" => (; long_name="stored energy removed by the flattening (3/2)∫(p − p_mod) dV", units="J"),
-    "delta_W_over_W" => (; long_name="fraction of the stored energy removed"),
-    "delta_p0" => (; long_name="on-axis pressure drop", units="Pa"),
-    "jbs_fraction_lost" => (; long_name="volume-integrated fraction of ⟨j_bs·B⟩ removed (NaN without a bootstrap profile)")
+    "Delta_W" => (; long_name="stored energy removed by the flattening (3/2)∫(p − p_mod) dV", units="J"),
+    "Delta_W_over_W" => (; long_name="fraction of the stored energy removed"),
+    "Delta_p0" => (; long_name="on-axis pressure drop", units="Pa"),
+    "jbs_fraction_lost" => (; long_name="fraction of the volume integral of the given bootstrap profile removed (NaN without one)")
 ]
 
 """
@@ -401,16 +400,15 @@ keeping the rest of `Tearing/`.
 function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, r::IslandFlatteningResult)
     g = replace_group!(ensure_group(parent, "Tearing"), "IslandFlattening")
     isl = r.islands
-    g["Islands/m"] = [i.m for i in isl]
-    g["Islands/n"] = [i.n for i in isl]
-    g["Islands/psi"] = [i.psi for i in isl]
-    g["Islands/w"] = [i.w for i in isl]
+    g["Islands/rational_m"] = [i.m for i in isl]
+    g["Islands/rational_n"] = [i.n for i in isl]
+    g["Islands/rational_psi"] = [i.psi for i in isl]
     g["Islands/psi_in"] = [i.psi_in for i in isl]
     g["Islands/psi_out"] = [i.psi_out for i in isl]
     g["Islands/clipped"] = Int[i.clipped for i in isl]
     g["Intervals/psi_in"] = first.(r.intervals)
     g["Intervals/psi_out"] = last.(r.intervals)
-    g["Intervals/delta_p"] = r.delta_p
+    g["Intervals/Delta_p"] = r.delta_p
     g["Profiles/psi"] = r.psi
     g["Profiles/p"] = r.p
     g["Profiles/p_mod"] = r.p_mod
@@ -419,9 +417,9 @@ function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, r::IslandFlatteningRe
         g["Profiles/jbs_B_mod"] = r.jbs_B_mod
     end
     g["W"] = r.W
-    g["delta_W"] = r.delta_W
-    g["delta_W_over_W"] = r.delta_W / r.W
-    g["delta_p0"] = r.delta_p0
+    g["Delta_W"] = r.delta_W
+    g["Delta_W_over_W"] = r.delta_W / r.W
+    g["Delta_p0"] = r.delta_p0
     g["jbs_fraction_lost"] = r.jbs_fraction_lost
     Utilities.HDF5Annotations.annotate!(g, ISLAND_FLATTENING_H5_ANNOTATIONS)
     Utilities.record_inputs!(parent, r)
