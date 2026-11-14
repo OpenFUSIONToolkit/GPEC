@@ -33,7 +33,8 @@ import Logging
         "Solovev" => Dict{String,Any}("mr" => 128, "mz" => 128, "ma" => 128, "elongation" => 1.6, "a" => 0.33, "r0" => 1.0, "q0" => 1.9)
     )
 
-    # examples/TJ_kinetic_NTV_example, coarsened, at a DIII-D-like size so the DIII-D C-coil forcing applies.
+    # examples/TJ_kinetic_NTV_example, coarsened, at a DIII-D-like size so the DIII-D C-coil forcing applies, and on the
+    # direct solver, so the inverse-solver path stays compiled on first use as before.
     kinetic_table = join(("$(x) 1.2e19 1.2e19 $(20 + 180 * (1 - x)) $(20 + 180 * (1 - x)) $(2e4 * (1 - x))" for x in range(0, 1; length=12)), "\n")
     response = Dict{String,Any}(
         "Equilibrium" => Dict{String,Any}(
@@ -42,7 +43,7 @@ import Logging
         ),
         "TJAnalytic" => Dict{String,Any}(
             "r0" => 1.7, "a" => 0.17, "q0" => 1.6, "qa" => 3.2, "p0" => 0.1, "pressure_peaking" => 2.0, "B0" => 1.0,
-            "ma" => 32, "mtheta" => 64
+            "ma" => 32, "mtheta" => 64, "solver" => "direct"
         ),
         "ForceFreeStates" => Dict{String,Any}(
             "vac_flag" => true, "qlow" => 1.02, "qhigh" => 1e3, "nn" => 1, "delta_mlow" => 4, "delta_mhigh" => 4,
@@ -64,8 +65,9 @@ import Logging
         for formalism in ("Riccati", "Forward", "Galerkin")
             stability["ForceFreeStates"]["integrator"] = formalism
             foreach(name -> delete!(stability, name), ("Riccati", "Forward", "Galerkin"))
-            stability[formalism] = formalism == "Galerkin" ? Dict{String,Any}("nx" => 32, "rpec_flag" => true) :
-                                   Dict{String,Any}("renorm_threshold" => 1e3, "eulerlagrange_tolerance" => 1e-7)
+            stability[formalism] =
+                formalism == "Galerkin" ? Dict{String,Any}("nx" => 32, "rpec_flag" => true) :
+                Dict{String,Any}("renorm_threshold" => 1e3, "eulerlagrange_tolerance" => 1e-7)
             run_workload(stability)
         end
         run_workload(response; files=("kinetic.dat" => kinetic_table,))
