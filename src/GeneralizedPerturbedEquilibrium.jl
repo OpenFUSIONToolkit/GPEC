@@ -281,7 +281,8 @@ a stage that did not run writes nothing.
   - Further `toroidal_mode` entries after those, `perturbation_type.name = "tearing"`, one per tearing root
     (one per surface uncoupled, one coupled): `growthrate` [1/s] and `frequency` [Hz].
   - `dd.core_sources` `source`, identifier `neoclassical`, one per kinetic-torque method: the NTV torque density
-    `momentum_tor` [N m⁻²] and the torque inside each surface `torque_tor_inside` [N m] on `grid.psi_norm`.
+    `momentum_tor` [N m⁻²] and the torque inside each surface `torque_tor_inside` [N m] on `grid.psi_norm`, with
+    `grid.rho_tor_norm` interpolated from `dd.equilibrium` when the dd holds the equilibrium.
 
 Δ' and the resonant fields at the rational surfaces have no IMAS slot and are not written.
 """
@@ -358,13 +359,26 @@ function _write_imas_tearing!(ts, ffs, tearing)
     return nothing
 end
 
+# ρ_tor,N at the given ψ_N from the dd's active equilibrium slice (the IMAS-fed case), or nothing without one.
+function _rho_tor_norm(dd, psi_norm)
+    isempty(dd.equilibrium.time_slice) && return nothing
+    eqt = dd.equilibrium.time_slice[]
+    p = eqt.profiles_1d
+    (IMASdd.hasdata(p, :psi) && IMASdd.hasdata(p, :rho_tor_norm)) || return nothing
+    g = eqt.global_quantities
+    pn = (p.psi .- g.psi_axis) ./ (g.psi_boundary - g.psi_axis)
+    return linear_interp(pn, p.rho_tor_norm).(psi_norm)
+end
+
 # NTV torque (real part) of each method as a neoclassical core source: density per volume and torque inside ψ_N.
 function _write_imas_torque!(dd, equil, kinetic)
     for (method, r) in sort!(collect(kinetic.total.method_results); by=first)
         isempty(r.psi_grid) && continue
         src = resize!(dd.core_sources.source, :neoclassical, "identifier.description" => "GPEC NTV torque, method $method"; wipe=false)
         p1 = resize!(src.profiles_1d; wipe=false)
-        p1.grid.psi_norm = copy(r.psi_grid)
+        rho = _rho_tor_norm(dd, r.psi_grid)
+        rho === nothing || (p1.grid.rho_tor_norm = rho)
+        setproperty!(p1.grid, :psi_norm, copy(r.psi_grid); error_on_missing_coordinates=false)
         dVdpsi = [equil.profiles.dVdpsi_spline(ψ) for ψ in r.psi_grid]
         p1.momentum_tor = real.(r.dtdpsi) ./ dVdpsi
         p1.torque_tor_inside = real.(r.t_cumulative)
