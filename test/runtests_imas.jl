@@ -257,6 +257,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test tm[1].plasma.grid.dim2 == [-1.0, 0.0, 1.0]
         p1 = dd.core_sources.source[1].profiles_1d[1]
         @test dd.core_sources.source[1].identifier.index == 401
+        @test dd.core_sources.source[1].identifier.name == "neoclassical"
         @test p1.momentum_tor ≈ fill(3.0, npsi)
         @test p1.torque_tor_inside[end] ≈ real(mr.total_torque)
         @test !IMASdd.hasdata(p1.grid, :rho_tor_norm)        # no equilibrium in the dd

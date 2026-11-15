@@ -375,6 +375,7 @@ function _write_imas_torque!(dd, equil, kinetic)
     for (method, r) in sort!(collect(kinetic.total.method_results); by=first)
         isempty(r.psi_grid) && continue
         src = resize!(dd.core_sources.source, :neoclassical, "identifier.description" => "GPEC NTV torque, method $method"; wipe=false)
+        src.identifier.name = "neoclassical"
         p1 = resize!(src.profiles_1d; wipe=false)
         rho = _rho_tor_norm(dd, r.psi_grid)
         rho === nothing || (p1.grid.rho_tor_norm = rho)
