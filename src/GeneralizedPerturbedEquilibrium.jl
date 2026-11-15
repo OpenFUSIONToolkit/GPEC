@@ -380,8 +380,9 @@ function _write_imas_torque!(dd, equil, kinetic)
         rho === nothing || (p1.grid.rho_tor_norm = rho)
         setproperty!(p1.grid, :psi_norm, copy(r.psi_grid); error_on_missing_coordinates=false)
         dVdpsi = [equil.profiles.dVdpsi_spline(ψ) for ψ in r.psi_grid]
-        p1.momentum_tor = real.(r.dtdpsi) ./ dVdpsi
-        p1.torque_tor_inside = real.(r.t_cumulative)
+        # Without ρ_tor,N (a run not fed from the dd) the profiles are kept on ψ_N alone.
+        setproperty!(p1, :momentum_tor, real.(r.dtdpsi) ./ dVdpsi; error_on_missing_coordinates=false)
+        setproperty!(p1, :torque_tor_inside, real.(r.t_cumulative); error_on_missing_coordinates=false)
     end
     return nothing
 end
