@@ -192,8 +192,16 @@ using QuadGK
         intr.psilow = 0.9
         @test orbit_torque(surfaces(1024)[2].orbit, sf) == 0
 
-        # Orbits beyond the control surface stay confined but see no perturbation there.
-        intr.psilow, intr.psilim = 0.0, 0.1
+        # Wide orbits that cross the control surface are kept, driven only inside it.
+        intr.psilow = 0.0
+        sf4, so4 = surfaces(4)
+        full = orbit_torque(so4.orbit, sf4)
+        intr.psilim = 0.505
+        sf4, so4 = surfaces(4)
+        @test so4.orbit.lost_fraction == 0
+        @test 0 < abs(orbit_torque(so4.orbit, sf4)) < abs(full)
+        intr.psilim = 0.1
         @test orbit_torque(surfaces(1024)[2].orbit, sf) == 0
+        intr.psilim = 1.0
     end
 end
