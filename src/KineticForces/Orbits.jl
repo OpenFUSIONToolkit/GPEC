@@ -50,7 +50,7 @@ end
 
 Tabulate the guiding-center field of `equil`. `omegaE(ψ_N)` (rad/s, the input E×B frequency) builds
 the potential from dΦ/dψ_N = −psio ω_E; `nothing` leaves Φ out of the orbit. Orbits are lost at
-`psi_max` (the control surface `psilim` for `forb`, where the perturbation ends) or at the grid's last ψ if lower.
+`psi_max` or at the grid's last ψ if lower; `forb` loses them at the grid's edge and sees no perturbation beyond `psilim`.
 """
 function guiding_center_field(equil; omegaE=nothing, psi_max::Float64=Inf)
     xs, ys = equil.rzphi_xs, equil.rzphi_ys

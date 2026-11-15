@@ -369,8 +369,8 @@ function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr,
         τ = (k - 1) * dτ
         u = sol(buf.u, τ)
         ψ, θ, w = u[1], u[2], u[4]
-        # No response is computed inside the first response surface, as on the surface path: the perturbation is zero there.
-        if ψ < intr.psilow
+        # No response is computed inside the first response surface or beyond the control surface: the perturbation is zero there.
+        if ψ < intr.psilow || ψ > intr.psilim
             fill!(buf.dbob, 0)
             fill!(buf.divx, 0)
         else

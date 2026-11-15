@@ -191,5 +191,9 @@ using QuadGK
         # No response is computed below the first response surface: orbits that stay there carry no torque.
         intr.psilow = 0.9
         @test orbit_torque(surfaces(1024)[2].orbit, sf) == 0
+
+        # Orbits beyond the control surface stay confined but see no perturbation there.
+        intr.psilow, intr.psilim = 0.0, 0.1
+        @test orbit_torque(surfaces(1024)[2].orbit, sf) == 0
     end
 end
