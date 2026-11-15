@@ -158,7 +158,7 @@ Guiding-center orbit segments on one flux surface.
     did not close or changed class, then samples whose ∂ψ̄/∂ψ₀ fell back to one side, then samples with a crossing count
     different from their segment's
   - `lost_fraction`: share of the launch phase space (density weight of the species over √x ≤ umax and v∥/v at θ₀, both
-    signs) on orbits that reach the equilibrium grid's edge; `NaN` when not computed
+    signs) on lost orbits; `NaN` when not computed
   - `core_fraction`: share of the same phase space on closed orbits that enter ψ < `psilow`, where the perturbation is zero
     (each segment weighted by the share of its nodes that do); `NaN` when not computed
 """
@@ -369,8 +369,8 @@ function _orbit_action!(out, o::GuidingCenterOrbit, g::GuidingCenterField, intr,
         τ = (k - 1) * dτ
         u = sol(buf.u, τ)
         ψ, θ, w = u[1], u[2], u[4]
-        # The perturbation is zero inside the first response surface and beyond the control surface.
-        if ψ < intr.psilow || ψ > intr.psilim
+        # No response is computed inside the first response surface, as on the surface path: the perturbation is zero there.
+        if ψ < intr.psilow
             fill!(buf.dbob, 0)
             fill!(buf.divx, 0)
         else
