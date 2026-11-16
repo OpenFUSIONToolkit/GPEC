@@ -3,8 +3,8 @@
 # Hermite-cubic finite-element (Galerkin) solver for a toroidal inner layer, porting the GWP2016
 # Sec. III singular-Galerkin method: the half-domain weak form (Eq. 32) on a packed grid
 # (Eq. 33), parity conditions at x = 0, and resonant/extension cells at x_max supplying the
-# matching data (Eqs. 34–35). Fortran deltac configuration: "resonant" + noexp + inps,
-# Hermite basis, mpert = 3 (Ψ, Ξ, Υ). The model's equations enter only through `layer_weak_form` and its
+# matching data (Eqs. 34–35), with the far field from the Wasow basis (GW2020) and three fields
+# (Ψ, Ξ, Υ) on Hermite cubics. The model's equations enter only through `layer_weak_form` and its
 # Wasow basis. `_assemble_and_solve_point!` reuses the assembly on the rotated ray with a point far-field
 # condition (Ray.jl).
 

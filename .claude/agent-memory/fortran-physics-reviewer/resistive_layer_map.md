@@ -19,9 +19,9 @@ the Fortran `rmatch/` sources (file mapping in fortran_correspondence_map.md).
 - `InnerLayer.jl` / `InnerLayerInterface.jl` — pluggable `InnerLayerModel` + `solve_inner()`.
 - `GGJ/GGJ.jl` — Glasser–Greene–Johnson solver selector/exports.
 - `GGJ/GGJParameters.jl` — physical/dimensionless params (E, F, G, H, K); Mercier indices D_I, D_R; Lundquist ratio S = τ_R/τ_A.
-- `GGJ/InnerAsymptotics.jl` — Wasow basis construction (T, J matrices; Lyapunov solve; splitting transform; Y-series Frobenius exponents).
+- `ToroidalLayer/InnerAsymptotics.jl` — Wasow basis construction (T, J matrices; Lyapunov solve; splitting transform; Y-series Frobenius exponents).
 - `GGJ/Shooting.jl` — backward shoot x_max → 0 (Frobenius basis).
-- `GGJ/Galerkin.jl` — Hermite-cubic finite-element solver with parity BCs.
+- `ToroidalLayer/Galerkin.jl` — Hermite-cubic finite-element solver with parity BCs.
 - `GGJ/Reference.jl` — benchmark `glasser_wang_2020_eq55`.
 - `SLAYER/Slayer.jl` — placeholder (drift-MHD two-fluid, pending).
 

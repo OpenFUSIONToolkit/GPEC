@@ -42,6 +42,10 @@ subtype only through this interface, so each model keeps whatever numbers its eq
     far-field rates that set the ray contour and mesh;
   - [`inner_Q`](@ref), [`rescale_delta`](@ref) and [`profile_conversions`](@ref) - the normalization between the
     physical growth rate, the outer region and the layer variables.
+
+Both backends impose parity at x = 0 (GWP2016 Sec. III): a model's equations must be invariant under x → −x with Ψ of
+opposite parity to Ξ and Υ, so the even solution (Ψ(0) = Ξ′(0) = Υ′(0) = 0) and the odd one (Ψ′(0) = Ξ(0) = Υ(0) = 0)
+decouple. A model with x-odd terms, such as flow shear, does not fit this interface.
 """
 abstract type ToroidalLayerParameters <: InnerLayerParameters end
 
@@ -84,7 +88,8 @@ function split_block end
     power_exponents(params) -> SVector{2,Float64}
 
 Exponents (r₊, r₋) of the two power-like far-field solutions in the Wasow state, x^r for xΨ (GW2020 Eq. 49);
-r₊ the large solution, r₋ the small one.
+r₊ the large solution, r₋ the small one. They must be the roots of r² − 3r − c₂²¹ = 0, with c₂²¹ the power block of the
+model's [`wasow_basis`](@ref) (GW2020 Eqs. 39, 48): r₊ + r₋ = 3 and r₊r₋ = −c₂²¹. The asymptotic construction checks this.
 """
 function power_exponents end
 

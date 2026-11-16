@@ -32,15 +32,15 @@ convention: `P[k+1]` holds the k-th-order matrix `P_k`, etc.
 ## Fields
 
   - `params, Q, kmax` — input parameters and series truncation order.
-  - `R = (r₊, r₋)` — Mercier-shifted Frobenius exponents at infinity (Eq. 49).
+  - `R = (r₊, r₋)` — exponents of the power-like solutions at infinity (Eq. 49).
   - `T` — 6×6 eigenvector basis of A₀ (Eq. 7).
   - `J` — `(J₀, J₁, J₂)`, the J-rotated coefficient matrices (Eqs. 9–10).
   - `P` — splitting matrices, k = 0..kmax+2 (Eqs. 16, 22).
   - `Qmat` — 2×2 inner-block transformation matrices, k = 0..kmax+2 (Eqs. 32–39).
   - `Y` — 2×2 series matrices Y_k = Y₀Z_k, k = 0..kmax (Eqs. 50–52).
 """
-struct InnerAsymptoticsCache{P<:ToroidalLayerParameters}
-    params::P
+struct InnerAsymptoticsCache{TP<:ToroidalLayerParameters}
+    params::TP
     Q::ComplexF64
     kmax::Int
     R::SVector{2,Float64}
@@ -122,7 +122,14 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
         ]
     end
 
-    # Build D_k for k = 0..kmax — GW2020 Eq. (43); c_2^21 = −(E+F+H+2) is Eq. (39).
+    # Y₀ = [1 1; r₊ r₋] diagonalizes D₀ = [0 1; c₂²¹ 3] only if r₊ + r₋ = 3 and r₊r₋ = −c₂²¹ (GW2020 Eqs. 39, 48–49).
+    r1 = ComplexF64(R[1])
+    r2 = ComplexF64(R[2])
+    c21 = Cm[3][2, 1]
+    abs(r1 + r2 - 3) <= 1e-6 && abs(r1 * r2 + c21) <= 1e-6 * max(1.0, abs(c21)) ||
+        throw(ArgumentError("power_exponents (r₊, r₋) = ($r1, $r2) are not the roots of r² − 3r − c₂²¹ = 0 with the Wasow basis' c₂²¹ = $c21"))
+
+    # Build D_k for k = 0..kmax — GW2020 Eq. (43), with c₂²¹ from Eq. (39).
     D = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
     D[1] = @SMatrix ComplexF64[
         0 1
@@ -136,8 +143,6 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
     end
 
     # Lowest-order Y solution and inverse — GW2020 Eq. (48), with exponents r± from Eq. (49).
-    r1 = ComplexF64(R[1])
-    r2 = ComplexF64(R[2])
     Y0 = @SMatrix ComplexF64[
         1 1
         r1 r2

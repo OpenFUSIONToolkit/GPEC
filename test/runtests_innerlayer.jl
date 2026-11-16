@@ -146,6 +146,73 @@ end
     end
 end
 
+# A second ToroidalLayerParameters type that forwards every interface method to GGJ: the backends reach a model only
+# through the interface, so its Δ must equal GGJ's bit for bit. `_BareLayer` implements nothing.
+const TL = IL.ToroidalLayer
+struct _ForwardingLayer <: TL.ToroidalLayerParameters
+    g::IL.GGJParameters
+end
+struct _BareLayer <: TL.ToroidalLayerParameters end
+struct _ShiftedExponents <: TL.ToroidalLayerParameters
+    g::IL.GGJParameters
+end
+TL.wasow_basis(p::_ShiftedExponents, Q::ComplexF64) = TL.wasow_basis(p.g, Q)
+TL.power_exponents(p::_ShiftedExponents) = TL.power_exponents(p.g) .+ 0.5
+TL.layer_rows(::Type{CT}, p::_ForwardingLayer, Q::Number, x::Number) where {CT<:Complex} = TL.layer_rows(CT, p.g, Q, x)
+TL.layer_weak_form(p::_ForwardingLayer, Q::ComplexF64, x::Number) = TL.layer_weak_form(p.g, Q, x)
+TL.wasow_basis(p::_ForwardingLayer, Q::ComplexF64) = TL.wasow_basis(p.g, Q)
+TL.power_exponents(p::_ForwardingLayer) = TL.power_exponents(p.g)
+TL.default_ray_angle(p::_ForwardingLayer, Q::ComplexF64) = TL.default_ray_angle(p.g, Q)
+TL.parabolic_rate(p::_ForwardingLayer, Q::ComplexF64, θ::Real) = TL.parabolic_rate(p.g, Q, θ)
+TL.ohm_rate(p::_ForwardingLayer, Q::ComplexF64) = TL.ohm_rate(p.g, Q)
+TL.fast_rates(p::_ForwardingLayer, Q::ComplexF64) = TL.fast_rates(p.g, Q)
+TL.inner_Q(p::_ForwardingLayer, γ::Number) = TL.inner_Q(p.g, γ)
+TL.rescale_delta(Δ::AbstractVector, p::_ForwardingLayer) = TL.rescale_delta(Δ, p.g)
+TL.profile_conversions(p::_ForwardingLayer) = TL.profile_conversions(p.g)
+
+# The rows u'' = Ũu + Ṽu' and the weak form I·u'' − V·u' − U·u = 0 describe one system: Ũ = I⁻¹U, Ṽ = I⁻¹V.
+function _rows_match_weak_form(p)
+    worst = 0.0
+    for Q in (0.1 + 0.05im, 5.0im, 50.0im), x in (0.3, 2.0 + 0.7im, 7.5im)
+        I, U, V = TL.layer_weak_form(p, ComplexF64(Q), x)
+        Ũ, Ṽ = TL.layer_rows(p, Q, x)
+        worst = max(worst, norm(Matrix(I) \ Matrix(U) - Matrix(Ũ)) / norm(Ũ), norm(Matrix(I) \ Matrix(V) - Matrix(Ṽ)) / norm(Ṽ))
+    end
+    return worst
+end
+
+@testset "ToroidalLayer interface" begin
+    q4 = GGJ.q4_surface_benchmark()
+    gw = GGJ.glasser_wang_2020_eq55()
+
+    @testset "layer_rows and layer_weak_form agree" begin
+        @test _rows_match_weak_form(q4) < 1e-12
+        @test _rows_match_weak_form(gw) < 1e-12
+    end
+
+    @testset "a forwarding model reproduces GGJ through both backends" begin
+        f = _ForwardingLayer(q4)
+        for Q in (0.1 + 0.05im, 5.0im)
+            @test TL.solve_ray(f, Q).Δ == TL.solve_ray(q4, Q).Δ
+        end
+        γ = 0.1234 * GGJ.q0(gw)
+        @test TL.galerkin_response(_ForwardingLayer(gw), γ) == TL.galerkin_response(gw, γ)
+        @test TL.ray_response(f, 5.0im * GGJ.q0(q4)) == TL.ray_response(q4, 5.0im * GGJ.q0(q4))
+        @test_throws MethodError TL.solve_ray(_BareLayer(), 1.0im)
+    end
+
+    @testset "power exponents must match the Wasow power block" begin
+        @test_throws "are not the roots" TL.build_asymptotics(_ShiftedExponents(q4), 5.0im)
+    end
+
+    @testset "backend options and model forwarding" begin
+        @test :cfl in TL.backend_options(:ray) && :nx in TL.backend_options(:galerkin)
+        @test_throws ArgumentError IL.GGJModel(; solver=:ray, nx=64)
+        γ = 5.0im * GGJ.q0(q4)
+        @test IL.solve_inner(IL.GGJModel(; cfl=0.1), q4, γ) == IL.solve_inner(IL.GGJModel(), q4, γ; cfl=0.1)
+    end
+end
+
 @testset "solve_inner_profile interface (matching-driver contract)" begin
     p = IL.GGJ.glasser_wang_2020_eq55()
     γ = 0.1234 * GGJ.q0(p)
