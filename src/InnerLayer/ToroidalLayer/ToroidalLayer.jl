@@ -90,7 +90,8 @@ function split_block end
 
 Exponents (r₊, r₋) of the two power-like far-field solutions in the Wasow state, x^r for xΨ (GW2020 Eq. 49);
 r₊ the large solution, r₋ the small one. They must be the roots of r² − 3r − c₂²¹ = 0, with c₂²¹ the power block of the
-model's [`wasow_basis`](@ref) (GW2020 Eqs. 39, 48): r₊ + r₋ = 3 and r₊r₋ = −c₂²¹. The asymptotic construction checks this.
+model's [`wasow_basis`](@ref) (GW2020 Eqs. 39, 48): r₊ + r₋ = 3 and r₊r₋ = −c₂²¹. Otherwise the asymptotic series do not
+solve the equations.
 """
 function power_exponents end
 

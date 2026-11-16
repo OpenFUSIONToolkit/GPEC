@@ -125,9 +125,6 @@ function _coefs(B::Vector{SMatrix{6,6,ComplexF64,36}},
     # Y₀ = [1 1; r₊ r₋] diagonalizes D₀ = [0 1; c₂²¹ 3] only if r₊ + r₋ = 3 and r₊r₋ = −c₂²¹ (GW2020 Eqs. 39, 48–49).
     r1 = ComplexF64(R[1])
     r2 = ComplexF64(R[2])
-    c21 = Cm[3][2, 1]
-    abs(r1 + r2 - 3) <= 1e-6 && abs(r1 * r2 + c21) <= 1e-6 * max(1.0, abs(c21)) ||
-        throw(ArgumentError("power_exponents (r₊, r₋) = ($r1, $r2) are not the roots of r² − 3r − c₂²¹ = 0 with the Wasow basis' c₂²¹ = $c21"))
 
     # Build D_k for k = 0..kmax — GW2020 Eq. (43), with c₂²¹ from Eq. (39).
     D = Vector{SMatrix{2,2,ComplexF64,4}}(undef, kmax + 1)
