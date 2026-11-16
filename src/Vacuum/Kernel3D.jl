@@ -52,25 +52,17 @@ function KernelWorkspace{T}(UP_DIM::Int, mtheta::Int, nzeta_fp::Int, nrow::Int, 
 end
 
 """
-    laplace_kernel(ox, oy, oz, sx, sy, sz, nx, ny, nz) -> (single, double)
+    laplace_kernel(x, y, n) -> (single, double)
 
-Fused Laplace kernels: `single = 1/r`, `double = (Δx·n)/r³`. Shares `√(r²)`; returns `(0, 0)` at coincidence (`r² < 1e-30`).
+Laplace kernels at observer `x` from source `y` with normal `n`: `single = 1/r`, `double = (Δx·n)/r³`; `(0, 0)` at
+coincidence (`r² < 1e-30`). Written by component: `dot` would let `@fastmath` reorder the sums.
 """
-@fastmath @inline function laplace_kernel(
-    ox::Float64, oy::Float64, oz::Float64,
-    sx::Float64, sy::Float64, sz::Float64,
-    nx::Float64, ny::Float64, nz::Float64
-)
-    dx = ox - sx
-    dy = oy - sy
-    dz = oz - sz
-    r2 = dx * dx + dy * dy + dz * dz
+@fastmath @inline function laplace_kernel(x::SVector{3,Float64}, y::SVector{3,Float64}, n::SVector{3,Float64})
+    Δ = x - y
+    r2 = Δ[1] * Δ[1] + Δ[2] * Δ[2] + Δ[3] * Δ[3]
     r2 < 1e-30 && return (0.0, 0.0)
     rinv = inv(sqrt(r2))
-    single = rinv
-    r3inv = rinv * rinv * rinv
-    double = (dx * nx + dy * ny + dz * nz) * r3inv
-    return (single, double)
+    return (rinv, (Δ[1] * n[1] + Δ[2] * n[2] + Δ[3] * n[3]) * (rinv * rinv * rinv))
 end
 
 """
@@ -90,14 +82,15 @@ end
 
 The source surface's quadrature data for `compute_3D_kernel_matrices!`, built once per call and shared by every thread
 (the per-thread scratch is [`KernelWorkspace`](@ref)): the source on the 2× trigonometrically upsampled grid
-(`points_up`, node `2i - 1` is collocation node `i`) and at the collocation nodes (`points`), the upsampling restricted
-to the patch about the first node (see [`fold_patch_to_row!`](@ref)), and the polar rules and interpolation orders of
-self (same-surface) and cross (plasma–wall) rows.
+(`points_up`, node `2i - 1` is collocation node `i`) and at the collocation nodes (`points`, `normals`), the upsampling
+restricted to the patch about the first node (see [`fold_patch_to_row!`](@ref)), and the polar rules and interpolation
+orders of self (same-surface) and cross (plasma–wall) rows.
 """
 struct SourceQuadrature{T<:Number,P<:AbstractVector{T},S,NS,NC,R}
     source::S
     points_up::Vector{SurfacePoint}
-    points::Vector{SVector{6,Float64}}             # (r, normal) per node, packed for the far-field sum
+    points::Vector{SVector{3,Float64}}
+    normals::Vector{SVector{3,Float64}}
     period_col::Vector{Tuple{Int,Int}}             # (field period, period-0 column) per node
     phases::P
     Uθ_patch::Matrix{Float64}
@@ -135,7 +128,8 @@ function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::I
     end
     return SourceQuadrature(
         source, points_up,
-        [SVector{6}(source.r[k, 1], source.r[k, 2], source.r[k, 3], source.normal[k, 1], source.normal[k, 2], source.normal[k, 3]) for k in 1:num_points],
+        [SVector{3}(@view source.r[k, :]) for k in 1:num_points],
+        [SVector{3}(@view source.normal[k, :]) for k in 1:num_points],
         [fldmod1(k, num_points ÷ nfp) for k in 1:num_points],
         phases, Uθ_patch, Uζ_patch, patch_rad, 2 * RAD_DIM,
         # Plasma–wall rows: 1–4 × RAD_DIM nodes, RAD_DIM per 4 units of the sinh variable
@@ -185,7 +179,7 @@ function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadratu
     c = (UP_DIM - 1) / 2  # patch centre
     dθ, dζ = 2π / mtheta, 2π / nzeta
 
-    k = argmin(k -> sum(abs2, r - quad.points[k][SVector(1, 2, 3)]), eachindex(quad.points))
+    k = argmin(k -> sum(abs2, r - quad.points[k]), eachindex(quad.points))
     i, j = mod1(k, mtheta), (k - 1) ÷ mtheta + 1
     q = quad.points_up[2i-1+2mtheta*(2j-2)]
     norm(r - q.r) > NEAR_GAP * max(norm(q.rθ) * dθ, norm(q.rζ) * dζ) && return nothing
@@ -223,7 +217,7 @@ function near_correction!(ws::KernelWorkspace{T}, quad::SourceQuadrature, r_obs:
     fill!(M_grid, 0)
     M_double, M_single = view(M_grid,:,:,1), view(M_grid,:,:,2)
     foreach_polar_node(patch, U, V, radial, patch_rad, quad.ANG_DIM, Val(N)) do q, cu, cv, wu, wv, w
-        near_single, near_double = laplace_kernel(r_obs..., q.r..., (source.normal_orient * cross(q.rθ, q.rζ))...)
+        near_single, near_double = laplace_kernel(r_obs, q.r, source.normal_orient * cross(q.rθ, q.rζ))
         @inbounds for b in 1:N, a in 1:N
             L = w * dθdζ * wu[a] * wv[b]
             M_double[cu+a, cv+b] += near_double * L
@@ -241,7 +235,7 @@ function near_correction!(ws::KernelWorkspace{T}, quad::SourceQuadrature, r_obs:
         χ == 0 && continue
         idx_src = periodic_wrap(i + a, mtheta) + mtheta * (periodic_wrap(j + b, nzeta) - 1)
         d_src, idx_col = quad.period_col[idx_src]
-        far_single, far_double = laplace_kernel(r_obs..., quad.points[idx_src]...)
+        far_single, far_double = laplace_kernel(r_obs, quad.points[idx_src], quad.normals[idx_src])
         populate_greenfunction && (row_single[idx_col] -= phases[d_src] * (far_single * χ * dθdζ))
         row_double[idx_col] -= phases[d_src] * (far_double * χ * dθdζ)
     end
@@ -267,8 +261,7 @@ function kernel_row!(ws::KernelWorkspace, quad::SourceQuadrature, observer, idx_
     # Far field: trapezoidal rule over all sources (the kernels return zero at r_src = r_obs); fold each source's field
     # period onto period 0
     @inbounds for idx_src in eachindex(quad.points)
-        s = quad.points[idx_src]
-        far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], s[1], s[2], s[3], s[4], s[5], s[6])
+        far_single, far_double = laplace_kernel(r_obs, quad.points[idx_src], quad.normals[idx_src])
         d, idx_col = quad.period_col[idx_src]
         populate_greenfunction && (row_single[idx_col] += phases[d] * (far_single * dθdζ))
         row_double[idx_col] += phases[d] * (far_double * dθdζ)
