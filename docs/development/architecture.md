@@ -110,9 +110,11 @@ Splines are provided by the external `FastInterpolations` package rather than by
 ### Resistive and Kinetic Modules
 
 8. **InnerLayer** (`src/InnerLayer/`) - Resistive inner-layer physics
-   - `GGJ/` - Glasser-Greene-Johnson layer model
+   - `ToroidalLayer/` - Shared library for toroidal layer models: the Wasow far-field construction, the rotated-ray
+     solver and the Galerkin (Hermite) solver, reached through a model interface
+   - `GGJ/` - Glasser-Greene-Johnson layer model, the reference ToroidalLayer model
    - `SLAYER/` - Layer solver used for growth-rate extraction
-   - Both are submodules and are valid Areas in their own right (`InnerLayer.GGJ`, `InnerLayer.SLAYER`)
+   - All are submodules and are valid Areas in their own right (`InnerLayer.ToroidalLayer`, `InnerLayer.GGJ`, `InnerLayer.SLAYER`)
 
 9. **Tearing** (`src/Tearing/`) - Tearing mode dispersion and drivers
    - `Dispersion/` - Dispersion relation solvers
