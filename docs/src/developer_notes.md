@@ -92,6 +92,14 @@ a comparison, and the exit-status contract are documented in
 
 ## Developer tips
 
+### Running cases and scans
+
+Loading GPEC and compiling its first case cost far more than a small case's physics, so run many
+cases in one Julia process rather than one process per case, and build the package image once
+before submitting a scan. Measured costs, a scan script, job-array and CPU-target advice, and the
+rules for isolating cases are in
+[`docs/development/running-scans.md`](https://github.com/OpenFUSIONToolkit/GPEC/blob/develop/docs/development/running-scans.md).
+
 ### Precompile workload
 
 Building the package runs a small Solovev case through the solver so that a fresh Julia process

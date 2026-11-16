@@ -1,5 +1,6 @@
 using TOML
 using HDF5
+include("display_check.jl")
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
 # same pipeline the TOML driver does. Every assertion is anchored on the coarse TJ fixture
@@ -609,12 +610,20 @@ using HDF5
                 open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
                 @test reference.kinetic isa KineticForcesResult && reference.kinetic.pe === reference.pe
+                _check_display(reference.kinetic)
 
                 kf = kinetic_torque(reference.pe, GPEC.kinetic_forces_control(ntv_deck))
                 @test sort!(collect(keys(kf.total.method_results))) == sort!(collect(keys(reference.kinetic.total.method_results)))
                 for (method, r) in kf.total.method_results
                     @test r.total_torque == reference.kinetic.total.method_results[method].total_torque
                 end
+
+                # The collision keys reach the torque path: a zero collisionality factor is the collisionless operator.
+                kf_with(kw...) =
+                    kinetic_torque(reference.pe, GPEC.kinetic_forces_control(merge(ntv_deck, Dict("KineticForces" => merge(ntv_deck["KineticForces"], Dict{String,Any}(kw...))))))
+                t_zero = kf_with("nutype" => "zero").total.method_results["fgar"].total_torque
+                @test t_zero != reference.kinetic.total.method_results["fgar"].total_torque
+                @test t_zero ≈ kf_with("collisionality_factor" => 0.0).total.method_results["fgar"].total_torque rtol = 1e-6
                 @test kf.axis_psi_c == reference.kinetic.axis_psi_c
 
                 api_file = joinpath(dir, "api.h5")
@@ -627,6 +636,13 @@ using HDF5
                         @test read(api_h5["KineticForces/Validity/psi_c"]) == read(deck_h5["KineticForces/Validity/psi_c"])
                     end
                 end
+
+                # With qlow above q0 the response starts off axis, and the torque quadrature starts with it.
+                ntv_deck["ForceFreeStates"]["qlow"] = 1.9
+                open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
+                raised = GPEC.main([dir])
+                @test raised.pe.psi_grid[1] > ntv_deck["Equilibrium"]["psilow"]
+                @test minimum(raised.kinetic.total.method_results["fgar"].psi_grid) >= raised.pe.psi_grid[1]
             end
         end
     end
