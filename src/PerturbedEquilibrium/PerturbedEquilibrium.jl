@@ -70,10 +70,10 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
 
     m_modes, n_modes = mode_arrays(ffs)
     # A run has at most one ξ solution, already closed at the rationals and carrying populated
-    # Ξ′ / Ξ_s stores. The gal-native basis takes the analytic Galerkin Ξ′ downstream.
+    # Ξ′ / Ξ_s stores. A matched solution's stored Ξ′ is used as is downstream.
     solution = ffs.solution
     resp = PlasmaResponse(; ffs, m_modes, n_modes, compute_singular_coupling, compute_torque_response,
-        odet_from_gal=solution !== nothing && solution.basis === :gal_native)
+        unit_edge_basis=solution !== nothing && solution.basis === :unit_edge)
 
     # A Riccati result carries ξ profiles, but the response operators are not validated on them yet.
     riccati = ffs.integrator === :riccati

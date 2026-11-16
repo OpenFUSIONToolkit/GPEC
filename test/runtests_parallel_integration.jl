@@ -33,8 +33,8 @@ end
         delta = reshape([raw[2, 2] - raw[2, 1] - raw[1, 2] + raw[1, 1]], 1, 1)
         return ComplexF64.(delta), ComplexF64.(raw)
     end
-    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], true)
-    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], false)
+    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], true)[1:2]
+    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], false)[1:2]
     @test extended == reference
     @test ordinary != reference
     @test all(isapprox.(ordinary, reference; rtol=1e-8))

@@ -467,7 +467,12 @@ include("display_check.jl")
             @test matched.closure === :matched
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
-            @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # The matched ξ is built from the Riccati solve's own outer solutions, on its stored grid.
+            @test ric.basis !== nothing && size(ric.basis.xi, 3) == 2 * length(ric.surfaces) + ric.numpert_total
+            @test matched.solution.basis === :unit_edge && matched.solution.psi_store == ric.basis.psi
+            @test matched.solution.u_store[:, :, 1, :] == permutedims(matched.match.xi, (1, 3, 2))
+            # A Riccati basis always carries its cut solution, so the composite inner profiles need no option.
+            @test length(solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel(; real_profiles=true)).match.inner_xi) == length(ric.surfaces)
             # It carries no ideal δW, so no plasma response can be built from it.
             @test_throws ErrorException plasma_response(matched)
             # A matched result is a new solution, not an outer solve to match again.
@@ -496,7 +501,7 @@ include("display_check.jl")
             @test matched.match !== nothing
             # The ideal reference keeps the ideal δW (only a :matched closure drops it).
             @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
-            @test matched.solution !== nothing && matched.solution.basis === :gal_native
+            @test matched.solution !== nothing && matched.solution.basis === :unit_edge
         end
     end
 
@@ -575,6 +580,8 @@ include("display_check.jl")
                 @test reference.closure === :matched
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
+                @test !isempty(api.match.xi)
+                @test api.match.xi ≈ reference.match.xi rtol = 1e-12
             end
 
             # A forward solve has no Δ′ to match against, so the deck stops at parse time instead of after the solve.

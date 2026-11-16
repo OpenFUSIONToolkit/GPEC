@@ -276,7 +276,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::PlasmaResponse)
     _row(io, "Coupling", isempty(r.C_resonant_area_weighted_field) ? _missing_coupling_note(r) : "C $(_shape(r.C_resonant_area_weighted_field))")
     isempty(r.dominant_singular_values) || _row(io, "Dominant σ", _list(_fmt.(r.dominant_singular_values); max=3))
     _row(io, "Torque resp.", isempty(r.T_xe) ? "not computed" : "T_xe $(_shape(r.T_xe))")
-    r.odet_from_gal && _row(io, "Basis", "Galerkin-native solution")
+    r.unit_edge_basis && _row(io, "Basis", "matched solution, unit edge displacement")
     _plots_row(io, r)
     return nothing
 end

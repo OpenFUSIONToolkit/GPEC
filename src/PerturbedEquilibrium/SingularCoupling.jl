@@ -77,14 +77,14 @@ function _chord_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, n
 end
 
 """
-    _gal_solution_at(psi, resnum, odet, nstep) -> (u, du)
+    _matched_solution_at(psi, resnum, odet, nstep) -> (u, du)
 
-Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` for a gal-matched solution:
-cubic Hermite for the value and the analytic Ξ′ carried in `du_store` for the derivative
+Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` for a matched solution:
+cubic Hermite for the value and the Ξ′ carried in `du_store` for the derivative
 (the `gal_flag` branch of Fortran `gpeq_sol`). Do not difference `u_store` instead:
 near-cancellation in `bwp1` (singfac·Ξ′ against n·q′·Ξ) amplifies that error into Δ′.
 """
-function _gal_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, nstep::Int)
+function _matched_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, nstep::Int)
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
     psi_a, psi_b = odet.psi_store[il], odet.psi_store[ir]
 
@@ -340,10 +340,10 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
             lpsi = sing_surf.psifac - spot_psi
             rpsi = sing_surf.psifac + spot_psi
 
-            # Ξ, Ξ′ at lpsi/rpsi as in Fortran gpeq_sol: gal-matched → analytic Ξ′, ideal → EL relation, kinetic → stored Ξ′.
-            if resp.odet_from_gal
-                u_l, ud_l = _gal_solution_at(lpsi, resnum, solution, nstep)
-                u_r, ud_r = _gal_solution_at(rpsi, resnum, solution, nstep)
+            # Ξ, Ξ′ at lpsi/rpsi as in Fortran gpeq_sol: matched → its stored Ξ′, ideal → EL relation, kinetic → stored Ξ′.
+            if resp.unit_edge_basis
+                u_l, ud_l = _matched_solution_at(lpsi, resnum, solution, nstep)
+                u_r, ud_r = _matched_solution_at(rpsi, resnum, solution, nstep)
             elseif use_el
                 u_l, ud_l = _el_solution_at(lpsi, resnum, solution, mats, equil, ffs, nstep)
                 u_r, ud_r = _el_solution_at(rpsi, resnum, solution, mats, equil, ffs, nstep)

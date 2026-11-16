@@ -143,7 +143,7 @@ bpens = [solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=f), GGJModel()).bp
 ```
 
 A scalar applies to every surface and a vector gives one value per entry of `ffs.surfaces`, core to edge.
-The problem needs a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the resonant data but keeps `solution === nothing`.
+The problem needs a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and Riccati (`vac_flag=true`) results. Both publish the outer solutions the match combines in `ffs.basis`; the composite inner-region profiles need Galerkin's `cut_solution=true`, and a Riccati basis always carries its cut solution.
 `GGJModel()` is the closure-capable model; `SLAYERModel()` is slab-only and drives the tearing solve instead.
 
 ## Tearing stability

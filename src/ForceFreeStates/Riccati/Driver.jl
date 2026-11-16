@@ -5,8 +5,9 @@ Integrate the Euler-Lagrange equations from the axis to `intr.psilim` with paral
 [Glasser, Kolemen & Glasser 2018, Phys. Plasmas 25, 032507; Glasser & Kolemen 2018, Phys. Plasmas 25, 082502].
 
 Returns `odet`, whose stores hold the solution at every stored solver step in columns that are continuous in ψ
-and equal (S, I), S = U₁U₂⁻¹, at the edge, and `riccati`, the inputs of `compute_delta_prime_matrix`:
-`(; propagators, chunks, columns)`, with `columns` from `_assemble_propagators_serially!`.
+and equal (S, I), S = U₁U₂⁻¹, at the edge, and `riccati`, the inputs of `compute_delta_prime_matrix` and
+`outer_solution_basis`: `(; propagators, chunks, columns, bases)`, with `columns` from
+`_assemble_propagators_serially!` and `bases` from `asymptotic_bases`.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -45,7 +46,7 @@ function riccati_eulerlagrange_integration(
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
     restore_solution_columns!(odet, propagators, chunks, columns)
 
-    return odet, (; propagators, chunks, columns)
+    return odet, (; propagators, chunks, columns, bases)
 end
 
 # OdeState at the axis start, with empty stores.

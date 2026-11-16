@@ -4,7 +4,7 @@
 const DELTA_PRIME_RESPONSE_MISMATCH = 1e-6
 
 """
-    compute_delta_prime_matrix(intr, propagators, chunks, axis_state; wv=nothing, wp=nothing, psio=0.0, extended_precision=false) -> Union{Nothing,DeltaPrimeData}
+    compute_delta_prime_matrix(intr, propagators, chunks, axis_state; wv=nothing, wp=nothing, psio=0.0, extended_precision=false) -> (delta_prime, coefficients)
 
 Solve the STRIDE boundary-value problem for the inter-surface Δ' matrix
 [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eq. 37].
@@ -14,15 +14,18 @@ Solve the STRIDE boundary-value problem for the inter-surface Δ' matrix
   - `intr`: Read for its mode space and singular surfaces.
   - `propagators`, `chunks`, `axis_state`: From `riccati_eulerlagrange_integration`.
   - `wv`: Singfac-scaled vacuum response for the edge condition `wp + wv = 0`; `nothing` puts a conducting wall there.
-  - `wp`: Plasma response from `free_run`. A warning is issued when the BVP's own differs from it by more than
-    `DELTA_PRIME_RESPONSE_MISMATCH`.
+  - `wp`: The run's plasma response, used only as a check: a warning is issued when the edge momentum of the Δ_EF
+    solve differs from it by more than `DELTA_PRIME_RESPONSE_MISMATCH`.
   - `psio`: Poloidal flux normalization.
   - `extended_precision`: Solve in `Complex{Double64}`.
 
 ### Returns
 
-A [`DeltaPrimeData`](@ref) whose `coil` is Δ_EF (empty without `wv`), or `nothing` when no surface is crossed
-or, with a warning, when a surface carries more than one resonant mode.
+  - `delta_prime`: A [`DeltaPrimeData`](@ref) whose `coil` is Δ_EF (empty without `wv`).
+  - `coefficients`: The BVP's solution vectors, one column per solution: the 2·msing Δ' solves, side-major, then the
+    N of Δ_EF. Input of `outer_solution_basis`; `nothing` without `wv`.
+
+Both are `nothing` when no surface is crossed or, with a warning, when a surface carries more than one resonant mode.
 """
 function compute_delta_prime_matrix(
     intr::ForceFreeStatesInternal,
@@ -34,11 +37,11 @@ function compute_delta_prime_matrix(
     psio::Float64=0.0,
     extended_precision::Bool=false
 )
-    intr.msing == 0 && return nothing
-    _has_unsupported_multi_resonance(intr) && return nothing
+    intr.msing == 0 && return nothing, nothing
+    _has_unsupported_multi_resonance(intr) && return nothing, nothing
 
     sing, i_crossings, msing = _select_active_surfaces(intr, chunks)
-    msing == 0 && return nothing
+    msing == 0 && return nothing, nothing
     N = intr.numpert_total
     ipert_all = [1 + sing[j].m[1] - intr.mlow + (sing[j].n[1] - intr.nlow) * intr.mpert for j in 1:msing]
 
@@ -48,11 +51,12 @@ function compute_delta_prime_matrix(
 
     # Δ_EF: needs a vacuum edge in the assembled matrix.
     delta_ef = Matrix{ComplexF64}(undef, 0, 0)
+    delta_ef_solutions = nothing
     if wv !== nothing
-        delta_ef, edge_coefficients = _solve_bvp_delta_ef(M, col_edge, msing, N, ipert_all)
+        delta_ef, delta_ef_solutions = _solve_bvp_delta_ef(M, col_edge, msing, N, ipert_all)
         if wp !== nothing
             # Unit edge displacement, so the edge U₂ is the plasma response times ψ₀².
-            wp_bvp = uShootR[msing][(N+1):(2N), :] * edge_coefficients ./ psio^2
+            wp_bvp = uShootR[msing][(N+1):(2N), :] * delta_ef_solutions[_col_right(msing, N), :] ./ psio^2
             mismatch = norm(wp_bvp - wp) / norm(wp)
             if mismatch > DELTA_PRIME_RESPONSE_MISMATCH
                 @warn "Riccati: the plasma response from the Δ' system differs from the axis-to-edge one by $(@sprintf("%.1e", mismatch)) " *
@@ -62,8 +66,9 @@ function compute_delta_prime_matrix(
         end
     end
     # The raw side-major D' (Fortran gal_write_delta layout) feeds `pest3_decompose`; Riccati leaves the blocks unfilled.
-    delta_prime, delta_prime_raw = _solve_bvp_and_combine_pest3(M, msing, N, ipert_all, extended_precision)
-    return DeltaPrimeData(delta_prime, delta_prime_raw, delta_ef, nothing, nothing, nothing)
+    delta_prime, delta_prime_raw, delta_prime_solutions = _solve_bvp_and_combine_pest3(M, msing, N, ipert_all, extended_precision)
+    coefficients = wv === nothing ? nothing : [delta_prime_solutions delta_ef_solutions]
+    return DeltaPrimeData(delta_prime, delta_prime_raw, delta_ef, nothing, nothing, nothing), coefficients
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -204,7 +209,7 @@ function _assemble_bvp(uShootR::Vector{Matrix{ComplexF64}},
 end
 
 # Δ_EF (2·msing × N): the small-solution coefficient at each surface side per unit displacement of each edge mode,
-# from the BVP with its edge fixed. Also returns the coefficients right of the last surface (2N × N).
+# from the BVP with its edge fixed. Also returns the N solution vectors.
 function _solve_bvp_delta_ef(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
     nMat = size(M, 1)
     bot = (nMat-2msing-N+1):(nMat-2msing)   # Eq. (38) bottom rows, carrying the W_V block
@@ -221,10 +226,11 @@ function _solve_bvp_delta_ef(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int
         @views delta_ef[2j-1, :] .= X[row_left, :]
         @views delta_ef[2j, :] .= X[row_right, :]
     end
-    return delta_ef, X[_col_right(msing, N), :]
+    return delta_ef, X
 end
 
-# Solve the BVP and apply the PEST3 four-term combination, in Complex{Double64} when `extended_precision`.
+# Solve the BVP and apply the PEST3 four-term combination, in Complex{Double64} when `extended_precision`. Returns
+# Δ', the raw side-major D' and the 2·msing solution vectors.
 function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int}, extended_precision::Bool)
     nMat = size(M, 1)
     s2 = 2 * msing
@@ -239,11 +245,13 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
 
     # One solve per surface side, driving that side's big-solution coefficient.
     dp_raw = zeros(Tc, s2, s2)
+    solutions = zeros(ComplexF64, nMat, s2)
     b = zeros(Tc, nMat)
     for dRow in 1:s2
         fill!(b, 0)
         b[nMat-s2+dRow] = 1
         x = use_lu ? (M_lu \ b) : (M_pinv * b)
+        solutions[:, dRow] .= x
         for ksing in 1:msing
             ipert_k = ipert_all[ksing]
             dp_raw[dRow, 2ksing-1] = x[_col_left(ksing, N)[ipert_k+N]]
@@ -256,7 +264,7 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
     for i in 1:msing, j in 1:msing
         deltap[i, j] = dp_raw[2i, 2j] - dp_raw[2i, 2j-1] - dp_raw[2i-1, 2j] + dp_raw[2i-1, 2j-1]
     end
-    return ComplexF64.(deltap), ComplexF64.(dp_raw)
+    return ComplexF64.(deltap), ComplexF64.(dp_raw), solutions
 end
 
 """

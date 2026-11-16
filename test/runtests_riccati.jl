@@ -153,7 +153,7 @@ end
             ctrl, intr, equil, _, mats = prepared_solovev(; fixture="regression_tj_ideal_example", nchunks)
             odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
             wv = FFS.free_run(odet, ctrl, equil, mats, intr).wv
-            result = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
+            result, _ = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
             return result.matrix, riccati.chunks
         end
         dp_auto, chunks_auto = delta_prime(0)
@@ -161,6 +161,35 @@ end
         @test length(chunks_few) < length(chunks_auto)
         @test !isempty(dp_auto) && all(isfinite, dp_auto)
         @test isapprox(dp_few, dp_auto; rtol=1e-4)
+    end
+
+    @testset "the Δ′ solutions on the stored grid" begin
+        ctrl, intr, equil, _, mats = prepared_solovev(; fixture="regression_tj_ideal_example")
+        odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
+        wv = FFS.free_run(odet, ctrl, equil, mats, intr).wv
+        delta_prime, coefficients = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
+        basis = FFS.outer_solution_basis(coefficients, riccati.propagators, riccati.chunks, riccati.columns, riccati.bases, intr.sing, equil, mats,
+            FFS.ModeIndices(intr))
+        N, msing = intr.numpert_total, intr.msing
+        ideal = (2msing+1):(2msing+N)
+        @test basis.psi == odet.psi_store && size(basis.xi) == size(basis.xi_deriv) == size(basis.xi_cut) == (N, odet.step, 2msing + N)
+        # The Δ_EF solutions carry no big solution and a unit edge displacement: the ideal solution, which the
+        # integrator's own columns give when scaled the same way.
+        @test basis.xi[:, end, ideal] ≈ I(N)
+        edge = odet.u_store[:, :, 1, end]
+        @test all(k -> isapprox(basis.xi[:, k, ideal], odet.u_store[:, :, 1, k] / edge; rtol=1e-6), 1:odet.step)
+        # The cut solution differs from the solution only next to the surfaces, where it is what remains of the
+        # resonant harmonic once the leading big and small terms are gone.
+        for (j, s) in enumerate(intr.sing)
+            lo, hi = basis.cut_range[j, :]
+            @test lo < s.psifac < hi
+            ires = 1 + s.m[1] - intr.mlow
+            right = findfirst(>(s.psifac), basis.psi)
+            @test abs(basis.xi_cut[ires, right, 2j]) < 1e-2 * abs(basis.xi[ires, right, 2j])
+            @test abs(basis.xi_cut[ires, right-1, 2j-1]) < 1e-2 * abs(basis.xi[ires, right-1, 2j-1])
+        end
+        outside = [all(j -> !(basis.cut_range[j, 1] <= p <= basis.cut_range[j, 2]), 1:msing) for p in basis.psi]
+        @test any(outside) && basis.xi_cut[:, outside, :] == basis.xi[:, outside, :]
     end
 
     @testset "truncation at the edge energy peak" begin
@@ -175,10 +204,12 @@ end
         free = FFS.free_run(odet, ctrl, equil, mats, intr)
         @test isfinite(free.et[1])
         # The Δ′ system reproduces the plasma response of the axis-to-edge products, and says so when it does not.
-        delta_prime = @test_logs min_level = Logging.Warn FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
+        delta_prime, coefficients = @test_logs min_level = Logging.Warn FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
             wv=free.wv, wp=free.wp, psio=equil.psio)
         @test size(delta_prime.matrix) == (intr.msing, intr.msing) && all(isfinite, delta_prime.matrix)
         @test size(delta_prime.coil) == (2 * intr.msing, intr.numpert_total)
+        basis = FFS.outer_solution_basis(coefficients, propagators, chunks, riccati.columns, riccati.bases, intr.sing, equil, mats, FFS.ModeIndices(intr))
+        @test basis.psi == odet.psi_store && all(isfinite, basis.xi)
         @test_logs (:warn, r"differs from the axis-to-edge one") FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
             wv=free.wv, wp=1.01 .* free.wp, psio=equil.psio)
     end

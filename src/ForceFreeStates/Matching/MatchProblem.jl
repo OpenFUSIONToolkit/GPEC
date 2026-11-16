@@ -95,8 +95,7 @@ closure_capable(::InnerLayer.SLAYERModel) = false
     solve(prob::MatchProblem, model) -> ForceFreeStatesResult
 
 Match `prob.ffs` to the inner layer of `model`. The result has `closure = :matched` (`:ideal`
-with `ideal=true`), `bpen`, the [`MatchResult`](@ref) in `result.match` and, for a Galerkin
-solve, the matched ξ. A `:matched` result drops the ideal δW (`wp`, `free_boundary`), so
+with `ideal=true`), `bpen`, the [`MatchResult`](@ref) in `result.match` and the matched ξ. A `:matched` result drops the ideal δW (`wp`, `free_boundary`), so
 PerturbedEquilibrium skips its response rather than mixing ideal and matched physics.
 """
 function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel)
@@ -117,7 +116,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     equil = ffs.equil
     chi1 = 2π * equil.psio
 
-    gal_sol = ffs.galerkin === nothing ? nothing : ffs.galerkin.solution
+    basis = ffs.basis
 
     if prob.ideal
         # Ideal limit (rmatch coil%ideal_flag): no inner layer, cout = 0.
@@ -193,16 +192,16 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
 
     reconnected_flux = Matrix{ComplexF64}(dp.coil .+ transpose(dp.raw) * cout)
 
-    # Matched outer ξ per coil: coil column + Σ cout·plasma columns (needs the Galerkin basis).
-    if gal_sol === nothing
+    # Matched outer ξ per coil: coil column + Σ cout·plasma columns.
+    if basis === nothing
         xi = Array{ComplexF64,3}(undef, 0, 0, 0)
         xi_deriv = Array{ComplexF64,3}(undef, 0, 0, 0)
         empty!(inner_psi)
         empty!(inner_xi)
         empty!(inner_b)
     else
-        sols = gal_sol.xi          # (mpert, ngrid, nsol)
-        sols_deriv = gal_sol.xi_deriv
+        sols = basis.xi          # (mpert, ngrid, nsol)
+        sols_deriv = basis.xi_deriv
         mpert = size(sols, 1)
         ngrid = size(sols, 2)
         xi = zeros(ComplexF64, mpert, ngrid, mcoil)
@@ -219,7 +218,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
 
         # Composite inner solution: add back the outer background the cut removed (match.f intotsol).
         if !isempty(inner_psi)
-            sols_cut = gal_sol.xi_cut
+            sols_cut = basis.xi_cut
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
                       "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog = 1
@@ -227,9 +226,9 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
                 empty!(inner_xi)
                 empty!(inner_b)
             else
-                cut_range = gal_sol.cut_range
-                keep = .!gal_sol.issing
-                psi_keep = gal_sol.psi[keep]
+                cut_range = basis.cut_range
+                keep = .!basis.issing
+                psi_keep = basis.psi[keep]
                 for i in 1:msing
                     m_res = round(Int, nn * sings[i].q)
                     ires = m_res - ffs.mlow + 1
@@ -238,7 +237,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
                     inside = findall(p -> lo <= p <= hi, inner_psi[i])
                     if isempty(inside)
                         @warn "MatchProblem: inner layer at ψ=$(round(sings[i].psifac, digits=5)) lies outside the " *
-                              "resonant/extension cells (ψ ∈ [$lo, $hi]); raise gal_dx1/gal_dx2 to overlap the layer" surface = i
+                              "cut window (ψ ∈ [$lo, $hi]); with Galerkin, raise gal_dx1/gal_dx2 to overlap the layer" surface = i
                         continue
                     end
                     length(inside) < length(inner_psi[i]) && @info "MatchProblem: surface $i inner region clipped to the " *
@@ -275,10 +274,8 @@ end
 
 # Copy of ffs with the match applied; the ideal reference keeps closure :ideal, its zero bpen and δW.
 function _matched_result(ffs::ForceFreeStatesResult, match::MatchResult, ideal::Bool)
-    gal = ffs.galerkin
     # Without a matched ξ, the ideal solution stands only for the ideal reference.
-    solution = (gal !== nothing && gal.solution !== nothing && !isempty(match.xi)) ?
-               _matched_gal_profiles(gal, match, ffs.mats, ffs) : (ideal ? ffs.solution : nothing)
+    solution = isempty(match.xi) ? (ideal ? ffs.solution : nothing) : _matched_profiles(ffs.basis, match, ffs.mats)
     ideal && return _with(ffs; match=match, solution=solution)
     # The ideal δW does not describe the matched plasma; PE gates on its absence.
     return _with(ffs; closure=:matched, bpen=match.bpen, match=match, solution=solution,

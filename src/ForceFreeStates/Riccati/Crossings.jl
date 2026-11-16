@@ -4,17 +4,19 @@
     asymptotic_bases(chunks, ctrl, equil, mats, intr) -> Dict{Int,NamedTuple}
 
 Asymptotic basis `(; left, right)`, each N × 2N × 2, on both sides of every crossed surface, where its crossing
-chunk ends. Keyed by the surface's index in `intr.sing`.
+chunk ends, with the series they are evaluated from (`left_series`, `right_series`). Keyed by the surface's index
+in `intr.sing`.
 """
 function asymptotic_bases(chunks::Vector{IntegrationChunk}, ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
-    bases = Dict{Int,@NamedTuple{left::Array{ComplexF64,3}, right::Array{ComplexF64,3}}}()
+    bases = Dict{Int,@NamedTuple{left::Array{ComplexF64,3}, right::Array{ComplexF64,3}, left_series::SingAsymptotics, right_series::SingAsymptotics}}()
     for chunk in chunks
         chunk.needs_crossing || continue
         singp = intr.sing[chunk.ising]
         dpsi = singp.psifac - chunk.psi_end
-        bases[chunk.ising] = (; left=sing_get_ua(compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0), dpsi),
-            right=sing_get_ua(compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0), dpsi))
+        left_series = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0)
+        right_series = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
+        bases[chunk.ising] = (; left=sing_get_ua(left_series, dpsi), right=sing_get_ua(right_series, dpsi), left_series, right_series)
     end
     return bases
 end

@@ -62,12 +62,13 @@ function run_force_free_states(
     free_energies = nothing
     gal_data = nothing
     delta_prime = nothing
+    basis = nothing
     if ctrl.algorithm isa Galerkin
         ctrl.kinetic === nothing ||
             error("Galerkin() does not support kinetic runs; use Forward().")
         gal_start = time()
         wv = ctrl.vac_flag ? first(compute_scaled_wv(ctrl, equil, intr)) : nothing
-        gal_data, delta_prime = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
+        gal_data, delta_prime, basis = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
         gal_dt = time() - gal_start
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
     else
@@ -101,14 +102,18 @@ function run_force_free_states(
                 if intr.verbose
                     @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
                 end
-                delta_prime = compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state;
+                delta_prime, coefficients = compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state;
                     wv=free_energies.wv, wp=free_energies.wp, psio=equil.psio, extended_precision=ctrl.algorithm.extended_precision_bvp)
+                if coefficients !== nothing
+                    basis = outer_solution_basis(coefficients, riccati.propagators, riccati.chunks, riccati.columns, riccati.bases,
+                        intr.sing, equil, mats, ModeIndices(intr))
+                end
             end
         end
     end
 
     # Publish the solve: from here on the downstream stages read the result, never `intr`.
-    result = build_result(_integrator_symbol(ctrl.algorithm), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, delta_prime)
+    result = build_result(_integrator_symbol(ctrl.algorithm), ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, delta_prime, basis)
 
     return result
 end

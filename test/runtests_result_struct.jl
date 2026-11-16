@@ -195,7 +195,8 @@ include("display_check.jl")
 
                     sol = ffs.solution
                     @test sol isa FFS.SolutionProfiles
-                    @test sol.basis === :gal_native
+                    @test sol.basis === :unit_edge
+                    @test ffs.basis !== nothing && sol.psi_store == ffs.basis.psi[.!ffs.basis.issing]
                     @test sol.step == length(sol.psi_store) == size(sol.u_store, 4)
                     @test !iszero(sol.du_store)      # analytic galerkin Ξ′
                     @test !iszero(sol.xi_s_store)
@@ -243,14 +244,17 @@ include("display_check.jl")
                     # The closed profiles land in the shared Solutions layout: same names and
                     # (mode, solution, psi) axis order as ForwardIntegration, on the gal grid.
                     gal = "ForceFreeStates/Solutions/GalerkinIntegration"
+                    matched = "ForceFreeStates/Solutions/Match"
                     HDF5.h5open(GeneralizedPerturbedEquilibrium.run_settings(TOML.parsefile(joinpath(dir, "gpec.toml")), dir).output_file, "r") do f
                         @test ffs.galerkin.solver in ("cholesky", "LU")
                         @test read(f["$gal/solver"]) == ffs.galerkin.solver
                         @test haskey(attrs(f["$gal/solver"]), "long_name")
-                        @test read(f["$gal/psi"]) == sol.psi_store
-                        @test read(f["$gal/xi_psi"]) == sol.u_store[:, :, 1, :]
-                        @test read(f["$gal/dxi_psidpsi"]) == sol.du_store
-                        @test read(f["$gal/xi_s"]) == sol.xi_s_store
+                        @test read(f["$matched/psi"]) == sol.psi_store
+                        @test read(f["$matched/xi_psi"]) == sol.u_store[:, :, 1, :]
+                        @test read(f["$matched/dxi_psidpsi"]) == sol.du_store
+                        @test read(f["$matched/xi_s"]) == sol.xi_s_store
+                        @test isempty(_collect_metadata_violations(f["ForceFreeStates/Solutions/Match"]))
+                        @test !haskey(f, "$gal/psi")
                         # Matching diagnostics sit with the other per-surface results, and the
                         # raw outer basis is debug-gated off by default.
                         @test haskey(f, "SingularSurfaces/Match/cout")

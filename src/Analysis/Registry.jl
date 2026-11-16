@@ -132,7 +132,7 @@ end
 const _H5_CAPABILITIES = (
     :equilibrium => "Equilibrium/Profiles/psi",
     :singular_surfaces => "SingularSurfaces/rational_psi",
-    :solution_profiles => ("ForceFreeStates/Solutions/ForwardIntegration/xi_psi", "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi"),
+    :solution_profiles => ("ForceFreeStates/Solutions/ForwardIntegration/xi_psi", "ForceFreeStates/Solutions/Match/xi_psi"),
     :fixed_boundary_criterion => "ForceFreeStates/Solutions/ForwardIntegration/crit",
     :edge_scan => "ForceFreeStates/EdgeScan/psi",
     :free_boundary => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",

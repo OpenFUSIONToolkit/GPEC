@@ -138,6 +138,7 @@ The perpendicular diffusivities that set the layer widths are described with the
 
 - The Riccati integrator splits the domain into chunks whose count is derived from the number of singular surfaces (`[Riccati] nchunks` overrides the target, `0` is automatic); every chunk integrates from its own start (the identity, or the asymptotic solutions of [Glasser and Kolemen (2018)](citations.md#Tearing) for the two chunks next to a rational surface), so the result is independent of the thread count.
 - The chunk ending at each rational surface is integrated backward, from the surface inward, because the forward propagator is ill-conditioned there; the Δ′ boundary-value problem is assembled from products of the same propagators, matched midway between the surfaces.
+- With `vac_flag = true` the solutions of that boundary-value problem are rebuilt on the stored grid from the same propagators and published as `ffs.basis`, the outer solutions a `[Match]` combines.
 - Both integrators use the adaptive ninth-order `Vern9` solver at `eulerlagrange_tolerance`; the Riccati integrator reduces its state to ``(S, I)`` after every chunk, and Forward applies Gaussian reduction whenever a solution norm grows past `renorm_threshold`.
 - The two integrators cross a rational surface differently. Riccati carries the nonresonant asymptotic coefficients across it (Glasser and Kolemen (2018), Eq. 36), so its energies do not depend on `singfac_min`. Forward takes a trapezoidal step between the two sides, with an error of first order in `singfac_min`, so its energies converge to Riccati's as `singfac_min` shrinks.
 
@@ -149,5 +150,5 @@ The Galerkin solver's functions are documented on the [Galerkin Solver](galerkin
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedKineticMatrices.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedKineticMatrices.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/OuterBasis.jl", "Riccati/Driver.jl"]
 ```

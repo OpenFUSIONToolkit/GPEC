@@ -17,6 +17,7 @@ const Source = Union{AbstractString,ForceFreeStatesResult}
 
 const _FWD = "ForceFreeStates/Solutions/ForwardIntegration"
 const _GAL = "ForceFreeStates/Solutions/GalerkinIntegration"
+const _MATCH = "ForceFreeStates/Solutions/Match"
 const _FBS = "ForceFreeStates/FreeBoundaryStability"
 
 # Least-stable total energy, or `nothing` without free-boundary energies.
@@ -39,8 +40,8 @@ end
 
 function _mode_displacement_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
-        # Forward integration stores its profiles in ForwardIntegration, a matched Galerkin solve in GalerkinIntegration.
-        group = isempty(fid["$_FWD/xi_psi"]) ? _GAL : _FWD
+        # An ODE integrator stores its profiles in ForwardIntegration, a matched solution in Match.
+        group = isempty(fid["$_FWD/xi_psi"]) ? _MATCH : _FWD
         (; mlow=read(fid["Info/mlow"]), psi=read(fid["$group/psi"]), xi=read(fid["$group/xi_psi"])[:, 1, :],
             dW=_first_energy(read(fid["$_FBS/eigenmode_energies"])))
     end
