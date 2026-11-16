@@ -4,6 +4,7 @@ module ForcingTerms
 using DelimitedFiles
 using HDF5
 using LinearAlgebra
+using StaticArrays: SVector
 
 import ..Equilibrium
 import ..Utilities.FourierTransforms
@@ -203,6 +204,7 @@ end
 # Coil-forcing helpers; these depend on ForcingTermsControl and ForcingMode defined above.
 include("CoilGeometry.jl")
 include("BiotSavart.jl")
+include("MagneticMaterial.jl")
 include("CoilFourier.jl")
 
 """
