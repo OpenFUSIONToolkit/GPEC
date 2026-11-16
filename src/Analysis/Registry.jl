@@ -44,7 +44,7 @@ What each capability needs, worded as what to change in the run to get it.
 const REASONS = Dict{Symbol,String}(
     :equilibrium => "needs an equilibrium",
     :singular_surfaces => "needs rational surfaces in the integration domain",
-    :solution_profiles => "needs stored ξ profiles: use the Forward integrator, or Galerkin with error_field_response = true (Riccati stores none)",
+    :solution_profiles => "needs stored ξ profiles: use the Forward or Riccati integrator, or Galerkin with error_field_response = true",
     :fixed_boundary_criterion => "needs the critical determinant scan: use the Forward or Riccati integrator (Galerkin computes none)",
     :free_boundary => "needs the free-boundary energies: run with vac_flag = true (Galerkin also needs error_field_response = true)",
     :edge_scan => "needs the edge stability scan: set dW_edge_scan_start below psilim",
@@ -132,7 +132,8 @@ end
 const _H5_CAPABILITIES = (
     :equilibrium => "Equilibrium/Profiles/psi",
     :singular_surfaces => "SingularSurfaces/rational_psi",
-    :solution_profiles => ("ForceFreeStates/Solutions/ForwardIntegration/xi_psi", "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi"),
+    :solution_profiles =>
+        ("ForceFreeStates/Solutions/ForwardIntegration/xi_psi", "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi", "ForceFreeStates/Solutions/Match/xi_psi"),
     :fixed_boundary_criterion => "ForceFreeStates/Solutions/ForwardIntegration/crit",
     :edge_scan => "ForceFreeStates/EdgeScan/psi",
     :free_boundary => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",

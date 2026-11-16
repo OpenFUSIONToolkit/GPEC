@@ -65,3 +65,31 @@ DeltaPrimeData(raw_freeboundary::AbstractMatrix, raw_fixedboundary::AbstractMatr
     DeltaPrimeData(raw_freeboundary, raw_fixedboundary, ef, edge_response,
         isempty(raw_freeboundary) ? nothing : pest3_decompose(raw_freeboundary),
         isempty(raw_fixedboundary) ? nothing : pest3_decompose(raw_fixedboundary))
+
+"""
+    OuterSolutionBasis
+
+Outer-region solutions ξ(ψ) that a `MatchProblem` combines into the matched solution, from the Riccati Δ′
+boundary-value problem or the Galerkin solve. Solution `2j-1` (`2j`) carries a unit big solution left (right) of
+surface `j` and none elsewhere; the rest, when present, carry no big solution and a unit displacement of one edge
+mode each.
+
+## Fields
+
+  - `psi::Vector{Float64}`, `q::Vector{Float64}` - Radial grid, core to edge, and its safety factor.
+  - `issing::Vector{Bool}` - Grid points on a singular surface, where the solutions are left zero.
+  - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` - `(mpert, ngrid, nsol)` ξ and dξ/dψ.
+  - `xi_cut::Array{ComplexF64,3}` - `(mpert, ngrid, nsol)` ξ without the leading-order big and small resonant terms
+    near each surface, the background the inner-layer solution is added to. Empty when not computed.
+  - `cut_range::Matrix{Float64}` - `(msing, 2)` ψ bounds around each surface outside which `xi_cut` equals `xi`.
+    Empty when not computed.
+"""
+struct OuterSolutionBasis
+    psi::Vector{Float64}
+    q::Vector{Float64}
+    issing::Vector{Bool}
+    xi::Array{ComplexF64,3}
+    xi_deriv::Array{ComplexF64,3}
+    xi_cut::Array{ComplexF64,3}
+    cut_range::Matrix{Float64}
+end

@@ -25,22 +25,17 @@ end
 """
     ChunkPropagator
 
-Fundamental matrix for one integration chunk, stored as two N×N×2 solution blocks.
-Represents the propagator Φ(ψ₂,ψ₁) computed by integrating the EL ODE from two
-identity-block initial conditions:
+Fundamental matrix of one integration chunk: column `j` is the solution started from column `j` of the chunk's
+start basis (`propagator_start`).
 
-  - `block_upper_ic`: result of integrating with IC = (I_N, 0_N)  (U₁ = I, U₂ = 0)
-  - `block_lower_ic`: result of integrating with IC = (0_N, I_N)  (U₁ = 0, U₂ = I)
+## Fields
 
-Applying the propagator to the current state `u_prev`:
-
-u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
-u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
-
-Each chunk starts from an identity IC rather than the accumulated state, so chunks integrate in parallel.
+  - `u::Array{ComplexF64,3}` - The matrix at the end of the integration, `(N, 2N, 2)`: U₁ in slice 1, U₂ in slice 2.
+  - `psi::Vector{Float64}` - ψ of every solver step, in integration order.
+  - `steps::Vector{Array{ComplexF64,3}}` - The matrix at each `psi`.
 """
 struct ChunkPropagator
-    block_upper_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (I, 0)
-    block_lower_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (0, I)
+    u::Array{ComplexF64,3}
+    psi::Vector{Float64}
+    steps::Vector{Array{ComplexF64,3}}
 end
-ChunkPropagator(N::Int) = ChunkPropagator(zeros(ComplexF64, N, N, 2), zeros(ComplexF64, N, N, 2))

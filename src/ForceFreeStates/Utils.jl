@@ -83,9 +83,7 @@ fixup transforms and the free-boundary normalization is exact rather than merely
 Euler-Lagrange system is linear in `u`, and both operations right-multiply the solution by a
 mixing matrix `T`, so `du(ψ, u·T) = du(ψ, u)·T`.
 
-Returns `false` without allocating when there is nothing to work from — no `mats`, no stored
-steps, or a solution held in a basis the Euler-Lagrange kernel does not apply to (the sparse
-parallel path, which stores chunk-endpoint Riccati matrices).
+Returns `false` without allocating when there is nothing to work from: no `mats` or no stored steps.
 """
 function materialize_derivative_stores!(
     odet::OdeState,
@@ -94,7 +92,7 @@ function materialize_derivative_stores!(
     intr::ModeSpace
 )
     odet.du_store_populated && return true
-    (isnothing(mats) || odet.step == 0 || isempty(odet.u_store) || !odet.u_store_el_basis) && return false
+    (isnothing(mats) || odet.step == 0 || isempty(odet.u_store)) && return false
 
     kinetic = mats.kinetic !== nothing
     nstep = min(odet.step, size(odet.u_store, 4))

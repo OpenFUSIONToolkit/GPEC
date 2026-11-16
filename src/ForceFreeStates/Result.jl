@@ -7,9 +7,9 @@ formalism produced the solution.
 
 ## Fields
 
-  - `basis::Symbol` - Which formalism's basis the profiles are in: `:el_axis` (forward
-    integrator, axis Euler-Lagrange basis) or `:gal_native` (ideal or inner-layer-matched Galerkin
-    solution, identity-at-edge basis).
+  - `basis::Symbol` - The basis the profiles are in: `:el_axis` (an ODE integrator's solution columns) or
+    `:unit_edge` (the ideal Galerkin solution or a `MatchProblem` solution; each column has unit displacement of one
+    edge mode).
   - `step::Int` - Number of stored radial nodes.
   - `psi_store::Vector{Float64}` - ψ at each node.
   - `q_store::Vector{Float64}` - Safety factor at each node.
@@ -65,7 +65,9 @@ is ideal-closed by its EF columns (`error_field_response`), and is unclosed with
     inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` and `:regular` closure.
   - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
-    formalism produced none (Riccati, and Galerkin without `error_field_response`).
+    formalism produced none (Galerkin without `error_field_response`).
+  - `basis::Union{Nothing,OuterSolutionBasis}` - The outer-region solutions a `MatchProblem` combines, from a
+    Galerkin solve or a Riccati solve that computed Δ_EF; `nothing` otherwise.
   - `diagnostics::Union{Nothing,OdeState}` - The integrator's raw ODE state (ψ trace, `crit`,
     edge scan, asymptotic coefficients). Written to HDF5; not a consumable solution.
   - `wp::Union{Nothing,Matrix{ComplexF64}}` - Fixed-boundary plasma energy matrix at `psilim`, the edge
@@ -119,6 +121,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P
     wp::Union{Nothing,Matrix{ComplexF64}}
     free_boundary::Union{Nothing,FreeBoundaryResult}
     delta_prime::Union{Nothing,DeltaPrimeData}
+    basis::Union{Nothing,OuterSolutionBasis}
     galerkin::Union{Nothing,GalerkinResult}
     layer_overlap::L
 end
@@ -143,7 +146,7 @@ with a message naming what a solution takes to produce.
 """
 function require_solution(result::ForceFreeStatesResult, calc::AbstractString)
     result.solution === nothing || return true
-    @warn "Skipping $calc: no ξ solution — dense profiles require a Forward (or matched Galerkin) run; " *
+    @warn "Skipping $calc: no ξ solution — dense profiles require a Forward, Riccati or matched Galerkin run; " *
           "this result came from the $(result.integrator) integrator"
     return false
 end
@@ -154,20 +157,19 @@ gal_ef_columns(gal::GalerkinResult) = (2gal.msing+1):size(gal.edge_response, 2)
 # Plasma energy matrix W_P of the Galerkin EF columns, in the units of `(U₂·U₁⁻¹)/ψ₀²`.
 gal_wp(gal::GalerkinResult, psio::Float64) = gal.edge_response[:, gal_ef_columns(gal)] ./ psio^2
 
-# `SolutionProfiles` of closed Galerkin columns `xi`, `xi_deriv` (npert, ngrid, ncol) on the grid of `sol`, without on-surface points.
-function _gal_profiles(sol::GalerkinSolution, xi::AbstractArray{ComplexF64,3}, xi_deriv::AbstractArray{ComplexF64,3}, mats::MatrixSplines,
-    intr::ModeSpace)
-    npert = intr.numpert_total
+# `SolutionProfiles` of the closed columns `xi`, `xi_deriv` (npert, ngrid, ncol) on the grid of `basis`: on-surface
+# `issing` points are dropped and Ξ_s = −A⁻¹(B·Ξ′ + C·Ξ) as in `sing_der!`.
+function _unit_edge_profiles(basis::OuterSolutionBasis, xi::AbstractArray{ComplexF64,3}, xi_deriv::AbstractArray{ComplexF64,3}, mats::MatrixSplines)
+    npert = size(xi, 1)
 
-    keep = .!sol.issing
-    psi_f = sol.psi[keep]
-    q_f = sol.q[keep]
+    keep = .!basis.issing
+    psi_f = basis.psi[keep]
+    q_f = basis.q[keep]
     xi_f = xi[:, keep, :]          # (npert, ngrid_f, ncol)
     dxi_f = xi_deriv[:, keep, :]
     ngrid_f = length(psi_f)
 
-    # u_store[:, :, 2] stays zero: the conjugate momentum has no consumer on this path and no
-    # Galerkin counterpart (matches Fortran's unused u2 in the gal branch).
+    # u_store[:, :, 2] stays zero: the conjugate momentum has no consumer on this path.
     u_store = zeros(ComplexF64, npert, npert, 2, ngrid_f)
     du_store = zeros(ComplexF64, npert, npert, ngrid_f)
     xi_s_store = zeros(ComplexF64, npert, npert, ngrid_f)
@@ -181,20 +183,20 @@ function _gal_profiles(sol::GalerkinSolution, xi::AbstractArray{ComplexF64,3}, x
         @views compute_node_xi_s!(xi_s_store[:, :, ip], ξ′, ξ, mats, psi_f[ip]; hint=hint)
     end
 
-    return SolutionProfiles(:gal_native, ngrid_f, psi_f, q_f, u_store, du_store, xi_s_store)
+    return SolutionProfiles(:unit_edge, ngrid_f, psi_f, q_f, u_store, du_store, xi_s_store)
 end
 
 """
-    build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, gal_dp)
+    build_result(integrator, ctrl, equil, intr, metric, mats, odet, free_energies, gal_data, delta_prime, basis)
         -> ForceFreeStatesResult
 
 Assemble the published result once the solve is finished, with the ideal or regular closure (a
-`MatchProblem` solve transforms it afterwards). Materializes the forward path's derivative stores, packs the
+`MatchProblem` solve transforms it afterwards). Materializes the ODE integrators' derivative stores, packs the
 Galerkin EF columns as the solution, and forms `W_p` when the free-boundary stage did not run; everything else
 is copied or aliased.
 
-`odet` is the ODE state (`nothing` for Galerkin); `gal_data`/`gal_dp` are the Galerkin internals and
-its Δ′ payload (`nothing` otherwise).
+`odet` is the ODE state (`nothing` for Galerkin), `gal_data` the Galerkin internals (`nothing` otherwise),
+and `delta_prime` and `basis` the Δ′ payload and outer solutions of a Riccati or Galerkin solve (`nothing` otherwise).
 """
 function build_result(
     integrator::Symbol,
@@ -206,32 +208,24 @@ function build_result(
     odet::Union{Nothing,OdeState},
     free_energies::Union{Nothing,FreeBoundaryResult},
     gal_data::Union{Nothing,GalerkinResult},
-    gal_dp::Union{Nothing,DeltaPrimeData}
+    delta_prime::Union{Nothing,DeltaPrimeData},
+    basis::Union{Nothing,OuterSolutionBasis}
 )
     # The Galerkin EF columns (ξ = eⱼ at the edge, no big-solution drive) are its ideal closure.
-    gal_ef = gal_data === nothing || gal_data.solution === nothing ? (1:0) : gal_ef_columns(gal_data)
+    gal_ef = gal_data === nothing || basis === nothing ? (1:0) : gal_ef_columns(gal_data)
 
-    # The forward sweep is the only formalism whose stores need materializing; doing it here
-    # keeps `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
-    solution = if integrator === :forward && odet !== nothing
+    # The ODE integrators' stores need materializing; doing it here keeps
+    # `SolutionProfiles.du_store`/`xi_s_store` populated by construction.
+    solution = if odet !== nothing
         materialize_derivative_stores!(odet, equil, mats, intr)
         SolutionProfiles(:el_axis, odet.step, odet.psi_store, odet.q_store,
             odet.u_store, odet.du_store, odet.xi_s_store)
     elseif !isempty(gal_ef)
-        gs = gal_data.solution
-        _gal_profiles(gs, @view(gs.xi[:, :, gal_ef]), @view(gs.xi_deriv[:, :, gal_ef]), mats, intr)
+        _unit_edge_profiles(basis, @view(basis.xi[:, :, gal_ef]), @view(basis.xi_deriv[:, :, gal_ef]), mats)
     else
         nothing
     end
 
-    # One Δ′ payload whichever formalism produced it.
-    delta_prime = if gal_dp !== nothing
-        gal_dp
-    elseif !isempty(intr.delta_prime_raw_freeboundary) || !isempty(intr.delta_prime_raw_fixedboundary)
-        DeltaPrimeData(intr.delta_prime_raw_freeboundary, intr.delta_prime_raw_fixedboundary, intr.delta_ef, intr.delta_prime_edge_response)
-    else
-        nothing
-    end
     kinetic = (kmsing=intr.kmsing, kinsing=intr.kinsing, scan_psi=intr.kinsing_scan_psi,
         scan_cond=intr.kinsing_scan_cond, scan_threshold=intr.kinsing_scan_threshold)
 
@@ -256,6 +250,6 @@ function build_result(
         intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.wall_settings,
         metric, mats, intr.sing, kinetic,
         closure, bpen, nothing,
-        solution, odet, wp, free_energies, delta_prime, gal_data, nothing
+        solution, odet, wp, free_energies, delta_prime, basis, gal_data, nothing
     )
 end

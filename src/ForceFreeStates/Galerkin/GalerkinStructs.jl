@@ -111,30 +111,6 @@ struct GalSingAsymp
 end
 
 """
-    GalerkinSolution
-
-Reconstructed outer-region radial solution on the gal-native grid (ξ and analytic ξ′ consumed by
-PerturbedEquilibrium). Populated by `gal_output_solution` (GalerkinSolution.jl).
-
-  - `psi::Vector{Float64}`, `q::Vector{Float64}` — radial grid (inner→edge) and its safety factor.
-  - `issing::Vector{Bool}` — grid points sitting on a singular surface (skipped; left zero).
-  - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ and dξ/dψ.
-  - `xi_cut::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ with the leading-order resonant content removed,
-    the background the inner-layer solution is added to for the composite solution. `(0,0,0)` unless `cut_solution`.
-  - `cut_range::Matrix{Float64}` — `(msing, 2)` ψ bounds of the resonant + extension cells around each surface;
-    the composite inner solution is only meaningful inside them. `(0,0)` unless `cut_solution`.
-"""
-struct GalerkinSolution
-    psi::Vector{Float64}
-    q::Vector{Float64}
-    issing::Vector{Bool}
-    xi::Array{ComplexF64,3}
-    xi_deriv::Array{ComplexF64,3}
-    xi_cut::Array{ComplexF64,3}
-    cut_range::Matrix{Float64}
-end
-
-"""
     GalerkinResult
 
 Solver internals and FEM diagnostics of the outer-region Galerkin solve. The Δ′ payload is not here;
@@ -147,8 +123,6 @@ Solver internals and FEM diagnostics of the outer-region Galerkin solve. The Δ�
   - `sing_psi, sing_q::Vector{Float64}`, `sing_m, sing_n::Vector{Int}` — per-surface identifiers,
     core→edge, in the order the Δ′ matrices are indexed.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
-  - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
-    gal-native grid; `nothing` if no resonant surfaces.
   - `solver::String` — factorization actually used: `"cholesky"`, `"LU"`, or `"none"` when no resonant surfaces were present.
   - `edge_response::Matrix{ComplexF64}` — `(mpert, nsol)` edge momentum FΞ′ + KΞ of every solution column
     (`gal_edge_response`); the EF columns give `W_P·ψ₀²`. Empty if no resonant surfaces.
@@ -161,7 +135,6 @@ struct GalerkinResult
     sing_n::Vector{Int}
     di::Vector{Float64}
     alpha::Vector{ComplexF64}
-    solution::Union{Nothing,GalerkinSolution}
     solver::String
     edge_response::Matrix{ComplexF64}
 end

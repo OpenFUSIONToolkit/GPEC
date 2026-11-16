@@ -17,6 +17,7 @@ const Source = Union{AbstractString,ForceFreeStatesResult}
 
 const _FWD = "ForceFreeStates/Solutions/ForwardIntegration"
 const _GAL = "ForceFreeStates/Solutions/GalerkinIntegration"
+const _MATCH = "ForceFreeStates/Solutions/Match"
 const _FBS = "ForceFreeStates/FreeBoundaryStability"
 
 # Least-stable total energy, or `nothing` without free-boundary energies.
@@ -52,17 +53,17 @@ _least_stable(xi, wt, psio, gal::Bool) =
 function _mode_displacement_data(r::ForceFreeStatesResult)
     sol = r.solution
     xi = _least_stable(sol.u_store[:, :, 1, :], r.free_boundary === nothing ? nothing : r.free_boundary.wt, r.equil.psio,
-        sol.basis === :gal_native && r.free_boundary !== nothing)
+        sol.basis === :unit_edge && r.free_boundary !== nothing)
     keep = _unmasked(sol.q_store, r.mlow, size(xi, 1), r.nlow)
     return (; mlow=r.mlow, psi=sol.psi_store, xi, keep, dW=r.free_boundary === nothing ? nothing : _first_energy(r.free_boundary.et), matched=_matched(r))
 end
 
 function _mode_displacement_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
-        # Forward integration stores its profiles in ForwardIntegration, a Galerkin solve in GalerkinIntegration.
-        group = isempty(fid["$_FWD/xi_psi"]) ? _GAL : _FWD
+        # An ODE integrator stores its profiles in ForwardIntegration, a Galerkin solve in GalerkinIntegration, a matched solution in Match.
+        group = !isempty(fid["$_FWD/xi_psi"]) ? _FWD : haskey(fid, "$_MATCH/xi_psi") ? _MATCH : _GAL
         psi = read(fid["$group/psi"])
-        xi = _least_stable(read(fid["$group/xi_psi"]), read(fid["$_FBS/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psi_total"]), group == _GAL)
+        xi = _least_stable(read(fid["$group/xi_psi"]), read(fid["$_FBS/W_freeboundary_eigenmodes"]), read(fid["Equilibrium/psi_total"]), group != _FWD)
         mlow = read(fid["Info/mlow"])
         keep = _unmasked(read(fid["$group/q"]), mlow, size(xi, 1), read(fid["Info/nlow"]))
         (; mlow, psi, xi, keep, dW=_first_energy(read(fid["$_FBS/eigenmode_energies"])), matched=_matched(fid))

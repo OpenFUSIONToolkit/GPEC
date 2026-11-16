@@ -12,6 +12,22 @@ Supertype for objects that carry the resolved (m, n) mode space — `mlow`, `mhi
 abstract type ModeSpace end
 
 """
+    ModeIndices(modes::ModeSpace)
+
+Immutable copy of a mode space's indexing, for code that must not see the rest of its source.
+"""
+struct ModeIndices <: ModeSpace
+    mlow::Int
+    mhigh::Int
+    mpert::Int
+    nlow::Int
+    nhigh::Int
+    npert::Int
+    numpert_total::Int
+end
+ModeIndices(m::ModeSpace) = ModeIndices(m.mlow, m.mhigh, m.mpert, m.nlow, m.nhigh, m.npert, m.numpert_total)
+
+"""
     ForceFreeStatesInternal
 
 Solve-time scratch state for a force-balance solve: the resolved mode space, singular surfaces and integration limits.
@@ -59,15 +75,6 @@ Solve-time scratch state for a force-balance solve: the resolved mode space, sin
     q1lim::Float64 = 0.0
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
     verbose::Bool = false
-    """
-    Riccati Δ' BVP results (`compute_delta_prime_matrix!`): raw side-major `2msing × 2msing` D' with the vacuum edge
-    and with ξ(edge) = 0, Δ_EF (`2msing × numpert_total`), and the edge momentum of the ξ(edge) = 0 solutions
-    (`numpert_total × 2msing`). Empty when not computed.
-    """
-    delta_prime_raw_freeboundary::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-    delta_prime_raw_fixedboundary::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-    delta_ef::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-    delta_prime_edge_response::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """

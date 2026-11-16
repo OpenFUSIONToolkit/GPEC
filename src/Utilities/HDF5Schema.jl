@@ -193,6 +193,30 @@ const MAIN_H5_ANNOTATIONS = [
             attach=(3 => "ForceFreeStates/Solutions/ForwardIntegration/psi",)),
     "ForceFreeStates/Solutions/ForwardIntegration/crit" =>
         (; long_name="DCON zero-crossing criterion at saved snapshots", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/ForwardIntegration/psi",)),
+    # --- ForceFreeStates/Solutions/GalerkinIntegration/ (the ideal solution of a Galerkin solve, on its own grid) ---
+    "ForceFreeStates/Solutions/GalerkinIntegration/psi" => (; long_name="normalized poloidal flux ψ_N grid of the closed Galerkin solution", scale="psi_gal"),
+    "ForceFreeStates/Solutions/GalerkinIntegration/q" =>
+        (; long_name="safety factor q on the Galerkin solution grid", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi" =>
+        (; long_name="closed axis-to-edge ξ^ψ profiles (ideal closure; identity-at-edge basis)", dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/dxi_psidpsi" =>
+        (; long_name="ψ_N derivative of the closed ξ^ψ profiles", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    "ForceFreeStates/Solutions/GalerkinIntegration/xi_s" =>
+        (; long_name="surface displacement ξ_s from the outer ideal-MHD relation", dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/GalerkinIntegration/psi",)),
+    # --- ForceFreeStates/Solutions/Match/ (the solution a MatchProblem closes, on the grid of its outer basis) ---
+    "ForceFreeStates/Solutions/Match/psi" => (; long_name="normalized poloidal flux ψ_N grid of the matched solution", scale="psi_match"),
+    "ForceFreeStates/Solutions/Match/q" =>
+        (; long_name="safety factor q on the matched-solution grid", dims=("psi",), attach=(1 => "ForceFreeStates/Solutions/Match/psi",)),
+    "ForceFreeStates/Solutions/Match/xi_psi" =>
+        (; long_name="closed axis-to-edge ξ^ψ profiles (inner-layer closure; identity-at-edge basis)", dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/Match/psi",)),
+    "ForceFreeStates/Solutions/Match/dxi_psidpsi" =>
+        (; long_name="ψ_N derivative of the closed ξ^ψ profiles", dims=("mode", "solution", "psi"), attach=(3 => "ForceFreeStates/Solutions/Match/psi",)),
+    "ForceFreeStates/Solutions/Match/xi_s" =>
+        (; long_name="surface displacement ξ_s from the outer ideal-MHD relation", dims=("mode", "solution", "psi"),
+            attach=(3 => "ForceFreeStates/Solutions/Match/psi",)),
     # --- ForceFreeStates/EdgeScan/ (power-normalized (W, N) pencil energies) ---
     "ForceFreeStates/EdgeScan/psi" => (; long_name="normalized poloidal flux ψ_N of the edge truncation scan", scale="psi"),
     "ForceFreeStates/EdgeScan/q" => (; long_name="safety factor at scan points", dims=("psi",), attach=(1 => "ForceFreeStates/EdgeScan/psi",)),

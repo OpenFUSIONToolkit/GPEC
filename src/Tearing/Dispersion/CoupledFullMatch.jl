@@ -64,9 +64,7 @@ end
                                 inner_kwargs=NamedTuple()) -> MultiSurfaceCouplingFull
 
 Construct the 4m × 4m dispersion matrix driver. `dp_raw` must be the
-2m × 2m matrix in side-major ordering (the `DeltaPrimeData` raw D'
-field populated by `ForceFreeStates.compute_delta_prime_matrix!` on the
-Riccati path). Surface k's inner layer is evaluated at `Q·ratio_k` Doppler-shifted by its
+2m × 2m matrix in side-major ordering (a raw D' of `DeltaPrimeData`). Surface k's inner layer is evaluated at `Q·ratio_k` Doppler-shifted by its
 E×B offset `q_shift_k`, exactly as in the reduced `multi_surface_coupling`: added to Q for a
 SLAYER surface, and as `i·q_shift_k` to the growth rate s for a GGJ surface (see `SurfaceCoupling`).
 

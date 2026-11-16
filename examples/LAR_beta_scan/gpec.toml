@@ -69,5 +69,4 @@ rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rati
 # Numerical settings of the Riccati integrator
 [Riccati]
 eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations
-renorm_threshold        = 1e3  # Column-norm threshold that triggers solution renormalization
-save_interval         = 1      # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+save_interval         = 1      # Store every Nth solver step of each chunk (1=all); chunk ends and the edge-dW scan band are always stored

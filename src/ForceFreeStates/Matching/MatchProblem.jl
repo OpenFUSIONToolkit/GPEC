@@ -91,9 +91,8 @@ closure_capable(::InnerLayer.SLAYERModel) = false
     solve(prob::MatchProblem, model) -> ForceFreeStatesResult
 
 Match `prob.ffs` to the inner layer of `model`. The result has `closure = :matched`, `bpen`, the
-[`MatchResult`](@ref) in `result.match`, the matched edge response `wp` (see [`ForceFreeStatesResult`](@ref))
-and, when the solve had `vac_flag`, the free-boundary energies of that response. A Galerkin solve also gives
-the matched ξ.
+[`MatchResult`](@ref) in `result.match`, the matched ξ, the matched edge response `wp` (see
+[`ForceFreeStatesResult`](@ref)) and, when the solve had `vac_flag`, the free-boundary energies of that response.
 """
 function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel)
     closure_capable(model) ||
@@ -113,7 +112,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     equil = ffs.equil
     chi1 = 2π * equil.psio
 
-    gal_sol = ffs.galerkin === nothing ? nothing : ffs.galerkin.solution
+    basis = ffs.basis
 
     # Inner-layer Δ and profiles per surface (match.f deltac_run, intotsol).
     deltar = zeros(ComplexF64, msing, 2)
@@ -175,16 +174,16 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
 
     reconnected_flux = Matrix{ComplexF64}(dp.ef .+ transpose(dp.raw_fixedboundary) * cout)
 
-    # Matched outer ξ per EF column: EF column + Σ cout·plasma columns (needs the Galerkin basis).
-    if gal_sol === nothing
+    # Matched outer ξ per EF column: EF column + Σ cout·plasma columns.
+    if basis === nothing
         xi = Array{ComplexF64,3}(undef, 0, 0, 0)
         xi_deriv = Array{ComplexF64,3}(undef, 0, 0, 0)
         empty!(inner_psi)
         empty!(inner_xi)
         empty!(inner_b)
     else
-        sols = gal_sol.xi          # (mpert, ngrid, nsol)
-        sols_deriv = gal_sol.xi_deriv
+        sols = basis.xi          # (mpert, ngrid, nsol)
+        sols_deriv = basis.xi_deriv
         mpert = size(sols, 1)
         ngrid = size(sols, 2)
         xi = zeros(ComplexF64, mpert, ngrid, nef)
@@ -201,7 +200,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
 
         # Composite inner solution: add back the outer background the cut removed (match.f intotsol).
         if !isempty(inner_psi)
-            sols_cut = gal_sol.xi_cut
+            sols_cut = basis.xi_cut
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
                       "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog = 1
@@ -209,9 +208,9 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
                 empty!(inner_xi)
                 empty!(inner_b)
             else
-                cut_range = gal_sol.cut_range
-                keep = .!gal_sol.issing
-                psi_keep = gal_sol.psi[keep]
+                cut_range = basis.cut_range
+                keep = .!basis.issing
+                psi_keep = basis.psi[keep]
                 for i in 1:msing
                     m_res = round(Int, nn * sings[i].q)
                     ires = m_res - ffs.mlow + 1
@@ -220,7 +219,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
                     inside = findall(p -> lo <= p <= hi, inner_psi[i])
                     if isempty(inside)
                         @warn "MatchProblem: inner layer at ψ=$(round(sings[i].psifac, digits=5)) lies outside the " *
-                              "resonant/extension cells (ψ ∈ [$lo, $hi]); raise gal_dx1/gal_dx2 to overlap the layer" surface = i
+                              "cut window (ψ ∈ [$lo, $hi]); with Galerkin, raise gal_dx1/gal_dx2 to overlap the layer" surface = i
                         continue
                     end
                     length(inside) < length(inner_psi[i]) && @info "MatchProblem: surface $i inner region clipped to the " *
@@ -255,15 +254,10 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model, prob)
 end
 
-# Copy of ffs with the match applied. A Galerkin match publishes the matched ξ, its edge response (the matched
-# columns are EF + plasma·cout, so their edge response is too) and the free-boundary energies of that response with
-# the solve's own vacuum. For Riccati match these remain TODO.
+# Copy of ffs with the match applied: the matched ξ, its edge response (the matched columns are EF + plasma·cout, so
+# their edge response is too) and the free-boundary energies of that response with the solve's own vacuum.
 function _matched_result(ffs::ForceFreeStatesResult, match::MatchResult)
-    gal = ffs.galerkin
-    solution = nothing
-    if gal !== nothing && gal.solution !== nothing && !isempty(match.xi)
-        solution = _gal_profiles(gal.solution, match.xi, match.xi_deriv, ffs.mats, ffs)
-    end
+    solution = isempty(match.xi) ? nothing : _unit_edge_profiles(ffs.basis, match.xi, match.xi_deriv, ffs.mats)
     # Matched edge momentum: the ideal EF response plus the big-solution columns weighted by cout.
     wp = nothing
     free_boundary = nothing

@@ -52,7 +52,6 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 # Numerical settings of the Riccati integrator
 [Riccati]
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
-renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 
 # Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
 [Solovev]

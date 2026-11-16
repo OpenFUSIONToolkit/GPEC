@@ -52,6 +52,7 @@ include("Free.jl")
 include("Riccati/Propagators.jl")
 include("Riccati/Crossings.jl")
 include("Riccati/DeltaPrimeBVP.jl")
+include("Riccati/OuterBasis.jl")
 include("Riccati/Driver.jl")
 
 # RDCON outer-region singular Galerkin Δ′ solver (gal_solve port)

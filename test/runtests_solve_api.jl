@@ -18,15 +18,16 @@ include("display_check.jl")
     )
     wall = GPEC.Vacuum.parse_wall(get(deck, "Wall", nothing))
 
-    # The deck's `[ForceFreeStates]` block as `solve` keywords, less `nn` and the wall; its `[Forward]` numerics
-    # serve both ODE integrators.
+    # The deck's `[ForceFreeStates]` block as `solve` keywords, less `nn` and the wall; its `[Forward]` tolerance
+    # serves both ODE integrators.
     ffs_kwargs = filter(p -> !(p.first in (:nn, :wall)), GPEC.force_balance_keywords(deck, template))
     ode_kwargs = GPEC.section_keywords(deck["Forward"], "Forward", GPEC._struct_fields(Forward))
     forward = Forward(; ode_kwargs...)
-    riccati = Riccati(; ode_kwargs...)
+    riccati_kwargs = GPEC.section_keywords(delete!(copy(deck["Forward"]), "renorm_threshold"), "Riccati", GPEC._struct_fields(Riccati))
+    riccati = Riccati(; riccati_kwargs...)
 
     # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
-    # An `integrator` override moves the `[Forward]` numerics to `[Riccati]`, or drops them for Galerkin.
+    # An `integrator` override moves the `[Forward]` tolerance to `[Riccati]`, or drops the section for Galerkin.
     function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
         for name in readdir(template)
             cp(joinpath(template, name), joinpath(dir, name))
@@ -36,7 +37,8 @@ include("display_check.jl")
         merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
         ode = pop!(inputs, "Forward")
-        inputs["ForceFreeStates"]["integrator"] in ("Forward", "Riccati") && (inputs[inputs["ForceFreeStates"]["integrator"]] = ode)
+        inputs["ForceFreeStates"]["integrator"] == "Forward" && (inputs["Forward"] = ode)
+        inputs["ForceFreeStates"]["integrator"] == "Riccati" && (inputs["Riccati"] = delete!(ode, "renorm_threshold"))
         foreach(section -> delete!(inputs, section), ("LocalStability", "Ballooning"))
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
@@ -69,19 +71,20 @@ include("display_check.jl")
         mktempdir() do dir
             reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"))]).ffs
             prob = ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs...)
-            api = solve(prob, Riccati(; ode_kwargs..., nchunks=40))
+            api = solve(prob, Riccati(; riccati_kwargs..., nchunks=40))
 
             @test api.integrator === :riccati
             @test api.control.algorithm.nchunks == 40
-            @test api.solution === nothing
+            @test api.solution !== nothing && api.solution.basis === :el_axis
             @test api.delta_prime !== nothing
             msing = length(api.surfaces)
             @test size(api.delta_prime.freeboundary.Delta) == (msing, msing)
             @test api.delta_prime.freeboundary.Delta ≈ FFS.pest3_decompose(api.delta_prime.raw_freeboundary).Delta
 
-            # Chunking is a decomposition of the same problem, so Δ′ tracks the TOML run.
+            # Chunking is a decomposition of the same problem, so Δ′ tracks the TOML run to the accuracy
+            # the propagator products keep at this fixture's singfac_min = 1e-6.
             @test size(reference.delta_prime.freeboundary.Delta) == size(api.delta_prime.freeboundary.Delta)
-            @test api.delta_prime.freeboundary.Delta ≈ reference.delta_prime.freeboundary.Delta rtol = 1e-6
+            @test api.delta_prime.freeboundary.Delta ≈ reference.delta_prime.freeboundary.Delta rtol = 1e-4
 
             # With the deck's own (auto) chunking the two runs are the same computation.
             same = solve(prob, riccati)
@@ -466,7 +469,12 @@ include("display_check.jl")
             matched = solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             @test matched.closure === :matched
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
-            @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # The matched ξ is built from the Riccati solve's own outer solutions, on its stored grid.
+            @test ric.basis !== nothing && size(ric.basis.xi, 3) == 2 * length(ric.surfaces) + ric.numpert_total
+            @test matched.solution.basis === :unit_edge && matched.solution.psi_store == ric.basis.psi
+            @test matched.solution.u_store[:, :, 1, :] == permutedims(matched.match.xi, (1, 3, 2))
+            # A Riccati basis always carries its cut solution, so the composite inner profiles need no option.
+            @test length(solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel(; real_profiles=true)).match.inner_xi) == length(ric.surfaces)
             # The edge response is W_P plus the big-solution edge momenta weighted by cout; the layers make it non-Hermitian.
             ψ₀² = ric.equil.psio^2
             @test matched.wp ≈ ric.wp + ric.delta_prime.edge_response * matched.match.cout / ψ₀² rtol = 1e-12
@@ -495,7 +503,7 @@ include("display_check.jl")
             @test_throws MethodError TearingProblem(gal; inner_model=:ggj_ray)
             # The Galerkin solve is itself ideal-closed: its EF columns, identity at the edge, with their δW.
             @test gal.closure === :ideal
-            @test gal.solution !== nothing && gal.solution.basis === :gal_native
+            @test gal.solution !== nothing && gal.solution.basis === :unit_edge
             N = gal.numpert_total
             @test gal.solution.u_store[:, :, 1, end] ≈ Matrix{ComplexF64}(I, N, N) atol = 1e-10
             @test size(gal.wp) == (N, N) && norm(gal.wp - gal.wp') <= 1e-8 * norm(gal.wp)
@@ -617,12 +625,14 @@ include("display_check.jl")
                 @test reference.closure === :matched
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
+                @test !isempty(api.match.xi)
+                @test api.match.xi ≈ reference.match.xi rtol = 1e-12
             end
 
             # A forward solve has no Δ′ to match against, so the deck stops at parse time instead of after the solve.
             mktempdir() do dir
                 deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("eta" => 1e-7, "rho" => 1e-7, "rotation" => 1.0)))
-                @test_throws "[Match] needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+                @test_throws "[Match] needs Δ_EF" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
 
             # A perturbed equilibrium with a wall stops at parse time.
