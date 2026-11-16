@@ -42,7 +42,7 @@ grad_greenfunction is not zeroed since it fills a different block of the
     analytical singularity removal [Chance Phys. Plasmas 1997 2161]
   - Plasma–wall rows within `NEAR_GAP` node spacings of the source curve: Simpson's rule plus sinh-graded Gauss nodes
     about the closest source point ([`add_near_window!`](@ref)), so the wall's node placement does not matter
-  - Other plasma–wall rows: periodic trapezoidal rule, spectrally accurate on their smooth integrand
+  - Other plasma–wall rows: periodic trapezoidal rule, as in 3D (error ∝ exp(-2πd/h), see `NEAR_GAP`)
 """
 function compute_2D_kernel_matrices!(
     grad_greenfunction::AbstractMatrix{Float64},

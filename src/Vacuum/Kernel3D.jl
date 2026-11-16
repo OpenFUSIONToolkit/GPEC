@@ -17,7 +17,8 @@
 #   - patch geometry upsampled 2x by trigonometric interpolation to refine the polar interpolation stencil,
 #     correction weights folded back to the collocation nodes by its transpose (BIEST instead upsamples the
 #     whole surface and density and shrinks the patch)
-#   - plasma-wall rows: sinh-mapped radial nodes [Johnston & Elliott, Int. J. Numer. Meth. Engng 62 (2005) 564]
+#   - plasma-wall rows: sinh-mapped radial nodes [Johnston & Elliott, Int. J. Numer. Meth. Engng 62 (2005) 564]; rows
+#     beyond NEAR_GAP node spacings take the trapezoidal rule alone
 #   - dense operator row assembly, field-period folding, stellarator-symmetric basis, threading
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -110,6 +111,9 @@ struct SourceQuadrature{T<:Number,P<:AbstractVector{T},S,NS,NC,R}
     populate_greenfunction::Bool                   # fill the single layer (plasma source only)
 end
 
+# Lagrange order on plasma–wall rows: 9 points match 11 there at 2/3 the cost
+const CROSS_INTERP_ORDER = 9
+
 function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::Int, RAD_DIM::Int, INTERP_ORDER::Int)
     mtheta, nzeta, nfp = source.mtheta, source.nzeta, length(phases)
     UP_DIM, nzeta_fp = 4 * patch_rad + 1, nzeta ÷ nfp
@@ -136,7 +140,7 @@ function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::I
         phases, Uθ_patch, Uζ_patch, patch_rad, 2 * RAD_DIM,
         # Plasma–wall rows: 1–4 × RAD_DIM nodes, RAD_DIM per 4 units of the sinh variable
         self_radial, sinh_rule(RAD_DIM, 4, 4.0),
-        Val(INTERP_ORDER), Val(INTERP_ORDER),
+        Val(INTERP_ORDER), Val(min(INTERP_ORDER, CROSS_INTERP_ORDER)),
         source isa PlasmaGeometry3D
     )
 end
@@ -168,11 +172,12 @@ function fold_patch_to_row!(row::Vector{T}, M_up::AbstractMatrix{Float64}, quad:
 end
 
 """
-    closest_source_point!(patch, quad, r) -> (; i, j, U, V, d, hθ, hζ)
+    closest_source_point!(patch, quad, r) -> (; i, j, U, V, d, hθ, hζ) or nothing
 
 Source point closest to `r`, for a near-field correction about it. `patch` is left holding the upsampled patch about
 collocation node `(i, j)`, re-centred as the Gauss–Newton search moves, and `(U, V)` are the point's coordinates on it;
-`d` is the distance and `hθ`, `hζ` the local node spacings.
+`d` is the distance and `hθ`, `hζ` the local node spacings. Returns `nothing` when `r` is more than `NEAR_GAP` node spacings from
+the source, where the trapezoidal error (∝ exp(-2πd/h)) needs no correction.
 """
 function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadrature, r::SVector{3,Float64})
     mtheta, nzeta = quad.source.mtheta, quad.source.nzeta
@@ -182,6 +187,8 @@ function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadratu
 
     k = argmin(k -> sum(abs2, r - quad.points[k][SVector(1, 2, 3)]), eachindex(quad.points))
     i, j = mod1(k, mtheta), (k - 1) ÷ mtheta + 1
+    q = quad.points_up[2i-1+2mtheta*(2j-2)]
+    norm(r - q.r) > NEAR_GAP * max(norm(q.rθ) * dθ, norm(q.rζ) * dζ) && return nothing
 
     U, V = c, c
     for iter in 1:3
@@ -273,10 +280,12 @@ function kernel_row!(ws::KernelWorkspace, quad::SourceQuadrature, observer, idx_
         c = 2.0 * quad.patch_rad
         near_correction!(ws, quad, r_obs, i_obs, j_obs, c, c, quad.self_radial, quad.self_order)
     else
-        # About the closest source point, with radial nodes graded to the gap
+        # About the closest source point, with radial nodes graded to the gap; none beyond NEAR_GAP node spacings
         cp = closest_source_point!(patch, quad, r_obs)
-        ε = cp.d / (quad.patch_rad * min(cp.hθ, cp.hζ))
-        near_correction!(ws, quad, r_obs, cp.i, cp.j, cp.U, cp.V, sinh_nodes(ε, 0.0, 1.0, quad.cross_radial_rule), quad.cross_order)
+        if cp !== nothing
+            ε = cp.d / (quad.patch_rad * min(cp.hθ, cp.hζ))
+            near_correction!(ws, quad, r_obs, cp.i, cp.j, cp.U, cp.V, sinh_nodes(ε, 0.0, 1.0, quad.cross_radial_rule), quad.cross_order)
+        end
     end
 
     # Normalize so the Green's-identity term is a unit shift and the exterior/interior jump is 2I, as in the 2D kernel
@@ -291,7 +300,8 @@ end
 
 Far field: trapezoidal rule. Near field ([`near_correction!`](@ref)): polar quadrature blended by a partition of unity,
 on source data upsampled 2× by trigonometric interpolation, about the observer on Gauss radial nodes, or for a
-plasma–wall row about the closest source point on sinh-mapped ones.
+plasma–wall row about the closest source point on sinh-mapped ones. Plasma–wall rows more than `NEAR_GAP` source node
+spacings away keep the trapezoidal rule alone, as in 2D.
 
 A source in field period `d` is accumulated onto the period-0 column with weight `phases[d+1]`, so
 the block-circulant reduction is written in and the full-torus source blocks are never stored.

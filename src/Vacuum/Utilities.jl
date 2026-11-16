@@ -199,9 +199,9 @@ Lagrange cardinal weights at `ξ` on the uniform nodes `0:(N - 1)`: wᵢ = cᵢ 
     return SVector(ntuple(i -> foldl(*, ntuple(j -> j == i ? 1.0 : ξ - (j - 1), Val(N)); init=c[i]), Val(N)))
 end
 
-# Plasma–wall rows whose observer is more than NEAR_GAP source node spacings h from the source curve take the periodic
-# trapezoidal rule alone: its error ∝ exp(-2πd/h) is ~1e-11 there. Nearer rows are integrated about the closest source
-# point
+# Plasma–wall rows whose observer is more than NEAR_GAP source node spacings h from the source surface take the periodic
+# trapezoidal rule alone, in 2D and 3D: its error ∝ exp(-2πd/h) is ~1e-11 there. Nearer rows are integrated about the
+# closest source point
 const NEAR_GAP = 4.0
 
 """
