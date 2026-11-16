@@ -47,6 +47,7 @@ const TEST_SUITES = [
     "runtests_dispersion_winding.jl" => "errorfields",
     "runtests_dispersion_ggj.jl" => "errorfields",
     "runtests_critical_resonant_field.jl" => "errorfields",
+    "runtests_modified_rutherford.jl" => "errorfields",
     "runtests_slayer_runner.jl" => "errorfields",
     "runtests_kinetic.jl" => "core",
     "runtests_kinetic_validity.jl" => "core",

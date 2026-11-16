@@ -1,5 +1,5 @@
 import ..Utilities: save_to_hdf5
-import ..Utilities.HDF5Annotations: replace_group!, write_ragged!
+import ..Utilities.HDF5Annotations: write_ragged!
 
 # HDF5Output.jl
 #
@@ -19,11 +19,12 @@ using HDF5
 """
     save_to_hdf5(parent::Union{HDF5.File,HDF5.Group}, result::TearingResult)
 
-Write `result` into a `Tearing/` subgroup of `parent`, replacing any existing one.
+Write `result` into a `Tearing/` subgroup of `parent`, replacing its previous contents but keeping the
+`ModifiedRutherford/` group that its result writes there.
 """
 function save_to_hdf5(parent::Union{HDF5.File,HDF5.Group},
     result::TearingResult)
-    g = replace_group!(parent, "Tearing")
+    g = _reset_tearing_group!(parent)
     g["enabled"] = Int(result.enabled)
     # Which inner-layer model produced PerSurface/: the SLAYER and GGJ branches write
     # disjoint field sets, so readers must not have to infer it from the schema.
@@ -181,6 +182,22 @@ const TEARING_RAGGED_H5_ANNOTATIONS = [
     "flat" => (; long_name="concatenated complex entries (rows delimited by offsets)"),
     "offsets" => (; long_name="ragged-array offsets: row k spans offsets[k]+1:offsets[k+1]")
 ]
+
+# What a TearingResult writes directly under Tearing/; a rewrite clears only these, so other results' groups stay.
+const _TEARING_OWN_KEYS = ("enabled", "PerSurface", "Roots", "LayerWidths", "Diagnostics", "Scan", "CriticalResonantField")
+
+# Empty Tearing/ of everything a TearingResult writes, or create it.
+function _reset_tearing_group!(parent)
+    haskey(parent, "Tearing") || return create_group(parent, "Tearing")
+    g = parent["Tearing"]
+    for k in keys(g)
+        k in _TEARING_OWN_KEYS && HDF5.delete_object(g, k)
+    end
+    for a in keys(attrs(g))
+        HDF5.delete_attribute(g, a)
+    end
+    return g
+end
 
 const TEARING_RAGGED_WINDING_H5_ANNOTATIONS = [
     "flat" => (; long_name="winding number of the dispersion residual around each entry of the matching root list (NaN: circle unresolved)"),

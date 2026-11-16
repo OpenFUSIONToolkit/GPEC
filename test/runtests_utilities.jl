@@ -1,3 +1,5 @@
+import QuadGK
+
 @testset "Utilities Unit Tests" begin
     @testset "adaptive_sample resolves a narrow resonance and brackets a zero crossing" begin
         adaptive_sample = GeneralizedPerturbedEquilibrium.Utilities.adaptive_sample
@@ -71,5 +73,22 @@
         out = zeros(ComplexF64, 5)
         GeneralizedPerturbedEquilibrium.Utilities.get_complex_coeffs!(out, fc, 10, 1)
         @test out[3] == c2  # Mode 2 is at index 3 (0-indexed mode)
+    end
+
+    @testset "trapped_fraction is a tight upper bound on the exact effective trapped fraction" begin
+        trapped_fraction = GeneralizedPerturbedEquilibrium.Utilities.NeoclassicalResistivity.trapped_fraction
+        for eps in (0.001, 0.05, 0.2, 0.4)
+            theta = range(0, 2pi; length=2001)[1:(end-1)]
+            B = 1 ./ (1 .+ eps .* cos.(theta))
+            w = 1 ./ B
+            avg(g) = sum(g .* w) / sum(w)
+            B_max = maximum(B)
+            # Exact: f_t = 1 − (3/4)⟨B²⟩ ∫₀^{1/B_max} λ dλ / ⟨√(1 − λB)⟩
+            integral, _ = QuadGK.quadgk(lam -> lam / avg(sqrt.(max.(1 .- lam .* B, 0.0))), 0.0, 1 / B_max; rtol=1e-8)
+            f_exact = 1 - 0.75 * avg(B .^ 2) * integral
+            f_tu = trapped_fraction(avg(B), avg(B .^ 2), minimum(B), B_max)
+            @test f_tu >= f_exact
+            @test f_tu <= 1.03 * f_exact  # 1.5/1.46 as eps -> 0 (Lin-Liu & Miller Eqs. 14-16)
+        end
     end
 end

@@ -1,0 +1,33 @@
+# The steady modified Rutherford equation: switchable terms and their sum F(w) per rational surface, from the
+# force-balance Δ′, the resistive-layer geometry and the equilibrium's kinetic data.
+
+module ModifiedRutherford
+
+using HDF5
+import CommonSolve
+import FastInterpolations
+using FastInterpolations: cubic_interp, Series, PeriodicBC, DerivOp
+
+import ...Utilities
+import ...Equilibrium
+import ...Utilities: save_to_hdf5
+using ...Utilities.HDF5Annotations: replace_group!
+using ...Utilities.PhysicalConstants: M_E, M_P, E_CHG, MU_0
+using ...Utilities.NeoclassicalResistivity: nu_star_e
+using ...InnerLayer: layer_plasma
+using ...InnerLayer.SLAYER: radial_label, build_slayer_inputs
+using Roots: find_zero, Brent
+using ..ResonantForcing: resonant_forcing, toroidal_flux_radius, callen_polarization_width, forcing_thresholds
+
+include("Geometry.jl")
+include("Terms.jl")
+include("Problem.jl")
+include("HDF5Output.jl")
+
+export MRESurfaceGeometry, mre_geometry, current_density_profile, sauter2002_trapped_fraction, bootstrap_coefficient
+export classical_term, saturation_coefficient, saturation_term, bootstrap_term, curvature_term, lutjens_curvature_term, layer_transport_width, polarization_term,
+    reduced_polarization_term,
+    transport_width
+export mre_roots, vacuum_island_field, ModifiedRutherfordProblem, ModifiedRutherfordResult, CALLEN_PRESET
+
+end # module ModifiedRutherford

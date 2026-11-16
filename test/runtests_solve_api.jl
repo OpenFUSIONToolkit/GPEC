@@ -243,6 +243,13 @@ include("display_check.jl")
 
             # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.
             @test pe.resonant_area_weighted_field ≈ reference.resonant_area_weighted_field rtol = 1e-10
+            # The MRE's seed field inverts the perturbed equilibrium's vacuum-island width at every surface.
+            MRE = GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford
+            for (row, k) in enumerate(resp.rational_surface_idx)
+                sk = ffs.surfaces[k]
+                @test MRE.vacuum_island_field(equil, resp.rational_psi[row], resp.rational_n[row], sk.q1, 2 * pe.island_half_width[row]) ≈
+                      abs(pe.resonant_area_weighted_field[row]) rtol = 1e-8
+            end
             @test pe.forcing_b ≈ reference.forcing_b rtol = 1e-10
 
             # One response serves any number of fields: forcing it again reproduces the result.
@@ -558,6 +565,207 @@ include("display_check.jl")
                     "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
                 deck_dir = _stage_deck(dir; extra_sections=walled)
                 @test_throws "without a wall" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+        end
+
+        @testset "modified Rutherford under [Tearing.ModifiedRutherford]" begin
+            # The MRE alone: a [Tearing] holding only the sub-table runs no layer solve, and its deck replays.
+            # Two settings between them move every problem keyword off its default.
+            variants = [
+                (; polarization=true, omega_model=:locked, omega_factor=0.5, delta_prime_factor=0.9, D_nc_factor=1.1, rho_theta_factor=1.2, nw=40,
+                    curvature_model=:benjamin, saturation=true, saturation_window=0.03, delta_prime_model=:constant, k1=1.6, c_wd=1.2,
+                    chi_perp_factor=1.5, c_pol=0.9, pol_sign=-1.0, w_min=2e-5, w_max=0.15),
+                (; polarization=true, pol_model=:reduced, C_pol=1.5, delta_prime_source=:cylindrical, omega_ratio=0.3, nw=40)
+            ]
+            mktempdir() do dir
+                psi = collect(range(0.0, 1.0; length=101))
+                h5open(joinpath(dir, "kinetic.h5"), "w") do f
+                    f["psi"] = psi
+                    f["n_e"] = f["n_i"] = 5e19 .* (1 .- 0.8 .* psi)
+                    f["T_e"] = f["T_i"] = 2e3 .* (1 .- 0.9 .* psi)
+                    f["omega_E"] = 1e4 .* (1 .- psi)
+                end
+                ric = solve(attach_kinetic_profiles!(deepcopy(equil), joinpath(dir, "kinetic.h5")), riccati; nn=1, wall=wall, ffs_kwargs...)
+                for (iv, settings) in enumerate(variants)
+                    api = solve(ModifiedRutherfordProblem(ric; settings...))
+                    run_dir = mkpath(joinpath(dir, "v$iv"))
+                    cp(joinpath(dir, "kinetic.h5"), joinpath(run_dir, "kinetic.h5"))
+                    deck_dir = _stage_deck(run_dir; eq_overrides=Dict{String,Any}("kinetic_file" => "kinetic.h5"),
+                        ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
+                        extra_sections=Dict{String,Any}(
+                            "Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                                Dict{String,Any}(String(k) => (v isa Symbol ? String(v) : v) for (k, v) in pairs(settings)))
+                        ))
+                    reference = GPEC.main([deck_dir])
+
+                    @test reference.tearing === nothing
+                    @test api.F ≈ reference.modified_rutherford.F rtol = 1e-10
+                    @test api.polarization ≈ reference.modified_rutherford.polarization rtol = 1e-10
+                    @test api.saturation ≈ reference.modified_rutherford.saturation rtol = 1e-10
+                    @test isequal(api.w_m, reference.modified_rutherford.w_m) && isequal(api.w_sat, reference.modified_rutherford.w_sat)
+                    @test api.fully_stabilized == reference.modified_rutherford.fully_stabilized
+                    @test all(<(0), api.D_R) && all(isfinite, api.F)
+                    @test all(getfield(reference.modified_rutherford.problem, k) == v for (k, v) in pairs(settings))
+                    h5open(joinpath(run_dir, "gpec.h5")) do f
+                        @test read(f["Tearing/ModifiedRutherford/Terms/F"]) ≈ api.F rtol = 1e-12
+                        recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))
+                        @test recorded["Tearing"] == Dict{String,Any}("ModifiedRutherford" => recorded["Tearing"]["ModifiedRutherford"])
+                        for (k, v) in pairs(settings)
+                            @test recorded["Tearing"]["ModifiedRutherford"][String(k)] == (v isa Symbol ? String(v) : v)
+                        end
+                        @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/w_m"]), api.w_m)
+                        @test read(f["Tearing/ModifiedRutherford/PerSurface/collisional"]) == Int8.(api.collisional)
+                    end
+                end
+                # An island at rest in the laboratory has ω = −n Ω_E in the E × B frame.
+                locked = solve(ModifiedRutherfordProblem(ric; omega_model=:locked))
+                @test locked.omega_hat .* locked.omega_star_i ≈ -locked.n .* (1e4 .* (1 .- locked.rational_psi)) rtol = 1e-6
+            end
+
+            # With [Tearing], main hands the linear solve to the MRE as its gate, as the API keyword does.
+            sl_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_SLAYER_example")
+            mktempdir() do dir
+                deck = TOML.parsefile(joinpath(sl_dir, "gpec.toml"))
+                deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
+                deck["Tearing"]["ModifiedRutherford"] = Dict{String,Any}("nw" => 40)
+                for key in ("eq_filename", "kinetic_file")
+                    deck["Equilibrium"][key] = abspath(joinpath(sl_dir, deck["Equilibrium"][key]))
+                end
+                open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
+                reference = GPEC.main([dir])
+                api = solve(ModifiedRutherfordProblem(reference.ffs; tearing=reference.tearing, nw=40))
+                @test reference.modified_rutherford.problem.tearing === reference.tearing
+                @test isequal(api.gamma, reference.modified_rutherford.gamma) && all(isfinite, api.gamma)
+                @test isequal(api.w_m, reference.modified_rutherford.w_m)
+                # The default Lütjens curvature takes SLAYER's toroidal critical offset, so it equals a toroidal gate's at the same χ⊥.
+                # χ⊥ varies by surface here, so the gate is built with the 3/1 surface's χ⊥ and compared there.
+                @test all(isfinite, api.D_c) && all(>(0), api.W_d_layer)
+                k = findfirst(==(3), api.m)
+                gate = solve(TearingProblem(reference.ffs), SLAYERModel(; D_c_type=:toroidal, chi_perp_Dc=api.chi_perp[k]))
+                row = findfirst(x -> isapprox(x, api.rational_psi[k]; atol=1e-8), gate.rational_psi)
+                @test gate.params[row].dc_tmp ≈ api.D_c[k] rtol = 1e-10
+                ben = solve(ModifiedRutherfordProblem(reference.ffs; tearing=reference.tearing, nw=40, curvature_model=:benjamin))
+                @test all(isnan, ben.D_c) && !(ben.curvature ≈ api.curvature)
+                @test_throws "curvature_model" solve(ModifiedRutherfordProblem(reference.ffs; curvature_model=:other))
+                # A TearingResult saved after the MRE keeps Tearing/ModifiedRutherford and its recorded sub-table.
+                h5open(joinpath(dir, "reversed.h5"), "w") do f
+                    save_to_hdf5(f, api)
+                    save_to_hdf5(f, reference.tearing)
+                    @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/w_m"]), api.w_m) && haskey(f, "Tearing/PerSurface")
+                    recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
+                    @test recorded["ModifiedRutherford"]["nw"] == 40 && recorded["inner_model"] == "SLAYER"
+                end
+            end
+
+            # A forward solve without vac_flag has no Δ′ and allows no Riccati solve, so the deck stops at parse time.
+            mktempdir() do dir
+                deck_dir = _stage_deck(dir; ffs_overrides=Dict{String,Any}("vac_flag" => false),
+                    extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}())))
+                @test_throws "needs Δ′" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
+            end
+            # omega_ratio is the one optional (nothing-default) key: a deck value reaches the problem as a Float64.
+            @test GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                Dict{String,Any}("omega_ratio" => 1))))[:omega_ratio] == 1.0
+            # preset = "callen" expands under the section's own keys.
+            preset = GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                Dict{String,Any}("preset" => "callen", "nw" => 50))))
+            @test preset[:pol_model] === :callen && preset[:delta_prime_model] === :callen && preset[:nw] == 50 && !haskey(preset, :preset)
+            @test_throws "preset" GPEC.modified_rutherford_from_deck(Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" =>
+                Dict{String,Any}("preset" => "other"))))
+        end
+
+        @testset "MRE Callen preset against Callen's closed form" begin
+            # The coil-driven DIII-D-like example: the MRE's Callen preset with the coil forcing and its own Riccati Δ′ solve,
+            # against the API and against Callen's closed-form critical field and cubic roots.
+            MRE = GeneralizedPerturbedEquilibrium.Tearing.ModifiedRutherford
+            RF = GeneralizedPerturbedEquilibrium.Tearing.ResonantForcing
+            ex_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+            mktempdir() do dir
+                deck = TOML.parsefile(joinpath(ex_dir, "gpec.toml"))
+                foreach(k -> delete!(deck, k), ("LocalStability", "Ballooning", "ErrorFields", "KineticForces"))
+                deck["Run"]["output_file"] = joinpath(dir, "gpec.h5")
+                deck["Tearing"] = Dict{String,Any}("ModifiedRutherford" => Dict{String,Any}("preset" => "callen", "nw" => 400))
+                for key in ("eq_filename", "kinetic_file")
+                    deck["Equilibrium"][key] = abspath(joinpath(ex_dir, deck["Equilibrium"][key]))
+                end
+                open(io -> TOML.print(io, deck), joinpath(dir, "gpec.toml"), "w")
+                reference = GPEC.main([dir])
+                @test reference.tearing === nothing
+                @test reference.modified_rutherford isa ModifiedRutherfordResult
+
+                ric = reference.modified_rutherford.problem.ffs
+                @test ric isa ForceFreeStatesResult
+                @test ric !== reference.ffs
+                @test !isempty(ric.delta_prime.matrix)
+                mre = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, MRE.CALLEN_PRESET..., nw=400))
+                @test mre.F ≈ reference.modified_rutherford.F rtol = 1e-10
+
+                # Callen's closed form (Fortran GPEC 1.6.0) with his cylindrical Δ_c = −2m/ρ, in metres of ρ: the critical
+                # vacuum half-width ½ w_pol^(2/3) ((27/4)|Δ_c|)^(1/6)/Δ_RMP^(1/2), B_crit = B_vac (h_v,crit/h_v)², and the
+                # positive roots of Δ_c x³ + Δ_RMP (2h_v)² x − w_pol² = 0 (trigonometric form), all widths back in ψ_N.
+                equil = reference.pe.response.ffs.equil
+                plasma = GeneralizedPerturbedEquilibrium.InnerLayer.layer_plasma(equil; log=false)
+                function callen(pe)
+                    rf = RF.resonant_forcing(pe)
+                    map(eachindex(rf.rational_psi)) do k
+                        rho, drho, d_rmp, hw_v = rf.rho[k], rf.drho[k], rf.delta_rmp[k], rf.hw_v[k]
+                        w_pol = RF.callen_polarization_width(equil, plasma, rf.rational_psi[k], rf.rational_q[k])[2]
+                        dc = -2 * rf.m[k] / rho
+                        hw_v_crit = 0.5 * w_pol^(2 / 3) * ((27 / 4) * abs(dc))^(1 / 6) / sqrt(d_rmp) / drho
+                        p, q = d_rmp * (2 * hw_v * drho)^2 / dc, -w_pol^2 / dc
+                        R = sqrt(-p / 3)
+                        arg = -q / (2 * R^3)
+                        x = abs(arg) <= 1 ? sort(filter(>(0), [2R * cos((acos(arg) + 2π * j) / 3) for j in 0:2])) ./ drho : [NaN, NaN]
+                        (; psi=rf.rational_psi[k], b_vac=rf.b_vac[k], d_rmp, w_v=2 * hw_v, b_crit=rf.b_vac[k] * (hw_v_crit / hw_v)^2,
+                            w_min=x[1], w_sat=x[end])
+                    end
+                end
+                row(res, psi) = findfirst(p -> isapprox(p, psi; atol=1e-6), res.rational_psi)
+                # On the forward solve's own surfaces, with the coils scaled past the largest critical field so every surface
+                # has both roots, the preset meets the closed form to the root tolerance.
+                cyl0 = callen(reference.pe)
+                strong = perturbed_equilibrium(reference.pe.response, 4 * maximum(c.b_crit / c.b_vac for c in cyl0) * reference.pe.forcing;
+                    coil_sets=reference.pe.coil_sets, reference.pe.regularization_width)
+                cyl = callen(strong)
+                pre = solve(ModifiedRutherfordProblem(reference.ffs; pe=strong, MRE.CALLEN_PRESET..., delta_prime_source=:cylindrical, nw=400))
+                @test [c.b_crit for c in cyl] ≈ [c.b_crit for c in cyl0] rtol = 1e-8
+                @test all(c -> c.w_sat > c.w_min, cyl)
+                compared = 0
+                for c in cyl
+                    s = row(pre, c.psi)
+                    @test pre.delta_rmp[s] ≈ c.d_rmp rtol = 1e-12
+                    @test pre.w_v[s] ≈ c.w_v rtol = 1e-12
+                    @test pre.b_crit[s] ≈ c.b_crit rtol = 1e-8
+                    c.w_sat < pre.w[end] && c.w_min > pre.w_lo[s] || continue
+                    @test pre.w_m[s] ≈ c.w_min rtol = 1e-8
+                    @test pre.w_sat[s] ≈ c.w_sat rtol = 1e-8
+                    compared += 1
+                end
+                @test compared > 0
+                # The computed Δ′ moves Δ_c, and so the critical field, off the cylindrical one.
+                @test !(mre.b_crit ≈ solve(ModifiedRutherfordProblem(ric; pe=reference.pe, MRE.CALLEN_PRESET..., delta_prime_source=:cylindrical, nw=400)).b_crit)
+                # The general MRE takes the same forcing: F gains exactly the forcing term, which scales as (w_v/w)².
+                kw = (; delta_prime_source=:cylindrical, saturation=true, nw=40)
+                forced = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, kw...))
+                free = solve(ModifiedRutherfordProblem(ric; pe=reference.pe, forcing=false, kw...))
+                @test forced.F ≈ free.F .+ forced.forcing rtol = 1e-12
+                @test forced.forcing .* forced.w' .^ 2 ≈ repeat(forced.forcing[:, 1] .* forced.w[1]^2, 1, 40) rtol = 1e-10
+                @test all(>(0), forced.forcing)
+                @test isequal(forced.b_crit, free.b_crit)
+                @test all(isnan, solve(ModifiedRutherfordProblem(ric; kw...)).b_crit)
+                h5open(joinpath(dir, "gpec.h5")) do f
+                    @test !haskey(f["Tearing"], "Callen")
+                    @test isequal(read(f["Tearing/ModifiedRutherford/PerSurface/b_crit"]), reference.modified_rutherford.b_crit)
+                    @test read(f["Tearing/ModifiedRutherford/Terms/forcing"]) ≈ reference.modified_rutherford.forcing
+                    recorded = TOML.parse(read(f["Input/gpec_toml_raw"]))["Tearing"]
+                    @test recorded["ModifiedRutherford"]["pol_model"] == "callen"
+                end
+            end
+
+            # The retired [Tearing.Callen] section stops the parse as an unknown [Tearing] key.
+            mktempdir() do dir
+                deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Tearing" => Dict{String,Any}("Callen" => Dict{String,Any}())))
+                @test_throws "Callen" GPEC.parse_deck(TOML.parsefile(joinpath(deck_dir, "gpec.toml")), deck_dir)
             end
         end
 

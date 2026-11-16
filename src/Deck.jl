@@ -360,7 +360,9 @@ end
 """
 function tearing_from_deck(inputs::AbstractDict)
     haskey(inputs, "Tearing") || return nothing
-    table = inputs["Tearing"]
+    # A [Tearing] holding only [Tearing.ModifiedRutherford] runs it without a layer solve.
+    table = _without(inputs["Tearing"], "ModifiedRutherford")
+    isempty(table) && haskey(inputs["Tearing"], "ModifiedRutherford") && return nothing
     get(table, "omega_E_kHz", Dict{String,Any}()) isa AbstractDict ||
         throw(ArgumentError("[Tearing] omega_E_kHz must be a table keyed by m/n, e.g. omega_E_kHz = { \"2/1\" = 3.0 }"))
     fields = _struct_fields(TearingProblem, (:ffs, :critical_resonant_field))
@@ -375,6 +377,21 @@ function tearing_from_deck(inputs::AbstractDict)
     )
     config = TearingConfig(; section_keywords(get(table, "search", Dict{String,Any}()), "Tearing.search", _struct_fields(TearingConfig))...)
     return (; problem, model=inner_model == "SLAYER" ? slayer_model(inputs) : ggj_model(inputs), config)
+end
+
+"""
+    modified_rutherford_from_deck(inputs) -> Union{Nothing,Dict{Symbol,Any}}
+
+The `ModifiedRutherfordProblem` keywords of `[Tearing.ModifiedRutherford]`; `nothing` without that section. The key
+`preset = "callen"` expands to `CALLEN_PRESET`, under the section's other keys.
+"""
+function modified_rutherford_from_deck(inputs::AbstractDict)
+    haskey(inputs, "Tearing") && haskey(inputs["Tearing"], "ModifiedRutherford") || return nothing
+    table = inputs["Tearing"]["ModifiedRutherford"]
+    preset = get(table, "preset", "none")
+    preset in ("none", "callen") || throw(ArgumentError("[Tearing.ModifiedRutherford] preset must be \"none\" or \"callen\", got \"$preset\""))
+    kwargs = section_keywords(_without(table, "preset"), "Tearing.ModifiedRutherford", _struct_fields(ModifiedRutherfordProblem, (:ffs, :tearing, :pe)))
+    return preset == "callen" ? merge(Dict{Symbol,Any}(pairs(ModifiedRutherford.CALLEN_PRESET)), kwargs) : kwargs
 end
 
 """
@@ -471,8 +488,27 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
             error("[Match] needs Δ′: use integrator = \"Galerkin\" with [Galerkin] rpec_flag = true, or \"Riccati\" with vac_flag = true")
     end
     tearing = tearing_from_deck(inputs)
+    modified_rutherford = modified_rutherford_from_deck(inputs)
+    # The ModifiedRutherfordProblem guards, checked before the force-free-states solve rather than after it.
+    if modified_rutherford !== nothing
+        has_ffs || error("[Tearing.ModifiedRutherford] needs a [ForceFreeStates] solve")
+        (; keywords, algorithm) = force_balance
+        first(keywords[:nn]) == last(keywords[:nn]) || error("[Tearing.ModifiedRutherford] is single-n: set [ForceFreeStates] nn to one toroidal mode number")
+        # Without a Δ′ of its own (a forward solve), the run adds a Riccati solve, which needs vac_flag.
+        get(modified_rutherford, :delta_prime_source, :computed) === :cylindrical ||
+            (algorithm isa Galerkin && algorithm.rpec_flag) || get(keywords, :vac_flag, false) ||
+            error(
+                "[Tearing.ModifiedRutherford] needs Δ′: set [ForceFreeStates] vac_flag = true (Riccati or Forward), use \"Galerkin\" with " *
+                "[Galerkin] rpec_flag = true, or set delta_prime_source = \"cylindrical\""
+            )
+        isempty(get(get(inputs, "Equilibrium", Dict{String,Any}()), "kinetic_file", "")) &&
+            error("[Tearing.ModifiedRutherford] needs kinetic profiles: set kinetic_file in [Equilibrium]")
+    end
     perturbed_equilibrium = perturbed_equilibrium_from_deck(inputs)
     forcing = forcing_terms_control(inputs, path)
+    modified_rutherford === nothing || perturbed_equilibrium === nothing || get(modified_rutherford, :forcing, true) === false ||
+        forcing.forcing_data_format == "coil" ||
+        error("[Tearing.ModifiedRutherford] forcing needs a coil forcing: set [ForcingTerms] forcing_data_format = \"coil\", or forcing = false")
     if haskey(inputs, "ErrorFields")
         perturbed_equilibrium === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section")
         forcing.forcing_data_format == "coil" ||
@@ -483,7 +519,7 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
         error("[GGJ] is set but neither [Match] nor [Tearing] inner_model = \"GGJ\" uses it")
     haskey(inputs, "SLAYER") && tearing_model != "SLAYER" && !(has_ffs && get(inputs["ForceFreeStates"], "psilim_from_layer_overlap", false) === true) &&
         error("[SLAYER] is set but neither [Tearing] inner_model = \"SLAYER\" nor [ForceFreeStates] psilim_from_layer_overlap = true uses it")
-    return (; run=run_settings(inputs, path), force_balance, local_stability=local_stability_from_deck(inputs), match, tearing,
+    return (; run=run_settings(inputs, path), force_balance, local_stability=local_stability_from_deck(inputs), match, tearing, modified_rutherford,
         kinetic_forces=haskey(inputs, "KineticForces") ? kinetic_forces_control(inputs) : nothing, perturbed_equilibrium, forcing,
         error_fields=error_fields_from_deck(inputs, path))
 end
@@ -578,6 +614,8 @@ function deck_inputs(deck::NamedTuple, config::Equilibrium.EquilibriumConfig, an
         merge!(inputs, _tearing_sections(filter(p -> p.first != :critical_resonant_field, problem), get(problem, :critical_resonant_field, nothing),
             model, config))
     end
+    mre = deck.modified_rutherford
+    mre === nothing || (get!(inputs, "Tearing", Dict{String,Any}())["ModifiedRutherford"] = _deck_table(mre))
     deck.kinetic_forces === nothing || merge!(inputs, deck_sections(deck.kinetic_forces))
     pe = deck.perturbed_equilibrium
     pe === nothing || (inputs["PerturbedEquilibrium"] = _deck_table(merge(pe.response, pe.drive)))
@@ -626,6 +664,7 @@ deck_sections(m::ForceFreeStates.MatchResult) =
     merge(deck_sections(m.model), Dict{String,Any}("Match" => merge(_deck_table(m.problem, (:ffs,)), Dict{String,Any}("inner_model" => "GGJ"))))
 deck_sections(kf::KineticForcesResult) = deck_sections(kf.control)
 deck_sections(t::TearingResult) = t.model === nothing ? Dict{String,Any}() : _tearing_sections(t.problem, t.problem.critical_resonant_field, t.model, t.config)
+deck_sections(r::ModifiedRutherfordResult) = Dict{String,Any}("Tearing" => Dict{String,Any}("ModifiedRutherford" => _deck_table(r.problem, (:ffs, :tearing, :pe))))
 deck_sections(ef::ErrorFieldsResult) = _error_fields_sections(ef.settings, ef.tolerances === nothing ? "" : _RECORDED_TOLERANCES)
 
 function deck_sections(ffs::ForceFreeStatesResult)

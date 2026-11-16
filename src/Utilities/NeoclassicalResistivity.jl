@@ -4,7 +4,7 @@
 #   - eq 18b (nu*_e):         Sauter et al. 1999, Eq. (18b)
 #   - eq 13 (F_33 Sauter):    Sauter et al. 1999, Eqs. (13a)-(13b)
 #   - eq 17 (F_33 Redl):      Redl et al. 2021, Eqs. (17)-(18)
-#   - f_t (Lin-Liu & Miller): Phys. Plasmas 2, 1666 (1995), Eq. (6)
+#   - f_t (Lin-Liu & Miller): Phys. Plasmas 2, 1666 (1995), Eq. (4)
 #   - NRL Coulomb log:        NRL Plasma Formulary 2009
 
 """
@@ -178,21 +178,23 @@ end
 """
     trapped_fraction(avg_B, avg_Bsq, B_min, B_max) -> Float64
 
-Lin-Liu & Miller 1995, Phys. Plasmas **2**, 1666, Eq. (6):
+Lin-Liu & Miller 1995, Phys. Plasmas **2**, 1666, Eq. (4), upper bound on the effective trapped fraction
+(about 3 % above the exact value as ε → 0, closer at larger ε):
 
 ```
-f_t = 1 − ⟨B⟩² / ⟨B²⟩ · (1 − √(1 − h) · (1 + h/2)),   h = B_min / B_max
+f_tu = 1 − ⟨B²⟩ / ⟨B⟩² · (1 − √(1 − h) · (1 + h/2)),   h = ⟨B⟩ / B_max
 ```
 
-Arguments are flux-surface averages and extrema of |B| on the surface.
+Arguments are flux-surface averages and the maximum of |B| on the surface.
+`B_min` is accepted for call-site compatibility and is unused.
 """
 function trapped_fraction(avg_B::Real, avg_Bsq::Real,
     B_min::Real, B_max::Real)
     B_max > 0 || throw(ArgumentError("trapped_fraction: B_max must be > 0"))
     avg_Bsq > 0 || throw(ArgumentError("trapped_fraction: avg_Bsq must be > 0"))
-    h = clamp(B_min / B_max, 0.0, 1.0)
+    h = clamp(avg_B / B_max, 0.0, 1.0)
     factor = 1.0 - sqrt(1.0 - h) * (1.0 + 0.5 * h)
-    ft = 1.0 - (avg_B^2 / avg_Bsq) * factor
+    ft = 1.0 - (avg_Bsq / avg_B^2) * factor
     return clamp(ft, 0.0, 1.0)
 end
 

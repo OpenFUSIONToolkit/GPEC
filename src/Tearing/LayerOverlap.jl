@@ -403,14 +403,12 @@ Eq. (100) is anchored to. Caveats are logged as warnings and notes as info.
 function layer_overlap_scan(equil, model::SLAYERModel, ns)
     data = equil.kinetic
     data === nothing && error("psilim_from_layer_overlap needs kinetic profiles: set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
-    loaded = _slayer_profiles(data, model)
-    chi = _slayer_chi_inputs(loaded, model, data; warn=false)
-    zeff = loaded.zeff === nothing ? data.zeff_default : loaded.zeff
+    plasma = layer_plasma(equil; control=model, log=false)
+    chi = _slayer_chi_inputs(plasma, model, data; warn=false)
     scans = [
-        resistive_layer_overlap(equil, loaded.profiles; n_tor=n, rs_method=:flux, chi..., tau_E=data.tau_E,
-            P_perp_model=model.P_perp_model, mu_i=_layer_ion_mass(data), mu_rho=_layer_mass_per_electron(data, zeff), zeff=zeff,
-            theta=model.theta_sample,
-            resistivity_model=_build_resistivity_model(data.resistivity_model), lnLambda_form=data.lnLambda_form)
+        resistive_layer_overlap(equil, plasma.profiles; n_tor=n, rs_method=:flux, chi..., tau_E=data.tau_E,
+            P_perp_model=model.P_perp_model, plasma.mu_i, plasma.mu_rho, plasma.zeff, theta=model.theta_sample,
+            plasma.resistivity_model, plasma.lnLambda_form)
         for n in ns
     ]
     for (n, scan) in zip(ns, scans)

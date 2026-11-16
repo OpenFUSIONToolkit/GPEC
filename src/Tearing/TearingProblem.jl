@@ -39,16 +39,15 @@ end
 TearingProblem(ffs; eta=nothing, rho=nothing, kwargs...) =
     TearingProblem{typeof(ffs),typeof(eta),typeof(rho)}(; ffs=ffs, eta=eta, rho=rho, kwargs...)
 
-function _tearing_params(model::SLAYERModel, equil, surfaces, loaded)
-    data = equil.kinetic
+function _tearing_params(model::SLAYERModel, equil, surfaces, plasma)
+    data = plasma.data
     # χ⊥,e/χ⊥,i/χ_φ from the kinetic file when present, else the kinetic data's defaults.
-    chi = _slayer_chi_inputs(loaded, model, data)
-    zeff = _layer_zeff(loaded, data)
+    chi = _slayer_chi_inputs(plasma, model, data)
     # B_T = F(ψ)/(2π·R₀) per surface comes from the equilibrium's F-spline (bt=nothing).
-    return build_slayer_inputs(equil, surfaces, loaded.profiles;
-        mu_i=_layer_ion_mass(data),
-        mu_rho=_layer_mass_per_electron(data, zeff),
-        zeff=zeff,
+    return build_slayer_inputs(equil, surfaces, plasma.profiles;
+        plasma.mu_i,
+        plasma.mu_rho,
+        plasma.zeff,
         chi_perp_e=chi.chi_perp_e,
         chi_perp_i=chi.chi_perp_i,
         chi_perp_Dc=model.chi_perp_Dc,
@@ -59,8 +58,8 @@ function _tearing_params(model::SLAYERModel, equil, surfaces, loaded)
         dgeo_val=model.D_geo,
         dc_type=model.D_c_type,
         theta=model.theta_sample,
-        resistivity_model=_build_resistivity_model(data.resistivity_model),
-        lnLambda_form=data.lnLambda_form)
+        plasma.resistivity_model,
+        plasma.lnLambda_form)
 end
 
 """
@@ -93,10 +92,10 @@ function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::Tea
 
     equil.kinetic === nothing &&
         error("TearingProblem: the equilibrium carries no kinetic profiles; set kinetic_file in [Equilibrium] or attach_kinetic_profiles!")
-    loaded = _slayer_profiles(equil.kinetic, model)
+    plasma = layer_plasma(equil; control=model)
     _warn_past_layer_overlap(ffs, model)
 
-    params = _tearing_params(model, equil, surfaces, loaded)
+    params = _tearing_params(model, equil, surfaces, plasma)
 
     # Prefer the full inter-surface Δ' matrix; fall back to a diagonal of each surface's scalar delta_prime.
     dpm = ffs.delta_prime === nothing ? Matrix{ComplexF64}(undef, 0, 0) : ffs.delta_prime.matrix
@@ -125,8 +124,8 @@ function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::Tea
     rational_q = Float64[surfaces[p.ising].q for p in params]
     # E×B rotation per unit n at each surface, for the Doppler shifts and the lab-frame roots;
     # empty when the kinetic file carries none.
-    omega_E = loaded.has_omega_E ? Float64[loaded.profiles.omega_E(ψ) for ψ in rational_psi] : Float64[]
-    loaded.has_omega_E || @warn "SLAYER: the kinetic file has no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
+    omega_E = plasma.has_omega_E ? Float64[plasma.profiles.omega_E(ψ) for ψ in rational_psi] : Float64[]
+    plasma.has_omega_E || @warn "SLAYER: the kinetic file has no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
     result = run_slayer_from_inputs(model, params, dp, prob, config;
         rational_psi=rational_psi, rational_q=rational_q, omega_E=omega_E)
     return result
