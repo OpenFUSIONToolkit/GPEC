@@ -328,6 +328,25 @@ end
 end
 
 """
+    closest_point(patch, r, U, V, dU, dV, Val(N)) -> (U, V)
+
+Patch coordinates of the surface point closest to `r`, by Gauss–Newton on the patch interpolant from `(U, V)`; `dU`, `dV`
+are the patch's node spacings in θ and ζ. Steps are capped at 2 nodes.
+"""
+function closest_point(patch::Matrix{SurfacePoint}, r::SVector{3,Float64}, U::Float64, V::Float64, dU::Float64, dV::Float64, val::Val)
+    for _ in 1:20
+        q = interpolate_patch(patch, U, V, val)[1]
+        e, ru, rv = r - q.r, q.rθ * dU, q.rζ * dV
+        g1, g2, h11, h12, h22 = dot(ru, e), dot(rv, e), dot(ru, ru), dot(ru, rv), dot(rv, rv)
+        ΔU = clamp((h22 * g1 - h12 * g2) / (h11 * h22 - h12^2), -2.0, 2.0)
+        ΔV = clamp((h11 * g2 - h12 * g1) / (h11 * h22 - h12^2), -2.0, 2.0)
+        U, V = U + ΔU, V + ΔV
+        abs(ΔU) + abs(ΔV) < 1e-10 && break
+    end
+    return U, V
+end
+
+"""
     foreach_polar_node(f, patch, U, V, radial, patch_rad, ANG_DIM, Val(N))
 
 Polar quadrature of radius `patch_rad` collocation nodes about patch point `(U, V)`, on radial nodes `(ρ, dρ)` in
