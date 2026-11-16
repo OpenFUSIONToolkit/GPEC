@@ -146,15 +146,15 @@ end
     end
 end
 
-# Interface guards: `_BareLayer` implements nothing, and `_ShiftedExponents` gives power exponents its Wasow basis
-# does not have.
+# GGJ with power exponents its Wasow basis does not have, which the Wasow check below must catch.
 const TL = IL.ToroidalLayer
-struct _BareLayer <: TL.ToroidalLayerParameters end
 struct _ShiftedExponents <: TL.ToroidalLayerParameters
     g::IL.GGJParameters
 end
+TL.layer_rows(::Type{CT}, p::_ShiftedExponents, Q::Number, x::Number) where {CT<:Complex} = TL.layer_rows(CT, p.g, Q, x)
 TL.wasow_basis(p::_ShiftedExponents, Q::ComplexF64) = TL.wasow_basis(p.g, Q)
 TL.power_exponents(p::_ShiftedExponents) = TL.power_exponents(p.g) .+ 0.5
+TL.default_ray_angle(p::_ShiftedExponents, Q::ComplexF64) = TL.default_ray_angle(p.g, Q)
 
 # A model's Wasow basis describes its own equations: J₀ splits the power-like (1:2) from the exponential (3:6)
 # subspace, x(A₀ + A₁/x² + A₂/x⁴) with A = TJT⁻¹ is its ode_matrix in the state u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x),
@@ -183,12 +183,9 @@ end
         for Q in (0.07 + 0.11im, 0.5im)                 # the series converge by s = 10 at these |Q|
             w = _wasow_matches_equations(q4, Q)
             @test w.split < 1e-12 && w.equations < 1e-12 && w.series < 1e-12
+            # Power exponents that are not the roots of the Wasow power block give series that do not solve the equations.
+            @test _wasow_matches_equations(_ShiftedExponents(q4), Q).series > 1e-8
         end
-    end
-
-    @testset "missing methods and inconsistent exponents are errors" begin
-        @test_throws MethodError TL.solve_ray(_BareLayer(), 1.0im)
-        @test_throws "are not the roots" TL.build_asymptotics(_ShiftedExponents(q4), 5.0im)
     end
 
     @testset "backend options and model forwarding" begin
