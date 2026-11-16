@@ -50,6 +50,7 @@ const TEST_SUITES = [
     "runtests_slayer_runner.jl" => "errorfields",
     "runtests_kinetic.jl" => "core",
     "runtests_kinetic_validity.jl" => "core",
+    "runtests_inertia.jl" => "core",
     "runtests_multiion.jl" => "core",
     "runtests_fullruns.jl" => "api",
     "runtests_torque_response.jl" => "api",

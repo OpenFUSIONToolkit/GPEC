@@ -21,6 +21,7 @@ Every stage after `Equilibrium` reads the force-free states, and `KineticForces`
 |---|---|---|
 | Is the equilibrium read and mapped correctly; what are q and β_N? | `[Equilibrium]` (+ `[ForceFreeStates]`, which triggers the write) | `Equilibrium/q_95`, `Equilibrium/beta_N`, `Equilibrium/Profiles/` |
 | Is the plasma ideal-kink stable, with or without a wall? | `[ForceFreeStates]` (+ `[Wall]`) | `ForceFreeStates/FreeBoundaryStability/W_freeboundary`, `…/eigenmode_energies` |
+| How fast does the least-stable free-boundary ideal mode grow? | `[GrowthRate]` (+ `[ForceFreeStates] vac_flag = true`, Forward) | `ForceFreeStates/GrowthRate/` |
 | Is it Mercier, resistive-interchange or ballooning unstable? | `[LocalStability]` (+ `[Ballooning]`) | `LocalStability/D_I`, `LocalStability/D_R`, `LocalStability/ballooning_Delta_prime` |
 | What is the tearing stability index Δ′ at each rational surface? | `[ForceFreeStates] integrator = "Riccati"` or `"Galerkin"` (+ `[Riccati]` or `[Galerkin]`) | `SingularSurfaces/Delta_prime_matrix` |
 | How does the plasma respond to an RMP or error field; do islands overlap? | `[ForcingTerms]` + `[PerturbedEquilibrium]` | `PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field`, `…/island_half_width`, `…/chirikov_parameter` |

@@ -67,6 +67,19 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `ising_start::Int` - Index of the last singular surface inside the starting ψ.
   - `needs_crossing::Bool` - Whether a rational surface must be crossed after the current region.
   - `nzero::Int` - Number of detected zero crossings of the critical eigenvalue.
+  - `count_conj::Bool` - Whether the exact conjugate-point count runs (forward Hamiltonian runs that request it: no kinetic source, or a
+    `PerpendicularInertia` one); off by default since it costs two LU factorizations and one eigenvalue solve per accepted step.
+  - `nconj::Int` - Signed running count of Cayley eigenphases that wrapped through π (conjugate points, fixed-boundary modes inside the
+    ψ interval), reseeded after each ideal crossing so it counts per Newcomb interval.
+  - `nzero_conj::Int` - Number of conjugate points, `abs(nconj)` at the end of the run; −1 when the count did not run.
+  - `nconj_flags::Int` - Accepted steps whose count is unreliable (an eigenphase rotation above π/2, or a unitarity defect above 1e-3 that
+    shows the frame is not Lagrangian to working precision); a nonzero value means `nzero_conj` may be wrong.
+  - `maslov_theta::Vector{Float64}` - Cayley eigenphases at the last counted step, aligned with the columns of `maslov_vecs`.
+  - `maslov_vecs::Matrix{ComplexF64}` - Cayley eigenvectors at the last counted step, which identify each eigenphase across a step.
+  - `maslov_pending::Bool` - Whether the next accepted step seeds the eigenphases and the Cayley scale instead of advancing the count.
+  - `maslov_s::Float64` - Scale s of the Cayley transform (U₁ − i s U₂)(U₁ + i s U₂)⁻¹, set to ‖U₁‖/‖U₂‖ of the column-normalized frame one step
+    into each chunk.
+  - `maslov_defect::Float64` - Largest unitarity defect max| |λ| − 1 | of the Cayley eigenvalues over the run.
   - `new::Bool` - Whether the next norm call records fresh reference norms `unorm0`.
   - `unorm::Vector{Float64}` - Current solution-column norms.
   - `unorm0::Vector{Float64}` - Reference norms since the last reduction.
@@ -74,7 +87,7 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `index::Array{Int,2}` - Pivot column order for each reduction, shape `(numpert_total, numunorms_init)`.
   - `sing_flag::Vector{Bool}` - Whether each reduction was at a singular surface.
   - `zeroed_idx::Vector{Vector{Int}}` - For each ideal crossing, the positions in `index` of the zeroed resonant solutions.
-  - `fixfac::Array{ComplexF64,3}` - Gaussian-reduction factors, shape `(numpert_total, numpert_total, numunorms_init)`.
+  - `fixfac::Array{ComplexF64,3}` - Gaussian-reduction factors, shape `(numpert_total, numpert_total, numunorms_init)`; the diagonal holds the column scales of `rescale_reduced_columns!`.
   - `fixstep::Vector{Int64}` - Last stored step before each reduction.
   - `spline_hint::Base.RefValue{Int}` - Shared interval hint for profile splines evaluated at the same ψ.
   - `mats_hint::Base.RefValue{Int}` - Interval hint for the matrix splines; per `OdeState`, so per-thread copies do not race.
@@ -110,6 +123,17 @@ records needed to undo it, and singular-surface asymptotic coefficients.
     ising_start::Int = 0
     needs_crossing::Bool = false
     nzero::Int = 0
+
+    # Exact conjugate-point count
+    count_conj::Bool = false
+    nconj::Int = 0
+    nzero_conj::Int = -1
+    nconj_flags::Int = 0
+    maslov_theta::Vector{Float64} = zeros(Float64, numpert_total)
+    maslov_vecs::Matrix{ComplexF64} = zeros(ComplexF64, numpert_total, numpert_total)
+    maslov_pending::Bool = false
+    maslov_s::Float64 = 1.0
+    maslov_defect::Float64 = 0.0
 
     # Used for Gaussian reduction
     new::Bool = true
@@ -285,6 +309,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
     odet = OdeState(intr.numpert_total, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr.msing)
     initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
+    odet.count_conj = intr.count_conjugate_points && kinetic_source(ctrl.kinetic) isa Union{Nothing,PerpendicularInertia}
 
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
 
@@ -293,6 +318,8 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     end
 
     for chunk in chunks
+        # Reseeds the count one step into the chunk: at the Frobenius start and after an ideal crossing U₁ has vanishing columns
+        odet.count_conj && maslov_seed!(odet)
         integrate_el_region!(odet, ctrl, equil, mats, intr, chunk)
         if verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
@@ -318,6 +345,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
+    odet.count_conj && (odet.nzero_conj = abs(odet.nconj))
 
     # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
@@ -663,6 +691,7 @@ function cross_kinetic_singular_surf!(
     odet.psifac = ksurf.psifac + dpsi
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
+    odet.count_conj && maslov_advance!(odet, odet.u)   # compared with the phases of the chunk's last accepted step
 
     odet.q = equil.profiles.q_spline(odet.psifac; hint=odet.spline_hint)
     store_ode_data!(odet, odet.psifac, odet.u)
@@ -746,6 +775,8 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
         column_abstol!(integrator.opts.abstol, integrator.u, integrator.opts.reltol)
+        # The dense output lets a step with a fast-moving eigenphase be bisected for the conjugate-point count
+        odet.count_conj && maslov_advance!(odet, integrator.u; refine=τ -> integrator(integrator.tprev + τ * (integrator.t - integrator.tprev)))
 
         # The first step is always saved, even when q_range ≈ 0
         near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
@@ -780,6 +811,7 @@ end
 
 Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
 growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
+Each reduction ends with `rescale_reduced_columns!`, so the column norms stay bounded along the integration.
 The first call after a reduction records reference norms; if `sing_flag` forces a reduction there, it keeps
 the previous reduction's pivot order. Errors if any norm is zero. Port of Fortran `ode_unorm`.
 
@@ -820,7 +852,26 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
             Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
         end
         apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
+        rescale_reduced_columns!(u, odet, intr)
         odet.new = true
+    end
+end
+
+"""
+    rescale_reduced_columns!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal)
+
+Scale every solution column of `u` to unit norm over both blocks, in place, recording the scales on the diagonal of
+`odet.fixfac` for `transform_u!`. The reductions only combine columns, so without this the column norms grow
+without bound and W = U₂U₁⁻¹ loses accuracy; the rescaling leaves W unchanged.
+"""
+function rescale_reduced_columns!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal)
+    @views for jsol in 1:intr.numpert_total
+        colnorm = norm(u[:, jsol, :])
+        isfinite(colnorm) || error("Solution vector $jsol is not finite at ψ = $(odet.psifac)")
+        scale = inv(colnorm)
+        isfinite(scale) || continue
+        u[:, jsol, :] .*= scale
+        odet.fixfac[jsol, jsol, odet.ifix] = scale
     end
 end
 
@@ -938,8 +989,8 @@ end
 """
     transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
-Undo the Gaussian reductions applied during integration, transforming the stored solutions in
-`odet` in place into the true solution vectors.
+Undo the Gaussian reductions and column rescalings applied during integration, transforming the stored
+solutions in `odet` in place into the true solution vectors.
 """
 function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
 
@@ -967,6 +1018,10 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
+        # The column rescaling that followed the reduction
+        for jsol in 1:intr.numpert_total
+            gauss[:, jsol, ifix] .*= odet.fixfac[jsol, jsol, ifix]
+        end
         # Drop the resonant solutions zeroed at an ideal crossing
         if odet.sing_flag[ifix]
             for zeroed_idx in odet.zeroed_idx[ifix]
@@ -974,6 +1029,11 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
             end
         end
     end
+
+    # The rescalings compound toward the axis, where the transformed solutions can fall below the floating-point range
+    scale_decades = sum(ifix -> log10(minimum(jsol -> abs(odet.fixfac[jsol, jsol, ifix]), 1:intr.numpert_total)), 1:odet.ifix; init=0.0)
+    scale_decades < log10(floatmin(Float64)) &&
+        @warn "The stored solutions span $(round(Int, -scale_decades)) decades; those nearest the axis underflow after the reductions are undone"
 
     # Region i lies between fixups i-1 and i; its transform is the product of all later reductions
     transforms[:, :, end] .= identity

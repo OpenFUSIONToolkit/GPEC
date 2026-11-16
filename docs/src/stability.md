@@ -141,6 +141,38 @@ The perpendicular diffusivities that set the layer widths are described with the
 - Both integrators use the adaptive ninth-order `Vern9` solver at `eulerlagrange_tolerance`; the Riccati basis is recovered by renormalizing whenever the solution exceeds `renorm_threshold`.
 - The two crossing conventions differ slightly, so Riccati and Forward free-boundary energies agree to within a few percent, not to machine precision.
 
+### Counting fixed-boundary modes
+
+Two counts of the conjugate points (fixed-boundary modes fitting inside the ψ interval) come out of the forward integration.
+
+- `nzero` is DCON's criterion: a sign change of the smallest-magnitude eigenvalue of W⁻¹ = U₁U₂⁻¹ between stored steps, confirmed at the interpolated zero. It is cheap and is what the `crit` scan in the output records, but it misses a crossing whenever a stiff harmonic holds a tiny eigenvalue of W⁻¹ near zero at every stored step, and it can report crossings where the frame has lost its Hermitian structure.
+- `nzero_conj` is the Maslov index of the solution frame (Arnold 1967; Robbin & Salamon 1993), computed at every accepted step and exact for a Lagrangian frame. The Cayley transform Ψ = (U₁ − i s U₂)(U₁ + i s U₂)⁻¹ of the column-normalized frame is unitary when U₁†U₂ is Hermitian, has an eigenvalue −1 exactly where det U₁ = 0 (a conjugate point) and +1 where U₂ is singular (a pole of W⁻¹, harmless), and is invariant under U → U·T, so the Gaussian reductions do not disturb it. Each eigenphase is followed through its eigenvector from one step to the next and counts one conjugate point when its shortest arc crosses π. The phases are seeded one accepted step into each chunk, because at the axis start and after an ideal crossing U₁ has vanishing columns whose phases sit exactly at π and belong to the interval's end, not its interior; a step in which a phase rotates by more than π/4 is bisected on the integrator's dense output until the arcs are short, since an eigenvalue of W⁻¹ can pass zero within one step near a conjugate point. The scale s is set from the frame one step into the chunk and never changed within it: a change of s moves every phase but none through π, yet a large s squashes the phases toward π until a pole of W⁻¹ becomes indistinguishable from a zero crossing, so rescaling is not a substitute for bisection.
+
+`nconj_flags` counts the steps where the count cannot be trusted: a rotation above π/2 after bisection, or a unitarity defect max||λ|−1| of Ψ above 1e-3, which means the integrated frame is no longer Lagrangian to working precision (the Solovev regression fixture shows this after its q = 2 crossing, where `nzero` also misfires). `maslov_defect` records the largest defect seen. The count costs two matrix inversions and one eigendecomposition per accepted step, roughly 10–15 % of a solve, so it is off by default; `growth_rate` switches it on for all of its solves and uses it, with the sign of the least free-boundary energy, as the number of modes faster than the trial γ, which is what makes its bracket monotone. Checked on the TJ analytic equilibrium at `qa = 2.9, p0 = 0.8`, where a fixed-boundary mode at γ² ≈ 1.2e8 is invisible to `nzero`: `nzero_conj` is 1 below that eigenvalue and 0 above, and the Morse index `nzero_conj` + (negative free-boundary eigenvalues) is non-increasing in γ² and continuous across the pole, as it must be.
+
+### Diamagnetic stabilization thresholds
+
+`growth_rate` returns the ideal-MHD γ and the peak ion diamagnetic frequency `omega_star_pi` (the maximum of |ω_*pi| over the integration domain, at the mode's n). It applies no stability threshold. Pedestal models call a peeling–ballooning mode unstable only when γ exceeds half of an effective diamagnetic frequency, and the choice of that frequency moves the stability boundary, so every boundary quoted from these numbers must name the convention it used.
+
+| Convention | Unstable when | Ratio in terms of the outputs |
+|:--|:--|:--|
+| Ideal | γ > 0 | none |
+| EPED1 ([Snyder (2009)](citations.md#ForceFreeStates)) | γ > ω_eff/2 with ω_eff half the pedestal maximum of ω_*pi, so ω_eff ∝ n | R₁ = `gamma / (omega_star_pi/4)` > 1 |
+| EPED1.6 ([Snyder (2011)](citations.md#ForceFreeStates)) | γ > ω_eff/2 with ω_eff from a two-segment fit to two-fluid calculations: ∝ n up to n_crit, a weaker slope above | R₁.₆ = R₁/√2 for n ≤ n_crit, and R₁/(√2 (n_crit/n + 0.168 (n − n_crit)/n)) above; unstable when > 1 |
+
+R₁ is the quantity ELITE prints as γ/(ω_*pi,max/4). The EPED1.6 row is written in the form used by the stability-map post-processing of the OMFIT ELITE module, which defaults to n_crit = 6 and is what the conventional pedestal stability diagrams (pressure gradient α against edge current, contour at 1, maximum over n) show.
+
+The motivation for the second fit is that ω_*pi varies strongly across a pedestal while a high-n mode is radially narrow, so the frequency the mode feels grows more slowly than n; a threshold linear in n over-stabilizes high n.
+
+Points to keep in view when using either ratio:
+
+- The two ratios are equal at n ≈ 1.54 n_crit (n ≈ 9 for n_crit = 6). Below that the EPED1.6 form is the more stable one, by √2 at n ≤ n_crit; above it the less stable, by a factor 1.92 at n = 25 and 2.64 at n = 50. The boundary of a map taken as the maximum over n therefore moves, and so does the most-unstable n.
+- With the EPED1.6 form the maximum over n is often set by the highest n computed, so the n range is part of the result.
+- n_crit is a model parameter, not a constant: the value 6 is a default, and a published DIII-D analysis scales it with the edge safety factor (n_crit ≈ 21.7/q at the peak pressure gradient).
+- The factor √2 and the slope 0.168 are quoted from that post-processing; check them against the fit in [Snyder (2011)](citations.md#ForceFreeStates) before relying on them outside a like-for-like comparison.
+- `omega_star_pi` comes from the attached kinetic profiles with n_i ∝ n_e and Z_i = 1, and its peak is taken over `[psilow, psilim]`; a truncated domain can cut off part of the pedestal gradient.
+- A comparison of two codes is independent of the convention as long as both growth rates go through the same one; the boundary location is not.
+
 Local stability (Mercier, resistive interchange and ballooning) is a separate stage on the same equilibrium; see [Local Stability](ballooning.md).
 
 ## API reference
@@ -149,5 +181,5 @@ The Galerkin solver's functions are documented on the [Galerkin Solver](galerkin
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
-Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "FixedKineticMatrices.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
+Pages = ["ForceFreeStates.jl", "CoreTypes.jl", "Surfaces/Types.jl", "Riccati/Types.jl", "Matching/DeltaPrime.jl", "Result.jl", "Surfaces/ResistEval.jl", "Matching/ResonantMatch.jl", "Matching/MatchProblem.jl", "EulerLagrange.jl", "Surfaces/Finding.jl", "Surfaces/Asymptotics.jl", "Fourfit.jl", "Kinetic.jl", "Inertia.jl", "FixedKineticMatrices.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati/Propagators.jl", "Riccati/Crossings.jl", "Riccati/DeltaPrimeBVP.jl", "Riccati/Driver.jl"]
 ```
