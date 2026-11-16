@@ -1226,17 +1226,6 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             @test isfinite(K)
         end
 
-        @testset "Kernel3D get_singular_quadrature" begin
-            quad = GeneralizedPerturbedEquilibrium.Vacuum.get_singular_quadrature(3, 8, 5)
-            @test quad.PATCH_RAD == 3
-            @test quad.RAD_DIM == 8
-            @test quad.INTERP_ORDER == 5
-            @test quad.PATCH_DIM == 2 * 3 + 1
-            # Cached: second call returns same object
-            quad2 = GeneralizedPerturbedEquilibrium.Vacuum.get_singular_quadrature(3, 8, 5)
-            @test quad === quad2
-        end
-
         @testset "Kernel3D extract_patch!" begin
             # 4×4 grid (npol=4, ntor=4), PATCH_DIM=3, center at (2,2)
             data = collect(1.0:16.0)
@@ -1286,14 +1275,11 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
         VAC = GeneralizedPerturbedEquilibrium.Vacuum
         KF = GeneralizedPerturbedEquilibrium.KineticForces
         VAC.get_pn_quad_cache(3)
-        VAC.get_singular_quadrature(3, 8, 5)
         KF._quadrature_weights(8)
         @test !isempty(VAC._PN_CACHE)
-        @test VAC.SINGULAR_QUAD_CACHE[] !== nothing
         @test !isempty(KF._QUAD_WEIGHTS)
         @test VAC.reset_caches!() === nothing
         @test isempty(VAC._PN_CACHE)
-        @test VAC.SINGULAR_QUAD_CACHE[] === nothing
         @test KF.reset_caches!() === nothing
         @test isempty(KF._QUAD_WEIGHTS)
     end
