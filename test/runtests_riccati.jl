@@ -89,19 +89,19 @@ end
         et_far = solovev_energies("Riccati", 1e-3)
         et_near = solovev_energies("Riccati", 1e-5)
         @test isapprox(et_far[1], et_near[1]; rtol=1e-6)
-        # Forward's trapezoid crossing reaches the same energy only as the distance shrinks.
-        et_forward = solovev_energies("Forward", 1e-6)
-        @test isapprox(real(et_far[1]), real(et_forward[1]); rtol=1e-3)
+        # Forward crosses the same way, so it gives the same energy at either distance.
+        @test isapprox(solovev_energies("Forward", 1e-3)[1], et_far[1]; rtol=1e-6)
+        @test isapprox(solovev_energies("Forward", 1e-5)[1], et_far[1]; rtol=1e-6)
     end
 
     @testset "surface with two resonances" begin
         fixture = "regression_solovev_ideal_example_multi_n"
         et_far = solovev_energies("Riccati", 1e-3; fixture)
         et_near = solovev_energies("Riccati", 1e-5; fixture)
-        et_forward = solovev_energies("Forward", 1e-6; fixture)
+        et_forward = solovev_energies("Forward", 1e-3; fixture)
         # The least-stable multi-n eigenvalue is near marginal, so its relative tolerances are looser.
         @test isapprox(et_far[1], et_near[1]; rtol=1e-4)
-        @test isapprox(real(et_far[1]), real(et_forward[1]); rtol=5e-3)
+        @test isapprox(et_far[1], et_forward[1]; rtol=1e-4)
     end
 
     @testset "stored solution" begin
@@ -120,19 +120,21 @@ end
             @test isapprox(direct, odet_ric.u_store[:, :, :, k+1]; rtol=1e-5)
         end
 
-        # Across the surfaces they are the solutions Forward stores: scaled to a unit edge displacement, the
-        # conjugate momenta agree on each side of every surface. (ξ itself differs there by Forward's crossing
-        # condition, which leaves a big-solution term next to each surface.)
-        function edge_scaled_momentum(integrator)
-            ctrl, intr, equil, _, mats = prepared_solovev(; integrator, singfac_min=1e-6)
+        # They are the solutions Forward stores: scaled to a unit edge displacement, ξ and its conjugate momentum
+        # agree at the nodes the two integrators share, which lie on each side of every surface.
+        function edge_scaled(integrator)
+            ctrl, intr, equil, _, mats = prepared_solovev(; integrator)
             odet = first(FFS.eulerlagrange_integration(ctrl, equil, mats, intr))
-            return odet, intr, [odet.u_store[:, :, 2, k] / odet.u_store[:, :, 1, odet.step] for k in 1:odet.step]
+            edge = odet.u_store[:, :, 1, odet.step]
+            return odet, intr, [cat(odet.u_store[:, :, 1, k] / edge, odet.u_store[:, :, 2, k] / edge; dims=3) for k in 1:odet.step]
         end
-        ric, intr, momentum_ric = edge_scaled_momentum("Riccati")
-        fwd, _, momentum_fwd = edge_scaled_momentum("Forward")
+        ric, intr, state_ric = edge_scaled("Riccati")
+        fwd, _, state_fwd = edge_scaled("Forward")
         shared = [(findfirst(==(p), ric.psi_store), k) for (k, p) in enumerate(fwd.psi_store[1:fwd.step]) if p in ric.psi_store]
         @test length(shared) >= 2 * intr.msing
-        @test maximum(norm(momentum_ric[i] - momentum_fwd[k]) / norm(momentum_fwd[k]) for (i, k) in shared) < 1e-2
+        for component in 1:2
+            @test maximum(norm(state_ric[i][:, :, component] - state_fwd[k][:, :, component]) / norm(state_fwd[k][:, :, component]) for (i, k) in shared) < 1e-4
+        end
     end
 
     # Note: a Solovev per-surface Δ' regression testset previously lived here,

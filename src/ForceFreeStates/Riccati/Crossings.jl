@@ -72,18 +72,18 @@ function eliminate_big_solutions!(ca::Array{ComplexF64,3}, ipert_res)
 end
 
 """
-    start_small_solutions!(ca, ipert_res)
+    start_small_solutions!(ca, ipert_res, columns=ipert_res)
 
 Turn reduced left-side coefficients `ca` into right-side ones: the resonant coefficients vanish and column
-`ipert_res[i]` becomes the small solution of resonance `i`.
+`columns[i]`, which carried the big solution of resonance `i`, becomes its small solution.
 """
-function start_small_solutions!(ca::Array{ComplexF64,3}, ipert_res)
-    for ipert in ipert_res
+function start_small_solutions!(ca::Array{ComplexF64,3}, ipert_res, columns=ipert_res)
+    for (ipert, column) in zip(ipert_res, columns)
         ca[ipert, :, :] .= 0
-        ca[:, ipert, :] .= 0
+        ca[:, column, :] .= 0
     end
-    for ipert in ipert_res
-        ca[ipert, ipert, 2] = 1
+    for (ipert, column) in zip(ipert_res, columns)
+        ca[ipert, column, 2] = 1
     end
     return ca
 end

@@ -94,8 +94,9 @@ Physical and workflow controls for a force-balance solve, together with its sele
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `singfac_min::Float64` - Fractional distance from rational q at which the ideal jump condition is enforced. Default 1e-4 suits the Riccati Δ′ (smaller values add a
-    spurious imaginary part); Forward runs feeding PerturbedEquilibrium need about 1e-6 for the outer-surface singular coupling to converge.
+  - `singfac_min::Float64` - Distance `|m − nq|` from each rational surface at which the ideal integration stops and
+    the surface is crossed through its asymptotic series. Energies do not depend on it; Δ′ loses accuracy below
+    about 1e-5, and the series does beyond the first radial-grid knot.
   - `truncate_at_rational_offset::Bool` - Truncate the domain at `(last_rational_q + rational_offset_fraction) / n` instead of at `qhigh` / `psihigh`, avoiding a spurious
     δW kink when the integration ends just below a rational. Right for diverted equilibria (default `true`); set `false` for limited/analytic equilibria with finite edge
     q (Solovev, LAR), where it cuts too much edge. Multi-n runs warn and fall back to `qhigh` / `psihigh`.
@@ -127,7 +128,7 @@ Physical and workflow controls for a force-balance solve, together with its sele
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    singfac_min::Float64 = 1e-4   # Required nonzero for the Riccati path.
+    singfac_min::Float64 = 5e-4   # Required nonzero for the Riccati path.
     truncate_at_rational_offset::Bool = true
     psilim_from_layer_overlap::Union{Bool,InnerLayer.SLAYERModel} = false
     rational_offset_fraction::Float64 = 0.2
