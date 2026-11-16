@@ -187,9 +187,8 @@ Abstract supertype of the vacuum wall shapes: [`ConformalWall`](@ref), [`Ellipti
 `WallSettings` at all; the wall is `nothing`, and the deck omits its `[Wall]` section.
 
 Every shape carries `equal_arc_wall::Bool` (default `true`), which redistributes the wall nodes
-to equal arc length (recommended unless the wall is very close to the plasma). Re-parameterizing
-the contour breaks the plasma/wall grid index correspondence that the singular quadrature relies
-on, so it is ignored outright for `nzeta_in > 1` walls.
+to equal arc length. Plasma–wall near pairs are found by distance, so any node placement works;
+it is ignored for `nzeta_in > 1` walls, as it re-parameterizes a 2D contour.
 
 A non-axisymmetric boundary (`nzeta_in > 1`) supports only [`ConformalWall`](@ref); the other
 shapes are poloidal contours that get revolved and so need `nzeta_in == 1`.
@@ -519,6 +518,7 @@ end
     WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::Union{Nothing,WallSettings}) -> WallGeometry
 
 Build the 2D wall contour on the `mtheta` grid from `wall_settings`, counter-clockwise like the plasma.
+Throws if the wall touches or crosses the plasma; warns when the gap is under a tenth of a grid cell.
 
 # Arguments
 
@@ -657,8 +657,22 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     # R ≤ 0 walls would need the extra kernel singularity handling of Chance's Fortran code
     any(x_wall .<= 0.0) && error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")
     assert_counterclockwise(x_wall, z_wall, "Wall")
+    wall = WallGeometry(false, x_wall, z_wall)
 
-    return WallGeometry(false, x_wall, z_wall)
+    # Each surface's kernel rows see the other, so check the clearance from both sides: the wall must lie strictly outside
+    # the plasma, and the gap is resolved down to about a tenth of a cell of the coarser grid (as in WallGeometry3D)
+    cells = Inf
+    for (obs, src, side) in ((wall, plasma_surf, 1), (plasma_surf, wall, -1))
+        for i in eachindex(obs.x)
+            cp = closest_point(src, obs.x[i], obs.z[i])
+            side * cp.d > 0 || throw(ArgumentError("plasma and wall touch or cross near (R, Z) = ($(obs.x[i]), $(obs.z[i]))"))
+            cells = min(cells, abs(cp.d) / max(cp.h, hypot(obs.dx_dθ[i], obs.dz_dθ[i]) * 2π / mtheta))
+        end
+    end
+    cells < 0.1 &&
+        @warn "Plasma–wall gap spans only $((@sprintf "%.2f" cells)) cells of the coarser grid at its narrowest. The near-field " *
+              "quadrature loses accuracy below a tenth of a cell. Refine mtheta, or move the wall out."
+    return wall
 end
 
 """

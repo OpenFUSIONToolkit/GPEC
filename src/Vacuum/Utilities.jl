@@ -200,6 +200,39 @@ Lagrange cardinal weights at `ξ` on the uniform nodes `0:(N - 1)`: wᵢ = cᵢ 
     return SVector(ntuple(i -> foldl(*, ntuple(j -> j == i ? 1.0 : ξ - (j - 1), Val(N)); init=c[i]), Val(N)))
 end
 
+# Plasma–wall rows whose observer is more than NEAR_GAP source node spacings h from the source curve take the periodic
+# trapezoidal rule alone: its error ∝ exp(-2πd/h) is ~1e-11 there. Nearer rows are integrated about the closest source
+# point
+const NEAR_GAP = 4.0
+
+"""
+    sinh_rule(Q, nmax, step) -> (; rules, step)
+
+Gauss–Legendre rules on [0, 1] with `Q, 2Q, …, nmax Q` nodes for [`sinh_nodes`](@ref), which takes `⌈Δs/step⌉ Q` nodes
+on a span `Δs` of the sinh variable.
+"""
+function sinh_rule(Q::Int, nmax::Int, step::Float64)
+    rules = map(1:nmax) do m
+        t, w = gausslegendre(m * Q)
+        return (t .+ 1) ./ 2, w ./ 2
+    end
+    return (; rules, step)
+end
+
+"""
+    sinh_nodes(ε, a, b, rule) -> iterator of (ρ, w)
+
+Quadrature nodes and weights on `[a, b]` for a kernel peaked at `ρ = 0` with width `ε`: `ρ = ε sinh(s)`, Gauss in `s`
+between `asinh(a/ε)` and `asinh(b/ε)` [Johnston & Elliott, Int. J. Numer. Meth. Engng 62 (2005) 564], from a
+[`sinh_rule`](@ref).
+"""
+@inline function sinh_nodes(ε::Float64, a::Float64, b::Float64, rule)
+    sa, sb = asinh(a / ε), asinh(b / ε)
+    Δs = sb - sa
+    t_nodes, t_weights = rule.rules[clamp(ceil(Int, Δs / rule.step), 1, length(rule.rules))]
+    return ((ε * sinh(sa + Δs * t_nodes[i]), t_weights[i] * Δs * ε * cosh(sa + Δs * t_nodes[i])) for i in eachindex(t_nodes))
+end
+
 """
     periodic_splines(x, z) -> (dx_dθ, dz_dθ, spline_x, spline_z)
 
@@ -220,4 +253,25 @@ Point and tangent of a 2D geometry's spline at any angle `θ`.
 @inline function curve_point(curve, θ)
     θ = mod(θ, 2π)
     return curve.spline_x(θ), curve.spline_z(θ), curve.spline_x(θ; deriv=DerivOp(1)), curve.spline_z(θ; deriv=DerivOp(1))
+end
+
+"""
+    closest_point(curve, x, z) -> (; θ, d, h)
+
+Point of a counter-clockwise 2D geometry closest to `(x, z)`, by Newton on its spline from the nearest node: its angle `θ`,
+the signed distance `d` along the outward normal, and the local node spacing `h`.
+"""
+function closest_point(curve, x, z)
+    M = length(curve.x)
+    θ = 2π / M * (argmin(@. (curve.x - x)^2 + (curve.z - z)^2) - 1)
+    for _ in 1:30
+        X, Z, Xθ, Zθ = curve_point(curve, θ)
+        Xθθ, Zθθ = curve.spline_x(mod(θ, 2π); deriv=DerivOp(2)), curve.spline_z(mod(θ, 2π); deriv=DerivOp(2))
+        Δ = clamp(((x - X) * Xθ + (z - Z) * Zθ) / (Xθ^2 + Zθ^2 - (x - X) * Xθθ - (z - Z) * Zθθ), -2π / M, 2π / M)
+        θ += Δ
+        abs(Δ) < 1e-14 && break
+    end
+    X, Z, Xθ, Zθ = curve_point(curve, θ)
+    J = hypot(Xθ, Zθ)
+    return (; θ=mod(θ, 2π), d=((x - X) * Zθ - (z - Z) * Xθ) / J, h=J * 2π / M)
 end
