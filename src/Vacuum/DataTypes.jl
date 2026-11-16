@@ -480,7 +480,7 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     # Tangent and normal vectors of the trigonometric interpolant, which converge spectrally with the grid
     dr_dθ, dr_dζ = trig_tangents(r, mtheta, nzeta)
     for idx in 1:num_points
-        cross3!(normal, dr_dθ, dr_dζ, idx)
+        normal[idx, :] = cross(SVector{3}(@view dr_dθ[idx, :]), SVector{3}(@view dr_dζ[idx, :]))
     end
 
     # Determine normal orientation (inward for plasma) and enforce it
@@ -820,7 +820,7 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
     # Tangent and normal vectors of the trigonometric interpolant, as on the plasma
     dr_dθ, dr_dζ = trig_tangents(r, mtheta, nzeta)
     for idx in 1:num_points
-        cross3!(normal, dr_dθ, dr_dζ, idx)
+        normal[idx, :] = cross(SVector{3}(@view dr_dθ[idx, :]), SVector{3}(@view dr_dζ[idx, :]))
     end
 
     # Determine normal orientation (outward for wall) and enforce it

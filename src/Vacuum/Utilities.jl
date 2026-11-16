@@ -161,31 +161,6 @@ end
 """
 @inline periodic_wrap(x::Int, n::Int) = x < 1 ? x + n : (x > n ? x - n : x)
 
-"""
-    cross3!(c, a, b, idx)
-
-Write the cross product of rows `idx` of the `(N, 3)` matrices `a` and `b` into row `idx` of `c`.
-"""
-@inline function cross3!(
-    c::AbstractMatrix,
-    a::AbstractMatrix,
-    b::AbstractMatrix,
-    idx::Int
-)
-    @inbounds begin
-        a1 = a[idx, 1]
-        a2 = a[idx, 2]
-        a3 = a[idx, 3]
-        b1 = b[idx, 1]
-        b2 = b[idx, 2]
-        b3 = b[idx, 3]
-
-        c[idx, 1] = a2 * b3 - a3 * b2
-        c[idx, 2] = a3 * b1 - a1 * b3
-        c[idx, 3] = a1 * b2 - a2 * b1
-    end
-end
-
 # cᵢ = 1/∏_{j≠i}(i - j) on the nodes 0:N-1, for every order up to 21 (factorial(21) overflows Int)
 const LAGRANGE_DENOMINATORS = ntuple(N -> ntuple(i -> (-1)^(N - i) / (factorial(i - 1) * factorial(N - i)), N), 21)
 
