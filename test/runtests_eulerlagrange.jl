@@ -392,41 +392,31 @@ end
         @test odet.index[:, 2] == [3, 1, 2]
     end
 
-    @testset "ideal-crossing reduction isolates the resonant harmonic" begin
+    @testset "ideal-crossing reduction leaves each big solution in one column" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
-        # Column 1 has the largest norm but no resonant (row 3) component; column 2 carries the resonance.
-        # Growth order alone would lead with column 1 and pivot it on row 1, leaving row 3 in columns 2 and 3.
-        u0 = zeros(ComplexF64, 3, 3, 2)
-        u0[:, 1, 1] .= [6.0, 0.5, 0.0]
-        u0[:, 2, 1] .= [0.4, 0.3, 5.0]
-        u0[:, 3, 1] .= [0.2, 2.0, 1.5]
-        u0[:, :, 2] .= 1.0
-        intr = FFS.ForceFreeStatesInternal(; numpert_total=3)
-        ctrl = FFS.ForceFreeStatesControl(; algorithm=Forward(; renorm_threshold=1e3))
-        fresh(u) = (odet = FFS.OdeState(3, 10, 10, 1); odet.u .= u; odet)
-
-        odet = fresh(u0)
-        odet.new = false
-        odet.unorm0 .= norm.(eachcol(u0[:, :, 1]))  # every column grown alike since the last reduction
-        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
-        @test odet.index[1, 1] == 2
-        @test odet.u[3, 2, 1] == u0[3, 2, 1]
-        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0  # only the lead column keeps the resonant harmonic
-        @test odet.sing_flag[1]
-
-        # A crossing right after a renorm_threshold reduction (new = true) still reduces on the resonant row.
-        odet = fresh(u0)
-        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
-        @test odet.ifix == 1 && odet.index[1, 1] == 2 && odet.new
-        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0
-
-        # Without resonant rows the growth-ordered reduction is unchanged.
-        odet = fresh(u0)
-        odet.new = false
-        odet.unorm0 .= 1.0
-        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
-        @test odet.index[1, 1] == 1
-        @test odet.u[3, 2, 1] != 0
+        # Asymptotic coefficients of three solutions; the resonance is basis row 3 and column 2 has most of its big solution.
+        ca0 = zeros(ComplexF64, 3, 3, 2)
+        ca0[:, 1, 1] .= [6.0, 0.5, 0.2]
+        ca0[:, 2, 1] .= [0.4, 0.3, 5.0]
+        ca0[:, 3, 1] .= [0.2, 2.0, 1.5]
+        ca0[:, :, 2] .= [1.0 2.0 3.0; 4.0 5.0 6.0; 7.0 8.0 9.0]
+        ca = copy(ca0)
+        pivots, factors = FFS.eliminate_big_solutions!(ca, [3])
+        @test pivots == [2] && factors[1, 2] == 0
+        @test ca[3, 1, 1] == 0 && ca[3, 3, 1] == 0 && ca[:, 2, :] == ca0[:, 2, :]
+        for j in (1, 3)
+            @test ca[:, j, :] ≈ ca0[:, j, :] .+ factors[1, j] .* ca0[:, 2, :]
+        end
+        # Forward records it in the form transform_u! undoes, with the pivot column ending at the surface.
+        odet = FFS.OdeState(3, 10, 10, 1)
+        odet.ifix = 1
+        FFS.record_crossing!(odet, pivots, factors)
+        @test odet.index[:, 1] == [2, 1, 3] && odet.sing_flag[1] && odet.zeroed_idx[1] == [1]
+        @test odet.fixfac[2, :, 1] == [factors[1, 1], 1, factors[1, 3]]
+        # Right of the surface the freed column is the small solution and no other column has a resonant coefficient.
+        FFS.start_small_solutions!(ca, [3], pivots)
+        @test all(iszero, ca[3, [1, 3], :])
+        @test ca[:, 2, 1] == zeros(3) && ca[:, 2, 2] == [0, 0, 1]
     end
 
     @testset "OdeState construction" begin

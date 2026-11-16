@@ -45,6 +45,7 @@ function riccati_eulerlagrange_integration(
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
     restore_solution_columns!(odet, propagators, chunks, columns)
+    fill_crossings!(odet, bases, crossing_fill_fractions(ctrl), equil, intr)
 
     return odet, (; propagators, chunks, columns, bases)
 end
@@ -142,9 +143,7 @@ function store_propagated!(u_store::Array{ComplexF64,4}, propagators::Vector{Chu
         Threads.@threads for i in eachindex(propagators)
             u = zeros(ComplexF64, N, N, 2)
             for (j, k) in enumerate(stored[i])
-                @views for half in 1:2
-                    mul!(u[:, :, half], propagators[i].steps[k][:, :, half], coefficients[i])
-                end
+                state_from_basis!(u, propagators[i].steps[k], coefficients[i])
                 reduce && renormalize_riccati_inplace!(u, N)
                 @views u_store[:, :, :, slots[i]+j] .= u
             end

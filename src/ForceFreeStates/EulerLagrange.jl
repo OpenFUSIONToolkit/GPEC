@@ -131,8 +131,9 @@ OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int
     compute_delta_prime_from_ca!(odet, intr, equil)
 
 **Stub, not physically valid.** Fill each surface's `delta_prime` with the per-surface estimate
-`(ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)` from the asymptotic coefficients. It ignores inter-surface
-coupling and the vacuum, so it does not agree with the physical `ForceFreeStatesResult.delta_prime`.
+`(1 - ca_l[i,c,2,s]) / (4π²·psio)` from the asymptotic coefficients, `c` being the column in which the small
+solution of resonance `i` starts. It ignores inter-surface coupling and the vacuum, so it does not agree with the
+physical `ForceFreeStatesResult.delta_prime`.
 """
 function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl
@@ -142,12 +143,8 @@ function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInter
         resize!(intr.sing[s].delta_prime, n_modes)
         for i in 1:n_modes
             ipert_res = 1 + sing.m[i] - intr.mlow + (sing.n[i] - intr.nlow) * intr.mpert
-            if 1 <= ipert_res <= intr.numpert_total
-                Δca = odet.ca_r[ipert_res, ipert_res, 2, s] - odet.ca_l[ipert_res, ipert_res, 2, s]
-                intr.sing[s].delta_prime[i] = Δca / denom
-            else
-                intr.sing[s].delta_prime[i] = 0.0 + 0.0im
-            end
+            column = 1 <= ipert_res <= intr.numpert_total ? findfirst(isone, @view odet.ca_r[ipert_res, :, 2, s]) : nothing
+            intr.sing[s].delta_prime[i] = column === nothing ? 0.0 + 0.0im : (1 - odet.ca_l[ipert_res, column, 2, s]) / denom
         end
     end
 end
@@ -263,6 +260,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
+    bases = ctrl.kinetic === nothing ? asymptotic_bases(chunks, ctrl, equil, mats, intr) : nothing
 
     if verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
@@ -279,7 +277,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
             if ctrl.kinetic !== nothing
                 cross_kinetic_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             else
-                cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
+                cross_ideal_singular_surf!(odet, ctrl, equil, intr, chunk.ising, bases[chunk.ising])
             end
         end
     end
@@ -297,6 +295,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
     # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
+    bases === nothing || fill_crossings!(odet, bases, crossing_fill_fractions(ctrl), equil, intr)
 
     return odet, nothing
 end
@@ -553,62 +552,67 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
 end
 
 """
-    cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
+    cross_ideal_singular_surf!(odet, ctrl, equil, intr, ising, basis)
 
-Cross ideal singular surface `ising`: reduce on the resonant rows, record the left asymptotic
-coefficients, replace the resonant solutions by the small asymptotic solutions on the far side,
-and record the right coefficients. Port of Fortran `ode_ideal_cross`.
+Cross ideal singular surface `ising` in its asymptotic basis [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502,
+Eq. 36]: the solutions are expanded in the left basis, the column carrying each resonance's big solution ends at
+the surface, the nonresonant coefficients continue into the right basis, and each small solution starts there in
+the freed column. `basis` is the surface's entry of `asymptotic_bases`. Records both coefficient sets in
+`odet.ca_l` and `odet.ca_r`, and the column reduction for `transform_u!`.
 """
 function cross_ideal_singular_surf!(
     odet::OdeState,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
-    ising::Int
+    ising::Int,
+    basis
 )
-
     singp = intr.sing[ising]
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    nres = length(ipert_res)
 
-    # Reduce on the resonant rows so the solutions removed below are the resonant ones
-    compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=ipert_res)
-
-    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
-    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0)
-    dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
-
-    ua = sing_get_ua(sing_asymp_left, dpsi)
-    odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
-
-    # The reduction put the column pivoted on ipert_res[i] at index position i; zeroed_idx records it for transform_u!
-    odet.zeroed_idx[odet.ifix] = collect(1:nres)
-    for i in 1:nres
-        odet.u[:, odet.index[i, odet.ifix], :] .= 0
-    end
-
-    # Trapezoidal step across the surface
-    params = (ctrl, equil, mats, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
-    du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    sing_der!(du1, odet.u, params, odet.psifac)
-    odet.psifac += 2 * dpsi
-    sing_der!(du2, odet.u, params, odet.psifac)
-    odet.u .+= (du1 .+ du2) .* dpsi
-
-    # Swap in the small resonant asymptotic solution on the right side
-    ua = sing_get_ua(sing_asymp_right, dpsi)
-    for i in 1:nres
-        odet.u[ipert_res[i], :, :] .= 0
-        odet.u[:, odet.index[i, odet.ifix], :] .= ua[:, ipert_res[i]+intr.numpert_total, :]
-    end
-    odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+    # Reduce first: columns left nearly parallel by the integration would lose their difference in the basis change.
+    compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+    ca = sing_get_ca(odet.u, basis.left, intr)
+    pivots, factors = eliminate_big_solutions!(ca, ipert_res)
+    next_fixup!(odet, ctrl)
+    record_crossing!(odet, pivots, factors)
+    odet.ca_l[:, :, :, ising] .= ca
+    start_small_solutions!(ca, ipert_res, pivots)
+    odet.ca_r[:, :, :, ising] .= ca
     odet.ca_populated = true
+
+    odet.psifac += 2 * basis.dpsi
+    state_from_basis!(odet.u, basis.right, [ca[:, :, 1]; ca[:, :, 2]])
+    # The next solver step records fresh reference norms.
+    odet.new = true
 
     # No Δ' here: it needs the Riccati propagators; see compute_delta_prime_matrix
     odet.q = equil.profiles.q_spline(odet.psifac; hint=odet.spline_hint)
     store_ode_data!(odet, odet.psifac, odet.u)
+end
+
+"""
+    record_crossing!(odet, pivots, factors)
+
+Record the reduction `eliminate_big_solutions!` made at an ideal crossing as fixup `odet.ifix`, in the form
+`transform_u!` undoes, with the `pivots` columns ending there.
+"""
+function record_crossing!(odet::OdeState, pivots::Vector{Int}, factors::Matrix{ComplexF64})
+    ifix = odet.ifix
+    N = size(factors, 2)
+    odet.sing_flag[ifix] = true
+    # The previous region ends at the step before this fixup
+    odet.fixstep[ifix] = odet.step - 1
+    odet.fixfac[:, :, ifix] .= 0
+    for isol in 1:N
+        odet.fixfac[isol, isol, ifix] = 1
+    end
+    for (i, pivot) in enumerate(pivots)
+        @views odet.fixfac[pivot, :, ifix] .+= factors[i, :]
+    end
+    odet.index[:, ifix] .= [pivots; setdiff(1:N, pivots)]
+    odet.zeroed_idx[ifix] = collect(eachindex(pivots))
 end
 
 """
@@ -754,7 +758,7 @@ function integrate_el_region!(
 end
 
 """
-    compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
+    compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
 Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
 growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
@@ -765,10 +769,8 @@ the previous reduction's pivot order. Errors if any norm is zero. Port of Fortra
 
   - `u` - Solution array, updated in place (the integrator state, to avoid copies)
   - `sing_flag` - Whether this call is at a singular surface
-  - `resonant_rows` - Resonant rows at an ideal crossing, pivoted on first
 """
-function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool;
-    resonant_rows=Int[])
+function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
     odet.unorm .= norm.(eachcol(u[:, :, 1]))
     if minimum(odet.unorm) == 0
@@ -791,28 +793,29 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     end
 
     if fix_required
-        if odet.ifix < ctrl.algorithm.numunorms_init
-            odet.ifix += 1
-        else
-            @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
-            Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
-        end
-        apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
+        next_fixup!(odet, ctrl)
+        apply_gaussian_reduction!(u, odet, intr, sing_flag)
         odet.new = true
     end
 end
 
+# Advance to the next slot of the reduction record; once the storage is full the last slot is reused.
+function next_fixup!(odet::OdeState, ctrl::ForceFreeStatesControl)
+    if odet.ifix < ctrl.algorithm.numunorms_init
+        odet.ifix += 1
+    else
+        @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
+        Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
+    end
+end
+
 """
-    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
+    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
 Triangularize the solution columns of `u` in place by Gaussian reduction, recording the factors in
 `odet.fixfac`/`odet.index` for `transform_u!`. Port of Fortran `ode_fixup`.
-
-At an ideal crossing, the first pivots are the `resonant_rows`, each on the remaining column largest
-there. Growth order cannot pick the resonant solution if a `renorm_threshold` reduction fired just before the
-crossing, since every column has then grown alike.
 """
-function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
+function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
     ifix = odet.ifix
     odet.sing_flag[ifix] = sing_flag
@@ -823,18 +826,13 @@ function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr:
         odet.fixfac[isol, isol, ifix] = 1
     end
 
-    # Triangularize primary solutions, resonant rows first, then columns from largest to smallest growth
+    # Triangularize primary solutions, columns from largest to smallest growth
     growth_order = sortperm(odet.unorm; rev=true)
     row_free = trues(intr.numpert_total)
     col_free = trues(intr.numpert_total)
     for isol in 1:intr.numpert_total
-        if isol <= length(resonant_rows)
-            kpert = resonant_rows[isol]
-            ksol = argmax(j -> col_free[j] ? abs(u[kpert, j, 1]) : -Inf, 1:intr.numpert_total)
-        else
-            ksol = growth_order[findfirst(j -> col_free[j], growth_order)]
-            @views kpert = argmax(abs.(u[:, ksol, 1]) .* row_free)
-        end
+        ksol = growth_order[isol]
+        @views kpert = argmax(abs.(u[:, ksol, 1]) .* row_free)
         odet.index[isol, ifix] = ksol
         col_free[ksol] = false
         row_free[kpert] = false

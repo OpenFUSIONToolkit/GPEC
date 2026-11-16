@@ -110,7 +110,7 @@ function run_force_free_states(
                     error_field_response=ctrl.algorithm.error_field_response)
                 if coefficients !== nothing
                     basis = outer_solution_basis(coefficients, riccati.propagators, riccati.chunks, riccati.columns, riccati.bases,
-                        intr.sing, equil, mats, ModeIndices(intr))
+                        intr.sing, equil, mats, ModeIndices(intr), crossing_fill_fractions(ctrl))
                 end
             end
         end
