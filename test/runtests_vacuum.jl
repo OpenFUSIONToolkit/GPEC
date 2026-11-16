@@ -1,4 +1,5 @@
 using GeneralizedPerturbedEquilibrium: Vacuum
+using QuadGK: quadgk
 using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, DeeWall, ModDeeWall, FileWall
 
 @testset "Vacuum.jl Unit Tests" begin
@@ -113,8 +114,8 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             _circle_inputs(mtheta) = VacuumInput(;
                 mtheta_in=mtheta,
                 nzeta_in=1,
-                x=1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta)),
-                z=0.3 .* sin.(range(0, 2π; length=mtheta)),
+                x=1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta + 1)[1:mtheta]),
+                z=0.3 .* sin.(range(0, 2π; length=mtheta + 1)[1:mtheta]),
                 ν=zeros(mtheta),
                 mtheta=mtheta,
                 nzeta=1
@@ -195,8 +196,8 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
                     VacuumInput(;
                         mtheta_in=16,
                         nzeta_in=1,
-                        x=0.05 .+ 0.03 .* cos.(range(0, 2π; length=16)),
-                        z=0.03 .* sin.(range(0, 2π; length=16)),
+                        x=0.05 .+ 0.03 .* cos.(range(0, 2π; length=17)[1:16]),
+                        z=0.03 .* sin.(range(0, 2π; length=17)[1:16]),
                         ν=zeros(16),
                         mtheta=16,
                         nzeta=1
@@ -374,8 +375,8 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             _make_inputs(; mtheta=128, mtheta_eq=17, m_modes=1:2, n_modes=[1]) = VacuumInput(;
                 mtheta_in=mtheta_eq,
                 nzeta_in=1,
-                x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta_eq))),
-                z=collect(0.3 .* sin.(range(0, 2π; length=mtheta_eq))),
+                x=collect(1.7 .+ 0.3 .* cos.(2π .* (0:(mtheta_eq-1)) ./ mtheta_eq)),
+                z=collect(0.3 .* sin.(2π .* (0:(mtheta_eq-1)) ./ mtheta_eq)),
                 ν=zeros(mtheta_eq),
                 m_modes=collect(Int, m_modes),
                 n_modes=collect(Int, n_modes),
@@ -432,6 +433,54 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
                 @test !isapprox(plasma_pts[:, 1], wall_pts[:, 1])
                 @test !isapprox(plasma_pts[:, 3], wall_pts[:, 3])
                 @test isapprox(wv, wv', rtol=1e-12)
+            end
+
+            @testset "close wall: near plasma–wall pairs found by distance" begin
+                # Shaped plasma, conformal wall 0.3 node spacings off at M = 128 (the old index-anchored panels erred by
+                # O(1) on misaligned nodes). Wall offset along the analytic normal, so every node placement is the same curve.
+                M, ms = 128, collect(-6:6)
+                p(θ) = (1.7 + 0.6cos(θ + 0.41sin(θ)), 1.08sin(θ))
+                dp(θ) = (-0.6sin(θ + 0.41sin(θ)) * (1 + 0.41cos(θ)), 1.08cos(θ))
+                wallpt(θ, g) = (d=dp(θ); J=hypot(d...); (p(θ)[1] + g * d[2] / J, p(θ)[2] - g * d[1] / J))
+                θ = 2π .* (0:(M-1)) ./ M
+                g = 0.3 * sum(t -> hypot(dp(t)...), θ) * 2π / M / M
+                inputs = VacuumInput(; x=first.(p.(θ)), z=last.(p.(θ)), ν=zeros(M), mtheta_in=M, m_modes=ms, n_modes=[1], mtheta=M)
+                # No non-Hermitian warning: the solve itself is accurate, not just symmetrized
+                wv_of(u; ea=false) = mktemp() do path, io
+                    println(io, M, "\n1.7\ni R Z")
+                    foreach(((k, t),) -> println(io, k, " ", join(wallpt(t, g), " ")), enumerate(u))
+                    close(io)
+                    @test_logs min_level = Base.CoreLogging.Warn compute_vacuum_response(inputs, FileWall(; file=path, equal_arc_wall=ea)).wv
+                end
+                wvs = [wv_of(θ), wv_of(θ .+ π / M), wv_of(θ .+ 0.3 .* sin.(θ)), wv_of(θ; ea=true)]
+                for w in wvs[2:end]
+                    @test norm(w - wvs[1]) < 3e-5 * norm(wvs[1])
+                end
+
+                # The wall is checked against the plasma when built: a crossing throws, a gap under a tenth of a cell warns
+                wall_of(gap) = mktemp() do path, io
+                    println(io, M, "\n1.7\ni R Z")
+                    foreach(((k, t),) -> println(io, k, " ", join(wallpt(t, gap), " ")), enumerate(θ))
+                    close(io)
+                    Vacuum.WallGeometry(inputs, PlasmaGeometry(inputs), FileWall(; file=path, equal_arc_wall=false))
+                end
+                @test_throws ArgumentError wall_of(-g)
+                @test_logs (:warn, r"tenth of a cell") wall_of(g / 100)
+
+                # One near row against direct adaptive quadrature of the same kernel
+                P = PlasmaGeometry(inputs.x, inputs.z, zeros(M))
+                W = Vacuum.WallGeometry(false, first.(wallpt.(θ .+ π / M, g)), last.(wallpt.(θ .+ π / M, g)))
+                χ(t) = cos(3t) + 0.5sin(t)
+                for (obs, src, σ, res) in ((P, W, -1, -2.0), (W, P, 1, 0.0))
+                    grad, green_mat = zeros(2M, 2M), zeros(M, M)
+                    Vacuum.compute_2D_kernel_matrices!(grad, green_mat, obs, src, 1)
+                    rows, cols = obs isa PlasmaGeometry ? (1:M) : ((M+1):2M), src isa PlasmaGeometry ? (1:M) : ((M+1):2M)
+                    j = 5
+                    kern(t) = Vacuum.green(obs.x[j], obs.z[j], Vacuum.curve_point(src, t)..., 1; pn_cache=Vacuum.get_pn_quad_cache(1))
+                    I = quadgk(t -> (k=kern(t); [k[2] * χ(t), k[3], k[1] * χ(t)]), range(0, 2π, 65)...; rtol=1e-12)[1]
+                    @test grad[rows, cols][j, :]' * χ.(θ) ≈ σ * (I[1] - χ(θ[j]) * I[2]) + res * χ(θ[j]) rtol = 1e-5
+                    src isa PlasmaGeometry && @test green_mat[j, :]' * χ.(θ) ≈ I[3] / 2π rtol = 1e-5
+                end
             end
 
             @testset "edge: single poloidal mode mpert=1" begin
@@ -548,8 +597,8 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
         _make_3d_inputs(; mtheta=32, mtheta_eq=17, m_modes=1:2, n_modes=0:1, nzeta=32) = VacuumInput(;
             mtheta_in=mtheta_eq,
             nzeta_in=1,
-            x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta_eq))),
-            z=collect(0.3 .* sin.(range(0, 2π; length=mtheta_eq))),
+            x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π; length=mtheta_eq + 1)[1:mtheta_eq])),
+            z=collect(0.3 .* sin.(range(0, 2π; length=mtheta_eq + 1)[1:mtheta_eq])),
             ν=zeros(mtheta_eq),
             m_modes=collect(Int, m_modes),
             n_modes=collect(Int, n_modes),

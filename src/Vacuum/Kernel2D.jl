@@ -9,6 +9,11 @@ const GL8_LAGRANGE_STENCILS = (lagrange_weights.(GL8_X .+ 1.0, Val(5)), lagrange
 # Pre-computed Gauss quadrature constants (_PN_TG02, _PN_WANUMR, _PN_AGAUS, _PN_BGAUS)
 # and per-n sinh/cosh cache are defined in PnQuadCache.jl.
 
+# Near plasma–wall rows (gap < NEAR_GAP node spacings) are integrated over ±NEAR_WINDOW node intervals about the source
+# point closest to the observer, on sinh-graded Gauss nodes: rules of 8–64 nodes, 8 per 2 units of the sinh variable
+const NEAR_WINDOW = 6
+const NEAR_SINH = sinh_rule(8, 8, 2.0)
+
 """
     compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, n)
 
@@ -33,9 +38,11 @@ grad_greenfunction is not zeroed since it fills a different block of the
 
 # Notes
 
-  - Uses Simpson's rule for integration away from singular points
-  - Uses Gaussian quadrature near singular points for improved accuracy
-  - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
+  - Same surface: Simpson's rule away from the singular point, Gaussian quadrature on the panels about it, with
+    analytical singularity removal [Chance Phys. Plasmas 1997 2161]
+  - Plasma–wall rows within `NEAR_GAP` node spacings of the source curve: Simpson's rule plus sinh-graded Gauss nodes
+    about the closest source point ([`add_near_window!`](@ref)), so the wall's node placement does not matter
+  - Other plasma–wall rows: periodic trapezoidal rule, spectrally accurate on their smooth integrand
 """
 function compute_2D_kernel_matrices!(
     grad_greenfunction::AbstractMatrix{Float64},
@@ -78,8 +85,18 @@ function compute_2D_kernel_matrices!(
         # (𝒢ⁿ, 𝒦ⁿ, 𝒦⁰) at this observer from a source point and its tangent
         kernel(x, z, dx_dθ, dz_dθ) = green(x_obs, z_obs, x, z, dx_dθ, dz_dθ, n; gamma_prefactor, pn_cache)
         rows = (grad_greenfunction_block, greenfunction, j)
-        add_regular_sum!(rows, kernel, source, simpson_nodes(j, 2, mtheta))
-        add_singular_panels!(rows, kernel, source, theta_grid[j], log_correction_array, x_obs, observer isa PlasmaGeometry)
+        cp = observer === source ? nothing : closest_point(source, x_obs, z_obs)
+        if cp === nothing
+            add_regular_sum!(rows, kernel, source, simpson_nodes(j, 2, mtheta))
+            add_singular_panels!(rows, kernel, source, theta_grid[j], log_correction_array, x_obs)
+        elseif abs(cp.d) < NEAR_GAP * cp.h
+            # The panels sit about the source node jc nearest the closest point (the wall need not share the plasma's nodes)
+            jc = mod1(round(Int, cp.θ / dtheta) + 1, mtheta)
+            add_regular_sum!(rows, kernel, source, simpson_nodes(jc, NEAR_WINDOW, mtheta))
+            add_near_window!(rows, kernel, source, jc, cp.θ, x_obs, z_obs)
+        else
+            add_regular_sum!(rows, kernel, source, ((isrc, dtheta) for isrc in 1:mtheta))
+        end
     end
 
     # Normals need to point outward from the vacuum region. With counter-clockwise θ the normal used in `green`
@@ -112,7 +129,8 @@ end
 
 """
 Add the quadrature sum `Σ w K(source node isrc)` over `nodes = (isrc, w)` to row `j` of `rows = (𝒦 block, 𝒢, j)`:
-Simpson's rule off the singular panels. 𝒢 is filled only for a plasma source.
+Simpson's rule off the singular panels, or the periodic trapezoidal rule on a far plasma–wall row. 𝒢 is filled only for a
+plasma source.
 """
 function add_regular_sum!((grad_greenfunction_block, greenfunction, j), kernel, source, nodes)
     @inbounds for (isrc, w) in nodes
@@ -125,11 +143,11 @@ function add_regular_sum!((grad_greenfunction_block, greenfunction, j), kernel, 
 end
 
 """
-Add the singular panels of row `j`: 8-point Gauss on the two panels of 2 node intervals about `theta_obs`, with the
-density from the 5-point Lagrange stencil about it. For a plasma observer and source, the log singularity of 𝒢 is
+Add the singular panels of same-surface row `j`: 8-point Gauss on the two panels of 2 node intervals about the observer
+at `theta_obs`, with the density from the 5-point Lagrange stencil about it. For the plasma, the log singularity of 𝒢 is
 removed and added back analytically (`log_correction_array`) [Chance Phys. Plasmas 1997 2161 eqs. 75, 78].
 """
-function add_singular_panels!((grad_greenfunction_block, greenfunction, j), kernel, source, theta_obs, log_correction_array, x_obs, plasma_observer)
+function add_singular_panels!((grad_greenfunction_block, greenfunction, j), kernel, source, theta_obs, log_correction_array, x_obs)
     mtheta = length(source.x)
     dtheta = 2π / mtheta
     stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
@@ -149,7 +167,7 @@ function add_singular_panels!((grad_greenfunction_block, greenfunction, j), kern
             # First type of singularity: 𝒢ⁿ [Chance Phys. Plasmas 1997 2161 eq. 75]
             if source isa PlasmaGeometry
                 # Remove singular behavior by adding on leading-order term
-                plasma_observer && (G_n += log((theta_obs - theta_gauss)^2) / x_obs)
+                G_n += log((theta_obs - theta_gauss)^2) / x_obs
                 @inbounds for stencil_idx in 1:5
                     greenfunction[j, sing_idx[stencil_idx]] += G_n * s[stencil_idx] * wgauss
                 end
@@ -164,11 +182,42 @@ function add_singular_panels!((grad_greenfunction_block, greenfunction, j), kern
         end
     end
 
-    # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75] if plasma-plasma block
-    if source isa PlasmaGeometry && plasma_observer
+    # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75] for the plasma
+    if source isa PlasmaGeometry
         @inbounds for stencil_idx in 1:5
             greenfunction[j, sing_idx[stencil_idx]] -= log_correction_array[stencil_idx] / x_obs
         end
+    end
+end
+
+"""
+Add the near-window integral of a close plasma–wall row `j` over the `2 * NEAR_WINDOW` node intervals about source node
+`jc`: each interval, split at the closest point `θc`, on sinh-graded nodes ([`sinh_nodes`](@ref)) of width
+`ε = d/|∂r/∂θ|`, with the density from the 5-point Lagrange stencil about the interval's left node.
+"""
+function add_near_window!((grad_greenfunction_block, greenfunction, j), kernel, source, jc, θc, x_obs, z_obs)
+    mtheta = length(source.x)
+    dtheta = 2π / mtheta
+    θc = (jc - 1) * dtheta + rem2pi(θc - (jc - 1) * dtheta, RoundNearest)  # unwrapped next to node jc
+    X, Z, Xθ, Zθ = curve_point(source, θc)
+    ε = hypot(x_obs - X, z_obs - Z) / hypot(Xθ, Zθ)
+    for k in (jc-1-NEAR_WINDOW):(jc-2+NEAR_WINDOW)
+        a, b = k * dtheta - θc, (k + 1) * dtheta - θc
+        # Interval integrals of 𝒦ⁿ and 𝒢ⁿ against each stencil weight, and of 𝒦⁰
+        I_grad, I_G, I_0 = zero(SVector{5,Float64}), zero(SVector{5,Float64}), 0.0
+        for (lo, hi) in (a < 0 < b ? ((a, 0.0), (0.0, b)) : ((a, b),)), (ρ, w) in sinh_nodes(ε, lo, hi, NEAR_SINH)
+            G_n, gradG_n, gradG_0 = kernel(curve_point(source, θc + ρ)...)
+            ℓ = lagrange_weights((θc + ρ) / dtheta - (k - 2), Val(5))
+            I_grad += w * (gradG_n * ℓ)
+            I_G += w * (G_n * ℓ)
+            I_0 += w * gradG_0
+        end
+        @inbounds for i in 1:5
+            col = mod1(k - 2 + i, mtheta)
+            grad_greenfunction_block[j, col] += I_grad[i]
+            source isa PlasmaGeometry && (greenfunction[j, col] += I_G[i])
+        end
+        grad_greenfunction_block[j, j] -= I_0
     end
 end
 
