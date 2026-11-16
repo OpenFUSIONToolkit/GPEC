@@ -108,18 +108,18 @@ end
     @testset "ode_matrix: ordinary point and type-generic build" begin
         Q = 5.0im
         # x = 0 is an ordinary point: the coefficient matrix is finite there.
-        M0 = GGJ.ode_matrix(p, Q, 0.0)
+        M0 = IL.ToroidalLayer.ode_matrix(p, Q, 0.0)
         @test all(isfinite, M0)
         @test M0[1, 4] == 1 && M0[2, 5] == 1 && M0[3, 6] == 1   # v' = (Ψ',Ξ',Υ') block
         # The extended-precision build agrees with the Float64 build.
-        Md = GGJ.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
-        @test ComplexF64.(Md) ≈ GGJ.ode_matrix(p, Q, 0.3) rtol = 1e-12
+        Md = IL.ToroidalLayer.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
+        @test ComplexF64.(Md) ≈ IL.ToroidalLayer.ode_matrix(p, Q, 0.3) rtol = 1e-12
     end
 
     @testset "decaying_pair is an orthonormal 6×2 frame" begin
         Q = 5.0im
         θ = angle(Q) / 4
-        E = GGJ.decaying_pair(p, Q, θ, 60.0)
+        E = IL.ToroidalLayer.decaying_pair(p, Q, θ, 60.0)
         @test size(E) == (6, 2)
         @test all(isfinite, E)
         @test E' * E ≈ I(2) atol = 1e-10          # columns orthonormal
@@ -146,62 +146,48 @@ end
     end
 end
 
-# A second ToroidalLayerParameters type that forwards every interface method to GGJ: the backends reach a model only
-# through the interface, so its Δ must equal GGJ's bit for bit. `_BareLayer` implements nothing.
+# Interface guards: `_BareLayer` implements nothing, and `_ShiftedExponents` gives power exponents its Wasow basis
+# does not have.
 const TL = IL.ToroidalLayer
-struct _ForwardingLayer <: TL.ToroidalLayerParameters
-    g::IL.GGJParameters
-end
 struct _BareLayer <: TL.ToroidalLayerParameters end
 struct _ShiftedExponents <: TL.ToroidalLayerParameters
     g::IL.GGJParameters
 end
 TL.wasow_basis(p::_ShiftedExponents, Q::ComplexF64) = TL.wasow_basis(p.g, Q)
 TL.power_exponents(p::_ShiftedExponents) = TL.power_exponents(p.g) .+ 0.5
-TL.layer_rows(::Type{CT}, p::_ForwardingLayer, Q::Number, x::Number) where {CT<:Complex} = TL.layer_rows(CT, p.g, Q, x)
-TL.layer_weak_form(p::_ForwardingLayer, Q::ComplexF64, x::Number) = TL.layer_weak_form(p.g, Q, x)
-TL.wasow_basis(p::_ForwardingLayer, Q::ComplexF64) = TL.wasow_basis(p.g, Q)
-TL.power_exponents(p::_ForwardingLayer) = TL.power_exponents(p.g)
-TL.default_ray_angle(p::_ForwardingLayer, Q::ComplexF64) = TL.default_ray_angle(p.g, Q)
-TL.parabolic_rate(p::_ForwardingLayer, Q::ComplexF64, θ::Real) = TL.parabolic_rate(p.g, Q, θ)
-TL.ohm_rate(p::_ForwardingLayer, Q::ComplexF64) = TL.ohm_rate(p.g, Q)
-TL.fast_rates(p::_ForwardingLayer, Q::ComplexF64) = TL.fast_rates(p.g, Q)
-TL.inner_Q(p::_ForwardingLayer, γ::Number) = TL.inner_Q(p.g, γ)
-TL.rescale_delta(Δ::AbstractVector, p::_ForwardingLayer) = TL.rescale_delta(Δ, p.g)
-TL.profile_conversions(p::_ForwardingLayer) = TL.profile_conversions(p.g)
 
-# The rows u'' = Ũu + Ṽu' and the weak form I·u'' − V·u' − U·u = 0 describe one system: Ũ = I⁻¹U, Ṽ = I⁻¹V.
-function _rows_match_weak_form(p)
-    worst = 0.0
-    for Q in (0.1 + 0.05im, 5.0im, 50.0im), x in (0.3, 2.0 + 0.7im, 7.5im)
-        I, U, V = TL.layer_weak_form(p, ComplexF64(Q), x)
-        Ũ, Ṽ = TL.layer_rows(p, Q, x)
-        worst = max(worst, norm(Matrix(I) \ Matrix(U) - Matrix(Ũ)) / norm(Ũ), norm(Matrix(I) \ Matrix(V) - Matrix(Ṽ)) / norm(Ṽ))
-    end
-    return worst
+# A model's Wasow basis describes its own equations: J₀ splits the power-like (1:2) from the exponential (3:6)
+# subspace, x(A₀ + A₁/x² + A₂/x⁴) with A = TJT⁻¹ is its ode_matrix in the state u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x),
+# and the series built from it solves the equations to round-off (GW2020 Eq. 54).
+function _wasow_matches_equations(p, Q)
+    T, J, _ = TL.wasow_basis(p, Q)
+    x = 1.7 + 0.4im
+    Sx = Matrix{ComplexF64}(Diagonal([x, 1, 1, 1, 1 / x, 1 / x]))
+    Sx[4, 1] = 1 / x
+    dSx = zeros(ComplexF64, 6, 6)
+    dSx[1, 1] = 1
+    dSx[4, 1] = -1 / x^2
+    dSx[5, 5] = dSx[6, 6] = -1 / x^2
+    A = [T * J[i] / T for i in 1:3]
+    far = x * (A[1] + A[2] / x^2 + A[3] / x^4)
+    c = TL.build_asymptotics(p, Q; kmax=12)
+    return (; split=norm(J[1][1:2, 3:6]) + norm(J[1][3:6, 1:2]),
+        equations=norm((Sx * TL.ode_matrix(p, Q, x) + dSx) / Sx - far) / norm(far),
+        series=maximum(TL.asymptotic_residual(c, 10.0 * cis(TL.default_ray_angle(p, Q)))))
 end
 
 @testset "ToroidalLayer interface" begin
     q4 = GGJ.q4_surface_benchmark()
-    gw = GGJ.glasser_wang_2020_eq55()
 
-    @testset "layer_rows and layer_weak_form agree" begin
-        @test _rows_match_weak_form(q4) < 1e-12
-        @test _rows_match_weak_form(gw) < 1e-12
-    end
-
-    @testset "a forwarding model reproduces GGJ through both backends" begin
-        f = _ForwardingLayer(q4)
-        for Q in (0.1 + 0.05im, 5.0im)
-            @test TL.solve_ray(f, Q).Δ == TL.solve_ray(q4, Q).Δ
+    @testset "Wasow basis matches the layer equations" begin
+        for Q in (0.07 + 0.11im, 0.5im)                 # the series converge by s = 10 at these |Q|
+            w = _wasow_matches_equations(q4, Q)
+            @test w.split < 1e-12 && w.equations < 1e-12 && w.series < 1e-12
         end
-        γ = 0.1234 * GGJ.q0(gw)
-        @test TL.galerkin_response(_ForwardingLayer(gw), γ) == TL.galerkin_response(gw, γ)
-        @test TL.ray_response(f, 5.0im * GGJ.q0(q4)) == TL.ray_response(q4, 5.0im * GGJ.q0(q4))
-        @test_throws MethodError TL.solve_ray(_BareLayer(), 1.0im)
     end
 
-    @testset "power exponents must match the Wasow power block" begin
+    @testset "missing methods and inconsistent exponents are errors" begin
+        @test_throws MethodError TL.solve_ray(_BareLayer(), 1.0im)
         @test_throws "are not the roots" TL.build_asymptotics(_ShiftedExponents(q4), 5.0im)
     end
 
@@ -210,6 +196,8 @@ end
         @test_throws ArgumentError IL.GGJModel(; solver=:ray, nx=64)
         γ = 5.0im * GGJ.q0(q4)
         @test IL.solve_inner(IL.GGJModel(; cfl=0.1), q4, γ) == IL.solve_inner(IL.GGJModel(), q4, γ; cfl=0.1)
+        @test IL.solve_inner(IL.GGJModel(; solver=:galerkin, nx=256), q4, 0.1im * GGJ.q0(q4)) ==
+              IL.solve_inner(IL.GGJModel(; solver=:galerkin), q4, 0.1im * GGJ.q0(q4); nx=256)
     end
 end
 

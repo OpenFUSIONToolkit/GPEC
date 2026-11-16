@@ -19,14 +19,15 @@ using DoubleFloats: Double64
 using ...Utilities.HermiteFEM: hermite_basis, pack_grid
 
 import ..InnerLayerModel, ..InnerLayerResponse, ..InnerLayerParameters
-import ..solve_inner_profile
+import ..solve_inner, ..solve_inner_profile
 
 """
     ToroidalLayerModel{S} <: InnerLayerModel
 
 Abstract supertype of the inner-layer models built on this library; `S` is the solver backend symbol
-(`:ray`, `:galerkin`, or a model's own). Concrete models forward `solve_inner` to [`ray_response`](@ref) or
-[`galerkin_response`](@ref) and `solve_inner_profile` to [`ray_profile`](@ref) or [`galerkin_profile`](@ref).
+(`:ray`, `:galerkin`, or a model's own). A concrete model carries its backend keywords in an `options::NamedTuple`
+field; `solve_inner` and `solve_inner_profile` for `S = :ray` and `:galerkin` are the library's ([`ray_response`](@ref),
+[`ray_profile`](@ref), [`galerkin_response`](@ref), [`galerkin_profile`](@ref)).
 """
 abstract type ToroidalLayerModel{S} <: InnerLayerModel end
 
@@ -36,7 +37,7 @@ abstract type ToroidalLayerModel{S} <: InnerLayerModel end
 Abstract supertype of the per-surface parameters of a [`ToroidalLayerModel`](@ref). The shared solvers read a
 subtype only through this interface, so each model keeps whatever numbers its equations need:
 
-  - [`layer_rows`](@ref) and [`layer_weak_form`](@ref) - the layer equations;
+  - [`layer_rows`](@ref) and [`layer_mass`](@ref) - the layer equations;
   - [`wasow_basis`](@ref), [`split_block`](@ref) and [`power_exponents`](@ref) - the far-field Wasow construction;
   - [`default_ray_angle`](@ref), [`parabolic_rate`](@ref), [`ohm_rate`](@ref) and [`fast_rates`](@ref) - the
     far-field rates that set the ray contour and mesh;
@@ -59,12 +60,12 @@ function layer_rows end
 layer_rows(params::ToroidalLayerParameters, Q::Number, x::Number) = layer_rows(ComplexF64, params, Q, x)
 
 """
-    layer_weak_form(params, Q::ComplexF64, x) -> (I, U, V)
+    layer_mass(params, Q::ComplexF64) -> I
 
-3×3 coefficients of `I·u'' − V·u' − U·u = 0` at real or complex `x`, the form the Hermite assembly integrates
-by parts (GWP2016 Eqs. 12–15, 32); `I` must be independent of `x`.
+The constant 3×3 matrix multiplying u'' in the model's natural form of the layer equations, `I·u'' = I·Ũ·u + I·Ṽ·u'`
+with (Ũ, Ṽ) from [`layer_rows`](@ref): the form the Hermite assembly integrates by parts (GWP2016 Eqs. 12–15, 32).
 """
-function layer_weak_form end
+function layer_mass end
 
 """
     wasow_basis(params, Q::ComplexF64) -> (T, (J₀, J₁, J₂), splitter)
@@ -149,7 +150,7 @@ include("Ray.jl")
 include("Backends.jl")
 
 export ToroidalLayerModel, ToroidalLayerParameters
-export layer_rows, layer_weak_form, wasow_basis, split_block, power_exponents, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
+export layer_rows, layer_mass, wasow_basis, split_block, power_exponents, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
 export inner_Q, rescale_delta, profile_conversions
 export solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_profile
 export ray_response, ray_profile, galerkin_response, galerkin_profile, backend_options
