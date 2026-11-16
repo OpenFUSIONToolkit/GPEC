@@ -331,12 +331,21 @@ of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ 
   - `x::Vector{Float64}`: Plasma surface R-coordinate on the vacuum (counter-clockwise) theta grid
   - `z::Vector{Float64}`: Plasma surface Z-coordinate on the vacuum (counter-clockwise) theta grid
   - `ν::Vector{Float64}`: Toroidal offset ν = ϕ - ζ in radians on the vacuum theta grid
+  - `dx_dθ`, `dz_dθ::Vector{Float64}`: Poloidal derivatives ∂R/∂θ, ∂Z/∂θ on the vacuum theta grid
+  - `spline_x`, `spline_z`: Periodic cubic splines of `x(θ)` and `z(θ)` on `[0, 2π)`
 """
-struct PlasmaGeometry
+struct PlasmaGeometry{S}
     x::Vector{Float64}
     z::Vector{Float64}
     ν::Vector{Float64}
+    dx_dθ::Vector{Float64}
+    dz_dθ::Vector{Float64}
+    spline_x::S
+    spline_z::S
 end
+
+PlasmaGeometry(x::Vector{Float64}, z::Vector{Float64}, ν::Vector{Float64}=zeros(length(x))) =
+    PlasmaGeometry(x, z, ν, periodic_splines(x, z)...)
 
 """
     WallGeometry
@@ -349,12 +358,21 @@ Struct holding wall geometry data for vacuum calculations. Arrays are of length
   - `nowall::Bool`: Boolean flag indicating if there is no wall
   - `x::Vector{Float64}`: Wall R-coordinates
   - `z::Vector{Float64}`: Wall Z-coordinates
+  - `dx_dθ`, `dz_dθ::Vector{Float64}`: Poloidal derivatives ∂R/∂θ, ∂Z/∂θ on the vacuum theta grid
+  - `spline_x`, `spline_z`: Periodic cubic splines of `x(θ)` and `z(θ)` on `[0, 2π)` (`nothing` when `nowall`)
 """
-struct WallGeometry
+struct WallGeometry{S}
     nowall::Bool
     x::Vector{Float64}
     z::Vector{Float64}
+    dx_dθ::Vector{Float64}
+    dz_dθ::Vector{Float64}
+    spline_x::S
+    spline_z::S
 end
+
+WallGeometry(nowall::Bool, x::Vector{Float64}, z::Vector{Float64}) =
+    WallGeometry(nowall, x, z, (nowall ? (zero(x), zero(z), nothing, nothing) : periodic_splines(x, z))...)
 
 """
     PlasmaGeometry(inputs::VacuumInput) -> PlasmaGeometry

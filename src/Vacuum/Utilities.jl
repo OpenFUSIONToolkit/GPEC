@@ -185,3 +185,38 @@ Write the cross product of rows `idx` of the `(N, 3)` matrices `a` and `b` into 
         c[idx, 3] = a1 * b2 - a2 * b1
     end
 end
+
+# cᵢ = 1/∏_{j≠i}(i - j) on the nodes 0:N-1, for every order up to 21 (factorial(21) overflows Int)
+const LAGRANGE_DENOMINATORS = ntuple(N -> ntuple(i -> (-1)^(N - i) / (factorial(i - 1) * factorial(N - i)), N), 21)
+
+"""
+    lagrange_weights(ξ, Val(N)) -> SVector{N,Float64}
+
+Lagrange cardinal weights at `ξ` on the uniform nodes `0:(N - 1)`: wᵢ = cᵢ ∏_{j≠i} (ξ - j + 1).
+"""
+@inline function lagrange_weights(ξ, ::Val{N}) where {N}
+    c = LAGRANGE_DENOMINATORS[N]
+    return SVector(ntuple(i -> foldl(*, ntuple(j -> j == i ? 1.0 : ξ - (j - 1), Val(N)); init=c[i]), Val(N)))
+end
+
+"""
+    periodic_splines(x, z) -> (dx_dθ, dz_dθ, spline_x, spline_z)
+
+Periodic cubic splines of a closed curve sampled on the uniform grid `θ = 2π(k - 1)/M`, and their derivatives on it.
+"""
+function periodic_splines(x::Vector{Float64}, z::Vector{Float64})
+    θ = range(; start=0, length=length(x), step=2π / length(x))
+    bc = PeriodicBC(; endpoint=:exclusive, period=2π)
+    spline_x, spline_z = cubic_interp(θ, x; bc), cubic_interp(θ, z; bc)
+    return spline_x.(θ; deriv=DerivOp(1)), spline_z.(θ; deriv=DerivOp(1)), spline_x, spline_z
+end
+
+"""
+    curve_point(curve, θ) -> (x, z, ∂x/∂θ, ∂z/∂θ)
+
+Point and tangent of a 2D geometry's spline at any angle `θ`.
+"""
+@inline function curve_point(curve, θ)
+    θ = mod(θ, 2π)
+    return curve.spline_x(θ), curve.spline_z(θ), curve.spline_x(θ; deriv=DerivOp(1)), curve.spline_z(θ; deriv=DerivOp(1))
+end
