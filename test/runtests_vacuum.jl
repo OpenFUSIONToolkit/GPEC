@@ -930,6 +930,41 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             @test norm(imag.(r3d.I_v) - imag.(r2d.I_v)) < norm(imag.(r3d.I_v) + imag.(r2d.I_v))
         end
 
+        # Plasma–wall rows take a polar patch centred at the closest source point, with sinh-mapped radial nodes that resolve
+        # the kernel peak over the gap (here 0.16 toroidal spacings), so the wall's node placement does not matter.
+        @testset "close wall: 3D plasma–wall rows centred at the closest point" begin
+            M, nz = 32, 32
+            p(θ) = (1.7 + 0.6cos(θ + 0.41sin(θ)), 1.08sin(θ))
+            dp(θ) = (-0.6sin(θ + 0.41sin(θ)) * (1 + 0.41cos(θ)), 1.08cos(θ))
+            θ = 2π .* (0:(M-1)) ./ M
+            make(M, nzeta) = (t=2π .* (0:(M-1)) ./ M;
+                VacuumInput(; x=first.(p.(t)), z=last.(p.(t)), ν=zeros(M), mtheta_in=M, m_modes=collect(-4:4), n_modes=[1], mtheta=M, nzeta))
+            wall = ConformalWall(; standoff_fraction=0.1, equal_arc_wall=false)
+            wv2d = compute_vacuum_response(make(512, 1), wall).wv
+            @test norm(compute_vacuum_response(make(M, nz), wall).wv - wv2d) / norm(wv2d) < 3e-3
+
+            # Same wall curve on aligned and half-node-shifted nodes: rows applied to one smooth density agree
+            P = Vacuum.PlasmaGeometry3D(make(M, nz))
+            g = 0.3 * sum(t -> hypot(dp(t)...), θ) * 2π / M / M
+            wallpt(t) = (d=dp(t); J=hypot(d...); (p(t)[1] + g * d[2] / J, p(t)[2] - g * d[1] / J))
+            function revolve(shift)
+                r, rθ, rζ, n = (zeros(M * nz, 3) for _ in 1:4)
+                for j in 1:nz, i in 1:M
+                    k, t, ζ = i + M * (j - 1), θ[i] + shift, 2π * (j - 1) / nz
+                    (R, Z), (Rp, Zp) = wallpt(t), (wallpt(t + 1e-6) .- wallpt(t - 1e-6)) ./ 2e-6
+                    r[k, :], rθ[k, :], rζ[k, :] = [R * cos(ζ), R * sin(ζ), Z], [Rp * cos(ζ), Rp * sin(ζ), Zp], [-R * sin(ζ), R * cos(ζ), 0]
+                    n[k, :] = cross(rθ[k, :], rζ[k, :])
+                end
+                return Vacuum.WallGeometry3D(false, M, nz, r, rθ, rζ, n, 1)
+            end
+            rows = map((0.0, π / M)) do shift
+                G, S = [zeros(2M * nz, 2M * nz)], [zeros(2M * nz, M * nz)]
+                Vacuum.compute_3D_kernel_matrices!(G, S, P, revolve(shift), M ÷ 3, 16, 11, [1.0])
+                G[1][1:(M*nz), (M*nz+1):end] * vec([cos(θ[i] + shift) * cos(2π * (j - 1) / nz) for i in 1:M, j in 1:nz])
+            end
+            @test maximum(abs, rows[1] - rows[2]) < 1e-4 * maximum(abs, rows[1])
+        end
+
         # ν enters the 3D path only through the geometry (ϕ = ζ + ν) and the 2D path only through the basis (ζ = -ν at ϕ = 0),
         # so the two agree only if both use the same relation. Negating ν in 2D alone misses by O(0.1).
         @testset "2D and 3D paths agree for a nonzero ν" begin

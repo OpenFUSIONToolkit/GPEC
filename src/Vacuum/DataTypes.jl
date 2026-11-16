@@ -720,12 +720,12 @@ Expects a full-torus boundary on the same `mtheta`/`nzeta` grid as `plasma_surf`
   - Axisymmetric boundaries (`nzeta_in == 1`) take `nothing` (no wall), `ConformalWall`, `EllipticalWall`,
     `DeeWall`, `ModDeeWall` or `FileWall`; non-axisymmetric boundaries take `nothing` or `ConformalWall`
   - The non-axisymmetric conformal wall displaces each plasma point along its own normal, so wall grid
-    index `(i, j)` is the closest wall point to plasma index `(i, j)` — the correspondence the near-field
-    patch of `compute_3D_kernel_matrices!` assumes. The revolved branch does not share it: the wall sits
-    on the geometric angle ϕ while `PlasmaGeometry3D` places the plasma on ζ = ϕ − ν(θ), and
-    `equal_arc_wall` re-parameterizes poloidally on top of that
+    index `(i, j)` is the closest wall point to plasma index `(i, j)`. The revolved branch does not share
+    this: the wall sits on the geometric angle ϕ while `PlasmaGeometry3D` places the plasma on ζ = ϕ − ν(θ),
+    and `equal_arc_wall` re-parameterizes poloidally on top of that. `compute_3D_kernel_matrices!` finds
+    the closest point itself, so either placement works
   - Rejects a conformal offset that folds the surface, and warns when the plasma–wall gap is smaller
-    than one cell of the coarser grid (the double-layer near-field quadrature cannot resolve it).
+    than a tenth of a cell of the coarser grid, where the near-field quadrature needs a finer grid.
     Both fold tests are local, so a global self-intersection between distant lobes — where the offset
     surface meets itself with aligned normals and a positive area element — passes them
 """
@@ -796,7 +796,7 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
     elseif wall_settings isa ConformalWall
         # Displace every plasma point outward along its own normal
         wall_settings.equal_arc_wall &&
-            @info "equal_arc_wall is ignored for non-axisymmetric (nzeta_in > 1) walls: it re-parameterizes a 2D contour and would break the plasma/wall index alignment the near-field patch relies on."
+            @info "equal_arc_wall is ignored for non-axisymmetric (nzeta_in > 1) walls: it re-parameterizes a 2D contour."
 
         # Same logic as 2D, with the extrema taken over the whole torus (see ConformalWall.standoff_fraction)
         R_plasma = [hypot(plasma_surf.r[idx, 1], plasma_surf.r[idx, 2]) for idx in axes(plasma_surf.r, 1)]
@@ -856,8 +856,8 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
                   "(0° when resolved), where a sharp convex edge of the plasma fans out across the gap. Refine mtheta and nzeta until this is below 2°, or reduce the wall distance a."
     end
 
-    # The 3D singular quadrature resolves the double-layer kernel well only while the plasma-wall gap spans a
-    # grid cell or more. Taken pointwise, so an under-resolved patch is not averaged away by the rest of the surface.
+    # The closest-point patch of `near_correction!` resolves the double-layer kernel down to gaps of about a tenth of a
+    # grid cell. Taken pointwise, so an under-resolved patch is not averaged away by the rest of the surface.
     node_norm(A, idx) = hypot(A[idx, 1], A[idx, 2], A[idx, 3])
     cells_per_point = [
         gap[idx] / max(
@@ -866,12 +866,12 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         ) for idx in axes(r, 1)
     ]
     cells, worst = findmin(cells_per_point)
-    if cells < 1.0
+    if cells < 0.1
         h_θ = max(node_norm(dr_dθ, worst), node_norm(plasma_surf.dr_dθ, worst)) * dθ
         h_ζ = max(node_norm(dr_dζ, worst), node_norm(plasma_surf.dr_dζ, worst)) * dζ
         @warn "Plasma–wall gap $((@sprintf "%.2e" gap[worst])) m spans only $((@sprintf "%.2f" cells)) cells of the coarser grid " *
               "at its worst-resolved point (h_θ=$((@sprintf "%.2e" h_θ)) m, h_ζ=$((@sprintf "%.2e" h_ζ)) m). The double-layer " *
-              "near-field quadrature is inaccurate below one cell. Refine the coarser of mtheta/nzeta, or move the wall out."
+              "near-field quadrature loses accuracy below a tenth of a cell. Refine the coarser of mtheta/nzeta, or move the wall out."
     end
 
     return WallGeometry3D(

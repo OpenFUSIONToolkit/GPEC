@@ -11,13 +11,13 @@
 #   - Julia translation; runtime patch, quadrature and interpolation orders, with the patch clamped on coarse grids
 #   - stencil corner by rounding, so odd orders are equivariant under the patch's pi-rotation
 #   - one near-field routine for every row: polar nodes interpolated and their weights scattered by per-node Lagrange
-#     stencils (no stored interpolation matrix)
+#     stencils (no stored interpolation matrix), about the observer or, off the source surface, the closest source point
 #   - VACUUM kernel convention: 1/r and n.grad'(1/r) over 2pi, unit Green's-identity diagonal
 #   - far field by the trapezoidal rule on the collocation grid, without upsampling
 #   - patch geometry upsampled 2x by trigonometric interpolation to refine the polar interpolation stencil,
 #     correction weights folded back to the collocation nodes by its transpose (BIEST instead upsamples the
 #     whole surface and density and shrinks the patch)
-#   - singular correction applied to plasma-wall cross-surface blocks
+#   - plasma-wall rows: sinh-mapped radial nodes [Johnston & Elliott, Int. J. Numer. Meth. Engng 62 (2005) 564]
 #   - dense operator row assembly, field-period folding, stellarator-symmetric basis, threading
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -90,9 +90,10 @@ end
 The source surface's quadrature data for `compute_3D_kernel_matrices!`, built once per call and shared by every thread
 (the per-thread scratch is [`KernelWorkspace`](@ref)): the source on the 2× trigonometrically upsampled grid
 (`points_up`, node `2i - 1` is collocation node `i`) and at the collocation nodes (`points`), the upsampling restricted
-to the patch about the first node (see [`fold_patch_to_row!`](@ref)), and the polar rule and interpolation order.
+to the patch about the first node (see [`fold_patch_to_row!`](@ref)), and the polar rules and interpolation orders of
+self (same-surface) and cross (plasma–wall) rows.
 """
-struct SourceQuadrature{T<:Number,P<:AbstractVector{T},S,NS}
+struct SourceQuadrature{T<:Number,P<:AbstractVector{T},S,NS,NC,R}
     source::S
     points_up::Vector{SurfacePoint}
     points::Vector{SVector{6,Float64}}             # (r, normal) per node, packed for the far-field sum
@@ -103,7 +104,9 @@ struct SourceQuadrature{T<:Number,P<:AbstractVector{T},S,NS}
     patch_rad::Int
     ANG_DIM::Int
     self_radial::Vector{Tuple{Float64,Float64}}    # Gauss on [0, 1]
+    cross_radial_rule::R                           # sinh-mapped, expanded per row by `sinh_nodes`
     self_order::Val{NS}
+    cross_order::Val{NC}
     populate_greenfunction::Bool                   # fill the single layer (plasma source only)
 end
 
@@ -131,7 +134,9 @@ function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::I
         [SVector{6}(source.r[k, 1], source.r[k, 2], source.r[k, 3], source.normal[k, 1], source.normal[k, 2], source.normal[k, 3]) for k in 1:num_points],
         [fldmod1(k, num_points ÷ nfp) for k in 1:num_points],
         phases, Uθ_patch, Uζ_patch, patch_rad, 2 * RAD_DIM,
-        self_radial, Val(INTERP_ORDER),
+        # Plasma–wall rows: 1–4 × RAD_DIM nodes, RAD_DIM per 4 units of the sinh variable
+        self_radial, sinh_rule(RAD_DIM, 4, 4.0),
+        Val(INTERP_ORDER), Val(INTERP_ORDER),
         source isa PlasmaGeometry3D
     )
 end
@@ -160,6 +165,36 @@ function fold_patch_to_row!(row::Vector{T}, M_up::AbstractMatrix{Float64}, quad:
             row[i+mtheta*(j-1)] += phase * folded_patch[j_fold, periodic_wrap(i - i_obs + 1, mtheta)]
         end
     end
+end
+
+"""
+    closest_source_point!(patch, quad, r) -> (; i, j, U, V, d, hθ, hζ)
+
+Source point closest to `r`, for a near-field correction about it. `patch` is left holding the upsampled patch about
+collocation node `(i, j)`, re-centred as the Gauss–Newton search moves, and `(U, V)` are the point's coordinates on it;
+`d` is the distance and `hθ`, `hζ` the local node spacings.
+"""
+function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadrature, r::SVector{3,Float64})
+    mtheta, nzeta = quad.source.mtheta, quad.source.nzeta
+    UP_DIM, val = size(patch, 1), quad.cross_order
+    c = (UP_DIM - 1) / 2  # patch centre
+    dθ, dζ = 2π / mtheta, 2π / nzeta
+
+    k = argmin(k -> sum(abs2, r - quad.points[k][SVector(1, 2, 3)]), eachindex(quad.points))
+    i, j = mod1(k, mtheta), (k - 1) ÷ mtheta + 1
+
+    U, V = c, c
+    for iter in 1:3
+        extract_patch!(patch, quad.points_up, 2i - 1, 2j - 1, 2mtheta, 2nzeta, UP_DIM)
+        U, V = closest_point(patch, r, U, V, dθ / 2, dζ / 2, val)
+        su, sv = round(Int, (U - c) / 2), round(Int, (V - c) / 2)
+        (su == sv == 0 || iter == 3) && break
+        i, j, U, V = mod1(i + su, mtheta), mod1(j + sv, nzeta), U - 2su, V - 2sv
+    end
+    q = interpolate_patch(patch, U, V, val)[1]
+    d, hθ, hζ = norm(r - q.r), norm(q.rθ) * dθ, norm(q.rζ) * dζ
+    d < 1e-3 * min(hθ, hζ) && throw(ArgumentError("plasma and wall touch (gap $(d) m)"))
+    return (; i, j, U, V, d, hθ, hζ)
 end
 
 """
@@ -209,7 +244,7 @@ end
     kernel_row!(ws, quad, observer, idx_obs)
 
 Fill `ws.row_double` (and `ws.row_single` for a plasma source) with observer `idx_obs`'s operator row: trapezoidal rule
-over all sources, then the near-field correction about the observer's node on the source.
+over all sources, then the near-field correction about the observer (same surface) or about the closest source point.
 """
 function kernel_row!(ws::KernelWorkspace, quad::SourceQuadrature, observer, idx_obs::Int)
     (; patch, row_single, row_double) = ws
@@ -232,10 +267,17 @@ function kernel_row!(ws::KernelWorkspace, quad::SourceQuadrature, observer, idx_
         row_double[idx_col] += phases[d] * (far_double * dθdζ)
     end
 
-    # Polar quadrature with singular correction about the observer's node on the source, at the centre of its upsampled patch
-    extract_patch!(patch, quad.points_up, 2 * i_obs - 1, 2 * j_obs - 1, 2 * source.mtheta, 2 * source.nzeta, size(patch, 1))
-    c = 2.0 * quad.patch_rad
-    near_correction!(ws, quad, r_obs, i_obs, j_obs, c, c, quad.self_radial, quad.self_order)
+    if observer === source
+        # Polar quadrature with singular correction about the observer, at the centre of its upsampled patch
+        extract_patch!(patch, quad.points_up, 2 * i_obs - 1, 2 * j_obs - 1, 2 * source.mtheta, 2 * source.nzeta, size(patch, 1))
+        c = 2.0 * quad.patch_rad
+        near_correction!(ws, quad, r_obs, i_obs, j_obs, c, c, quad.self_radial, quad.self_order)
+    else
+        # About the closest source point, with radial nodes graded to the gap
+        cp = closest_source_point!(patch, quad, r_obs)
+        ε = cp.d / (quad.patch_rad * min(cp.hθ, cp.hζ))
+        near_correction!(ws, quad, r_obs, cp.i, cp.j, cp.U, cp.V, sinh_nodes(ε, 0.0, 1.0, quad.cross_radial_rule), quad.cross_order)
+    end
 
     # Normalize so the Green's-identity term is a unit shift and the exterior/interior jump is 2I, as in the 2D kernel
     row_double ./= 2π
@@ -248,7 +290,8 @@ end
 3D single- and double-layer kernels with Malhotra's polar singular correction (PPCF 62 (2020) 024004).
 
 Far field: trapezoidal rule. Near field ([`near_correction!`](@ref)): polar quadrature blended by a partition of unity,
-on source data upsampled 2× by trigonometric interpolation.
+on source data upsampled 2× by trigonometric interpolation, about the observer on Gauss radial nodes, or for a
+plasma–wall row about the closest source point on sinh-mapped ones.
 
 A source in field period `d` is accumulated onto the period-0 column with weight `phases[d+1]`, so
 the block-circulant reduction is written in and the full-torus source blocks are never stored.
