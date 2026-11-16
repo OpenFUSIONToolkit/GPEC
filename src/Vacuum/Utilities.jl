@@ -274,3 +274,74 @@ function closest_point(curve, x, z)
     J = hypot(Xθ, Zθ)
     return (; θ=mod(θ, 2π), d=((x - X) * Zθ - (z - Z) * Xθ) / J, h=J * 2π / M)
 end
+
+"""
+    SurfacePoint(r, rθ, rζ)
+
+A 3D surface point with its tangents ∂r/∂θ, ∂r/∂ζ, interpolated together on the singular-correction patch.
+"""
+struct SurfacePoint
+    r::SVector{3,Float64}
+    rθ::SVector{3,Float64}
+    rζ::SVector{3,Float64}
+end
+
+Base.:+(a::SurfacePoint, b::SurfacePoint) = SurfacePoint(a.r + b.r, a.rθ + b.rθ, a.rζ + b.rζ)
+Base.:*(w::Real, a::SurfacePoint) = SurfacePoint(w * a.r, w * a.rθ, w * a.rζ)
+Base.zero(::Type{SurfacePoint}) = SurfacePoint(zero(SVector{3,Float64}), zero(SVector{3,Float64}), zero(SVector{3,Float64}))
+
+"""
+Partition of unity `χ(r) = exp(-36 r^p)` of the singular-correction patch, `r` in patch radii. `p` keys on `PATCH_DIM`, the
+collocation patch, since χ blends on the collocation grid.
+"""
+@inline function patch_pou(r::Float64, PATCH_DIM::Int)
+    pou_power = PATCH_DIM > 45 ? 10 : (PATCH_DIM > 20 ? 8 : 6)
+    return r ≥ 1.0 ? 0.0 : exp(-36.0 * r^pou_power)
+end
+
+"""
+    patch_stencil(U, V, UP_DIM, Val(N)) -> (cu, cv, wu, wv)
+
+0-based corner and Lagrange weights of the `N × N` interpolation stencil at 0-based upsampled-patch coordinates `(U, V)`.
+The corner is rounded, not truncated, so an odd `N` is equivariant under the patch's π-rotation (stellarator symmetry),
+and clamped to the patch.
+"""
+@inline function patch_stencil(U::Float64, V::Float64, UP_DIM::Int, val::Val{N}) where {N}
+    cu = clamp(round(Int, U) - (N - 1) ÷ 2, 0, UP_DIM - N)
+    cv = clamp(round(Int, V) - (N - 1) ÷ 2, 0, UP_DIM - N)
+    return cu, cv, lagrange_weights(U - cu, val), lagrange_weights(V - cv, val)
+end
+
+"""
+    interpolate_patch(patch, U, V, Val(N)) -> (q, cu, cv, wu, wv)
+
+`N × N` Lagrange interpolant of the patch at 0-based coordinates `(U, V)`, with its stencil.
+"""
+@inline function interpolate_patch(patch::Matrix{SurfacePoint}, U::Float64, V::Float64, val::Val{N}) where {N}
+    cu, cv, wu, wv = patch_stencil(U, V, size(patch, 1), val)
+    q = zero(SurfacePoint)
+    @inbounds for b in 1:N, a in 1:N
+        q += (wu[a] * wv[b]) * patch[cu+a, cv+b]
+    end
+    return q, cu, cv, wu, wv
+end
+
+"""
+    foreach_polar_node(f, patch, U, V, radial, patch_rad, ANG_DIM, Val(N))
+
+Polar quadrature of radius `patch_rad` collocation nodes about patch point `(U, V)`, on radial nodes `(ρ, dρ)` in
+`radial` (ρ in patch radii). Calls `f(q, cu, cv, wu, wv, w)` at each node with the interpolated patch data, its stencil,
+and the area weight χ(ρ) ρ dρ dα in collocation-node units [Malhotra JCP 397 (2019) 108791 eq. 38].
+"""
+function foreach_polar_node(f, patch::Matrix{SurfacePoint}, U::Float64, V::Float64, radial, patch_rad::Int, ANG_DIM::Int, val::Val)
+    PATCH_DIM, c = 2 * patch_rad + 1, 2.0 * patch_rad
+    # The radial weights do not depend on the angle, so the POU and sinh map are evaluated once per row
+    rings = [(ρ, patch_pou(ρ, PATCH_DIM) * patch_rad^2 * ρ * dρ * (2π / ANG_DIM)) for (ρ, dρ) in radial]
+    @inbounds for ia in 1:ANG_DIM
+        sα, cα = sincos(2π * (ia - 1) / ANG_DIM)
+        for (ρ, w) in rings
+            q, cu, cv, wu, wv = interpolate_patch(patch, U + c * ρ * cα, V + c * ρ * sα, val)
+            f(q, cu, cv, wu, wv, w)
+        end
+    end
+end
