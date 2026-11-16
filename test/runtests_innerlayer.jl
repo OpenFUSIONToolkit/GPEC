@@ -108,18 +108,18 @@ end
     @testset "ode_matrix: ordinary point and type-generic build" begin
         Q = 5.0im
         # x = 0 is an ordinary point: the coefficient matrix is finite there.
-        M0 = GGJ.ode_matrix(p, Q, 0.0)
+        M0 = IL.ToroidalLayer.ode_matrix(p, Q, 0.0)
         @test all(isfinite, M0)
         @test M0[1, 4] == 1 && M0[2, 5] == 1 && M0[3, 6] == 1   # v' = (Ψ',Ξ',Υ') block
         # The extended-precision build agrees with the Float64 build.
-        Md = GGJ.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
-        @test ComplexF64.(Md) ≈ GGJ.ode_matrix(p, Q, 0.3) rtol = 1e-12
+        Md = IL.ToroidalLayer.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
+        @test ComplexF64.(Md) ≈ IL.ToroidalLayer.ode_matrix(p, Q, 0.3) rtol = 1e-12
     end
 
     @testset "decaying_pair is an orthonormal 6×2 frame" begin
         Q = 5.0im
         θ = angle(Q) / 4
-        E = GGJ.decaying_pair(p, Q, θ, 60.0)
+        E = IL.ToroidalLayer.decaying_pair(p, Q, θ, 60.0)
         @test size(E) == (6, 2)
         @test all(isfinite, E)
         @test E' * E ≈ I(2) atol = 1e-10          # columns orthonormal
@@ -143,6 +143,61 @@ end
         @test conv.Δ[1] ≈ Δ.interchange rtol = 1e-6   # baseline == the plain solve
         @test conv.Δ[2] ≈ Δ.tearing rtol = 1e-6
         @test maximum(conv.spread) < 1e-4         # honest error bar is small here
+    end
+end
+
+# Interface guards: `_BareLayer` implements nothing, and `_ShiftedExponents` gives power exponents its Wasow basis
+# does not have.
+const TL = IL.ToroidalLayer
+struct _BareLayer <: TL.ToroidalLayerParameters end
+struct _ShiftedExponents <: TL.ToroidalLayerParameters
+    g::IL.GGJParameters
+end
+TL.wasow_basis(p::_ShiftedExponents, Q::ComplexF64) = TL.wasow_basis(p.g, Q)
+TL.power_exponents(p::_ShiftedExponents) = TL.power_exponents(p.g) .+ 0.5
+
+# A model's Wasow basis describes its own equations: J₀ splits the power-like (1:2) from the exponential (3:6)
+# subspace, x(A₀ + A₁/x² + A₂/x⁴) with A = TJT⁻¹ is its ode_matrix in the state u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x),
+# and the series built from it solves the equations to round-off (GW2020 Eq. 54).
+function _wasow_matches_equations(p, Q)
+    T, J, _ = TL.wasow_basis(p, Q)
+    x = 1.7 + 0.4im
+    Sx = Matrix{ComplexF64}(Diagonal([x, 1, 1, 1, 1 / x, 1 / x]))
+    Sx[4, 1] = 1 / x
+    dSx = zeros(ComplexF64, 6, 6)
+    dSx[1, 1] = 1
+    dSx[4, 1] = -1 / x^2
+    dSx[5, 5] = dSx[6, 6] = -1 / x^2
+    A = [T * J[i] / T for i in 1:3]
+    far = x * (A[1] + A[2] / x^2 + A[3] / x^4)
+    c = TL.build_asymptotics(p, Q; kmax=12)
+    return (; split=norm(J[1][1:2, 3:6]) + norm(J[1][3:6, 1:2]),
+        equations=norm((Sx * TL.ode_matrix(p, Q, x) + dSx) / Sx - far) / norm(far),
+        series=maximum(TL.asymptotic_residual(c, 10.0 * cis(TL.default_ray_angle(p, Q)))))
+end
+
+@testset "ToroidalLayer interface" begin
+    q4 = GGJ.q4_surface_benchmark()
+
+    @testset "Wasow basis matches the layer equations" begin
+        for Q in (0.07 + 0.11im, 0.5im)                 # the series converge by s = 10 at these |Q|
+            w = _wasow_matches_equations(q4, Q)
+            @test w.split < 1e-12 && w.equations < 1e-12 && w.series < 1e-12
+        end
+    end
+
+    @testset "missing methods and inconsistent exponents are errors" begin
+        @test_throws MethodError TL.solve_ray(_BareLayer(), 1.0im)
+        @test_throws "are not the roots" TL.build_asymptotics(_ShiftedExponents(q4), 5.0im)
+    end
+
+    @testset "backend options and model forwarding" begin
+        @test :cfl in TL.backend_options(:ray) && :nx in TL.backend_options(:galerkin)
+        @test_throws ArgumentError IL.GGJModel(; solver=:ray, nx=64)
+        γ = 5.0im * GGJ.q0(q4)
+        @test IL.solve_inner(IL.GGJModel(; cfl=0.1), q4, γ) == IL.solve_inner(IL.GGJModel(), q4, γ; cfl=0.1)
+        @test IL.solve_inner(IL.GGJModel(; solver=:galerkin, nx=256), q4, 0.1im * GGJ.q0(q4)) ==
+              IL.solve_inner(IL.GGJModel(; solver=:galerkin), q4, 0.1im * GGJ.q0(q4); nx=256)
     end
 end
 
@@ -187,28 +242,14 @@ end
 @testset "InnerLayer CCC (Cho, Choi & Choi drift-resistive layer)" begin
     q4 = IL.GGJ.q4_surface_benchmark()
     ccc(; Qstar=0.0, mperp=1.0) = IL.CCCParameters(q4, Qstar, mperp)
-    TL = IL.ToroidalLayer
     reldiff(a, b) = maximum(abs.(a .- b) ./ abs.(b))
     p = ccc(; Qstar=0.5, mperp=1.4)
 
     @testset "Wasow basis matches the layer equations" begin
-        Q = 0.07 + 0.11im
-        T, J = IL.CCC._build_tjmat(p, Q)
-        # J₀ is block-diagonal: power-like (1:2) and exponential (3:6) subspaces split.
-        @test norm(J[1][1:2, 3:6]) + norm(J[1][3:6, 1:2]) < 1e-12
-        # x(A₀ + A₁/x² + A₂/x⁴), A = TJT⁻¹, is ode_matrix in the state u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x).
-        x = 1.7 + 0.4im
-        Sx = Matrix{ComplexF64}(Diagonal([x, 1, 1, 1, 1 / x, 1 / x]))
-        Sx[4, 1] = 1 / x
-        dSx = zeros(ComplexF64, 6, 6)
-        dSx[1, 1] = 1
-        dSx[4, 1] = -1 / x^2
-        dSx[5, 5] = dSx[6, 6] = -1 / x^2
-        A = [T * J[i] / T for i in 1:3]
-        @test (Sx * TL.ode_matrix(p, Q, x) + dSx) / Sx ≈ x * (A[1] + A[2] / x^2 + A[3] / x^4) rtol = 1e-12
-        # The series solves the equations: its residual (GW2020 Eq. 54) reaches round-off at moderate s.
-        c = TL.build_asymptotics(p, Q; kmax=12)
-        @test maximum(TL.asymptotic_residual(c, 10.0 * cis(TL.default_ray_angle(p, Q)))) < 1e-12
+        for Q in (0.07 + 0.11im, 0.5im)
+            w = _wasow_matches_equations(p, Q)
+            @test w.split < 1e-12 && w.equations < 1e-12 && w.series < 1e-12
+        end
     end
 
     @testset "first-order Ξ coefficient matches the closed form" begin
@@ -258,7 +299,11 @@ end
         @test_throws ArgumentError IL.CCCModel(; mperp=0.0)
         @test_throws "Qstar has length 2, expected 3" IL.check_layer_inputs(m, 3)
         @test IL.check_layer_inputs(m, 2) === nothing && IL.check_layer_inputs(IL.GGJModel(), 3) === nothing
-        @test IL.layer_parameters(m, IL.GGJParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, ising=2), nothing, nothing).Qstar == 0.2
+        # A singular surface and equilibrium as layer_parameters reads them: the resistive geometry and the flux scales.
+        surf = (; restype=(; E=q4.E, F=q4.F, H=q4.H, K=q4.K, M=1.0, v1_local=1.0, avg_bsq=1.0, avg_bsq_over_dpsisq=1.0, p_local=1.0),
+            psifac=0.5, n=[1], q1=1.0)
+        eq = (; psio=1.0, params=(; volume=1.0), kinetic=nothing)
+        @test IL.layer_parameters(m, surf, eq; eta=1e-7, rho=1e-7, ising=2).Qstar == 0.2
         @test [c.first for c in IL.layer_parameter_columns([ccc(; Qstar=0.3)])] == ["E", "F", "G", "H", "K", "M", "tau_A", "tau_R", "dVdpsi", "Q_star", "M_perp_ratio"]
         # An angle past the decaying sector of the slower family is refused.
         @test_throws ArgumentError TL.solve_ray(p, 5.0im; θ=1.2)

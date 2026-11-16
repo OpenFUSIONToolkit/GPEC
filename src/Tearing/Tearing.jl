@@ -25,7 +25,7 @@ using FastInterpolations: cubic_interp
 using ..Utilities
 using ..Utilities: KineticProfiles
 using ..Equilibrium: KineticProfileData
-using ..ForceFreeStates: ForceFreeStatesResult, ggj_parameters
+using ..ForceFreeStates: ForceFreeStatesResult
 # The force-balance solve's layer-overlap cap calls this scan, so Tearing adds its method.
 import ..ForceFreeStates: layer_overlap_scan
 

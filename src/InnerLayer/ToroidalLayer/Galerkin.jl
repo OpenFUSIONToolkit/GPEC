@@ -3,14 +3,25 @@
 # Hermite-cubic finite-element (Galerkin) solver for a toroidal inner layer, porting the GWP2016
 # Sec. III singular-Galerkin method: the half-domain weak form (Eq. 32) on a packed grid
 # (Eq. 33), parity conditions at x = 0, and resonant/extension cells at x_max supplying the
-# matching data (Eqs. 34–35). Fortran deltac configuration: "resonant" + noexp + inps,
-# Hermite basis, mpert = 3 (Ψ, Ξ, Υ). The model's equations enter only through `layer_weak_form` and its
+# matching data (Eqs. 34–35), with the far field from the Wasow basis (GW2020) and three fields
+# (Ψ, Ξ, Υ) on Hermite cubics. The model's equations enter only through `layer_rows`, `layer_mass` and its
 # Wasow basis. `_assemble_and_solve_point!` reuses the assembly on the rotated ray with a point far-field
 # condition (Ray.jl).
 
 using LinearAlgebra
 using FastGaussQuadrature: gausslobatto
 using QuadGK: quadgk
+
+# The weak-form coefficients (I, U, V) of `I·u'' − V·u' − U·u = 0` at x: the model's rows scaled by its mass matrix.
+function _weak_form(params::ToroidalLayerParameters, Q::ComplexF64, x::Number)
+    I = layer_mass(params, Q)
+    Ũ, Ṽ = layer_rows(params, Q, x)
+    return I, _mass_times(I, Ũ), _mass_times(I, Ṽ)
+end
+
+# I·M as plain sums of products: StaticArrays' product fuses multiply-adds, which would round GGJ's diagonal scaling
+# differently from multiplying entry by entry.
+_mass_times(I, M) = @SMatrix [I[i, 1] * M[1, j] + I[i, 2] * M[2, j] + I[i, 3] * M[3, j] for i in 1:3, j in 1:3]
 
 # x_max and the two thin matching cells inside it, from where the series residual (GW2020 Eq. 54)
 # crosses three tolerances. Returns (xmax, dx1, dx2, cache).
@@ -269,10 +280,10 @@ function _gauss_quad!(cell_mat::Array{ComplexF64,4}, cell::GalerkinCell,
         x = x0 + dx * quad_nodes[iq]
         w = dx * quad_weights[iq]
         if iszero(θ)
-            Imat, Umat, Vmat = layer_weak_form(params, Q, x)
+            Imat, Umat, Vmat = _weak_form(params, Q, x)
         else
             # Rotated contour x = e^{iθ}s: d/dx = e^{-iθ} d/ds; times e^{2iθ}, I is unchanged, V gains e^{iθ}, U gains e^{2iθ}.
-            Imat, U0, V0 = layer_weak_form(params, Q, cis(θ) * x)
+            Imat, U0, V0 = _weak_form(params, Q, cis(θ) * x)
             Umat, Vmat = cis(2θ) * U0, cis(θ) * V0
         end
         pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
@@ -311,7 +322,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
             x = x0c + dxc * quad_nodes[iq]
             w = dxc * quad_weights[iq]
             uax, duax = physical_ua_dua(cache, x)
-            Imat, Umat, Vmat = layer_weak_form(params, Q, x)
+            Imat, Umat, Vmat = _weak_form(params, Q, x)
             pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
 
             # Extra DOF φ = ua₁(x_r)·H₁₀ + ua₁'(x_r)·H₁₁, the large solution Hermite-blended at the right
@@ -353,7 +364,7 @@ function _extension!(cell_mat::Array{ComplexF64,4}, cell_rhs::Matrix{ComplexF64}
         @inbounds for iq in 1:nq
             x = x0c + dxc * quad_nodes[iq]
             w = dxc * quad_weights[iq]
-            Imat, Umat, Vmat = layer_weak_form(params, Q, x)
+            Imat, Umat, Vmat = _weak_form(params, Q, x)
             pb, qb = hermite_basis(x, cell.x_left, cell.x_right)
 
             if cell.etype == CT_EXT1
@@ -384,7 +395,7 @@ function _resonant_integral(cell::GalerkinCell, params::ToroidalLayerParameters,
 
     function integrand_11(x)
         ua, dua = physical_ua_dua(cache, x)
-        Imat, Umat, Vmat = layer_weak_form(params, Q, x)
+        Imat, Umat, Vmat = _weak_form(params, Q, x)
         ua1 = ua[:, 1]
         dua1 = dua[:, 1]
         return transpose(dua1) * Imat * dua1 + transpose(ua1) * Vmat * dua1 + transpose(ua1) * Umat * ua1
@@ -392,7 +403,7 @@ function _resonant_integral(cell::GalerkinCell, params::ToroidalLayerParameters,
 
     function integrand_12(x)
         ua, dua = physical_ua_dua(cache, x)
-        Imat, Umat, Vmat = layer_weak_form(params, Q, x)
+        Imat, Umat, Vmat = _weak_form(params, Q, x)
         dua1 = dua[:, 1]
         ua1 = ua[:, 1]
         ua2 = ua[:, 2]
@@ -482,7 +493,7 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     res_cell = ws.cells[ws.nx]
     x_lsode = res_cell.x_lsode
     ua_xmax, dua_xmax = physical_ua_dua(cache, x_lsode)
-    Imat_xmax, _, _ = layer_weak_form(params, Q, x_lsode)
+    Imat_xmax = layer_mass(params, Q)
     emap1 = res_cell.emap[1]
     if emap1 <= ws.ndim
         # Surface term: -ua_1^T I dua_1 at x_lsode (stiffness)
@@ -525,7 +536,7 @@ function _parity_bcs_and_solve!(ws::GalerkinWorkspace, params::ToroidalLayerPara
     ws.rhs[:, 2] .= ws.rhs[:, 1]
 
     cell1 = ws.cells[1]
-    Imat0, _, _ = layer_weak_form(params, Q, cell1.x_left)
+    Imat0 = layer_mass(params, Q)
 
     # IBP surface term at x = 0
     for ipert in 1:mpert, jpert in 1:mpert
@@ -623,7 +634,7 @@ function _assemble_and_solve_point!(ws::GalerkinWorkspace, params::ToroidalLayer
         Kc[3ip+ipert, 3jp+jpert] = cell_mat[ipert, jpert, ip+1, jp+1]
     end
     # IBP boundary term at the far end, mirroring the x = 0 term of `_parity_bcs_and_solve!` (I is x-independent).
-    Imat, _, _ = layer_weak_form(params, Q, 0.0)
+    Imat = layer_mass(params, Q)
     for ipert in 1:3, jpert in 1:3
         Kc[6+ipert, 9+jpert] -= Imat[ipert, jpert]
     end

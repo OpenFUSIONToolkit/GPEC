@@ -143,8 +143,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.ToroidalLayerModel
         inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₋, even
         inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₊, odd
         InnerLayer.check_layer_inputs(model, msing)
-        inner_params = [InnerLayer.layer_parameters(model, ggj_parameters(sings[i], equil; eta=prob.eta[i], rho=prob.rho[i], gamma=prob.gamma, ising=i),
-            equil, sings[i]) for i in 1:msing]
+        inner_params = [InnerLayer.layer_parameters(model, sings[i], equil; eta=prob.eta[i], rho=prob.rho[i], gamma=prob.gamma, ising=i) for i in 1:msing]
         profiles = true
         for i in 1:msing
             params = inner_params[i]

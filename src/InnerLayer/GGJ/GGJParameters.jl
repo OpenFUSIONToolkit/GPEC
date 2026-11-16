@@ -127,3 +127,21 @@ function layer_parameter_columns(params::AbstractVector{GGJParameters})
         "tau_R" => (; values=Float64[p.taur for p in params], long_name="resistive diffusion time τ_R per surface", units="s"),
         "dVdpsi" => (; values=Float64[p.v1 for p in params], long_name="dV/dψ_N at each surface", units="m^3")]
 end
+
+"""
+    ggj_parameters(surface, equil; eta, rho, gamma=5/3, ising=0) -> GGJParameters
+
+GGJ layer parameters at the singular surface `surface` of `equil`, from its resistive geometry `surface.restype`, the
+local resistivity `eta` in Ω·m, the mass density `rho` in kg/m³ and the ratio of specific heats `gamma`.
+"""
+function ggj_parameters(surface, equil; eta::Real, rho::Real, gamma::Real=5 / 3, ising::Int=0)
+    rg = surface.restype
+    rg === nothing && throw(ArgumentError("ggj_parameters: the surface at ψ=$(surface.psifac) has restype = nothing; run resist_eval_all! first"))
+    equil.params.volume === nothing && throw(ArgumentError("ggj_parameters: equil.params.volume is nothing"))
+    chi1 = 2π * equil.psio
+    taua = sqrt(rho * rg.M * MU_0) / abs(2π * Int(surface.n[1]) * surface.q1 * chi1 / rg.v1_local)
+    taur = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta
+    G = rg.avg_bsq / (rg.M * gamma * rg.p_local)
+    return GGJParameters(; E=rg.E, F=rg.F, G=G, H=rg.H, K=rg.K, M=rg.M,
+        taua=taua, taur=taur, v1=rg.v1_local / equil.params.volume, ising=ising)
+end

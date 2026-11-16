@@ -44,18 +44,10 @@ function layer_rows(::Type{CT}, params::CCCParameters, Q::Number, x::Number) whe
     return Ũ, Ṽ
 end
 
-"""
-    layer_weak_form(params::CCCParameters, Q, x) -> (I, U, V)
-
-Kim (1988) Eqs. (1a)–(1c) as `I·u'' − V·u' − U·u = 0`: the rows of [`layer_rows`](@ref) multiplied by the u''
-coefficient matrix I = [1 0 0; 0 Q² 0; 0 iQ*KQ³ (M⊥/M)Q], which is lower triangular and independent of x.
-"""
-function layer_weak_form(params::CCCParameters, Q::ComplexF64, x::Number)
-    Ũ, Ṽ = layer_rows(params, Q, x)
+# Kim (1988) Eqs. (1a)–(1c) multiply (Ψ'', Ξ'', Υ'') by this lower-triangular matrix, independent of x.
+function layer_mass(params::CCCParameters, Q::ComplexF64)
     a = ComplexF64(0, params.Qstar) * params.ggj.K * Q^3   # iQ*KQ³ Ξ'' in the Υ row
-    mq = params.mperp * Q
-    Imat = @SMatrix ComplexF64[1 0 0; 0 Q*Q 0; 0 a mq]
-    return Imat, Imat * Ũ, Imat * Ṽ
+    return @SMatrix ComplexF64[1 0 0; 0 Q*Q 0; 0 a params.mperp*Q]
 end
 
 # T, T⁻¹ and J_i = T⁻¹A_iT from A₀–A₂ (GW2020 Eqs. 3–10) with Kim's Q* and m = M⊥/M terms. T's columns 3–6 span the

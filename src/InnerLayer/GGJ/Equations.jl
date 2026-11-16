@@ -1,6 +1,6 @@
 # Equations.jl
 #
-# The GGJ equations as a ToroidalLayer model: the coefficient rows and weak form of GWP2016 Eq. 11, the
+# The GGJ equations as a ToroidalLayer model: the coefficient rows and mass matrix of GWP2016 Eq. 11, the
 # Wasow basis of GW2020 Eqs. 3–10 with its closed-form splitting solve, and the far-field rates the ray
 # solver sizes its contour and mesh by.
 
@@ -8,9 +8,7 @@
     layer_rows([CT,] params::GGJParameters, Q, x) -> (Ũ, Ṽ)
 
 GWP2016 Eq. 11 solved for the second derivatives, `u'' = Ũ·u + Ṽ·u'` for u = (Ψ, Ξ, Υ), at real or complex
-`x` (used as given). `CT` is the element type (default `ComplexF64`). The Galerkin weak form scales the rows by
-diag(1, Q², Q) ([`layer_weak_form`](@ref)); the ray march takes them as the lower half of its companion matrix
-([`ode_matrix`](@ref)).
+`x` (used as given). `CT` is the element type (default `ComplexF64`).
 """
 function layer_rows(::Type{CT}, params::GGJParameters, Q::Number, x::Number) where {CT<:Complex}
     e = CT(params.E)
@@ -36,30 +34,8 @@ function layer_rows(::Type{CT}, params::GGJParameters, Q::Number, x::Number) whe
     return Ũ, Ṽ
 end
 
-"""
-    layer_weak_form(params::GGJParameters, Q, x) -> (I, U, V)
-
-3×3 coefficients of `I·u'' − V·u' − U·u = 0` for u = (Ψ, Ξ, Υ) at real or complex `x`, with
-(I, V, U) = (A, −B, −C) of GWP2016 Eqs. 12–15: the rows of [`layer_rows`](@ref) scaled by diag(1, Q², Q).
-"""
-function layer_weak_form(params::GGJParameters, Q::ComplexF64, x::Number)
-    Ũ, Ṽ = layer_rows(params, Q, x)
-    q, q2 = Q, Q * Q
-    Imat = @SMatrix ComplexF64[1 0 0; 0 q2 0; 0 0 q]
-    #! format: off
-    U = @SMatrix ComplexF64[
-        Ũ[1, 1]         Ũ[1, 2]         0
-        Ũ[2, 1] * q2    Ũ[2, 2] * q2    Ũ[2, 3] * q2
-        Ũ[3, 1] * q     Ũ[3, 2] * q     Ũ[3, 3] * q
-    ]
-    V = @SMatrix ComplexF64[
-        0               0               Ṽ[1, 3]
-        Ṽ[2, 1] * q2    0               0
-        Ṽ[3, 1] * q     0               0
-    ]
-    #! format: on
-    return Imat, U, V
-end
+# GWP2016 Eq. 11 in its natural form multiplies Ψ'', Ξ'', Υ'' by 1, Q², Q (A of Eqs. 12–15).
+layer_mass(::GGJParameters, Q::ComplexF64) = @SMatrix ComplexF64[1 0 0; 0 Q*Q 0; 0 0 Q]
 
 # T, T⁻¹, λ = Q^{-1/2} and J_i = T⁻¹A_iT from the coefficient matrices A₀–A₂ (GW2020 Eqs. 3–10).
 

@@ -1,7 +1,7 @@
 # Backends.jl
 #
-# The ray and Galerkin solves behind a model's `solve_inner` / `solve_inner_profile`, and the keywords each
-# accepts, so a model type only forwards to them.
+# The ray and Galerkin solves behind every toroidal model's `solve_inner` / `solve_inner_profile`, and the keywords
+# each accepts.
 
 """
     ray_response(params, γ::Number; kwargs...) -> InnerLayerResponse
@@ -39,7 +39,7 @@ function ray_profile(params::ToroidalLayerParameters, γ::Number;
     end
     r0 = solve_ray(params, Q; θ=0.0, kwargs...)      # real-axis profile solve
     certΔ = maximum(abs.(r0.Δ .- rr.Δ) ./ max.(abs.(rr.Δ), 1e-300))
-    certΔ > certify_rtol && @warn "Ray solver: θ=0 profile solve disagrees with certified Δ" Q certΔ
+    certΔ > certify_rtol && @warn "Ray solver: θ=0 profile solve disagrees with certified Δ" params Q certΔ
     prof = solution_profile(r0; npc=npc)
     prof.Ψ[1, :] .= c.Ψ[1, :]                        # x = 0 from the rotated solve, as without profiles
     prof.Ξ[1, :] .= c.Ξ[1, :]
@@ -89,3 +89,24 @@ Keywords the shared `:ray` or `:galerkin` backend accepts, for validating a mode
 backend_options(solver::Symbol) = backend_options(Val(solver))
 backend_options(::Val{:ray}) = union(_kwarg_names(solve_ray), (:real_profiles, :npc, :certify_rtol))
 backend_options(::Val{:galerkin}) = _kwarg_names(_galerkin_solve)
+
+"""
+    solve_inner(m::ToroidalLayerModel{:ray}, params, γ::Number; kwargs...) -> InnerLayerResponse
+    solve_inner(m::ToroidalLayerModel{:galerkin}, params, γ::Number; kwargs...) -> InnerLayerResponse
+
+Matching data (Δ₊, Δ₋) from [`ray_response`](@ref) or [`galerkin_response`](@ref), with the model's `options` and
+then `kwargs` (call-site keywords win). `γ` is the growth rate in the surface's E×B frame, in 1/s.
+"""
+solve_inner(m::ToroidalLayerModel{:ray}, params::ToroidalLayerParameters, γ::Number; kwargs...) = ray_response(params, γ; m.options..., kwargs...)
+solve_inner(m::ToroidalLayerModel{:galerkin}, params::ToroidalLayerParameters, γ::Number; kwargs...) =
+    galerkin_response(params, γ; m.options..., kwargs...)
+
+"""
+    solve_inner_profile(m::ToroidalLayerModel{:ray}, params, γ::Number; kwargs...)
+    solve_inner_profile(m::ToroidalLayerModel{:galerkin}, params, γ::Number; kwargs...)
+
+Layer profiles from [`ray_profile`](@ref) or [`galerkin_profile`](@ref), with the model's `options` and then `kwargs`.
+"""
+solve_inner_profile(m::ToroidalLayerModel{:ray}, params::ToroidalLayerParameters, γ::Number; kwargs...) = ray_profile(params, γ; m.options..., kwargs...)
+solve_inner_profile(m::ToroidalLayerModel{:galerkin}, params::ToroidalLayerParameters, γ::Number; kwargs...) =
+    galerkin_profile(params, γ; m.options..., kwargs...)

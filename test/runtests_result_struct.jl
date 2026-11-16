@@ -1,6 +1,7 @@
 using TOML
 using HDF5
 include("h5_metadata_check.jl")
+include("display_check.jl")
 
 # ForceFreeStatesResult: what each formalism publishes, and how consumers gate on it.
 # The Solovev fixture deck (mpsi=16, delta_m=0) is coarse but has two rational surfaces,
@@ -84,6 +85,12 @@ include("h5_metadata_check.jl")
             @test 0 < ffs.psilim <= 1
             @test !isempty(ffs.surfaces)
             @test ffs.integrator === :forward
+
+            # Each result prints a short summary, and the returned named tuple stays on one line.
+            _check_main_display(ret)
+            # A default surface has no mode numbers yet; displaying it must not throw.
+            @test repr(FFS.SingType()) isa String
+            foreach(_check_display, (ffs.solution, ffs.free_boundary, ffs.diagnostics, first(ffs.surfaces)))
         end
     end
 
@@ -111,6 +118,8 @@ include("h5_metadata_check.jl")
             @test ffs.delta_prime.Gamma === nothing
             @test ffs.delta_prime.matrix ≈ FFS.pest3_decompose(ffs.delta_prime.raw).Δ
             @test ffs.free_boundary !== nothing
+
+            foreach(_check_display, (ffs, ffs.delta_prime))
         end
     end
 
@@ -144,6 +153,29 @@ include("h5_metadata_check.jl")
             @test ret.pe !== nothing
             @test isempty(ret.pe.response.permeability)
             @test isempty(ret.pe.response.C_delta_prime)
+            @test ret.ffs.free_boundary !== nothing && ret.ffs.solution === nothing
+            @test ret.resp.compute_singular_coupling
+            for result in (ret.resp, ret.pe)
+                plain = _check_display(result)
+                @test occursin("needs stored ξ profiles", plain)
+                @test !occursin("needs a free-boundary result", plain)
+                @test !occursin("singular coupling off", plain)
+                @test !occursin(" 0 J", plain)
+            end
+        end
+    end
+
+    @testset "display distinguishes disabled coupling from no resonances" begin
+        PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+        ffs = forward_result[]
+        for enabled in (false, true)
+            resp = PlasmaResponse(; ffs, compute_singular_coupling=enabled,
+                permeability_flux=zeros(ComplexF64, ffs.numpert_total, ffs.numpert_total))
+            pe = PE.PerturbedEquilibriumState(; response=resp)
+            expected = enabled ? "none (no resonant surfaces)" : "not computed (singular coupling off)"
+            for result in (resp, pe)
+                @test occursin(expected, _check_display(result))
+            end
         end
     end
 
@@ -154,7 +186,8 @@ include("h5_metadata_check.jl")
             @testset "$deck" begin
                 mktempdir() do dir
                     _stage_deck(dir, joinpath(@__DIR__, "..", "examples", deck))
-                    ffs = GeneralizedPerturbedEquilibrium.main([dir]).ffs
+                    ret = GeneralizedPerturbedEquilibrium.main([dir])
+                    ffs = ret.ffs
 
                     @test ffs.integrator === :galerkin
                     @test ffs.galerkin !== nothing
@@ -191,6 +224,9 @@ include("h5_metadata_check.jl")
                     # The rpec coil block is normalized to the Riccati orientation at pack time.
                     @test size(dp.coil) == (2msing, ffs.numpert_total)
                     @test !iszero(dp.coil)
+
+                    _check_main_display(ret)
+                    foreach(_check_display, (ffs, ffs.galerkin, ffs.solution))
 
                     # The ideal-flag match skips the inner layer, so its basis is ideal-closed.
                     if ideal
@@ -259,6 +295,11 @@ include("h5_metadata_check.jl")
             @test ffs.wp !== nothing
             @test size(ffs.wp) == (ffs.numpert_total, ffs.numpert_total)
             @test all(isfinite, ffs.wp)
+            resp = PlasmaResponse(; ffs)
+            pe = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState(; response=resp)
+            for result in (resp, pe)
+                @test occursin("needs a free-boundary result", _check_display(result))
+            end
         end
     end
 

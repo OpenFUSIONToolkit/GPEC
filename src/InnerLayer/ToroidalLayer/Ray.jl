@@ -373,7 +373,7 @@ function solve_ray(params::ToroidalLayerParameters, Q::ComplexF64;
     breaks = ray_breaks(params, Q, θ, Sbvp; cfl=cfl, min_cells=min_cells)
     length(breaks) - 1 > warn_cells &&
         @warn "Ray solver: $(length(breaks) - 1) Hermite cells exceed warn_cells = $warn_cells, so the solve is slow; the grid follows cfl = $cfl, min_cells = $min_cells and the local rates at this Q" Q maxlog =
-            1 _id = (:ggj_ray_cells, warn_cells)
+            1 _id = (:ray_cells, warn_cells)
     ws = _galerkin_workspace(breaks, fill(CT_NONE, length(breaks) - 1))
     Δraw, cexp = _assemble_and_solve_point!(ws, params, Q, θ, Us, Ub, E; nq=nq)
     verbose && @printf("  BVP: %d Hermite cells on [0, %.4g], Δraw[1] = %.6e %+.6eim\n",

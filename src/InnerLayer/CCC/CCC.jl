@@ -14,16 +14,14 @@ module CCC
 using LinearAlgebra
 using StaticArrays
 
-import ..InnerLayerResponse
-import ..solve_inner, ..solve_inner_profile
 import ..layer_omega_star_e
 using ..ToroidalLayer
 import ..ToroidalLayer: inner_Q, rescale_delta, profile_conversions, power_exponents
 import ..ToroidalLayer:
-    layer_rows, layer_weak_form, wasow_basis, split_block, default_ray_angle, parabolic_rate,
+    layer_rows, layer_mass, wasow_basis, split_block, default_ray_angle, parabolic_rate,
     parabolic_resolution_rate, ray_angle_admissible, ohm_rate, fast_rates
 import ..ToroidalLayer: layer_parameters, check_layer_inputs, mercier_di, growth_rate_scale, layer_parameter_columns
-using ..GGJ: GGJParameters, q0
+using ..GGJ: GGJParameters, q0, ggj_parameters
 
 """
     CCCModel{S,O,Q,M} <: ToroidalLayerModel{S}
@@ -68,22 +66,6 @@ CCCModel{S}() where {S} = CCCModel(; solver=S)
 include("CCCParameters.jl")
 include("Equations.jl")
 
-"""
-    solve_inner(m::CCCModel{:ray}, params::CCCParameters, γ::Number; kwargs...) -> InnerLayerResponse
-
-Rotated-ray matching data (Δ₊, Δ₋) as the `interchange` and `tearing` fields of `InnerLayerResponse`
-([`ray_response`](@ref)); the model's options and `kwargs` forward to [`solve_ray`](@ref). `γ = s` is the growth
-rate in the surface's E×B frame, in 1/s.
-"""
-solve_inner(m::CCCModel{:ray}, params::CCCParameters, γ::Number; kwargs...) = ray_response(params, γ; m.options..., kwargs...)
-
-"""
-    solve_inner_profile(m::CCCModel{:ray}, params::CCCParameters, γ::Number; kwargs...)
-
-Rotated-ray implementation of the `solve_inner_profile` interface ([`ray_profile`](@ref)).
-"""
-solve_inner_profile(m::CCCModel{:ray}, params::CCCParameters, γ::Number; kwargs...) = ray_profile(params, γ; m.options..., kwargs...)
-
 # A per-surface model input at surface `k`: the scalar for every surface, or the vector's entry.
 _at_surface(v::Float64, k::Integer) = v
 _at_surface(v::Vector{Float64}, k::Integer) = v[k]
@@ -96,7 +78,8 @@ function check_layer_inputs(model::CCCModel, nsurfaces::Integer)
     return nothing
 end
 
-function layer_parameters(model::CCCModel, ggj::GGJParameters, equil, surface)
+function layer_parameters(model::CCCModel, surface, equil; kwargs...)
+    ggj = ggj_parameters(surface, equil; kwargs...)
     Qstar = if model.Qstar === nothing
         equil.kinetic === nothing &&
             throw(ArgumentError("CCC layer: give Qstar, or load kinetic profiles (kinetic_file in [Equilibrium], or attach_kinetic_profiles!)"))

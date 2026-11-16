@@ -75,8 +75,7 @@ function CommonSolve.solve(prob::TearingProblem, model::ToroidalLayerModel; conf
     count = length(surfaces)
     InnerLayer.check_layer_inputs(model, count)
     eta, rho = _ggj_layer_inputs(prob)
-    params = [InnerLayer.layer_parameters(model, ggj_parameters(s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k), ffs.equil, s)
-              for (k, s) in enumerate(surfaces)]
+    params = [InnerLayer.layer_parameters(model, s, ffs.equil; eta=eta[k], rho=rho[k], gamma=prob.gamma, ising=k) for (k, s) in enumerate(surfaces)]
     labels = ["$(only(s.m))/$(only(s.n))" for s in surfaces]
     # The layer needs D_I < 0 at every surface; check them all before any scan runs.
     unstable = [labels[k] for (k, p) in enumerate(params) if InnerLayer.mercier_di(p) >= 0]

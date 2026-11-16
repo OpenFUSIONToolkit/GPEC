@@ -19,14 +19,15 @@ using DoubleFloats: Double64
 using ...Utilities.HermiteFEM: hermite_basis, pack_grid
 
 import ..InnerLayerModel, ..InnerLayerResponse, ..InnerLayerParameters
-import ..solve_inner_profile
+import ..solve_inner, ..solve_inner_profile
 
 """
     ToroidalLayerModel{S} <: InnerLayerModel
 
 Abstract supertype of the inner-layer models built on this library; `S` is the solver backend symbol
-(`:ray`, `:galerkin`, or a model's own). Concrete models forward `solve_inner` to [`ray_response`](@ref) or
-[`galerkin_response`](@ref) and `solve_inner_profile` to [`ray_profile`](@ref) or [`galerkin_profile`](@ref).
+(`:ray`, `:galerkin`, or a model's own). A concrete model carries its backend keywords in an `options::NamedTuple`
+field; `solve_inner` and `solve_inner_profile` for `S = :ray` and `:galerkin` are the library's ([`ray_response`](@ref),
+[`ray_profile`](@ref), [`galerkin_response`](@ref), [`galerkin_profile`](@ref)).
 """
 abstract type ToroidalLayerModel{S} <: InnerLayerModel end
 
@@ -36,7 +37,7 @@ abstract type ToroidalLayerModel{S} <: InnerLayerModel end
 Abstract supertype of the per-surface parameters of a [`ToroidalLayerModel`](@ref). The shared solvers read a
 subtype only through this interface, so each model keeps whatever numbers its equations need:
 
-  - [`layer_rows`](@ref) and [`layer_weak_form`](@ref) - the layer equations;
+  - [`layer_rows`](@ref) and [`layer_mass`](@ref) - the layer equations;
   - [`wasow_basis`](@ref), [`split_block`](@ref) and [`power_exponents`](@ref) - the far-field Wasow construction;
   - [`default_ray_angle`](@ref), [`parabolic_rate`](@ref), [`ohm_rate`](@ref) and [`fast_rates`](@ref) - the
     far-field rates that set the ray contour and mesh, with optional [`parabolic_resolution_rate`](@ref) and
@@ -48,6 +49,10 @@ subtype only through this interface, so each model keeps whatever numbers its eq
 
 A model builds its parameters with [`layer_parameters`](@ref) and checks its own inputs with
 [`check_layer_inputs`](@ref).
+
+Both backends impose parity at x = 0 (GWP2016 Sec. III): a model's equations must be invariant under x → −x with Ψ of
+opposite parity to Ξ and Υ, so the even solution (Ψ(0) = Ξ′(0) = Υ′(0) = 0) and the odd one (Ψ′(0) = Ξ(0) = Υ(0) = 0)
+decouple. A model with x-odd terms, such as flow shear, does not fit this interface.
 """
 abstract type ToroidalLayerParameters <: InnerLayerParameters end
 
@@ -61,12 +66,12 @@ function layer_rows end
 layer_rows(params::ToroidalLayerParameters, Q::Number, x::Number) = layer_rows(ComplexF64, params, Q, x)
 
 """
-    layer_weak_form(params, Q::ComplexF64, x) -> (I, U, V)
+    layer_mass(params, Q::ComplexF64) -> I
 
-3×3 coefficients of `I·u'' − V·u' − U·u = 0` at real or complex `x`, the form the Hermite assembly integrates
-by parts (GWP2016 Eqs. 12–15, 32); `I` must be independent of `x`.
+The constant 3×3 matrix multiplying u'' in the model's natural form of the layer equations, `I·u'' = I·Ũ·u + I·Ṽ·u'`
+with (Ũ, Ṽ) from [`layer_rows`](@ref): the form the Hermite assembly integrates by parts (GWP2016 Eqs. 12–15, 32).
 """
-function layer_weak_form end
+function layer_mass end
 
 """
     wasow_basis(params, Q::ComplexF64) -> (T, (J₀, J₁, J₂), splitter)
@@ -90,7 +95,8 @@ function split_block end
     power_exponents(params) -> SVector{2,Float64}
 
 Exponents (r₊, r₋) of the two power-like far-field solutions in the Wasow state, x^r for xΨ (GW2020 Eq. 49);
-r₊ the large solution, r₋ the small one.
+r₊ the large solution, r₋ the small one. They must be the roots of r² − 3r − c₂²¹ = 0, with c₂²¹ the power block of the
+model's [`wasow_basis`](@ref) (GW2020 Eqs. 39, 48): r₊ + r₋ = 3 and r₊r₋ = −c₂²¹. The asymptotic construction checks this.
 """
 function power_exponents end
 
@@ -161,10 +167,11 @@ Sum of the fast exponential rates every Hermite cell resolves, alongside the par
 function fast_rates end
 
 """
-    layer_parameters(model, ggj, equil, surface) -> ToroidalLayerParameters
+    layer_parameters(model, surface, equil; eta, rho, gamma=5/3, ising=0) -> ToroidalLayerParameters
 
-The per-surface parameters `model` solves on, from the surface's GGJ coefficients and times `ggj` (a
-`GGJParameters`), the equilibrium `equil` and the singular surface `surface`.
+The per-surface parameters `model` solves on at the singular surface `surface` of `equil`, from its resistive geometry
+`surface.restype`, the local resistivity `eta` in Ω·m, the mass density `rho` in kg/m³, the ratio of specific heats
+`gamma` and the surface's index `ising`, core to edge.
 """
 function layer_parameters end
 
@@ -202,7 +209,7 @@ include("Ray.jl")
 include("Backends.jl")
 
 export ToroidalLayerModel, ToroidalLayerParameters
-export layer_rows, layer_weak_form, wasow_basis, split_block, power_exponents, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
+export layer_rows, layer_mass, wasow_basis, split_block, power_exponents, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
 export parabolic_resolution_rate, ray_angle_admissible
 export inner_Q, rescale_delta, profile_conversions
 export layer_parameters, check_layer_inputs, mercier_di, growth_rate_scale, layer_parameter_columns
