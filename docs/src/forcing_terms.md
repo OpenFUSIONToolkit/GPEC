@@ -49,7 +49,6 @@ From `examples/DIIID-like_ideal_example/gpec.toml` (the first block) and the oth
 forcing_data_format = "coil"
 machine = "d3d"
 mtheta_coil = 480
-nzeta_coil = 32
 
 # ASCII .dat file, resolved to {dat_dir}/{machine}_{name}.dat
 [[ForcingTerms.coil_set]]

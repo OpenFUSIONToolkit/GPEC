@@ -28,7 +28,7 @@ Coil settings (used when `forcing_data_format = "coil"`):
   - `machine::String` - Machine name prefix for .dat files (e.g. "d3d")
   - `dat_dir::String` - Directory containing .dat files; defaults to bundled `coil_geometries/`
   - `mtheta_coil::Int` - Poloidal grid resolution for boundary field evaluation (default: 480)
-  - `nzeta_coil::Int` - Toroidal grid resolution; 0 = auto (32 × n)
+  - `nzeta_coil::Int` - Toroidal grid resolution; 0 = auto, 32(|n| + 1)
   - `coil_sets_raw::Vector{Dict{String,Any}}` - Parsed `[[ForcingTerms.coil_set]]` TOML blocks
 """
 @kwdef struct ForcingTermsControl

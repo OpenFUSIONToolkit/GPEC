@@ -145,7 +145,7 @@ Top-level coil configuration from the `[ForcingTerms]` TOML section when
   - `machine`: machine name prefix for .dat files (e.g. "d3d")
   - `dat_dir`: directory containing .dat files; defaults to bundled `coil_geometries/`
   - `mtheta_coil`: poloidal grid resolution for boundary field evaluation (default: 480)
-  - `nzeta_coil`: toroidal grid resolution; 0 = auto (32 × n)
+  - `nzeta_coil`: toroidal grid resolution; 0 = auto, 32(|n| + 1)
   - `coil_sets`: parsed `[[ForcingTerms.coil_set]]` blocks
 """
 Base.@kwdef struct CoilConfig

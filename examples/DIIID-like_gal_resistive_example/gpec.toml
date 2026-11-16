@@ -82,7 +82,6 @@ gamma                  = 1.6666666666666667               # Ratio of specific he
 forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
 mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
-nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
 
 [[ForcingTerms.coil_set]]
 name = "c"                              # Coil set; resolves to coil_geometries/d3d_c.dat (DIII-D C-coil, 6 coils)
