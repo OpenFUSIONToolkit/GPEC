@@ -1252,7 +1252,8 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
         end
 
         @testset "Kernel3D laplace_kernel" begin
-            G, K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_kernel(1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            SV = GeneralizedPerturbedEquilibrium.Vacuum.SVector
+            G, K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_kernel(SV(1.0, 0.0, 0.0), SV(2.0, 0.0, 0.0), SV(1.0, 0.0, 0.0))
             # Kernel returns 1/|r_obs - r_src| (4π factor applied elsewhere in BIE)
             dist = sqrt((2.0 - 1.0)^2 + 0 + 0)
             @test isapprox(G, 1.0 / dist)
