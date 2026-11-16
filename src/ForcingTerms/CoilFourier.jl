@@ -16,7 +16,7 @@ suitable for the perturbed equilibrium pipeline.
 
 using FastInterpolations: cubic_interp, PeriodicBC, DerivOp
 
-# Default toroidal points per period when nzeta_coil is not specified
+# Toroidal points per period of n; the default grid is this × (|n| + 1), the extra period resolving the source's own toroidal structure.
 const NZETA_POINTS_PER_PERIOD = 32
 
 """
@@ -254,11 +254,11 @@ end
     CoilForcingGrid(equil, cfg, n; psi=equil.rzphi_xs[end])
 
 Sample the control surface `psi` at `cfg.mtheta_coil × nzeta` points, with `nzeta` taken
-from `cfg.nzeta_coil` or `NZETA_POINTS_PER_PERIOD` per toroidal period of `n`. Pass
+from `cfg.nzeta_coil` or `NZETA_POINTS_PER_PERIOD × (|n| + 1)`. Pass
 `psi = psilim` whenever a solve is at hand (see `sample_boundary_grid`).
 """
 function CoilForcingGrid(equil::Equilibrium.PlasmaEquilibrium, cfg::CoilConfig, n::Int; psi::Float64=equil.rzphi_xs[end])
-    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * max(1, abs(n))
+    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * (abs(n) + 1)
     grid = sample_boundary_grid(equil, cfg.mtheta_coil, nzeta; psi)
 
     # Lay out observation points: (theta_i, zeta_j) → cylindrical (R, phi, Z)
