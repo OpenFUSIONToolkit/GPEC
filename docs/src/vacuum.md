@@ -66,6 +66,7 @@ With `[ForceFreeStates] nzeta_vacuum > 1` the response is evaluated on a toroida
 
 - The Legendre functions of the Green's function are evaluated from Bulirsch's elliptic integrals, and by 32-point Gaussian quadrature for large arguments (``n\hat\rho \geq 0.1``).
 - For n = 0 with a closed wall the kernel is regularized automatically.
+- Close walls: plasma–wall rows are integrated about the closest point of the source surface, so the wall's node placement (`equal_arc_wall`, wall files, a revolved wall with ν ≠ 0) does not matter. Both use Gauss nodes on the sinh map of [Johnston & Elliott, Int. J. Numer. Meth. Engng 62 (2005) 564], which follows the kernel peak over the gap: in 2D on ±6 node intervals about the closest point, in 3D radially in the polar patch centred at the closest point. Rows more than 4 source node spacings from the source take the plain trapezoidal rule. ``W^v`` keeps its far-wall convergence down to gaps of a few hundredths of a node spacing; a wall touching the plasma is rejected. Each observer uses its single closest point, so a wall close to two separate parts of the plasma is treated only at the nearer one.
 
 ## API reference
 
