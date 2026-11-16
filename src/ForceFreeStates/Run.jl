@@ -106,7 +106,7 @@ function run_force_free_states(
                     wv=free_energies.wv, wp=free_energies.wp, psio=equil.psio, extended_precision=ctrl.algorithm.extended_precision_bvp)
                 if coefficients !== nothing
                     basis = outer_solution_basis(coefficients, riccati.propagators, riccati.chunks, riccati.columns, riccati.bases,
-                        intr.sing, equil, mats, ModeIndices(intr))
+                        intr.sing, equil, mats, ModeIndices(intr), crossing_fill_fractions(ctrl))
                 end
             end
         end

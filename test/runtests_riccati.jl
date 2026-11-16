@@ -120,6 +120,18 @@ end
             @test isapprox(direct, odet_ric.u_store[:, :, :, k+1]; rtol=1e-5)
         end
 
+        # Inside the crossing distance of each surface the stored states come from its asymptotic series, and they
+        # continue the integrated solution: integrating from where the integration stopped lands on the first of them.
+        for s in intr_ric.sing
+            near = findall(p -> abs(p - s.psifac) < (1 - 1e-9) * ctrl.singfac_min / abs(s.n[1] * s.q1), psi)
+            @test length(near) == 2 * ctrl.crossing_fill_points
+            k = first(near) - 1
+            params = (ctrl, equil, mats, intr_ric, FFS.OdeState(N, 1, 1, 0), FFS.IntegrationChunk(psi[k], psi[k+1], false, 0, 1))
+            direct = FFS.solve_el(FFS.ODEProblem(FFS.sing_der!, odet_ric.u_store[:, :, :, k], (psi[k], psi[k+1]), params),
+                ctrl.algorithm.eulerlagrange_tolerance).u[end]
+            @test isapprox(direct, odet_ric.u_store[:, :, :, k+1]; rtol=1e-5)
+        end
+
         # They are the solutions Forward stores: scaled to a unit edge displacement, ξ and its conjugate momentum
         # agree at the nodes the two integrators share, which lie on each side of every surface.
         function edge_scaled(integrator)
@@ -171,7 +183,7 @@ end
         wv = FFS.free_run(odet, ctrl, equil, mats, intr).wv
         delta_prime, coefficients = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
         basis = FFS.outer_solution_basis(coefficients, riccati.propagators, riccati.chunks, riccati.columns, riccati.bases, intr.sing, equil, mats,
-            FFS.ModeIndices(intr))
+            FFS.ModeIndices(intr), FFS.crossing_fill_fractions(ctrl))
         N, msing = intr.numpert_total, intr.msing
         ideal = (2msing+1):(2msing+N)
         @test basis.psi == odet.psi_store && size(basis.xi) == size(basis.xi_deriv) == size(basis.xi_cut) == (N, odet.step, 2msing + N)
@@ -210,7 +222,18 @@ end
             wv=free.wv, wp=free.wp, psio=equil.psio)
         @test size(delta_prime.matrix) == (intr.msing, intr.msing) && all(isfinite, delta_prime.matrix)
         @test size(delta_prime.coil) == (2 * intr.msing, intr.numpert_total)
-        basis = FFS.outer_solution_basis(coefficients, propagators, chunks, riccati.columns, riccati.bases, intr.sing, equil, mats, FFS.ModeIndices(intr))
+        basis = FFS.outer_solution_basis(
+            coefficients,
+            propagators,
+            chunks,
+            riccati.columns,
+            riccati.bases,
+            intr.sing,
+            equil,
+            mats,
+            FFS.ModeIndices(intr),
+            FFS.crossing_fill_fractions(ctrl)
+        )
         @test basis.psi == odet.psi_store && all(isfinite, basis.xi)
         @test_logs (:warn, r"differs from the axis-to-edge one") FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
             wv=free.wv, wp=1.01 .* free.wp, psio=equil.psio)

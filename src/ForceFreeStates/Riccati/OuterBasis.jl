@@ -1,11 +1,13 @@
 # The solutions of the Δ' boundary-value problem on the stored radial grid.
 
 """
-    outer_solution_basis(coefficients, propagators, chunks, columns, bases, surfaces, equil, mats, modes) -> OuterSolutionBasis
+    outer_solution_basis(coefficients, propagators, chunks, columns, bases, surfaces, equil, mats, modes, fill_fractions)
+        -> OuterSolutionBasis
 
 Rebuild the solutions of the Δ' boundary-value problem [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eq. 37]
-at every stored step of the chunk propagators. The cut solution leaves out the leading-order big and small terms
-over the two chunks next to each surface.
+at every stored step of the chunk propagators and, inside the crossing distance of each surface, from its asymptotic
+series at the fractions `fill_fractions` of that distance, big solution included. The cut solution leaves out the leading-order big and small
+terms over the two chunks next to each surface.
 
 ### Arguments
 
@@ -13,60 +15,84 @@ over the two chunks next to each surface.
   - `propagators`, `chunks`, `columns`, `bases`: From `riccati_eulerlagrange_integration`.
   - `surfaces`: The singular surfaces `chunks` index.
   - `modes`: Mode indexing.
+  - `fill_fractions`: From `crossing_fill_fractions`.
 """
 function outer_solution_basis(coefficients::Matrix{ComplexF64}, propagators::Vector{ChunkPropagator},
     chunks::Vector{IntegrationChunk}, columns, bases::AbstractDict, surfaces::Vector{SingType},
-    equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, modes::ModeIndices)
+    equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, modes::ModeIndices, fill_fractions::Vector{Float64})
     (; stored, slots) = columns
     N = modes.numpert_total
     nsol = size(coefficients, 2)
-    ngrid = slots[end]
+    i_crossings = findall(c -> c.needs_crossing, chunks)
+    nfill = 2 * length(fill_fractions)
+    ngrid = slots[end] + nfill * length(i_crossings)
     chunk_coefficients = basis_chunk_coefficients(coefficients, propagators, chunks, columns)
 
     psi = Vector{Float64}(undef, ngrid)
     q = Vector{Float64}(undef, ngrid)
     xi = Array{ComplexF64}(undef, N, ngrid, nsol)
     xi_deriv = Array{ComplexF64}(undef, N, ngrid, nsol)
+    # ξ and ξ′ of the state `u` at ψ, into `node`.
+    function store!(node, psi_node, u, du, hints)
+        psi[node] = psi_node
+        q[node] = el_derivatives!(du, u, false, equil, mats, modes, psi_node, hints...)
+        @views xi[:, node, :] .= u[:, :, 1]
+        @views xi_deriv[:, node, :] .= du[:, :, 1]
+    end
     nblas = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
         Threads.@threads for i in eachindex(chunks)
-            u = zeros(ComplexF64, N, nsol, 2)
-            du = zeros(ComplexF64, N, nsol, 2)
-            spline_hint, mats_hint = Ref(1), Ref(1)
+            # `local`: each task owns its work arrays.
+            local u = zeros(ComplexF64, N, nsol, 2)
+            local du = zeros(ComplexF64, N, nsol, 2)
+            local hints = (Ref(1), Ref(1))
             for (j, k) in enumerate(stored[i])
-                node = slots[i] + j
-                psi[node] = propagators[i].psi[k]
-                @views for half in 1:2
-                    mul!(u[:, :, half], propagators[i].steps[k][:, :, half], chunk_coefficients[i])
-                end
-                q[node] = el_derivatives!(du, u, false, equil, mats, modes, psi[node], spline_hint, mats_hint)
-                @views xi[:, node, :] .= u[:, :, 1]
-                @views xi_deriv[:, node, :] .= du[:, :, 1]
+                store!(slots[i] + j, propagators[i].psi[k], state_from_basis!(u, propagators[i].steps[k], chunk_coefficients[i]), du, hints)
             end
         end
     finally
         BLAS.set_num_threads(nblas)
     end
 
-    i_crossings = findall(c -> c.needs_crossing, chunks)
-    xi_cut = copy(xi)
+    # Inside the crossing distance the solutions are their series on each side, with every coefficient they carry.
+    series_du = zeros(ComplexF64, N, nsol, 2)
+    series_hints = (Ref(1), Ref(1))
+    node = slots[end]
+    for ic in i_crossings
+        surface = surfaces[chunks[ic].ising]
+        basis = bases[chunks[ic].ising]
+        for (sig, series, i) in ((-1.0, basis.left_series, ic), (1.0, basis.right_series, ic + 1))
+            for (psi_node, u) in crossing_fill(series, chunk_coefficients[i], surface.psifac, sig, basis.dpsi, fill_fractions)
+                node += 1
+                store!(node, psi_node, u, series_du, series_hints)
+            end
+        end
+    end
+    order = sortperm(psi)
+    grid = psi[order]
+    xi_grid = xi[:, order, :]
+
+    xi_cut = copy(xi_grid)
     cut_range = Matrix{Float64}(undef, length(i_crossings), 2)
     for (j, ic) in enumerate(i_crossings)
         surface = surfaces[chunks[ic].ising]
         ipert = 1 + surface.m[1] - modes.mlow + (surface.n[1] - modes.nlow) * modes.mpert
         cut_range[j, 1] = chunks[ic].psi_start
         cut_range[j, 2] = chunks[ic+1].psi_end
-        for (i, series) in ((ic, bases[chunks[ic].ising].left_series), (ic + 1, bases[chunks[ic].ising].right_series))
+        basis = bases[chunks[ic].ising]
+        sides = ((basis.left_series, ic, findall(p -> cut_range[j, 1] <= p < surface.psifac, grid)),
+            (basis.right_series, ic + 1, findall(p -> surface.psifac < p <= cut_range[j, 2], grid)))
+        for (series, i, nodes) in sides
             big = transpose(@view chunk_coefficients[i][ipert, :])
             small = transpose(@view chunk_coefficients[i][ipert+N, :])
-            for node in (slots[i]+1):slots[i+1]
-                leading = sing_get_ua_res_cut(series, abs(psi[node] - surface.psifac))
+            for node in nodes
+                leading = sing_get_ua_res_cut(series, abs(grid[node] - surface.psifac))
                 @views xi_cut[:, node, :] .-= leading[:, 1, 1] .* big .+ leading[:, 2, 1] .* small
             end
         end
     end
-    return OuterSolutionBasis(psi, q, fill(false, ngrid), xi, xi_deriv, xi_cut, cut_range)
+    return OuterSolutionBasis(grid, q[order], fill(false, ngrid), xi_grid, xi_deriv[:, order, :], xi_cut, cut_range)
 end
 
 """

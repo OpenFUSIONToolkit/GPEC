@@ -57,10 +57,7 @@ end
 Multiply `odet.u` by the chunk propagator `prop` [Glasser, Kolemen & Glasser 2018, Phys. Plasmas 25, 032507, Eq. 29].
 """
 function apply_propagator!(odet::OdeState, prop::ChunkPropagator)
-    x = [odet.u[:, :, 1]; odet.u[:, :, 2]]
-    @views for k in 1:2
-        mul!(odet.u[:, :, k], prop.u[:, :, k], x)
-    end
+    state_from_basis!(odet.u, prop.u, [odet.u[:, :, 1]; odet.u[:, :, 2]])
 end
 
 """

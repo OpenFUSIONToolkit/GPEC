@@ -547,6 +547,25 @@ include("display_check.jl")
             end
         end
 
+        @testset "states filled in from the asymptotic series next to each surface" begin
+            ffs_overrides = Dict{String,Any}("singfac_min" => 5e-4, "crossing_fill_points" => 3, "crossing_fill_min" => 2e-5, "vac_flag" => false)
+            mktempdir() do dir
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=ffs_overrides)]).ffs
+                kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
+                api = solve(equil, forward; nn=1, wall=wall, kwargs...)
+                @test api.solution.psi_store == reference.solution.psi_store
+                @test api.solution.u_store ≈ reference.solution.u_store rtol = 1e-12
+                # Three states on each side, the closest at crossing_fill_min, and none when switched off.
+                distance(sol, s) = abs.(sol.psi_store .- s.psifac) .* abs(s.n[1] * s.q1)
+                for s in api.surfaces
+                    inside = filter(<(5e-4 * (1 - 1e-9)), distance(api.solution, s))
+                    @test length(inside) == 6 && minimum(inside) ≈ 2e-5
+                end
+                bare = solve(equil, forward; nn=1, wall=wall, merge(kwargs, Dict{Symbol,Any}(:crossing_fill_points => 0))...)
+                @test all(s -> minimum(distance(bare.solution, s)) ≈ 5e-4, bare.surfaces)
+            end
+        end
+
         @testset "deck matching under [Match]" begin
             layer = (eta=1e-7, rho=1e-7, rotation=1.0)
             # The deck's [Match] section for `n` surfaces and the [GGJ] solver.

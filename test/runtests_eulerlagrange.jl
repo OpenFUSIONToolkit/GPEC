@@ -400,22 +400,23 @@ end
         ca0[:, 2, 1] .= [0.4, 0.3, 5.0]
         ca0[:, 3, 1] .= [0.2, 2.0, 1.5]
         ca0[:, :, 2] .= [1.0 2.0 3.0; 4.0 5.0 6.0; 7.0 8.0 9.0]
+        ca = copy(ca0)
+        pivots, factors = FFS.eliminate_big_solutions!(ca, [3])
+        @test pivots == [2] && factors[1, 2] == 0
+        @test ca[3, 1, 1] == 0 && ca[3, 3, 1] == 0 && ca[:, 2, :] == ca0[:, 2, :]
+        for j in (1, 3)
+            @test ca[:, j, :] ≈ ca0[:, j, :] .+ factors[1, j] .* ca0[:, 2, :]
+        end
+        # Forward records it in the form transform_u! undoes, with the pivot column ending at the surface.
         odet = FFS.OdeState(3, 10, 10, 1)
         odet.ifix = 1
-        ca = copy(ca0)
-        pivots = FFS.reduce_big_solutions!(ca, odet, [3])
-        @test pivots == [2] && odet.index[:, 1] == [2, 1, 3]
-        @test odet.sing_flag[1] && odet.zeroed_idx[1] == [1]
-        @test ca[3, 1, 1] == 0 && ca[3, 3, 1] == 0 && ca[:, 2, :] == ca0[:, 2, :]
-        # The recorded factors are the reduction transform_u! undoes: column j gained fixfac[2, j] times column 2.
-        for j in (1, 3)
-            @test ca[:, j, :] ≈ ca0[:, j, :] .+ odet.fixfac[2, j, 1] .* ca0[:, 2, :]
-        end
+        FFS.record_crossing!(odet, pivots, factors)
+        @test odet.index[:, 1] == [2, 1, 3] && odet.sing_flag[1] && odet.zeroed_idx[1] == [1]
+        @test odet.fixfac[2, :, 1] == [factors[1, 1], 1, factors[1, 3]]
         # Right of the surface the freed column is the small solution and no other column has a resonant coefficient.
         FFS.start_small_solutions!(ca, [3], pivots)
         @test all(iszero, ca[3, [1, 3], :])
         @test ca[:, 2, 1] == zeros(3) && ca[:, 2, 2] == [0, 0, 1]
-        @test ca[1:2, [1, 3], :] ≈ (ca0[:, [1, 3], :].+reshape(odet.fixfac[2, [1, 3], 1], 1, 2, 1).*ca0[:, [2], :])[1:2, :, :]
     end
 
     @testset "OdeState construction" begin

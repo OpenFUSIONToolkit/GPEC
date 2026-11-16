@@ -131,8 +131,9 @@ OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int
     compute_delta_prime_from_ca!(odet, intr, equil)
 
 **Stub, not physically valid.** Fill each surface's `delta_prime` with the per-surface estimate
-`(ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)` from the asymptotic coefficients. It ignores inter-surface
-coupling and the vacuum, so it does not agree with the physical `ForceFreeStatesResult.delta_prime`.
+`(1 - ca_l[i,c,2,s]) / (4π²·psio)` from the asymptotic coefficients, `c` being the column in which the small
+solution of resonance `i` starts. It ignores inter-surface coupling and the vacuum, so it does not agree with the
+physical `ForceFreeStatesResult.delta_prime`.
 """
 function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl
@@ -142,12 +143,8 @@ function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInter
         resize!(intr.sing[s].delta_prime, n_modes)
         for i in 1:n_modes
             ipert_res = 1 + sing.m[i] - intr.mlow + (sing.n[i] - intr.nlow) * intr.mpert
-            if 1 <= ipert_res <= intr.numpert_total
-                Δca = odet.ca_r[ipert_res, ipert_res, 2, s] - odet.ca_l[ipert_res, ipert_res, 2, s]
-                intr.sing[s].delta_prime[i] = Δca / denom
-            else
-                intr.sing[s].delta_prime[i] = 0.0 + 0.0im
-            end
+            column = 1 <= ipert_res <= intr.numpert_total ? findfirst(isone, @view odet.ca_r[ipert_res, :, 2, s]) : nothing
+            intr.sing[s].delta_prime[i] = column === nothing ? 0.0 + 0.0im : (1 - odet.ca_l[ipert_res, column, 2, s]) / denom
         end
     end
 end
@@ -263,6 +260,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
+    bases = ctrl.kinetic === nothing ? asymptotic_bases(chunks, ctrl, equil, mats, intr) : nothing
 
     if verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
@@ -279,7 +277,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
             if ctrl.kinetic !== nothing
                 cross_kinetic_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             else
-                cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
+                cross_ideal_singular_surf!(odet, ctrl, equil, intr, chunk.ising, bases[chunk.ising])
             end
         end
     end
@@ -297,6 +295,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
     # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
+    bases === nothing || fill_crossings!(odet, bases, crossing_fill_fractions(ctrl), equil, intr)
 
     return odet, nothing
 end
@@ -553,44 +552,38 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
 end
 
 """
-    cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, ising)
+    cross_ideal_singular_surf!(odet, ctrl, equil, intr, ising, basis)
 
 Cross ideal singular surface `ising` in its asymptotic basis [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502,
 Eq. 36]: the solutions are expanded in the left basis, the column carrying each resonance's big solution ends at
 the surface, the nonresonant coefficients continue into the right basis, and each small solution starts there in
-the freed column. Records both coefficient sets in `odet.ca_l` and `odet.ca_r`, and the column reduction for
-`transform_u!`.
+the freed column. `basis` is the surface's entry of `asymptotic_bases`. Records both coefficient sets in
+`odet.ca_l` and `odet.ca_r`, and the column reduction for `transform_u!`.
 """
 function cross_ideal_singular_surf!(
     odet::OdeState,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
-    ising::Int
+    ising::Int,
+    basis
 )
     singp = intr.sing[ising]
-    N = intr.numpert_total
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
-    ua_left = sing_get_ua(compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0), dpsi)
-    ua_right = sing_get_ua(compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0), dpsi)
 
     # Reduce first: columns left nearly parallel by the integration would lose their difference in the basis change.
     compute_solution_norms!(odet.u, odet, ctrl, intr, true)
-    ca = sing_get_ca(odet.u, ua_left, intr)
+    ca = sing_get_ca(odet.u, basis.left, intr)
+    pivots, factors = eliminate_big_solutions!(ca, ipert_res)
     next_fixup!(odet, ctrl)
-    pivots = reduce_big_solutions!(ca, odet, ipert_res)
+    record_crossing!(odet, pivots, factors)
     odet.ca_l[:, :, :, ising] .= ca
     start_small_solutions!(ca, ipert_res, pivots)
     odet.ca_r[:, :, :, ising] .= ca
     odet.ca_populated = true
 
-    odet.psifac += 2 * dpsi
-    @views for k in 1:2
-        mul!(odet.u[:, :, k], ua_right[:, 1:N, k], ca[:, :, 1])
-        mul!(odet.u[:, :, k], ua_right[:, (N+1):(2N), k], ca[:, :, 2], 1, 1)
-    end
+    odet.psifac += 2 * basis.dpsi
+    state_from_basis!(odet.u, basis.right, [ca[:, :, 1]; ca[:, :, 2]])
     # The next solver step records fresh reference norms.
     odet.new = true
 
@@ -600,16 +593,14 @@ function cross_ideal_singular_surf!(
 end
 
 """
-    reduce_big_solutions!(ca, odet, ipert_res) -> pivots
+    record_crossing!(odet, pivots, factors)
 
-Column-reduce the asymptotic coefficients `ca` (N × N × 2: basis solution, solution, big or small half of the
-basis) so that one column carries the big solution of each resonance `ipert_res[i]`, and record the reduction as
-fixup `odet.ifix` for `transform_u!`. Returns those columns.
+Record the reduction `eliminate_big_solutions!` made at an ideal crossing as fixup `odet.ifix`, in the form
+`transform_u!` undoes, with the `pivots` columns ending there.
 """
-function reduce_big_solutions!(ca::Array{ComplexF64,3}, odet::OdeState, ipert_res)
+function record_crossing!(odet::OdeState, pivots::Vector{Int}, factors::Matrix{ComplexF64})
     ifix = odet.ifix
-    N = size(ca, 2)
-    nres = length(ipert_res)
+    N = size(factors, 2)
     odet.sing_flag[ifix] = true
     # The previous region ends at the step before this fixup
     odet.fixstep[ifix] = odet.step - 1
@@ -617,23 +608,11 @@ function reduce_big_solutions!(ca::Array{ComplexF64,3}, odet::OdeState, ipert_re
     for isol in 1:N
         odet.fixfac[isol, isol, ifix] = 1
     end
-
-    col_free = trues(N)
-    for (i, ipert) in enumerate(ipert_res)
-        pivot = argmax(j -> col_free[j] ? abs(ca[ipert, j, 1]) : -Inf, 1:N)
-        odet.index[i, ifix] = pivot
-        col_free[pivot] = false
-        for j in findall(col_free)
-            factor = -ca[ipert, j, 1] / ca[ipert, pivot, 1]
-            odet.fixfac[pivot, j, ifix] = factor
-            @views ca[:, j, :] .+= factor .* ca[:, pivot, :]
-            ca[ipert, j, 1] = 0
-        end
+    for (i, pivot) in enumerate(pivots)
+        @views odet.fixfac[pivot, :, ifix] .+= factors[i, :]
     end
-    odet.index[(nres+1):N, ifix] .= findall(col_free)
-    # transform_u! drops the columns that end at the surface
-    odet.zeroed_idx[ifix] = collect(1:nres)
-    return odet.index[1:nres, ifix]
+    odet.index[:, ifix] .= [pivots; setdiff(1:N, pivots)]
+    odet.zeroed_idx[ifix] = collect(eachindex(pivots))
 end
 
 """

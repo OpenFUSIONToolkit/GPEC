@@ -97,6 +97,9 @@ Physical and workflow controls for a force-balance solve, together with its sele
   - `singfac_min::Float64` - Distance `|m − nq|` from each rational surface at which the ideal integration stops and
     the surface is crossed through its asymptotic series. Energies do not depend on it; Δ′ loses accuracy below
     about 1e-5, and the series does beyond the first radial-grid knot.
+  - `crossing_fill_points::Int` - Stored states added on each side of each crossed rational surface from its asymptotic
+    series, log-spaced in distance between `singfac_min` and `crossing_fill_min`. Zero adds none.
+  - `crossing_fill_min::Float64` - Distance `|m − nq|` from the surface of the closest of those states.
   - `truncate_at_rational_offset::Bool` - Truncate the domain at `(last_rational_q + rational_offset_fraction) / n` instead of at `qhigh` / `psihigh`, avoiding a spurious
     δW kink when the integration ends just below a rational. Right for diverted equilibria (default `true`); set `false` for limited/analytic equilibria with finite edge
     q (Solovev, LAR), where it cuts too much edge. Multi-n runs warn and fall back to `qhigh` / `psihigh`.
@@ -129,6 +132,8 @@ Physical and workflow controls for a force-balance solve, together with its sele
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
     singfac_min::Float64 = 5e-4   # Required nonzero for the Riccati path.
+    crossing_fill_points::Int = 5
+    crossing_fill_min::Float64 = 1e-5
     truncate_at_rational_offset::Bool = true
     psilim_from_layer_overlap::Union{Bool,InnerLayer.SLAYERModel} = false
     rational_offset_fraction::Float64 = 0.2
