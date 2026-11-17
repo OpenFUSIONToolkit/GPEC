@@ -80,28 +80,36 @@ end
 """
     SourceQuadrature
 
-The source surface's quadrature data for `compute_3D_kernel_matrices!`, built once per call and shared by every thread
-(the per-thread scratch is [`KernelWorkspace`](@ref)): the source on the 2× trigonometrically upsampled grid
-(`points_up`, node `2i - 1` is collocation node `i`) and at the collocation nodes (`points`, `normals`), the upsampling
-restricted to the patch about the first node (see [`fold_patch_to_row!`](@ref)), and the polar rules and interpolation
-orders of self (same-surface) and cross (plasma–wall) rows.
+Read-only source-surface quadrature data for `compute_3D_kernel_matrices!`, built once per call and shared across threads
+(per-thread scratch lives in [`KernelWorkspace`](@ref)).
+
+## Fields
+
+  - `source`: Underlying `PlasmaGeometry3D` or `WallGeometry3D`
+  - `points_up`: Source `(r, ∂r/∂θ, ∂r/∂ζ)` on the 2× trigonometrically upsampled grid (node `2i - 1` is collocation node `i`)
+  - `points`, `normals`: Collocation positions and area-weighted normals for the far-field trapezoidal sum
+  - `period_col`: `(field_period, period_0_col)` of each full-torus collocation node
+  - `phases`: Field-period Bloch phases `ω^{k(d-1)}` (`d = 1:nfp`)
+  - `Uθ_patch`, `Uζ_patch`: Upsampling matrices restricted to the patch about node `(1, 1)`, with `Uζ_patch` pre-folded onto field period 0 (see [`fold_patch_to_row!`](@ref))
+  - `patch_rad`, `ANG_DIM`: Patch radius (in collocation spacings) and polar angular node count
+  - `self_radial`, `cross_radial_rule`: Gauss radial rule on `[0, 1]` for same-surface rows, and [`sinh_rule`](@ref) for close plasma–wall rows
+  - `self_order`, `cross_order`: Lagrange stencil orders (`Val`) on the upsampled patch for self and plasma–wall rows
 """
 struct SourceQuadrature{T<:Number,P<:AbstractVector{T},S,NS,NC,R}
     source::S
     points_up::Vector{SurfacePoint}
     points::Vector{SVector{3,Float64}}
     normals::Vector{SVector{3,Float64}}
-    period_col::Vector{Tuple{Int,Int}}             # (field period, period-0 column) per node
+    period_col::Vector{Tuple{Int,Int}}
     phases::P
     Uθ_patch::Matrix{Float64}
-    Uζ_patch::Matrix{T}                            # field periods folded onto period 0
+    Uζ_patch::Matrix{T}
     patch_rad::Int
     ANG_DIM::Int
-    self_radial::Vector{Tuple{Float64,Float64}}    # Gauss on [0, 1]
-    cross_radial_rule::R                           # sinh-mapped, expanded per row by `sinh_nodes`
+    self_radial::Vector{Tuple{Float64,Float64}}
+    cross_radial_rule::R
     self_order::Val{NS}
     cross_order::Val{NC}
-    populate_greenfunction::Bool                   # fill the single layer (plasma source only)
 end
 
 # Lagrange order on plasma–wall rows: 9 points match 11 there at 2/3 the cost
@@ -116,6 +124,8 @@ function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::I
     up = trig_upsample(hcat(source.r, source.dr_dθ, source.dr_dζ), Uθ, Uζ, mtheta, nzeta)
     points_up = [SurfacePoint(up[k, SVector(1, 2, 3)], up[k, SVector(4, 5, 6)], up[k, SVector(7, 8, 9)]) for k in axes(up, 1)]
 
+    # Upsampling rows for the UP_DIM patch centred on collocation node 1 (fine index 1); translation invariance lets
+    # `fold_patch_to_row!` reuse them for any patch centre, and `Uζ_patch` pre-folds all nfp field periods onto period 0
     Uθ_patch = Uθ[periodic_wrap.((1:UP_DIM) .- 2 * patch_rad, 2 * mtheta), :]
     Uζ_patch = zeros(eltype(phases), nzeta_fp, UP_DIM)
     for i in 1:UP_DIM, d in eachindex(phases), j in 1:nzeta_fp
@@ -134,8 +144,7 @@ function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::I
         phases, Uθ_patch, Uζ_patch, patch_rad, 2 * RAD_DIM,
         # Plasma–wall rows: 1–4 × RAD_DIM nodes, RAD_DIM per 4 units of the sinh variable
         self_radial, sinh_rule(RAD_DIM, 4, 4.0),
-        Val(INTERP_ORDER), Val(min(INTERP_ORDER, CROSS_INTERP_ORDER)),
-        source isa PlasmaGeometry3D
+        Val(INTERP_ORDER), Val(min(INTERP_ORDER, CROSS_INTERP_ORDER))
     )
 end
 
@@ -151,8 +160,8 @@ function fold_patch_to_row!(row::Vector{T}, M_up::AbstractMatrix{Float64}, quad:
     mul!(fold_tmp, transpose(M_up), quad.Uθ_patch)
     mul!(folded_patch, quad.Uζ_patch, fold_tmp)
 
-    # Columns the shift pushes into the next field period fold back with one more phase step;
-    # this assumes geometric phases, phases[d] = wrap_phase^(d-1)
+    # Shifting from node 1 to j_obs wraps entries from the end of period d - 1 into period d when j < j_obs,
+    # adding one more Bloch step `wrap_phase` (assumes geometric phases, phases[d] = wrap_phase^(d-1))
     wrap_phase = quad.phases[min(2, end)]
     nzeta_fp, mtheta = size(folded_patch)
     @inbounds for j in 1:nzeta_fp
@@ -166,25 +175,34 @@ function fold_patch_to_row!(row::Vector{T}, M_up::AbstractMatrix{Float64}, quad:
 end
 
 """
-    closest_source_point!(patch, quad, r) -> (; i, j, U, V, d, hθ, hζ) or nothing
+    nearest_source_node(quad, r) -> (; i, j, d, h)
 
-Source point closest to `r`, for a near-field correction about it. `patch` is left holding the upsampled patch about
-collocation node `(i, j)`, re-centred as the Gauss–Newton search moves, and `(U, V)` are the point's coordinates on it;
-`d` is the distance and `hθ`, `hζ` the local node spacings. Returns `nothing` when `r` is more than `NEAR_GAP` node spacings from
-the source, where the trapezoidal error (∝ exp(-2πd/h)) needs no correction.
+Collocation node `(i, j)` of `quad.source` nearest to `r`, its distance `d` from `r`, and its larger cell spacing `h`.
+Used to screen out far plasma–wall observers (`d ≥ NEAR_GAP * h`) before extracting a patch for Gauss–Newton.
 """
-function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadrature, r::SVector{3,Float64})
+@inline function nearest_source_node(quad::SourceQuadrature, r::SVector{3,Float64})
+    (; mtheta, nzeta) = quad.source
+    k = argmin(k -> sum(abs2, r - quad.points[k]), eachindex(quad.points))
+    i, j = mod1(k, mtheta), (k - 1) ÷ mtheta + 1
+    q = quad.points_up[2i-1+2mtheta*(2j-2)]
+    return (; i, j, d=norm(r - q.r), h=max(norm(q.rθ) * (2π / mtheta), norm(q.rζ) * (2π / nzeta)))
+end
+
+"""
+    closest_source_point!(patch, quad, r, i, j) -> (; i, j, U, V, d, hθ, hζ)
+
+Refine the source point closest to `r` starting from collocation node `(i, j)`. `patch` is left holding the upsampled
+patch about the updated `(i, j)`, re-centred as the Gauss–Newton search moves, and `(U, V)` are the point's coordinates
+on it; `d` is the distance and `hθ`, `hζ` the local node spacings.
+"""
+function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadrature, r::SVector{3,Float64}, i::Int, j::Int)
     mtheta, nzeta = quad.source.mtheta, quad.source.nzeta
     UP_DIM, val = size(patch, 1), quad.cross_order
     c = (UP_DIM - 1) / 2  # patch centre
     dθ, dζ = 2π / mtheta, 2π / nzeta
 
-    k = argmin(k -> sum(abs2, r - quad.points[k]), eachindex(quad.points))
-    i, j = mod1(k, mtheta), (k - 1) ÷ mtheta + 1
-    q = quad.points_up[2i-1+2mtheta*(2j-2)]
-    norm(r - q.r) > NEAR_GAP * max(norm(q.rθ) * dθ, norm(q.rζ) * dζ) && return nothing
-
     U, V = c, c
+    # Re-centre `patch` on the collocation node nearest (U, V) (2 fine spacings per coarse step) so the polar disk stays inside it
     for iter in 1:3
         extract_patch!(patch, quad.points_up, 2i - 1, 2j - 1, 2mtheta, 2nzeta, UP_DIM)
         U, V = closest_point(patch, r, U, V, dθ / 2, dζ / 2, val)
@@ -199,16 +217,17 @@ function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadratu
 end
 
 """
-    near_correction!(ws, quad, r_obs, i, j, U, V, radial, Val(N))
+    add_near_correction!(ws, quad, r_obs, i, j, U, V, radial, Val(N))
 
-Near-field correction of the row in `ws` about source point `(U, V)` of the upsampled patch about collocation node
-`(i, j)`, which `ws.patch` already holds: polar quadrature on the radial nodes `radial` ([`foreach_polar_node`](@ref)),
-folded onto the row, minus the trapezoidal sum it replaces.
+Add the near-field correction of the row in `ws` about source point `(U, V)` of the upsampled patch about collocation
+node `(i, j)`, which `ws.patch` already holds: polar quadrature on the radial nodes `radial`
+([`foreach_polar_node`](@ref)), folded onto the row, minus the trapezoidal sum it replaces.
 """
-function near_correction!(ws::KernelWorkspace{T}, quad::SourceQuadrature, r_obs::SVector{3,Float64}, i::Int, j::Int,
+function add_near_correction!(ws::KernelWorkspace{T}, quad::SourceQuadrature, r_obs::SVector{3,Float64}, i::Int, j::Int,
     U::Float64, V::Float64, radial, ::Val{N}) where {T<:Number,N}
     (; patch, M_grid, row_single, row_double) = ws
-    (; source, phases, patch_rad, populate_greenfunction) = quad
+    (; source, phases, patch_rad) = quad
+    populate_greenfunction = source isa PlasmaGeometry3D
     UP_DIM, PATCH_DIM = size(patch, 1), 2 * patch_rad + 1
     mtheta, nzeta = source.mtheta, source.nzeta
     dθdζ = 4π^2 / (mtheta * nzeta)
@@ -217,6 +236,7 @@ function near_correction!(ws::KernelWorkspace{T}, quad::SourceQuadrature, r_obs:
     fill!(M_grid, 0)
     M_double, M_single = view(M_grid,:,:,1), view(M_grid,:,:,2)
     foreach_polar_node(patch, U, V, radial, patch_rad, quad.ANG_DIM, Val(N)) do q, cu, cv, wu, wv, w
+        # Area-weighted normal from the interpolated tangents (single layer omits |∂r/∂θ × ∂r/∂ζ| because the RHS carries it)
         near_single, near_double = laplace_kernel(r_obs, q.r, source.normal_orient * cross(q.rθ, q.rζ))
         @inbounds for b in 1:N, a in 1:N
             L = w * dθdζ * wu[a] * wv[b]
@@ -224,11 +244,13 @@ function near_correction!(ws::KernelWorkspace{T}, quad::SourceQuadrature, r_obs:
             populate_greenfunction && (M_single[cu+a, cv+b] += near_single * L)
         end
     end
+    # On a plasma–wall row the closest source node (i, j) can cross a seam out of period 0
     period, j_fp = fldmod1(j, nzeta ÷ length(phases))
     fold_patch_to_row!(row_double, M_double, quad, ws, i, j_fp, phases[period])
     populate_greenfunction && fold_patch_to_row!(row_single, M_single, quad, ws, i, j_fp, phases[period])
 
-    # Remove the trapezoidal sum under the patch: net weight (1 - χ), with χ about (U, V)
+    # Remove the trapezoidal sum under the patch: net weight (1 - χ), with χ centred at (U, V) — offset (δu, δv) in
+    # collocation spacings from (i, j), so ±(patch_rad + 1) covers the ≤0.5-cell shift on plasma–wall rows
     δu, δv = (U - (UP_DIM - 1) / 2) / 2, (V - (UP_DIM - 1) / 2) / 2
     @inbounds for b in (-patch_rad-1):(patch_rad+1), a in (-patch_rad-1):(patch_rad+1)
         χ = patch_pou(hypot(a - δu, b - δv) / patch_rad, PATCH_DIM)
@@ -249,7 +271,8 @@ over all sources, then the near-field correction about the observer (same surfac
 """
 function kernel_row!(ws::KernelWorkspace, quad::SourceQuadrature, observer, idx_obs::Int)
     (; patch, row_single, row_double) = ws
-    (; source, phases, populate_greenfunction) = quad
+    (; source, phases) = quad
+    populate_greenfunction = source isa PlasmaGeometry3D
     dθdζ = 4π^2 / (source.mtheta * source.nzeta)
     fill!(row_double, 0)
     populate_greenfunction && fill!(row_single, 0)
@@ -268,16 +291,19 @@ function kernel_row!(ws::KernelWorkspace, quad::SourceQuadrature, observer, idx_
     end
 
     if observer === source
-        # Polar quadrature with singular correction about the observer, at the centre of its upsampled patch
+        # Same surface: polar quadrature with singular correction about the observer, at the centre of its upsampled patch
         extract_patch!(patch, quad.points_up, 2 * i_obs - 1, 2 * j_obs - 1, 2 * source.mtheta, 2 * source.nzeta, size(patch, 1))
         c = 2.0 * quad.patch_rad
-        near_correction!(ws, quad, r_obs, i_obs, j_obs, c, c, quad.self_radial, quad.self_order)
+        add_near_correction!(ws, quad, r_obs, i_obs, j_obs, c, c, quad.self_radial, quad.self_order)
     else
-        # About the closest source point, with radial nodes graded to the gap; none beyond NEAR_GAP node spacings
-        cp = closest_source_point!(patch, quad, r_obs)
-        if cp !== nothing
+        # Cross surface: the periodic trapezoidal sum only needs a correction if the observer is close to a source point
+        node = nearest_source_node(quad, r_obs)
+        if node.d <= NEAR_GAP * node.h
+            # Close cross-surface: polar patch centred on the closest source point, with radial nodes sinh-graded to the gap
+            cp = closest_source_point!(patch, quad, r_obs, node.i, node.j)
+            # Kernel peak width in normalized patch radius ρ ∈ [0, 1], using min(hθ, hζ) for the sharpest polar direction
             ε = cp.d / (quad.patch_rad * min(cp.hθ, cp.hζ))
-            near_correction!(ws, quad, r_obs, cp.i, cp.j, cp.U, cp.V, sinh_nodes(ε, 0.0, 1.0, quad.cross_radial_rule), quad.cross_order)
+            add_near_correction!(ws, quad, r_obs, cp.i, cp.j, cp.U, cp.V, sinh_nodes(ε, 0.0, 1.0, quad.cross_radial_rule), quad.cross_order)
         end
     end
 
@@ -291,10 +317,10 @@ end
 
 3D single- and double-layer kernels with Malhotra's polar singular correction (PPCF 62 (2020) 024004).
 
-Far field: trapezoidal rule. Near field ([`near_correction!`](@ref)): polar quadrature blended by a partition of unity,
-on source data upsampled 2× by trigonometric interpolation, about the observer on Gauss radial nodes, or for a
-plasma–wall row about the closest source point on sinh-mapped ones. Plasma–wall rows more than `NEAR_GAP` source node
-spacings away keep the trapezoidal rule alone, as in 2D.
+Far field: trapezoidal rule. Near field ([`kernel_row!`](@ref), [`add_near_correction!`](@ref)): polar quadrature blended
+by a partition of unity, on source data upsampled 2× by trigonometric interpolation, about the observer on Gauss radial
+nodes, or for a plasma–wall row about the closest source point on sinh-mapped ones. Plasma–wall rows more than `NEAR_GAP`
+source node spacings away keep the trapezoidal rule alone, as in 2D.
 
 A source in field period `d` is accumulated onto the period-0 column with weight `phases[d+1]`, so
 the block-circulant reduction is written in and the full-torus source blocks are never stored.
@@ -320,8 +346,9 @@ function compute_3D_kernel_matrices!(
     @assert num_points % length(phases) == 0 "full-torus grid ($num_points points) is not divisible by nfp ($(length(phases)))"
     num_points_per_fp = num_points ÷ length(phases) # observer/source points in one field period
 
-    # Surface sub-block of the operator this call fills
-    col_index = (source isa PlasmaGeometry3D ? 1 : 2)
+    # Surface sub-block of the operator this call fills; 𝒢 is only needed for a plasma source (Chance 1997 eqs. 26–27)
+    populate_greenfunction = source isa PlasmaGeometry3D
+    col_index = populate_greenfunction ? 1 : 2
     row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
 
     # Each reflection pair's second row follows from its first, so only the representatives are evaluated
@@ -346,11 +373,11 @@ function compute_3D_kernel_matrices!(
         ws = workspaces[Threads.threadid()]
         kernel_row!(ws, quad, observer, observers[i_pair])
         store_kernel_row!(grad_blocks, sym_basis, ws.row_double, ws.sym_work, i_pair, row_index, col_index)
-        quad.populate_greenfunction && store_kernel_row!(green_blocks, sym_basis, ws.row_single, ws.sym_work, i_pair, row_index, 1)
+        populate_greenfunction && store_kernel_row!(green_blocks, sym_basis, ws.row_single, ws.sym_work, i_pair, row_index, 1)
     end
 
     # Volume-integral term of Green's identity; invariant under the basis change, so it is the same unit shift on every block
-    if typeof(source) == typeof(observer)
+    if observer === source
         for (b, H) in enumerate(grad_blocks)
             nsize = sym_basis === nothing ? num_points_per_fp : sym_basis.block_sizes[b]
             for i in 1:nsize

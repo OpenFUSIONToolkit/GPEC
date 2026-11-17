@@ -467,7 +467,8 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
                 @test_throws ArgumentError wall_of(-g)
                 @test_logs (:warn, r"tenth of a cell") wall_of(g / 100)
 
-                # One near row against direct adaptive quadrature of the same kernel
+                # One near row against direct adaptive quadrature of the same kernel; (σ, res) are the normal sign and
+                # Gauss's-law diagonal residue applied at the end of `compute_2D_kernel_matrices!`
                 P = PlasmaGeometry(inputs.x, inputs.z, zeros(M))
                 W = Vacuum.WallGeometry(false, first.(wallpt.(θ .+ π / M, g)), last.(wallpt.(θ .+ π / M, g)))
                 χ(t) = cos(3t) + 0.5sin(t)
