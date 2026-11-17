@@ -6,6 +6,8 @@
 #                  extraction (consumes any InnerLayerModel)
 #   CriticalResonantField -- real-Q torque-balance scan for the critical
 #                  resonant field of error-field penetration
+#   IslandFlattening -- static pressure flattening across islands of given
+#                  width, and the stored energy it removes
 #   TearingProblem / TearingConfig / TearingResult -- the public solve,
 #                  `solve(TearingProblem(ffs; ...), model; config)`, with one
 #                  method per inner-layer model (SLAYERModel, GGJModel)
@@ -39,9 +41,11 @@ using .InnerLayer.SLAYER: _slayer_profiles, _layer_zeff, _layer_ion_mass, _layer
 include("LayerOverlap.jl")
 include("Dispersion/Dispersion.jl")
 include("CriticalResonantField/CriticalResonantField.jl")
+include("IslandFlattening/IslandFlattening.jl")
 
 import .Dispersion as Dispersion
 import .CriticalResonantField as CriticalResonantField
+import .IslandFlattening as IslandFlattening
 using .Dispersion: SurfaceCoupling, surface_coupling,
     MultiSurfaceCoupling, multi_surface_coupling,
     ScanResult, brute_force_scan,
@@ -49,6 +53,7 @@ using .Dispersion: SurfaceCoupling, surface_coupling,
     MultiBoxAMRResult, multi_box_amr_scan, as_amr_result,
     GrowthRateResult, find_growth_rates
 using .CriticalResonantField: TorqueBalance, torque_balance_scan
+using .IslandFlattening: IslandFlatteningResult, island_flattening
 
 include("Config.jl")
 include("Result.jl")
@@ -57,12 +62,13 @@ include("SLAYERTearing.jl")
 include("GGJTearing.jl")
 include("HDF5Output.jl")
 
-export InnerLayer, Dispersion, CriticalResonantField
+export InnerLayer, Dispersion, CriticalResonantField, IslandFlattening
 export resistive_layer_overlap, layer_overlap_scan, LayerOverlapScan
 export TearingProblem, TearingConfig, TearingResult
 export run_slayer_from_inputs
 export save_to_hdf5
 export CriticalResonantFieldControl, CriticalResonantFieldScan, CriticalResonantFieldResult
 export run_critical_resonant_field
+export IslandFlatteningResult, island_flattening
 
 end # module Tearing

@@ -30,6 +30,7 @@ const TEST_SUITES = [
     "runtests_tj_analytic.jl" => "core",
     "runtests_kinetic_profiles.jl" => "core",
     "runtests_resist_eval.jl" => "core",
+    "runtests_island_flattening.jl" => "api",
     "runtests_localstability.jl" => "core",
     "runtests_analysis_plots.jl" => "api",
     "runtests_slayer_params.jl" => "errorfields",

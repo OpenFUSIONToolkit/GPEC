@@ -1,0 +1,68 @@
+# Regression case: DIII-D-like n=1 with static pressure flattening across prescribed islands.
+# Same deck as diiid_n1 plus [Tearing.IslandFlattening] on the 3/2, 2/1 and 3/1 surfaces, so the
+# merged intervals, the stored energy they remove and the flattened pressure are tracked.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it,
+# and the noise floor below which a difference is treated as zero.
+[case]
+name = "diiid_n1_island_flattening"
+description = "DIII-D-like equilibrium, n=1, pressure flattened across 3/2, 2/1 and 3/1 islands"
+example_dir = "examples/DIIID-like_ideal_example"
+
+[overrides]
+"Tearing.IslandFlattening.widths" = { "3/2" = 0.04, "2/1" = 0.06, "3/1" = 0.03 }
+
+[quantities.W]
+h5path = "Tearing/IslandFlattening/W"
+type = "real_scalar"
+extract = "value"
+label = "stored energy W"
+noise_threshold = 1e-6
+order = 10
+
+[quantities.delta_W]
+h5path = "Tearing/IslandFlattening/Delta_W"
+type = "real_scalar"
+extract = "value"
+label = "stored energy removed"
+noise_threshold = 1e-6
+order = 11
+
+[quantities.delta_W_over_W]
+h5path = "Tearing/IslandFlattening/Delta_W_over_W"
+type = "real_scalar"
+extract = "value"
+label = "fraction of W removed"
+noise_threshold = 1e-12
+order = 12
+
+[quantities.delta_p0]
+h5path = "Tearing/IslandFlattening/Delta_p0"
+type = "real_scalar"
+extract = "value"
+label = "on-axis pressure drop"
+noise_threshold = 1e-6
+order = 13
+
+[quantities.island_psi]
+h5path = "Tearing/IslandFlattening/Islands/rational_psi"
+type = "real_vector"
+extract = "all_real"
+label = "island rational surfaces"
+noise_threshold = 1e-12
+order = 20
+
+[quantities.interval_delta_p]
+h5path = "Tearing/IslandFlattening/Intervals/Delta_p"
+type = "real_vector"
+extract = "all_real"
+label = "pressure drop per merged interval"
+noise_threshold = 1e-6
+order = 21
+
+[quantities.p_mod]
+h5path = "Tearing/IslandFlattening/Profiles/p_mod"
+type = "real_vector"
+extract = "checksum"
+label = "flattened pressure (checksum)"
+noise_threshold = 0
+order = 30
