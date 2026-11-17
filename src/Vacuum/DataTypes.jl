@@ -659,8 +659,8 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     assert_counterclockwise(x_wall, z_wall, "Wall")
     wall = WallGeometry(false, x_wall, z_wall)
 
-    # Each surface's kernel rows see the other, so check the clearance from both sides: the wall must lie strictly outside
-    # the plasma, and the gap is resolved down to about a tenth of a cell of the coarser grid (as in WallGeometry3D)
+    # Each surface's kernel rows see the other, so check the clearance from both sides: `cp.d` is signed outward from `src`
+    # (+1 for the wall outside the plasma, -1 for the plasma inside the wall), and the gap is resolved down to MIN_WALL_GAP_CELLS coarser cells
     cells = Inf
     for (obs, src, side) in ((wall, plasma_surf, 1), (plasma_surf, wall, -1))
         for i in eachindex(obs.x)
@@ -669,7 +669,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
             cells = min(cells, abs(cp.d) / max(cp.h, hypot(obs.dx_dθ[i], obs.dz_dθ[i]) * 2π / mtheta))
         end
     end
-    cells < 0.1 &&
+    cells < MIN_WALL_GAP_CELLS &&
         @warn "Plasma–wall gap spans only $((@sprintf "%.2f" cells)) cells of the coarser grid at its narrowest. The near-field " *
               "quadrature loses accuracy below a tenth of a cell. Refine mtheta, or move the wall out."
     return wall
@@ -862,8 +862,8 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
                   "(0° when resolved), where a sharp convex edge of the plasma fans out across the gap. Refine mtheta and nzeta until this is below 2°, or reduce the wall distance a."
     end
 
-    # The closest-point patch of `near_correction!` resolves the double-layer kernel down to gaps of about a tenth of a
-    # grid cell. Taken pointwise, so an under-resolved patch is not averaged away by the rest of the surface.
+    # The closest-point patch of `add_near_correction!` resolves the double-layer kernel down to MIN_WALL_GAP_CELLS cells of the
+    # coarser grid. Taken pointwise, so an under-resolved patch is not averaged away by the rest of the surface.
     node_norm(A, idx) = hypot(A[idx, 1], A[idx, 2], A[idx, 3])
     cells_per_point = [
         gap[idx] / max(
@@ -872,7 +872,7 @@ function WallGeometry3D(inputs::VacuumInput, plasma_surf::PlasmaGeometry3D, wall
         ) for idx in axes(r, 1)
     ]
     cells, worst = findmin(cells_per_point)
-    if cells < 0.1
+    if cells < MIN_WALL_GAP_CELLS
         h_θ = max(node_norm(dr_dθ, worst), node_norm(plasma_surf.dr_dθ, worst)) * dθ
         h_ζ = max(node_norm(dr_dζ, worst), node_norm(plasma_surf.dr_dζ, worst)) * dζ
         @warn "Plasma–wall gap $((@sprintf "%.2e" gap[worst])) m spans only $((@sprintf "%.2f" cells)) cells of the coarser grid " *
