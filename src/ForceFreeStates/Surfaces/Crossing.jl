@@ -116,7 +116,7 @@ interpolated linearly across each surface.
 """
 function fill_crossings!(odet::OdeState, bases::AbstractDict, fractions::Vector{Float64}, equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal)
-    isempty(fractions) && return
+    isempty(fractions) && return nothing
     nstep = odet.step
     filled = Tuple{Float64,Array{ComplexF64,3}}[]
     crit_fill = Float64[]
@@ -139,13 +139,18 @@ function fill_crossings!(odet::OdeState, bases::AbstractDict, fractions::Vector{
             end
         end
     end
-    isempty(filled) && return
+    isempty(filled) && return nothing
 
     psi = [odet.psi_store[1:nstep]; first.(filled)]
     order = sortperm(psi)
     odet.psi_store = psi[order]
     odet.crit_store = [odet.crit_store[1:nstep]; crit_fill][order]
     odet.q_store = equil.profiles.q_spline.(odet.psi_store)
-    odet.u_store = cat(odet.u_store[:, :, :, 1:nstep], last.(filled)...; dims=4)[:, :, :, order]
+    u_store = similar(odet.u_store, size(odet.u_store)[1:3]..., length(order))
+    for (k, node) in enumerate(order)
+        @views u_store[:, :, :, k] .= node <= nstep ? odet.u_store[:, :, :, node] : last(filled[node-nstep])
+    end
+    odet.u_store = u_store
     odet.step = length(order)
+    return nothing
 end

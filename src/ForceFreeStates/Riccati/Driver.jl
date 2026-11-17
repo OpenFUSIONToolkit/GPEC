@@ -69,7 +69,8 @@ function chunk_propagators(chunks::Vector{IntegrationChunk}, bases::AbstractDict
     nblas = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
-        Threads.@threads for i in eachindex(chunks)
+        # Chunks differ in cost, so each task takes the next one when it is free.
+        Threads.@threads :greedy for i in eachindex(chunks)
             propagators[i] = chunk_propagator(chunks[i], propagator_start(chunks, i, bases, modes.numpert_total), rtol, equil, mats, modes)
         end
     finally
@@ -82,7 +83,7 @@ end
 # `dW_edge_scan_start` on, and the upper end. `after_crossing` adds the first, the state right of the surface.
 function stored_step_indices(prop::ChunkPropagator, chunk::IntegrationChunk, after_crossing::Bool, ctrl::ForceFreeStatesControl)
     nstep = length(prop.psi)
-    order = chunk.direction == 1 ? ((after_crossing ? 1 : 2):nstep) : ((nstep-1):-1:1)
+    order = chunk.direction == 1 ? ((after_crossing ? 1 : 2):1:nstep) : ((nstep-1):-1:1)
     return [k for (i, k) in enumerate(order) if
             i == length(order) || i % ctrl.algorithm.save_interval == 0 || prop.psi[k] >= ctrl.dW_edge_scan_start]
 end
@@ -140,7 +141,7 @@ function store_propagated!(u_store::Array{ComplexF64,4}, propagators::Vector{Chu
     nblas = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     try
-        Threads.@threads for i in eachindex(propagators)
+        Threads.@threads :greedy for i in eachindex(propagators)
             u = zeros(ComplexF64, N, N, 2)
             for (j, k) in enumerate(stored[i])
                 state_from_basis!(u, propagators[i].steps[k], coefficients[i])
