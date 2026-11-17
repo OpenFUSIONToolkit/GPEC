@@ -79,7 +79,6 @@ rotation               = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation
 gamma                  = 1.6666666666666667               # Ratio of specific heats Γ for the resistive-layer coefficients (5/3)
 
 [ForcingTerms]
-forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
 mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
 

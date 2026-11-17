@@ -62,7 +62,7 @@ equal_arc_wall = false                  # Equal arc length distribution of nodes
 # Uncomment to enable perturbed equilibrium calculations:
 # [PerturbedEquilibrium]
 # forcing_data_file = "forcing.dat"      # Manual mode table (n, m, amplitude_real, amplitude_imag)
-# forcing_data_format = "ascii"          # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
+# forcing_data_format = "ascii"          # Format of the forcing-mode table: "ascii" or "hdf5"
 # compute_singular_coupling = true       # Compute singular layer coupling metrics
 # Solovev analytic equilibrium parameters; this section selects the equilibrium. See SolovevConfig in src/Equilibrium.
 [Solovev]

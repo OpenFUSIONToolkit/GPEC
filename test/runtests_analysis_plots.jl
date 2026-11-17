@@ -76,7 +76,7 @@ using TOML
                 "regression_tj_ideal_example";
                 ffs=Dict{String,Any}("dW_edge_scan_start" => 0.95),
                 sections=Dict{String,Any}(
-                    "ForcingTerms" => Dict{String,Any}("forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
+                    "ForcingTerms" => Dict{String,Any}("mtheta_coil" => 240, "nzeta_coil" => 32,
                         "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 12.0, "height" => 1.2,
                             "currents" => [2.0e3], "tiltx" => [3.0])]),
                     "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
@@ -153,7 +153,7 @@ using TOML
                 edit=d -> (d["ForceFreeStates"]["integrator"] = "Riccati"; d["Riccati"] = delete!(pop!(d, "Forward"), "renorm_threshold")),
                 sections=Dict{String,Any}(
                     "Match" => Dict{String,Any}("eta" => 1e-7, "rho" => 3e-7, "rotation" => 1.0),
-                    "ForcingTerms" => Dict{String,Any}("forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
+                    "ForcingTerms" => Dict{String,Any}("mtheta_coil" => 240, "nzeta_coil" => 32,
                         "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 12.0, "height" => 1.2,
                             "currents" => [2.0e3], "tiltx" => [3.0])]),
                     "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))

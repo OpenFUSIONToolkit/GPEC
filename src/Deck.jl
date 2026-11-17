@@ -410,9 +410,8 @@ relative file paths resolved against the deck directory `path`. The `[[ForcingTe
 array of tables is passed through as `coil_sets_raw`.
 """
 function forcing_terms_control(inputs::AbstractDict, path::AbstractString)
-    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl(; forcing_data_file=joinpath(path, "forcing.dat"))
+    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl()
     forcing_raw = _deck_paths(inputs["ForcingTerms"], path, ("forcing_data_file", "dat_dir"))
-    haskey(forcing_raw, "forcing_data_file") || (forcing_raw["forcing_data_file"] = joinpath(path, "forcing.dat"))
     coil_sets_raw = Dict{String,Any}[_deck_paths(d, path, ("dat_file", "h5_file")) for d in get(forcing_raw, "coil_set", Dict{String,Any}[])]
     kwargs = section_keywords(_without(forcing_raw, "coil_set"), "ForcingTerms", _struct_fields(ForcingTerms.ForcingTermsControl, (:coil_sets_raw,)))
     return ForcingTerms.ForcingTermsControl(; kwargs..., coil_sets_raw=coil_sets_raw)
@@ -486,8 +485,8 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     forcing = forcing_terms_control(inputs, path)
     if haskey(inputs, "ErrorFields")
         perturbed_equilibrium === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section")
-        forcing.forcing_data_format == "coil" ||
-            error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(forcing.forcing_data_format)\")")
+        !isempty(forcing.coil_sets_raw) && isempty(forcing.forcing_data_file) ||
+            error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must hold coil sets and no forcing_data_file")
     end
     tearing_model = haskey(inputs, "Tearing") ? get(inputs["Tearing"], "inner_model", nothing) : nothing
     match_model = match === nothing ? nothing : _inner_model_token(match.model)
@@ -623,7 +622,7 @@ _forcing_table(f::ForcingTerms.ForcingFile) = Dict{String,Any}("forcing_data_fil
 
 function _forcing_table(f::ForcingTerms.ForcingCoils)
     cfg, default = f.config, ForcingTerms.CoilSetConfig()
-    table = Dict{String,Any}("forcing_data_format" => "coil", "machine" => cfg.machine, "mtheta_coil" => cfg.mtheta_coil, "nzeta_coil" => cfg.nzeta_coil)
+    table = Dict{String,Any}("machine" => cfg.machine, "mtheta_coil" => cfg.mtheta_coil, "nzeta_coil" => cfg.nzeta_coil)
     cfg.dat_dir == ForcingTerms.BUNDLED_COIL_DIR || (table["dat_dir"] = cfg.dat_dir)
     table["coil_set"] = Any[
         Dict{String,Any}(String(k) => _deck_out(getfield(sc, k)) for k in fieldnames(ForcingTerms.CoilSetConfig) if !isequal(getfield(sc, k), getfield(default, k)))

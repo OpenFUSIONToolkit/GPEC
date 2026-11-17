@@ -130,7 +130,6 @@ vac_flag = true
 integrator = "Forward"   # [PerturbedEquilibrium] needs a dense ξ solution and no [Wall]; "Riccati" (the default) supplies one too
 
 [ForcingTerms]
-forcing_data_format = "coil"
 machine = "d3d"
 
 [[ForcingTerms.coil_set]]

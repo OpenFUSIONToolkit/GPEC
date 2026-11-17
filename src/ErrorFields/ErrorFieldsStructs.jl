@@ -2,7 +2,7 @@
     ErrorFieldsControl
 
 Control parameters for the `[ErrorFields]` TOML section. The sweep needs a coil-forced
-perturbed-equilibrium solve (`forcing_data_format = "coil"` with the singular-coupling step on);
+perturbed-equilibrium solve (`[ForcingTerms]` coil sets, with the singular-coupling step on);
 everything here concerns only how the coil linearization is taken and where it is written.
 Analysis choices (which resonant surfaces count, which singular mode, which normalization) are
 never inputs: the full spectra are stored and projected post hoc with [`sensitivity_table`](@ref).

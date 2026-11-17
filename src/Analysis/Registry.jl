@@ -57,7 +57,7 @@ const REASONS = Dict{Symbol,String}(
     :response_n => "needs the stored normal field and displacement: run PerturbedEquilibrium on a free-boundary result",
     :penetrated_field => "needs a penetrated field: ideal runs have none; it comes from a matched (resistive) run",
     :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a free-boundary result",
-    :coil_sets => "needs coil forcing: give ForcingTerms coil sets (forcing_data_format = \"coil\")",
+    :coil_sets => "needs coil forcing: give [ForcingTerms] coil sets",
     :forcing_modes => "needs forcing modes: give ForcingTerms a forcing",
     :ef_sensitivities => "needs the coil sensitivities: add an [ErrorFields] section",
     :dominant_mode => "needs the dominant resonant-coupling mode: run PerturbedEquilibrium with compute_singular_coupling = true",

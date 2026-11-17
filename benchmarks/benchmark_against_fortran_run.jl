@@ -426,7 +426,6 @@ function write_gpec_toml_coil(
         println(io, "save_interval = $(p.euler_stride)")
         println(io)
         println(io, "[ForcingTerms]")
-        println(io, "forcing_data_format = \"coil\"")
         println(io, "mtheta_coil         = $(p.mtheta_coil)")
         println(io, "nzeta_coil          = $(p.nzeta_coil)")
         for (name, currents) in zip(p.coil_names, p.coil_currents)

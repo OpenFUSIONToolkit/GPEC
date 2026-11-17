@@ -47,7 +47,7 @@ It holds only while the plasma still rotates, so the current is capped at ``I_\m
 
 ## Running it
 
-The stage needs a `[PerturbedEquilibrium]` run with `forcing_data_format = "coil"` and the singular coupling computed; `examples/DIIID-like_error_field_example` is the complete case, with the DIII-D C-coil as the n = 1 source and the eighteen F coils as single-filament hoops whose error-field content is entirely their sensitivity to misalignment.
+The stage needs a `[PerturbedEquilibrium]` run with `[ForcingTerms]` coil sets and the singular coupling computed; `examples/DIIID-like_error_field_example` is the complete case, with the DIII-D C-coil as the n = 1 source and the eighteen F coils as single-filament hoops whose error-field content is entirely their sensitivity to misalignment.
 From its deck:
 
 ```toml

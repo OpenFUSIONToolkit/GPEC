@@ -58,7 +58,6 @@ eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Eule
 save_interval = 1              # Store every Nth solver step of each chunk (1=all); chunk ends and the edge-dW scan band are always stored
 
 [ForcingTerms]
-forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
 mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
 

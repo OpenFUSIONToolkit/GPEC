@@ -51,7 +51,7 @@ import Logging
         ),
         "Forward" => Dict{String,Any}("eulerlagrange_tolerance" => 1e-6),
         "ForcingTerms" => Dict{String,Any}(
-            "forcing_data_format" => "coil", "machine" => "d3d", "mtheta_coil" => 32, "nzeta_coil" => 8,
+            "machine" => "d3d", "mtheta_coil" => 32, "nzeta_coil" => 8,
             "coil_set" => [Dict{String,Any}("name" => "c", "currents" => [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0])]
         ),
         "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true, "regularization_width" => 0.05),
