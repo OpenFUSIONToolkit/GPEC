@@ -277,9 +277,11 @@ a stage that did not run writes nothing.
     free-boundary `energy_perturbed` of that n and, after a perturbed-equilibrium solve, the response's normal
     displacement ξ_n [m] (`plasma.displacement_perpendicular`) and normal field b_n [T]
     (`plasma.b_field_perturbed.coordinate1`) by poloidal harmonic on the code's ψ grid
-    (`plasma.grid.dim1` = √ψ_N, `dim2` = m, grid type 24).
-  - Further `toroidal_mode` entries after those, `perturbation_type.name = "tearing"`, one per tearing root
-    (one per surface uncoupled, one coupled): `growthrate` [1/s] and `frequency` [Hz].
+    (`plasma.grid.dim1` = √ψ_N, `dim2` = m; grid type 25 for the equal-arc poloidal angle, 24 otherwise). The
+    coefficients are the code's own, of exp(i(mθ − nζ)) in its magnetic angles; they are not converted to the
+    dictionary's exp(i(nφ − mθ)) in COCOS 11 angles.
+  - Further `toroidal_mode` entries after those, `perturbation_type` 13 (`Tearing`), one per tearing root
+    (one per surface uncoupled, one coupled): `growthrate` [1/s] and `frequency` [Hz]. `ideal_flag` is then 0.
   - `dd.core_sources` `source`, identifier `neoclassical`, one per kinetic-torque method: the NTV torque density
     `momentum_tor` [N m⁻²] and the torque inside each surface `torque_tor_inside` [N m] on `grid.psi_norm`, with
     `grid.rho_tor_norm` interpolated from `dd.equilibrium` when the dd holds the equilibrium.
@@ -312,23 +314,24 @@ function write_imas(dd, result)
     end
 
     pe = get(result, :pe, nothing)
-    pe === nothing || _write_imas_response!(ts, ffs, pe)
+    pe === nothing || _write_imas_response!(ts, ffs, pe, result.equil)
     tearing = get(result, :tearing, nothing)
-    tearing === nothing || _write_imas_tearing!(ts, ffs, tearing)
+    tearing === nothing || _write_imas_tearing!(dd.mhd_linear, ts, ffs, tearing)
     kinetic = get(result, :kinetic, nothing)
     kinetic === nothing || _write_imas_torque!(dd, result.equil, kinetic)
     return dd
 end
 
-# Response ξ_n and b_n of each n by poloidal harmonic, on √ψ_N × m (straight-field-line Fourier grid, type 24).
-function _write_imas_response!(ts, ffs, pe)
+# Response ξ_n and b_n of each n by poloidal harmonic, on √ψ_N × m (a Fourier grid in the working poloidal angle).
+function _write_imas_response!(ts, ffs, pe, equil)
     (pe.xi_n_modes === nothing || pe.b_n_modes === nothing || isempty(pe.psi_grid)) && return nothing
     ms = collect(Float64, ffs.mlow:ffs.mhigh)
+    grid_type = equil.config.jac_type == "equal_arc" ? (25, "inverse_rhopolnorm_equal_arc_fourier") :
+                (24, "inverse_rhopolnorm_straight_field_line_fourier")
     for j in 0:(ffs.npert-1)
         cols = (j*ffs.mpert+1):((j+1)*ffs.mpert)    # mode index i ↔ (m, n) = ((i-1)%mpert + mlow, (i-1)÷mpert + nlow)
         plasma = ts.toroidal_mode[j+1].plasma
-        plasma.grid_type.index = 24
-        plasma.grid_type.name = "inverse_rhopolnorm_straight_field_line_fourier"
+        plasma.grid_type.index, plasma.grid_type.name = grid_type
         plasma.grid.dim1 = sqrt.(pe.psi_grid)
         plasma.grid.dim2 = ms
         xi, bn = pe.xi_n_modes[:, cols], pe.b_n_modes[:, cols]
@@ -341,15 +344,17 @@ function _write_imas_response!(ts, ffs, pe)
 end
 
 # One toroidal_mode per tearing root, after the ideal entries; tearing is solved for a single n.
-function _write_imas_tearing!(ts, ffs, tearing)
+function _write_imas_tearing!(mhd_linear, ts, ffs, tearing)
     (tearing.enabled && !isempty(tearing.gamma) && ffs.npert == 1) || return nothing
+    mhd_linear.ideal_flag = 0    # the tearing roots are resistive
     coupled = tearing.coupled_extraction !== nothing
     nideal = length(ts.toroidal_mode)
     resize!(ts.toroidal_mode, nideal + length(tearing.gamma))
     for (k, (γ, ω)) in enumerate(zip(tearing.gamma, tearing.omega))
         mode = ts.toroidal_mode[nideal+k]
         mode.n_tor = ffs.nlow
-        mode.perturbation_type.name = "tearing"
+        mode.perturbation_type.index = 13
+        mode.perturbation_type.name = "Tearing"
         mode.perturbation_type.description = coupled ? "coupled tearing root of all rational surfaces" :
                                              "uncoupled tearing root of one rational surface"
         coupled || isempty(tearing.rational_q) || (mode.m_pol_dominant = round(tearing.rational_q[k] * ffs.nlow))

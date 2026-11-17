@@ -244,7 +244,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
                     n_tor_idx=[0, 1, 0, 1, 0, 1]), numpert_total=mpert * npert, npert=npert, nlow=1, mlow=-1, mhigh=1, mpert=mpert),
             pe=(psi_grid=psi, xi_n_modes=xi, b_n_modes=2 .* xi),
             kinetic=(total=(method_results=Dict("fgar" => mr),),),
-            equil=(profiles=(dVdpsi_spline=dVdpsi,),)
+            equil=(profiles=(dVdpsi_spline=dVdpsi,), config=(jac_type="hamada",))
         )
         dd = IMASdd.dd()
         dd.global_time = 0.0
@@ -255,6 +255,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test tm[1].plasma.b_field_perturbed.coordinate1.imaginary == imag.(2 .* xi[:, 1:3])
         @test tm[1].plasma.grid.dim1 ≈ sqrt.(psi)
         @test tm[1].plasma.grid.dim2 == [-1.0, 0.0, 1.0]
+        @test tm[1].plasma.grid_type.index == 24
+        @test dd.mhd_linear.ideal_flag == 1
         p1 = dd.core_sources.source[1].profiles_1d[1]
         @test dd.core_sources.source[1].identifier.index == 401
         @test dd.core_sources.source[1].identifier.name == "neoclassical"
@@ -281,7 +283,13 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test [m.growthrate for m in tm1[2:3]] == tr.gamma
         @test tm1[2].frequency ≈ 100.0
         @test [m.m_pol_dominant for m in tm1[2:3]] == [2.0, 3.0]
-        @test all(m.perturbation_type.name == "tearing" for m in tm1[2:3])
+        @test all(m.perturbation_type.index == 13 && m.perturbation_type.name == "Tearing" for m in tm1[2:3])
+        @test dd1.mhd_linear.ideal_flag == 0                 # tearing roots are resistive
+
+        # The equal-arc poloidal angle has its own Fourier grid type
+        dda = IMASdd.dd()
+        GeneralizedPerturbedEquilibrium.write_imas(dda, merge(result, (equil=merge(result.equil, (config=(jac_type="equal_arc",),)),)))
+        @test dda.mhd_linear.time_slice[1].toroidal_mode[1].plasma.grid_type.index == 25
     end
 
 end
