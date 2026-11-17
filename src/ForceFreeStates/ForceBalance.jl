@@ -202,8 +202,12 @@ function maybe_reform_equilibrium(
     equil = Equilibrium.reform(equil, psi_nodes)
     implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
     if implied > 1.5 * (length(psi_nodes) - 1)
-        @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
-              "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
+        remedy = "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
+        if implied > Equilibrium.REFINED_N_CAP
+            remedy = "the grid is capped at $(Equilibrium.REFINED_N_CAP) knots, so psi_accuracy cannot refine it further and results may be under-resolved; " *
+                     "a poloidal angle with smoother metric harmonics (jac_type = \"hamada\") needs fewer knots"
+        end
+        @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " * remedy
     end
     @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$(_mode_range_label(intr)))"
 
