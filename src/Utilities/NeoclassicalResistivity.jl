@@ -16,23 +16,23 @@ physics when the same `NeoResistivityModel` is selected.
 
 # Exports
 
-| symbol                 | role                                                   |
-|:---------------------- |:------------------------------------------------------ |
-| `NeoResistivityModel`  | abstract tag                                           |
-| `SpitzerModel`         | plain Spitzer (no trapped-particle correction)         |
-| `SpitzerHarmModel`     | Fitzpatrick/TJ Spitzer-Härm σ_∥ (legacy SLAYER τ_R)    |
-| `SauterNeoModel`       | Sauter 1999 F_33 neoclassical correction               |
-| `RedlNeoModel`         | Redl 2021 F_33 neoclassical correction                 |
-| `coulomb_log_e`        | ln Λ_e (NRL or Sauter form)                            |
-| `eta_spitzer`          | Sauter 18a Spitzer resistivity [Ω·m]                   |
-| `tau_ee_spitzer_harm`  | electron-electron collision time τ_ee [s]              |
-| `eta_spitzer_harm`     | Fitzpatrick/TJ Spitzer-Härm resistivity 1/σ_∥ [Ω·m]    |
-| `trapped_fraction`     | exact pitch-angle integral f_t from ⟨B²⟩/B_max² and ⟨√(1 − λB/B_max)⟩ |
-| `trapped_fraction_nodes` | Gauss-Legendre pitch-angle nodes λ and weights for `trapped_fraction` |
-| `trapped_fraction_lin_liu_miller` | Lin-Liu & Miller 1995 f_t (OMFIT `fluxSurfaces` form)  |
-| `trapped_fraction_eps` | simple ε-only f_t fallback                             |
-| `nu_star_e`            | Sauter 18b electron collisionality                     |
-| `eta_neoclassical`     | dispatched: Spitzer(-Härm) or F_33 · Spitzer           |
+| symbol                            | role                                                                  |
+|:--------------------------------- |:--------------------------------------------------------------------- |
+| `NeoResistivityModel`             | abstract tag                                                          |
+| `SpitzerModel`                    | plain Spitzer (no trapped-particle correction)                        |
+| `SpitzerHarmModel`                | Fitzpatrick/TJ Spitzer-Härm σ_∥ (legacy SLAYER τ_R)                   |
+| `SauterNeoModel`                  | Sauter 1999 F_33 neoclassical correction                              |
+| `RedlNeoModel`                    | Redl 2021 F_33 neoclassical correction                                |
+| `coulomb_log_e`                   | ln Λ_e (NRL or Sauter form)                                           |
+| `eta_spitzer`                     | Sauter 18a Spitzer resistivity [Ω·m]                                  |
+| `tau_ee_spitzer_harm`             | electron-electron collision time τ_ee [s]                             |
+| `eta_spitzer_harm`                | Fitzpatrick/TJ Spitzer-Härm resistivity 1/σ_∥ [Ω·m]                   |
+| `trapped_fraction`                | exact pitch-angle integral f_t from ⟨B²⟩/B_max² and ⟨√(1 − λB/B_max)⟩ |
+| `trapped_fraction_nodes`          | Gauss-Legendre pitch-angle nodes λ and weights for `trapped_fraction` |
+| `trapped_fraction_lin_liu_miller` | Lin-Liu & Miller 1995 f_t (OMFIT `fluxSurfaces` form)                 |
+| `trapped_fraction_eps`            | simple ε-only f_t fallback                                            |
+| `nu_star_e`                       | Sauter 18b electron collisionality                                    |
+| `eta_neoclassical`                | dispatched: Spitzer(-Härm) or F_33 · Spitzer                          |
 """
 module NeoclassicalResistivity
 
