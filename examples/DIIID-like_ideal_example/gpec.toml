@@ -67,7 +67,6 @@ save_interval = 1              # Save every Nth ODE step (1=all). Always saves n
 renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
 
 [ForcingTerms]
-forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
 mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
 

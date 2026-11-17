@@ -333,12 +333,24 @@ include("display_check.jl")
         @test ForcingField(GPEC.forcing_terms_control(Dict{String,Any}("ForcingTerms" => file_table), forcing_dir)).path == table_h5
     end
 
+    @testset "[ForcingTerms] sums every source it holds" begin
+        forcing_section = section -> GPEC.forcing_terms_control(Dict{String,Any}("ForcingTerms" => section), forcing_dir)
+        c_coil = Dict{String,Any}("name" => "c", "currents" => [1e3, 500, -500, -1e3, -500, 500])
+        both = ForcingField(forcing_section(Dict{String,Any}("machine" => "d3d", "coil_set" => [c_coil], "forcing_data_file" => "forcing.dat")))
+        @test both isa GPEC.ForcingTerms.ForcingFieldSum
+        @test [typeof(t) for t in both.terms] == [GPEC.ForcingTerms.ForcingCoils, GPEC.ForcingTerms.ForcingFile]
+        @test ForcingField(forcing_section(Dict{String,Any}("machine" => "d3d", "coil_set" => [c_coil]))) isa GPEC.ForcingTerms.ForcingCoils
+        @test ForcingField(forcing_section(Dict{String,Any}("forcing_data_file" => "forcing.dat"))) isa GPEC.ForcingTerms.ForcingFile
+        @test_throws "holds no forcing source" ForcingField(GPEC.forcing_terms_control(Dict{String,Any}(), forcing_dir))
+        @test_throws "is not \"ascii\" or \"hdf5\"" ForcingField(forcing_section(Dict{String,Any}("forcing_data_format" => "coil", "machine" => "d3d", "coil_set" => [c_coil])))
+    end
+
     @testset "ForcingField checks its source when built" begin
         @test_throws "no forcing file" ForcingField(joinpath(forcing_dir, "missing.dat"))
         geometry = joinpath(pkgdir(GPEC), "src", "ForcingTerms", "coil_geometries", "d3d_c.dat")
         @test_throws "is not a forcing-mode table" ForcingField(geometry)
         @test_throws "is not a forcing-mode table" ForcingField(table; format="hdf5")
-        @test_throws "is not \"ascii\", \"hdf5\" or \"coil\"" ForcingField(table; format="csv")
+        @test_throws "is not \"ascii\" or \"hdf5\"" ForcingField(table; format="csv")
         @test_throws "has no currents" ForcingField((name="c",); machine="d3d")
         @test_throws "currents for its 6 conductors" ForcingField((name="c", currents=ones(7)); machine="d3d")
         @test_throws "pass machine" ForcingField((name="c", currents=ones(6)))

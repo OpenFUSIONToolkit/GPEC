@@ -137,8 +137,7 @@ end
 """
     CoilConfig
 
-Top-level coil configuration from the `[ForcingTerms]` TOML section when
-`forcing_data_format = "coil"`.
+Top-level coil configuration from the `[ForcingTerms]` TOML section.
 
 ## Fields
 

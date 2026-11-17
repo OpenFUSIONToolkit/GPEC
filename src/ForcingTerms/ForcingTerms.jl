@@ -18,12 +18,14 @@ file paths against the deck directory; a script's resolve against the working di
 
 ## Fields
 
-Forcing Data:
+Every source the section holds drives the perturbed equilibrium, and their spectra are summed.
 
-  - `forcing_data_file::String` - Path to forcing data file (n, m, complex amplitude)
-  - `forcing_data_format::String` - Format: "ascii", "hdf5", or "coil"
+Forcing file:
 
-Coil settings (used when `forcing_data_format = "coil"`):
+  - `forcing_data_file::String` - Path to a forcing-mode table (n, m, complex amplitude); empty for none
+  - `forcing_data_format::String` - Format of the forcing-mode table: "ascii" or "hdf5"
+
+Coils:
 
   - `machine::String` - Machine name prefix for .dat files (e.g. "d3d")
   - `dat_dir::String` - Directory containing .dat files; defaults to bundled `coil_geometries/`
@@ -32,11 +34,9 @@ Coil settings (used when `forcing_data_format = "coil"`):
   - `coil_sets_raw::Vector{Dict{String,Any}}` - Parsed `[[ForcingTerms.coil_set]]` TOML blocks
 """
 @kwdef struct ForcingTermsControl
-    # Forcing data file settings (ascii/hdf5 formats)
-    forcing_data_file::String = "forcing.dat"
+    forcing_data_file::String = ""
     forcing_data_format::String = "ascii"
 
-    # Coil calculation settings (coil format)
     machine::String = ""
     dat_dir::String = ""
     mtheta_coil::Int = 480
@@ -276,7 +276,7 @@ drive several solves.
 
 The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
 or `.hdf5` extension and `"ascii"` otherwise. The second form takes one coil set or a vector of them, each a
-NamedTuple or Dict with the `[[ForcingTerms.coil_set]]` keys, and selects the coil format:
+NamedTuple or Dict with the `[[ForcingTerms.coil_set]]` keys:
 
 ```julia
 ForcingField((name="c", currents=[1e3, 500, -500, -1e3, -500, 500]); machine="d3d")   # the DIII-D C-coil, in amperes
@@ -286,7 +286,7 @@ ForcingField((source="pf_hoop", radius=12.0, height=1.2, currents=[2e3]))
 
 Its remaining `kwargs` are the [`ForcingTermsControl`](@ref) coil settings (`machine`, `dat_dir`, `mtheta_coil`,
 `nzeta_coil`). The third form takes the same coil description already parsed, and the fourth a deck's `[ForcingTerms]`
-section. The file forms return a [`ForcingFile`](@ref) leaf and the coil forms a [`ForcingCoils`](@ref) leaf. The last form
+section, the sum of every source it holds. The file forms return a [`ForcingFile`](@ref) leaf and the coil forms a [`ForcingCoils`](@ref) leaf. The last form
 takes a control-surface spectrum computed elsewhere, already in the unit-norm `Φ_x` convention, and returns a
 spectrum-literal leaf ([`ForcingSpectrum`](@ref)).
 
@@ -438,14 +438,19 @@ function ForcingField(cfg::CoilConfig; scale::Number=1.0)
 end
 
 function ForcingField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0)
-    format in ("ascii", "hdf5") || throw(ArgumentError("ForcingField: forcing_data_format \"$format\" is not \"ascii\", \"hdf5\" or \"coil\""))
+    format in ("ascii", "hdf5") || throw(ArgumentError("ForcingField: forcing_data_format \"$format\" is not \"ascii\" or \"hdf5\""))
     _check_forcing_file(abspath(path), format)
     return ForcingFile(abspath(path), format, ComplexF64(scale))
 end
 
 function ForcingField(ctrl::ForcingTermsControl; scale::Number=1.0)
-    ctrl.forcing_data_format == "coil" && return ForcingField(CoilConfig(ctrl); scale)
-    return ForcingField(ctrl.forcing_data_file; format=ctrl.forcing_data_format, scale)
+    ctrl.forcing_data_format in ("ascii", "hdf5") ||
+        throw(ArgumentError("ForcingField: forcing_data_format \"$(ctrl.forcing_data_format)\" is not \"ascii\" or \"hdf5\""))
+    sources = ForcingField[]
+    isempty(ctrl.coil_sets_raw) || push!(sources, ForcingField(CoilConfig(ctrl)))
+    isempty(ctrl.forcing_data_file) || push!(sources, ForcingField(ctrl.forcing_data_file; format=ctrl.forcing_data_format))
+    isempty(sources) && throw(ArgumentError("ForcingField: [ForcingTerms] holds no forcing source; give [[ForcingTerms.coil_set]] blocks or a forcing_data_file"))
+    return scale * sum(sources)
 end
 
 # A coil set as the [[ForcingTerms.coil_set]] table: a Dict or NamedTuple, keys as strings or symbols.
@@ -454,7 +459,7 @@ _coil_dict(nt::NamedTuple) = Dict{String,Any}(string(k) => v for (k, v) in pairs
 _coil_dict(x) = throw(ArgumentError("ForcingField: a coil set is a Dict or NamedTuple of [[ForcingTerms.coil_set]] keys, not a $(typeof(x))"))
 
 ForcingField(coil_sets::AbstractVector; scale::Number=1.0, kwargs...) =
-    ForcingField(ForcingTermsControl(; forcing_data_format="coil", coil_sets_raw=_coil_dict.(coil_sets), kwargs...); scale)
+    ForcingField(ForcingTermsControl(; coil_sets_raw=_coil_dict.(coil_sets), kwargs...); scale)
 ForcingField(coil_set::Union{AbstractDict,NamedTuple}; kwargs...) = ForcingField([coil_set]; kwargs...)
 
 function ForcingField(modes::Vector{ForcingMode}; scale::Number=1.0)

@@ -11,7 +11,7 @@ function error_fields_fixture(dir)
     toml_path = joinpath(dir, "gpec.toml")
     inputs = TOML.parsefile(toml_path)
     inputs["ForcingTerms"] = Dict{String,Any}(
-        "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
+        "mtheta_coil" => 240, "nzeta_coil" => 32,
         "coil_set" => [
             Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 12.0, "height" => 1.2, "currents" => [2.0e3], "tiltx" => [3.0]),
             Dict{String,Any}("name" => "hoop_axi", "source" => "pf_hoop", "radius" => 12.0, "height" => -1.2, "currents" => [2.0e3]),

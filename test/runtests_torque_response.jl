@@ -14,7 +14,6 @@ include("h5_metadata_check.jl")
 const _TORQUE_RESPONSE_SECTIONS = """
 
 [ForcingTerms]
-forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 mtheta_coil = 128                       # Poloidal grid for boundary B·n̂ evaluation
 nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
 
