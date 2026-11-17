@@ -220,11 +220,26 @@ for fast evaluation in `free_compute_total` during the edge dW scan.
                 psi -> profiles.q_deriv(psi)),
             psii, Roots.Newton()
         )
+    end
 
-        # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
+    # Raw vacuum matrix at each scan psi (singfac NOT applied; free_compute_total applies it analytically)
+    function vacuum_matrix!(i)
         vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mtheta_vacuum, ctrl.nzeta_vacuum, intr.mlow:intr.mhigh, intr.nlow:intr.nhigh)
-        vac = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-        @views wv_array[i, :, :] .= vac.wv
+        @views wv_array[i, :, :] .= Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings).wv
+    end
+    if ctrl.nzeta_vacuum == 1
+        # The matrices are independent, so each is its own task. The 3D kernel threads internally instead.
+        nblas = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            Threads.@threads :greedy for i in 1:(npsi+1)
+                vacuum_matrix!(i)
+            end
+        finally
+            BLAS.set_num_threads(nblas)
+        end
+    else
+        foreach(vacuum_matrix!, 1:(npsi+1))
     end
 
     # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
