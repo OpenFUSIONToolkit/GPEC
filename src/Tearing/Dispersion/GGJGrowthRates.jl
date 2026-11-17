@@ -1,4 +1,4 @@
-# GGJ tearing growth rates from the full Pletzer-Dewar 4m × 4m determinant (CoupledFullMatch.jl),
+# Toroidal-layer (GGJ-form) tearing growth rates from the full Pletzer-Dewar 4m × 4m determinant (CoupledFullMatch.jl),
 # which keeps the interchange channel and Glasser stabilization; roots are classified by winding number.
 #
 # The determinant takes s = γ − iω in 1/s; the scans use Q = τ·(ω + iγ), so s = −i·Q/τ with
@@ -8,8 +8,9 @@
 """
     GGJDispersion(mc::MultiSurfaceCouplingFull)
 
-The GGJ full-matching determinant on the scan plane, `g(Q) = mc(−i·Q·Q₀)`, where `Q₀ = S^(−1/3)/τ_A`
-of the reference surface `mc.surfaces[mc.ref_idx]`. Every surface must use a `ToroidalLayerModel`.
+The full-matching determinant on the scan plane, `g(Q) = mc(−i·Q·Q₀)`, where `Q₀ = S^(−1/3)/τ_A`
+of the reference surface `mc.surfaces[mc.ref_idx]`. Every surface must use a `ToroidalLayerModel`; GGJ names the
+determinant's origin, not a restriction on the model.
 """
 struct GGJDispersion{M<:MultiSurfaceCouplingFull}
     mc::M
@@ -34,7 +35,7 @@ _residual_domain_radius(::GGJDispersion, Q::ComplexF64) = 0.9 * max(imag(Q), 0.0
                      polish=true, winding_rfrac=0.5,
                      parallel=Threads.nthreads() > 1) -> (GrowthRateResult, AMRResult)
 
-Tearing growth rates of the GGJ inner layer matched through the full 4m × 4m determinant `mc`
+Tearing growth rates of any `ToroidalLayerModel` inner layer matched through the full 4m × 4m determinant `mc`
 (one surface gives the uncoupled 2 × 2 block of its raw Δ'). With s = γ − iω, the box `gamma_range` ×
 `omega_range` bounds γ in 1/s and ω in rad/s, and is scanned adaptively in the plane of [`GGJDispersion`](@ref);
 each contour intersection is classified by winding number (see `find_growth_rates`). In the result `gamma` is γ,

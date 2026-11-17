@@ -429,7 +429,7 @@ end
 function θ_variation(params::ToroidalLayerParameters, Q::ComplexF64, θ::Float64)
     θout = θ == 0 ? 0.1 : 1.2 * θ
     ray_angle_admissible(params, Q, θout) && return ("θ → 1.2θ", (; θ=θout))
-    return ("θ → 0.8θ", (; θ=0.8 * θ))
+    return θ == 0 ? ("θ fixed (no admissible variation)", (; θ=θ)) : ("θ → 0.8θ", (; θ=0.8 * θ))
 end
 
 """

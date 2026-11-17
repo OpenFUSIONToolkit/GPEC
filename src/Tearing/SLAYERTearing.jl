@@ -47,7 +47,7 @@ end
 _surface_label(p::SLAYERParameters) = "m=$(p.m), n=$(p.n)"
 _surface_label(p::InnerLayerParameters) = "ising=$(getfield(p, :ising))"
 
-# Is this a GGJ inner-layer model? Its growth rates come from `ggj_growth_rates`, not this runner.
+# Is this a toroidal-layer model (GGJ, CCC)? Its growth rates come from `ggj_growth_rates`, not this runner.
 _is_ggj(::ToroidalLayerModel) = true
 _is_ggj(::Any) = false
 
@@ -177,9 +177,9 @@ function run_slayer_from_inputs(model::InnerLayer.InnerLayerModel,
     validate(problem, config)
     _is_ggj(model) && throw(
         ArgumentError(
-            "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no GGJ growth rate. " *
+            "run_slayer_from_inputs: this runner scans SLAYER's tearing-only residual, which gives no toroidal-layer growth rate. " *
             "Use Dispersion.ggj_growth_rates on multi_surface_coupling_full, which matches both parity channels, and " *
-            "solve_inner for the GGJ layer's Δ.")
+            "solve_inner for the layer's Δ.")
     )
     isempty(params) && return empty_tearing_result(problem, config, model)
 

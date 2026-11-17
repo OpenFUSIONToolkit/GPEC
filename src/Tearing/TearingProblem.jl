@@ -83,7 +83,7 @@ end
 function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::TearingConfig=TearingConfig())
     config.gamma_range === nothing && config.omega_range === nothing || throw(ArgumentError("SLAYER uses Q_re_range and Q_im_range."))
     prob.eta === nothing && prob.rho === nothing && prob.gamma == 5 / 3 ||
-        throw(ArgumentError("SLAYER derives its layer inputs from transport profiles; eta, rho, and gamma overrides are GGJ settings."))
+        throw(ArgumentError("SLAYER derives its layer inputs from transport profiles; eta, rho, and gamma overrides are toroidal-layer (GGJ, CCC) settings."))
     ffs = prob.ffs
     equil = ffs.equil
     surfaces = ffs.surfaces

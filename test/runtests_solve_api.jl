@@ -638,6 +638,21 @@ include("display_check.jl")
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
             end
 
+            # The CCC layer under [Tearing], named by inner_model with Q* in [CCC].
+            mktempdir() do dir
+                ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs...)
+                n = length(ric.surfaces)
+                config = TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0), nre=4, nim=4, amr_passes=1)
+                api = solve(TearingProblem(ric; eta=fill(1e-7, n), rho=fill(1e-7, n)), CCCModel(; Qstar=fill(0.05, n)); config)
+                search = Dict{String,Any}("gamma_range" => [600.0, 2600.0], "omega_range" => [-1500.0, 1500.0], "nre" => 4, "nim" => 4, "amr_passes" => 1)
+                sections = Dict{String,Any}("CCC" => Dict{String,Any}("Qstar" => fill(0.05, n)),
+                    "Tearing" => Dict{String,Any}("inner_model" => "CCC", "eta" => fill(1e-7, n), "rho" => fill(1e-7, n), "search" => search))
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"), extra_sections=sections)]).tearing
+
+                @test reference.model === api.model && eltype(reference.params) <: GPEC.InnerLayer.CCCParameters
+                @test isequal(reference.gamma, api.gamma) && isequal(reference.omega, api.omega)
+            end
+
             # A forward solve has no Δ′ to match against, so the deck stops at parse time instead of after the solve.
             mktempdir() do dir
                 deck_dir = _stage_deck(dir; extra_sections=Dict{String,Any}("Match" => Dict{String,Any}("ideal" => true)))

@@ -101,7 +101,7 @@ PerturbedEquilibrium skips its response rather than mixing ideal and matched phy
 """
 function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel)
     closure_capable(model) ||
-        error("$(nameof(typeof(model))) cannot solve a MatchProblem (use GGJModel(); SLAYERModel is for TearingProblem)")
+        error("$(nameof(typeof(model))) cannot solve a MatchProblem (use GGJModel() or CCCModel(); SLAYERModel is for TearingProblem)")
     match = _compute_match(prob, model)
     return _matched_result(prob.ffs, match, prob.ideal)
 end

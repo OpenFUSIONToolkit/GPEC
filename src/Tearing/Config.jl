@@ -41,7 +41,7 @@ classification selects threshold classification for SLAYER and winding classific
   - `filter_above_poles`, `filter_outside_re` - SLAYER contour filters.
   - `gamma_gap_threshold` - SLAYER growth-rate separation threshold in 1/s.
   - `polish_roots`, `validity_rtol` - Root polishing and SLAYER residual acceptance tolerance.
-  - `root_classification` - `:auto`, `:threshold`, or `:winding`; GGJ requires winding.
+  - `root_classification` - `:auto`, `:threshold`, or `:winding`; the toroidal-layer models require winding.
   - `store_scan` - Retain scan data in the result and HDF5 output.
 """
 @kwdef struct TearingConfig

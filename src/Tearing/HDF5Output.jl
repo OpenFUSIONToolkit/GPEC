@@ -123,14 +123,15 @@ const TEARING_H5_ANNOTATIONS = [
     "PerSurface/alpha_mercier" => (; long_name="Mercier Frobenius exponent α = √(−D_I) at each surface (Glasser-Greene-Johnson 1975 Eq. 48)", dims=("surface",)),
     "PerSurface/delta_prime_conversion" => (; long_name="ψ_N → r_s reference-length factor K^(2α) applied to each Δ' diagonal", dims=("surface",)),
     "PerSurface/Delta_prime_matrix" => (;
-        long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (GGJ path; identical to SingularSurfaces/Delta_prime_matrix)",
+        long_name="full complex Δ' matrix coupling the rational surfaces, ψ_N-referenced (toroidal-layer path; identical to SingularSurfaces/Delta_prime_matrix)",
         dims=("surface_row", "surface_col")
     ),
     "PerSurface/Delta_prime_matrix_rs" => (;
         long_name="full complex Δ' matrix as used in the slab-layer matching, converted to the r_s reference length (K^(2α) on the diagonal; the ψ_N-referenced BVP matrix is SingularSurfaces/Delta_prime_matrix)",
         dims=("surface_row", "surface_col")
     ),
-    "PerSurface/Delta_prime_raw" => (; long_name="raw side-major outer matching matrix used by the full GGJ determinant", dims=("surface_side_row", "surface_side_col")),
+    "PerSurface/Delta_prime_raw" =>
+        (; long_name="raw side-major outer matching matrix used by the full toroidal-layer determinant", dims=("surface_side_row", "surface_side_col")),
     "Roots/Q_root" => (; long_name="complex normalized root in the declared frequency_frame (NaN = no root)", dims=("surface",)),
     "Roots/omega" =>
         (;
