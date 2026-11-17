@@ -76,9 +76,13 @@ const _RETIRED_SECTIONS = Dict("DEBUG" => "[DEBUG] is retired: output_benchmark_
     "SOL_INPUT" => "[SOL_INPUT] is now [Solovev]" * _ANALYTIC_HOME, "LAR_INPUT" => "[LAR_INPUT] is now [LargeAspectRatio]" * _ANALYTIC_HOME,
     "TJ_ANALYTIC_INPUT" => "[TJ_ANALYTIC_INPUT] is now [TJAnalytic], whose solver = \"direct\" replaces eq_type = \"tj_analytic_direct\"" * _ANALYTIC_HOME)
 
+# The toroidal layer models a deck can name as `inner_model`, each configured by the section of its token.
+const TOROIDAL_LAYER_MODELS = ("GGJ" => GGJModel, "CCC" => CCCModel)
+const _TOROIDAL_LAYER_TOKENS = first.(TOROIDAL_LAYER_MODELS)
+
 # Every section a deck may hold, besides the analytic-equilibrium sections.
 const _DECK_SECTIONS = ("Run", "Equilibrium", "Wall", "LocalStability", "Ballooning", "ForceFreeStates", "Forward", "Riccati",
-    "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "ForcingTerms", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
+    "Galerkin", "Match", _TOROIDAL_LAYER_TOKENS..., "Tearing", "SLAYER", "ForcingTerms", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
 const _INTEGRATORS = ("Forward" => Forward, "Riccati" => Riccati, "Galerkin" => Galerkin)
 
 # Stop the run when a parsed gpec.toml section sets keys that no longer exist, so the deck is updated.
@@ -250,16 +254,20 @@ function slayer_model(inputs::AbstractDict)
 end
 
 """
-    ggj_model(inputs) -> GGJModel
+    toroidal_layer_model(inputs, token) -> InnerLayer.ToroidalLayerModel
 
-The GGJ layer model of the `[GGJ]` section: `solver` and the backend options, passed to
-`GGJModel` as they are. The default `GGJModel()` when absent.
+The toroidal layer model `token` names in `TOROIDAL_LAYER_MODELS` (`"GGJ"`, `"CCC"`), from its `[token]` section:
+`solver` and the model's keywords, passed to its constructor as they are. The model's defaults when absent.
 """
-function ggj_model(inputs::AbstractDict)
-    kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in get(inputs, "GGJ", Dict{String,Any}()))
+function toroidal_layer_model(inputs::AbstractDict, token::AbstractString)
+    kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in get(inputs, token, Dict{String,Any}()))
     haskey(kwargs, :solver) && (kwargs[:solver] = Symbol(kwargs[:solver]))
-    return GGJModel(; kwargs...)
+    return Dict(TOROIDAL_LAYER_MODELS)[token](; kwargs...)
 end
+
+# The `inner_model` token of a layer model, as a deck names it.
+_inner_model_token(::SLAYERModel) = "SLAYER"
+_inner_model_token(model::InnerLayer.ToroidalLayerModel) = only(token for (token, T) in TOROIDAL_LAYER_MODELS if model isa T)
 
 """
     force_balance_keywords(inputs, path) -> Dict{Symbol,Any}
@@ -340,15 +348,15 @@ end
     match_from_deck(inputs) -> Union{Nothing,NamedTuple}
 
 `(; problem, model)`: the `MatchProblem` keywords of `[Match]` and the inner-layer model its
-`inner_model` names (`"GGJ"`, from `[GGJ]`). `nothing` without `[Match]`.
+`inner_model` names (`"GGJ"` by default, or `"CCC"`, from the section of that name). `nothing` without `[Match]`.
 """
 function match_from_deck(inputs::AbstractDict)
     haskey(inputs, "Match") || return nothing
     fields = Dict{Symbol,Any}(:eta => Any, :rho => Any, :rotation => Any, :gamma => Any, :ideal => Bool, :inner_model => String)
     problem = section_keywords(inputs["Match"], "Match", fields)
-    _selector(inputs["Match"], "Match", "inner_model", ("GGJ",), "GGJ")
+    inner_model = _selector(inputs["Match"], "Match", "inner_model", _TOROIDAL_LAYER_TOKENS, "GGJ")
     delete!(problem, :inner_model)
-    return (; problem, model=ggj_model(inputs))
+    return (; problem, model=toroidal_layer_model(inputs, inner_model))
 end
 
 """
@@ -356,7 +364,7 @@ end
 
 `(; problem, model, config)`: the `TearingProblem` keywords of `[Tearing]` (with
 `[Tearing.CriticalResonantField]`), the layer model its `inner_model` names (`"SLAYER"` from
-`[SLAYER]`, `"GGJ"` from `[GGJ]`) and the `TearingConfig` of `[Tearing.search]`. `nothing` without `[Tearing]`.
+`[SLAYER]`, `"GGJ"` or `"CCC"` from the section of that name) and the `TearingConfig` of `[Tearing.search]`. `nothing` without `[Tearing]`.
 """
 function tearing_from_deck(inputs::AbstractDict)
     haskey(inputs, "Tearing") || return nothing
@@ -366,7 +374,7 @@ function tearing_from_deck(inputs::AbstractDict)
     fields = _struct_fields(TearingProblem, (:ffs, :critical_resonant_field))
     fields[:inner_model] = String
     problem = section_keywords(_without(table, "search", "CriticalResonantField"), "Tearing", fields)
-    inner_model = _selector(table, "Tearing", "inner_model", ("SLAYER", "GGJ"))
+    inner_model = _selector(table, "Tearing", "inner_model", ("SLAYER", _TOROIDAL_LAYER_TOKENS...))
     delete!(problem, :inner_model)
     crf = get(table, "CriticalResonantField", nothing)
     crf === nothing || (
@@ -374,7 +382,7 @@ function tearing_from_deck(inputs::AbstractDict)
             section_keywords(crf, "Tearing.CriticalResonantField", _struct_fields(CriticalResonantFieldControl))...)
     )
     config = TearingConfig(; section_keywords(get(table, "search", Dict{String,Any}()), "Tearing.search", _struct_fields(TearingConfig))...)
-    return (; problem, model=inner_model == "SLAYER" ? slayer_model(inputs) : ggj_model(inputs), config)
+    return (; problem, model=inner_model == "SLAYER" ? slayer_model(inputs) : toroidal_layer_model(inputs, inner_model), config)
 end
 
 """
@@ -447,7 +455,7 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     end
     has_ffs = haskey(inputs, "ForceFreeStates")
     if !has_ffs
-        for section in ("Wall", "Forward", "Riccati", "Galerkin", "Match", "GGJ", "Tearing", "SLAYER", "LocalStability", "Ballooning",
+        for section in ("Wall", "Forward", "Riccati", "Galerkin", "Match", _TOROIDAL_LAYER_TOKENS..., "Tearing", "SLAYER", "LocalStability", "Ballooning",
             "ForcingTerms", "PerturbedEquilibrium", "KineticForces", "ErrorFields")
             haskey(inputs, section) && error("[$section] is set but there is no [ForceFreeStates] section, so the run stops after the equilibrium")
         end
@@ -479,8 +487,11 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
             error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(forcing.forcing_data_format)\")")
     end
     tearing_model = haskey(inputs, "Tearing") ? get(inputs["Tearing"], "inner_model", nothing) : nothing
-    haskey(inputs, "GGJ") && match === nothing && tearing_model != "GGJ" &&
-        error("[GGJ] is set but neither [Match] nor [Tearing] inner_model = \"GGJ\" uses it")
+    match_model = match === nothing ? nothing : _inner_model_token(match.model)
+    for token in _TOROIDAL_LAYER_TOKENS
+        haskey(inputs, token) && match_model != token && tearing_model != token &&
+            error("[$token] is set but neither [Match] nor [Tearing] inner_model = \"$token\" uses it")
+    end
     haskey(inputs, "SLAYER") && tearing_model != "SLAYER" && !(has_ffs && get(inputs["ForceFreeStates"], "psilim_from_layer_overlap", false) === true) &&
         error("[SLAYER] is set but neither [Tearing] inner_model = \"SLAYER\" nor [ForceFreeStates] psilim_from_layer_overlap = true uses it")
     return (; run=run_settings(inputs, path), force_balance, local_stability=local_stability_from_deck(inputs), match, tearing,
@@ -521,7 +532,8 @@ end
 
 deck_sections(ctrl::KineticForces.KineticForcesControl) = Dict{String,Any}("KineticForces" => _deck_table(ctrl))
 deck_sections(model::SLAYERModel) = Dict{String,Any}("SLAYER" => merge(_deck_table(model), Dict{String,Any}("variant" => String(typeof(model).parameters[1]))))
-deck_sections(model::GGJModel) = Dict{String,Any}("GGJ" => merge(_deck_table(Dict(pairs(model.options))), Dict{String,Any}("solver" => String(typeof(model).parameters[1]))))
+deck_sections(model::InnerLayer.ToroidalLayerModel{S}) where {S} =
+    Dict{String,Any}(_inner_model_token(model) => merge(_deck_table(model, (:options,)), _deck_table(Dict(pairs(model.options))), Dict{String,Any}("solver" => String(S))))
 deck_sections(wall::Vacuum.WallSettings) = Dict{String,Any}("Wall" => merge(_deck_table(wall), Dict{String,Any}("shape" => only(k for (k, T) in Vacuum.WALL_SHAPES if wall isa T))))
 
 """
@@ -571,7 +583,7 @@ function deck_inputs(deck::NamedTuple, config::Equilibrium.EquilibriumConfig, an
     ls === nothing || merge!(inputs, Dict{String,Any}("LocalStability" => _deck_table(ls.problem), "Ballooning" => _deck_table(ls.algorithm)))
     if deck.match !== nothing
         merge!(inputs, deck_sections(deck.match.model))
-        inputs["Match"] = merge(_deck_table(deck.match.problem), Dict{String,Any}("inner_model" => "GGJ"))
+        inputs["Match"] = merge(_deck_table(deck.match.problem), Dict{String,Any}("inner_model" => _inner_model_token(deck.match.model)))
     end
     if deck.tearing !== nothing
         (; problem, model, config) = deck.tearing
@@ -590,7 +602,7 @@ end
 # [Tearing] with its search and critical-resonant-field sub-tables, and the section of its layer model.
 function _tearing_sections(problem, crf, model, config)
     table = _deck_table(problem, (:ffs, :critical_resonant_field))
-    table["inner_model"] = model isa SLAYERModel ? "SLAYER" : "GGJ"
+    table["inner_model"] = _inner_model_token(model)
     table["search"] = _deck_table(config)
     crf === nothing || (table["CriticalResonantField"] = _deck_table(crf))
     return merge(deck_sections(model), Dict{String,Any}("Tearing" => table))
@@ -623,7 +635,7 @@ const _RECORDED_TOLERANCES = "Input/RawInputs/ErrorFields/tolerance_toml_raw"
 deck_sections(equil::Equilibrium.PlasmaEquilibrium) = deck_sections(equil.config, equil.analytic)
 deck_sections(ls::LocalStabilityResult) = Dict{String,Any}("LocalStability" => _deck_table(ls.problem, (:equil,)), "Ballooning" => _deck_table(ls.algorithm))
 deck_sections(m::ForceFreeStates.MatchResult) =
-    merge(deck_sections(m.model), Dict{String,Any}("Match" => merge(_deck_table(m.problem, (:ffs,)), Dict{String,Any}("inner_model" => "GGJ"))))
+    merge(deck_sections(m.model), Dict{String,Any}("Match" => merge(_deck_table(m.problem, (:ffs,)), Dict{String,Any}("inner_model" => _inner_model_token(m.model)))))
 deck_sections(kf::KineticForcesResult) = deck_sections(kf.control)
 deck_sections(t::TearingResult) = t.model === nothing ? Dict{String,Any}() : _tearing_sections(t.problem, t.problem.critical_resonant_field, t.model, t.config)
 deck_sections(ef::ErrorFieldsResult) = _error_fields_sections(ef.settings, ef.tolerances === nothing ? "" : _RECORDED_TOLERANCES)

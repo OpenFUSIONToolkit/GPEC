@@ -144,6 +144,21 @@ Provides an efficient algorithm for computing the full Δ' matrix (coupling betw
 
 ---
 
+> G. S. Cho, E. H. Choi, and D. I. Choi, "Compressional effects on drift-resistive instabilities in general toroidal plasma,"
+> *IEEE Transactions on Plasma Science* **PS-15**, 418 (1987).
+
+Derives the toroidal resistive-layer equations with electron diamagnetic drift, ion acoustic coupling, ion polarization drift and perpendicular resistivity by generalizing the GGJ scheme; `CCCModel` in the `InnerLayer` module solves them.
+
+---
+
+> J.-Y. Kim, G.-S. Cho, and D.-I. Choi, "Numerical study of drift-resistive modes in general toroidal geometry,"
+> *Physics of Fluids* **31**, 2659 (1988).
+> DOI: [10.1063/1.866543](https://doi.org/10.1063/1.866543)
+
+States those equations as Eqs. (1a)–(1c), with the electron diamagnetic frequency Q* and the perpendicular-transport weight M⊥/M, and their large-x exponents (Eq. 2): the form `CCCModel` implements. Its tearing dispersion curves (Figs. 1b, 2b) plot the Fourier-space Δ_o, which its Eq. (10b) relates to the real-space Δ that `CCCModel` returns.
+
+---
+
 > A. H. Glasser and Z. R. Wang, "Asymptotic solutions and convergence studies of the resistive inner region equations,"
 > *Physics of Plasmas* **27**, 012506 (2020).
 > DOI: [10.1063/1.5134999](https://doi.org/10.1063/1.5134999)

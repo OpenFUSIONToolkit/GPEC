@@ -235,3 +235,107 @@ end
     @test full.Ψ[2, 2] ≈ c.Ψ[1, 2] rtol = 1e-2      # odd Ψ is even, so smooth through x = 0
     @test full.certΔ < 1e-5
 end
+
+@testset "InnerLayer CCC (Cho, Choi & Choi drift-resistive layer)" begin
+    q4 = IL.GGJ.q4_surface_benchmark()
+    ccc(; Qstar=0.0, mperp=1.0) = IL.CCCParameters(q4, Qstar, mperp)
+    reldiff(a, b) = maximum(abs.(a .- b) ./ abs.(b))
+    p = ccc(; Qstar=0.5, mperp=1.4)
+
+    @testset "Wasow basis matches the layer equations" begin
+        for Q in (0.07 + 0.11im, 0.5im)
+            w = _wasow_matches_equations(p, Q)
+            @test w.split < 1e-12 && w.equations < 1e-12 && w.series < 1e-12
+        end
+    end
+
+    @testset "first-order Ξ coefficient matches the closed form" begin
+        # Q* enters the power-like solutions first through Ξ = x^{r−2}(1 + b₁/x² + …):
+        # b₁ − b₁^GGJ = −(i/8) K Q Q* (2s − 1)(1 + 4E + 4F + 4s + 4s²), s = ±√(−D_I) for the large/small column.
+        Q = 0.07 + 0.11im
+        cK = TL.build_asymptotics(ccc(; Qstar=0.3), Q; kmax=12)
+        cG = TL.build_asymptotics(q4, Q; kmax=12)
+        for (col, s) in ((1, GGJ.p1(q4)), (2, -GGJ.p1(q4)))
+            ratio(c, x) = (ua = TL.physical_ua_dua(c, x)[1]; x * ua[2, col] / ua[1, col])
+            est(x) = x^2 * (ratio(cK, x) - ratio(cG, x))
+            Δb1 = (4 * est(200.0) - est(100.0)) / 3
+            @test Δb1 ≈ -(im / 8) * q4.K * Q * 0.3 * (2s - 1) * (1 + 4q4.E + 4q4.F + 4s + 4s^2) rtol = 1e-5
+        end
+    end
+
+    @testset "Δ is independent of the contour angle" begin
+        for Q in (0.5 + 0.5im, 5.0im)
+            r = TL.solve_ray(p, Q)
+            θ = TL.default_ray_angle(p, Q)
+            @test TL.ray_angle_admissible(p, Q, θ)
+            @test reldiff(TL.solve_ray(p, Q; θ=0.5 * θ).Δ, r.Δ) < 1e-5
+        end
+        # Pin at Q = 5i (delta_convergence spread ~1e-7 there).
+        Δ = IL.solve_inner(IL.CCCModel(), p, 5.0im * GGJ.q0(q4))
+        @test Δ.interchange ≈ 433.38897 + 2358.8069im rtol = 1e-5
+        @test Δ.tearing ≈ 22.378564 + 127.277im rtol = 1e-5
+    end
+
+    @testset "reduces to GGJ" begin
+        for Q in (0.1 + 0.05im, 5.0im)
+            g = TL.solve_ray(q4, Q)
+            @test reldiff(TL.solve_ray(ccc(), Q).Δ, g.Δ) < 1e-8          # same equations, separate basis and split
+        end
+        # The departure from GGJ is linear in Q* and in M⊥/M − 1: doubling the step doubles it. At Q = 5i the M⊥/M
+        # effect is ~1e-8, below the solver's accuracy.
+        withQstar(x) = ccc(; Qstar=x)
+        withmperp(x) = ccc(; mperp=1 + x)
+        for (Q, models) in ((0.1 + 0.05im, (withQstar, withmperp)), (5.0im, (withQstar,)))
+            Δ0 = TL.solve_ray(q4, Q).Δ
+            for f in models
+                Δ1, Δ2 = TL.solve_ray(f(1e-3), Q).Δ, TL.solve_ray(f(2e-3), Q).Δ
+                @test maximum(abs.((Δ2 .- Δ0) ./ (2 .* (Δ1 .- Δ0)) .- 1)) < 1e-2
+            end
+        end
+    end
+
+    @testset "Kim, Cho & Choi (1988) Fig. 2b tearing root" begin
+        # Their surface at Q* = 0.05: the zero of Δ₋ on branch A, read from the figure as −0.019 − 0.062i.
+        kim = IL.CCCParameters(; E=-0.01, F=0.0, G=100.0, H=0.0, K=100.0, taua=1.0, taur=1.0, Qstar=0.05)
+        Δm(Q) = TL.solve_ray(kim, Q).Δ[2]
+        a, b = -0.0184 - 0.0626im, (-0.0184 - 0.0626im) * (1 + 1e-3)
+        fa, fb = Δm(a), Δm(b)
+        for _ in 1:20
+            abs(b - a) < 1e-10 && break
+            a, fa, b = b, fb, b - fb * (b - a) / (fb - fa)
+            fb = Δm(b)
+        end
+        @test b ≈ -0.0183834 - 0.0626106im rtol = 1e-5
+        @test abs(b - (-0.019 - 0.062im)) < 2e-3
+    end
+
+    @testset "model and guards" begin
+        @test IL.CCCModel() === IL.CCCModel{:ray}()
+        @test IL.model_name(IL.CCCModel()) == "ccc_ray"
+        @test_throws ArgumentError IL.CCCModel(; solver=:galerkin)
+        @test_throws ArgumentError IL.CCCModel(; nx=10)
+        @test_throws ArgumentError IL.CCCParameters(q4, 0.1, -1.0)
+        # Per-surface inputs live on the model: a number for every surface or one value per surface.
+        m = IL.CCCModel(; Qstar=[0.1, 0.2], mperp=1.2)
+        @test m.Qstar == [0.1, 0.2] && m.mperp === 1.2 && m.options == (;)
+        @test_throws ArgumentError IL.CCCModel(; mperp=0.0)
+        @test_throws "Qstar has length 2, expected 3" IL.check_layer_inputs(m, 3)
+        @test IL.check_layer_inputs(m, 2) === nothing && IL.check_layer_inputs(IL.GGJModel(), 3) === nothing
+        # A singular surface and equilibrium as layer_parameters reads them: the resistive geometry and the flux scales.
+        surf = (; restype=(; E=q4.E, F=q4.F, H=q4.H, K=q4.K, M=1.0, v1_local=1.0, avg_bsq=1.0, avg_bsq_over_dpsisq=1.0, p_local=1.0),
+            psifac=0.5, n=[1], q1=1.0)
+        eq = (; psio=1.0, params=(; volume=1.0), kinetic=nothing)
+        @test IL.layer_parameters(m, surf, eq; eta=1e-7, rho=1e-7, ising=2).Qstar == 0.2
+        @test [c.first for c in IL.layer_parameter_columns([ccc(; Qstar=0.3)])] == ["E", "F", "G", "H", "K", "M", "tau_A", "tau_R", "dVdpsi", "Q_star", "M_perp_ratio"]
+        # Just past Re Q ≈ −0.041 a root of Kim Eq. 2 crosses the negative real axis: the default angle stays continuous, and the
+        # slower family, still decaying along the ray, no longer decays on the real axis, so the solve is refused.
+        p13 = ccc(; Qstar=1.3)
+        θa, θb = TL.default_ray_angle(p13, -0.040 + 0.5im), TL.default_ray_angle(p13, -0.042 + 0.5im)
+        @test abs(θb - θa) < 1e-2
+        @test TL.ray_angle_admissible(p13, -0.040 + 0.5im, θa)
+        @test TL.parabolic_rate(p13, -0.042 + 0.5im, θb) > 0 && !TL.ray_angle_admissible(p13, -0.042 + 0.5im, θb)
+        @test_throws "stop decaying between the real axis and the ray" TL.solve_ray(p13, -0.042 + 0.5im)
+        @test_throws "must be finite" IL.CCCParameters(q4, NaN, 1.0)
+        @test IL.CCCParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, Qstar=0.5).ggj.E == q4.E
+    end
+end

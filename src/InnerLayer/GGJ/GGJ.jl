@@ -31,11 +31,13 @@ module GGJ
 using LinearAlgebra
 using StaticArrays
 using DoubleFloats: Double64
+using ...Utilities.PhysicalConstants: MU_0
 
 import ..InnerLayerResponse
 import ..solve_inner, ..solve_inner_profile
 using ..ToroidalLayer
 import ..ToroidalLayer: inner_Q, rescale_delta, profile_conversions, power_exponents
+import ..ToroidalLayer: layer_parameters, mercier_di, growth_rate_scale, layer_parameter_columns
 import ..ToroidalLayer: layer_rows, layer_mass, wasow_basis, split_block, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
 
 """
@@ -73,6 +75,8 @@ include("Equations.jl")
 include("Reference.jl")
 include("Shooting.jl")
 
+layer_parameters(::GGJModel, surface, equil; kwargs...) = ggj_parameters(surface, equil; kwargs...)
+
 # A shooting model carrying options forwards them to the option-free one.
 function solve_inner(m::GGJModel{:shooting}, params::GGJParameters, γ::Number; kwargs...)
     m isa _BareGGJ && throw(MethodError(solve_inner, (m, params, γ)))
@@ -86,7 +90,7 @@ function _ggj_options(solver::Symbol)
     throw(ArgumentError("GGJModel: unknown solver :$solver (expected :ray, :galerkin or :shooting)"))
 end
 
-export GGJModel, GGJParameters
+export GGJModel, GGJParameters, ggj_parameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
 
 end # module GGJ

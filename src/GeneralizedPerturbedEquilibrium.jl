@@ -73,7 +73,7 @@ include("Rerun.jl")
 # constructor and the forcing description, re-exported so a user needs one `using`.
 using .ForceFreeStates: AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult
 using .ForceFreeStates: MatchProblem
-using .InnerLayer: GGJModel, SLAYERModel
+using .InnerLayer: GGJModel, CCCModel, SLAYERModel
 using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
@@ -305,7 +305,7 @@ export main, write_imas
 export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fields
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
-export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
+export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, CCCModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
 

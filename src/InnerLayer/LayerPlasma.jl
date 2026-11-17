@@ -55,3 +55,16 @@ function layer_omega_E(equil, surfaces)
     spline = SLAYER._slayer_profiles(data, nothing).profiles.omega_E
     return Float64[spline(s.psifac) for s in surfaces]
 end
+
+"""
+    layer_omega_star_e(equil, surfaces) -> Vector{Float64}
+
+Electron diamagnetic frequency per unit n, (2π/χ₁)(T_e n_e′/n_e + T_e′) in rad/s with T_e in eV and ′ = d/dψ_N, at each
+rational surface of `surfaces`, from the equilibrium's kinetic data; the SLAYER layer's ω*ₑ divided by n.
+"""
+function layer_omega_star_e(equil, surfaces)
+    profiles = SLAYER._slayer_profiles(_layer_kinetic_data(equil, "electron diamagnetic frequency"), nothing).profiles
+    chi1 = 2π * equil.psio
+    return Float64[(2π / chi1) * (profiles.T_e(ψ) * profiles.n_e(ψ; deriv=DerivOp(1)) / profiles.n_e(ψ) + profiles.T_e(ψ; deriv=DerivOp(1)))
+                   for ψ in (s.psifac for s in surfaces)]
+end

@@ -19,7 +19,7 @@ fields are empty when the solve kept no Galerkin basis; the inner fields are emp
   - `xi`, `xi_deriv`: `(mpert, ngrid, ncoil)` matched outer ξ and ξ′, one column per coil.
   - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it; empty unless the
     inner model returns real-ψ profiles (`GGJModel(; solver=:galerkin)` or `GGJModel(; real_profiles=true)`).
-  - `inner_params`: per-surface `GGJParameters` used.
+  - `inner_params`: per-surface layer parameters used (`GGJParameters`, `CCCParameters`).
   - `model`: the inner-layer model solved, with its backend options.
   - `problem`: the [`MatchProblem`](@ref) solved, with its per-surface η, ρ and rotation.
 """
@@ -36,7 +36,7 @@ struct MatchResult{P}
     inner_psi::Vector{Vector{Float64}}
     inner_xi::Vector{Matrix{ComplexF64}}
     inner_b::Vector{Matrix{ComplexF64}}
-    inner_params::Vector{InnerLayer.GGJParameters}
+    inner_params::Vector{<:InnerLayer.ToroidalLayerParameters}
     model::InnerLayer.InnerLayerModel
     problem::P
 end
@@ -90,20 +90,17 @@ function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, m::MatchResult)
         out_h5["$g/Inner/b_$i"] = m.inner_b[i]
     end
     out_h5["$g/residual"] = m.residual
-    if !isempty(m.inner_params)
-        for f in (:E, :F, :G, :H, :K, :M)
-            out_h5["$g/InnerParams/$(f)"] = [getfield(pp, f) for pp in m.inner_params]
-        end
-        # Literature names, matching the Tearing PerSurface mapping for the same fields.
-        out_h5["$g/InnerParams/tau_A"] = [pp.taua for pp in m.inner_params]
-        out_h5["$g/InnerParams/tau_R"] = [pp.taur for pp in m.inner_params]
-        out_h5["$g/InnerParams/dVdpsi"] = [pp.v1 for pp in m.inner_params]
+    # The layer model's per-surface parameters, the same columns as the Tearing PerSurface group.
+    columns = isempty(m.inner_params) ? [] : InnerLayer.layer_parameter_columns(m.inner_params)
+    for (name, column) in columns
+        out_h5["$g/InnerParams/$name"] = column.values
     end
     a = attrs(out_h5[g])
     a["inner_model"] = InnerLayer.model_name(m.model)
-    m.model isa InnerLayer.GGJModel && (a["inner_model_options"] = string(m.model.options))
+    m.model isa InnerLayer.ToroidalLayerModel && (a["inner_model_options"] = string(m.model.options))
     inner = ["$g/Inner/$(v)_$i" => meta for i in eachindex(m.inner_psi) for (v, meta) in _MATCH_INNER_H5_ANNOTATIONS]
-    Utilities.HDF5Annotations.annotate!(out_h5, vcat(MATCH_H5_ANNOTATIONS, inner))
+    params = ["$g/InnerParams/$name" => (; column.long_name, column.units, _MATCH_SURF...) for (name, column) in columns]
+    Utilities.HDF5Annotations.annotate!(out_h5, vcat(MATCH_H5_ANNOTATIONS, inner, params))
     return nothing
 end
 
@@ -121,16 +118,7 @@ const MATCH_H5_ANNOTATIONS = [
     "SingularSurfaces/Match/reconnected_flux" =>
         (; long_name="reconnected flux Δ_coil + Δ_outᵀ·cout per surface parity, per unit coil-response column", dims=("surface_parity", "coil")),
     "SingularSurfaces/Match/rpec_eig" => (; long_name="forced eigenvalue γ = 2πi·n·f at each surface", units="rad/s", _MATCH_SURF...),
-    "SingularSurfaces/Match/residual" => (; long_name="relative residual of the matching linear solve"),
-    "SingularSurfaces/Match/InnerParams/E" => (; long_name="Glasser-Greene-Johnson coefficient E per surface", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/F" => (; long_name="Glasser-Greene-Johnson coefficient F per surface", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/G" => (; long_name="Glasser-Greene-Johnson coefficient G per surface", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/H" => (; long_name="Glasser-Greene-Johnson coefficient H per surface", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/K" => (; long_name="Glasser-Greene-Johnson coefficient K per surface", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/M" => (; long_name="Glasser-Greene-Johnson coefficient M per surface", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/tau_A" => (; long_name="Alfvén time τ_A per surface", units="s", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/tau_R" => (; long_name="resistive diffusion time τ_R per surface", units="s", _MATCH_SURF...),
-    "SingularSurfaces/Match/InnerParams/dVdpsi" => (; long_name="dV/dψ_N at each surface", units="m^3", _MATCH_SURF...)
+    "SingularSurfaces/Match/residual" => (; long_name="relative residual of the matching linear solve")
 ]
 const _MATCH_INNER_H5_ANNOTATIONS = [
     "psi" => (; long_name="normalized poloidal flux ψ_N grid across the inner layer of this surface", dims=("inner_psi",)),

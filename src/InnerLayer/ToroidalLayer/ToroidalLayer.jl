@@ -40,9 +40,15 @@ subtype only through this interface, so each model keeps whatever numbers its eq
   - [`layer_rows`](@ref) and [`layer_mass`](@ref) - the layer equations;
   - [`wasow_basis`](@ref), [`split_block`](@ref) and [`power_exponents`](@ref) - the far-field Wasow construction;
   - [`default_ray_angle`](@ref), [`parabolic_rate`](@ref), [`ohm_rate`](@ref) and [`fast_rates`](@ref) - the
-    far-field rates that set the ray contour and mesh;
+    far-field rates that set the ray contour and mesh, with optional [`parabolic_resolution_rate`](@ref) and
+    [`ray_angle_admissible`](@ref) for models whose exponential pairs have different rates;
   - [`inner_Q`](@ref), [`rescale_delta`](@ref) and [`profile_conversions`](@ref) - the normalization between the
-    physical growth rate, the outer region and the layer variables.
+    physical growth rate, the outer region and the layer variables;
+  - [`mercier_di`](@ref), [`growth_rate_scale`](@ref) and [`layer_parameter_columns`](@ref) - what the tearing and
+    matching stages read.
+
+A model builds its parameters with [`layer_parameters`](@ref) and checks its own inputs with
+[`check_layer_inputs`](@ref).
 
 Both backends impose parity at x = 0 (GWP2016 Sec. III): a model's equations must be invariant under x → −x with Ψ of
 opposite parity to Ξ and Υ, so the even solution (Ψ(0) = Ξ′(0) = Υ′(0) = 0) and the odd one (Ψ′(0) = Ξ(0) = Υ(0) = 0)
@@ -132,6 +138,22 @@ Decay rate per unit s² of the slowest parabolic exponential pair along the ray 
 function parabolic_rate end
 
 """
+    parabolic_resolution_rate(params, Q::ComplexF64, θ) -> Float64
+
+Rate per unit s² of the fastest parabolic exponential pair along the ray, which every Hermite cell resolves;
+[`parabolic_rate`](@ref) by default, when the pairs share one rate.
+"""
+parabolic_resolution_rate(params::ToroidalLayerParameters, Q::ComplexF64, θ::Real) = parabolic_rate(params, Q, θ)
+
+"""
+    ray_angle_admissible(params, Q::ComplexF64, θ) -> Bool
+
+Whether every exponential family decays at every angle between the real axis and θ, so the decaying pair on the
+ray continues the real-axis one; `true` by default.
+"""
+ray_angle_admissible(::ToroidalLayerParameters, ::ComplexF64, ::Real) = true
+
+"""
     ohm_rate(params, Q::ComplexF64) -> Float64
 
 Rate of the fast exponential pair from the resistive Ohm's-law balance.
@@ -145,6 +167,43 @@ Sum of the fast exponential rates every Hermite cell resolves, alongside the par
 """
 function fast_rates end
 
+"""
+    layer_parameters(model, surface, equil; eta, rho, gamma=5/3, ising=0) -> ToroidalLayerParameters
+
+The per-surface parameters `model` solves on at the singular surface `surface` of `equil`, from its resistive geometry
+`surface.restype`, the local resistivity `eta` in Ω·m, the mass density `rho` in kg/m³, the ratio of specific heats
+`gamma` and the surface's index `ising`, core to edge.
+"""
+function layer_parameters end
+
+"""
+    check_layer_inputs(model, nsurfaces) -> nothing
+
+Throws if the inputs `model` carries do not fit a problem with `nsurfaces` rational surfaces; a no-op by default.
+"""
+check_layer_inputs(::ToroidalLayerModel, ::Integer) = nothing
+
+"""
+    mercier_di(params) -> Float64
+
+Mercier interchange index D_I of the surface; the layer needs D_I < 0.
+"""
+function mercier_di end
+
+"""
+    growth_rate_scale(params) -> Float64
+
+The rate Q₀ in 1/s that scales the physical growth rate to the layer's, Q = γ/Q₀.
+"""
+function growth_rate_scale end
+
+"""
+    layer_parameter_columns(params::AbstractVector) -> Vector{Pair{String,NamedTuple}}
+
+The per-surface parameters as output columns, `name => (; values, long_name, units)`, one value per surface.
+"""
+function layer_parameter_columns end
+
 include("InnerAsymptotics.jl")
 include("Galerkin.jl")
 include("Ray.jl")
@@ -152,7 +211,9 @@ include("Backends.jl")
 
 export ToroidalLayerModel, ToroidalLayerParameters
 export layer_rows, layer_mass, wasow_basis, split_block, power_exponents, default_ray_angle, parabolic_rate, ohm_rate, fast_rates
+export parabolic_resolution_rate, ray_angle_admissible
 export inner_Q, rescale_delta, profile_conversions
+export layer_parameters, check_layer_inputs, mercier_di, growth_rate_scale, layer_parameter_columns
 export solve_ray, pick_smax, delta_convergence, solution_profile, asymptotic_profile
 export ray_response, ray_profile, galerkin_response, galerkin_profile, backend_options
 
