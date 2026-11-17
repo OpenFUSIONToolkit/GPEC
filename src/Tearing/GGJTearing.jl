@@ -6,23 +6,23 @@
 
 # The raw side-major Δ′ the determinant needs, after checking it is aligned with ordered surfaces.
 function _ggj_delta_prime_raw(ffs)
-    ffs.npert == 1 || throw(ArgumentError("GGJ tearing is single-n; the result spans n = $(ffs.nlow):$(ffs.nhigh)"))
+    ffs.npert == 1 || throw(ArgumentError("Toroidal-layer tearing is single-n; the result spans n = $(ffs.nlow):$(ffs.nhigh)"))
     surfaces = ffs.surfaces
     psi = Float64[s.psifac for s in surfaces]
-    issorted(psi; lt=<=) || throw(ArgumentError("GGJ tearing needs distinct surfaces ordered core to edge; got ψ = $psi"))
+    issorted(psi; lt=<=) || throw(ArgumentError("Toroidal-layer tearing needs distinct surfaces ordered core to edge; got ψ = $psi"))
     dp = ffs.delta_prime
-    dp === nothing && throw(ArgumentError("GGJ tearing needs the raw Δ′ matrix; solve with Riccati() and vac_flag=true, or Galerkin(; rpec_flag=true)"))
+    dp === nothing && throw(ArgumentError("Toroidal-layer tearing needs the raw Δ′ matrix; solve with Riccati() and vac_flag=true, or Galerkin(; rpec_flag=true)"))
     size(dp.raw) == (2length(surfaces), 2length(surfaces)) ||
-        throw(ArgumentError("GGJ tearing: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $(length(surfaces)) surfaces"))
-    all(isfinite, dp.raw) || throw(ArgumentError("GGJ tearing: the raw Δ′ matrix has non-finite entries"))
+        throw(ArgumentError("Toroidal-layer tearing: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $(length(surfaces)) surfaces"))
+    all(isfinite, dp.raw) || throw(ArgumentError("Toroidal-layer tearing: the raw Δ′ matrix has non-finite entries"))
     return dp.raw
 end
 
 # η and ρ given on the problem, as MatchProblem takes them: a scalar or one value per surface, core to edge.
 function _ggj_per_surface(value, name, count)
     values = value isa Real ? fill(Float64(value), count) : collect(Float64, value)
-    length(values) == count || throw(ArgumentError("GGJ tearing: $name has length $(length(values)), expected $count"))
-    all(v -> isfinite(v) && v > 0, values) || throw(ArgumentError("GGJ tearing: $name must be positive and finite"))
+    length(values) == count || throw(ArgumentError("Toroidal-layer tearing: $name has length $(length(values)), expected $count"))
+    all(v -> isfinite(v) && v > 0, values) || throw(ArgumentError("Toroidal-layer tearing: $name must be positive and finite"))
     return values
 end
 
@@ -32,7 +32,7 @@ function _ggj_layer_inputs(prob::TearingProblem)
     ffs = prob.ffs
     surfaces = ffs.surfaces
     count = length(surfaces)
-    InnerLayer._require_layer_inputs("GGJ tearing", ffs.equil; prob.eta, prob.rho)
+    InnerLayer._require_layer_inputs("Toroidal-layer tearing", ffs.equil; prob.eta, prob.rho)
     eta = prob.eta === nothing ? InnerLayer.layer_eta(ffs.equil, surfaces) : prob.eta
     rho = prob.rho === nothing ? InnerLayer.layer_rho(ffs.equil, surfaces) : prob.rho
     return _ggj_per_surface(eta, "eta", count), _ggj_per_surface(rho, "rho", count)
@@ -44,7 +44,7 @@ function _ggj_omega_E(prob::TearingProblem)
     ffs = prob.ffs
     data = ffs.equil.kinetic
     data === nothing || data.omega_E !== nothing ||
-        @warn "GGJ tearing: the kinetic data have no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
+        @warn "Toroidal-layer tearing: the kinetic data have no omega_E; surfaces without an omega_E_kHz override assume Ω_E = 0, so their lab-frame ω equals their E×B-frame ω."
     return _omega_E_per_surface(prob, ["$(only(s.m))/$(only(s.n))" for s in ffs.surfaces], InnerLayer.layer_omega_E(ffs.equil, ffs.surfaces))
 end
 
@@ -58,10 +58,10 @@ function _check_ggj_inputs(prob::TearingProblem, config::TearingConfig, model::T
             throw(ArgumentError("TearingProblem: `$key` is a SLAYER input; $(nameof(typeof(model))) does not use it"))
     end
     prob.gamma > 0 && isfinite(prob.gamma) || throw(ArgumentError("TearingProblem: gamma (ratio of specific heats) must be positive and finite"))
-    config.gamma_range === nothing && throw(ArgumentError("GGJ tearing needs TearingConfig(; gamma_range=(γ_min, γ_max)) in 1/s"))
-    config.omega_range === nothing && throw(ArgumentError("GGJ tearing needs TearingConfig(; omega_range=(ω_min, ω_max)) in rad/s"))
-    config.root_classification in (:auto, :winding) || throw(ArgumentError("GGJ tearing classifies roots by winding number"))
-    config.scan_mode === :amr && isempty(config.boxes) || throw(ArgumentError("GGJ tearing scans one adaptive box; scan_mode and boxes are SLAYER settings"))
+    config.gamma_range === nothing && throw(ArgumentError("Toroidal-layer tearing needs TearingConfig(; gamma_range=(γ_min, γ_max)) in 1/s"))
+    config.omega_range === nothing && throw(ArgumentError("Toroidal-layer tearing needs TearingConfig(; omega_range=(ω_min, ω_max)) in rad/s"))
+    config.root_classification in (:auto, :winding) || throw(ArgumentError("Toroidal-layer tearing classifies roots by winding number"))
+    config.scan_mode === :amr && isempty(config.boxes) || throw(ArgumentError("Toroidal-layer tearing scans one adaptive box; scan_mode and boxes are SLAYER settings"))
     return nothing
 end
 
@@ -80,7 +80,7 @@ function CommonSolve.solve(prob::TearingProblem, model::ToroidalLayerModel; conf
     # The layer needs D_I < 0 at every surface; check them all before any scan runs.
     unstable = [labels[k] for (k, p) in enumerate(params) if InnerLayer.mercier_di(p) >= 0]
     isempty(unstable) ||
-        throw(ArgumentError("GGJ tearing: the layer needs Mercier-stable surfaces (D_I < 0); $(join(unstable, ", ")) have D_I ≥ 0"))
+        throw(ArgumentError("Toroidal-layer tearing: the layer needs Mercier-stable surfaces (D_I < 0); $(join(unstable, ", ")) have D_I ≥ 0"))
     coupled = prob.coupling_mode === :coupled
     Ω_E = _ggj_omega_E(prob)
     # A surface with no known rotation applies no shift.
@@ -89,7 +89,7 @@ function CommonSolve.solve(prob::TearingProblem, model::ToroidalLayerModel; conf
     # A coupled root near a surface's own frame sits near ω = n·Ω_E,k; outside the box it would read as no root.
     if coupled
         outside = [labels[k] for k in 1:count if !(config.omega_range[1] <= n * Ω_shift[k] <= config.omega_range[2])]
-        isempty(outside) || @warn "GGJ tearing: the E×B frames of $(join(outside, ", ")) (ω = n·Ω_E) lie outside omega_range = " *
+        isempty(outside) || @warn "Toroidal-layer tearing: the E×B frames of $(join(outside, ", ")) (ω = n·Ω_E) lie outside omega_range = " *
               "$(config.omega_range); a root near those frequencies would be missed."
     end
 

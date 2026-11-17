@@ -190,7 +190,7 @@
             foreach(_check_display, (still, coupled))
             foreach(_check_display, still.per_surface_extraction)
             # The LAR deck carries no kinetic profiles, so a missing ρ is named in the error.
-            @test_throws "GGJ tearing: give rho, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7), GGJModel();
+            @test_throws "Toroidal-layer tearing: give rho, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7), GGJModel();
                 config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
             @test_throws "SLAYER input" solve(
                 TearingProblem(ffs; eta=1e-7, rho=1e-7,

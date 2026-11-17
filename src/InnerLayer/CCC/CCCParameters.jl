@@ -23,6 +23,7 @@ struct CCCParameters <: ToroidalLayerParameters
     Qstar::Float64
     mperp::Float64
     function CCCParameters(ggj::GGJParameters, Qstar::Real, mperp::Real)
+        isfinite(Qstar) || throw(ArgumentError("CCCParameters: Qstar = $Qstar must be finite"))
         mperp > 0 || throw(ArgumentError("CCCParameters: mperp = $mperp must be positive"))
         return new(ggj, Float64(Qstar), Float64(mperp))
     end

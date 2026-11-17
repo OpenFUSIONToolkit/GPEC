@@ -159,13 +159,14 @@ end
     parabolic_scales(params::CCCParameters, Q) -> SVector{2,ComplexF64}
 
 Scales σⱼ of the two exponential families exp(±x²/(2σⱼ)) at large x: the roots σ² = z of
-z² − (1 + m + KQQ*²)Q z + mQ² = 0, Kim, Cho & Choi (1988) Eq. (2) with m = M⊥/M; (√Q, √m·√Q) at Q* = 0.
+z² − (1 + m + KQQ*²)Q z + mQ² = 0, Kim, Cho & Choi (1988) Eq. (2) with m = M⊥/M; (√Q, √m·√Q) at Q* = 0. σⱼ = √Q·√wⱼ
+with wⱼ = z/Q, so σⱼ is continuous in Q off the negative real axis, as GGJ's √Q is.
 """
 function parabolic_scales(p::CCCParameters, Q::ComplexF64)
     m = p.mperp
     b = 1 + m + p.ggj.K * Q * p.Qstar^2
     d = sqrt(b * b - 4 * m)
-    return SVector(sqrt(Q * (b + d) / 2), sqrt(Q * (b - d) / 2))
+    return sqrt(Q) .* SVector(sqrt((b + d) / 2), sqrt((b - d) / 2))
 end
 
 # The ray centred between the two families, θ = (arg σ₁ + arg σ₂)/4, so both decay along it.
@@ -176,12 +177,12 @@ default_ray_angle(p::CCCParameters, Q::ComplexF64) = ((σ1, σ2) = parabolic_sca
 parabolic_rate(p::CCCParameters, Q::ComplexF64, θ::Real) = minimum(real(cis(2θ) / σ) for σ in parabolic_scales(p, Q))
 parabolic_resolution_rate(p::CCCParameters, Q::ComplexF64, θ::Real) = maximum(abs(cis(2θ) / σ) for σ in parabolic_scales(p, Q))
 
-# Both families decay at every angle in [0, θ]; the condition is linear in the angle, so the end points decide it.
+# Each family decays at the rate cos(2θ − arg σⱼ)/|σⱼ|, so for |θ| < π/2 decay at both end points implies decay on [0, θ].
 ray_angle_admissible(p::CCCParameters, Q::ComplexF64, θ::Real) = parabolic_rate(p, Q, 0.0) > 0 && parabolic_rate(p, Q, θ) > 0
 
-# Fast Ohm pair |√(Q + iQ*)| and Υ-family pair √(|Q(G+KF) + iKQ*(E+F)|/m).
+# Fast Ohm pair |√(Q + iQ*)| and Υ-family pair √(max(|Q(G+KF)|, |KQ*(E+F)|)/m), nonzero where the two terms cancel.
 ohm_rate(p::CCCParameters, Q::ComplexF64) = abs(sqrt(Q + ComplexF64(0, p.Qstar)))
 function fast_rates(p::CCCParameters, Q::ComplexF64)
     g = p.ggj
-    return ohm_rate(p, Q) + sqrt(abs(Q * (g.G + g.K * g.F) + ComplexF64(0, p.Qstar) * g.K * (g.E + g.F)) / p.mperp)
+    return ohm_rate(p, Q) + sqrt(max(abs(Q * (g.G + g.K * g.F)), abs(p.Qstar * g.K * (g.E + g.F))) / p.mperp)
 end

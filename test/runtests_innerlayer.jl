@@ -280,8 +280,33 @@ end
         for Q in (0.1 + 0.05im, 5.0im)
             g = TL.solve_ray(q4, Q)
             @test reldiff(TL.solve_ray(ccc(), Q).Δ, g.Δ) < 1e-8          # same equations, separate basis and split
-            @test reldiff(TL.solve_ray(ccc(; Qstar=1e-7, mperp=1 + 1e-7), Q).Δ, g.Δ) < 1e-5
         end
+        # The departure from GGJ is linear in Q* and in M⊥/M − 1: doubling the step doubles it. At Q = 5i the M⊥/M
+        # effect is ~1e-8, below the solver's accuracy.
+        withQstar(x) = ccc(; Qstar=x)
+        withmperp(x) = ccc(; mperp=1 + x)
+        for (Q, models) in ((0.1 + 0.05im, (withQstar, withmperp)), (5.0im, (withQstar,)))
+            Δ0 = TL.solve_ray(q4, Q).Δ
+            for f in models
+                Δ1, Δ2 = TL.solve_ray(f(1e-3), Q).Δ, TL.solve_ray(f(2e-3), Q).Δ
+                @test maximum(abs.((Δ2 .- Δ0) ./ (2 .* (Δ1 .- Δ0)) .- 1)) < 1e-2
+            end
+        end
+    end
+
+    @testset "Kim, Cho & Choi (1988) Fig. 2b tearing root" begin
+        # Their surface at Q* = 0.05: the zero of Δ₋ on branch A, read from the figure as −0.019 − 0.062i.
+        kim = IL.CCCParameters(; E=-0.01, F=0.0, G=100.0, H=0.0, K=100.0, taua=1.0, taur=1.0, Qstar=0.05)
+        Δm(Q) = TL.solve_ray(kim, Q).Δ[2]
+        a, b = -0.0184 - 0.0626im, (-0.0184 - 0.0626im) * (1 + 1e-3)
+        fa, fb = Δm(a), Δm(b)
+        for _ in 1:20
+            abs(b - a) < 1e-10 && break
+            a, fa, b = b, fb, b - fb * (b - a) / (fb - fa)
+            fb = Δm(b)
+        end
+        @test b ≈ -0.0183834 - 0.0626106im rtol = 1e-5
+        @test abs(b - (-0.019 - 0.062im)) < 2e-3
     end
 
     @testset "model and guards" begin
@@ -302,8 +327,15 @@ end
         eq = (; psio=1.0, params=(; volume=1.0), kinetic=nothing)
         @test IL.layer_parameters(m, surf, eq; eta=1e-7, rho=1e-7, ising=2).Qstar == 0.2
         @test [c.first for c in IL.layer_parameter_columns([ccc(; Qstar=0.3)])] == ["E", "F", "G", "H", "K", "M", "tau_A", "tau_R", "dVdpsi", "Q_star", "M_perp_ratio"]
-        # An angle past the decaying sector of the slower family is refused.
-        @test_throws ArgumentError TL.solve_ray(p, 5.0im; θ=1.2)
+        # Just past Re Q ≈ −0.041 a root of Kim Eq. 2 crosses the negative real axis: the default angle stays continuous, and the
+        # slower family, still decaying along the ray, no longer decays on the real axis, so the solve is refused.
+        p13 = ccc(; Qstar=1.3)
+        θa, θb = TL.default_ray_angle(p13, -0.040 + 0.5im), TL.default_ray_angle(p13, -0.042 + 0.5im)
+        @test abs(θb - θa) < 1e-2
+        @test TL.ray_angle_admissible(p13, -0.040 + 0.5im, θa)
+        @test TL.parabolic_rate(p13, -0.042 + 0.5im, θb) > 0 && !TL.ray_angle_admissible(p13, -0.042 + 0.5im, θb)
+        @test_throws "stop decaying between the real axis and the ray" TL.solve_ray(p13, -0.042 + 0.5im)
+        @test_throws "must be finite" IL.CCCParameters(q4, NaN, 1.0)
         @test IL.CCCParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, Qstar=0.5).ggj.E == q4.E
     end
 end
