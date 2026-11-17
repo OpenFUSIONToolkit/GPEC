@@ -84,6 +84,14 @@ The EPED1.6 model. Replaces the linear-in-n diamagnetic threshold with a two-seg
 
 ---
 
+> H. R. Wilson, P. B. Snyder, G. T. A. Huysmans, and R. L. Miller, "Numerical studies of edge localized instabilities in tokamaks,"
+> *Physics of Plasmas* **9**, 1277 (2002).
+> DOI: [10.1063/1.1459058](https://doi.org/10.1063/1.1459058)
+
+The ELITE formulation. Source of the perpendicular-inertia growth-rate model that `PerpendicularInertia` and `growth_rate` follow.
+
+---
+
 ## PerturbedEquilibrium
 
 > J.-K. Park, A. H. Boozer, and A. H. Glasser, "Computation of three-dimensional tokamak and spherical torus equilibria,"
