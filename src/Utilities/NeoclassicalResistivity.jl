@@ -179,16 +179,31 @@ end
 # Trapped fraction
 
 """
-    trapped_fraction_nodes(n=16) -> (lambda, weight)
+    trapped_fraction_nodes(h_min; n=16, ratio=8) -> (lambda, weight)
 
-Pitch-angle nodes for [`trapped_fraction`](@ref): `n`-point Gauss-Legendre in x ∈ [0, 1] with λ = 1 − x², so that
-∫₀¹ λ g(λ) dλ ≈ Σₖ weight[k] g(lambda[k]). The x map removes the √ edge behavior at λ → 1; 16 nodes give f_t to ~1e-9.
+Pitch-angle nodes for [`trapped_fraction`](@ref) on a surface with h_min = B_min/B_max, such that
+∫₀¹ λ g(λ) dλ ≈ Σₖ weight[k] g(lambda[k]). With λ = 1 − x², the integrand varies on the scale x ~ √(1 − h_min) near
+x = 0, so the nodes are `n`-point Gauss-Legendre on the panels [0, s], [s, ratio·s], … , 1 with s = √(1 − h_min).
+On the model surface B ∝ 1/(1 + ε cos θ) the defaults give f_t to within 1e-10 for 0 ≤ ε ≤ 0.9, with 16 to 112 nodes.
 """
-function trapped_fraction_nodes(n::Integer=16)
-    x, w = gausslegendre(n)
-    x = 0.5 .* (x .+ 1.0)
-    w = 0.5 .* w
-    return 1.0 .- x .^ 2, w .* 2.0 .* x .* (1.0 .- x .^ 2)
+function trapped_fraction_nodes(h_min::Real; n::Integer=16, ratio::Real=8)
+    ratio > 1 || throw(ArgumentError("trapped_fraction_nodes: ratio must be > 1"))
+    edges = [0.0]
+    s = sqrt(clamp(1.0 - h_min, 0.0, 1.0))
+    while 0 < s < 1
+        push!(edges, s)
+        s *= ratio
+    end
+    push!(edges, 1.0)
+    xg, wg = gausslegendre(n)
+    lambda = Float64[]
+    weight = Float64[]
+    for (a, b) in zip(edges[1:end-1], edges[2:end])
+        x = @. a + 0.5 * (b - a) * (xg + 1.0)
+        append!(lambda, @. 1.0 - x^2)
+        append!(weight, @. 0.5 * (b - a) * wg * 2.0 * x * (1.0 - x^2))
+    end
+    return lambda, weight
 end
 
 """

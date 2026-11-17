@@ -87,12 +87,12 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     v2 = profiles.dVdpsi_deriv(psi_f)
     q = profiles.q_spline(psi_f)
 
-    # θ-integrands (see file header) plus running B_max (f_trap) and R extrema (ε).
+    # θ-integrands (see file header) plus running extrema of B (f_trap) and R (ε).
     ntheta = length(equil.rzphi_ys)
-    lambda, lambda_weight = Utilities.NeoclassicalResistivity.trapped_fraction_nodes()
-    ff = zeros(Float64, ntheta, 8 + length(lambda))
+    ff = zeros(Float64, ntheta, 8)
     weight = zeros(Float64, ntheta)
     B_max = -Inf
+    B_min = Inf
     R_max = -Inf
     R_min = Inf
     for itheta in 1:ntheta
@@ -117,6 +117,7 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
 
         B_here = sqrt(bsq)
         B_max = max(B_max, B_here)
+        B_min = min(B_min, B_here)
         R_max = max(R_max, r)
         R_min = min(R_min, r)
 
@@ -130,10 +131,9 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
         ff[itheta, 8] = dpsisq
         weight[itheta] = jac / v1
     end
-    # The pitch-angle columns need B_max over the whole surface, so they are filled after the θ loop.
-    for itheta in 1:ntheta, (k, lam) in enumerate(lambda)
-        ff[itheta, 8+k] = sqrt(max(1.0 - lam * ff[itheta, 7] / B_max, 0.0))
-    end
+    # The pitch-angle nodes and columns need B_min and B_max over the whole surface, so they follow the θ loop.
+    lambda, lambda_weight = Utilities.NeoclassicalResistivity.trapped_fraction_nodes(B_min / B_max)
+    ff = hcat(ff, @. sqrt(max(1.0 - lambda' * ff[:, 7] / B_max, 0.0)))
     ff .*= weight
     # Snap the repeated endpoint exactly equal to the start
     @views ff[end, :] .= ff[1, :]
