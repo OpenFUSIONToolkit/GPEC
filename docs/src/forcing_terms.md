@@ -1,7 +1,7 @@
 # Forcing Terms
 
 `ForcingTerms` specifies the external magnetic perturbation that drives the perturbed equilibrium: the spectrum of the normal field on the control surface at `psilim`, given either as a file of (m, n) amplitudes or computed by Biot–Savart from coil geometry.
-The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs; its result is the `RMPField` that `perturbed_equilibrium` applies to the plasma response.
+The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs. Every source it holds (a `forcing_data_file`, coil sets) drives the plasma, and their spectra are summed into the `ForcingField` that `perturbed_equilibrium` applies to the plasma response.
 
 ## Normalization
 
@@ -39,17 +39,15 @@ end
 
 ## Coils
 
-`forcing_data_format = "coil"` computes the field from coil geometry: the plasma boundary is sampled on an `mtheta_coil × nzeta_coil` grid, the Biot–Savart field of every coil set is evaluated there, projected onto the normal flux and Fourier decomposed.
+Coil sets compute the field from coil geometry: the plasma boundary is sampled on an `mtheta_coil × nzeta_coil` grid, the Biot–Savart field of every coil set is evaluated there, projected onto the normal flux and Fourier decomposed.
 The toroidal angle of each observation point includes the straight-field-line offset ``\nu(\psi, \theta)`` and the helicity ``\mathrm{sign}(B_T)\,\mathrm{sign}(I_p)`` of the equilibrium, without which the decomposition would be wrong.
 Each `[[ForcingTerms.coil_set]]` block supplies one coil set, selected by `source`; shifts and tilts (`shiftx/y/z`, `tiltx/y/z`, `n_tilt`, …) apply to every source, which is what the [Error Fields](error_fields.md) stage sweeps.
 From `examples/DIIID-like_ideal_example/gpec.toml` (the first block) and the other sources:
 
 ```toml
 [ForcingTerms]
-forcing_data_format = "coil"
 machine = "d3d"
 mtheta_coil = 480
-nzeta_coil = 32
 
 # ASCII .dat file, resolved to {dat_dir}/{machine}_{name}.dat
 [[ForcingTerms.coil_set]]

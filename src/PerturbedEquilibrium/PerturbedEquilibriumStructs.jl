@@ -39,7 +39,7 @@ end
 The source-independent half of a perturbed equilibrium: the control-surface response and
 singular-coupling operators of one force-free-states result, built once by
 [`plasma_response`](@ref) and applied to any number of external fields by
-`perturbed_equilibrium(resp, rmp)` (Park et al., Phys. Plasmas 14, 052110 (2007); Park,
+`perturbed_equilibrium(resp, field)` (Park et al., Phys. Plasmas 14, 052110 (2007); Park,
 Phys. Plasmas 16, 056115 (2009)). Operators the result could not supply (no free-boundary
 energies or no ξ solution) are left empty, and forcing such a response yields only the forcing
 spectra.
@@ -155,7 +155,7 @@ The perturbed equilibrium driven by one external field: the forcing materialized
 ## Fields
 
   - `response::PlasmaResponse` - The operators this field was applied to.
-  - `forcing` - The [`ForcingTerms.RMPField`](@ref) applied.
+  - `forcing` - The [`ForcingTerms.ForcingField`](@ref) applied.
   - `forcing_modes::Vector{ForcingMode}` - The materialized control-surface forcing Φ_x.
   - `coil_sets::Vector{CoilSet}` - Coil geometry used (coil-format forcing); captured for the gpec.h5 rerun snapshot.
   - `regularization_width::Float64` - Width the profiles were reconstructed with (Fortran `reg_spot`): 0, no
@@ -210,7 +210,7 @@ Torque response (kinetic forward solves with `compute_torque_response`):
 """
 @kwdef mutable struct PerturbedEquilibriumState
     response::PlasmaResponse
-    forcing::Union{Nothing,ForcingTerms.RMPField} = nothing
+    forcing::Union{Nothing,ForcingTerms.ForcingField} = nothing
     forcing_modes::Vector{ForcingMode} = ForcingMode[]
     coil_sets::Vector{CoilSet} = CoilSet[]
     regularization_width::Float64 = 0.0

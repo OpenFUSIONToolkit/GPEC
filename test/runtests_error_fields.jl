@@ -529,7 +529,7 @@ include("error_fields_fixture.jl")
             toml_path = joinpath(dir, "gpec.toml")
             inputs = TOML.parsefile(toml_path)
             inputs["ForcingTerms"] = Dict{String,Any}(
-                "forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
+                "mtheta_coil" => 240, "nzeta_coil" => 32,
                 "coil_set" => [
                     Dict{String,Any}("name" => "hoop_tilted", "source" => "pf_hoop", "radius" => 1.5,
                         "height" => 0.4, "currents" => [2.0e3], "tiltx" => [3.0])

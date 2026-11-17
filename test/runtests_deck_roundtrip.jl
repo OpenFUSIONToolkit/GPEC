@@ -62,7 +62,7 @@ end
         ffs = solve(ForceBalanceProblem(equil; deck.force_balance.keywords...), deck.force_balance.algorithm)
         ls = solve(LocalStabilityProblem(ffs.equil; deck.local_stability.problem...), deck.local_stability.algorithm)
         resp = plasma_response(ffs; deck.perturbed_equilibrium.response...)
-        pe = perturbed_equilibrium(resp, RMPField(deck.forcing); deck.perturbed_equilibrium.drive...)
+        pe = perturbed_equilibrium(resp, ForcingField(deck.forcing); deck.perturbed_equilibrium.drive...)
         script_h5 = joinpath(dir, "script.h5")
         foreach(r -> save_to_hdf5(script_h5, r), (ffs, ls, pe))
         @test deck_same(stages(recorded(script_h5), dir), stages(recorded(deck_h5), dir))
@@ -82,7 +82,7 @@ end
         @test replay.pe.forcing_b == pe.forcing_b
 
         # A weighted field has no [ForcingTerms]: the replay drives the recorded control-surface modes.
-        doubled = perturbed_equilibrium(resp, 2 * RMPField(deck.forcing); deck.perturbed_equilibrium.drive...)
+        doubled = perturbed_equilibrium(resp, 2 * ForcingField(deck.forcing); deck.perturbed_equilibrium.drive...)
         weighted_h5 = joinpath(dir, "weighted.h5")
         foreach(r -> save_to_hdf5(weighted_h5, r), (ffs, doubled))
         @test recorded(weighted_h5)["ForcingTerms"]["forcing_data_file"] == "Input/RawInputs/ForcingTerms"

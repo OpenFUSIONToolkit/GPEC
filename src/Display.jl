@@ -11,7 +11,7 @@ using .PerturbedEquilibrium: PerturbedEquilibriumState
 using .KineticForces: MethodResult, KineticForcesState
 using .ErrorFields: MonteCarloResult, RiskResult, EFCCoupling
 using .Tearing: GrowthRateResult
-using .ForcingTerms: RMPSource, RMPSpectrum, RMPFieldSum
+using .ForcingTerms: ForcingFile, ForcingCoils, ForcingSpectrum, ForcingLeaf, ForcingFieldSum
 
 _fmt(x::Real) = @sprintf("%.4g", x)
 _fmt(::Nothing) = "—"
@@ -285,21 +285,21 @@ end
 
 _weight(w) = string(iszero(real(w)) && !iszero(imag(w)) ? _fmt(imag(w)) * "im" : _fmt(w), " × ")
 
-function _rmp_label(f::RMPSource)
-    c = f.ctrl
-    c.forcing_data_format == "coil" || return string(basename(c.forcing_data_file), " (", c.forcing_data_format, ")")
-    sets = [isempty(get(d, "name", "")) ? get(d, "source", "coil set") : d["name"] for d in c.coil_sets_raw]
+_field_label(f::ForcingFile) = string(basename(f.path), " (", f.format, ")")
+function _field_label(f::ForcingCoils)
+    c = f.config
+    sets = [!isempty(sc.name) ? sc.name : !isempty(sc.source) ? sc.source : "coil set" for sc in c.coil_sets]
     return string(isempty(c.machine) ? "" : c.machine * " ", "coils ", _list(sets))
 end
-_rmp_label(f::RMPSpectrum) = string("spectrum of ", _plural(length(f.modes), "mode"), ", n = ", _irange([m.n for m in f.modes]))
+_field_label(f::ForcingSpectrum) = string("spectrum of ", _plural(length(f.modes), "mode"), ", n = ", _irange([m.n for m in f.modes]))
 
-Base.show(io::IO, f::Union{RMPSource,RMPSpectrum}) = print(io, "RMPField(", f.scale == 1 ? "" : _weight(f.scale), _rmp_label(f), ")")
-Base.show(io::IO, f::RMPFieldSum) = print(io, "RMPField(sum of ", _plural(length(f.terms), "term"), ")")
+Base.show(io::IO, f::ForcingLeaf) = print(io, "ForcingField(", f.scale == 1 ? "" : _weight(f.scale), _field_label(f), ")")
+Base.show(io::IO, f::ForcingFieldSum) = print(io, "ForcingField(sum of ", _plural(length(f.terms), "term"), ")")
 
-function Base.show(io::IO, ::MIME"text/plain", f::RMPFieldSum)
-    print(io, "RMPField  sum of ", _plural(length(f.terms), "term"))
+function Base.show(io::IO, ::MIME"text/plain", f::ForcingFieldSum)
+    print(io, "ForcingField  sum of ", _plural(length(f.terms), "term"))
     for t in f.terms
-        print(io, "\n  ", _weight(t.scale), _rmp_label(t))
+        print(io, "\n  ", _weight(t.scale), _field_label(t))
     end
     return nothing
 end

@@ -230,7 +230,7 @@ end
         inputs["PerturbedEquilibrium"] = Dict{String,Any}(
             "compute_singular_coupling" => true)
         inputs["ForcingTerms"] = Dict{String,Any}(
-            "forcing_data_format" => "coil", "mtheta_coil" => 64, "nzeta_coil" => 32,
+            "mtheta_coil" => 64, "nzeta_coil" => 32,
             "coil_set" => [Dict{String,Any}(
                 "dat_file" => coil_dat,
                 "currents" => fill(1.0e3, 6)

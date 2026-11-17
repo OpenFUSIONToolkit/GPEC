@@ -7,7 +7,7 @@ It is the stage that turns a stability calculation into the quantities of error-
 
 The force-free states of [Stability](stability.md) give the displacement inside the plasma for any boundary value, and the [Vacuum](vacuum.md) response gives the field outside it.
 On the control surface at `psilim` the two are joined by requiring continuity of the normal field, which fixes the plasma response to an applied spectrum uniquely ([Park et al. (2007a)](citations.md#PerturbedEquilibrium), [Park et al. (2009)](citations.md#PerturbedEquilibrium)).
-`plasma_response(ffs)` builds the operators of that response once, with no reference to a drive; `perturbed_equilibrium(resp, rmp)` applies them to one external field from [Forcing Terms](forcing_terms.md), so a scan over fields reuses one response.
+`plasma_response(ffs)` builds the operators of that response once, with no reference to a drive; `perturbed_equilibrium(resp, field)` applies them to one external field from [Forcing Terms](forcing_terms.md), so a scan over fields reuses one response.
 `compute_perturbed_equilibrium` is the lower-level form of the same call.
 
 The resonant part of the response is reported at every rational surface as the singular coupling: the pitch-resonant field and current, the island half-width and the Chirikov overlap parameter.
@@ -58,7 +58,7 @@ A kinetic forward solve (`integrator = "Forward"`, `kinetic = "KineticForces"`) 
 With `compute_torque_response = true`, `plasma_response` refers that quadratic form back to the applied root-area-weighted field ``\tilde b`` and stores it at every node as the torque response matrix ``T_{xe}(\psi)``, cumulative in ψ, under `PerturbedEquilibrium/TorqueResponse/`; it is the `T_xe` of the Fortran GPEC, in the basis of the stored response matrices, in N·m/T².
 ``T_{xe}`` is built on the ``+n`` harmonic alone and is therefore twice the physical value, so the cumulative complex torque of an applied spectrum is ``T(\psi) = \tilde b^\dagger T_{xe}(\psi)\, \tilde b / 2`` (`torque_profile` applies the 1/2), with ``\operatorname{Re} T`` the toroidal torque inside ψ, equal to `Energies/toroidal_torque` at the control surface, and ``\operatorname{Im} T = 2n\,\delta W``.
 Only the Hermitian part ``(T_{xe} + T_{xe}^\dagger)/2`` contributes to the torque; its eigenvectors are the applied spectra of extremal torque, and the anti-Hermitian part carries the energy.
-Each `perturbed_equilibrium(resp, rmp)` call contracts ``T_{xe}`` with its field into a `TorqueResponse`: the applied torque ``T_\mathrm{applied}`` and the source form ``T_\mathrm{source} = M^\dagger T M`` with one column of ``M`` per forcing source, so that driving the sources at scale factors ``s`` gives ``s^\dagger T_\mathrm{source}\, s / 2``.
+Each `perturbed_equilibrium(resp, field)` call contracts ``T_{xe}`` with its field into a `TorqueResponse`: the applied torque ``T_\mathrm{applied}`` and the source form ``T_\mathrm{source} = M^\dagger T M`` with one column of ``M`` per forcing source, so that driving the sources at scale factors ``s`` gives ``s^\dagger T_\mathrm{source}\, s / 2``.
 
 ## Governing equations
 
@@ -114,11 +114,11 @@ In a script the same two steps are
 using GeneralizedPerturbedEquilibrium
 
 resp = plasma_response(ffs; compute_singular_coupling=true)
-pe   = perturbed_equilibrium(resp, rmp; regularization_width=0.05)   # rmp: an RMPField, see the Scripting API
+pe   = perturbed_equilibrium(resp, field; regularization_width=0.05)   # field: a ForcingField, see the Scripting API
 save_to_hdf5("gpec.h5", pe)
 ```
 
-with the `RMPField` built from coils or a file as on the [Scripting API](api.md) page; computing the response does not write a file.
+with the `ForcingField` built from coils or a file as on the [Scripting API](api.md) page; computing the response does not write a file.
 
 ## Outputs
 

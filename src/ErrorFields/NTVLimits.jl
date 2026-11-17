@@ -525,7 +525,7 @@ function efc_couplings(
           "scan ±$(@sprintf("%.3e", span)) rad/s on $(length(grid0)) initial points (max $(scan_max_points))"
 
     function response_of(modes::Vector{ForcingMode})
-        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(resp, ForcingTerms.RMPField(modes); regularization_width, verbose)
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(resp, ForcingTerms.ForcingField(modes); regularization_width, verbose)
         kf_intr = KineticForces.KineticForcesInternal(equil; verbose=verbose)
         KineticForces.set_perturbation_data!(kf_intr, pe_state, ffs, equil, ffs.metric)
         return kf_intr

@@ -55,6 +55,7 @@ const TEST_SUITES = [
     "runtests_fullruns.jl" => "api",
     "runtests_torque_response.jl" => "api",
     "runtests_coils.jl" => "api",
+    "runtests_magnetic_material.jl" => "api",
     "runtests_imas.jl" => "api",
     "runtests_rerun_from_h5.jl" => "api",
     "runtests_deck_roundtrip.jl" => "api",

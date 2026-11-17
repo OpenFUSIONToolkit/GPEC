@@ -137,15 +137,14 @@ end
 """
     CoilConfig
 
-Top-level coil configuration from the `[ForcingTerms]` TOML section when
-`forcing_data_format = "coil"`.
+Top-level coil configuration from the `[ForcingTerms]` TOML section.
 
 ## Fields
 
   - `machine`: machine name prefix for .dat files (e.g. "d3d")
   - `dat_dir`: directory containing .dat files; defaults to bundled `coil_geometries/`
   - `mtheta_coil`: poloidal grid resolution for boundary field evaluation (default: 480)
-  - `nzeta_coil`: toroidal grid resolution; 0 = auto (32 × n)
+  - `nzeta_coil`: toroidal grid resolution; 0 = auto, 32(|n| + 1)
   - `coil_sets`: parsed `[[ForcingTerms.coil_set]]` blocks
 """
 Base.@kwdef struct CoilConfig
@@ -156,15 +155,16 @@ Base.@kwdef struct CoilConfig
     coil_sets::Vector{CoilSetConfig} = CoilSetConfig[]
 end
 
+# The coil geometry files shipped with the package, the default `dat_dir`.
+const BUNDLED_COIL_DIR = joinpath(@__DIR__, "coil_geometries")
+
 """
     CoilConfig(ft_ctrl::ForcingTermsControl)
 
 Construct a `CoilConfig` from a `ForcingTermsControl` populated from TOML.
 """
 function CoilConfig(ft_ctrl::ForcingTermsControl)
-    dat_dir = isempty(ft_ctrl.dat_dir) ?
-              joinpath(@__DIR__, "coil_geometries") :
-              ft_ctrl.dat_dir
+    dat_dir = isempty(ft_ctrl.dat_dir) ? BUNDLED_COIL_DIR : ft_ctrl.dat_dir
 
     coil_sets = CoilSetConfig[_parse_coil_set_config(d) for d in ft_ctrl.coil_sets_raw]
 
