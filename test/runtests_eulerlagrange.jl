@@ -611,6 +611,14 @@ end
         @test chunks[1].needs_crossing && !chunks[2].needs_crossing
     end
 
+    @testset "a kinetic run crosses closer by default" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        kinetic = FFS.TestKineticMatrices(; scale=1.0)
+        @test FFS.ForceFreeStatesControl().singfac_min == 5e-4
+        @test FFS.ForceFreeStatesControl(; kinetic).singfac_min == 1e-5
+        @test FFS.ForceFreeStatesControl(; kinetic, singfac_min=1e-4).singfac_min == 1e-4
+    end
+
     @testset "EdgeScanState" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         # Default construction with sentinel values

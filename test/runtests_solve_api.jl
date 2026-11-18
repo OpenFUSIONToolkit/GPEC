@@ -69,8 +69,9 @@ include("display_check.jl")
 
     @testset "riccati solve produces the unified delta_prime" begin
         mktempdir() do dir
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"))]).ffs
-            prob = ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs...)
+            # At the default crossing distance; the fixture's own 1e-6 is below where Δ′ keeps its accuracy.
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati", "singfac_min" => 5e-4))]).ffs
+            prob = ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs..., singfac_min=5e-4)
             api = solve(prob, Riccati(; riccati_kwargs..., nchunks=40))
 
             @test api.integrator === :riccati
@@ -81,10 +82,9 @@ include("display_check.jl")
             @test size(api.delta_prime.freeboundary.Delta) == (msing, msing)
             @test api.delta_prime.freeboundary.Delta ≈ FFS.pest3_decompose(api.delta_prime.raw_freeboundary).Delta
 
-            # Chunking is a decomposition of the same problem, so Δ′ tracks the TOML run to the accuracy
-            # the propagator products keep at this fixture's singfac_min = 1e-6.
+            # Chunking is a decomposition of the same problem, so Δ′ tracks the TOML run.
             @test size(reference.delta_prime.freeboundary.Delta) == size(api.delta_prime.freeboundary.Delta)
-            @test api.delta_prime.freeboundary.Delta ≈ reference.delta_prime.freeboundary.Delta rtol = 1e-4
+            @test api.delta_prime.freeboundary.Delta ≈ reference.delta_prime.freeboundary.Delta rtol = 1e-6
 
             # With the deck's own (auto) chunking the two runs are the same computation.
             same = solve(prob, riccati)

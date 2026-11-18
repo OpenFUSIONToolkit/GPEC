@@ -34,7 +34,7 @@ Chunked Riccati integration and the singular-surface boundary-value solve.
 
 ## Fields
 
-  - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration.
+  - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration; the error of Δ′ scales with it.
   - `save_interval::Int` - Store every Nth solver step of each chunk; chunk ends and the edge-dW scan band are always stored.
   - `nchunks::Int` - Target chunk count; zero derives the count from the singular surfaces.
   - `extended_precision_bvp::Bool` - Solve the Delta-prime BVP in Complex{Double64} instead of ComplexF64; far slower, and needed only beyond about 150 poloidal harmonics.
@@ -42,7 +42,7 @@ Chunked Riccati integration and the singular-surface boundary-value solve.
     Required by `MatchProblem`.
 """
 @kwdef struct Riccati <: AbstractIntegrator
-    eulerlagrange_tolerance::Float64 = 1e-8
+    eulerlagrange_tolerance::Float64 = 1e-10
     save_interval::Int = 1
     nchunks::Int = 0
     extended_precision_bvp::Bool = false

@@ -180,6 +180,16 @@ end
         @test isapprox(dp_few, dp_auto; rtol=1e-4)
     end
 
+    @testset "a surface whose small solution the tolerance cannot resolve is named" begin
+        function surface_warnings(fixture)
+            ctrl, intr, equil, _, mats = prepared_solovev(; fixture)
+            _, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
+            return () -> FFS.warn_unresolved_surfaces(riccati.bases, intr.sing[1:intr.msing], ctrl.algorithm.eulerlagrange_tolerance)
+        end
+        @test_logs (:warn, r"big solution is .* times the small one") match_mode = :any surface_warnings("regression_solovev_ideal_example")()
+        @test_logs min_level = Logging.Warn surface_warnings("regression_tj_ideal_example")()
+    end
+
     @testset "the Δ′ solutions on the stored grid" begin
         ctrl, intr, equil, _, mats = prepared_solovev(; fixture="regression_tj_ideal_example")
         odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
