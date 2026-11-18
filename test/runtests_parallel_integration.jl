@@ -212,8 +212,8 @@ end
         et_fwd, intr_fwd = run_solovev("Forward")
         et_ric, intr_ric = run_solovev("Riccati")
 
-        # Energy eigenvalue matches to 2%
-        @test isapprox(et_ric, et_fwd; rtol=0.02)
+        # Both integrators cross each surface the same way
+        @test isapprox(et_ric, et_fwd; rtol=1e-6)
     end
 
     @testset "ode_itime_cost is additive over sub-intervals" begin

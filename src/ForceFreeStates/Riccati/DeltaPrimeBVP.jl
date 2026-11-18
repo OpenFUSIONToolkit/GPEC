@@ -2,6 +2,28 @@
 
 # Relative difference between the two plasma response matrices above which `compute_delta_prime_matrix` warns.
 const DELTA_PRIME_RESPONSE_MISMATCH = 1e-6
+# Integration tolerance times the size of the big solution against the small one at the crossing distance, above which
+# the small solution of a surface is not resolved.
+const UNRESOLVED_SMALL_SOLUTION = 1.0
+
+"""
+    warn_unresolved_surfaces(bases, surfaces, rtol)
+
+Warn for each crossed surface whose big asymptotic solution exceeds its small one, at the crossing distance, by more
+than the integration tolerance `rtol` resolves, so that Δ' and the outer solutions there are unreliable. `bases` is
+from `asymptotic_bases`; `surfaces` are the singular surfaces it indexes.
+"""
+function warn_unresolved_surfaces(bases::AbstractDict, surfaces::Vector{SingType}, rtol::Float64)
+    for ising in sort!(collect(keys(bases)))
+        ising <= length(surfaces) || continue
+        alpha = maximum(real, bases[ising].left_series.alpha)
+        ratio = bases[ising].dpsi^(-2 * alpha)
+        rtol * ratio > UNRESOLVED_SMALL_SOLUTION &&
+            @warn "Riccati: at the rational surface ψ = $(@sprintf("%.4f", surfaces[ising].psifac)) (m = $(join(surfaces[ising].m, ", "))) the big solution is " *
+                  "$(@sprintf("%.1e", ratio)) times the small one at the crossing distance (Mercier exponent α = $(@sprintf("%.2f", alpha))), more than " *
+                  "eulerlagrange_tolerance = $rtol resolves. Δ' and the outer solutions at this surface are unreliable."
+    end
+end
 
 """
     compute_delta_prime_matrix(intr, propagators, chunks, axis_state; wv=nothing, wp=nothing, psio=0.0, extended_precision=false) -> (delta_prime, coefficients)

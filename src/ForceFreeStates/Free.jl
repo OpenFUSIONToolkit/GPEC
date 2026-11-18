@@ -214,16 +214,11 @@ for fast evaluation in `free_compute_total` during the edge dW scan.
     psi_array = zeros!(pool, Float64, npsi + 1)
     wv_array = zeros!(pool, ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
-    for i in 1:(npsi+1)
-        # Space points evenly in q over [qedge, qlim] (i=1 → qedge, i=npsi+1 → qlim)
+    # Points evenly spaced in q over [qedge, qlim]; q is monotonic over the scan band, which brackets each root
+    psi_array[1], psi_array[npsi+1] = ctrl.dW_edge_scan_start, intr.psilim
+    for i in 2:npsi
         qi = qedge + (intr.qlim - qedge) * ((i - 1) / npsi)
-
-        psii = ctrl.dW_edge_scan_start + (intr.psilim - ctrl.dW_edge_scan_start) * ((i - 1) / npsi)
-        psi_array[i] = find_zero(
-            (psi -> profiles.q_spline(psi) - qi,
-                psi -> profiles.q_deriv(psi)),
-            psii, Roots.Newton()
-        )
+        psi_array[i] = find_zero(psi -> profiles.q_spline(psi) - qi, (ctrl.dW_edge_scan_start, intr.psilim), Roots.Brent())
     end
 
     # Raw vacuum matrix at each scan psi (singfac NOT applied; free_compute_total applies it analytically)

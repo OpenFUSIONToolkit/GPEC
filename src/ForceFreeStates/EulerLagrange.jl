@@ -558,7 +558,8 @@ Cross ideal singular surface `ising` in its asymptotic basis [Glasser & Kolemen 
 Eq. 36]: the solutions are expanded in the left basis, the column carrying each resonance's big solution ends at
 the surface, the nonresonant coefficients continue into the right basis, and each small solution starts there in
 the freed column. `basis` is the surface's entry of `asymptotic_bases`. Records both coefficient sets in
-`odet.ca_l` and `odet.ca_r`, and the column reduction for `transform_u!`.
+`odet.ca_l` and `odet.ca_r`, and the column reduction for `transform_u!`. Fortran `ode_ideal_cross` steps across
+with a trapezoidal rule instead.
 """
 function cross_ideal_singular_surf!(
     odet::OdeState,

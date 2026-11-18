@@ -15,6 +15,12 @@ abstract type ModeSpace end
     ModeIndices(modes::ModeSpace)
 
 Immutable copy of a mode space's indexing, for code that must not see the rest of its source.
+
+## Fields
+
+  - `mlow::Int`, `mhigh::Int`, `mpert::Int` - Lowest and highest poloidal harmonic and their count.
+  - `nlow::Int`, `nhigh::Int`, `npert::Int` - Lowest and highest toroidal harmonic and their count.
+  - `numpert_total::Int` - Number of (m, n) harmonics, `mpert * npert`.
 """
 struct ModeIndices <: ModeSpace
     mlow::Int
@@ -96,7 +102,9 @@ Physical and workflow controls for a force-balance solve, together with its sele
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
   - `singfac_min::Float64` - Distance `|m − nq|` from each rational surface at which the ideal integration stops and
     the surface is crossed through its asymptotic series. Energies do not depend on it; Δ′ loses accuracy below
-    about 1e-5, and the series does beyond the first radial-grid knot.
+    about 1e-5, and the series does beyond the first radial-grid knot. Default 5e-4. A `kinetic` run stops this far
+    from each kinetic singular surface and steps across by a trapezoidal rule, whose error grows as the distance
+    cubed, so its default is 1e-5.
   - `crossing_fill_points::Int` - Stored states added on each side of each crossed rational surface from its asymptotic
     series, log-spaced in distance between `singfac_min` and `crossing_fill_min`. Zero adds none.
   - `crossing_fill_min::Float64` - Distance `|m − nq|` from the surface of the closest of those states.
@@ -131,7 +139,9 @@ Physical and workflow controls for a force-balance solve, together with its sele
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    singfac_min::Float64 = 5e-4   # Required nonzero for the Riccati path.
+    kinetic::Any = nothing
+    kinetic_factor::Float64 = 1.0
+    singfac_min::Float64 = kinetic === nothing ? 5e-4 : 1e-5   # Required nonzero for the Riccati path.
     crossing_fill_points::Int = 5
     crossing_fill_min::Float64 = 1e-5
     truncate_at_rational_offset::Bool = true
@@ -139,8 +149,6 @@ Physical and workflow controls for a force-balance solve, together with its sele
     rational_offset_fraction::Float64 = 0.2
     frobenius_order::Int = 6
     qhigh::Float64 = 1e3
-    kinetic::Any = nothing
-    kinetic_factor::Float64 = 1.0
     qlow::Float64 = 0.0
     dW_edge_scan_start::Float64 = 0.99
     truncate_at_dW_peak::Bool = false

@@ -102,6 +102,7 @@ function run_force_free_states(
                 if intr.verbose
                     @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
                 end
+                warn_unresolved_surfaces(riccati.bases, intr.sing[1:intr.msing], ctrl.algorithm.eulerlagrange_tolerance)
                 delta_prime, coefficients = compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state;
                     wv=free_energies.wv, wp=free_energies.wp, psio=equil.psio, extended_precision=ctrl.algorithm.extended_precision_bvp)
                 if coefficients !== nothing
