@@ -269,6 +269,8 @@ renormalize_riccati!(odet::OdeState, intr::ForceFreeStatesInternal) = renormaliz
 
 Fill `prop` with the chunk's fundamental matrix by integrating the EL ODE from IC (I, 0) into
 `prop.block_upper_ic` and from (0, I) into `prop.block_lower_ic`, without renormalization or storage.
+The (0, I) solve is the chunk's principal solution; its callback also counts that solution's zero crossings
+into `prop.principal_nzero` (`step_zero_crossings`).
 `odet_proxy` holds the `sing_der!` side effects; concurrent calls need distinct proxies.
 """
 function integrate_propagator_chunk!(
@@ -300,15 +302,24 @@ function integrate_propagator_chunk!(
     prop.block_upper_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept  # thread-local; summed into odet after the BVP barrier
 
-    # Lower block IC: U₁ = 0, U₂ = I
+    # Lower block IC: U₁ = 0, U₂ = I (the principal solution), counting its zero crossings at every step
     u_lower = zeros(ComplexF64, N, N, 2)
     for i in 1:N
         u_lower[i, i, 2] = 1
     end
+    u_prev, nneg_prev = copy(u_lower), Ref(0)
+    prop.principal_nzero = 0
+    function count_principal_crossings!(integrator)
+        refresh_column_abstol!(integrator)
+        ncross, nneg_prev[] = step_zero_crossings(integrator.u, u_prev, nneg_prev[], chunk.direction)
+        prop.principal_nzero += ncross
+        u_prev .= integrator.u
+    end
+    cb = DiscreteCallback((u, t, integrator) -> true, count_principal_crossings!; save_positions=(false, false))
     odet_proxy.spline_hint[] = 1
     odet_proxy.mats_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
-    sol = solve_el(prob, rtol)
+    sol = solve_el(prob, rtol; callback=cb)
     prop.block_lower_ic .= sol.u[end]
     odet_proxy.total_steps += sol.stats.naccept
 end
