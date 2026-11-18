@@ -25,7 +25,7 @@ function _coupling_data(s::PerturbedEquilibriumState)
     r = s.response
     return (; field=s.resonant_area_weighted_field, penetrated=_penetrated(s.penetrated_area_weighted_field), current=s.resonant_current, island_hw=s.island_half_width,
         chirikov=s.chirikov_parameter,
-        delta_prime=s.delta_prime, psi=r.rational_psi, q=r.rational_q, m=r.rational_m_res, n=r.rational_n)
+        delta_mn=s.delta_mn, psi=r.rational_psi, q=r.rational_q, m=r.rational_m_res, n=r.rational_n)
 end
 
 function _coupling_data(h5path::AbstractString)
@@ -33,7 +33,7 @@ function _coupling_data(h5path::AbstractString)
         rd(name) = read(fid[_COUPLING*name])
         pen = haskey(fid, _COUPLING * "penetrated_area_weighted_field") ? _penetrated(rd("penetrated_area_weighted_field")) : nothing
         (; field=rd("resonant_area_weighted_field"), penetrated=pen, current=rd("resonant_current"), island_hw=rd("island_half_width"), chirikov=rd("chirikov_parameter"),
-            delta_prime=rd("Delta_prime"), psi=rd("rational_psi"), q=rd("rational_q"), m=rd("rational_m"), n=rd("rational_n"))
+            delta_mn=rd("Delta_mn"), psi=rd("rational_psi"), q=rd("rational_q"), m=rd("rational_m"), n=rd("rational_n"))
     end
 end
 
@@ -77,14 +77,14 @@ function _plot_resonant_coupling end
 function _plot_mode_spectrogram end
 function _plot_perturbed_equilibrium_summary end
 
-const _COUPLING_ROWS = (:field, :current, :island_hw, :chirikov, :delta_prime)
+const _COUPLING_ROWS = (:field, :current, :island_hw, :chirikov, :delta_mn)
 
 """
     plot_resonant_area_weighted_field(src; save_path=nothing)
 
 Plot the resonant coupling at each rational surface in rows sharing a q = m/n axis: the resonant area-weighted field
 |b̄_res|, the resonant current |I_res|, the island half-width w/2, the effective island-overlap Chirikov parameter
-and the forcing-driven Re Δ′. Toroidal mode numbers are distinguished by colour; the title counts the surfaces with
+and the forcing-driven Re Δ_mn. Toroidal mode numbers are distinguished by colour; the title counts the surfaces with
 overlapping islands.
 
 ### Arguments
@@ -172,10 +172,10 @@ function plot_chirikov_parameter(src::Source; save_path=nothing)
 end
 
 """
-    plot_driven_delta_prime(src; save_path=nothing)
+    plot_driven_delta_mn(src; save_path=nothing)
 
-Plot the forcing-driven Re Δ′ at each rational surface, the response to the applied forcing; for the
-equilibrium's own Δ′ of a Riccati or Galerkin solve, see `ForceFreeStates.plot_delta_prime`.
+Plot the forcing-driven Re Δ_mn at each rational surface, the jump of ∂b^ψ/∂ψ across it that the applied forcing
+drives; for the equilibrium's Δ′ matrix of a Riccati or Galerkin solve, see `ForceFreeStates.plot_delta_prime`.
 
 ### Arguments
 
@@ -189,9 +189,9 @@ equilibrium's own Δ′ of a Riccati or Galerkin solve, see `ForceFreeStates.plo
 
 A Makie `Figure`.
 """
-function plot_driven_delta_prime(src::Source; save_path=nothing)
-    _require(plot_driven_delta_prime, src)
-    return _draw(_plot_resonant_coupling, _coupling_data(src), (:delta_prime,); save_path)
+function plot_driven_delta_mn(src::Source; save_path=nothing)
+    _require(plot_driven_delta_mn, src)
+    return _draw(_plot_resonant_coupling, _coupling_data(src), (:delta_mn,); save_path)
 end
 
 const _STYLES = (:log_heatmap, :linear_heatmap, :lines)
@@ -535,7 +535,7 @@ register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,),
 register!(plot_resonant_area_weighted_field_amplitude, _PE_SOURCES, (:singular_coupling,), "|b̄_res| per rational surface")
 register!(plot_island_widths, _PE_SOURCES, (:singular_coupling,), "island half-width per rational surface")
 register!(plot_chirikov_parameter, _PE_SOURCES, (:singular_coupling,), "effective island-overlap Chirikov parameter per rational surface")
-register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ′ per rational surface")
+register!(plot_driven_delta_mn, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ_mn per rational surface")
 register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
 register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
     "a dominant resonant-coupling mode as b_n on the control surface")

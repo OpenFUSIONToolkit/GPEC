@@ -158,11 +158,11 @@ label = "Chirikov parameter per row"
 noise_threshold = 1e-8
 order = 74
 
-[quantities.delta_prime_all]
-h5path = "PerturbedEquilibrium/SingularCoupling/Delta_prime"
+[quantities.delta_mn_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/Delta_mn"
 type = "complex_vector"
 extract = "all_complex"
-label = "forcing-driven Delta' per row"
+label = "forcing-driven Delta_mn per row"
 noise_threshold = 1e-8
 order = 75
 

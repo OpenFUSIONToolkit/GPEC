@@ -76,7 +76,7 @@ applied root-area-weighted field b̃_x to the resonant response at that surface.
   - `C_resonant_current` - Resonant current coupling (singcoup row 2)
   - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
   - `C_penetrated_area_weighted_field` - Penetrated area-weighted field coupling (singcoup row 4)
-  - `C_delta_prime`      - Δ' coupling (singcoup row 5)
+  - `C_delta_mn`         - Δ_mn coupling, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁ (singcoup row 5)
   - `coupling_flux::NamedTuple` - The same five matrices acting on the physical flux Φ_x (keys without the
     `C_` prefix), used for the applied resonant vectors; empty when the coupling was not built.
   - `C_coeffs::Matrix{ComplexF64}` - Edge-to-solution coefficients `u_bnd⁻¹·edge_mn` of each unit forcing mode.
@@ -124,7 +124,7 @@ on a `ResonantCoupling`):
     C_resonant_current::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_island_width_sq::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_penetrated_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
-    C_delta_prime::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_delta_mn::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     coupling_flux::NamedTuple = (;)
     C_coeffs::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
 
@@ -175,7 +175,7 @@ Response fields (mode space):
 Applied resonant vectors [n_rational] = C · forcing, on the rows of `response`.
 Matches Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`.
 
-  - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_prime`
+  - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_mn`
   - `forcing_solution_weights` - `C_coeffs`·Φ_x, the forcing's weights on the edge-driven solutions
 
 Diagnostics [n_rational]:
@@ -229,7 +229,7 @@ Torque response (kinetic forward solves with `compute_torque_response`):
     resonant_current::Vector{ComplexF64} = ComplexF64[]
     island_width_sq::Vector{ComplexF64} = ComplexF64[]
     penetrated_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
-    delta_prime::Vector{ComplexF64} = ComplexF64[]
+    delta_mn::Vector{ComplexF64} = ComplexF64[]
     forcing_solution_weights::Vector{ComplexF64} = ComplexF64[]
 
     # Diagnostics [n_rational]

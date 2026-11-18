@@ -82,7 +82,7 @@ end
 Evaluate the `resnum` row of Ξ_ψ and Ξ′_ψ at `psi` for a matched solution:
 cubic Hermite for the value and the Ξ′ carried in `du_store` for the derivative
 (the `gal_flag` branch of Fortran `gpeq_sol`). Do not difference `u_store` instead:
-near-cancellation in `bwp1` (singfac·Ξ′ against n·q′·Ξ) amplifies that error into Δ′.
+near-cancellation in `bwp1` (singfac·Ξ′ against n·q′·Ξ) amplifies that error into Δ_mn.
 """
 function _matched_solution_at(psi::Float64, resnum::Int, odet::SolutionProfiles, nstep::Int)
     il, ir, _ = _psi_bracket(odet.psi_store, psi, nstep)
@@ -216,7 +216,7 @@ end
 
 Build the singular-layer coupling matrices of `resp.ffs` onto `resp`, matching Fortran GPEC's
 `C_f_x_out` [Park Phys. Plasmas 2009 056115]: one row per resonant (surface, n) pair, giving the
-resonant area-weighted field, current, (w/2)², penetrated field and Δ' per unit forcing mode, plus
+resonant area-weighted field, current, (w/2)², penetrated field and Δ_mn per unit forcing mode, plus
 the rational-surface metadata and the edge-to-solution coefficients `C_coeffs`. The matrices are
 stored acting on b̃_x, with flux-space copies in `resp.coupling_flux` for applying a forcing.
 
@@ -224,7 +224,7 @@ stored acting on b̃_x, with flux-space copies in `resp.coupling_flux` for apply
 
   - Rows: the resonant and penetrated rows are a resonant flux divided by that surface's own area
     `rational_area[row]`, so both are fields in T. `C_resonant_current`, `C_island_width_sq` and
-    `C_delta_prime` carry their own normalizations.
+    `C_delta_mn` carry their own normalizations.
   - Columns: each field-space coupling matrix is right-multiplied by the control-surface `flux_conform`, so it
     acts on the root-area-weighted field b̃ in T and its singular values do not depend on `jac_type`.
     Applied vectors use the flux-space copies in `resp.coupling_flux` on the run's own forcing flux.
@@ -286,7 +286,7 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
         resp.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
         @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog = 1
     end
-    resp.C_delta_prime = zeros(ComplexF64, n_rational, numpert_total)
+    resp.C_delta_mn = zeros(ComplexF64, n_rational, numpert_total)
     resp.rational_psi = zeros(Float64, n_rational)
     resp.rational_q = zeros(Float64, n_rational)
     resp.rational_m_res = zeros(Int, n_rational)
@@ -377,9 +377,9 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
                 resp.C_penetrated_area_weighted_field[row, :] = pen_row
             end
 
-            # Δ' is the ∂b^ψ/∂ψ jump over 2π·χ₁ [Glasser 2016]; j_c carries the surface Jacobian weighting of the current;
+            # Δ_mn is the ∂b^ψ/∂ψ jump, stored over 2π·χ₁; j_c carries the surface Jacobian weighting of the current;
             # resonant flux/area is a coordinate-invariant field in T [Park 2008; Pharr 2026].
-            resp.C_delta_prime[row, :] = jump_vec ./ (twopi * chi1)
+            resp.C_delta_mn[row, :] = jump_vec ./ (twopi * chi1)
             resp.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
             # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant area-weighted field = singflx/area,
             # islandhwids = 4·singflx/(2π·shear·q·chi1)
@@ -397,8 +397,8 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
             resp.rational_surface_idx[row] = s
 
             if verbose
-                dp_diag = real(resp.C_delta_prime[row, resnum])
-                @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ'(diag)=$(@sprintf("%.3e", dp_diag))"
+                dp_diag = real(resp.C_delta_mn[row, resnum])
+                @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ_mn(diag)=$(@sprintf("%.3e", dp_diag))"
             end
         end
     finally
@@ -408,12 +408,12 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
     # Conform the stored matrices to b̃ space, C̃ = C·R with R = S·A (Pharr 2026); `coupling_flux` keeps the flux-space
     # copies so a forcing is applied without round-trip noise.
     resp.coupling_flux = (; resonant_area_weighted_field=resp.C_resonant_area_weighted_field, resonant_current=resp.C_resonant_current,
-        island_width_sq=resp.C_island_width_sq, penetrated_area_weighted_field=resp.C_penetrated_area_weighted_field, delta_prime=resp.C_delta_prime)
+        island_width_sq=resp.C_island_width_sq, penetrated_area_weighted_field=resp.C_penetrated_area_weighted_field, delta_mn=resp.C_delta_mn)
     flux_conform = resp.rootarea_to_area_weight .* resp.surface_area
     resp.C_resonant_area_weighted_field = resp.C_resonant_area_weighted_field * flux_conform
     resp.C_resonant_current = resp.C_resonant_current * flux_conform
     resp.C_island_width_sq = resp.C_island_width_sq * flux_conform
-    resp.C_delta_prime = resp.C_delta_prime * flux_conform
+    resp.C_delta_mn = resp.C_delta_mn * flux_conform
     have_inner_bpen && (resp.C_penetrated_area_weighted_field = resp.C_penetrated_area_weighted_field * flux_conform)
 
     return resp
@@ -441,7 +441,7 @@ function apply_coupling!(state::PerturbedEquilibriumState; verbose::Bool=false)
     state.resonant_area_weighted_field = C.resonant_area_weighted_field * forcing_flux
     state.resonant_current = C.resonant_current * forcing_flux
     state.island_width_sq = C.island_width_sq * forcing_flux
-    state.delta_prime = C.delta_prime * forcing_flux
+    state.delta_mn = C.delta_mn * forcing_flux
     isempty(C.penetrated_area_weighted_field) || (state.penetrated_area_weighted_field = C.penetrated_area_weighted_field * forcing_flux)
     state.forcing_solution_weights = resp.C_coeffs * forcing_flux
 
@@ -450,8 +450,8 @@ function apply_coupling!(state::PerturbedEquilibriumState; verbose::Bool=false)
 
     if verbose
         max_island = isempty(state.island_half_width) ? 0.0 : maximum(state.island_half_width)
-        max_dp = isempty(state.delta_prime) ? 0.0 : maximum(abs.(real.(state.delta_prime)))
-        @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island)), max |Δ'| = $(@sprintf("%.3e", max_dp))"
+        max_dp = isempty(state.delta_mn) ? 0.0 : maximum(abs.(real.(state.delta_mn)))
+        @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island)), max |Δ_mn| = $(@sprintf("%.3e", max_dp))"
     end
 end
 

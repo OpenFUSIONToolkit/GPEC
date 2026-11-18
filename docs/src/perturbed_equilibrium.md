@@ -41,7 +41,7 @@ The run writes up to five coupling matrices under `PerturbedEquilibrium/Singular
 | `C_resonant_current` | the pitch-resonant current | A/T |
 | `C_island_width_sq` | the squared island half-width | 1/T |
 | `C_penetrated_area_weighted_field` | the penetrated field, when the run computes it | dimensionless |
-| `C_Delta_prime` | the forcing-driven Δ′ | 1/T |
+| `C_Delta_mn` | the forcing-driven ``\Delta_{mn}`` | 1/T |
 
 `ResonantCoupling` wraps the first; any of the others decomposes over any window of surfaces through the bare-matrix form of `dominant_coupling`, with the ``\tilde b`` conform taken from a `ResonantCoupling` of the same file, since the bare matrix carries no (m, n) labels for `check_mode_basis` to guard the projection:
 
@@ -141,7 +141,7 @@ with the `RMPField` built from coils or a file as on the [Scripting API](api.md)
 | `PerturbedEquilibrium/SingularCoupling/resonant_current` | the pitch-resonant current | A |
 | `PerturbedEquilibrium/SingularCoupling/island_width_sq`, `island_half_width` | ``w_s^2`` and ``w_s`` in ψ_N | |
 | `PerturbedEquilibrium/SingularCoupling/chirikov_parameter` | ``\sigma_s`` | |
-| `PerturbedEquilibrium/SingularCoupling/Delta_prime` | the forcing-driven tearing Δ′ per surface | |
+| `PerturbedEquilibrium/SingularCoupling/Delta_mn` | the forcing-driven ``\Delta_{mn}`` per surface | |
 | `PerturbedEquilibrium/SingularCoupling/C_*` | the coupling matrices from the applied ``\tilde b`` to each quantity above | |
 | `PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values`, `right_singular_vectors`, `left_singular_vectors`, `rational_index`, `forcing_overlap` | the core-window SVD of the resonant-field coupling | |
 | `PerturbedEquilibrium/Energies/plasma_energy`, `vacuum_energy`, `surface_energy` | the perturbed energies | J |

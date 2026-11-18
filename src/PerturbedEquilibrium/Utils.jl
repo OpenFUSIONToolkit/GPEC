@@ -125,14 +125,14 @@ function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilib
     !isempty(resp.C_resonant_current) && (coupling_group["C_resonant_current"] = resp.C_resonant_current)
     !isempty(resp.C_island_width_sq) && (coupling_group["C_island_width_sq"] = resp.C_island_width_sq)
     !isempty(resp.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = resp.C_penetrated_area_weighted_field)
-    !isempty(resp.C_delta_prime) && (coupling_group["C_Delta_prime"] = resp.C_delta_prime)
+    !isempty(resp.C_delta_mn) && (coupling_group["C_Delta_mn"] = resp.C_delta_mn)
 
     # Applied resonant vectors [n_rational]
     !isempty(state.resonant_area_weighted_field) && (coupling_group["resonant_area_weighted_field"] = state.resonant_area_weighted_field)
     !isempty(state.resonant_current) && (coupling_group["resonant_current"] = state.resonant_current)
     !isempty(state.island_width_sq) && (coupling_group["island_width_sq"] = state.island_width_sq)
     !isempty(state.penetrated_area_weighted_field) && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
-    !isempty(state.delta_prime) && (coupling_group["Delta_prime"] = state.delta_prime)
+    !isempty(state.delta_mn) && (coupling_group["Delta_mn"] = state.delta_mn)
     !isempty(state.forcing_solution_weights) && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
     !isempty(resp.rational_area) && (coupling_group["rational_area"] = resp.rational_area)
     !isempty(state.island_half_width) && (coupling_group["island_half_width"] = state.island_half_width)
@@ -281,8 +281,8 @@ const PE_H5_ANNOTATIONS = [
     "SingularCoupling/C_penetrated_area_weighted_field" =>
         (; long_name="coupling matrix: applied b̃ → penetrated area-weighted field", dims=("surface", "mode"),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
-    "SingularCoupling/C_Delta_prime" =>
-        (; long_name="coupling matrix: applied b̃ → forcing-driven Δ'", units="1/T", dims=("surface", "mode"),
+    "SingularCoupling/C_Delta_mn" =>
+        (; long_name="coupling matrix: applied b̃ → Δ_mn, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁", units="1/T", dims=("surface", "mode"),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
     "SingularCoupling/resonant_area_weighted_field" =>
         (; long_name="resonant area-weighted field b̄^r = Φ^r/A^r per rational surface (coordinate-invariant)", units="T", dims=("surface",),
@@ -296,8 +296,8 @@ const PE_H5_ANNOTATIONS = [
     "SingularCoupling/penetrated_area_weighted_field" =>
         (; long_name="penetrated area-weighted field per rational surface", units="T", dims=("surface",),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
-    "SingularCoupling/Delta_prime" =>
-        (; long_name="forcing-driven tearing Δ' per rational surface (Riccati; response to applied forcing)", dims=("surface",),
+    "SingularCoupling/Delta_mn" =>
+        (; long_name="forcing-driven Δ_mn per rational surface, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁", dims=("surface",),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
     "SingularCoupling/forcing_solution_weights" =>
         (; long_name="weights of the forcing solutions in the singular-coupling decomposition", dims=("surface",),

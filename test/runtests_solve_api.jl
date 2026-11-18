@@ -244,7 +244,7 @@ include("display_check.jl")
             @test resp isa PlasmaResponse && pe.response === resp
             @test !isempty(resp.permeability)
             @test resp.permeability ≈ reference.response.permeability rtol = 1e-10
-            @test size(resp.C_delta_prime) == size(reference.response.C_delta_prime)
+            @test size(resp.C_delta_mn) == size(reference.response.C_delta_mn)
             @test !isempty(pe.resonant_area_weighted_field)
 
             # The deck reads and normalizes its forcing file exactly as a fresh RMPField does.

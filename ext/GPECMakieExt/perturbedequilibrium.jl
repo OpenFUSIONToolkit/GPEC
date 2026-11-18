@@ -18,7 +18,7 @@ function _coupling_row(d, key)
     key === :current && return (_magnitude_row(abs.(d.current), rich("|I", subscript("res"), "|"), "A")..., nothing)
     key === :island_hw && return (d.island_hw, rich("w/2 (", PSIN, ")"), identity, nothing)
     key === :chirikov && return (d.chirikov, "effective island-overlap\nChirikov parameter", identity, 1.0)
-    return (real.(d.delta_prime), "driven Re Δ′", identity, 0.0)
+    return (real.(d.delta_mn), rich("driven Re Δ", subscript("mn")), identity, 0.0)
 end
 
 const _ROW_TITLES = Dict(
@@ -26,7 +26,7 @@ const _ROW_TITLES = Dict(
     :field => "Resonant field at each rational surface",
     :current => "Resonant current at each rational surface",
     :island_hw => "Island half-width at each rational surface",
-    :delta_prime => "Forcing-driven Δ′ at each rational surface"
+    :delta_mn => rich("Forcing-driven Δ", subscript("mn"), " at each rational surface")
 )
 
 function _coupling_title(d, keys)

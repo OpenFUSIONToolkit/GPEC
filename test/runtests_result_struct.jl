@@ -158,7 +158,7 @@ include("display_check.jl")
         @test riccati.resp.permeability ≈ forward.resp.permeability rtol = 1e-6
         @test riccati.resp.reluctance ≈ forward.resp.reluctance rtol = 1e-6
         # The singular coupling reads ξ and ξ′ off each surface, where the two integrators' stored nodes differ.
-        for name in (:C_delta_prime, :C_resonant_current, :C_resonant_area_weighted_field, :C_island_width_sq)
+        for name in (:C_delta_mn, :C_resonant_current, :C_resonant_area_weighted_field, :C_island_width_sq)
             @test getfield(riccati.resp, name) ≈ getfield(forward.resp, name) rtol = 1e-3
         end
         @test riccati.pe.resonant_area_weighted_field ≈ forward.pe.resonant_area_weighted_field rtol = 1e-4
