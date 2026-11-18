@@ -142,8 +142,8 @@ function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::I
         [SVector{3}(@view source.normal[k, :]) for k in 1:num_points],
         [fldmod1(k, num_points ÷ nfp) for k in 1:num_points],
         phases, Uθ_patch, Uζ_patch, patch_rad, 2 * RAD_DIM,
-        # Plasma–wall rows: 1–4 × RAD_DIM nodes, RAD_DIM per 4 units of the sinh variable
-        self_radial, sinh_rule(RAD_DIM, 4, 4.0),
+        # Plasma–wall rows: 1–8 × RAD_DIM nodes, RAD_DIM per 2 units of the sinh variable
+        self_radial, sinh_rule(RAD_DIM, 8, 2.0),
         Val(INTERP_ORDER), Val(min(INTERP_ORDER, CROSS_INTERP_ORDER))
     )
 end
