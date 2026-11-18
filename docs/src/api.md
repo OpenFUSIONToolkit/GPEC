@@ -125,12 +125,12 @@ The weights are linear-combination coefficients, not physical amplitudes: a coil
 The second argument of `solve` picks the formalism and its fields are that formalism's numerical settings; physical inputs belong on `ForceBalanceProblem`:
 
 ```julia
-ffs = solve(eq, Forward(; eulerlagrange_tolerance=1e-8); nn=1, vac_flag=true)   # dense ξ profiles: the only input plasma_response accepts; kinetic solves
-ffs = solve(eq, Riccati(; nchunks=40); nn=1, vac_flag=true)                      # chunked propagators, Δ′ matrix (default)
+ffs = solve(eq, Forward(; eulerlagrange_tolerance=1e-8); nn=1, vac_flag=true)   # dense ξ profiles; kinetic solves
+ffs = solve(eq, Riccati(; nchunks=40); nn=1, vac_flag=true)                      # chunked propagators, Δ′ matrix, ξ profiles (default)
 ffs = solve(eq, Galerkin(; nx=512); nn=1)                                        # finite-element outer-region Δ′
 ```
 
-A result carries `nothing` in the fields its integrator does not produce, and consumers warn and skip rather than erroring; `plasma_response` in particular needs a `Forward()` solve, or a `Galerkin(; error_field_response=true)` solve with `vac_flag=true`, with `wall=nothing` (it errors on a wall, any other Galerkin result or a matched one, and skips with a warning on a Riccati one), see [Stability](stability.md).
+A result carries `nothing` in the fields its integrator does not produce, and consumers warn and skip rather than erroring; `plasma_response` in particular needs a `Riccati()` or `Forward()` solve, or a `Galerkin(; error_field_response=true)` solve, with `vac_flag=true` and `wall=nothing` (it errors on a wall, any other Galerkin result or a matched one), see [Stability](stability.md).
 A kinetic solve takes `Forward()` with the problem's `kinetic` keyword: `kinetic=KineticForcesControl(; ...)` evaluates the drift-kinetic matrices on the equilibrium's kinetic profiles, `kinetic=TestKineticMatrices(; scale)` uses synthetic matrices, `kinetic_factor` scales either, and `km = kinetic_matrices(prob)` evaluates the source once for reuse in later solves ([`KineticMatrices`](@ref GeneralizedPerturbedEquilibrium.ForceFreeStates.KineticMatrices)).
 
 ## Inner-layer matching

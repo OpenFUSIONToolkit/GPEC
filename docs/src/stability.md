@@ -41,8 +41,8 @@ Its global boundary-value problem over all surfaces gives the Δ′ matrix of [G
 
 `[ForceFreeStates] integrator` selects the radial method; its numerical settings sit in a section of the same name.
 
-- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in its asymptotic basis and assembles the Δ′ matrix. It stores the solution at every solver step, like Forward, so its result carries ``\xi`` profiles; `plasma_response` does not accept a Riccati result yet.
-- `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction as the solutions grow, crossing each rational surface in its asymptotic basis as Riccati does. It returns dense displacement profiles, and is the only integrator whose result `plasma_response` accepts (the response operators are built from the dense ``\xi`` solution; a wall is refused too) and the only one that supports the kinetic solve.
+- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in its asymptotic basis and assembles the Δ′ matrix. It stores the solution at every solver step, like Forward, so its result carries ``\xi`` profiles and `plasma_response` accepts it.
+- `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction as the solutions grow, crossing each rational surface in its asymptotic basis as Riccati does. It returns dense displacement profiles, and is the only integrator that supports the kinetic solve.
 - `"Galerkin"` (`[Galerkin]`) solves the outer region variationally on a finite-element basis, giving the resistive Δ′ matrix and the PEST-3 blocks but no free-boundary energies; see [Galerkin Solver](galerkin.md).
 
 `kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs `[Equilibrium] kinetic_file`; see [Kinetic Forces](kinetic_forces.md).
@@ -59,7 +59,7 @@ qlow = 1.02              # inner edge of the integration domain
 qhigh = 1e3              # outer bound of qlim (see Integration domain)
 delta_mlow = 8           # extra poloidal modes below the resonant range
 delta_mhigh = 8          # extra poloidal modes above it
-integrator = "Forward"   # "Riccati" is the default; "Forward" or an error_field_response "Galerkin" (and no [Wall]) is required for [PerturbedEquilibrium]
+integrator = "Forward"   # "Riccati" is the default; [PerturbedEquilibrium] takes either, or an error_field_response "Galerkin", and no [Wall]
 truncate_at_rational_offset = true
 rational_offset_fraction = 0.2
 

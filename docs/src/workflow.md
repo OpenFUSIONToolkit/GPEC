@@ -29,7 +29,7 @@ Every stage after `Equilibrium` reads the force-free states, and `KineticForces`
 | What are the tearing growth rate and critical resonant field? | `[Tearing]` (+ `[SLAYER]` or `[GGJ]`) | `Tearing/Roots/gamma`, `Tearing/Roots/omega`, `Tearing/CriticalResonantField/` |
 | What does a resistive inner layer do to the response? | `[Match]` (+ `[GGJ]`) | `SingularSurfaces/Match/` |
 
-`[PerturbedEquilibrium]` and the stages built on it need a `[ForceFreeStates]` solve with `integrator = "Forward"`, or `"Galerkin"` with `error_field_response = true` and `vac_flag = true`, and no `[Wall]`, while the Δ′ matrix, `[Tearing]` and wall stability need `"Riccati"` or `"Galerkin"` or a `[Wall]`. Only a `"Galerkin"` deck without a `[Wall]` does both; otherwise run the response and the Δ′ or wall cases as separate decks (`DIIID-like_ideal_example` and `DIIID-like_riccati_deltaprime_example` are such a pair).
+`[PerturbedEquilibrium]` and the stages built on it need a `[ForceFreeStates]` solve with `vac_flag = true` and `integrator = "Riccati"` or `"Forward"`, or `"Galerkin"` with `error_field_response = true`, and no `[Wall]`, while the Δ′ matrix, `[Tearing]` and wall stability need `"Riccati"` or `"Galerkin"` or a `[Wall]`. A `"Riccati"` or `"Galerkin"` deck without a `[Wall]` does both; the wall case is a separate deck.
 
 ### Headline outputs
 
@@ -76,7 +76,7 @@ Page: [Tearing](inner_layer.md).
 
 Computes the plasma response to an external non-axisymmetric field: `plasma_response` builds the permeability, inductance and reluctance operators on the control surface from the force-free states and the vacuum matrices, and `perturbed_equilibrium` applies them to the drive that `ForcingTerms` supplies, either a normal-field spectrum from a file or the Biot–Savart field of `[[ForcingTerms.coil_set]]` coils.
 The resonant fields, island half-widths and Chirikov parameter at each rational surface follow from the singular coupling (`compute_singular_coupling`), and `regularization_width` controls the regularization of the ideal response there.
-The response is built from a `"Forward"` solve, or a `"Galerkin"` solve with `error_field_response = true` and `vac_flag = true`, without a wall: a `"Riccati"` result (the default) makes `plasma_response` skip the operators with a warning, and any other `"Galerkin"` result, a matched result or a wall is an error.
+The response is built from a `"Riccati"` (the default) or `"Forward"` solve with `vac_flag = true`, or a `"Galerkin"` solve with `error_field_response = true` and `vac_flag = true`, without a wall: any other `"Galerkin"` result, a matched result or a wall is an error.
 Outputs: `PerturbedEquilibrium/ForcingModes/`, `Response/`, `ResponseMatrices/`, `SingularCoupling/`, `Energies/`.
 Key references: [Park et al. (2007a)](citations.md#PerturbedEquilibrium), [Park et al. (2009)](citations.md#PerturbedEquilibrium).
 Pages: [Forcing Terms](forcing_terms.md), [Perturbed Equilibrium](perturbed_equilibrium.md).
@@ -127,7 +127,7 @@ alpha_boundary_scan = true
 [ForceFreeStates]
 nn = 1
 vac_flag = true
-integrator = "Forward"   # "Forward": [PerturbedEquilibrium] needs a dense ξ solution and no [Wall] ("Riccati" is the default)
+integrator = "Forward"   # [PerturbedEquilibrium] needs a dense ξ solution and no [Wall]; "Riccati" (the default) supplies one too
 
 [ForcingTerms]
 forcing_data_format = "coil"

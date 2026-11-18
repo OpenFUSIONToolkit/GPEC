@@ -91,15 +91,15 @@ The coupling matrices `C_*` map the applied ``\tilde b`` to each of these quanti
 
 ## Running it
 
-The response needs a force-free-states solve with `integrator = "Forward"` and no `[Wall]`.
-The operators are built from a dense ``\xi`` solution with its free-boundary δW, which a `"Forward"` solve and a `"Galerkin"` solve with `error_field_response = true` and `vac_flag = true` both provide: a `"Riccati"` solve (the deck default) makes `plasma_response` warn that the response is skipped and return empty operators, so the failure surfaces only when a field is applied, while a `"Galerkin"` solve without those flags or a `[Match]`ed solve, whose singular coupling is not defined yet, is an error. The ψ-resolved torque response (`compute_torque_response`) needs a `"Forward"` kinetic solve.
+The response needs a force-free-states solve with `vac_flag = true` and no `[Wall]`.
+The operators are built from a dense ``\xi`` solution with its free-boundary δW, which a `"Riccati"` solve (the deck default), a `"Forward"` solve and a `"Galerkin"` solve with `error_field_response = true` all provide when `vac_flag = true`: a `"Galerkin"` solve without those flags or a `[Match]`ed solve, whose singular coupling is not defined yet, is an error. The ψ-resolved torque response (`compute_torque_response`) needs a `"Forward"` kinetic solve.
 A solve with a wall is an error too, because the surface inductance is the free-space one and ``\Lambda`` from a wall run would mix two vacuum models; the wall case of a stability study is therefore a separate deck.
 
 From `examples/DIIID-like_ideal_example/gpec.toml`, after the `[ForceFreeStates]` solve and a `[ForcingTerms]` drive:
 
 ```toml
 [ForceFreeStates]
-integrator = "Forward"             # the dense ξ solution the response needs ("Riccati" is the default); no [Wall]
+integrator = "Forward"             # the dense ξ solution the response needs ("Riccati", the default, supplies one too); no [Wall]
 
 [PerturbedEquilibrium]
 compute_singular_coupling = true   # resonant fields, islands and Chirikov parameter

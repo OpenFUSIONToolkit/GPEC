@@ -256,7 +256,6 @@ _resonances(r::PlasmaResponse) = ["$(m)/$(n)" for (m, n) in zip(r.rational_m_res
 function _missing_operators_note(r::PlasmaResponse)
     r.ffs.free_boundary === nothing && return "not computed (needs a free-boundary result)"
     r.ffs.solution === nothing && return "not computed (needs stored ξ profiles)"
-    r.ffs.integrator === :riccati && return "not computed (a Riccati result is not accepted yet)"
     return "not computed"
 end
 

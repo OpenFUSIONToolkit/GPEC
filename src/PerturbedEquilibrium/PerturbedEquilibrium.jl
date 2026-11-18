@@ -79,11 +79,7 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
     resp = PlasmaResponse(; ffs, m_modes, n_modes, compute_singular_coupling, compute_torque_response,
         unit_edge_basis=solution !== nothing && solution.basis === :unit_edge)
 
-    # A Riccati result carries ξ profiles, but the response operators are not validated on them yet.
-    riccati = ffs.integrator === :riccati
-    riccati && @warn "Skipping plasma response calculation: a Riccati result is not accepted yet; use the Forward integrator"
-    if !riccati && ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
-       ForceFreeStates.require_solution(ffs, "plasma response calculation")
+    if ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") && ForceFreeStates.require_solution(ffs, "plasma response calculation")
         build_response_operators!(resp; verbose)
         if compute_singular_coupling
             build_coupling_operators!(resp; verbose)

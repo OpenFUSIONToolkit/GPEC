@@ -137,35 +137,33 @@ include("display_check.jl")
         end
     end
 
-    @testset "PerturbedEquilibrium warn-skips on a riccati result" begin
-        mktempdir() do dir
-            _stage_deck(dir, joinpath(@__DIR__, "test_data", "regression_tj_ideal_example");
-                ffs_overrides=Dict{String,Any}("integrator" => "Riccati"),
-                extra_sections=Dict{String,Any}(
-                    "ForcingTerms" => Dict{String,Any}(
-                        "forcing_data_file" => "forcing.dat",
-                        "forcing_data_format" => "ascii"),
-                    "PerturbedEquilibrium" => Dict{String,Any}(
-                        "compute_singular_coupling" => true)))
-            cp(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"),
-                joinpath(dir, "forcing.dat"))
-
-            local ret
-            @test_logs (:warn,) match_mode = :any (ret = GeneralizedPerturbedEquilibrium.main([dir]))
-            # The stage runs to completion; both sub-calculations are simply not populated.
-            @test ret.pe !== nothing
-            @test isempty(ret.pe.response.permeability)
-            @test isempty(ret.pe.response.C_delta_prime)
-            @test ret.ffs.free_boundary !== nothing && ret.ffs.solution !== nothing
-            @test ret.resp.compute_singular_coupling
-            for result in (ret.resp, ret.pe)
-                plain = _check_display(result)
-                @test occursin("a Riccati result is not accepted yet", plain)
-                @test !occursin("needs a free-boundary result", plain)
-                @test !occursin("singular coupling off", plain)
-                @test !occursin(" 0 J", plain)
+    @testset "PerturbedEquilibrium on a riccati result matches the forward one" begin
+        run_pe(integrator) =
+            mktempdir() do dir
+                _stage_deck(dir, joinpath(@__DIR__, "test_data", "regression_tj_ideal_example");
+                    ffs_overrides=Dict{String,Any}("integrator" => integrator),
+                    extra_sections=Dict{String,Any}(
+                        "ForcingTerms" => Dict{String,Any}(
+                            "forcing_data_file" => "forcing.dat",
+                            "forcing_data_format" => "ascii"),
+                        "PerturbedEquilibrium" => Dict{String,Any}(
+                            "compute_singular_coupling" => true)))
+                cp(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"),
+                    joinpath(dir, "forcing.dat"))
+                return GeneralizedPerturbedEquilibrium.main([dir])
             end
+        forward, riccati = run_pe("Forward"), run_pe("Riccati")
+
+        @test riccati.ffs.integrator === :riccati && riccati.pe !== nothing
+        @test riccati.resp.permeability ≈ forward.resp.permeability rtol = 1e-6
+        @test riccati.resp.reluctance ≈ forward.resp.reluctance rtol = 1e-6
+        # The singular coupling reads ξ and ξ′ off each surface, where the two integrators' stored nodes differ.
+        for name in (:C_delta_prime, :C_resonant_current, :C_resonant_area_weighted_field, :C_island_width_sq)
+            @test getfield(riccati.resp, name) ≈ getfield(forward.resp, name) rtol = 1e-3
         end
+        @test riccati.pe.resonant_area_weighted_field ≈ forward.pe.resonant_area_weighted_field rtol = 1e-4
+        @test riccati.pe.island_half_width ≈ forward.pe.island_half_width rtol = 1e-4
+        foreach(_check_display, (riccati.resp, riccati.pe))
     end
 
     @testset "display distinguishes disabled coupling from no resonances" begin
