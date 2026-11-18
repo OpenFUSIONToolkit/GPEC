@@ -77,8 +77,13 @@ applied root-area-weighted field b̃_x to the resonant response at that surface.
   - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
   - `C_penetrated_area_weighted_field` - Penetrated area-weighted field coupling (singcoup row 4)
   - `C_delta_mn`         - Δ_mn coupling, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁ (singcoup row 5)
-  - `coupling_flux::NamedTuple` - The same five matrices acting on the physical flux Φ_x (keys without the
+  - `coupling_flux::NamedTuple` - The same matrices acting on the physical flux Φ_x (keys without the
     `C_` prefix), used for the applied resonant vectors; empty when the coupling was not built.
+  - `C_resonant_area_weighted_field_asymptotic`, `C_resonant_current_asymptotic`, `C_island_width_sq_asymptotic`,
+    `C_delta_mn_asymptotic` - The same four built from the jump of the asymptotic small solution,
+    −2πi·χ₁·n·q′·(C_R − C_L), in place of the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4. The two agree where D_I = −1/4;
+    elsewhere the finite-width matrices are (1/2 + √−D_I)·w^(√−D_I − 1/2) times these, w being that half-width in ψ_N.
+    Empty unless the result is single-`n` and carries `Delta_EF`.
   - `C_coeffs::Matrix{ComplexF64}` - Edge-to-solution coefficients `u_bnd⁻¹·edge_mn` of each unit forcing mode.
 
 Metadata [n_rational] — identifies each (surface, n) row:
@@ -125,6 +130,10 @@ on a `ResonantCoupling`):
     C_island_width_sq::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_penetrated_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_delta_mn::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_resonant_area_weighted_field_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_resonant_current_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_island_width_sq_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_delta_mn_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     coupling_flux::NamedTuple = (;)
     C_coeffs::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
 
@@ -177,11 +186,14 @@ Matches Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`.
 
   - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_mn`
   - `forcing_solution_weights` - `C_coeffs`·Φ_x, the forcing's weights on the edge-driven solutions
+  - `resonant_area_weighted_field_asymptotic`, `resonant_current_asymptotic`, `island_width_sq_asymptotic`, `delta_mn_asymptotic` -
+    the same from the response's `_asymptotic` matrices; empty when it has none
 
 Diagnostics [n_rational]:
 
   - `island_half_width::Vector{Float64}` - w/2 = sqrt(|island_width_sq|) from applied forcing
   - `chirikov_parameter::Vector{Float64}` - Island overlap metric
+  - `island_half_width_asymptotic`, `chirikov_parameter_asymptotic` - the same from `island_width_sq_asymptotic`
   - `dominant_forcing_overlap` - Vᴴ·b̃_x, the applied forcing's coefficient on each dominant mode [rank]
 
 Control-surface forcing/response spectra [numpert_total], in the three Pharr (2026) field
@@ -231,10 +243,16 @@ Torque response (kinetic forward solves with `compute_torque_response`):
     penetrated_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
     delta_mn::Vector{ComplexF64} = ComplexF64[]
     forcing_solution_weights::Vector{ComplexF64} = ComplexF64[]
+    resonant_area_weighted_field_asymptotic::Vector{ComplexF64} = ComplexF64[]
+    resonant_current_asymptotic::Vector{ComplexF64} = ComplexF64[]
+    island_width_sq_asymptotic::Vector{ComplexF64} = ComplexF64[]
+    delta_mn_asymptotic::Vector{ComplexF64} = ComplexF64[]
 
     # Diagnostics [n_rational]
     island_half_width::Vector{Float64} = Float64[]
     chirikov_parameter::Vector{Float64} = Float64[]
+    island_half_width_asymptotic::Vector{Float64} = Float64[]
+    chirikov_parameter_asymptotic::Vector{Float64} = Float64[]
     dominant_forcing_overlap::Vector{ComplexF64} = ComplexF64[]  # Vᴴ·b̃_x [rank]
 
     # Control-surface forcing/response spectra in the three weightings of field representations [numpert_total], tesla

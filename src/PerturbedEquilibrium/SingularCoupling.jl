@@ -220,6 +220,10 @@ resonant area-weighted field, current, (w/2)², penetrated field and Δ_mn per u
 the rational-surface metadata and the edge-to-solution coefficients `C_coeffs`. The matrices are
 stored acting on b̃_x, with flux-space copies in `resp.coupling_flux` for applying a forcing.
 
+Δ_mn, the current, the field and (w/2)² are built from the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4. A single-`n`
+result with `Delta_EF` also gets them from the jump of the asymptotic small solution, −2πi·χ₁·n·q′·(C_R − C_L),
+in the `_asymptotic` matrices; those are empty otherwise.
+
 ## Normalization
 
   - Rows: the resonant and penetrated rows are a resonant flux divided by that surface's own area
@@ -293,6 +297,14 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
     resp.rational_n = zeros(Int, n_rational)
     resp.rational_surface_idx = zeros(Int, n_rational)
     resp.rational_area = zeros(Float64, n_rational)
+    # The asymptotic rows need Δ_EF, each surface's left and right small-solution coefficients per unit edge displacement.
+    dp = ffs.delta_prime
+    have_ef = ffs.npert == 1 && dp !== nothing && size(dp.ef) == (2msing, numpert_total)
+    asymptotic_size = have_ef ? (n_rational, numpert_total) : (0, 0)
+    resp.C_resonant_area_weighted_field_asymptotic = zeros(ComplexF64, asymptotic_size)
+    resp.C_resonant_current_asymptotic = zeros(ComplexF64, asymptotic_size)
+    resp.C_island_width_sq_asymptotic = zeros(ComplexF64, asymptotic_size)
+    resp.C_delta_mn_asymptotic = zeros(ComplexF64, asymptotic_size)
 
     # Edge-to-solution coefficients C_coeffs = u_bnd⁻¹·edge_mn, edge_mn = P/(chi1·singfac_lim·2πi) (Fortran gpout_resp)
     psi_lim = solution.psi_store[solution.step]
@@ -378,15 +390,26 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
             end
 
             # Δ_mn is the ∂b^ψ/∂ψ jump, stored over 2π·χ₁; j_c carries the surface Jacobian weighting of the current;
-            # resonant flux/area is a coordinate-invariant field in T [Park 2008; Pharr 2026].
-            resp.C_delta_mn[row, :] = jump_vec ./ (twopi * chi1)
-            resp.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
-            # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant area-weighted field = singflx/area,
-            # islandhwids = 4·singflx/(2π·shear·q·chi1)
-            singflx_pre = (L_mm / (twopi * nn)) .* resp.C_resonant_current[row, :]
-            resp.C_resonant_area_weighted_field[row, :] = singflx_pre ./ area
-            if abs(shear) > 1e-10
-                resp.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
+            # resonant flux/area is a coordinate-invariant field in T [Park 2008; Pharr 2026]. Matches Fortran gpout_resp:
+            # singflx = L·fkaxmn, resonant area-weighted field = singflx/area, islandhwids = 4·singflx/(2π·shear·q·chi1).
+            function coupling_rows(jump)
+                resonant_current = jump .* (-j_c / (twopi * m_res))
+                singflx = (L_mm / (twopi * nn)) .* resonant_current
+                island_width_sq = abs(shear) > 1e-10 ? (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx : zero(singflx)
+                return (; delta_mn=jump ./ (twopi * chi1), resonant_current, resonant_area_weighted_field=singflx ./ area, island_width_sq)
+            end
+            rows = coupling_rows(jump_vec)
+            resp.C_delta_mn[row, :] = rows.delta_mn
+            resp.C_resonant_current[row, :] = rows.resonant_current
+            resp.C_resonant_area_weighted_field[row, :] = rows.resonant_area_weighted_field
+            resp.C_island_width_sq[row, :] = rows.island_width_sq
+            if have_ef
+                # Asymptotic jump −2πi·χ₁·n·q′·(C_R − C_L): the right and left rows of Δ_EF on the edge displacement of each forcing mode.
+                rows = coupling_rows((-2π * im * chi1 * nn * sing_surf.q1) .* (transpose(edge_mn) * (dp.ef[2s, :] .- dp.ef[2s-1, :])))
+                resp.C_delta_mn_asymptotic[row, :] = rows.delta_mn
+                resp.C_resonant_current_asymptotic[row, :] = rows.resonant_current
+                resp.C_resonant_area_weighted_field_asymptotic[row, :] = rows.resonant_area_weighted_field
+                resp.C_island_width_sq_asymptotic[row, :] = rows.island_width_sq
             end
 
             resp.rational_psi[row] = sing_surf.psifac
@@ -408,12 +431,20 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
     # Conform the stored matrices to b̃ space, C̃ = C·R with R = S·A (Pharr 2026); `coupling_flux` keeps the flux-space
     # copies so a forcing is applied without round-trip noise.
     resp.coupling_flux = (; resonant_area_weighted_field=resp.C_resonant_area_weighted_field, resonant_current=resp.C_resonant_current,
-        island_width_sq=resp.C_island_width_sq, penetrated_area_weighted_field=resp.C_penetrated_area_weighted_field, delta_mn=resp.C_delta_mn)
+        island_width_sq=resp.C_island_width_sq, penetrated_area_weighted_field=resp.C_penetrated_area_weighted_field, delta_mn=resp.C_delta_mn,
+        resonant_area_weighted_field_asymptotic=resp.C_resonant_area_weighted_field_asymptotic, resonant_current_asymptotic=resp.C_resonant_current_asymptotic,
+        island_width_sq_asymptotic=resp.C_island_width_sq_asymptotic, delta_mn_asymptotic=resp.C_delta_mn_asymptotic)
     flux_conform = resp.rootarea_to_area_weight .* resp.surface_area
     resp.C_resonant_area_weighted_field = resp.C_resonant_area_weighted_field * flux_conform
     resp.C_resonant_current = resp.C_resonant_current * flux_conform
     resp.C_island_width_sq = resp.C_island_width_sq * flux_conform
     resp.C_delta_mn = resp.C_delta_mn * flux_conform
+    if have_ef
+        resp.C_resonant_area_weighted_field_asymptotic = resp.C_resonant_area_weighted_field_asymptotic * flux_conform
+        resp.C_resonant_current_asymptotic = resp.C_resonant_current_asymptotic * flux_conform
+        resp.C_island_width_sq_asymptotic = resp.C_island_width_sq_asymptotic * flux_conform
+        resp.C_delta_mn_asymptotic = resp.C_delta_mn_asymptotic * flux_conform
+    end
     have_inner_bpen && (resp.C_penetrated_area_weighted_field = resp.C_penetrated_area_weighted_field * flux_conform)
 
     return resp
@@ -424,7 +455,7 @@ end
 
 Apply the coupling matrices of `state.response` to the forcing on `state`: the applied resonant vectors
 (Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`), the forcing's solution weights, and the island
-half-widths and Chirikov overlap.
+half-widths and Chirikov overlap, each also in its `_asymptotic` form when the response carries those matrices.
 """
 function apply_coupling!(state::PerturbedEquilibriumState; verbose::Bool=false)
     resp = state.response
@@ -447,6 +478,14 @@ function apply_coupling!(state::PerturbedEquilibriumState; verbose::Bool=false)
 
     # Island diagnostics from the applied resonant vectors
     state.island_half_width, state.chirikov_parameter = island_diagnostics(state.island_width_sq, resp.rational_psi, resp.rational_surface_idx)
+    if !isempty(C.delta_mn_asymptotic)
+        state.resonant_area_weighted_field_asymptotic = C.resonant_area_weighted_field_asymptotic * forcing_flux
+        state.resonant_current_asymptotic = C.resonant_current_asymptotic * forcing_flux
+        state.island_width_sq_asymptotic = C.island_width_sq_asymptotic * forcing_flux
+        state.delta_mn_asymptotic = C.delta_mn_asymptotic * forcing_flux
+        state.island_half_width_asymptotic, state.chirikov_parameter_asymptotic =
+            island_diagnostics(state.island_width_sq_asymptotic, resp.rational_psi, resp.rational_surface_idx)
+    end
 
     if verbose
         max_island = isempty(state.island_half_width) ? 0.0 : maximum(state.island_half_width)

@@ -43,6 +43,8 @@ The run writes up to five coupling matrices under `PerturbedEquilibrium/Singular
 | `C_penetrated_area_weighted_field` | the penetrated field, when the run computes it | dimensionless |
 | `C_Delta_mn` | the forcing-driven ``\Delta_{mn}`` | 1/T |
 
+All but the penetrated field are built from the jump of ``\partial b^\psi/\partial\psi`` across ``|m - nq| = 5\times10^{-4}``. That jump depends on the width it is taken across wherever the Mercier index ``D_I \ne -1/4``, so a single-n run on a `"Riccati"` or `error_field_response` `"Galerkin"` solve also writes each of them with the suffix `_asymptotic`, built from the jump of the asymptotic small solution, which no width enters; the applied quantities carry the same suffix, and `ResonantCoupling(src; matrix=:resonant_area_weighted_field_asymptotic)` wraps that resonant-field matrix.
+
 `ResonantCoupling` wraps the first; any of the others decomposes over any window of surfaces through the bare-matrix form of `dominant_coupling`, with the ``\tilde b`` conform taken from a `ResonantCoupling` of the same file, since the bare matrix carries no (m, n) labels for `check_mode_basis` to guard the projection:
 
 ```julia
@@ -143,6 +145,7 @@ with the `RMPField` built from coils or a file as on the [Scripting API](api.md)
 | `PerturbedEquilibrium/SingularCoupling/chirikov_parameter` | ``\sigma_s`` | |
 | `PerturbedEquilibrium/SingularCoupling/Delta_mn` | the forcing-driven ``\Delta_{mn}`` per surface | |
 | `PerturbedEquilibrium/SingularCoupling/C_*` | the coupling matrices from the applied ``\tilde b`` to each quantity above | |
+| `PerturbedEquilibrium/SingularCoupling/*_asymptotic` | the resonant field, current, island widths, Chirikov parameter, ``\Delta_{mn}`` and their `C_*` matrices from the jump of the asymptotic small solution | as above |
 | `PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values`, `right_singular_vectors`, `left_singular_vectors`, `rational_index`, `forcing_overlap` | the core-window SVD of the resonant-field coupling | |
 | `PerturbedEquilibrium/Energies/plasma_energy`, `vacuum_energy`, `surface_energy` | the perturbed energies | J |
 | `PerturbedEquilibrium/Energies/toroidal_torque` | the boundary-response torque ``T_\phi`` | N·m |
