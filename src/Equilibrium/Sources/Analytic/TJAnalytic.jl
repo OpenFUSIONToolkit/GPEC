@@ -1,26 +1,19 @@
 """
     TJAnalyticConfig(...)
 
-Parameters for the **TJ-analytic** cylindrical large-aspect-ratio equilibrium
-model — a GPEC adaptation of the analytic profile family used by
-R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).  We follow the
-same analytic-profile parameterization (ψ-ODE in dimensionless r/a, f₁
-for q, power-law pressure) for the inner cylindrical core and connect it
-to GPEC's direct-GS pipeline; this is NOT a re-implementation of TJ.
-
-The model uses analytic profiles with exact control of both the on-axis
-and edge safety factors. The q profile is determined by:
+Parameters for the TJ-analytic cylindrical large-aspect-ratio equilibrium, a GPEC adaptation of
+the analytic profile family of R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ), not a
+re-implementation of TJ. The q profile is
 
     f1(r) = [1 - (1-r²)^ν] / (ν·q0)
     q(r)  = r² / f1(r)
 
-where ν = qa/q0 is the current peaking parameter, q0 is the axis q, and qa
-is the edge q. All lengths are normalized to R₀, fields to B₀. The pressure
-profile is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`.
-
-Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
+with the current peaking ν solved so q matches `qa` at the edge (ν = qa/q0 at lowest order). The
+pressure is p₂(r) = p0·(1-r²)^μ with μ = `pressure_peaking`. Lengths are normalized to R₀, fields
+to B₀. `solver` picks the pipeline: `:inverse` feeds the flux-surface geometry to the inverse
+solver, `:direct` builds ψ(R, Z) for the direct solver.
 """
-@kwdef mutable struct TJAnalyticConfig <: AnalyticEquilibriumConfig
+@kwdef struct TJAnalyticConfig <: AnalyticEquilibriumConfig
     r0::Float64 = 10.0         # Major radius R₀ [m]
     a::Float64 = 1.0           # Minor radius a [m] (ε = a/R₀)
     q0::Float64 = 1.5          # On-axis safety factor
@@ -31,13 +24,7 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     ma::Int = 128              # Radial grid points
     mtheta::Int = 128          # Poloidal grid points
     zeroth::Bool = false       # If true, suppress Shafranov shift
-end
-
-"""
-Build a `TJAnalyticConfig` from a parsed `[TJ_ANALYTIC_INPUT]` TOML table.
-"""
-function TJAnalyticConfig(input_dict::Dict{String,Any})
-    return TJAnalyticConfig(; symbolize_keys(input_dict)...)
+    solver::Symbol = :inverse  # Equilibrium pipeline: :inverse or :direct
 end
 
 """
@@ -45,10 +32,8 @@ end
 
 TJ-analytic poloidal flux function f1(x) where x = r/a, following the
 analytic-profile parameterization of R. Fitzpatrick's TJ code
-(https://github.com/rfitzp/TJ).  Uses a Taylor expansion near the axis
+(https://github.com/rfitzp/TJ). Uses a Taylor expansion near the axis
 for numerical stability.
-
-Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
 function tj_analytic_f1(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
@@ -80,8 +65,7 @@ end
 """
 Internal parameter bundle for the TJ-analytic shape ODE (ψ, g₂, H₁, H₁', f₃) —
 GPEC adaptation of the analytic shape ODE used in R. Fitzpatrick's TJ code
-(https://github.com/rfitzp/TJ).  Built once per `tj_analytic_run` /
-`tj_analytic_run_direct` call so both pipelines share identical numerics.
+(https://github.com/rfitzp/TJ), shared by the inverse and direct pipelines.
 
 Fields:
 
@@ -180,7 +164,7 @@ end
 Integrate the TJ-analytic shape ODE for the given ν.  Pass `saveat` to collect
 output on a prescribed dense grid (used by `tj_analytic_run_direct` so the
 downstream Hₙ / ψ splines sit on uniform nodes); leave it `nothing` for
-the default adaptive save pattern used by `tj_analytic_run`. `reltol` and `abstol` go to the
+the default adaptive save pattern used by `tj_analytic_run_inverse`. `reltol` and `abstol` go to the
 Vern9 solve; `abstol` defaults to `equil_abstol(reltol)`.
 """
 function tj_analytic_shape_solve(p::TJAnalyticShapeParams, nu::Float64;
@@ -231,39 +215,29 @@ end
 """
     tj_analytic_run(equil_input, tj_input)
 
-Construct a cylindrical tokamak equilibrium using the TJ-analytic
-model — GPEC's adaptation of the analytic-profile family used in
-R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).
+Solve the TJ-analytic equilibrium with the pipeline `tj_input.solver` names, `:inverse`
+([`tj_analytic_run_inverse`](@ref)) or `:direct` ([`tj_analytic_run_direct`](@ref)).
+"""
+function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
+    tj.solver === :inverse && return tj_analytic_run_inverse(equil_input, tj)
+    tj.solver === :direct && return tj_analytic_run_direct(equil_input, tj)
+    return error("TJAnalytic solver = \"$(tj.solver)\" is not one of \"inverse\", \"direct\"")
+end
 
-Profiles are analytic:
+"""
+    tj_analytic_run_inverse(equil_input, tj_input)
 
-    f1(x) = [1 - (1-x²)^ν] / (ν·qc),   p2(x) = pc·(1-x²)^μ,   x = r/a
-
-with ν = qa/qc.  The 2D geometry is built from the TJ-analytic inverse
-aspect-ratio expansion.  With zero edge shaping (Hna = Vna = 0) — the
-TJ-analytic benchmark configuration of Fitzpatrick's TJ — flux surfaces are
-shifted circles
+Build the TJ-analytic equilibrium of `tj` as inverse-solver input. With zero
+edge shaping (Hna = Vna = 0, the TJ benchmark configuration) the flux surfaces are shifted circles
 
     R(r,θ) = R₀ + Δ(r) + α(r)·r·cos θ
     Z(r,θ) =            α(r)·r·sin θ
 
-where Δ and α come from the shaping ODE for (g₂, H₁, H₁') (same equations
-as Fitzpatrick's TJ shape ODE):
-
-    Δ(r)   = R₀·εa²·H₁(x)                             (Shafranov shift)
-    α(r)   = 1 − εa²·(x²/8 − H₁/2)                    (from L(x) = x³/8 − x·H₁/2)
-    εa     = a/R₀
-
-The higher-order toroidal-flux correction g₂ enters the output F profile as
-F = R₀·B₀·(1 + εa²·g₂), and the higher-order poloidal flux f₃ enters the
-safety factor as q₂ = x²·(1 + εa²·g₂)·exp(−εa²·f₃/f1)/f1.
-
-The (n ≥ 2) horizontal/vertical shaping harmonics Hₙ(r), Vₙ(r) are not yet
-included; they are zero in the TJ-analytic benchmark scans.
-
-Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
+with Δ = R₀·εa²·H₁(x), α = 1 − εa²·(x²/8 − H₁/2), εa = a/R₀ and x = r/a, from the shaping ODE.
+The output profiles are F = R₀·B₀·(1 + εa²·g₂) and q₂ = x²·(1 + εa²·g₂)·exp(−εa²·f₃/f1)/f1.
+The n ≥ 2 shaping harmonics Hₙ, Vₙ are not included.
 """
-function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
+function tj_analytic_run_inverse(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     a, R0 = tj.a, tj.r0
     qc, mu = tj.q0, max(tj.pressure_peaking, 1.001)
     pc, B0 = tj.p0, tj.B0
@@ -279,9 +253,7 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     y_mat = reduce(hcat, sol.u)'
     steps = length(r_arr)
 
-    # Profile table: columns [r, F, P, q, ψ, g₂, H₁].  H₁' and f₃ are only
-    # needed inside the ODE; F and q are folded from the TJ-analytic EFIT-writer
-    # formulas (cf. R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ).
+    # Profile table columns: r, F, P, q, ψ, g₂, H₁ (F and q as in TJ's EFIT writer).
     temp = zeros(steps, 7)
     for i in 1:steps
         r = r_arr[i]
@@ -351,10 +323,7 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     end
 
     sq_in = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
-    # InverseRunInput's rz_in_xs is specified as ψ_N (see its docstring in Sources/Ingest.jl);
-    # the inverse solver queries (R, Z) splines at ψ_N values from sq_xs.  Passing
-    # physical r here happens to work when a ≈ 1 (r and ψ_N cover the same range)
-    # but extrapolates the (R, Z) splines for any a < 1, corrupting outer surfaces.
+    # rz_in_xs is ψ_N (see InverseRunInput), not physical r; the two only coincide when a ≈ 1.
     rz_in_xs = sq_xs
     rz_in_ys = collect(rzphi_y_nodes)
 
@@ -362,42 +331,19 @@ function tj_analytic_run(equil_input::EquilibriumConfig, tj::TJAnalyticConfig)
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; itp_2d_opts...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)
 
-    # Analytic: ingest=nothing — replay regenerates from the [TJ_ANALYTIC_INPUT] TOML section.
+    # Analytic: ingest=nothing — replay regenerates from the [TJAnalytic] deck section.
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, R0, 0.0, psio, nothing)
 end
 
 """
     tj_analytic_run_direct(equil_input, tj_input; nrbox=257, nzbox=257, rc=1.2)
 
-Option B pipeline: construct ψ(R, Z) on a 2D grid from the TJ-analytic
-model — GPEC's adaptation of R. Fitzpatrick's TJ code analytic-profile
-family (https://github.com/rfitzp/TJ) — and return a `DirectRunInput` so the
-equilibrium is processed by the direct-GS solver (same path as the
-geqdsk-based scans).
-
-Using the inverse pipeline on just the first-order Shafranov-shifted-circle
-geometry systematically under-drives the external kink at large ε because the
-inverse solver consumes the prescribed q₂ profile and never recomputes q from
-geometry.  The direct pipeline, in contrast, line-integrates F·∮dθ/(R²·Bp) on
-the 2D ψ(R,Z) field, so higher-order geometric effects (buried in the shape of
-ψ away from the axis) feed back into q and δW.  Reproducing the full
-geqdsk-equivalent path therefore requires rebuilding ψ(R,Z) from the analytic
-model itself — not just the flux-surface coordinates — including the vacuum
-region outside the plasma.
-
-The benchmark keeps edge shaping `Hna = Vna = 0`, so the ODE-integrated shape
-harmonics Hₙ, Vₙ for n ≥ 2 are rescaled to zero; only the H₁ Shafranov shift
-contributes.  ψ(R, Z) is constructed by:
-
-  - for each grid point, iterating the map (R, Z) → (r, w) 10× per the
-    TJ-analytic EFIT writer (handles the εa²·H₁ shift of the axis);
-  - evaluating ψ_plasma(r) from the radial ψ-ODE when r < 1, the TJ-analytic
-    analytic vacuum solution (`GetPSIvac` of Fitzpatrick's TJ) when 1 ≤ r < rc,
-    and the 1/r² far-field form when r ≥ rc.
-
-Reference: R. Fitzpatrick, TJ code (https://github.com/rfitzp/TJ) — the shape
-ODE (g₂, H₁, H₁', f₃), the `GetPSIvac` / `GetHHvac` vacuum extension, and the
-EFIT-writer (R, Z) → (r, w) Newton inversion that this routine adapts.
+Build ψ(R, Z) on an `nrbox × nzbox` grid from the TJ-analytic model and return it as direct-solver
+input, so q and δW are recomputed from the 2D geometry instead of taken from the prescribed q₂ (the
+inverse pipeline under-drives the external kink at large ε). Each grid point is mapped to (r, w) by
+the fixed-point iteration of TJ's EFIT writer; ψ comes from the radial ψ-ODE for r < 1, TJ's vacuum
+solution `GetPSIvac` for 1 ≤ r < `rc`, and that value at `rc` scaled by r²/rc² beyond (r, `rc` in
+units of a). Edge shaping is `Hna = Vna = 0`, so only the H₁ Shafranov shift contributes.
 """
 function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticConfig;
     nrbox::Int=257, nzbox::Int=257, rc::Float64=1.2)
@@ -411,9 +357,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     # ν root-find (cf. Fitzpatrick TJ's Setnu): q₂(1) = qa_target.
     nu = tj_analytic_find_nu(p, tj.qa; reltol=equil_input.flux_surface_rtol)
 
-    # Dense saveat so the downstream splines (H₁, g₂, f₃, ψ) are evaluated on
-    # a fine uniform r grid rather than the ~30 adaptive Vern9 steps — otherwise
-    # the (R, Z) → (r, w) Newton iteration hits spline interpolation artifacts.
+    # Dense uniform saveat: on the adaptive steps the (R, Z) → (r, w) iteration hits spline artifacts.
     # That inversion also needs a tighter abstol ceiling (1e-10) than the other equilibrium solves.
     dense_r = collect(range(p.r0, p.a; length=1024))
     sol = tj_analytic_shape_solve(p, nu; reltol=equil_input.flux_surface_rtol, abstol=equil_abstol(equil_input.flux_surface_rtol, 1e-10), saveat=dense_r)
@@ -444,24 +388,12 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
         return H1a - 0.5 * r^2 * log(r) + 0.25 * (2 * H1ap + 1) * (r^2 - 1)
     end
 
-    # TJ-analytic f_R, f_Z (cf. Fitzpatrick's TJ) — the full shift of (R, Z) from
-    # the nominal shifted circle.  With Hn = Vn = 0 for n ≥ 2 the residual
-    # terms are:
+    # TJ's shifts of (R, Z) from the nominal circle with Hₙ = Vₙ = 0 for n ≥ 2, L(r) = r³/8 − r·H₁(r)/2:
     #   f_R = εa²·H₁(r) + εa³·L(r)·cos(w)
     #   f_Z =          −εa³·L(r)·sin(w)
-    # L(r) = r³/8 − r·H₁(r)/2.  The εa³ terms were omitted in the first pass
-    # and shifted the pole location of the ε-scan to ε ≈ 0.41 instead of 0.66.
-    # Per Fitzpatrick's TJ, freeze f_R, f_Z at r = rc and scale the inner
-    # value by r²/rc² for r ≥ rc to prevent the Newton iteration from
-    # diverging in the far vacuum.
-    function L_of(r::Float64)
-        rr = (r >= rc) ? (rc - 1e-8) : r
-        H1 = (rr < 1.0) ? H1_of_x(rr) : H1_vac(rr)
-        return rr^3 / 8 - rr * H1 / 2
-    end
+    # As in TJ, frozen at r = rc and scaled by r²/rc² beyond, so the iteration does not diverge in the far vacuum.
     function f_R_shift(r::Float64, w::Float64)
         if r >= rc
-            # TJ-analytic capping (Fitzpatrick's TJ): f_R(r, w) = f_R(rc − ε, w) · r² / rc²
             return f_R_shift(rc - 1e-8, w) * r^2 / rc^2
         end
         H1 = (r < 1.0) ? H1_of_x(r) : H1_vac(r)
@@ -477,9 +409,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
         return -epsa2 * epsa * L * sin(w)
     end
 
-    # (R_norm, Z_norm) → (r, w) by the TJ-analytic 10-step fixed-point iteration
-    # (cf. Fitzpatrick's TJ EFIT writer).
-    # R_norm, Z_norm are normalized to R₀.
+    # (R_norm, Z_norm) → (r, w) by the 10-step fixed-point iteration of TJ's EFIT writer; R_norm, Z_norm are normalized to R₀.
     function find_rw(R_norm::Float64, Z_norm::Float64)
         r = sqrt((R_norm - 1.0)^2 + Z_norm^2) / epsa
         w = atan(Z_norm, 1.0 - R_norm)
@@ -492,10 +422,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
         return r, w
     end
 
-    # TJ-analytic GetPSIvac (cf. Fitzpatrick's TJ) with Hn = Vn = 0 for n ≥ 2.
-    # Returns the TJ-analytic-normalized vacuum ψ (same units as the
-    # plasma-interior ψ-ODE); multiplied by psi_scale outside to convert to
-    # physical units.
+    # TJ's GetPSIvac with Hₙ = Vₙ = 0 for n ≥ 2, in normalized units (callers multiply by psi_scale).
     function psi_vac(r::Float64)
         logr = log(r)
         sum1 = 1.0 - H1ap + H1ap^2
@@ -505,20 +432,14 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
                0.5 * epsa2 * f1a * (-sum1 * logr + sum2)
     end
 
-    # ψ(r) inside plasma, from my ODE.  ψ_ana(0) ≈ 0, ψ_ana(a) = psio.  The
-    # clamp keeps the argument inside the spline's data range [p.r0, p.a].
+    # ψ(r) inside the plasma from the ψ-ODE (≈ 0 on axis, psio at r = a), clamped to the data range [p.r0, p.a].
     function psi_plasma_physical(r::Float64)
         r_phys = clamp(r * p.a, p.r0, p.a)
         return ψ_of_r(r_phys)
     end
 
-    # Build psi_in in the direct-GS solver's expected convention:
-    # positive at axis, zero at LCFS, negative outside (per DirectRunInput docs).
-    # Inside plasma: psi = psio − ψ_plasma(r)  (axis ≈ psio, boundary = 0).
-    # Outside: psi = −psi_scale · GetPSIvac(r)  (0 at LCFS, negative outside).
-    #
-    # Grid spans R₀ ± rc·a × ±rc·a (where rc is the vacuum-shell radius in
-    # units of a), giving a comfortable margin for the separatrix finder.
+    # Direct-solver convention: ψ positive at the axis, zero at the LCFS, negative outside.
+    # The grid spans R₀ ± rc·a by ±rc·a, a margin for the separatrix finder.
     r_span = rc * a
     psi_in_xs = collect(range(R0 - r_span, R0 + r_span; length=nrbox))
     psi_in_ys = collect(range(-r_span, r_span; length=nzbox))
@@ -542,17 +463,14 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     # 2D spline consumed by direct-GS
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_rz; extrap=ExtendExtrap())
 
-    # 1D profile spline, same layout as read_efit (4 columns).  Use the
-    # TJ-analytic q₂ on the radial grid so that the prescribed q is
-    # consistent with the ψ(R,Z) we just constructed.
+    # 1D profile spline in read_efit's 4-column layout, with q₂ consistent with the ψ(R, Z) above.
     psi_norm_grid = range(0.0, 1.0; length=nrbox)
     F_nodes = zeros(nrbox)
     P_nodes = zeros(nrbox)
     q_nodes = zeros(nrbox)
     for i in 1:nrbox
         ψN = psi_norm_grid[i]
-        # Invert ψN = (ψ_plasma(r) - 0) / psio  ⇒  find r such that ψ_plasma(r) = ψN·psio.
-        # ψ_plasma is monotonic in r so a Brent search on [p.r0, p.a] converges quickly.
+        # Solve ψ_plasma(r) = ψN·psio for r (ψ_plasma is monotonic in r).
         target = ψN * psio
         rlocal = if ψN ≤ 0.0
             p.r0
@@ -577,7 +495,7 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     rmin_grid, rmax_grid = extrema(psi_in_xs)
     zmin_grid, zmax_grid = extrema(psi_in_ys)
 
-    # Analytic: ingest=nothing — replay regenerates from the [TJ_ANALYTIC_INPUT] TOML section.
+    # Analytic: ingest=nothing — replay regenerates from the [TJAnalytic] deck section.
     return DirectRunInput(equil_input, sq_in, psi_in, psi_in_xs, psi_in_ys,
         rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1, 1, nothing)
 end

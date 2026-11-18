@@ -4,15 +4,12 @@
 Random draws of coil misalignment within a tolerance, the primitives a tolerance Monte Carlo
 recombines with the coil sensitivities. A tolerance is one number, the radius of the disk the
 coil centre (or axis endpoint) may lie in; the direction is random and the radial density is a
-[`RadialDistribution`](@ref). Every sampler works on a caller-supplied `rng` and scalar
-arguments so a hot loop can hold the resolved exponents and pass phases shared between
-coherently moving groups.
+[`RadialDistribution`](@ref). Samplers take a caller-supplied `rng` and scalar arguments.
 
 Displacements are complex numbers `Δx + iΔy` in metres and tilts `θx + iθy` in degrees, the
 rotation angles about the machine x and y axes that `apply_transforms` and the stored
 sensitivities use, so an overlap moves by `S_x·real(Δ) + S_y·imag(Δ) + T_x·real(θ) + T_y·imag(θ)`.
-For an axisymmetric coil `S_y = −i·S_x`, which makes that `S_x·conj(Δ)`: a single magnitude
-with a free phase, the model the OMFIT tolerance tool used.
+For an axisymmetric coil `S_y = −i·S_x`, which makes that `S_x·conj(Δ)`.
 """
 
 """
@@ -99,9 +96,7 @@ end
     disk_radius(rng, R, p) -> Float64
 
 A radius drawn in `[0, R]` with density exponent `p` (see [`RadialDistribution`](@ref)):
-`R·rand()^p`. The common exponents (`0`, `1/3`, `1/2`, `1`, from [`Ring`](@ref), [`Hollow`](@ref),
-[`UniformArea`](@ref), [`Flat`](@ref)) take a `sqrt`/`cbrt`/identity fast path instead of the
-general `^`, which is the hot loop's dominant cost otherwise.
+`R·rand()^p`, with `sqrt`/`cbrt`/identity fast paths for the common exponents.
 """
 @inline function disk_radius(rng::AbstractRNG, R::Real, p::Real)
     u = rand(rng)
@@ -168,11 +163,8 @@ The tilt is expressed as the rotation angles `(θx, θy)` about the machine axes
 axis top toward the direction `φ_d`, in the sense `apply_transforms` uses: a positive `θx`
 leans the top toward −y and a positive `θy` toward −x.
 
-The OMFIT tool's version of this model measured the endpoint separation in units of the
-tolerance radius against a height in metres and scaled the result by the tabulated tilt
-tolerance, and reused the top endpoint's direction for the bottom one; this sampler works in
-physical units from `(R, z_top)` alone with independent endpoint directions, so benchmarks
-against that tool compare the additive model exactly and the cylinder model only in kind.
+Unlike the OMFIT tool's version, this works in physical units with independent endpoint directions,
+so it agrees with that tool only in kind.
 """
 function sample_cylinder(rng::AbstractRNG, R::Real, z_top::Real, p::Real;
     phase_top::Real=2π * rand(rng), phase_bot::Real=2π * rand(rng))

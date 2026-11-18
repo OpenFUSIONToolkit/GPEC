@@ -1,11 +1,6 @@
-# GalerkinStructs.jl
-#
-# Data structures for the RDCON outer-region singular Galerkin solver — the Julia port of
-# `gal.f` (Dewar's Galerkin method for singular modes). These mirror the Fortran derived types
-# `cell_type`, `interval_type`, and `gal_type` (gal.f).
-#
-# Fortran uses 0-based dimensions `0:np` and `0:nx`/`0:msing`; here those become Julia 1-based with a
-# `+1` index shift (Hermite DOF `ip` ↔ array index `ip+1`; interval `ising` ↔ `intvl[ising+1]`).
+# Data structures for the RDCON outer-region singular Galerkin solver (Fortran `gal.f` types `cell_type`,
+# `interval_type`, `gal_type`). Fortran `0:np`/`0:msing` dimensions are 1-based here with a `+1` shift
+# (Hermite DOF `ip` ↔ index `ip+1`; interval `ising` ↔ `intvl[ising+1]`).
 #
 # Reference: A. H. Glasser, Z. R. Wang & J.-K. Park, Phys. Plasmas 23, 112506 (2016).
 
@@ -124,14 +119,10 @@ PerturbedEquilibrium). Populated by `gal_output_solution` (GalerkinSolution.jl).
   - `psi::Vector{Float64}`, `q::Vector{Float64}` — radial grid (inner→edge) and its safety factor.
   - `issing::Vector{Bool}` — grid points sitting on a singular surface (skipped; left zero).
   - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ and dξ/dψ.
-  - `xi_cut::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` cut solution: ξ with the leading-order
-    resonant content removed. This is the smooth background the resistive inner-layer solution is
-    added to when forming the composite solution at a rational surface, so the inner and outer
-    solutions overlap in the matching region. Sized `(0,0,0)` when the cut path was not requested.
-  - `cut_range::Matrix{Float64}` — `(msing, 2)` ψ bounds of the resonant + extension cells flanking
-    each rational surface. Outside these bounds no resonant content is subtracted, so `xi_cut`
-    equals `xi` there and the composite solution is undefined; the inner-region solution is only
-    meaningful inside this window. Sized `(0,0)` when the cut path was not requested.
+  - `xi_cut::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ with the leading-order resonant content removed,
+    the background the inner-layer solution is added to for the composite solution. `(0,0,0)` unless `cut_solution`.
+  - `cut_range::Matrix{Float64}` — `(msing, 2)` ψ bounds of the resonant + extension cells around each surface;
+    the composite inner solution is only meaningful inside them. `(0,0)` unless `cut_solution`.
 """
 struct GalerkinSolution
     psi::Vector{Float64}
@@ -146,16 +137,13 @@ end
 """
     GalerkinResult
 
-Solver internals and FEM diagnostics of the outer-region Galerkin solve. Its Δ′ payload (Δ′
-matrix, raw D′, PEST-3 blocks, coil-response block) is NOT carried here: `galerkin_solve`
-returns it separately as a [`DeltaPrimeData`](@ref), the one formalism-independent Δ′ type,
-published as `ForceFreeStatesResult.delta_prime`.
+Solver internals and FEM diagnostics of the outer-region Galerkin solve. The Δ′ payload is not here;
+`galerkin_solve` returns it separately as a [`DeltaPrimeData`](@ref) (`ForceFreeStatesResult.delta_prime`).
 
 ## Fields
 
-  - `msing::Int` — number of resonant singular surfaces in the Galerkin solve. May be fewer than
-    `result.surfaces`: only surfaces inside the integration domain and the resolved m-band are
-    kept (`gal_resonant_surfaces`).
+  - `msing::Int` — number of resonant surfaces solved; may be fewer than `result.surfaces`, since only
+    surfaces inside the domain and the resolved m-band are kept (`gal_resonant_surfaces`).
   - `sing_psi, sing_q::Vector{Float64}`, `sing_m, sing_n::Vector{Int}` — per-surface identifiers,
     core→edge, in the order the Δ′ matrices are indexed.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.

@@ -20,6 +20,7 @@ Identity of the environment a run was produced in.
   - `nthreads::Int` — `Threads.nthreads()` in the run (-1 if unknown)
   - `blas_threads::Int` — `BLAS.get_num_threads()` in the run (-1 if unknown)
   - `build_mode::String` — "aot" if the loaded GPEC was built with its precompile workload, "jit" otherwise ("" if unknown)
+  - `run_mode::String` — "warm" if the case ran in a warm worker after other cases, "isolated" if in its own subprocess ("" if unknown)
   - `pinned::Bool` — whether the harness copied its own Manifest into the run's project
 """
 struct EnvFingerprint
@@ -29,10 +30,11 @@ struct EnvFingerprint
     nthreads::Int
     blas_threads::Int
     build_mode::String
+    run_mode::String
     pinned::Bool
 end
 
-const UNKNOWN_ENV = EnvFingerprint("", "", "", -1, -1, "", false)
+const UNKNOWN_ENV = EnvFingerprint("", "", "", -1, -1, "", "", false)
 
 """
 Cache key for an environment.
@@ -91,8 +93,9 @@ Parse the `key=value` run-info file written by a run subprocess.
 
 Returns `(runtime_s, fingerprint)`. A missing or malformed file yields `NaN` and `UNKNOWN_ENV`
 rather than throwing, so a run that produced output but no metadata still reports its numbers.
+`run_mode` is recorded as given, since the run itself cannot tell how it was launched.
 """
-function read_runinfo(path::String, pinned::Bool)
+function read_runinfo(path::String, pinned::Bool, run_mode::String="")
     isfile(path) || return (NaN, UNKNOWN_ENV)
     fields = Dict{String,String}()
     for line in eachline(path)
@@ -108,6 +111,7 @@ function read_runinfo(path::String, pinned::Bool)
         something(tryparse(Int, getf("nthreads", "")), -1),
         something(tryparse(Int, getf("blas_threads", "")), -1),
         getf("build_mode", ""),
+        run_mode,
         pinned
     )
     return (something(runtime_s, NaN), fp)
@@ -122,5 +126,6 @@ function describe_env(fp::EnvFingerprint)::String
     pin = fp.pinned ? "pinned" : "unpinned"
     threads = "$(fp.nthreads) thread$(fp.nthreads == 1 ? "" : "s")/$(fp.blas_threads) BLAS"
     mode = isempty(fp.build_mode) ? "" : ", $(fp.build_mode) build"
-    return "julia $(fp.julia_version), $(fp.os_arch), $mani ($pin), $threads$mode"
+    launch = isempty(fp.run_mode) ? "" : ", $(fp.run_mode)"
+    return "julia $(fp.julia_version), $(fp.os_arch), $mani ($pin), $threads$mode$launch"
 end

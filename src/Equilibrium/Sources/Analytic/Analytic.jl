@@ -2,8 +2,8 @@
     AnalyticEquilibriumConfig
 
 Supertype of the parameter structs of the analytic equilibrium kinds. Each subtype is the
-`config_type` of one or more `ANALYTIC_EQ` rows, which pair it with an `eq_type`, its TOML
-section, and its solver.
+`config_type` of one `ANALYTIC_EQ` row, which pairs it with an `eq_type`, its deck section,
+and its solver.
 """
 abstract type AnalyticEquilibriumConfig end
 
@@ -16,14 +16,12 @@ include("TJAnalytic.jl")
 
 Single-source-of-truth entry describing one analytic-equilibrium kind: the `gpec.toml`
 section that carries its parameters, the `*Config` type built from that section, and the
-run function that turns the config into solver input. `tj_analytic` and `tj_analytic_direct`
-share `TJAnalyticConfig` but bind different run functions, so `run_fn` is per-entry rather
-than derived from `config_type`.
+run function that turns the config into solver input.
 
 ## Fields
 
-  - `section::String` — `gpec.toml` section key (e.g. `"SOL_INPUT"`)
-  - `config_type::DataType` — `*Config` type, constructed via its `(::Dict)` / `(::String)` ctor
+  - `section::String` — `gpec.toml` section, the config type's name without `Config` (e.g. `"Solovev"`)
+  - `config_type::DataType` — `*Config` type, built from the section's keys as keywords
   - `run_fn::Function` — `(EquilibriumConfig, config) -> eq_input` solver entry point
 """
 struct AnalyticEqSpec
@@ -32,11 +30,10 @@ struct AnalyticEqSpec
     run_fn::Function
 end
 
-# Registry of analytic equilibrium kinds. Both `run_input` (fresh runs) and the rerun input
-# builder dispatch off this table, so adding a new analytic kind is one new row.
+# Registry of analytic equilibrium kinds, keyed by the internal eq_type each config implies. `run_input` and the
+# deck parser both dispatch off this table, so adding a new analytic kind is one new row.
 const ANALYTIC_EQ = Dict(
-    "sol" => AnalyticEqSpec("SOL_INPUT", SolovevConfig, sol_run),
-    "lar" => AnalyticEqSpec("LAR_INPUT", LargeAspectRatioConfig, lar_run),
-    "tj_analytic" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run),
-    "tj_analytic_direct" => AnalyticEqSpec("TJ_ANALYTIC_INPUT", TJAnalyticConfig, tj_analytic_run_direct)
+    "sol" => AnalyticEqSpec("Solovev", SolovevConfig, sol_run),
+    "lar" => AnalyticEqSpec("LargeAspectRatio", LargeAspectRatioConfig, lar_run),
+    "tj_analytic" => AnalyticEqSpec("TJAnalytic", TJAnalyticConfig, tj_analytic_run)
 )

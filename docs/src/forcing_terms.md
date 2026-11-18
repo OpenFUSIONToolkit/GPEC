@@ -1,79 +1,31 @@
-# ForcingTerms Module
+# Forcing Terms
 
-The ForcingTerms module specifies external magnetic field perturbations for the perturbed
-equilibrium calculation. It supports reading from ASCII or HDF5 files, as well as computing
-perturbations directly from coil Biot-Savart calculations.
+`ForcingTerms` specifies the external magnetic perturbation that drives the perturbed equilibrium: the spectrum of the normal field on the control surface at `psilim`, given either as a file of (m, n) amplitudes or computed by Biot–Savart from coil geometry.
+The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs; its result is the `RMPField` that `perturbed_equilibrium` applies to the plasma response.
 
-## Normalization conventions
+## Normalization
 
-Two normalization tags are supported, specified inside the file (not in `gpec.toml`):
+Internally every forcing is the unit-norm flux spectrum ``\Phi_x``, the Fourier amplitude of ``2\pi R\,(B_R\,\partial Z/\partial\theta - B_Z\,\partial R/\partial\theta)`` over the unit-norm angles ``\theta, \zeta \in [0, 1]``, the quantity the Fortran GPEC calls `Phi_x`.
+A forcing file declares its own normalization by a tag; a coil set needs none, because the Biot–Savart pipeline produces ``\Phi_x`` directly.
 
-| Tag | Quantity | Units | Notes |
-|-----|----------|-------|-------|
-| `"normal_field_T"` | Fourier modes of B·n̂ | Tesla | **Default** — most intuitive for users |
-| `"sfl_flux_Wb"` | Fourier modes of R×(B_R ∂Z/∂θ − B_Z ∂R/∂θ) | T·m² | 2π-angle SFL flux (user input) |
+| Tag | Quantity | Units | On load |
+|---|---|---|---|
+| `"normal_field_T"` (default) | Fourier modes of ``B\cdot\hat n`` over ``\theta \in [0, 2\pi]`` | T | weighted by the area element ``J\lvert\nabla\psi\rvert`` and projected onto every harmonic of the run; a poloidally varying weight mixes modes, so the file must cover its sidebands (a warning asks for a wider m range when an edge harmonic carries more than 10% of the flux) |
+| `"sfl_flux_Wb"` | the straight-field-line flux ``R\,(B_R\,\partial Z/\partial\theta - B_Z\,\partial R/\partial\theta)`` over ``\theta \in [0, 2\pi]`` | T·m² | multiplied by ``(2\pi)^2`` |
+| `"unit_flux"` | ``\Phi_x`` itself, as a run records its forcing for replay | T·m² | loaded as is |
 
-### Angle convention
+## File formats
 
-Julia's ForcingTerms use the **unit-norm angle convention** (θ_norm ∈ [0, 1], ζ_norm ∈ [0, 1])
-internally, matching Fortran GPEC and the Equilibrium/ForceFreeStates modules.
-
-The coil Biot-Savart pipeline produces mode amplitudes directly equal to Fortran's `Phi_x`:
-
-```
-Julia output ≡ Fortran Phi_x
-```
-
-The formula is `Phi_x(θ_norm, ζ_norm) = 2π × R × (B_R ∂Z/∂θ_norm − B_Z ∂R/∂θ_norm)`, where
-the `2π` comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ.
-
-Users who provide forcing files may use the more intuitive **2π-angle Fourier amplitudes**
-(e.g. the amplitude of cos(mθ − nζ) where θ ∈ [0, 2π]). These are tagged `"sfl_flux_Wb"`
-and multiplied by (2π)² internally to reach unit-norm convention.
-
-### Automatic conversion
-
-Files tagged `normal_field_T` are automatically converted to unit-norm Phi_x convention
-during loading by weighting with the control-surface area element J|∇ψ|. This weight varies
-poloidally, so the conversion is a mode-mixing operation and the flux is projected onto
-every harmonic of the run (`mlow:mhigh`), sidebands included.
-
-The file's spectrum must also extend far enough that the harmonics it omits are negligible,
-since those would mix into the run's range too. GPEC estimates this from the file's edge
-harmonics: if either one alone carries more than 10% of the converted flux, a warning asks for
-a wider m range. Files with fewer than three harmonics are not checked.
-
-Files tagged `sfl_flux_Wb` (2π-angle SFL flux) are scaled by (2π)² to reach unit-norm.
-
-The coil Biot-Savart code (`forcing_data_format = "coil"`) always produces unit-norm
-amplitudes directly — no conversion is applied.
-
-## ASCII file format
+ASCII (`forcing_data_format = "ascii"`): an optional `# normalization: <tag>` line, comment lines starting with `#`, and one `n  m  real(amplitude)  imag(amplitude)` row per mode; all four columns are required:
 
 ```
 # normalization: normal_field_T
-# Format: n  m  real(amplitude)  imag(amplitude)
 1  6  1.0e-4  0.0
 1  7  5.0e-5  2.0e-5
 ```
 
-- The `# normalization: <tag>` line is optional; default is `normal_field_T`.
-- Lines starting with `#` are comments and are ignored by the data parser.
-- Columns: toroidal mode n, poloidal mode m, real part of amplitude, imaginary part (optional, default 0).
-- Amplitudes are in Tesla (for `normal_field_T`) or T·m² (for `sfl_flux_Wb`).
+HDF5 (`forcing_data_format = "hdf5"`): datasets `n`, `m`, `amplitude_real` and `amplitude_imag`, all required, with the optional root attribute `normalization`:
 
-## HDF5 file format
-
-Required datasets:
-- `n`: integer array of toroidal mode numbers
-- `m`: integer array of poloidal mode numbers
-- `amplitude_real`: float array of real parts
-- `amplitude_imag`: float array of imaginary parts (optional)
-
-Optional root attribute:
-- `normalization`: string, either `"normal_field_T"` (default) or `"sfl_flux_Wb"`
-
-Example (Julia):
 ```julia
 using HDF5
 h5open("forcing.h5", "w") do f
@@ -85,57 +37,33 @@ h5open("forcing.h5", "w") do f
 end
 ```
 
-## Coil Biot-Savart format
+## Coils
 
-Set `forcing_data_format = "coil"` in `[ForcingTerms]` TOML to compute the field
-directly from coil geometry. Output is always in `sfl_flux_Wb` convention.
-
-The coil pipeline:
-1. `sample_boundary_grid`: evaluate plasma boundary geometry at (mtheta × nzeta) grid
-2. `compute_biot_savart_boundary!`: compute B at all grid points via Biot-Savart law
-3. `project_normal_flux!`: compute Phi_x = 2π×R×(B_R ∂Z/∂θ_norm − B_Z ∂R/∂θ_norm)
-4. `fourier_decompose_bn`: Fourier decompose to get bmn in unit-norm (= Phi_x) convention
-
-Steps 2–4 are linear in the coils, so a `CoilForcingGrid` (step 1 plus the observation-point
-layout, built once per equilibrium and `n`) can be reused to evaluate coil sets one at a time
-with `coil_forcing_modes`; the per-set spectra sum to the assembly's. Use this when many coil
-variants must be compared against one plasma — moved or re-wound coils, or one coil at a time —
-without re-sampling the boundary:
-
-```julia
-forcing_grid = CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)
-spectra = [coil_forcing_modes(cs, forcing_grid, n, m_low, m_high) for cs in coil_sets]
-```
-
-The toroidal angle for each observation point at SFL grid coordinate (θ_i, ζ_j) is:
-```
-φ_phys(i, j) = -helicity × (2π × ζ_j + ν(ψ, θ_i))
-```
-where `helicity = sign(Bt) × sign(Ip)` and `ν(ψ, θ)` is the SFL toroidal coordinate correction
-stored in `equil.rzphi_nu`. This matches Fortran's `phi = -helicity*(twopi*czeta + crzphi_f(3))`.
-For DIII-D (Bt < 0, Ip > 0 → helicity = -1), ν ranges from about -3.4 to +3.4 radians at the
-boundary — omitting it completely scrambles the Fourier mode decomposition.
-
-### Coil geometry sources
-
-Each `[[ForcingTerms.coil_set]]` block supplies one coil set from one of several sources,
-selected by `source`. Shifts and tilts (`shiftx/y/z`, `tiltx/y/z`, `n_tilt`, ...) apply to
-every source, so analytic coils can be perturbed exactly like file-based ones.
+`forcing_data_format = "coil"` computes the field from coil geometry: the plasma boundary is sampled on an `mtheta_coil × nzeta_coil` grid, the Biot–Savart field of every coil set is evaluated there, projected onto the normal flux and Fourier decomposed.
+The toroidal angle of each observation point includes the straight-field-line offset ``\nu(\psi, \theta)`` and the helicity ``\mathrm{sign}(B_T)\,\mathrm{sign}(I_p)`` of the equilibrium, without which the decomposition would be wrong.
+Each `[[ForcingTerms.coil_set]]` block supplies one coil set, selected by `source`; shifts and tilts (`shiftx/y/z`, `tiltx/y/z`, `n_tilt`, …) apply to every source, which is what the [Error Fields](error_fields.md) stage sweeps.
+From `examples/DIIID-like_ideal_example/gpec.toml` (the first block) and the other sources:
 
 ```toml
-# Legacy ASCII .dat file (unchanged; resolves to {dat_dir}/{machine}_{name}.dat)
-[[ForcingTerms.coil_set]]
-name = "il"
-currents = [1e4, 1e4, 1e4, 1e4, 1e4, 1e4]
+[ForcingTerms]
+forcing_data_format = "coil"
+machine = "d3d"
+mtheta_coil = 480
+nzeta_coil = 32
 
-# Modern HDF5 file; `name` selects one set from a multi-set file (omit if it holds one)
+# ASCII .dat file, resolved to {dat_dir}/{machine}_{name}.dat
+[[ForcingTerms.coil_set]]
+name = "c"
+currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]
+
+# HDF5 file; `name` selects one set of a multi-set file
 [[ForcingTerms.coil_set]]
 source = "file"
 h5_file = "/path/to/my_coils.h5"
 name = "il"
 currents = [1e4, 1e4, 1e4, 1e4, 1e4, 1e4]
 
-# Analytic PF hoop — a horizontal circle; tilt breaks axisymmetry to give n ≠ 0 forcing
+# Analytic PF hoop; a tilt breaks axisymmetry to give n ≠ 0 forcing
 [[ForcingTerms.coil_set]]
 source = "pf_hoop"
 radius = 1.8
@@ -143,7 +71,7 @@ height = 0.9
 currents = [5e3]
 tiltx = [2.0]
 
-# Analytic window-pane (picture-frame) array — corner mode: two opposite [R, Z] corners
+# Analytic window-pane array, by two opposite [R, Z] corners ...
 [[ForcingTerms.coil_set]]
 source = "window_pane"
 n_coils = 8
@@ -151,10 +79,7 @@ rz_corners = [[2.2, -0.6], [2.2, 0.6]]
 gap_fraction = 0.15
 currents = [1e3, -1e3, 1e3, -1e3, 1e3, -1e3, 1e3, -1e3]
 
-# Analytic window-pane — standoff mode: placed by physical distance off the plasma surface.
-# The frame center sits `standoff` m along the outward surface normal at cylindrical
-# `poloidal_angle` (degrees); legs span `poloidal_length` m, tilted by `poloidal_tilt`
-# (degrees, 0 = tangential). Requires an equilibrium (the main forcing pipeline supplies it).
+# ... or by standoff off the plasma surface at a poloidal angle (degrees)
 [[ForcingTerms.coil_set]]
 source = "window_pane"
 n_coils = 2
@@ -165,8 +90,7 @@ poloidal_tilt = 0.0
 gap_fraction = 0.15
 currents = [1e4, -1e4]
 
-# Analytic helical array on a circular cross-section torus (pitch = m/n).
-# theta_lo/theta_hi (poloidal extent, degrees) default to a full 0–360 turn.
+# Analytic helical array on a circular torus, pitch m_hel/n_hel
 [[ForcingTerms.coil_set]]
 source = "helical"
 R0 = 1.7
@@ -177,47 +101,21 @@ n_coils = 4
 currents = [1e3, 1e3, 1e3, 1e3]
 ```
 
-### HDF5 coil geometry format
+A coil HDF5 file stores one subgroup per coil set under a parent group (default `coils`): `<group>/<set>/x`, `y`, `z` as `ncoil × s × nsec` Cartesian metres, an optional `currents` dataset, and the winding multiplier as the attribute `nw`; `convert_coil_dat_to_h5` and `convert_coil_h5_to_dat` translate the ASCII format, `read_coil_h5` and `write_coil_h5` read and write it.
 
-A coil HDF5 file stores one **subgroup per coil set** under a parent group (default `coils`),
-so a single file can hold many sets and the reader ignores any unrelated content elsewhere:
+The field is linear in the coils, so a `CoilForcingGrid` built once per equilibrium and n evaluates coil sets one at a time, for comparing coil variants against one plasma without re-sampling the boundary:
 
-```text
-<group>/<set_name>/x         Float64 ncoil×s×nsec   Cartesian metres
-<group>/<set_name>/y         Float64 ncoil×s×nsec
-<group>/<set_name>/z         Float64 ncoil×s×nsec
-<group>/<set_name>/currents  Float64 ncoil          optional
-<group>/<set_name>  attr nw  Float64                winding multiplier, default 1.0
+```julia
+forcing_grid = CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)
+spectra = [coil_forcing_modes(cs, forcing_grid, n, m_low, m_high) for cs in coil_sets]
 ```
 
-Use `convert_coil_dat_to_h5` / `convert_coil_h5_to_dat` to migrate legacy files, and
-`read_coil_h5` / `write_coil_h5` for direct I/O.
+## Outputs
 
-### Rerun snapshot
+The applied spectrum is written with the response: `PerturbedEquilibrium/ForcingModes/` (`m`, `n`, `amplitude`) and the control-surface spectra `PerturbedEquilibrium/forcing_b`, `forcing_b_root_area` and `forcing_b_area` (see [Perturbed Equilibrium](perturbed_equilibrium.md)).
+A forcing file is captured raw with its tag under `Input/RawInputs/ForcingTerms/`, and the coil geometry as used, after shifts and tilts, under `Input/RawInputs/Coils/`, so that `main(["gpec.h5"])` can replay the run without the original files; see the [Scripting API](api.md).
 
-When a coil run writes `gpec.h5`, the coil geometry actually used (after shifts/tilts and with
-currents) is captured under `Input/RawInputs/Coils/`. The run can then be replayed with
-`main_from_h5` even if the original `.dat`/`.h5` files are gone:
-
-- `--coil-source forcing-modes` (default) recomputes the field from the stored TOML coil config
-  (needs the original geometry files to be present).
-- `--coil-source coils` recomputes the field from the geometry stored in `gpec.h5`, so no
-  original files are required — and the equilibrium may be overridden on replay.
-
-An ASCII or HDF5 forcing file is captured raw, with its `normalization` tag, under
-`Input/RawInputs/ForcingTerms/`. The replay writes it back out as `<stem>_forcing.h5` beside its
-output and reads it like any forcing file, so the normalization is redone against the replay's
-own equilibrium.
-
-## Comparison with Fortran GPEC
-
-| Quantity | Julia convention | Fortran GPEC convention |
-|----------|-----------------|------------------------|
-| Angle range | θ_norm ∈ [0, 1], ζ_norm ∈ [0, 1] | θ_norm ∈ [0, 1], ζ_norm ∈ [0, 1] |
-| Coil forcing output | unit-norm = 2π×R×(B_R ∂Z/∂θ_norm − B_Z ∂R/∂θ_norm) | `Phi_x` [Wb] |
-| Ratio | Julia output ≡ Fortran Phi_x (directly comparable) | — |
-
-## API Reference
+## API reference
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForcingTerms]

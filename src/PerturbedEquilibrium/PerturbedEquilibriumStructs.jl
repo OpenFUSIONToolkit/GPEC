@@ -48,12 +48,9 @@ spectra.
 
   - `ffs::ForceFreeStatesResult` - The result the operators were built from.
   - `m_modes`, `n_modes` - Poloidal and toroidal mode number of each entry of a spectrum [numpert_total].
-  - `regularization_width::Float64` - Default profile-reconstruction width (Fortran `reg_spot`): 0, no
-    regularization (Fortran `reg_flag = f`). Set it, typically to 0.05, only to drive KineticForces with an
-    ideal solve, whose 1/(m−nq) divergence leaves the NTV torque integral unconverged; a kinetic solve has
-    none to smooth (Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D).
   - `odet_from_gal::Bool` - The solution is the gal-native matched basis, whose `du_store` carries the
     analytic Galerkin Ξ′; selects that branch of the singular-coupling Ξ′ evaluation.
+  - `compute_singular_coupling::Bool`, `compute_torque_response::Bool` - The [`plasma_response`](@ref) options it was built with.
   - `flux_matrix::Matrix{ComplexF64}` - Control-surface flux of the free-boundary eigenmodes [mode × eigenmode].
   - `plasma_inductance_flux`, `surface_inductance_flux`, `permeability_flux` - Λ, L and P = Λ·L⁻¹ acting
     on the physical control-surface flux Φ_x; the applied quantities and energies are evaluated with these.
@@ -67,7 +64,7 @@ with `Φ = A·b̄`.
   - `plasma_inductance` - Λ̃ = R⁻¹·Λ·R⁻† (wt0-based plasma inductance, congruence)
   - `surface_inductance` - L̃ = R⁻¹·L·R⁻† (vacuum surface inductance, congruence)
   - `permeability` - P̃ = R⁻¹·P·R (plasma response operator P=Λ·L⁻¹, similarity)
-  - `reluctance` - ϱ̃ = R†·ϱ·R (ϱ = L⁻¹·(Λ−L)·L⁻¹, congruence)
+  - `reluctance` - ϱ̃ = R†·ϱ·R (ϱ = L⁻¹·(Λ†−L)·L⁻¹, congruence)
   - `rootarea_to_area_weight` - S = Σ/√A at psilim (b̃→b̄ recovery operator)
   - `surface_area` - scalar A = ∫J|∇ψ|dθ at psilim (flux recovery Φ = A·b̄)
 
@@ -104,8 +101,9 @@ on a `ResonantCoupling`):
     ffs::ForceFreeStatesResult
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
-    regularization_width::Float64 = 0.0
     odet_from_gal::Bool = false
+    compute_singular_coupling::Bool = true
+    compute_torque_response::Bool = false
 
     # Flux-space operators [numpert_total × numpert_total]
     flux_matrix::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
@@ -157,15 +155,20 @@ The perturbed equilibrium driven by one external field: the forcing materialized
 ## Fields
 
   - `response::PlasmaResponse` - The operators this field was applied to.
+  - `forcing` - The [`ForcingTerms.RMPField`](@ref) applied.
   - `forcing_modes::Vector{ForcingMode}` - The materialized control-surface forcing Φ_x.
   - `coil_sets::Vector{CoilSet}` - Coil geometry used (coil-format forcing); captured for the gpec.h5 rerun snapshot.
-  - `regularization_width::Float64` - Width the profiles were reconstructed with.
+  - `regularization_width::Float64` - Width the profiles were reconstructed with (Fortran `reg_spot`): 0, no
+    regularization (Fortran `reg_flag = f`). Set it, typically to 0.05, only to drive KineticForces with an
+    ideal solve, whose 1/(m−nq) divergence leaves the NTV torque integral unconverged; a kinetic solve has
+    none to smooth (Park & Logan, Phys. Plasmas 24, 032505 (2017) §III D).
 
 Response fields (mode space):
 
   - `psi_grid` - FFS ODE integration ψ_n values [npsi]
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, numpert_total]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=J·b^ψ, b_psi_area_weighted=J·b^ψ/⟨J·|∇ψ|⟩_θ,
+    theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, numpert_total]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, numpert_total]
   - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, numpert_total]
 
@@ -197,9 +200,8 @@ well-conditioned flux-space inductances L, Λ:
   - `plasma_energy`  - Σₙ Re( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ ) / 4 over the diagonal n blocks of Λ (energy to
     perturb the plasma; Fortran's "total energy")
   - `toroidal_torque` - Σₙ −2n·Im( ⟨Φ_tot,n, Λₙₙ⁻¹·Φ_tot,n⟩ / 4 ) [Park 2011 PoP 18 110702, eq. 1] —
-    the boundary-response torque, zero for ideal
-    (Hermitian) runs. Equals the volume-integrated Euler-Lagrange kinetic torque only for converged
-    self-consistent solutions, and is a distinct construction from the KineticForces NTV torque.
+    the boundary-response torque, zero for ideal (Hermitian) runs. Equals the volume-integrated
+    Euler-Lagrange kinetic torque only for converged self-consistent solutions; distinct from the KineticForces NTV torque.
 
 Torque response (kinetic forward solves with `compute_torque_response`):
 
@@ -208,9 +210,10 @@ Torque response (kinetic forward solves with `compute_torque_response`):
 """
 @kwdef mutable struct PerturbedEquilibriumState
     response::PlasmaResponse
+    forcing::Union{Nothing,ForcingTerms.RMPField} = nothing
     forcing_modes::Vector{ForcingMode} = ForcingMode[]
     coil_sets::Vector{CoilSet} = CoilSet[]
-    regularization_width::Float64 = response.regularization_width
+    regularization_width::Float64 = 0.0
 
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
     psi_grid::Vector{Float64} = Float64[]

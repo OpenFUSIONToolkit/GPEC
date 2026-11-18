@@ -20,52 +20,52 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 
         # COCOS 11: ψ_IMAS = 2π × ψ_internal
         psi_axis_int = 0.0
-        psi_bnd_int  = 1.5   # Wb/rad
+        psi_bnd_int = 1.5   # Wb/rad
         cf = cocos == 11 ? 2π : 1.0
 
-        eqt.global_quantities.psi_axis     = psi_axis_int * cf
-        eqt.global_quantities.psi_boundary = psi_bnd_int  * cf
+        eqt.global_quantities.psi_axis = psi_axis_int * cf
+        eqt.global_quantities.psi_boundary = psi_bnd_int * cf
 
         nw = 64
         psi_1d = collect(LinRange(psi_axis_int, psi_bnd_int, nw))
-        eqt.profiles_1d.psi      = psi_1d .* cf
-        eqt.profiles_1d.f        = fill(5.0, nw)
+        eqt.profiles_1d.psi = psi_1d .* cf
+        eqt.profiles_1d.f = fill(5.0, nw)
         eqt.profiles_1d.pressure = collect(LinRange(1e4, 0.0, nw))
-        eqt.profiles_1d.q        = collect(LinRange(1.0, 3.0, nw))
+        eqt.profiles_1d.q = collect(LinRange(1.0, 3.0, nw))
 
         # Minimal 2D ψ(R,Z) — rough circular flux surfaces
         nR, nZ = 32, 40
         R_grid = collect(LinRange(1.0, 2.5, nR))
         Z_grid = collect(LinRange(-0.8, 0.8, nZ))
-        Rmag   = 1.75
+        Rmag = 1.75
         psi_rz = [min((R - Rmag)^2 / 0.6 + Z^2 / 0.7, psi_bnd_int * 1.4) for R in R_grid, Z in Z_grid]
 
         resize!(eqt.profiles_2d, 1; wipe=true)
-        prof2d              = eqt.profiles_2d[1]
+        prof2d = eqt.profiles_2d[1]
         prof2d.grid_type.index = 1
-        prof2d.grid.dim1    = R_grid
-        prof2d.grid.dim2    = Z_grid
-        prof2d.psi          = psi_rz .* cf
+        prof2d.grid.dim1 = R_grid
+        prof2d.grid.dim2 = Z_grid
+        prof2d.psi = psi_rz .* cf
 
         return dd, psi_bnd_int
     end
 
     # Test 1: read_imas — COCOS 11 conversion produces correct psio
     @testset "read_imas: COCOS 11 conversion" begin
-        dd, psi_bnd_int = make_mock_dd(cocos=11)
+        dd, psi_bnd_int = make_mock_dd(; cocos=11)
 
         config = EquilibriumConfig(; eq_type="imas", eq_filename="mock", imas_cocos=11)
         result = Equilibrium.read_imas(config, dd)
 
         # psio should equal |psi_boundary - psi_axis| in internal (COCOS 2) units
         @test isapprox(result.psio, psi_bnd_int; rtol=1e-6)
-        @test result.rmin ≈ 1.0  atol=1e-9
-        @test result.rmax ≈ 2.5  atol=1e-9
+        @test result.rmin ≈ 1.0 atol = 1e-9
+        @test result.rmax ≈ 2.5 atol = 1e-9
     end
 
     # Test 2: read_imas — COCOS 2 input requires no conversion
     @testset "read_imas: COCOS 2 no-op conversion" begin
-        dd, psi_bnd_int = make_mock_dd(cocos=2)
+        dd, psi_bnd_int = make_mock_dd(; cocos=2)
 
         config = EquilibriumConfig(; eq_type="imas", eq_filename="mock", imas_cocos=2)
         result = Equilibrium.read_imas(config, dd)
@@ -133,16 +133,16 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         dd = IMASdd.dd()
 
         # Mock result: npert=1 (n=1 only), 3 eigenvalues sorted ascending
-        mock_et      = [0.4+0im, 0.7+0im, 1.1+0im]
-        mock_n_idx   = [0, 0, 0]   # all belong to n=1 (j=0)
-        mock_result  = (
-            ffs = (integrator=:forward, free_boundary=(et=mock_et, n_tor_idx=mock_n_idx),
+        mock_et = [0.4 + 0im, 0.7 + 0im, 1.1 + 0im]
+        mock_n_idx = [0, 0, 0]   # all belong to n=1 (j=0)
+        mock_result = (
+            ffs=(integrator=:forward, free_boundary=(et=mock_et, n_tor_idx=mock_n_idx),
                 numpert_total=3, npert=1, nlow=1),
         )
 
         GeneralizedPerturbedEquilibrium.write_imas(dd, mock_result)
 
-        @test dd.mhd_linear.code.name  == "GPEC"
+        @test dd.mhd_linear.code.name == "GPEC"
         @test dd.mhd_linear.ideal_flag == 1
         @test length(dd.mhd_linear.time_slice) == 1
 
@@ -163,10 +163,10 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # et sorted ascending (least stable globally first).
         # n=1 (j=0) has eigenvalues: real=0.3 (idx 1) and real=0.6 (idx 3)
         # n=2 (j=1) has eigenvalues: real=0.5 (idx 2) and real=0.7 (idx 4)
-        mock_et    = [0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im]
+        mock_et = [0.3 + 0im, 0.5 + 0im, 0.6 + 0im, 0.7 + 0im]
         mock_n_idx = [0, 1, 0, 1]
         mock_result = (
-            ffs = (integrator=:forward, free_boundary=(et=mock_et, n_tor_idx=mock_n_idx),
+            ffs=(integrator=:forward, free_boundary=(et=mock_et, n_tor_idx=mock_n_idx),
                 numpert_total=4, npert=2, nlow=1),
         )
 
@@ -190,7 +190,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # Single n=1 run
         dd_single = IMASdd.dd()
         result_single = (
-            ffs = (integrator=:forward, free_boundary=(et=[0.3+0im, 0.6+0im], n_tor_idx=[0, 0]),
+            ffs=(integrator=:forward, free_boundary=(et=[0.3 + 0im, 0.6 + 0im], n_tor_idx=[0, 0]),
                 numpert_total=2, npert=1, nlow=1),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_single, result_single)
@@ -198,7 +198,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # Single n=2 run
         dd_single2 = IMASdd.dd()
         result_single2 = (
-            ffs = (integrator=:forward, free_boundary=(et=[0.5+0im, 0.7+0im], n_tor_idx=[0, 0]),
+            ffs=(integrator=:forward, free_boundary=(et=[0.5 + 0im, 0.7 + 0im], n_tor_idx=[0, 0]),
                 numpert_total=2, npert=1, nlow=2),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_single2, result_single2)
@@ -206,14 +206,14 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         # Combined n=1,2 run (same eigenvalues, now interleaved)
         dd_multi = IMASdd.dd()
         result_multi = (
-            ffs = (integrator=:forward, free_boundary=(et=[0.3+0im, 0.5+0im, 0.6+0im, 0.7+0im], n_tor_idx=[0, 1, 0, 1]),
+            ffs=(integrator=:forward, free_boundary=(et=[0.3 + 0im, 0.5 + 0im, 0.6 + 0im, 0.7 + 0im], n_tor_idx=[0, 1, 0, 1]),
                 numpert_total=4, npert=2, nlow=1),
         )
         GeneralizedPerturbedEquilibrium.write_imas(dd_multi, result_multi)
 
-        ts_single  = dd_single.mhd_linear.time_slice[1]
+        ts_single = dd_single.mhd_linear.time_slice[1]
         ts_single2 = dd_single2.mhd_linear.time_slice[1]
-        ts_multi   = dd_multi.mhd_linear.time_slice[1]
+        ts_multi = dd_multi.mhd_linear.time_slice[1]
 
         # n=1 energy from combined run must match the standalone n=1 run
         @test ts_multi.toroidal_mode[1].energy_perturbed == ts_single.toroidal_mode[1].energy_perturbed

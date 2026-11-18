@@ -8,16 +8,15 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
 # (GPEC adaptation of R. Fitzpatrick's TJ code,
 # https://github.com/rfitzp/TJ).
 #
-# `tj_analytic_run` (inverse) is exercised at a low-εa point where the
+# The inverse solver is exercised at a low-εa point where the
 # first-order Shafranov-shifted-circle geometry is faithful;
 # `tj_analytic_run_direct` (Option B direct-GS) is exercised at a moderate-εa
 # point where the εa³·L terms in the (R,Z)→(r,w) Newton inversion matter.
-# These cover the two dispatch branches (`eq_type = "tj_analytic"` /
-# `"tj_analytic_direct"`) that are otherwise only run end-to-end via the LAR_*
-# scan scripts.
+# These cover the two `solver` branches (`:inverse` / `:direct`) that are
+# otherwise only run end-to-end via the LAR_* scan scripts.
 
 @testset "TJ-analytic model" begin
-    @testset "tj_analytic_run (inverse) — basic invariants at ε = 0.25" begin
+    @testset "tj_analytic_run_inverse — basic invariants at ε = 0.25" begin
         # Keep ε, mpsi, mtheta modest so the whole block runs in ~1 s.
         tj = TJAnalyticConfig(; r0=1.0 / 0.25, a=1.0,
             q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0,
@@ -48,8 +47,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # (δW_t small, Δ' > 0 and growing) is the Option B success criterion.
         tj = TJAnalyticConfig(; r0=1.0 / 0.60, a=1.0,
             q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0,
-            ma=64, mtheta=64)
-        eq = EquilibriumConfig(; eq_type="tj_analytic_direct",
+            ma=64, mtheta=64, solver=:direct)
+        eq = EquilibriumConfig(; eq_type="tj_analytic",
             psilow=0.01, psihigh=0.995,
             mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
         pe = PlasmaEquilibrium(eq, tj)
@@ -75,8 +74,8 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, Equilibrium
         # give a negative value (the vacuum branch of psi_rz).
         tj = TJAnalyticConfig(; r0=1.0 / 0.25, a=1.0,
             q0=1.5, qa=3.6, p0=0.001, pressure_peaking=2.0, B0=12.0,
-            ma=64, mtheta=64)
-        eq = EquilibriumConfig(; eq_type="tj_analytic_direct",
+            ma=64, mtheta=64, solver=:direct)
+        eq = EquilibriumConfig(; eq_type="tj_analytic",
             psilow=0.01, psihigh=0.995,
             mpsi=64, mtheta=128, flux_surface_rtol=1e-7)
         inp = tj_analytic_run_direct(eq, tj)

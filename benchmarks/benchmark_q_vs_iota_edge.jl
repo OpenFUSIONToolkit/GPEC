@@ -22,7 +22,7 @@ const EXAMPLE_DIR = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_examp
 function reference_q()
     inputs, _, additional_input = GPE.build_inputs_from_toml(EXAMPLE_DIR)
     equil_dict = merge(inputs["Equilibrium"], Dict{String,Any}("grid_type" => "core_edge_packed", "mpsi" => 1024))
-    eq_config = GPE.Equilibrium.EquilibriumConfig(equil_dict, EXAMPLE_DIR)
+    eq_config = GPE.equilibrium_config(Dict{String,Any}("Equilibrium" => equil_dict), EXAMPLE_DIR)
     equil = GPE.Equilibrium.PlasmaEquilibrium(eq_config, additional_input)
     # The dict rides along so the mpsi scan can rebuild configs; EquilibriumConfig is immutable.
     return equil, equil_dict
@@ -65,7 +65,7 @@ function main()
 
     for N in (16, 32, 64, 128, 256)
         # Same log_asymptotic knot layout the auto grid uses for fixed mpsi
-        cfg = GPE.Equilibrium.EquilibriumConfig(merge(equil_dict, Dict{String,Any}("mpsi" => N)), EXAMPLE_DIR)
+        cfg = GPE.equilibrium_config(Dict{String,Any}("Equilibrium" => merge(equil_dict, Dict{String,Any}("mpsi" => N))), EXAMPLE_DIR)
         knots = GPE.Equilibrium._build_psi_grid(cfg, psilow, psihigh)
         q_nodes = [q_ref_itp(p) for p in knots]
 

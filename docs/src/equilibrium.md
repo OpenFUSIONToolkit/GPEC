@@ -1,191 +1,102 @@
-# Equilibrium Module
+# Equilibrium
 
-The Equilibrium module provides tools to read, construct, and analyze
-magnetohydrodynamic (MHD) plasma equilibria. It wraps a variety of
-equilibrium file formats (EFIT, CHEASE, SOL, LAR, and others), runs the
-appropriate direct or inverse solver, and returns a processed
-`PlasmaEquilibrium` object ready for downstream calculations.
+`Equilibrium` reads or constructs the axisymmetric MHD equilibrium, maps it to the straight-field-line coordinates every later stage works in, and returns a `PlasmaEquilibrium` holding the flux-surface splines, the profiles and the global parameters of the plasma.
+It is the first stage of every run and the only one that reads physics input files: the equilibrium itself and, optionally, the kinetic profiles.
 
-## Overview
+## What it computes
 
-Key responsibilities of the module:
+From the poloidal flux ``\psi(R, Z)`` and the profiles ``F = R B_\phi`` and ``p`` of a Grad–Shafranov solution, the module traces the closed flux surfaces, finds the magnetic axis and the separatrix, integrates the safety factor ``q(\psi)`` and the surface quantities ``dV/d\psi``, and builds bicubic splines of the surface geometry ``R(\psi, \theta)``, ``Z(\psi, \theta)`` and of the toroidal-angle offset ``\nu(\psi, \theta)`` in the coordinates selected by `jac_type` (`"hamada"`, `"pest"`, `"boozer"`, `"equal_arc"`, …; see the [Conventions Reference](conventions.md) page).
+The normalized flux ``\psi_N \in [0, 1]`` runs from the axis to the boundary, and the rational surfaces q = m/n of the run are located on it.
 
-- Read equilibrium input files and TOML configuration (see `EquilibriumConfig`).
-- Provide convenient constructors for analytic / model equilibria (Large
-	Aspect Ratio, Solovev).
-- Build spline representations used throughout the code (1D cubic and
-	2D bicubic splines).
-- Run the direct or inverse equilibrium solver and post-process results
-	(global parameters, q-profile finding, separatrix finding, GSE checks).
+## Inputs
 
-The module exposes a small public API that covers setup, configuration,
-and common analyses used by other GPEC components (e.g. `ForceFreeStates`, vacuum
-interfaces).
+`[Equilibrium] eq_type` selects the file format of `eq_filename`:
 
-## EFIT solver strategies
+| `eq_type` | Format | Notes |
+|---|---|---|
+| `"efit"` | EFIT g-file | flux surfaces traced by a field-line ODE in the geometric angle; the default |
+| `"efit_arclength"` | EFIT g-file | the same traced in arc length, which stays regular near the separatrix and reaches higher `psihigh` |
+| `"efit_by_inversion"` | EFIT g-file | level sets traced by marching squares and fed to the inverse solver; the most accurate geometry |
+| `"chease"` (`"chease_binary"`) | CHEASE binary output | inverse solver |
+| `"chease2"` (`"chease_ascii"`) | CHEASE ASCII output | inverse solver |
+| `"ifile"` | inverse i-file, as TokaMaker writes | inverse solver |
+| `"imas"` | an `IMASdd.dd` passed from a script | `PlasmaEquilibrium(dd; kwargs...)`; see `examples/DIIID-like_ideal_example_IMAS` |
 
-When `eq_type` is one of the EFIT-based options, three solver strategies are available:
+An analytic equilibrium is selected by its own section instead of `eq_type`: `[Solovev]` (the Solov'ev solution), `[LargeAspectRatio]` (a large-aspect-ratio model with prescribed profiles) or `[TJAnalytic]` (the profile family of Fitzpatrick's TJ code, `solver = "inverse" | "direct"`); their keys are the fields of `SolovevConfig`, `LargeAspectRatioConfig` and `TJAnalyticConfig`.
 
-| `eq_type` | Method | Best for |
-|-----------|--------|----------|
-| `"efit"` | Geometric-angle field-line ODE | Default; fast and robust for standard cases |
-| `"efit_arclength"` | Arc-length field-line ODE | Near-separatrix surfaces where the geometric-angle ODE becomes singular |
-| `"efit_by_inversion"` | Contour.jl marching-squares → inverse solver | Highest geometric accuracy; avoids ODE singularities entirely |
+### Kinetic profiles
 
-**`efit`** integrates field lines using the geometric angle η (polar angle from the
-magnetic axis, 0→2π) as the independent variable. Position at each step is computed as
-`R = R₀ + rfac·cos(η)`, so the RHS denominator is `Bz·cos(η) − Br·sin(η)` — the
-projection of B_pol onto the radial direction. Near an X-point where Bp → 0 this
-denominator passes through zero, causing a coordinate singularity: the ODE steps
-become extremely small or the solver fails to converge.
+`[Equilibrium] kinetic_file` attaches the density, temperature, rotation and transport profiles that the kinetic solve, [Kinetic Forces](kinetic_forces.md) and the `SLAYER` layer of [Tearing](inner_layer.md) read, so every kinetic consumer sees one plasma.
+Two formats are read, by extension:
 
-**`efit_arclength`** uses arc length along the flux surface as the independent variable
-instead. The tangent direction `(dR/ds, dZ/ds) = ∇ψ⊥/|∇ψ|` has unit magnitude by
-construction, so the position equations have no denominator and remain well-behaved
-all the way to the separatrix. The 1/Bp factors in the accumulated integrals still
-diverge near X-points, but their solver tolerances are set large so they do not
-restrict the step size — only the position tracking drives adaptivity. The two methods
-produce identical results when both succeed; `efit_arclength` extends the reliable
-range of psihigh closer to 1.
+- **HDF5** (`.h5`, `.hdf5`), the GPEC kinetic schema: datasets at the file root, each with a `units` attribute, on the normalized flux `psi`: required `n_e`, `T_i`, `T_e`, `omega_E` (and `n_i`, defaulting to `n_e`); optional `omega_tor`, `chi_e`, `chi_i`, `chi_phi` (perpendicular heat and momentum diffusivities), `zeff`, and the supplied collision rates `lnLambda`, `nu_i` and `nu_e` (see [Kinetic Forces](kinetic_forces.md)); further `n_*` datasets are named per-species densities. Densities in m⁻³, temperatures in eV, frequencies in rad/s, collision rates in 1/s, diffusivities in m²/s. `write_kinetic_h5` writes the format.
+- **ASCII** (`.gpeckf`, `.kin`, `.dat`): the six-column table `psi_n n_i n_e T_i T_e omega_E`, or with `kinetic_format = "rates-v1"` nine columns that append `lnLambda nu_i nu_e` (the Fortran PENTRC rates-v1 table); the column count must match `kinetic_format`, and header rows are skipped.
 
-**`efit_by_inversion`** traces flux surface level sets directly from ψ(R,Z) using marching
-squares, resamples each closed curve to a uniform geometric-angle grid, and feeds the
-result into the inverse equilibrium solver (the same path used by CHEASE input).
-The Cartesian evaluation grid is clipped to the separatrix bounding box and its
-resolution is set adaptively from a bilinear interpolation error bound, so no manual
-tuning is needed.
+The ion composition is part of the same data: `[[Equilibrium.ion_species]]` lists the main ions, each with `z`, `m` and either `fraction` (its share of the file's total `n_i`) or `density` (a named `n_*` dataset), and `impurity_charge` and `impurity_mass` describe the impurity that closes quasineutrality; the default is one deuterium ion carrying all of `n_i` with a carbon impurity.
+``Z_\mathrm{eff}(\psi)`` is taken from the `zeff` dataset when present, else from `n_i/n_e` with the impurity charge.
+In a script the same data is attached with `attach_kinetic_profiles!(equil, "kinetic.h5"; ion_species=[IonSpecies(; z=1, m=2, fraction=0.5), IonSpecies(; z=1, m=3, fraction=0.5)], impurity_charge=6, impurity_mass=12)`.
 
-## Radial grid packing
+### Radial grid
 
-With `grid_type = "auto"` and `mpsi = 0` (the defaults; `"log_asymptotic"` is a legacy alias), the radial grid is
-built by a **two-pass measured-curvature refinement** driven by the single accuracy knob
-`psi_accuracy` (τ):
+With `grid_type = "auto"` and `mpsi = 0` (the defaults) the radial knots are placed by a two-pass refinement driven by one accuracy knob, `psi_accuracy`: the equilibrium is formed on a coarse grid, the curvature of the profiles, of the surface geometry and of the kinetic profiles is measured on it, and the knot density that keeps the cubic-spline derivative error below the tolerance is equidistributed, with geometric packing toward the axis and the separatrix and a mandatory knot at every rational surface of the run.
+Every region's knot count scales as `psi_accuracy^(-1/3)`, so tightening it refines the core, the pedestal and the edge together; the rational-surface knots are what converge the Δ′ boundary-value problem.
+The fixed layouts `grid_type = "core_edge_packed"`, `"pow1"` and `"uniform"` with an explicit `mpsi` remain available.
 
-1. **Pass 1** forms the equilibrium on a coarse three-region layout (geometric in
-   log(ψ) at the core, uniform in the middle, geometric in log(1−ψ) at the edge).
-2. A knot density is derived from **one sizing rule** — the cubic-spline derivative
-   error model err(f′) ≈ h³|f''''|/24 ≤ τ·|f| — applied to three sources of
-   curvature |f''''|:
-   - **Measured** (mid-radius and edge): divided differences on the pass-1 nodes of the
-     1D profiles (F, P, dV/dψ, q), the 2D geometry channels (r², η-offset, ν, Jacobian)
-     along sampled θ-lines (the bicubic ψ-axis shares the same knots), and the kinetic
-     profiles (n, T, ω_E) when loaded, so steep pedestal gradients attract knots. Nodal
-     values come from independent field-line integrations, so the estimate is immune to
-     inter-knot spline ringing. Curvature is measured against ρ = √ψ, in which the
-     equilibrium is regular at the magnetic axis — in ψ itself the geometry channels
-     behave as ψ^(k/2) (R−R₀ ~ √ψ), so their ψ-curvature diverges under refinement while
-     their ρ-curvature converges; the ρ-spacing maps back through dψ/dρ = 2√ψ, which by
-     itself packs √ψ-tight toward the axis.
-   - **Separatrix model** (edge floor, ψ ≥ 0.9): the same rule on q ≈ −A·ln(1−ψ) gives
-     geometric-in-log(1−ψ) packing with uniform relative q′ error, independent of A.
-     Normally inactive — the pass-1 layout is already log-packed at the edge, so the
-     measured density dominates — it only guards a pass-1 that under-sampled the
-     divergence.
-   - **Axis model** (core, ψ ≤ 0.03): the same rule on the power-law axis form gives
-     geometric-in-log(ψ) packing (constant-ratio spacing ∝ ψ down to `psilow`). Here the
-     model *replaces* measurement: nodal data from the smallest flux surfaces is
-     dominated by integration and axis-extrapolation noise, which grid refinement
-     amplifies rather than resolves.
-   - **Rational surfaces**: local packing around every q = m/n in the requested n range
-     (pinned as mandatory knots by the main driver), at any ψ including inside the
-     modeled core region. This local resolution of the ψ-splined Euler-Lagrange
-     coefficient matrices is what converges the Δ′ boundary-value problem.
-3. The density integral is equidistributed into the knot vector, mandatory
-   rational-surface knots are inserted with a minimum-spacing snap guard, and
-   **pass 2** re-forms the equilibrium on the refined grid from the in-memory input
-   (no file re-read).
+![Radial knot packing on the DIII-D-like example: the automatic two-pass grid against a fixed core_edge_packed grid.](assets/grid_knot_placement.png)
 
-Every region's knot count scales as τ^(-1/3), so tightening `psi_accuracy` refines
-the core, pedestal, and edge proportionally. The fixed `grid_type = "core_edge_packed"`
-(sin²-spaced), `"pow1"`, `"uniform"`, and explicit `mpsi > 0` (single-pass, fixed
-layout) are still supported. A `PlasmaEquilibrium` built directly with `mpsi = 0` keeps
-the coarse pass-1 grid until `solve` re-forms it; to refine it yourself, pass the nodes from
-`refined_psi_grid` to `Equilibrium.reform`.
+## Running it
 
-The packing on the DIII-D-like example (n=1) compared to fixed `core_edge_packed` grids — note the
-coarse spacing across the smooth mid-radius, the spacing dips at each rational surface,
-and the core/pedestal/edge packing (`benchmarks/plot_grid_knot_placement.jl` regenerates
-this figure):
+From `examples/DIIID-like_ideal_example/gpec.toml`:
 
-![Radial knot packing: auto two-pass vs core_edge_packed](assets/grid_knot_placement.png)
+```toml
+[Equilibrium]
+eq_type = "efit"
+eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk"
+kinetic_file = "TkMkr_D3Dlike_Hmode_kinetic.h5"
+jac_type = "hamada"
+grid_type = "auto"
+psilow = 1e-4                # innermost flux surface
+psihigh = 0.995              # outermost flux surface
+mpsi = 0                     # 0: automatic radial grid
+psi_accuracy = 0.001         # spline accuracy that sizes the automatic grid
+mtheta = 256                 # poloidal resolution
+impurity_charge = 6
+impurity_mass = 12
 
-Decomposing the density by source on the same example shows the pedestal band
-(ψ_N ≈ 0.85–0.98) is driven by *measured* curvature, not the edge floor: the pressure,
-q, and dV/dψ profiles contribute comparably, and the rzphi geometry channels — the
-Grad-Shafranov response to the same pedestal p′ (Shafranov-shift / angle-offset
-steepening) — contribute the most at every node in the band. Because the density is
-measured from the formed solution, the packing follows the pedestal wherever it sits:
+[[Equilibrium.ion_species]]
+z = 1
+m = 2
+fraction = 1.0
+```
 
-![Knot-density decomposition by source](assets/density_decomposition.png)
+The same from a script, with the deck keys as keywords:
 
-## API Reference
+```julia
+using GeneralizedPerturbedEquilibrium
+
+eq = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada", psihigh=0.995)
+eq = PlasmaEquilibrium(Equilibrium.LargeAspectRatioConfig(; r0=10.0, a=1.0, beta0=1e-3))   # an analytic equilibrium
+```
+
+Relative paths in the deck are resolved against the deck directory.
+A `PlasmaEquilibrium` built with `mpsi = 0` keeps the coarse first-pass grid until a `solve` re-forms it; `Equilibrium.reform` with the nodes of `refined_psi_grid` does the same by hand.
+
+## Outputs
+
+The group is written once `[ForceFreeStates]` has run, on the grid of the solve.
+
+| Dataset | Meaning | Units |
+|---|---|---|
+| `Equilibrium/R_axis`, `Z_axis`, `B_T_axis`, `R_mean`, `a_mean`, `aspect_ratio`, `kappa`, `delta_upper`, `delta_lower` | axis position and field, mean radii and shape parameters | m, T |
+| `Equilibrium/I_p`, `volume` | plasma current and volume | MA, m³ |
+| `Equilibrium/beta_N`, `beta_t`, `beta_p_1`, `l_i_1`, … | normalized, toroidal and poloidal beta and internal inductance | |
+| `Equilibrium/q_axis`, `q_95`, `q_edge`, `q_min`, `q_max`, `q_extrema_psi` | the safety factor at the axis, the 95% surface and the edge, and its extrema | |
+| `Equilibrium/psi_boundary`, `psi_total`, `I_p_sign`, `B_T_sign` | the flux normalization and the sign conventions of the file | |
+| `Equilibrium/Profiles/psi`, `q`, `2piF`, `mu0p`, `dVdpsi` | the 1-D profiles on ψ_N: q, 2πF, μ₀p and dV/dψ_N | T·m (`2piF`), T² (`mu0p`), m³ (`dVdpsi`) |
+| `Equilibrium/Geometry/psi`, `theta`, `rcoords`, `offset`, `nu`, `jac` | the 2-D surface geometry on (ψ_N, θ): the radial coordinate, the angle offset, the toroidal offset ν and the Jacobian | |
+
+## API reference
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 ```
-
-## Important types
-
-- `EquilibriumConfig` — configuration container, built from the `[Equilibrium]`
-	section of `gpec.toml` or from keywords.
-- `PlasmaEquilibrium` — the runtime structure containing spline fields,
-	geometry, profiles, and computed diagnostics (q-profile, separatrix,
-	etc.).
-- `LargeAspectRatioConfig`, `SolovevConfig` — convenience structs to
-	construct analytic/model equilibria when using `eq_type = "lar"` or
-	`eq_type = "sol"`.
-
-## Key functions
-
-- `PlasmaEquilibrium(file; eq_type="efit", kwargs...)`, `PlasmaEquilibrium(analytic_config; kwargs...)`
-	and `PlasmaEquilibrium(dd; kwargs...)` — read or solve the equilibrium and return a
-	`PlasmaEquilibrium`; `kwargs` are `EquilibriumConfig` fields.
-- `PlasmaEquilibrium(config::EquilibriumConfig, source=nothing)` — the form every other
-	constructor ends in, with `source` an analytic config, an IMAS `dd`, or `nothing` to read `eq_filename`.
-- `equilibrium_separatrix_find!(pe::PlasmaEquilibrium)` — locate
-	separatrix and related boundary geometry in-place.
-- `equilibrium_global_parameters!(pe::PlasmaEquilibrium)` — populate
-	common global parameters (major radius, magnetic axis, volumes, etc.).
-- `equilibrium_qfind!(pe::PlasmaEquilibrium)` — compute safety factor
-	(q) information across the grid.
-- `equilibrium_gse!(pe::PlasmaEquilibrium)` — diagnostics on the
-	Grad–Shafranov solution.
-
-## Example usage
-
-Basic example: read a g-file and build an equilibrium
-
-```julia
-using GeneralizedPerturbedEquilibrium
-
-pe = PlasmaEquilibrium("examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk"; jac_type="hamada")
-
-println("Magnetic axis: ", pe.ro, ", ", pe.zo)
-println("q(0) = ", pe.params.q0)
-
-# Find separatrix (in-place) and inspect results
-GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_separatrix_find!(pe)
-println("rsep = ", pe.params.rsep)
-```
-
-Analytic / testing example: construct a large-aspect-ratio model
-
-```julia
-using GeneralizedPerturbedEquilibrium
-
-larcfg = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(r0=10.0, a=1.0, beta0=1e-3)
-pe = PlasmaEquilibrium(larcfg)  # eq_type = "lar" is implied by the config type
-
-println("Built LAR equilibrium with a = ", larcfg.a)
-```
-
-## Notes and Caveats
-
-- `EquilibriumConfig` is constructed from the `[Equilibrium]` section of `gpec.toml`.
-  Paths that are not absolute are resolved relative to the TOML file location.
-- The Equilibrium module contains readers for EFIT and CHEASE formats. Ensure the
-  required data files are present and paths are set correctly in `gpec.toml`.
-
-## See also
-
-- `docs/src/stability.md` — ideal MHD stability analysis built on top of the equilibrium

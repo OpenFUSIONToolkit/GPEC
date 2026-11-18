@@ -1,10 +1,4 @@
-# KineticProfiles.jl
-#
-# Radial kinetic-profile container shared across GPEC modules that need
-# electron density, electron/ion temperatures, and the three frequencies
-# (toroidal rotation + electron/ion diamagnetic) as functions of the
-# normalized poloidal flux ψ. SLAYER is the first consumer; PENTRC and
-# future resistive-MHD modules will share this object.
+# Radial kinetic-profile container (density, temperatures, E×B rotation) on the normalized poloidal flux ψ.
 
 using FastInterpolations
 
@@ -22,10 +16,8 @@ the normalized poloidal flux ψ ∈ [0, 1].
 | `omega_E` | E×B rotation Ω_E, per unit n | rad/s |
 
 Construct via the keyword constructor `KineticProfiles(; psi, n_e, T_e, T_i, omega_E)` with
-matched-length vectors. The SLAYER runner builds this object from the equilibrium's
-kinetic profiles (`equil.kinetic`). Diamagnetic frequencies are not
-carried here: `build_slayer_inputs` derives ω_*e and ω_*i per surface from the density and
-temperature splines.
+matched-length vectors. Diamagnetic frequencies are not carried here; callers derive ω_*e and
+ω_*i from the density and temperature splines.
 
 Evaluate all profiles at a given ψ via the call operator:
 

@@ -175,8 +175,8 @@ end
 """
     equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
 
-Finds the separatrix locations in the plasma equilibrium (rsep, zsep, rext, zext).
-Performs the same function as equil_out_sep_find in the Fortran code.
+Find the separatrix midplane radii `rsep` and the top/bottom extremal points (`rext`, `zext`, with
+`zsep = zext`), store them in `pe.params`, and return them. Port of Fortran `equil_out_sep_find`.
 """
 function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     mpsi = length(pe.rzphi_xs) - 1
@@ -206,10 +206,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     end
 
     # Top and bottom separatrix Z extrema via bracketed Brent on ∂z/∂θ = 0.
-    # iside=1 → top (θ ∈ [0.0, 0.5]),  iside=2 → bottom (θ ∈ [0.5, 1.0]).
-    # Matches Fortran convention so (r|z)ext[1] / zsep[1] refer to the top extremum
-    # and (r|z)ext[2] / zsep[2] to the bottom (see equil_out.f::equil_out_sep_find).
-    # Splines use PeriodicBC + WrapExtrap, so θ outside [0,1] is valid.
+    # iside=1 → top (θ ∈ [0.0, 0.5]),  iside=2 → bottom (θ ∈ [0.5, 1.0]), as in Fortran.
     zsep = zeros(2)
     rext = zeros(2)
     zext = zeros(2)

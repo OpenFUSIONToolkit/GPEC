@@ -27,9 +27,9 @@ relative to this repository.
 - bounce averaging of the 6 perturbed-action matrices -> `src/KineticForces/BounceAveraging.jl`
 
 ## InnerLayer (resistive matched-asymptotics, Fortran `rmatch/`) — see resistive_layer_map.md for the audit checklist
-- `rmatch/deltac.f` (Galerkin solver) -> `src/InnerLayer/GGJ/Galerkin.jl`
+- `rmatch/deltac.f` (Galerkin solver) -> `src/InnerLayer/ToroidalLayer/Galerkin.jl`
 - `rmatch/deltar.f` (shooting solver) -> `src/InnerLayer/GGJ/Shooting.jl`
-- `rmatch/inps.f` + `inpso.f` (Wasow asymptotic basis: T,J,P,B,Q,C,D,Y,Z,U matrices) -> `src/InnerLayer/GGJ/InnerAsymptotics.jl`
+- `rmatch/inps.f` + `inpso.f` (Wasow asymptotic basis: T,J,P,B,Q,C,D,Y,Z,U matrices) -> `src/InnerLayer/ToroidalLayer/InnerAsymptotics.jl`
 - `rmatch/{inner.f,match.f,msing.f,gamma.f}` -> `src/InnerLayer/GGJ/` (parameters, matching data, special functions)
 - SLAYER drift-MHD two-fluid solver: `src/InnerLayer/SLAYER/` is a placeholder pending implementation
 

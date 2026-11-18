@@ -13,13 +13,9 @@ using Plots
     function forward_solve(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{Symbol,Any}())
         deck = TOML.parsefile(joinpath(dir, "gpec.toml"))
         merge!(deck["Equilibrium"], eq_overrides)
-        config = GPEC.Equilibrium.EquilibriumConfig(deck["Equilibrium"], dir)
-        equil =
-            haskey(deck, "SOL_INPUT") ? GPEC.Equilibrium.PlasmaEquilibrium(config, GPEC.Equilibrium.SolovevConfig(deck["SOL_INPUT"])) :
-            GPEC.Equilibrium.PlasmaEquilibrium(config)
-        wall = GPEC.Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in deck["Wall"])...)
-        ffs_kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in deck["ForceFreeStates"] if !(k in ("integrator", "nn_low", "nn_high")))
-        return solve(equil, Forward(); nn=1, wall=wall, dir_path=mktempdir(), merge(ffs_kwargs, ffs_overrides)...)
+        equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(deck, dir), GPEC.analytic_config(deck))
+        keywords = merge(GPEC.force_balance_keywords(deck, dir), ffs_overrides)
+        return solve(GPEC.ForceBalanceProblem(equil; keywords...), GPEC.force_balance_algorithm(deck))
     end
 
     # Standard-form surface integrals and 2/ψ₀² times the Euler-Lagrange quadratic form ξ'†Fξ' + 2Re(ξ'†Kξ) + ξ†Gξ,

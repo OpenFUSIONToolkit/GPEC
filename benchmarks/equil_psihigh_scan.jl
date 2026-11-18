@@ -29,7 +29,7 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
 using TOML, Printf, Statistics, HDF5
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
-config_path  = joinpath(example_path, "gpec.toml")
+config_path = joinpath(example_path, "gpec.toml")
 
 psihigh_values = [0.980, 0.985, 0.990, 0.993, 0.995, 0.996, 0.997, 0.998, 0.999, 0.9995, 0.9999, 1.0]
 methods = ["efit", "efit_arclength", "efit_by_inversion"]
@@ -39,7 +39,7 @@ function make_config(path::String, eq_type::String, psihigh::Float64)
     raw["Equilibrium"]["eq_type"] = eq_type
     raw["Equilibrium"]["psihigh"] = psihigh
     base = dirname(path)
-    return Equilibrium.EquilibriumConfig(raw["Equilibrium"], base)
+    return GeneralizedPerturbedEquilibrium.equilibrium_config(raw, base)
 end
 
 """
@@ -52,9 +52,8 @@ function run_ffs_et1(config_path::String, eq_type::String, psihigh::Float64)::Fl
     raw = TOML.parsefile(config_path)
     raw["Equilibrium"]["eq_type"] = eq_type
     raw["Equilibrium"]["psihigh"] = psihigh
-    raw["ForceFreeStates"]["force_termination"] = true   # write gpec.h5 after FFS, skip PE
     raw["ForceFreeStates"]["vac_flag"] = true
-    raw["ForceFreeStates"]["verbose"] = false
+    foreach(section -> delete!(raw, section), ("PerturbedEquilibrium", "ErrorFields"))   # stop after FFS
 
     mktempdir() do tmpdir
         # Write modified config
@@ -82,9 +81,9 @@ end
 println("JIT warmup (equilibrium + FFS)...")
 run_ffs_et1(config_path, "efit", 0.990)
 
-println("=" ^ 70)
+println("="^70)
 println("psihigh robustness scan (equilibrium + stability)")
-println("=" ^ 70)
+println("="^70)
 
 rows = []
 
@@ -123,7 +122,7 @@ for method in methods
                 ψ = psi_xs[ipsi]
                 for itheta in 1:8:mtheta+1
                     θ = pe.rzphi_ys[itheta]
-                    r2  = pe.rzphi_rsquared((ψ, θ))
+                    r2 = pe.rzphi_rsquared((ψ, θ))
                     off = pe.rzphi_offset((ψ, θ))
                     rfac = sqrt(max(r2, 0.0))
                     η = 2π * (θ + off)
@@ -161,13 +160,16 @@ for method in methods
             isnan(q_at_psihigh) ? -1.0 : q_at_psihigh,
             et1_str)
 
-        push!(rows, (
-            method=method, psihigh=psihigh, success=success, runtime=runtime,
-            roundtrip_max_edge=roundtrip_max_edge,
-            q_mono_violations_edge=q_mono_violations_edge,
-            q_at_psihigh=q_at_psihigh, q_edge_slope=q_edge_slope,
-            et1=et1, error_msg=err_msg
-        ))
+        push!(
+            rows,
+            (
+                method=method, psihigh=psihigh, success=success, runtime=runtime,
+                roundtrip_max_edge=roundtrip_max_edge,
+                q_mono_violations_edge=q_mono_violations_edge,
+                q_at_psihigh=q_at_psihigh, q_edge_slope=q_edge_slope,
+                et1=et1, error_msg=err_msg
+            )
+        )
     end
 end
 
@@ -181,7 +183,7 @@ end
 println("\nResults saved to: $output_csv")
 
 # Summary
-println("\n" * "=" ^ 70)
+println("\n" * "="^70)
 println("Last successful psihigh per method:")
 for method in methods
     method_rows = filter(r -> r.method == method && r.success, rows)
@@ -193,14 +195,16 @@ for method in methods
     end
 end
 
-println("\n" * "=" ^ 70)
+println("\n" * "="^70)
 println("et[1] vs psihigh (free-boundary stability eigenvalue):")
 println("  (positive = stable, negative = unstable)")
 @printf("  %-22s  %s\n", "psihigh", join([@sprintf("%-22s", m) for m in methods]))
 for psihigh in psihigh_values
-    vals = [let r = findfirst(x -> x.method == m && x.psihigh == psihigh, rows)
-                r === nothing || isnan(rows[r].et1) ? "      -" : @sprintf("%+.4f", rows[r].et1)
-            end for m in methods]
+    vals = [
+        let r = findfirst(x -> x.method == m && x.psihigh == psihigh, rows)
+            r === nothing || isnan(rows[r].et1) ? "      -" : @sprintf("%+.4f", rows[r].et1)
+        end for m in methods
+    ]
     @printf("  %-22.4f  %s\n", psihigh, join([@sprintf("%-22s", v) for v in vals]))
 end
 println()

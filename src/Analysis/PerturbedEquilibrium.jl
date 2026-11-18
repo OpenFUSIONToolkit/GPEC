@@ -45,10 +45,10 @@ function plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
         return plot(; title="No resonant area-weighted field data — run with perturbed equilibrium enabled", legend=false)
 
     resonant_area_weighted_field, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base * "resonant_area_weighted_field"]),
-        read(fid[base * "rational_psi"]),
-        read(fid[base * "rational_q"]),
-        read(fid[base * "rational_n"])
+        read(fid[base*"resonant_area_weighted_field"]),
+        read(fid[base*"rational_psi"]),
+        read(fid[base*"rational_q"]),
+        read(fid[base*"rational_n"])
     end
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|b^r| [T]",
@@ -96,9 +96,9 @@ function plot_island_widths(h5path; save_path=nothing)
         return plot(; title="No island width data — run with perturbed equilibrium enabled", legend=false)
 
     island_hw, rational_psi, rational_q = h5open(h5path, "r") do fid
-        read(fid[base * "island_half_width"]),
-        read(fid[base * "rational_psi"]),
-        read(fid[base * "rational_q"])
+        read(fid[base*"island_half_width"]),
+        read(fid[base*"rational_psi"]),
+        read(fid[base*"rational_q"])
     end
 
     p = scatter(
@@ -150,9 +150,9 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
         return plot(; title="No Chirikov data — run with perturbed equilibrium enabled", legend=false)
 
     chirikov, rational_psi, rational_q = h5open(h5path, "r") do fid
-        read(fid[base * "chirikov_parameter"]),
-        read(fid[base * "rational_psi"]),
-        read(fid[base * "rational_q"])
+        read(fid[base*"chirikov_parameter"]),
+        read(fid[base*"rational_psi"]),
+        read(fid[base*"rational_q"])
     end
 
     colors = [k > 1.0 ? :red : :steelblue for k in chirikov]
@@ -212,10 +212,10 @@ function plot_driven_delta_prime(h5path; save_path=nothing)
         return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
 
     delta_prime, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base * "Delta_prime"]),
-        read(fid[base * "rational_psi"]),
-        read(fid[base * "rational_q"]),
-        read(fid[base * "rational_n"])
+        read(fid[base*"Delta_prime"]),
+        read(fid[base*"rational_psi"]),
+        read(fid[base*"rational_q"]),
+        read(fid[base*"rational_n"])
     end
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="Re(Δ')",
@@ -280,7 +280,7 @@ function plot_resonant_area_weighted_field(h5path; save_path=nothing)
         plot!(p; title="")
     end
 
-    hide_xaxis!(p) = plot!(p; xlabel="", xformatter=_->"", bottom_margin=1Plots.mm)
+    hide_xaxis!(p) = plot!(p; xlabel="", xformatter=_ -> "", bottom_margin=1Plots.mm)
     for p in (p1, p2, p3, p4)
         hide_xaxis!(p)
     end
@@ -298,10 +298,10 @@ function _plot_resonant_current(h5path)
         return plot(; title="No resonant current data", legend=false)
 
     resonant_current, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base * "resonant_current"]),
-        read(fid[base * "rational_psi"]),
-        read(fid[base * "rational_q"]),
-        read(fid[base * "rational_n"])
+        read(fid[base*"resonant_current"]),
+        read(fid[base*"rational_psi"]),
+        read(fid[base*"rational_q"]),
+        read(fid[base*"rational_n"])
     end
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|I_res|",
@@ -353,10 +353,10 @@ A `Plots.jl` plot object.
 """
 function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     comp_map = Dict(
-        :xi_psi   => "xi_psi",
-        :b_psi    => "b_psi_area_weighted",  # area-normalized b^ψ
+        :xi_psi => "xi_psi",
+        :b_psi => "b_psi_area_weighted",  # area-normalized b^ψ
         :Jb_theta => "Jb_theta",
-        :Jb_zeta  => "Jb_zeta",
+        :Jb_zeta => "Jb_zeta"
     )
     haskey(comp_map, component) ||
         error("component must be one of :xi_psi, :b_psi, :Jb_theta, :Jb_zeta")
@@ -369,7 +369,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
 
     data, psi_response, mlow, mhigh, nhigh, q95, rational_psi = h5open(h5path, "r") do fid
         read(fid[dataset_path]),
-        read(fid[base * "psi"]),
+        read(fid[base*"psi"]),
         read(fid["Info/mlow"]), read(fid["Info/mhigh"]), read(fid["Info/nhigh"]),
         read(fid["Equilibrium/q_95"]),
         read(fid["PerturbedEquilibrium/SingularCoupling/rational_psi"])
@@ -440,9 +440,9 @@ Three-panel composite summary of perturbed equilibrium results:
 A `Plots.jl` plot object.
 """
 function plot_perturbed_equilibrium_summary(h5path; save_path=nothing)
-    p_islands  = plot_resonant_area_weighted_field_amplitude(h5path)
-    p_bpsi     = _plot_bpsi_edge_spectrum(h5path)
-    p_spectro  = plot_mode_spectrogram(h5path; component=:xi_psi)
+    p_islands = plot_resonant_area_weighted_field_amplitude(h5path)
+    p_bpsi = _plot_bpsi_edge_spectrum(h5path)
+    p_spectro = plot_mode_spectrogram(h5path; component=:xi_psi)
 
     l = @layout [grid(1, 2){0.35h}; b]
     p = plot(p_islands, p_bpsi, p_spectro; layout=l, size=(1100, 1100))
@@ -458,11 +458,11 @@ function _plot_bpsi_edge_spectrum(h5path)
         return plot(; title="No b_psi data — run with perturbed equilibrium enabled", legend=false)
 
     data, mlow, mhigh = h5open(h5path, "r") do fid
-        read(fid[base * "b_psi_area_weighted"]),
+        read(fid[base*"b_psi_area_weighted"]),
         read(fid["Info/mlow"]), read(fid["Info/mhigh"])
     end
 
-    mpert  = mhigh - mlow + 1
+    mpert = mhigh - mlow + 1
     m_vals = mlow:mhigh
     bpsi_edge = abs.(data[end, 1:mpert])
 

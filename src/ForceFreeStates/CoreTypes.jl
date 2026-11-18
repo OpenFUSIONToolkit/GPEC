@@ -1,4 +1,4 @@
-# Module-wide types: ModeSpace, DebugSettings, ForceFreeStatesInternal, ForceFreeStatesControl.
+# Module-wide types: ModeSpace, ForceFreeStatesInternal, ForceFreeStatesControl.
 
 """
     ModeSpace
@@ -12,28 +12,12 @@ Supertype for objects that carry the resolved (m, n) mode space — `mlow`, `mhi
 abstract type ModeSpace end
 
 """
-DebugSettings
-
-A mutable struct containing settings for debugging and benchmarking output.
-
-## Fields
-
-  - `output_benchmark_data::Bool` - Flag to output benchmark data for comparison between codes
-  - `gal_basis_output::Bool` - Write the raw Galerkin outer-region basis functions (per-interval, unconstrained at the rationals) under `GalerkinIntegration/Basis/`. Solver internals for development verification, not physics output.
-"""
-@kwdef mutable struct DebugSettings
-    output_benchmark_data::Bool = false
-    gal_basis_output::Bool = false
-end
-
-"""
     ForceFreeStatesInternal
 
-A mutable struct holding internal state variables for stability calculations.
+Solve-time scratch state for a force-balance solve: the resolved mode space, singular surfaces and integration limits.
 
 ## Fields
 
-  - `dir_path::String` - Directory path for input/output files
   - `mlow::Int` - Lowest poloidal mode number
   - `mhigh::Int` - Highest poloidal mode number
   - `mpert::Int` - Number of poloidal modes (mhigh - mlow + 1)
@@ -51,10 +35,10 @@ A mutable struct holding internal state variables for stability calculations.
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
-  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
+  - `wall_settings::Union{Nothing,Vacuum.WallSettings}` - Wall shape settings for vacuum calculations
+  - `verbose::Bool` - Log solve progress; set from the `verbose` keyword of `solve`
 """
 @kwdef mutable struct ForceFreeStatesInternal <: ModeSpace
-    dir_path::String = ""
     mlow::Int = 0
     mhigh::Int = 0
     mpert::Int = 0
@@ -73,38 +57,26 @@ A mutable struct holding internal state variables for stability calculations.
     psilow::Float64 = 0.0   # lower integration bound; the outermost crossing of q = qlow (sing_min!), else the first grid node
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    debug_settings::DebugSettings = DebugSettings()
-    wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
+    wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
+    verbose::Bool = false
     """
-    Inter-surface Δ' matrix of shape (msing × msing) in PEST3 convention.
-    Computed by `compute_delta_prime_matrix!` (parallel FM path only) using the STRIDE
-    global BVP with vacuum coupling. The deltap linear combination is applied to the
-    raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
+    Inter-surface Δ' matrix, `msing × msing`, PEST3 convention: the odd-parity projection of
+    `delta_prime_raw`, set by `compute_delta_prime_matrix!` (Riccati path only).
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 
     """
-    Edge coil-response matrix of shape (2msing × numpert_total). Column k is the resonant
-    small-solution response at each surface side to a unit source on edge poloidal mode k,
-    built by imposing the Eq. (37) rpec edge boundary condition on the Riccati BVP
-    (`_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
+    Edge coil-response matrix, `2msing × numpert_total`: column k is the resonant small-solution
+    response at each surface side to a unit source on edge mode k (Eq. 37 rpec edge condition,
+    `_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
     """
     delta_coil::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 
     """
-    Raw 2msing × 2msing outer-region matching matrix `D'` from the STRIDE global
-    BVP, in the side-major ordering `[L_s1, R_s1, L_s2, R_s2, …, L_sm, R_sm]`
-    (left vs right of each singular surface, interleaved surface-by-surface).
-    This is the Pletzer–Dewar 1991 outer-region matrix before parity rotation,
-    and is stored byte-compatibly with the Fortran `rdcon/gal.f::gal_write_delta`
-    convention (top 2msing×2msing block of `delta_gw.dat`). The PEST3 Δ' matrix
-    stored in `delta_prime_matrix` is the odd-parity tearing projection of this
-    raw matrix; the even-parity A' and off-parity B', Γ' blocks are recovered
-    via `pest3_decompose(dp_raw)` — needed for the full det(D' − D(γ)) = 0
-    eigenvalue problem with Glasser stabilization.
-
-    Empty unless the Riccati integrator was used. No ½ prefactor is applied (matches
-    Fortran rdcon; Pletzer–Dewar paper multiplies by ½).
+    Raw `2msing × 2msing` outer-region matching matrix D' (Pletzer–Dewar 1991, before parity
+    rotation), side-major ordering `[L_s1, R_s1, …, L_sm, R_sm]`. `pest3_decompose` recovers the
+    A', B', Γ', Δ' blocks. No ½ prefactor (matches Fortran rdcon; the paper applies ½).
+    Empty unless the Riccati integrator was used.
     """
     delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
@@ -112,108 +84,77 @@ end
 """
     ForceFreeStatesControl
 
-An immutable struct containing 'ForceFreeStates' parameters set by the user in
-gpec.toml.
+Physical and workflow controls for a force-balance solve, together with its selected algorithm.
 
 ## Fields
 
-  - `verbose::Bool` - Enable verbose output
+  - `algorithm::AbstractIntegrator` - Selected integrator and its numerical settings.
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mtheta_vacuum::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzeta_vacuum::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
-  - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
-  - `frobenius_psi_max::Float64` - Largest starting ψ_N at which the opt-in Frobenius start is used. Default `0` selects the fixed start everywhere and silently: U₁ = 0, U₂ = I, the initialization Fortran DCON uses. A positive value uses the diagonal Frobenius 2×2 when the integration starts at or below it, and warns that this start is currently unreliable. A start above the threshold uses the fixed start with no warning. That 2×2 does not recover a displacement that vanishes as a positive power of the starting ψ, and its m = 0 branch is an imaginary pair whose sign follows roundoff. Leave this at 0 unless the Frobenius start itself is under test.
+  - `frobenius_psi_max::Float64` - Largest starting ψ_N at which the opt-in diagonal Frobenius start is used; default `0` always uses the fixed start U₁ = 0, U₂ = I. The
+    Frobenius start is currently unreliable (warns when used); leave at 0 unless testing it.
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
-  - `renorm_threshold::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e3`. The trigger compares column-norm growth, not conditioning, so near-parallel columns can leave an error in the free-boundary energies that does not shrink with `eulerlagrange_tolerance`.
-  - `numsteps_init::Int` - Initial array size for ODE data storage
-  - `numunorms_init::Int` - Initial array size for solution normalization data
-  - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced. The default 1e-4 suits the Riccati Δ′, whose asymptotic matching gains a spurious imaginary part as it shrinks; `"forward"` runs feeding PerturbedEquilibrium need about 1e-6 for the singular coupling to converge at the outer rational surfaces.
-  - `truncate_at_rational_offset::Bool` - Truncate the integration domain at `(last_rational_q + rational_offset_fraction) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`rational_offset_fraction = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `truncate_at_rational_offset = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `truncate_at_rational_offset = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + rational_offset_fraction / n" depends on which `n`); when `truncate_at_rational_offset = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
-  - `psilim_from_layer_overlap::Bool` - Cap the integration domain where adjacent rational surfaces' resistive layers overlap, after Fitzpatrick, Nucl. Fusion 2025 Sect. 5.9: past that point no surface retains a well-separated inner region. Applied as an upper bound on `qlim` at the top of `sing_lim!`, so `rational_offset_fraction` / `qhigh` still select the final surface from inside it. The scan runs whenever the run has a `[SLAYER]` section and the equilibrium carries kinetic profiles — the same profiles and χ⊥(ψ) the SLAYER analysis uses — and is recorded under `ForceFreeStates/LayerOverlap/` either way; this flag only decides whether it constrains the domain. It resolves that file from the run's TOML, so the programmatic `solve(prob, alg)` entry point cannot run it and the flag is inert there (with a warning). Off on every shipped deck; with the shipped DIII-D-like profiles the overlap point (ψ ≈ 0.9985) lies outside the 0.995 decks' domain but inside the SLAYER deck's 0.9995. See the integration-domain truncation section of the stability documentation. Default `false`.
-  - `rational_offset_fraction::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `truncate_at_rational_offset` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
-  - `frobenius_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
+  - `singfac_min::Float64` - Fractional distance from rational q at which the ideal jump condition is enforced. Default 1e-4 suits the Riccati Δ′ (smaller values add a
+    spurious imaginary part); Forward runs feeding PerturbedEquilibrium need about 1e-6 for the outer-surface singular coupling to converge.
+  - `truncate_at_rational_offset::Bool` - Truncate the domain at `(last_rational_q + rational_offset_fraction) / n` instead of at `qhigh` / `psihigh`, avoiding a spurious
+    δW kink when the integration ends just below a rational. Right for diverted equilibria (default `true`); set `false` for limited/analytic equilibria with finite edge
+    q (Solovev, LAR), where it cuts too much edge. Multi-n runs warn and fall back to `qhigh` / `psihigh`.
+  - `psilim_from_layer_overlap::Union{Bool,InnerLayer.SLAYERModel}` - Cap `qlim` where adjacent rational surfaces' resistive layers overlap (Fitzpatrick, Nucl. Fusion
+    2025 Sect. 5.9); `rational_offset_fraction` / `qhigh` still pick the final surface inside the cap. `true` uses the default `SLAYERModel()` closures, a
+    `SLAYERModel(; ...)` its own (a deck's `[SLAYER]` section). Requires the equilibrium's kinetic data; the result carries the scan as `layer_overlap`. Default `false`.
+  - `rational_offset_fraction::Float64` - Distance beyond the last rational surface, in units of 1/n, in [0, 1). Used only when `truncate_at_rational_offset` is true. Default 0.2.
+  - `frobenius_order::Int` - Order of the Frobenius expansion at rational surfaces. Default 6.
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (the drift-kinetic matrices of the KineticForces model, evaluated on the `[KineticForces]` profiles; needs `integrator = "forward"` and is deck-driven through `main`)
-  - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
-  - `qlow::Float64` - Integration starts at the outermost crossing of q = qlow, excluding the q < qlow region inside it (a core, or a reversed-shear ring); no effect when q ≥ qlow everywhere
-  - `dW_edge_scan_start::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
-  - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, the edge-dW scan's peak is adopted as the physical plasma edge, reproducing the ode_record_edge heuristic of Fortran STRIDE. `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, fixups recorded beyond it are discarded, `q1lim` and the rational-surface list are re-derived at the new edge, and on the Riccati path the Δ' chunks are cut back to it. The result is the same physics as setting `psihigh` to the peak by hand. Δ' still depends on where in the edge band the peak falls, so set this deliberately when you mean to measure against the peak-defined edge (e.g. edge-mode regimes); leave at `false` (default) for the full domain at `qhigh` / `psihigh` / `rational_offset_fraction`.
-  - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
-  - `write_el_matrices::Bool` - Write the Euler-Lagrange matrices (`ForceFreeStates/EulerLagrangeMatrices`: the ideal A, B, C, D, E, H, F, K and G and, on a kinetic run, the kinetic set) sampled on the ψ grid. Each is `numpert_total × numpert_total` complex at every ψ, so the group scales as numpert_total²·npsi and dominates the file size. Needs `write_outputs_to_HDF5`. Default `false`.
-  - `HDF5_filename::String` - Name of HDF5 output file
-  - `save_interval::Int` - Save every Nth ODE step (1=all). Always saves near rational surfaces. Default `1`: PerturbedEquilibrium and KineticForces interpolate ξ(ψ) between saved steps, so their accuracy follows the saved-step density.
-  - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
-  - `integrator::String` - Which formalism integrates the Euler-Lagrange system. `"forward"` sweeps the plasma serially with Gaussian reduction and returns `u_store` / `du_store` / `xi_s_store` dense in the axis (EL) basis — the only convention PerturbedEquilibrium and FieldReconstruction consume correctly, and the only path that supports `kinetic_factor > 0`. `"riccati"` (default) runs the chunked fundamental-matrix propagator driver (Glasser 2018 Phys. Plasmas 25, 032507): chunks are integrated independently from identity initial conditions and assembled serially with Riccati-style crossings, which is the only way to obtain the singular-surface Δ' matrix for the tearing-mode solvers downstream, but leaves `u_store` as sparse chunk-endpoint Riccati states, so dense ξ profiles are unavailable. `"galerkin"` solves the same Euler-Lagrange system variationally instead of by radial ODE integration — the RDCON outer-region singular Galerkin method (Glasser, Wang & Park 2016 Phys. Plasmas 23, 112506), which discretizes the displacement on packed Hermite-cubic elements and solves one global banded system — producing the resistive Δ′ matrix and, when `gal_match_flag` is set, the RPEC inner-layer-matched ξ; it computes its own vacuum response and returns no free-boundary energies, and does not support `kinetic_factor > 0`. Requires `singfac_min != 0` for `"riccati"`.
-  - `nchunks::Int` - Target number of Riccati integration chunks. `0` (the default) derives the count from problem structure alone: `max(2·msing + 3, 8·(msing + 1) + msing)`, enough sub-chunks per segment to keep the accumulated propagator products well-conditioned. An explicit value below `2·msing + 3` is clamped up with a warning. Chunk sizing never consults `Threads.nthreads()`, so Riccati outputs are identical whatever thread count `julia -t` provides; threads only change wall-clock.
-  - `extended_precision_bvp::Bool` - Solve the Δ' BVP and its PEST3 combination in `Complex{Double64}` (~31 digits). Default `true`, guarding the cancellation in the PEST3 combination. Set `false` to use Float64 after checking the complex Δ' matrix against Double64 at the chosen matching distance.
+  - `kinetic` - Kinetic source of the force operator: `nothing` (ideal), a `KineticForces.KineticForcesControl` (the drift-kinetic matrices of the KineticForces model
+    evaluated on the equilibrium's kinetic profiles; needs `Forward()`), `TestKineticMatrices` (synthetic test matrices), or the `KineticMatrices` of an earlier
+    evaluation, reused. A deck selects the KineticForces model with `kinetic = "KineticForces"`, using its `[KineticForces]` section.
+  - `kinetic_factor::Float64` - Uniform scale on the kinetic matrices of a kinetic run. Default 1.
+  - `qlow::Float64` - Integration starts at the outermost crossing of q = qlow, excluding the q < qlow region inside it (a core, or a reversed-shear ring); no effect when
+    q ≥ qlow everywhere
+  - `dW_edge_scan_start::Float64` - If below psilim, records a dW(ψ) diagnostic scan over [dW_edge_scan_start, psilim] on `odet.edge_scan`. Does not change the domain
+    unless `truncate_at_dW_peak` is set.
+  - `truncate_at_dW_peak::Bool` - When `true` and `dW_edge_scan_start < psilim`, adopt the edge-dW scan's peak as the plasma edge, equivalent to setting `psihigh` to the
+    peak by hand. Δ' then depends on where the peak falls in the edge band. Default `false`.
+  - `write_el_matrices::Bool` - Write the ideal (and on a kinetic run, kinetic) Euler-Lagrange matrices on the ψ grid to `ForceFreeStates/EulerLagrangeMatrices`; scales
+    as numpert_total²·npsi and dominates the file size. Default `false`.
 """
-@kwdef struct ForceFreeStatesControl
-    verbose::Bool = true
+@kwdef struct ForceFreeStatesControl{A<:AbstractIntegrator}
+    algorithm::A = Riccati()
     vac_flag::Bool = false
     mtheta_vacuum::Int = 480
     nzeta_vacuum::Int = 1
-    sing_start::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    eulerlagrange_tolerance::Float64 = 1e-8
-    renorm_threshold::Float64 = 1e3
-    numsteps_init::Int = 4000
-    numunorms_init::Int = 100
-    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the Riccati path.
-    truncate_at_rational_offset::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
-    psilim_from_layer_overlap::Bool = false  # Cap psilim where adjacent resistive layers overlap. Opt-in; the scan is recorded either way. See docstring.
+    singfac_min::Float64 = 1e-4   # Required nonzero for the Riccati path.
+    truncate_at_rational_offset::Bool = true
+    psilim_from_layer_overlap::Union{Bool,InnerLayer.SLAYERModel} = false
     rational_offset_fraction::Float64 = 0.2
     frobenius_order::Int = 6
     qhigh::Float64 = 1e3
-    kinetic_source::String = "fixed"
-    kinetic_factor::Float64 = 0.0
+    kinetic::Any = nothing
+    kinetic_factor::Float64 = 1.0
     qlow::Float64 = 0.0
     dW_edge_scan_start::Float64 = 0.99
-    truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
-    write_outputs_to_HDF5::Bool = true
+    truncate_at_dW_peak::Bool = false
     write_el_matrices::Bool = false
-    HDF5_filename::String = "gpec.h5"
-    save_interval::Int = 1
-    force_termination::Bool = false
-    integrator::String = "riccati"   # Default: unlocks SingularSurfaces/Delta_prime_matrix (STRIDE BVP Δ′ matrix) used by SLAYER/GGJ downstream. Use "forward" for dense ξ (PerturbedEquilibrium) or kinetic runs.
-    nchunks::Int = 0                 # Riccati chunk-count target; 0 = auto (derived from msing alone, never from Threads.nthreads()).
-    extended_precision_bvp::Bool = true
 
-    # --- RDCON outer-region Galerkin Δ′ solver (gal_solve port); selected by integrator = "galerkin" ---
-    gal_solver::String = "auto"     # "auto" (banded Cholesky if the matrix is positive definite, else LU), "LU" (zgbtrf/zgbtrs) or "cholesky" (zpbtrf/zpbtrs, error if not positive definite)
-    gal_nx::Int = 256               # elements per interval between singular surfaces
-    gal_nq::Int = 6                 # Gauss-Lobatto quadrature order per element
-    gal_pfac::Float64 = 0.001       # grid packing ratio near singular surfaces
-    gal_dx0::Float64 = 5e-4         # resonant-element integration truncation distance (×1/|n q'|)
-    gal_dx1::Float64 = 1e-3         # resonant-element size (×1/|n q'|)
-    gal_dx2::Float64 = 1e-3         # extension-element size (×1/|n q'|)
-    gal_cutoff::Int = 10            # # of elements carrying the large solution as driving term
-    gal_tol::Float64 = 1e-10        # resonant-quadrature (QuadGK) tolerance
-    gal_gnstep::Int = 20000         # max resonant-quadrature evaluations (QuadGK maxevals in gal_resonant!)
-    gal_dx1dx2_flag::Bool = true    # enable special dx1/dx2 treatment for resonant/extension elements
-    gal_sing_order::Int = 6         # base power-series order for the Galerkin singular asymptotics
-    gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
-    gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
-    gal_edge_onesided::Bool = false # pack the two end intervals one-sided toward their single rational end (vs the Fortran symmetric "both" pack); avoids the fine edge cell that inflates cond(A). Default false = faithful to gal.f.
-    # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
-    gal_match_flag::Bool = false    # match the inner layer on the finished solve (coil-driven ξ from Δ′ + inner Δ(Q)); needs gal_rpec_flag=true, or riccati with vac_flag=true
-    gal_ideal_flag::Bool = false    # within the match, build the IDEAL solution: skip the inner-layer Δ, use bare coil columns (cout=0). Mirrors Fortran rmatch coil%ideal_flag (the EL reference). eta/rho/rotation ignored.
-    gal_inner_solver::String = "ray" # inner-layer Δ backend for the match: "ray" (rotated contour + inward march; recommended for every Q) or "galerkin" (real-axis Hermite FEM; accuracy depends on the surface and arg Q)
-    # --- Inner-layer "galerkin" backend overrides (gal_inner_solver = "galerkin"; unset keeps the backend default) ---
-    gal_inner_xfac::Union{Nothing,Float64} = nothing  # asymptotic-matching radius multiplier
-    gal_inner_nx::Union{Nothing,Int} = nothing        # inner-layer grid cells
-    gal_inner_nq::Union{Nothing,Int} = nothing        # quadrature order per cell
-    gal_inner_cutoff::Union{Nothing,Int} = nothing    # cells carrying the large solution as driving term
-    gal_inner_kmax::Union{Nothing,Int} = nothing      # large-x asymptotic series order
-    gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
-    gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
-    gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
-    gal_gamma::Float64 = 5 / 3       # ratio of specific heats Γ for the resistive-layer coefficients (ggj_parameters G term)
     frobenius_psi_max::Float64 = 0.0
+end
+
+ForceFreeStatesControl(algorithm::A, fields...) where {A<:AbstractIntegrator} = ForceFreeStatesControl{A}(algorithm, fields...)
+
+# Galerkin solves from the fixed start on the full domain, so the start and edge-truncation controls must keep their defaults.
+function validate_algorithm(ctrl::ForceFreeStatesControl)
+    if ctrl.algorithm isa Galerkin
+        for (name, default) in ((:frobenius_psi_max, 0.0), (:truncate_at_dW_peak, false), (:dW_edge_scan_start, 0.99))
+            getfield(ctrl, name) == default || throw(ArgumentError("Galerkin does not support non-default `$name`."))
+        end
+    end
+    return ctrl
 end

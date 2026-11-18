@@ -1,12 +1,9 @@
 """
     DirectIngest
 
-The serializable raw arrays and scalars captured by a direct-equilibrium reader
-(`read_efit`, `read_imas`, `sol_run` is analytic and does not use this) — everything
-needed to rebuild a `DirectRunInput`'s splines without re-reading the original g-file.
-Stored on `DirectRunInput.ingest` / `PlasmaEquilibrium.ingest` and dumped to
-`gpec.h5` so a run can be replayed from any directory. The interpolants themselves are
-not serializable; they are reconstructed from these nodes by `build_direct_from_ingest`.
+Raw arrays and scalars captured by a direct-equilibrium reader (`read_efit`, `read_imas`), enough to
+rebuild a `DirectRunInput`'s splines via `build_direct_from_ingest`. Written to `gpec.h5` so a run can be
+replayed without the original source.
 
 ## Fields
 
@@ -38,12 +35,9 @@ end
 """
     InverseIngest
 
-The serializable raw arrays and scalars captured by an inverse-equilibrium reader
-(`read_chease_ascii`, `read_chease_binary`, `read_ifile`) — everything needed to rebuild an
-`InverseRunInput`'s splines without re-reading the original CHEASE file or i-file. Stored on
-`InverseRunInput.ingest` / `PlasmaEquilibrium.ingest` and reconstructed by
-`build_inverse_from_ingest`. See [`DirectIngest`](@ref) for the role this plays in
-the `gpec.h5` rerun snapshot.
+Raw arrays and scalars captured by an inverse-equilibrium reader (`read_chease_ascii`, `read_chease_binary`,
+`read_ifile`), enough to rebuild an `InverseRunInput`'s splines via `build_inverse_from_ingest`. The inverse
+counterpart of [`DirectIngest`](@ref).
 
 ## Fields
 
@@ -76,34 +70,13 @@ const EquilibriumIngest = Union{Nothing,DirectIngest,InverseIngest}
 """
     DirectRunInput(...)
 
-A container struct that bundles all necessary inputs for the `direct_run` function.
-It is created by one of the equilibrium file read-in functions after processing the
-raw equilibrium data and preparing the initial splines.
+Inputs to `direct_run`, built by a direct-equilibrium reader from the raw data.
 
 ## Fields
 
-  - `config::EquilibriumConfig`
-    The equilibrium configuration object.
-
-  - `sq_in`
-    1D spline data versus normalized poloidal flux `psin`.
-    Quantities:
-
-     1. `F = R * B_t` — toroidal flux function [m·T]
-     2. `μ₀ * Pressure` — plasma pressure (non-negative) [T²]
-     3. `q` — safety factor profile
-     4. `√ψ_norm` — square root of normalized flux
-  - `psi_in`
-    2D cubic interpolant on the (R, Z) grid [m].
-    The values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
-    Definitions:
-
-     1. `ψ(R, Z) = ψ_boundary - ψ(R, Z)`
-
-     2. `ψ = ψ * sign(ψ(centerR, centerZ))`
-
-          * 1D profiles are represented by `CubicInterpolant` or `CubicSeriesInterpolant`
-          * 2D flux surfaces by `CubicInterpolantND`
+  - `config::EquilibriumConfig` — the equilibrium configuration
+  - `sq_in` — 1D spline in normalized ψ of `|F| = R·|B_t|` (m·T), `μ₀P` clipped at zero (T²), `q`, `√ψ_norm`
+  - `psi_in` — 2D interpolant of the poloidal flux on (R, Z), `ψ_boundary - ψ` signed positive at the axis (Wb/rad)
   - `psi_in_xs::Vector{Float64}` — R coordinate grid for psi_in [m]
   - `psi_in_ys::Vector{Float64}` — Z coordinate grid for psi_in [m]
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
@@ -111,39 +84,33 @@ raw equilibrium data and preparing the initial splines.
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
-  - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
-  - `ip_sign::Int` — Sign of the plasma current (+1 or -1); read from the `current` header value
-    in EFIT g-files and `global_quantities.ip` in IMAS. The internal flux is always made
-    positive at the axis, so the sign is kept here (never recovered from the computed current)
-    and fixes the SFL→machine toroidal-angle handedness `helicity = bt_sign × ip_sign`.
+  - `bt_sign::Int` — Sign of the toroidal field (+1 or -1), from the sign of F
+  - `ip_sign::Int` — Sign of the plasma current (+1 or -1) as the source states it (g-file `current`, IMAS
+    `global_quantities.ip`); the internal flux is always positive at the axis, so this sign, not the computed
+    current, sets the SFL→machine handedness `helicity = bt_sign × ip_sign`
   - `ingest::EquilibriumIngest` — captured raw arrays for the `gpec.h5` rerun snapshot
     (a [`DirectIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
-  - `psihigh_resolved::Float64` — outer flux limit the equilibrium is formed on: `config.psihigh`
-    clamped to the outermost closed flux surface by [`resolve_psihigh!`](@ref). Defaults to
-    `config.psihigh` and only differs for efit-family equilibria whose requested limit falls
-    outside the closed-flux region. The solvers build their ψ grid from this field. IMAS
-    equilibria are read into this struct but are not in `EFIT_KINDS`, so they are never
-    clamped and always keep the request.
+  - `psihigh_resolved::Float64` — outer flux limit the solvers build their ψ grid on: `config.psihigh`, clamped
+    to the outermost closed flux surface by [`resolve_psihigh!`](@ref) for efit-family equilibria (not IMAS)
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
-    sq_in::S       # 1D profile spline for F, P, q
-    psi_in::I2D    # 2D flux interpolant (CubicInterpolantND)
-    psi_in_xs::Vector{Float64}  # R coordinates
-    psi_in_ys::Vector{Float64}  # Z coordinates
-    rmin::Float64    # Minimum R-coordinate of the computational grid [m].
-    rmax::Float64    # Maximum R-coordinate of the computational grid [m].
-    zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
-    zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
-    psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
-    bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
-    ip_sign::Int     # Sign of the plasma current: +1 or -1 (from the g-file current / IMAS ip)
+    sq_in::S
+    psi_in::I2D
+    psi_in_xs::Vector{Float64}
+    psi_in_ys::Vector{Float64}
+    rmin::Float64
+    rmax::Float64
+    zmin::Float64
+    zmax::Float64
+    psio::Float64
+    bt_sign::Int
+    ip_sign::Int
     ingest::EquilibriumIngest
     psihigh_resolved::Float64
 end
 
-# Readers construct without a resolved psihigh; it starts at the request and `resolve_psihigh!`
-# clamps it for efit-family equilibria.
+# Readers construct without a resolved psihigh; it starts at the request until `resolve_psihigh!` clamps it
 DirectRunInput(config::EquilibriumConfig, sq_in, psi_in, psi_in_xs, psi_in_ys,
     rmin, rmax, zmin, zmax, psio, bt_sign, ip_sign, ingest) =
     DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys,
@@ -152,7 +119,7 @@ DirectRunInput(config::EquilibriumConfig, sq_in, psi_in, psi_in_xs, psi_in_ys,
 """
     InverseRunInput(...)
 
-A container struct for inputs to the `inverse_run` function.
+Inputs to `inverse_run`, built by an inverse-equilibrium reader.
 
 ## Fields
 
@@ -167,20 +134,20 @@ A container struct for inputs to the `inverse_run` function.
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
   - `ingest::EquilibriumIngest` - captured raw arrays for the `gpec.h5` rerun snapshot
     (an [`InverseIngest`](@ref) for file-based reads, or `nothing` for analytic equilibria)
-  - `psihigh_resolved::Float64` - outer flux limit the equilibrium is formed on; see
-    [`DirectRunInput`](@ref). `config.psihigh`, clamped to the outermost input surface for i-files and
-    reruns (`resolve_psihigh!`); `efit_by_inversion` forwards the clamped value from its `DirectRunInput`.
+  - `psihigh_resolved::Float64` - outer flux limit the solvers build their ψ grid on: `config.psihigh`, clamped
+    to the outermost input surface for i-files and reruns (`resolve_psihigh!`); `efit_by_inversion` forwards
+    the value clamped on its `DirectRunInput`
 """
 mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
-    sq_in::S   # 1D profile spline for F, P, q
-    rz_in_xs::Vector{Float64}   # ψ coordinates
-    rz_in_ys::Vector{Float64}   # θ coordinates
-    rz_in_R::I2D                # R coordinate interpolant
-    rz_in_Z::I2D                # Z coordinate interpolant
-    ro::Float64                 # R axis location
-    zo::Float64                 # Z axis location
-    psio::Float64               # Total flux difference |psi_axis - psi_boundary|
+    sq_in::S
+    rz_in_xs::Vector{Float64}
+    rz_in_ys::Vector{Float64}
+    rz_in_R::I2D
+    rz_in_Z::I2D
+    ro::Float64
+    zo::Float64
+    psio::Float64
     ingest::EquilibriumIngest
     psihigh_resolved::Float64
 end
@@ -193,10 +160,8 @@ InverseRunInput(config::EquilibriumConfig, sq_in, rz_in_xs, rz_in_ys, rz_in_R, r
 """
     build_direct_from_ingest(config::EquilibriumConfig, ingest::DirectIngest) -> DirectRunInput
 
-Rebuild a `DirectRunInput` from a [`DirectIngest`](@ref) captured by `read_efit`/`read_imas`
-(or restored from `Input/RawInputs/Equilibrium/` inside `gpec.h5`). Inverse of that capture:
-reconstructs the splines so the rerun path skips the g-file/IMAS parse, reusing the existing
-solver dispatch.
+Rebuild a `DirectRunInput`'s splines from a [`DirectIngest`](@ref) (from `read_efit`/`read_imas`, or restored
+from `Input/RawInputs/Equilibrium/` in `gpec.h5`), so a rerun skips the g-file/IMAS parse.
 """
 function build_direct_from_ingest(config::EquilibriumConfig, ingest::DirectIngest)
     sq_in = cubic_interp(ingest.sq_xs, Series(ingest.sq_fs); extrap=ExtendExtrap())
@@ -208,9 +173,8 @@ end
 """
     build_inverse_from_ingest(config::EquilibriumConfig, ingest::InverseIngest) -> InverseRunInput
 
-Rebuild an `InverseRunInput` from an [`InverseIngest`](@ref) captured by
-`read_chease_ascii`/`read_chease_binary`. Inverse of that capture; used by the rerun path to
-skip the CHEASE parse.
+Rebuild an `InverseRunInput`'s splines from an [`InverseIngest`](@ref), so a rerun skips the CHEASE or
+i-file parse.
 """
 function build_inverse_from_ingest(config::EquilibriumConfig, ingest::InverseIngest)
     sq_in = cubic_interp(ingest.sq_xs, Series(ingest.sq_fs); extrap=ExtendExtrap())

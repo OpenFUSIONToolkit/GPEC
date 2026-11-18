@@ -1,0 +1,40 @@
+# Regression case: the TJ-analytic n=1 NTV torque with supplied collision rates.
+# Reuses the TJ kinetic NTV deck via [overrides], reading kinetic_rates.dat as a rates-v1 table: its lnΛ is the
+# internal model's and its ν_i, ν_e are 3× the model's, so a reader or spline path that drops the supplied rates
+# moves the torque away from this case's reference. The only harness coverage of supplied collision rates.
+# Each [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
+# noise floor below which a difference is treated as zero.
+[case]
+name = "tj_kinetic_ntv_rates"
+description = "TJ-analytic equilibrium, n=1, no wall, NTV torque with supplied rates-v1 collision rates (reuses the TJ NTV deck via overrides)"
+example_dir = "examples/TJ_kinetic_NTV_example"
+
+[overrides]
+"Equilibrium.kinetic_file" = "kinetic_rates.dat"   # the same profiles with supplied lnLambda, nu_i, nu_e
+"Equilibrium.kinetic_format" = "rates-v1"          # read columns 7-9 as supplied collision rates
+
+# NTV torque with the supplied rates. [Re, Im] pair; deterministic for fixed code and inputs, so the
+# noise floor sits near FP noise.
+[quantities.ntv_torque]
+h5path = "KineticForces/fgar/total_torque"
+type = "real_vector"
+extract = "all_real"
+label = "NTV torque fgar with supplied rates [Re, Im]"
+noise_threshold = 1e-8
+order = 10
+
+[quantities.ntv_psi_nsteps]
+h5path = "KineticForces/fgar/psi_nsteps"
+type = "int_scalar"
+extract = "value"
+label = "NTV ψ quadrature evaluations"
+noise_threshold = 0
+order = 11
+
+# Runtime (special: not from H5)
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0

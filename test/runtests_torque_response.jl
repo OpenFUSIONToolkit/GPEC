@@ -2,9 +2,9 @@ using Test
 using HDF5
 using LinearAlgebra
 
-# ψ-resolved torque response matrices of a kinetic forward solve: the Solovev calculated-kinetic
+# ψ-resolved torque response matrices of a kinetic forward solve: the TJ calculated-kinetic
 # fixture driven by two analytic window-pane coil sets, so T_xe, T_source and the run's own
-# forcing are all exercised on one (cheap, mpsi=16) solve.
+# forcing are all exercised on one (cheap, mpsi=32) solve.
 
 const _GPE_TR = GeneralizedPerturbedEquilibrium
 const _PE_TR = _GPE_TR.PerturbedEquilibrium
@@ -22,7 +22,7 @@ nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
 name = "pane_upper"                     # Analytic window-pane array above the midplane
 source = "window_pane"                  # Rectangular picture-frame coils placed by explicit corners
 n_coils = 6                             # Number of frames around the torus
-rz_corners = [[1.5, 0.05], [1.5, 0.45]] # Frame corners (R, Z) [m]
+rz_corners = [[12.0, 0.1], [12.0, 1.5]]  # Frame corners (R, Z) [m]
 gap_fraction = 0.15                     # Toroidal gap between neighbouring frames as a fraction of the pitch
 currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
 
@@ -30,19 +30,17 @@ currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing
 name = "pane_lower"                     # Analytic window-pane array below the midplane
 source = "window_pane"                  # Rectangular picture-frame coils placed by explicit corners
 n_coils = 6                             # Number of frames around the torus
-rz_corners = [[1.5, -0.45], [1.5, -0.05]] # Frame corners (R, Z) [m]
+rz_corners = [[12.0, -1.5], [12.0, -0.1]] # Frame corners (R, Z) [m]
 gap_fraction = 0.15                     # Toroidal gap between neighbouring frames as a fraction of the pitch
 currents = [1000.0, 0.0, -1000.0, -1000.0, 0.0, 1000.0]  # n=1 phasing shifted by 60 degrees, 1 kA peak [A]
 
 [PerturbedEquilibrium]
 compute_singular_coupling = false       # Compute singular layer coupling metrics
 compute_torque_response = true          # Build the ψ-resolved torque response matrices T_xe and T_source
-verbose = false                         # Enable verbose logging
-write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 """
 
 @testset "Torque response matrices" begin
-    template = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_calculated")
+    template = joinpath(@__DIR__, "test_data", "regression_tj_kinetic_calculated")
 
     mktempdir() do dir
         for name in readdir(template)
@@ -50,7 +48,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
         end
         toml = joinpath(dir, "gpec.toml")
         # Opt in to the Euler-Lagrange matrices so the kinetic set is written and checked by the metadata walk.
-        deck = replace(read(toml, String), "write_outputs_to_HDF5 = true" => "write_outputs_to_HDF5 = true\nwrite_el_matrices = true"; count=1)
+        deck = replace(read(toml, String), "[ForceFreeStates]\n" => "[ForceFreeStates]\nwrite_el_matrices = true\n")
         write(toml, deck * _TORQUE_RESPONSE_SECTIONS)
 
         res = _GPE_TR.main([dir])
@@ -105,7 +103,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
         T_expected = dot(ξ, (U2l / U1l) * ξ) * (2 * nn * im / (2μ₀)) / 2
 
         # The run's coil sets, rebuilt the way the response stage builds them.
-        ft_ctrl = _GPE_TR.forcing_terms_control(_GPE_TR.TOML.parsefile(toml))
+        ft_ctrl = _GPE_TR.forcing_terms_control(_GPE_TR.TOML.parsefile(toml), dirname(toml))
         cfg = _GPE_TR.ForcingTerms.CoilConfig(ft_ctrl)
         coil_sets = _GPE_TR.ForcingTerms.load_coil_sets(cfg, nn; equil=ffs.equil)
 
@@ -160,7 +158,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             # No regularization by default; an explicit width still reaches the regularized profiles.
             @test pe.regularization_width == 0.0
             reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.RMPField(ft_ctrl); regularization_width=0.05,
-                coil_sets=pe.coil_sets, verbose=false, write_outputs_to_HDF5=false)
+                coil_sets=pe.coil_sets, verbose=false)
             @test reg.regularization_width == 0.05
             @test reg.forcing_b ≈ pe.forcing_b rtol = 1e-12
             @test !(reg.xi_modes.clebsch_alpha ≈ pe.xi_modes.clebsch_alpha)
@@ -172,7 +170,7 @@ write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to
             @test_throws ArgumentError _PE_TR.build_torque_response!(_PE_TR.PlasmaResponse(; ffs))
             # The torque response is opt-in: a response built without it contracts nothing.
             plain = perturbed_equilibrium(plasma_response(ffs; compute_singular_coupling=false, verbose=false), _GPE_TR.ForcingTerms.RMPField(ft_ctrl);
-                coil_sets=pe.coil_sets, verbose=false, write_outputs_to_HDF5=false)
+                coil_sets=pe.coil_sets, verbose=false)
             @test isempty(plain.response.T_xe) && plain.torque_response === nothing
         end
     end

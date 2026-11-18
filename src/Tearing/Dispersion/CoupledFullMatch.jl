@@ -11,23 +11,9 @@
 # Eq. (36)-(40); original matching construction Pletzer & Dewar 1991,
 # J. Plasma Phys. **45**, 427).
 #
-# Why 4m × 4m and not 2m × 2m?
-#
-#   The outer-region matching matrix D' (Julia `intr.delta_prime_raw`) is
-#   expressed in the side-major basis `[L_s1, R_s1, L_s2, R_s2, …]` of
-#   large-solution driving amplitudes. The inner-layer Galerkin solver
-#   (`solve_inner(GGJModel, …)`) returns Δ_tearing and Δ_interchange in
-#   the even/odd parity (+/−) basis instead. The naive relation
-#   `det(D' − diag(Δ_+, Δ_-)) = 0` cannot be written directly because
-#   the two quantities live in different bases. The fix is to introduce
-#   both sets of amplitudes (`C^j_{L,R}` for outer, `d^j_±` for inner) as
-#   explicit unknowns and use the ±1 matching identity as two extra rows
-#   per surface, yielding the 4m × 4m linear system. A naive 2m × 2m
-#   `det(D' − diag(Δ_+, Δ_-))` form cannot work here: it subtracts the
-#   inner Δ (parity ± basis) from the outer D' (side-major L/R basis), two
-#   quantities living in different bases, producing a determinant with
-#   structurally-wrong magnitude and topology. This module reproduces the
-#   full Pletzer-Dewar result.
+# The outer D' (`intr.delta_prime_raw`) is in the side-major L/R basis while the inner layer returns
+# Δ in the parity ± basis, so both amplitude sets are kept as unknowns and joined by the matching
+# identity rows, giving a 4m × 4m system instead of a basis-mixing 2m × 2m determinant.
 #
 # Per surface `k` (1-indexed), the 4 block indices are
 #
@@ -51,33 +37,24 @@
 Full 4m × 4m tearing+interchange Pletzer-Dewar dispersion matrix
 (Wang et al. 2020, Phys. Plasmas **27**, 122503).
 
-Given the raw 2m × 2m outer-region matrix `dp_raw` (side-major ordering
-`[L_s1, R_s1, L_s2, R_s2, …]`, from `intr.delta_prime_raw`) and a vector
-of `SurfaceCoupling` (each containing the inner-layer model and
-parameters), calling `mc(Q)` assembles the 4m × 4m Pletzer-Dewar
-matching matrix and returns `det(mat)`.
-
-This is the correct Pletzer-Dewar dispersion relation for
-tearing+interchange coupling. A naive 2m × 2m `det(D' − D(γ))` form is
-not equivalent: it subtracts the inner Δ (parity ± basis) from the outer
-D' (side-major L/R basis), mixing two different bases. The 4m × 4m
-matching system introduced here keeps the bases separate via the explicit
-`C^j_{L,R}` / `d^j_±` unknowns. For pure-tearing (pressureless SLAYER)
-studies use the reduced m × m `MultiSurfaceCoupling` instead.
+Calling `mc(Q)` assembles the matching matrix from the raw outer-region matrix and the per-surface
+inner layers and returns its determinant. For pure-tearing (pressureless SLAYER) studies use the
+reduced m × m `MultiSurfaceCoupling`.
 
 # Fields
 
   - `surfaces::V`               — per-surface `SurfaceCoupling`.
-  - `dp_raw::Matrix{ComplexF64}` — 2m × 2m outer-region matrix (side-major).
+  - `dp_raw::Matrix{ComplexF64}` — 2m × 2m outer-region matrix, side-major `[L_s1, R_s1, L_s2, R_s2, …]`.
   - `ref_idx::Int`              — reference surface for Q rescaling (1-based).
-  - `msing_max::Int`            — number of surfaces to include (truncates).
+  - `msing_max::Int`            — number of leading surfaces included.
+  - `inner_kwargs::K`           — kwargs forwarded to `solve_inner`, e.g. `(pfac=0.1, nx=128, nq=5)`.
 """
 struct MultiSurfaceCouplingFull{V<:AbstractVector{<:SurfaceCoupling},K<:NamedTuple}
     surfaces::V
     dp_raw::Matrix{ComplexF64}
     ref_idx::Int
     msing_max::Int
-    inner_kwargs::K    # kwargs forwarded to solve_inner; e.g. (pfac=0.1, nx=128, nq=5)
+    inner_kwargs::K
 end
 
 """
@@ -95,15 +72,9 @@ SLAYER surface, and as `i·q_shift_k` to the growth rate s for a GGJ surface (se
 
 # Keyword arguments
 
-  - `ref_idx`   — index of the reference surface whose `tauk` defines the
-    Q normalization (1 ≤ ref_idx ≤ m). Defaults to 1.
-  - `msing_max` — truncate to the leading `msing_max` surfaces; the
-    matching matrix becomes 4·msing_max × 4·msing_max, built from the
-    corresponding 2·msing_max × 2·msing_max submatrix of `dp_raw`.
-    Defaults to `length(surfaces)`.
-  - `inner_kwargs` — NamedTuple of kwargs forwarded to `solve_inner` at
-    every Q evaluation, e.g. `(pfac=0.1, xfac=10.0, nx=128, nq=5)` for
-    Galerkin grid tuning. Defaults to `NamedTuple()`.
+  - `ref_idx`   — reference surface whose `tauk` defines the Q normalization.
+  - `msing_max` — truncate to the leading `msing_max` surfaces (and the matching block of `dp_raw`).
+  - `inner_kwargs` — NamedTuple forwarded to `solve_inner` at every evaluation, e.g. `(pfac=0.1, nx=128)`.
 """
 function multi_surface_coupling_full(surfaces::AbstractVector{<:SurfaceCoupling},
     dp_raw::AbstractMatrix;
@@ -136,12 +107,10 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
     Qc = ComplexF64(Q)
     ref_tauk = mc.surfaces[mc.ref_idx].tauk
 
-    # Allocate the matching matrix and fill the lower-left 2m × 2m block
-    # with transpose(dp_raw[1:s2, 1:s2]).
+    # Lower-left 2m × 2m block is transpose(dp_raw).
     mat = zeros(ComplexF64, s4, s4)
     @views mat[(s2+1):s4, 1:s2] .= transpose(mc.dp_raw[1:s2, 1:s2])
 
-    # Per-surface inner-layer assembly
     @inbounds for k in 1:m
         sc = mc.surfaces[k]
         idx1 = 2k - 1          # C^k_L
@@ -152,24 +121,13 @@ function (mc::MultiSurfaceCouplingFull)(Q::Number)
         # Map the shared scanned Q onto this surface's normalization, then Doppler it into
         # the surface's E×B frame (GGJ carries tauk = 1, so the ratio is a no-op there).
         Q_k = layer_argument(sc, Qc * (sc.tauk / ref_tauk))
-        resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
+        resp = layer_response(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
-        # delta1 = interchange (parity +), delta2 = tearing (parity −); named
-        # fields expose the two channels directly. sc.scale converts inner-basis
-        # Δ to outer units (1.0 for GGJ since rescale_delta is applied inside
-        # solve_inner; S^(1/3) for SLAYER).
-        #
-        # NOTE: the fulldomain matching does NOT add any Δ_crit offset here —
-        # delta1, delta2 are the raw inner-layer outputs. The full 4m×4m
-        # Pletzer-Dewar residual includes the interchange channel, which
-        # provides Glasser (Mercier) stabilization natively; Δ_crit is a
-        # slab-layer proxy only relevant to SLAYER's tearing-only model.
+        # delta1 = interchange (parity +), delta2 = tearing (parity −), in outer units via sc.scale.
+        # No Δ_crit offset: the interchange channel already supplies Glasser stabilization.
         delta1 = resp.interchange * sc.scale
         delta2 = resp.tearing * sc.scale
-        # The inner-layer solver returns NaN when the Riccati integration fails
-        # (clustered near poles). Propagate it as the residual so the scan flags
-        # this Q-cell via its isfinite checks, rather than feeding NaN into the
-        # LU factorization where it silently contaminates the whole determinant.
+        # Propagate a NaN layer failure so the scan flags this cell instead of a contaminated det.
         (isfinite(delta1) && isfinite(delta2)) || return ComplexF64(NaN, NaN)
 
         # --- Upper-left 2×2 block: per-surface identity on C_{L,R} ---

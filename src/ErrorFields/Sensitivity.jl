@@ -1,21 +1,15 @@
 """
-    compute_coil_sensitivities(coil_sets, rc, equil, cfg, ctrl=ErrorFieldsControl(); psi, b_t0) -> CoilSensitivities
+    compute_coil_sensitivities(coil_sets, rc, equil, cfg, ctrl=ErrorFieldsControl(); psi, b_t0, verbose=false) -> CoilSensitivities
 
 Linearize the control-surface spectrum of every coil set in `coil_sets` with respect to its six
 rigid-body degrees of freedom, by central differences of the Biot-Savart spectrum on the surface
 `psi` (the solve's integration limit, `ffs.psilim`) sampled once per toroidal mode of `rc`.
-The nominal spectrum is evaluated too, so the sum over sets reproduces the run's forcing when
-these are the run's coils.
+The nominal spectrum is evaluated too. Tilt taps rotate about the pivot named by
+`ctrl.rotation_center`, in degrees; `b_t0` is the axis toroidal field (tesla) for the δ
+normalization. Errors on a set carrying no current.
 
-Shift taps translate the whole set rigidly; tilt taps rotate it about the pivot named by
-`ctrl.rotation_center`, in degrees. `cfg` supplies the boundary-grid resolution, `b_t0` the
-axis toroidal field (tesla) stored for the δ normalization. Errors on a set carrying no
-current, whose linearization would vanish identically.
-
-The spectra are placed on `rc`'s (m, n) ordering and conformed to root-area-weighted field with
-[`rootarea_field`](@ref), so [`coupling_overlap`](@ref) applies to them directly. Post-hoc use
-from a `gpec.h5` goes through the `compute_coil_sensitivities(h5path, coil_sets; kwargs...)`
-method.
+Spectra are on `rc`'s (m, n) ordering, conformed with [`rootarea_field`](@ref), so
+[`coupling_overlap`](@ref) applies directly.
 """
 function compute_coil_sensitivities(
     coil_sets::Vector{CoilSet},
@@ -24,7 +18,8 @@ function compute_coil_sensitivities(
     cfg::CoilConfig,
     ctrl::ErrorFieldsControl=ErrorFieldsControl();
     psi::Float64,
-    b_t0::Float64
+    b_t0::Float64,
+    verbose::Bool=false
 )
     isempty(coil_sets) && throw(ArgumentError("compute_coil_sensitivities: no coil sets given"))
     ctrl.rotation_center in ("conductor", "set") ||
@@ -67,7 +62,7 @@ function compute_coil_sensitivities(
             second_norm[axis, col] = norm(plus .+ minus .- 2 .* b0)
         end
 
-        # Curvature relative to the set's largest linear response, so a tap whose first difference vanishes by symmetry is judged against the terms the model keeps.
+        # Curvature relative to the set's largest linear response, so a tap vanishing by symmetry is not judged against itself.
         scale = maximum(first_norm)
         resid = scale > 0 ? second_norm ./ scale : zeros(3, 2)
         shift_resid[:, j] = resid[:, 1]
@@ -76,7 +71,7 @@ function compute_coil_sensitivities(
         worst = maximum(resid)
         worst > 1e-2 &&
             @warn "Coil set \"$(cs.name)\": finite-difference curvature $(@sprintf("%.2e", worst)) of the first difference; reduce fd_step_shift_m / fd_step_tilt_deg"
-        ctrl.verbose &&
+        verbose &&
             @info "  $(cs.name): |b̃| = $(@sprintf("%.3e", norm(b0))) T, " *
                   "max |∂b̃/∂x| = $(@sprintf("%.3e", maximum(norm, eachslice(shift[:, :, j]; dims=2)))) T/m, " *
                   "max |∂b̃/∂θ| = $(@sprintf("%.3e", maximum(norm, eachslice(tilt[:, :, j]; dims=2)))) T/deg, curvature $(@sprintf("%.1e", worst)) ($(@sprintf("%.2f", time() - t_start)) s)"
@@ -91,13 +86,13 @@ function compute_coil_sensitivities(
 end
 
 """
-    compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets, ctrl=ErrorFieldsControl()) -> CoilSensitivities
+    compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets, ctrl=ErrorFieldsControl(); verbose=false) -> CoilSensitivities
 
 Sweep `coil_sets` against an already-assembled [`ResonantDriveContext`](@ref), reusing its boundary grids.
 Equivalent to the five-argument method and the way to apply a grid or ψ-window override.
 """
-function compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets::Vector{CoilSet}, ctrl::ErrorFieldsControl=ErrorFieldsControl())
-    return compute_coil_sensitivities(coil_sets, ctx.rc, ctx.equil, ctx.cfg, ctrl; psi=ctx.psilim, b_t0=ctx.b_t0)
+function compute_coil_sensitivities(ctx::ResonantDriveContext, coil_sets::Vector{CoilSet}, ctrl::ErrorFieldsControl=ErrorFieldsControl(); verbose::Bool=false)
+    return compute_coil_sensitivities(coil_sets, ctx.rc, ctx.equil, ctx.cfg, ctrl; psi=ctx.psilim, b_t0=ctx.b_t0, verbose)
 end
 
 """
@@ -186,10 +181,8 @@ end
 """
     without_coils(table::SensitivityTable, names) -> SensitivityTable
 
-The table with the named coil sets dropped: the error-field coil sets alone, once a correction
-array or any other energized coil set that is not an error-field source is taken out. Every name
-must be in the table. This is the table the run's Monte Carlo, worst case and scans use; the
-per-coil sensitivities of the excluded sets stay in the full table.
+The table with the named coil sets (e.g. correction arrays) dropped, leaving the error-field
+sources the Monte Carlo, worst case and scans use. Every name must be in the table.
 """
 function without_coils(table::SensitivityTable, names)
     names = String[String(n) for n in names]
@@ -207,7 +200,7 @@ end
 
 The coil sets a run leaves out of its error field: `[ErrorFields] exclude_coils` together with
 the correction arrays in `[ErrorFields.NTV] efc_coils`, read from the parsed `[ErrorFields]`
-section of a deck or from the deck echoed into a run file (none when the file carries no deck).
+section of a deck or from the deck recorded in a run file (none when the file carries no deck).
 """
 function excluded_coil_names(ef_raw::AbstractDict)
     listed = vcat(get(ef_raw, "exclude_coils", String[]), get(get(ef_raw, "NTV", Dict{String,Any}()), "efc_coils", String[]))
@@ -225,11 +218,9 @@ end
 
 The real in-plane displacement that cancels a coil set's nominal overlap to linear order,
 `S_x·Δx + S_y·Δy = −δ_as_designed`, as the least-squares solution of the 2×2 real system on the
-real and imaginary parts. For an axisymmetric hoop the two sensitivities are one complex number
-seen twice — `S_y = −i·S_x` in the sign convention these coils are built with — and the solution is
-`conj(−δ_as_designed / S_x)`, split into its real and imaginary parts. The conjugate is not decoration:
-dropping it mirrors the offset about the x axis. A degenerate pair (`S_x` and `S_y` real
-multiples of each other) returns the minimum-norm solution.
+real and imaginary parts. For an axisymmetric hoop (`S_y = −i·S_x`) the solution is
+`conj(−δ_as_designed / S_x)`; dropping the conjugate mirrors the offset about the x axis. A degenerate
+pair returns the minimum-norm solution.
 """
 function cancelling_offset(δ_as_designed::Number, S_x::Number, S_y::Number)
     A = [real(S_x) real(S_y); imag(S_x) imag(S_y)]

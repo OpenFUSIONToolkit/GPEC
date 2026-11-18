@@ -35,8 +35,10 @@
 
     @testset "Interface compliance" begin
         p = _ref_params_large_D()
-        Δ = solve_inner(SLAYERModel(), p, 0.5 + 0.2im)
+        # solve_inner takes s = γ − iω in 1/s; this s is Q = 0.5 + 0.2i, the point the tests below use.
+        Δ = solve_inner(SLAYERModel(), p, (0.2 - 0.5im) / p.tauk)
         @test Δ isa InnerLayerResponse
+        @test Δ.tearing ≈ layer_response(SLAYERModel(), p, 0.5 + 0.2im).tearing
         @test Δ.interchange == zero(ComplexF64)    # pressureless SLAYER has no interchange channel
         @test isfinite(real(Δ.tearing))
         @test isfinite(imag(Δ.tearing))
@@ -58,8 +60,8 @@
         @test branch_small === :small_D
 
         # Both branches should yield finite Δ values
-        Δl = solve_inner(SLAYERModel(), p_large, 0.5 + 0.1im)
-        Δs = solve_inner(SLAYERModel(), p_small, 0.5 + 0.1im)
+        Δl = layer_response(SLAYERModel(), p_large, 0.5 + 0.1im)
+        Δs = layer_response(SLAYERModel(), p_small, 0.5 + 0.1im)
         @test isfinite(Δl.tearing) && isfinite(Δs.tearing)
 
         # p_floor (=6 by default) is honored even when the branch
@@ -86,7 +88,7 @@
         # absolute step size, which would only measure sampling resolution and
         # drift with the resistivity model.
         ωs_full = collect(range(-1.5; stop=1.5, length=16))
-        Δ_full = [solve_inner(m, p, ω + γ * im).tearing for ω in ωs_full]
+        Δ_full = [layer_response(m, p, ω + γ * im).tearing for ω in ωs_full]
         @test all(isfinite.(real.(Δ_full)))
         @test all(isfinite.(imag.(Δ_full)))
         # Bounded magnitude over the full band — no blow-up / pole crossing.
@@ -96,7 +98,7 @@
         # would show up as one step far larger than the local median; a smooth
         # curve keeps that ratio small regardless of overall scale.
         ωs = collect(range(-1.5; stop=0.5, length=11))
-        Δs = [solve_inner(m, p, ω + γ * im).tearing for ω in ωs]
+        Δs = [layer_response(m, p, ω + γ * im).tearing for ω in ωs]
         diffs = abs.(diff(Δs))
         @test maximum(diffs) < 6.0 * median(diffs)
 
@@ -113,8 +115,8 @@
         # the long inward integration span amplifies local tolerances
         # by roughly 5 orders of magnitude, so 1e-3 relative is the
         # realistic self-consistency threshold here.
-        Δ_default = solve_inner(m, p, Q).tearing
-        Δ_tight = solve_inner(m, p, Q; reltol=1e-13, abstol=1e-13).tearing
+        Δ_default = layer_response(m, p, Q).tearing
+        Δ_tight = layer_response(m, p, Q; reltol=1e-13, abstol=1e-13).tearing
         @test abs(Δ_default - Δ_tight) < 1e-3 * abs(Δ_tight)
     end
 
@@ -125,8 +127,8 @@
         p = _ref_params_large_D()
         m = SLAYERModel()
         Q = 0.5 + 0.2im
-        Δ_default = solve_inner(m, p, Q; pmin=1e-6).tearing
-        Δ_deeper = solve_inner(m, p, Q; pmin=1e-7).tearing
+        Δ_default = layer_response(m, p, Q; pmin=1e-6).tearing
+        Δ_deeper = layer_response(m, p, Q; pmin=1e-7).tearing
         @test abs(Δ_default - Δ_deeper) < 0.05 * abs(Δ_default)
     end
 

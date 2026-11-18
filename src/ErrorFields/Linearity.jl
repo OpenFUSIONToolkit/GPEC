@@ -1,5 +1,4 @@
-# The linear sensitivity model checked at finite displacements. Lives after MonteCarlo.jl because it
-# converts tolerances the way the sampler does (group_tilt_deg) and rebuilds file inputs with it.
+# The linear sensitivity model checked at finite displacements. Included after MonteCarlo.jl (uses group_tilt_deg).
 
 """
     LinearityCheck
@@ -40,16 +39,11 @@ end
     linearity_check(ctx, coil_sets, tolerances; scales=(1.0, 2.0), mode=1, ctrl=ErrorFieldsControl()) -> LinearityCheck
     linearity_check(h5path; scales=(1.0, 2.0), mode=1, psi_low=0.0, psi_high=CORE_PSI_HIGH, ctrl=ErrorFieldsControl(), kwargs...) -> LinearityCheck
 
-How linear the overlap is out to the tolerance edge, which is the premise every post-hoc sweep rests
-on and which the stored finite-difference residuals only test at the step. Each coil set with a
-tolerance block is displaced by `±scale × tolerance` along each in-plane shift axis and about each
-in-plane tilt axis (a cylinder coil's tilt range is the angle its axis line can reach,
-`atan(shift_tol / half_height)`); each coherent group is shifted and rigidly rotated about its pivot
-as one body at its own tolerance; the overlap of the displaced geometry is recomputed and compared
-with the linear prediction from [`sensitivity_table`](@ref). Include the largest scale a tolerance
-scan will use, since that is the regime it relies on. Cost: one Biot–Savart pass per row, so it is
-opt-in and not part of the run. The file form rebuilds the context, the coil geometry and the
-tolerance snapshot from `gpec.h5`.
+Compare the linear overlap model of [`sensitivity_table`](@ref) with the overlap recomputed for finite
+displacements: each toleranced coil set is shifted and tilted in-plane by `±scale × tolerance` (a
+cylinder coil's tilt range is `atan(shift_tol / half_height)`), and each coherent group is shifted and
+rigidly rotated about its pivot. Include the largest scale a tolerance scan will use. Costs one
+Biot–Savart pass per row. The file form rebuilds its inputs from `gpec.h5`.
 """
 function linearity_check(ctx::ResonantDriveContext, coil_sets::AbstractVector{CoilSet}, ts::ToleranceSet;
     scales=(1.0, 2.0), mode::Int=1, ctrl::ErrorFieldsControl=ErrorFieldsControl())

@@ -16,7 +16,7 @@ const ATOL_TIGHT = 1e-12  # in-place vs allocating / formula-vs-formula checks
     @testset "single real mode → ±m amplitudes" begin
         N, mlow, mpert = 64, -10, 21  # modes -10..10
         ft = FourierTransform(N, mpert, mlow)
-        θ = range(; start=0, length=N, step=2π/N)
+        θ = range(; start=0, length=N, step=2π / N)
 
         # cos(m0 θ): real 0.5 at m = ±m0, zero elsewhere; imag ≈ 0 everywhere.
         m0 = 3
@@ -36,7 +36,7 @@ const ATOL_TIGHT = 1e-12  # in-place vs allocating / formula-vs-formula checks
     @testset "single complex mode → Kronecker delta" begin
         N, mlow, mpert = 64, -10, 21
         ft = FourierTransform(N, mpert, mlow)
-        θ = collect(range(; start=0, length=N, step=2π/N))
+        θ = collect(range(; start=0, length=N, step=2π / N))
 
         for m0 in (3, -2, 0)
             modes = ft(exp.(im .* m0 .* θ))
@@ -65,7 +65,7 @@ const ATOL_TIGHT = 1e-12  # in-place vs allocating / formula-vs-formula checks
     @testset "matrix input transforms columns independently" begin
         N, mlow, mpert = 48, -8, 17  # modes -8..8
         ft = FourierTransform(N, mpert, mlow)
-        θ = collect(range(; start=0, length=N, step=2π/N))
+        θ = collect(range(; start=0, length=N, step=2π / N))
 
         data = hcat(cos.(3 .* θ), sin.(5 .* θ))
         modes = ft(data)
@@ -88,7 +88,7 @@ end
         basis = compute_fourier_coefficients(N, m_modes, n, ζ)
         @test size(basis) == (mpert, N)
 
-        θ = collect(range(; start=0, length=N, step=2π/N))
+        θ = collect(range(; start=0, length=N, step=2π / N))
         for (l, m) in enumerate(m_modes)
             expected = exp.(-im .* (m .* θ .- n .* ζ))
             @test all(isapprox.(basis[l, :], expected; atol))

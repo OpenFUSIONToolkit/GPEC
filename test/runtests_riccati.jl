@@ -2,23 +2,19 @@ using LinearAlgebra, Random, TOML
 
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
-# Configure a fresh ForceFreeStatesInternal from an already-built equilibrium.
-# Cheap (sing_lim! + sing_find! + field assignment). Separate from equil/mats
-# setup because intr is mutated by each integration (sing[s].delta_prime etc.).
-function make_solovev_intr(inputs, ctrl, equil, ex)
-    intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
-    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-        (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    intr.nlow = ctrl.nn_low;
-    intr.nhigh = ctrl.nn_high;
-    intr.npert = 1
-    FFS.sing_lim!(intr, ctrl, equil)
-    FFS.sing_find!(intr, equil)
-    intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-    intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-    intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.numpert_total = intr.mpert * intr.npert
-    return intr
+# The Solovev fixture prepared as solve prepares it, up to the integration. Each integration mutates its
+# intr (sing[s].delta_prime etc.), so every run takes a freshly prepared one.
+function prepared_solovev()
+    GPEC = GeneralizedPerturbedEquilibrium
+    ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+    # The fixture's [Forward] settings drive both paths; the Riccati control also carries the chunking.
+    inputs["ForceFreeStates"]["integrator"] = "Riccati"
+    inputs["Riccati"] = pop!(inputs, "Forward")
+    equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(inputs, ex), GPEC.analytic_config(inputs))
+    prob = GPEC.ForceBalanceProblem(equil; GPEC.force_balance_keywords(inputs, ex)...)
+    ctrl, intr, equil, metric, mats = GPEC._prepare_solve(prob, GPEC.force_balance_algorithm(inputs))
+    return ctrl, intr, equil, metric, mats
 end
 
 @testset "Riccati Integration Tests" begin
@@ -32,8 +28,8 @@ end
             0.0 1.2+0.1im 0.0im 0.2;
             0.1+0.1im 0.0 0.9+0.3im 0.1im;
             0.0im 0.2 0.0 1.1+0.2im]
-        U1 = rng .+ 0.5*I(N)
-        U2 = 0.5*rng .+ I(N)  # near-identity to ensure invertibility
+        U1 = rng .+ 0.5 * I(N)
+        U2 = 0.5 * rng .+ I(N)  # near-identity to ensure invertibility
 
         u = zeros(ComplexF64, N, N, 2)
         u[:, :, 1] .= U1
@@ -44,7 +40,7 @@ end
         FFS.renormalize_riccati_inplace!(u, N)
 
         @test u[:, :, 2] ≈ I(N)
-        @test u[:, :, 1] ≈ S_expected rtol=1e-12
+        @test u[:, :, 1] ≈ S_expected rtol = 1e-12
     end
 
     @testset "renormalize_riccati_inplace! idempotent" begin
@@ -60,7 +56,7 @@ end
         FFS.renormalize_riccati_inplace!(u, N)
 
         @test u[:, :, 2] ≈ I(N)
-        @test u[:, :, 1] ≈ S rtol=1e-12
+        @test u[:, :, 1] ≈ S rtol = 1e-12
     end
 
     @testset "renormalize_riccati! (OdeState)" begin
@@ -68,8 +64,8 @@ end
         rng = [1.0+0.5im 0.2im 0.1;
             0.0im 1.2+0.1im 0.0;
             0.1+0.1im 0.0 0.9+0.3im]
-        U1 = rng .+ 0.5*I(N)
-        U2 = 0.2*rng .+ I(N)
+        U1 = rng .+ 0.5 * I(N)
+        U2 = 0.2 * rng .+ I(N)
 
         odet = FFS.OdeState(N, 10, 5, 1)
         odet.u[:, :, 1] .= U1
@@ -81,7 +77,7 @@ end
         FFS.renormalize_riccati!(odet, intr)
 
         @test odet.u[:, :, 2] ≈ I(N)
-        @test odet.u[:, :, 1] ≈ S_expected rtol=1e-12
+        @test odet.u[:, :, 1] ≈ S_expected rtol = 1e-12
     end
 
     # ── Shared Solovev setup ──────────────────────────────────────────────────
@@ -95,24 +91,11 @@ end
     #   intr_ric / odet_ric — Riccati path (shared by most tests)
     #   intr_fwd / odet_fwd — Forward path (energy comparison only)
 
-    ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-    inputs["ForceFreeStates"]["verbose"] = false
-
-    ctrl = FFS.ForceFreeStatesControl(;
-        (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-    equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
-        GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex),
-        GeneralizedPerturbedEquilibrium.Equilibrium.SolovevConfig(inputs["SOL_INPUT"]))
-
-    intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
-    metric = FFS.make_metric(equil, intr_tmp.mpert)
-    mats = FFS.build_matrix_splines(equil, intr_tmp, metric)
-    N = intr_tmp.numpert_total
+    ctrl, intr_ric, equil, metric, mats = prepared_solovev()
+    N = intr_ric.numpert_total
 
     # Riccati integration. The driver returns (odet, propagators, chunks, S_at_surface_left);
     # only odet is used here.
-    intr_ric = make_solovev_intr(inputs, ctrl, equil, ex)
     odet_ric, _, _, _ = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr_ric)
 
     # Save inline Δ' values before any test that calls compute_delta_prime_from_ca!
@@ -123,7 +106,7 @@ end
     et_ric = real(vac_ric.et[1])
 
     # Forward integration (needed only for energy comparison).
-    intr_fwd = make_solovev_intr(inputs, ctrl, equil, ex)
+    _, intr_fwd, _, _, _ = prepared_solovev()
     odet_fwd, _, _, _ = FFS.forward_eulerlagrange_integration(ctrl, equil, mats, intr_fwd)
     vac_fwd = FFS.free_run(odet_fwd, ctrl, equil, mats, intr_fwd)
     et_fwd = real(vac_fwd.et[1])
@@ -151,7 +134,7 @@ end
     @testset "Riccati end state has U₂ ≈ I" begin
         # The outer-region re-integration that closes riccati_eulerlagrange_integration
         # leaves odet.u[:,:,2] as the identity (canonical Riccati convention after final renorm)
-        @test odet_ric.u[:, :, 2] ≈ I(N) rtol=1e-10
+        @test odet_ric.u[:, :, 2] ≈ I(N) rtol = 1e-10
     end
 
     @testset "riccati_der! formula — Glasser 2018 Eq. 19" begin
@@ -164,7 +147,7 @@ end
         # See benchmarks/benchmark_riccati_der.jl for the extended version with output.
 
         # Use an initialized OdeState just for spline_hint and chunk bounds
-        odet_tmp = FFS.OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr_ric.msing)
+        odet_tmp = FFS.OdeState(N, ctrl.algorithm.numsteps_init, ctrl.algorithm.numunorms_init, intr_ric.msing)
         FFS.initialize_el_at_axis!(odet_tmp, ctrl, mats, equil.profiles, intr_ric)
         chunks = FFS.chunk_el_integration_bounds(odet_tmp, ctrl, intr_ric)
 
@@ -218,7 +201,6 @@ end
         # Note: this call overwrites intr_ric.sing[s].delta_prime; delta_prime_inline was
         # saved before free_run above so it holds the original inline values.
         #
-        # See benchmarks/benchmark_delta_prime_methods.jl for the extended version.
         FFS.compute_delta_prime_from_ca!(odet_ric, intr_ric, equil)
         for s in 1:intr_ric.msing
             @test intr_ric.sing[s].delta_prime == delta_prime_inline[s]

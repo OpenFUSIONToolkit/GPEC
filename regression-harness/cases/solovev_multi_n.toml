@@ -8,12 +8,13 @@ description = "Solovev analytical equilibrium, multi-n, ideal stability"
 example_dir = "examples/Solovev_ideal_example_multi_n"
 
 # Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
+# The parallel Riccati chunking depends on the thread count, which moves energies by ~2e-9 (spectra ~1e-6 absolute) and step counts by ~2 between 1 and 16 threads; the floors below sit well above that.
 [quantities.et_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
 label = "total energy Re(et[1])"
-noise_threshold = 1e-10
+noise_threshold = 1e-7
 order = 10
 
 [quantities.et_imag]
@@ -21,7 +22,7 @@ h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "imag_first"
 label = "total energy Im(et[1])"
-noise_threshold = 1e-10
+noise_threshold = 1e-7
 order = 11
 
 [quantities.vacuum_eigenvalue]
@@ -38,7 +39,7 @@ h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "plasma energy (all)"
-noise_threshold = 1e-10
+noise_threshold = 1e-4
 order = 20
 
 [quantities.ev_all]
@@ -46,7 +47,7 @@ h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "vacuum energy (all)"
-noise_threshold = 1e-10
+noise_threshold = 1e-4
 order = 21
 
 [quantities.et_all]
@@ -54,7 +55,7 @@ h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "all_complex"
 label = "total energy (all)"
-noise_threshold = 1e-10
+noise_threshold = 1e-4
 order = 22
 
 # Integration
@@ -71,7 +72,7 @@ h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep_total"
 type = "int_scalar"
 extract = "value"
 label = "ODE steps (total)"
-noise_threshold = 0
+noise_threshold = 10
 order = 31
 
 # Equilibrium

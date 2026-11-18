@@ -35,7 +35,9 @@ const KF = GPE.KineticForces
 const Eq = GPE.Equilibrium
 const PE = GPE.PerturbedEquilibrium
 
-"Fortran GPEC DIII-D ideal example run directory, from the environment (no on-disk default)."
+"""
+Fortran GPEC DIII-D ideal example run directory, from the environment (no on-disk default).
+"""
 default_fortran_dir() = get(() -> error("Set GPEC_FORTRAN_DIIID, or pass the Fortran run directory as the first argument"),
     ENV, "GPEC_FORTRAN_DIIID")
 
@@ -125,31 +127,24 @@ mtheta = 256
 newq0 = 0
 flux_surface_rtol = 1e-7
 
-[Wall]
-shape = "nowall"
-
 [LocalStability]
 
 [ForceFreeStates]
 vac_flag = true
-force_termination = false
 
 dW_edge_scan_start = 1.0      # No edge-scan truncation (rational_offset_fraction truncation off)
 qlow = 1.02
 qhigh = 1e3
-sing_start = 0
 
-nn_low = 1
-nn_high = 1
+nn = 1
 delta_mlow = 8
 delta_mhigh = 8
 mtheta_vacuum = 512
+singfac_min = 1e-4
 
-kinetic_source = "fixed"
-kinetic_factor = 0.0
+[Riccati]
 eulerlagrange_tolerance = 1e-7
 save_interval = 3
-singfac_min = 1e-4
 renorm_threshold = 1e4
 """
         )
@@ -221,10 +216,10 @@ _p(args...) = (println(stderr, args...); flush(stderr))
 _pf(fmt, args...) = (print(stderr, Printf.format(Printf.Format(fmt), args...)); flush(stderr))
 
 function run_benchmark(fortran_dir::String=default_fortran_dir())
-    _p("=" ^ 70)
+    _p("="^70)
     _p("  DIIID Kinetic Benchmark: Julia KineticForces vs Fortran PENTRC")
     _p("  Fortran example: $fortran_dir")
-    _p("=" ^ 70)
+    _p("="^70)
 
     inputs = discover_inputs(fortran_dir)
     ref = read_pentrc_reference(inputs.pentrc_nc)
@@ -280,10 +275,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     # for the final full-validation run.
     tgar_enabled = get(ENV, "BENCHMARK_TGAR", "0") == "1"
     kf_ctrl = KF.KineticForcesControl(;
-        fgar_flag=true, tgar_flag=tgar_enabled, nn=1, bounce_harmonic_max=4,
-        ion_mass=2, ion_charge=1, nutype="harmonic", f0type="maxwellian",
-        collisionality_factor=1, psilims=[0.0, 1.0],
-        verbose=false)
+        fgar_flag=true, tgar_flag=tgar_enabled, bounce_harmonic_max=4,
+        nutype="harmonic", f0type="maxwellian",
+        collisionality_factor=1, psilims=[0.0, 1.0])
 
     # Initialize KF internal state
     kf_intr = KF.KineticForcesInternal(equil; verbose=false)
@@ -309,9 +303,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     _p("\n--- Torque integration ---")
     t2 = time()
 
-    kinetic_profiles = Eq.kinetic_profile_splines(
-        Eq.read_kinetic_file(inputs.kin_file);
-        zi=kf_ctrl.ion_charge, zimp=kf_ctrl.impurity_charge, mi=kf_ctrl.ion_mass, mimp=kf_ctrl.impurity_mass)
+    # The default species (one deuterium main ion, carbon impurity) match pentrc.in.
+    Eq.attach_kinetic_profiles!(equil, inputs.kin_file)
+    kinetic_profiles = KF.ntv_profiles(kf_ctrl, equil)
 
     kf_state = KF.KineticForcesState()
     KF.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
@@ -326,9 +320,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     end
 
     # Compare results
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     _p("  Results Comparison")
-    _p("=" ^ 70)
+    _p("="^70)
 
     results = Dict{String,NamedTuple}()
 
@@ -354,13 +348,13 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
         end
     end
 
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
 
     # Check pass/fail
     all_pass = true
     for (method_key, r) in results
         if r.T_err > 5.0 || r.dW_err > 5.0
-            @warn "$(uppercase(method_key)) exceeds 5% threshold" T_err=r.T_err dW_err=r.dW_err
+            @warn "$(uppercase(method_key)) exceeds 5% threshold" T_err = r.T_err dW_err = r.dW_err
             all_pass = false
         end
     end
@@ -374,9 +368,9 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
     end
 
     # Plot dT/dψ and T(ψ) overlay vs Fortran PENTRC reference
-    _p("\n" * "=" ^ 70)
+    _p("\n" * "="^70)
     _p("  Plotting dT/dψ and T(ψ) overlay vs Fortran")
-    _p("=" ^ 70)
+    _p("="^70)
 
     pentrc_nc = inputs.pentrc_nc
 
@@ -391,7 +385,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
             dt_var = "dTdpsi_$method_key"
             T_var = "T_$method_key"
             if !(haskey(ds, psi_var) && haskey(ds, dt_var) && haskey(ds, T_var))
-                @warn "Fortran NetCDF missing variables for method" method=method_key
+                @warn "Fortran NetCDF missing variables for method" method = method_key
                 continue
             end
             psi_f = Array(ds[psi_var][:])
@@ -453,7 +447,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
             savefig(p1, path1)
             _p("  Saved dT/dψ panel → $path1")
         catch err
-            @warn "dT/dψ panel savefig failed" method=mkey err
+            @warn "dT/dψ panel savefig failed" method = mkey err
         end
 
         # Cumulative T panel
@@ -469,7 +463,7 @@ function run_benchmark(fortran_dir::String=default_fortran_dir())
             savefig(p2, path2)
             _p("  Saved cumulative T panel → $path2")
         catch err
-            @warn "cumulative T panel savefig failed" method=mkey err
+            @warn "cumulative T panel savefig failed" method = mkey err
         end
     end
 

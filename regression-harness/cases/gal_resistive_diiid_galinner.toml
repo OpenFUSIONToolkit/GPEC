@@ -7,4 +7,4 @@ base = "gal_resistive_diiid"   # Inherit example_dir and [quantities.*] from thi
 description = "DIII-D-like, n=1, Galerkin Δ′ matched with the Galerkin inner-layer backend"
 
 [overrides]
-"ForceFreeStates.gal_inner_solver" = "galerkin"   # Inner-layer Δ backend for the match: "ray" or "galerkin"
+"GGJ.solver" = "galerkin"   # GGJ inner-layer backend for the match: "ray" or "galerkin"

@@ -57,6 +57,7 @@ import ..Equilibrium
 import ..ForcingTerms
 import ..ForcingTerms: CoilSet, CoilSetConfig, CoilConfig, ForcingMode, CoilForcingGrid, coil_forcing_modes, apply_transforms
 import ..PerturbedEquilibrium
+import ..KineticForces
 import ..PerturbedEquilibrium: ResonantCoupling, DominantCoupling, dominant_coupling, rootarea_field, coupling_overlap
 import ..Utilities
 
@@ -71,6 +72,7 @@ include("Risk.jl")
 include("Phasing.jl")
 include("NTVLimits.jl")
 include("Correction.jl")
+include("Assessment.jl")
 include("Output.jl")
 
 export ErrorFieldsControl, CoilSensitivities, SensitivityTable
@@ -85,6 +87,7 @@ export MonteCarloControl, MonteCarloResult, run_monte_carlo, worst_case_terms, a
 export ThresholdScaling, ITPA_THRESHOLD_SCALINGS, threshold_scaling, scaling_label, ScenarioParameters, fitted_threshold, threshold_samples
 export RiskControl, RiskResult, locking_risk, ToleranceScan, tolerance_scan, allowable_tolerance, risk_convergence, single_toroidal_mode
 export PhasingMap, phasing_map, extreme_phasing
+export error_fields, ErrorFieldsResult, efc_couplings
 export NTVControl, EFCCoupling, residual_spectrum, correction_current, correction_current_upper, max_correctable_overlap, efc_current_curve, read_efc_couplings
 export CorrectionRequirement, correction_requirement, needed_current_distribution, uncorrectable_probability
 export has_rotation_scan, rotation_scan_span, torque_at, torque_zero_crossings, rotation_shift, threshold_factor

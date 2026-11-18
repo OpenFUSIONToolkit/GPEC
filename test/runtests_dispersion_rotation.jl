@@ -1,9 +1,8 @@
 @testset "Dispersion per-surface rotation shift" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner
-    using GeneralizedPerturbedEquilibrium.Dispersion
-    using GeneralizedPerturbedEquilibrium.Tearing.Runner: SLAYERControl,
-        slayer_control_from_toml, validate, _q_shift, _build_surface_coupling
+    using GeneralizedPerturbedEquilibrium.InnerLayer: InnerLayerModel, solve_inner, layer_response
+    using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
+    using GeneralizedPerturbedEquilibrium.Tearing: validate, _q_shift, _build_surface_coupling
     using LinearAlgebra
 
     # Linear inner layer Δ(Q) = a + b·Q makes the applied Q offset readable
@@ -71,14 +70,17 @@
     @testset "Scanned Re(Q) runs along the ζ axis of Ω_E" begin
         # The Doppler sign holds only if the scanned Re(Q) shares the ζ axis of the kinetic file's Ω_E, as
         # GPEC's ω_*e from `build_slayer_inputs` does. The layer Δ vanishes where the mode co-rotates with the
-        # electron fluid, so that zero must sit at Re(Q) = +τ_k·ω_*e: reversing either `Q_e = −τ_k·ω_*e` or
-        # the `i·conj(Q)` bridge in `solve_inner` moves it to −τ_k·ω_*e.
+        # electron fluid, so that zero must sit at Re(Q) = +τ_k·ω_*e: reversing the sign of `Q_e = −τ_k·ω_*e` or
+        # of its entry ĝ − i·Q_e in the layer moves it to −τ_k·ω_*e.
         slayer = SLAYERModel(; variant=:fitzpatrick)
         for (ω_e, ω_i) in ((-1.0e4, 5.0e3), (1.0e4, -5.0e3), (-1.0e4, 0.0))
             p = slayer_parameters(; P_perp_model=:chi_perp_e, n_e=5.0e19, t_e=1000.0, t_i=1000.0, omega_e=ω_e, omega_i=ω_i,
                 qval=2.0, sval_r=1.0, bt=2.0, rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0, chi_perp_e=1.0, chi_tor=1.0, m=2, n=1)
             Q_electron = p.tauk * ω_e + 0.01im
-            @test abs(solve_inner(slayer, p, Q_electron).tearing) < 0.1 * abs(solve_inner(slayer, p, -conj(Q_electron)).tearing)
+            @test abs(layer_response(slayer, p, Q_electron).tearing) < 0.1 * abs(layer_response(slayer, p, -conj(Q_electron)).tearing)
+            # solve_inner takes the growth rate s = γ − iω of that same point, s = −i·Q/τ_k.
+            s = -im * Q_electron / p.tauk
+            @test solve_inner(slayer, p, s).tearing ≈ layer_response(slayer, p, Q_electron).tearing rtol = 1e-8
         end
     end
 
@@ -101,13 +103,15 @@
         end
     end
 
-    @testset "omega_E_kHz parses and validates from TOML" begin
-        ctrl = slayer_control_from_toml(Dict("omega_E_kHz" => Dict("2/1" => 0, "3/1" => 3.0)))
-        @test ctrl.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
-        # Default stays empty so existing decks are untouched.
-        @test isempty(slayer_control_from_toml(Dict{String,Any}()).omega_E_kHz)
-        @test_throws "table keyed by m/n" slayer_control_from_toml(Dict("omega_E_kHz" => [0.0, 3.0]))
+    @testset "omega_E_kHz parses from the deck and validates" begin
+        GPEC = GeneralizedPerturbedEquilibrium
+        tearing(t) = GPEC.tearing_from_deck(Dict{String,Any}("Tearing" => merge(Dict{String,Any}("inner_model" => "SLAYER"), t)))
+        prob = TearingProblem(nothing; tearing(Dict{String,Any}("omega_E_kHz" => Dict{String,Any}("2/1" => 0, "3/1" => 3.0))).problem...)
+        @test prob.omega_E_kHz == Dict("2/1" => 0.0, "3/1" => 3.0)
+        # Default stays empty, so surfaces use the kinetic file's rotation.
+        @test isempty(TearingProblem(nothing).omega_E_kHz)
+        @test_throws "table keyed by m/n" tearing(Dict{String,Any}("omega_E_kHz" => [0.0, 3.0]))
         # Reject non-finite overrides before they reach the dispersion scan.
-        @test_throws ArgumentError validate(SLAYERControl(; omega_E_kHz=Dict("2/1" => NaN)))
+        @test_throws ArgumentError validate(TearingProblem(nothing; omega_E_kHz=Dict("2/1" => NaN)), TearingConfig())
     end
 end

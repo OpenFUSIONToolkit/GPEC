@@ -6,7 +6,7 @@ include(joinpath(HARNESS_SOURCE, "env.jl"))
 include(joinpath(HARNESS_SOURCE, "database.jl"))
 
 @testset "Regression database writes do not depend on garbage collection" begin
-    fingerprint = EnvFingerprint("synthetic", "synthetic", "synthetic", 1, 1, "jit", true)
+    fingerprint = EnvFingerprint("synthetic", "synthetic", "synthetic", 1, 1, "jit", "warm", true)
     quantities = [
         ExtractedQuantity("finite", "finite", 2.5, nothing, nothing, "real", 1e-10),
         ExtractedQuantity("array", "array", nothing, nothing, "[NaN,Infinity,-Infinity,-0.0]", "json_array", 1e-10),

@@ -148,11 +148,7 @@ end
 """
     _accumulate_precomputed(ox, oy, oz, seg) -> (dbx, dby, dbz)
 
-Inner kernel: accumulate Biot-Savart field from pre-computed segments.
-Returns `(dbx, dby, dbz)` increments using the exact segment field.
-
-Operates on `PrecomputedSegments` with contiguous arrays for maximum
-cache efficiency.
+Sum the exact segment fields of one `PrecomputedSegments` strand at `(ox, oy, oz)`, scaled by its prefactor.
 """
 @inline function _accumulate_precomputed(
     ox::Float64, oy::Float64, oz::Float64,
@@ -182,11 +178,7 @@ Compute the total Biot-Savart field from all coil sets at every observation poin
 Observation points are specified in cylindrical coordinates `(R, φ, Z)` and the
 returned field components are also cylindrical.
 
-Uses `Threads.@threads` over observation points -- each thread writes to a unique
-index so no synchronization is required.
-
-Performance: segment vectors, lengths and start points are pre-computed once outside the
-observation-point loop, then accessed from contiguous arrays in the inner kernel.
+Threaded over observation points; strands with zero current are skipped.
 
 ## Arguments
 
@@ -207,7 +199,7 @@ function compute_biot_savart_boundary!(
     @assert length(obs_phi) == nobs && length(obs_Z) == nobs
     @assert length(B_R) == nobs && length(B_phi) == nobs && length(B_Z) == nobs
 
-    # Pre-compute segment geometry for all active strands (done once, O(total_segments))
+    # Segment geometry for all strands carrying current
     all_segments = PrecomputedSegments[]
     for cs in coil_sets
         for j in 1:cs.ncoil
@@ -219,7 +211,7 @@ function compute_biot_savart_boundary!(
         end
     end
 
-    # Pre-compute sincos for cylindrical ↔ Cartesian conversion (avoids redundant trig)
+    # sincos for the cylindrical ↔ Cartesian conversion
     cos_phi = Vector{Float64}(undef, nobs)
     sin_phi = Vector{Float64}(undef, nobs)
     obs_x = Vector{Float64}(undef, nobs)
@@ -233,7 +225,6 @@ function compute_biot_savart_boundary!(
         obs_y[i] = obs_R[i] * sp
     end
 
-    # Each thread writes exclusively to its own index i — no synchronization needed
     Threads.@threads for i in 1:nobs
         @inbounds begin
             ox = obs_x[i]
@@ -250,7 +241,7 @@ function compute_biot_savart_boundary!(
                 bz_total += dbz
             end
 
-            # Convert Cartesian → cylindrical in-place
+            # Cartesian → cylindrical
             cp = cos_phi[i]
             sp = sin_phi[i]
             B_R[i] = bx_total * cp + by_total * sp

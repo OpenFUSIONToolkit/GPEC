@@ -1,18 +1,9 @@
 # LayerThickness.jl
 #
-# Resistive inner-layer *width* (del_s) diagnostic for the SLAYER two-fluid
-# drift-MHD slab layer (Fitzpatrick, Tearing Mode Dynamics in Tokamak
-# Plasmas, IOP 2023; Park 2022, Phys. Plasmas 29, 072506; Burgess
-# et al. 2026). This is a distinct quantity from the matching index
-# Δ = π/W' returned by the dispersion solver (Riccati.jl): it integrates a
-# separate reduced Riccati ODE evaluated at the electron diamagnetic
-# frequency Q_e and extracts a dimensionless width ratio delta_s/d_beta,
-# which scales to a layer thickness in metres via the beta-weighted ion
-# length d_beta.
-#
-# Q_i, c_beta, and the scanned Q are NOT referenced by this width
-# formulation; the E/F coefficients depend only on Q_e, P_perp, P_tor, tau,
-# and D_norm.
+# Resistive inner-layer *width* (del_s) diagnostic for the SLAYER two-fluid drift-MHD slab layer (Fitzpatrick,
+# Tearing Mode Dynamics in Tokamak Plasmas, IOP 2023; Park 2022, Phys. Plasmas 29, 072506; Burgess et al. 2026).
+# Distinct from the matching Δ of Riccati.jl: a reduced Riccati ODE at the electron diamagnetic frequency gives the
+# ratio delta_s/d_beta, which depends only on Q_e, P_perp, P_tor, tau and D_norm.
 
 using OrdinaryDiffEq
 
@@ -47,10 +38,7 @@ end
     )
 end
 
-# Scalar ODE right-hand side dW/dq for the del_s Riccati. The E, F
-# dispersion coefficients are q-dependent and complex (via the `im·Q_hat`
-# terms);
-# everything else is cached in `_DelSConsts`.
+# Scalar ODE right-hand side dW/dq of the del_s Riccati; E and F are complex through the `im·Q_hat` terms.
 @inline function _dels_rhs(W::Number, c::_DelSConsts, q::Real)
     q2 = q * q
     q4 = q2 * q2
@@ -73,7 +61,7 @@ end
 
 Solve the SLAYER `del_s` inner-layer Riccati ODE and return the
 **dimensionless** layer-thickness ratio `δ_s / d_β` at one rational
-surface (see file header for references).
+surface.
 
 Integrates `dW/dq = W/q − W²/q + q·E/F` inward from `q_start = 5·D_norm`
 to `q_min`, with asymptotic boundary value `W = −α·q_start² − 0.5`,
@@ -101,8 +89,7 @@ function riccati_del_s(p::SLAYERParameters;
 
     c = _build_dels_consts(p)
 
-    # Asymptotic boundary condition at large q. P_hat is
-    # the normalised P_perp, i.e. c.Pperp_hat; α and W₀ are real.
+    # Asymptotic boundary condition at large q (α and W₀ are real).
     α = sqrt(c.Pperp_hat * c.inv_c)
     W0 = ComplexF64(-α * q_start^2 - 0.5)
 
@@ -137,22 +124,13 @@ is built from, retained as a drift-scale reference.
   - `delta_s`   -- complex layer thickness `δ_s = dels_db · d_β` [m]
   - `delta_s_m` -- `|δ_s|`, the resistive layer thickness in meters (primary)
   - `d_beta`    -- β-weighted ion scale `c_β·d_i` in meters (drift reference)
-  - `delta_norm`  -- layer normalization length `r_s · S^(-1/3)` in meters, the
-    length by which Δ' is made dimensionless (`Δ̂' = Δ'·delta_norm`). Shared by all
-    four regimes of Burgess et al. (2026) Eqs. (10)-(13), not specific to any one
-    of them, and **not** the classic non-rotating Furth-Killeen-Rosenbluth (1963)
-    constant-ψ tearing width, which scales as `S^(-2/5)` and is not computed here.
-    Exactly the reciprocal of the `delta_n` Δ-normalization already carried on
-    `SLAYERParameters`, restated as a length for comparison with `delta_s_m`
-  - `delta_dr` -- diffusive-resistive layer thickness in meters, Fitzpatrick (2025)
-    Eq. (100). Strong magnetic shear near the separatrix forces every resonant layer in
-    that region into the diffusive-resistive (`nu = 1/4`) regime, so this is the width the
-    edge overlap criterion compares against surface spacing. In the paper's normalized
-    radius, `delta_hat = tau_A^(1/2) / (tau_R^(1/4) tau_E^(1/4) d_beta_hat^(1/2) (n|s|)^(1/2))`;
-    with `lu = tau_R/tau_A` and `P_perp = tau_R/tau_E` that is
-    `lu^(-1/2) P_perp^(1/4) / (d_beta_hat^(1/2) (n|s|)^(1/2))`, scaled by `rs` for meters.
-    Distinct from `delta_visco`, which is the 2/3 power of the same timescale grouping and
-    carries neither the `d_beta` nor the shear factor
+  - `delta_norm`  -- layer normalization length `r_s · S^(-1/3)` in meters (`Δ̂' = Δ'·delta_norm`), the reciprocal of
+    `SLAYERParameters.delta_n`, shared by all four regimes of Burgess et al. (2026) Eqs. (10)-(13); **not** the
+    Furth-Killeen-Rosenbluth `S^(-2/5)` tearing width
+  - `delta_dr` -- diffusive-resistive layer thickness in meters, Fitzpatrick (2025) Eq. (100), equal to
+    `rs · lu^(-1/2) P_perp^(1/4) / d_beta_hat^(1/2)` with `d_beta_hat = d_beta/rs` (SLAYER's `lu` already carries the paper's
+    `(n|s|)^(1/2)`). Strong shear forces edge layers into this (`nu = 1/4`) regime, so it is the width the edge overlap
+    criterion compares against surface spacing
   - `delta_visco` -- viscous-resistive scale `delta_norm · P_perp^(1/6)` in meters,
     from the `P^(1/6)` broadening of the VR-regime growth rate, Burgess et al.
     (2026) Eq. (11). The paper gives the growth rate rather than an explicit width;
@@ -188,11 +166,8 @@ function slayer_algebraic_widths(p::SLAYERParameters)
     delta_norm = p.rs * p.lu^(-1.0 / 3.0)
     # Viscous-resistive broadening, P^(1/6) coefficient of Burgess et al. (2026) Eq. (11).
     delta_visco = delta_norm * p.P_perp^(1.0 / 6.0)
-    # Diffusive-resistive width, Fitzpatrick (2025) Eq. (100), in meters. d_beta_hat is the
-    # normalized ion scale d_beta/rs; the shear is the r-based |s| SLAYER already carries.
-    # The paper's tau_A (its Eq. 74) carries no shear, whereas SLAYER's tau_h divides by n*s,
-    # so lu = tau_R/tau_h = (n|s|) * (tau_R/tau_A) supplies Eq. (100)'s explicit (n|s|)^(-1/2),
-    # leaving no separate shear factor in terms of lu.
+    # Diffusive-resistive width, Fitzpatrick (2025) Eq. (100). The paper's tau_A (Eq. 74) has no shear, while SLAYER's
+    # tau_h divides by n|s|, so lu = (n|s|)·tau_R/tau_A already supplies Eq. (100)'s (n|s|)^(-1/2).
     d_beta_hat = p.d_beta / p.rs
     delta_dr = d_beta_hat > 0 ? p.rs * p.lu^(-0.5) * p.P_perp^(0.25) / sqrt(d_beta_hat) : NaN
     return (; delta_norm, delta_visco, delta_dr)

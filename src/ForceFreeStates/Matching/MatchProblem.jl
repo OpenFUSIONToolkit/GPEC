@@ -3,11 +3,11 @@
 # Driven inner-layer matching on a finished solve (rmatch match_rpec + match_output_solution, match.f).
 
 """
-    MatchProblem(ffs; eta, rho, rotation, gamma=5/3, ideal=false)
+    MatchProblem(ffs; eta=nothing, rho=nothing, rotation=nothing, gamma=5/3, ideal=false)
 
 Driven inner-layer matching on a finished force-free-states solve `ffs`: each rational surface
 is matched at the forced eigenvalue γ = 2πi·n·f, with f the plasma rotation frequency there.
-`solve(prob, GGJModel())` returns a copy of `ffs` with the matched solution and the penetrated
+`solve(prob, GGJModel())` (or another toroidal layer model, e.g. `CCCModel()`) returns a copy of `ffs` with the matched solution and the penetrated
 field `bpen`. `ffs` needs the Δ′ coil block, from `Galerkin(; rpec_flag=true)` or `Riccati()`
 with `vac_flag=true`.
 
@@ -15,7 +15,10 @@ with `vac_flag=true`.
 
   - `eta`, `rho`, `rotation`: resistivity in Ω·m, mass density in kg/m³ and rotation frequency
     in Hz, a scalar for every surface or one value per `ffs.surfaces` entry (core to edge).
-    Required unless `ideal=true`.
+    Each one not given comes from the equilibrium's kinetic data, as the tearing problem's do:
+    η from [`InnerLayer.layer_eta`](@ref), ρ from [`InnerLayer.layer_rho`](@ref), and the
+    rotation f = Ω_E/2π from the E×B rotation of [`InnerLayer.layer_omega_E`](@ref). Unused
+    with `ideal=true`.
   - `gamma`: ratio of specific heats.
   - `ideal`: skip the inner layer and return the perfectly shielding solution.
 
@@ -63,8 +66,15 @@ function MatchProblem(
         error("MatchProblem: Δ′ raw block is $(size(dp.raw, 1))×$(size(dp.raw, 2)) but the result carries $msing surfaces")
 
     ideal && return MatchProblem(ffs, zeros(msing), zeros(msing), zeros(msing), Float64(gamma), true)
+    InnerLayer._require_layer_inputs("MatchProblem", ffs.equil; eta, rho, rotation)
+    eta === nothing && (eta = InnerLayer.layer_eta(ffs.equil, ffs.surfaces))
+    rho === nothing && (rho = InnerLayer.layer_rho(ffs.equil, ffs.surfaces))
+    if rotation === nothing
+        omega_E = InnerLayer.layer_omega_E(ffs.equil, ffs.surfaces)
+        any(isnan, omega_E) && error("MatchProblem: the kinetic data carry no omega_E; give rotation")
+        rotation = omega_E ./ 2π
+    end
     per_surface(name, v) =
-        v === nothing ? error("MatchProblem: $name is required (a scalar, or one value per surface, core to edge)") :
         v isa Real ? fill(Float64(v), msing) :
         length(v) == msing ? collect(Float64, v) :
         error("MatchProblem: $name has length $(length(v)), expected $msing (one per surface, core to edge)")
@@ -74,11 +84,11 @@ end
 """
     closure_capable(model) -> Bool
 
-Whether `model` can solve a [`MatchProblem`](@ref): `GGJModel` with the `:ray` or `:galerkin`
-backend can (they reconstruct the layer profiles); `SLAYERModel` (slab, tearing parity only)
+Whether `model` can solve a [`MatchProblem`](@ref): a toroidal layer model (`GGJModel`, `CCCModel`) with the
+`:ray` or `:galerkin` backend can (they reconstruct the layer profiles); `SLAYERModel` (slab, tearing parity only)
 cannot.
 """
-closure_capable(::InnerLayer.GGJModel{S}) where {S} = S in (:ray, :galerkin)
+closure_capable(::InnerLayer.ToroidalLayerModel{S}) where {S} = S in (:ray, :galerkin)
 closure_capable(::InnerLayer.SLAYERModel) = false
 
 """
@@ -91,13 +101,13 @@ PerturbedEquilibrium skips its response rather than mixing ideal and matched phy
 """
 function CommonSolve.solve(prob::MatchProblem, model::InnerLayer.InnerLayerModel)
     closure_capable(model) ||
-        error("$(nameof(typeof(model))) cannot solve a MatchProblem (use GGJModel(); SLAYERModel is for TearingProblem)")
+        error("$(nameof(typeof(model))) cannot solve a MatchProblem (use GGJModel() or CCCModel(); SLAYERModel is for TearingProblem)")
     match = _compute_match(prob, model)
     return _matched_result(prob.ffs, match, prob.ideal)
 end
 
 # Inner-layer Δ per surface, the matching system, then the matched outer and inner profiles.
-function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
+function _compute_match(prob::MatchProblem, model::InnerLayer.ToroidalLayerModel)
     ffs = prob.ffs
     dp = ffs.delta_prime
     sings = ffs.surfaces
@@ -118,7 +128,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         inner_psi = Vector{Float64}[]
         inner_xi = Matrix{ComplexF64}[]
         inner_b = Matrix{ComplexF64}[]
-        inner_params = InnerLayer.GGJParameters[]
+        inner_params = InnerLayer.ToroidalLayerParameters[]
         rpec_eig = zeros(ComplexF64, msing)
         residual = 0.0
     else
@@ -132,12 +142,11 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
         inner_even = Vector{Vector{ComplexF64}}(undef, msing)  # Ξ₊, even
         inner_bodd = Vector{Vector{ComplexF64}}(undef, msing)  # b^ψ from Ψ₋, even
         inner_beven = Vector{Vector{ComplexF64}}(undef, msing) # b^ψ from Ψ₊, odd
-        inner_params = Vector{InnerLayer.GGJParameters}(undef, msing)
+        InnerLayer.check_layer_inputs(model, msing)
+        inner_params = [InnerLayer.layer_parameters(model, sings[i], equil; eta=prob.eta[i], rho=prob.rho[i], gamma=prob.gamma, ising=i) for i in 1:msing]
         profiles = true
         for i in 1:msing
-            params = ggj_parameters(sings[i], equil; eta=prob.eta[i], rho=prob.rho[i],
-                gamma=prob.gamma, ising=i)
-            inner_params[i] = params
+            params = inner_params[i]
             γ = 2π * im * nn * prob.rotation[i]    # forced eigenvalue, f in Hz
             rpec_eig[i] = γ
             inner = InnerLayer.solve_inner_profile(model, params, γ)   # parity columns (Δ₊, Δ₋)
@@ -212,7 +221,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
             sols_cut = gal_sol.xi_cut
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
-                      "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog=1
+                      "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog = 1
                 empty!(inner_psi)
                 empty!(inner_xi)
                 empty!(inner_b)
@@ -260,7 +269,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.GGJModel)
     end
 
     return MatchResult(cout, cin, deltar, rpec_eig, residual, bpen, reconnected_flux,
-        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model)
+        xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model, prob)
 end
 
 # Copy of ffs with the match applied; the ideal reference keeps closure :ideal, its zero bpen and δW.

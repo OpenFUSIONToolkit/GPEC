@@ -19,10 +19,11 @@ end
 Specification for a test case: what to run and what to extract.
 
 `kind` selects the runner backend:
+
   - "gpec_run"  (default) — run GPEC end-to-end on `example_dir`, extract from `gpec.h5`
   - "computed"  — run a self-contained Julia computation that writes a small h5
-                  (no `example_dir` required); used for analytic/reference cases
-                  like the GGJ inner-layer benchmark.
+    (no `example_dir` required); used for analytic/reference cases
+    like the GGJ inner-layer benchmark.
 
 `precompile_workload` sets GPEC's PrecompileTools workload preference for the run. It defaults to
 `false` so every case compares code compiled on first use; a case sets it `true` to track the
@@ -35,6 +36,7 @@ struct CaseSpec
     quantities::Vector{QuantitySpec}
     kind::String
     overrides::Dict{String,Any}  # gpec.toml keys patched for this run; dotted keys e.g. "KineticForces.nutype" => "zero". Empty = run the deck in place.
+    remove_sections::Vector{String}  # gpec.toml sections (dotted for a sub-table) dropped for this run, e.g. ["PerturbedEquilibrium"] to stop before that stage
     precompile_workload::Bool
 end
 
@@ -73,5 +75,7 @@ struct CLIOptions
     no_pin_manifest::Bool
     allow_env_mismatch::Bool
     fail_on_change::Bool
+    jobs::Int
+    isolate::Bool
     help::Bool
 end

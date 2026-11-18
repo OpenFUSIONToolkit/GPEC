@@ -1,15 +1,11 @@
-# CriticalResonantField.jl
-#
-# Uses the inner-layer delta from InnerLayer.jl to find the critical resonant field
-# required for mode penetration at each rational surface. This can then be compared
-# to the actual resonant field from the perturbed equilibrium to determine which modes
-# are predicted to penetrate.
+# Critical resonant field for error-field penetration at each rational surface, from the
+# inner-layer Δ via torque balance; compare against the perturbed-equilibrium resonant field.
 
 module CriticalResonantField
 
 using Printf
 
-using ..InnerLayer: InnerLayerModel, solve_inner
+using ..InnerLayer: InnerLayerModel, layer_response
 
 include("TorqueBalance.jl")
 

@@ -1,8 +1,8 @@
 name = "GeneralizedPerturbedEquilibrium"
 uuid = "462872dd-e066-4d2e-b993-6468b5239634"
 license = "MIT"
-authors = ["Nikolas Logan <ncl2128@columbia.edu>", "Jong-Kyu Park <jkpark@snu.ac.kr>", "Matthew Pharr <m.pharr@protonmail.com>", "Jacob Halpern <jmh2363@columbia.edu>", "Rithik Banerjee <rb3736@columbia.edu>", "Jaebeom Cho <aspire1019@snu.ac.kr>", "Daniel Burgess <dab2245@columbia.edu>", "Min-Gu Yoo <yoom@fusion.gat.com>", "Jaymyoung Lee <jmlmir@snu.ac.kr>", "Sunjae Lee <sl6100@columbia.edu>", "Evan Bursch <emb2333@columbia.edu>"]
-version = "0.1.0"
+authors = ["Nikolas Logan <ncl2128@columbia.edu>", "Jong-Kyu Park <jkpark@snu.ac.kr>", "Matthew Pharr <matthew.pharr@iter.org>", "Jacob Halpern <jmh2363@columbia.edu>", "Rithik Banerjee <rb3736@columbia.edu>", "Jaebeom Cho <aspire1019@snu.ac.kr>", "Daniel Burgess <dab2245@columbia.edu>", "Min-Gu Yoo <yoom@fusion.gat.com>", "Jaymyoung Lee <jmlmir@snu.ac.kr>", "Sunjae Lee <sl6100@columbia.edu>", "Evan Bursch <emb2333@columbia.edu>"]
+version = "2.0.1"
 
 [deps]
 AdaptiveArrayPools = "4f381ef7-9af0-4cbe-99d4-cf36d7b0f233"
@@ -73,5 +73,3 @@ Statistics = "1"
 TOML = "1"
 Test = "1"
 julia = "1.11"
-
-

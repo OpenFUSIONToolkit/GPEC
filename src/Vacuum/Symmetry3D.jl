@@ -91,7 +91,7 @@ coordinate, `nothing` otherwise. A nearly symmetric boundary (e.g. one extracted
 ~1e-3) is rejected and takes the general path; this test is the only guard on the symmetric path.
 """
 function stell_sym_map(plasma::PlasmaGeometry3D, wall::WallGeometry3D, nfp::Int)
-    # This must be called after expand_field_periods, so nzeta_full is the full-torus nzeta
+    # Must be called after expand_field_periods, so nzeta is the full-torus count
     mtheta, nzeta_full = plasma.mtheta, plasma.nzeta
     @assert nzeta_full % nfp == 0 "full-torus nzeta ($nzeta_full) must be divisible by nfp ($nfp)"
     num_points_full = mtheta * nzeta_full
@@ -103,8 +103,6 @@ function stell_sym_map(plasma::PlasmaGeometry3D, wall::WallGeometry3D, nfp::Int)
         return all(p -> abs(r[reflected[p], 1] - r[p, 1]) ≤ tol && abs(r[reflected[p], 2] + r[p, 2]) ≤ tol && abs(r[reflected[p], 3] + r[p, 3]) ≤ tol, 1:num_points_full)
     end
 
-    # Check if the boundary(s) are stellarator symmetric
-    # return the mapping if so, otherwise return nothing
     if is_symmetric(plasma.r) && (wall.nowall || is_symmetric(wall.r))
         nzeta = nzeta_full ÷ nfp
         return [reflect_index(p, mtheta, nzeta) for p in 1:(mtheta*nzeta)]
@@ -133,7 +131,7 @@ function StellSymBasis(σ_map::Vector{Int}, mtheta::Int, k::Int, nfp::Int)
     # Column prefactor: half-twist ω^{k a_p/2} makes U†D̂ₖU real when k is not self-conjugate
     twist(p) = self_conjugate ? ComplexF64(1) : cis(-π * k * a(p) / nfp)
 
-    # Get one representative from each reflection pair
+    # One representative per reflection pair
     pair_reps = [p for p in 1:npts if p ≤ σ_map[p]]
 
     # Build orthonormal columns of U: symmetric first, antisymmetric second; slot numbered within block
