@@ -157,6 +157,29 @@ end
 %RUNINFO%
 """
 
+# CCC (Cho, Choi & Choi drift-resistive) layer on the rotated ray: the q=4 benchmark surface with Q* = 0.5 and
+# M⊥/M = 1.4 at Q = 5i, where its two exponential families separate. Writes the parity matching data; runtime and
+# environment go to ARGS[2] via the run-info epilogue.
+const COMPUTED_CCC_RAY_SCRIPT_TEMPLATE = """
+using Pkg
+%INSTANTIATE%
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.InnerLayer
+using HDF5
+p = CCCParameters(InnerLayer.GGJ.q4_surface_benchmark(), 0.5, 1.4)
+γ = 5.0im * InnerLayer.GGJ.q0(p.ggj)
+t_start = time()
+Δ = solve_inner(CCCModel(), p, γ)
+elapsed = time() - t_start
+h5open(ARGS[1], "w") do fid
+    fid["ccc/delta_interchange_real"] = real(Δ.interchange)
+    fid["ccc/delta_interchange_imag"] = imag(Δ.interchange)
+    fid["ccc/delta_tearing_real"]     = real(Δ.tearing)
+    fid["ccc/delta_tearing_imag"]     = imag(Δ.tearing)
+end
+%RUNINFO%
+"""
+
 # Self-contained separatrix-finder regression (PR #296). Loads a fixed-boundary EFIT whose
 # computational box hugs the LCFS (eps=0.05 TokaMaker aspect-scan g-file): outside the prescribed
 # LCFS the coil-vacuum flux turns back above the boundary value before the grid edge, so the old
@@ -346,6 +369,8 @@ function _computed_script_template(case_spec::CaseSpec)
         return COMPUTED_GGJ_SCRIPT_TEMPLATE
     elseif case_spec.name == "ggj_ray_q500i"
         return COMPUTED_GGJ_RAY_SCRIPT_TEMPLATE
+    elseif case_spec.name == "ccc_ray_q5i"
+        return COMPUTED_CCC_RAY_SCRIPT_TEMPLATE
     elseif case_spec.name == "efit_fixedbdy_separatrix"
         return COMPUTED_SEPARATRIX_SCRIPT_TEMPLATE
     end
