@@ -405,9 +405,10 @@ end
 
 Plot how linear each coil set's field is in its rigid motions: for the six taps (shift and tilt about `x`, `y`, `z`)
 the ratio of the central second difference to the largest first difference among the set's taps, as stored in
-`ErrorFields/CoilSensitivities/*_linearity_residual`. `at = :step` shows it at the finite-difference steps; `at = :tolerance` rescales each tap by `tolerance / step` to the coil's own tolerance range. Tolerances come from the file's
-snapshot or `tolerances`; steps from the recorded deck or `fd_step_shift_m` and `fd_step_tilt_deg`. The 1 % level at
-which the sensitivity calculation warns is marked. One panel per source, on a log axis unless `yscale = :identity`.
+`ErrorFields/CoilSensitivities/*_linearity_residual`. `at = :step` shows it at the finite-difference steps;
+`at = :tolerance` rescales each tap by `tolerance / step` to the coil's own tolerance range. Tolerances come from the
+file's snapshot or `tolerances`; steps from the recorded deck or `fd_step_shift_m` and `fd_step_tilt_deg`. The 1 % level
+at which the sensitivity calculation warns is marked. One panel per source, on a log axis unless `yscale = :identity`.
 """
 function plot_linearity_residuals(sources::Sources; at::Symbol=:tolerance, coils=nothing, tolerances=nothing, fd_step_shift_m=nothing,
     fd_step_tilt_deg=nothing, yscale::Symbol=:log10, save_path=nothing)

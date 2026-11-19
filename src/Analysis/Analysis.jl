@@ -19,8 +19,8 @@ package, so `plot_qprofile(eq)` needs no module prefix.
 """
 module Analysis
 
-# The plots draw with Makie through the GPECMakieExt extension, which sets this when a backend loads.
-const _BACKEND = Ref(false)
+# Whether a Makie backend is loaded. The plots draw through the GPECMakieExt extension, which supplies the method.
+function _has_backend end
 
 """
     _draw(plotter, args...; save_path=nothing, kwargs...)
@@ -29,7 +29,8 @@ Draw a figure with `plotter`, a drawing function the GPECMakieExt extension defi
 is given. Throws an `ArgumentError` when no Makie backend is loaded.
 """
 function _draw(plotter, args...; save_path=nothing, kwargs...)
-    _BACKEND[] || throw(ArgumentError("plotting needs a Makie backend: `using CairoMakie` for files or `using GLMakie` for interactive windows"))
+    hasmethod(_has_backend, Tuple{}) && _has_backend() ||
+        throw(ArgumentError("plotting needs a Makie backend: `using CairoMakie` for files or `using GLMakie` for interactive windows"))
     fig = plotter(args...; kwargs...)
     isnothing(save_path) || _save(fig, save_path)
     return fig
