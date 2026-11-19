@@ -16,7 +16,7 @@ Serial forward integration with Gaussian reduction and dense solution profiles.
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration.
   - `renorm_threshold::Float64` - Column-norm growth threshold for Gaussian reduction or Riccati renormalization.
   - `numsteps_init::Int` - Initial capacity for stored ODE solution steps.
-  - `numunorms_init::Int` - Initial capacity for solution-normalization records.
+  - `numunorms_init::Int` - Initial capacity for solution-normalization records; grown on demand.
   - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.
 """
 @kwdef struct Forward <: AbstractIntegrator
@@ -37,7 +37,7 @@ Chunked Riccati integration and the singular-surface boundary-value solve.
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration.
   - `renorm_threshold::Float64` - Column-norm growth threshold for Gaussian reduction or Riccati renormalization.
   - `numsteps_init::Int` - Initial capacity for stored ODE solution steps.
-  - `numunorms_init::Int` - Initial capacity for solution-normalization records.
+  - `numunorms_init::Int` - Initial capacity for solution-normalization records; grown on demand.
   - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.
   - `nchunks::Int` - Target chunk count; zero derives the count from the singular surfaces.
   - `extended_precision_bvp::Bool` - Use Complex{Double64} for the Delta-prime BVP and PEST3 combination to reduce cancellation error.
