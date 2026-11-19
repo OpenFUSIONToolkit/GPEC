@@ -8,7 +8,6 @@ description = "Solovev analytical equilibrium, multi-n, ideal stability"
 example_dir = "examples/Solovev_ideal_example_multi_n"
 
 # Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
-# The parallel Riccati chunking depends on the thread count, which moves energies by ~2e-9 (spectra ~1e-6 absolute) and step counts by ~2 between 1 and 16 threads; the floors below sit well above that.
 [quantities.et_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"

@@ -53,8 +53,6 @@ records needed to undo it, and singular-surface asymptotic coefficients.
   - `du_store::Array{ComplexF64,3}` - du₁/dψ at each stored step, shape `(numpert_total, numpert_total, step)`; empty until `materialize_derivative_stores!` fills it (the
     galerkin-matched path supplies it at construction).
   - `xi_s_store::Array{ComplexF64,3}` - Clebsch displacement Ξ_s (Glasser 2016 Eq. 18) at each stored step; empty until materialized, like `du_store`.
-  - `u_store_el_basis::Bool` - True when `u_store` holds the Euler-Lagrange state; false on the sparse parallel path (Riccati-basis chunk endpoints), where derivative
-    stores cannot be materialized.
   - `du_store_populated::Bool` - True once `du_store`/`xi_s_store` hold valid data in the final basis.
   - `crit_store::Vector{Float64}` - Critical eigenvalue (smallest eigenvalue of W⁻¹) at each stored step.
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients right of each singular surface, shape `(numpert_total, numpert_total, 2, msing)`.
@@ -94,7 +92,6 @@ records needed to undo it, and singular-surface asymptotic coefficients.
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
     du_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
     xi_s_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, numpert_total, numpert_total, 0)
-    u_store_el_basis::Bool = true
     du_store_populated::Bool = false
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     ca_r::Array{ComplexF64,4} = zeros(ComplexF64, numpert_total, numpert_total, 2, msing)
@@ -133,9 +130,10 @@ OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int
 """
     compute_delta_prime_from_ca!(odet, intr, equil)
 
-**Stub, not physically valid.** Per-surface Δ' estimate `(ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)`
-from the asymptotic coefficients. It ignores inter-surface coupling and the vacuum, so it does not
-agree with the physical `ForceFreeStatesInternal.delta_prime_matrix`. Used only by tests.
+**Stub, not physically valid.** Fill each surface's `delta_prime` with the per-surface estimate
+`(1 - ca_l[i,c,2,s]) / (4π²·psio)` from the asymptotic coefficients, `c` being the column in which the small
+solution of resonance `i` starts. It ignores inter-surface coupling and the vacuum, so it does not agree with the
+physical `ForceFreeStatesResult.delta_prime`.
 """
 function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl
@@ -145,12 +143,8 @@ function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInter
         resize!(intr.sing[s].delta_prime, n_modes)
         for i in 1:n_modes
             ipert_res = 1 + sing.m[i] - intr.mlow + (sing.n[i] - intr.nlow) * intr.mpert
-            if 1 <= ipert_res <= intr.numpert_total
-                Δca = odet.ca_r[ipert_res, ipert_res, 2, s] - odet.ca_l[ipert_res, ipert_res, 2, s]
-                intr.sing[s].delta_prime[i] = Δca / denom
-            else
-                intr.sing[s].delta_prime[i] = 0.0 + 0.0im
-            end
+            column = 1 <= ipert_res <= intr.numpert_total ? findfirst(isone, @view odet.ca_r[ipert_res, :, 2, s]) : nothing
+            intr.sing[s].delta_prime[i] = column === nothing ? 0.0 + 0.0im : (1 - odet.ca_l[ipert_res, column, 2, s]) / denom
         end
     end
 end
@@ -182,80 +176,60 @@ end
 """
     balance_integration_chunks(chunks, ctrl, intr) -> Vector{IntegrationChunk}
 
-Split the highest-`ode_itime_cost` chunk at its equal-cost midpoint until the count reaches
-`ctrl.algorithm.nchunks` (`0` = auto). The target never depends on the thread count, so Riccati
-output is thread-count independent. Only the last sub-chunk of a split keeps its crossing.
+Split every crossing chunk once, then the costliest chunk (`ode_itime_cost`) until there are
+`ctrl.algorithm.nchunks` (`0` = auto). Splits are at the equal-cost point; the upper part keeps the crossing.
 """
 function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
-    min_chunks = 2 * intr.msing + 3
-    # Enough sub-chunks per segment that no single long-span propagator is too ill-conditioned for the BVP
-    min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
-    if ctrl.algorithm.nchunks > 0
-        if ctrl.algorithm.nchunks < min_chunks
-            @warn "nchunks = $(ctrl.algorithm.nchunks) is below the $min_chunks chunks required by $(intr.msing) singular surfaces; clamping up."
-        end
-        target_n = max(ctrl.algorithm.nchunks, min_chunks)
-    else
-        target_n = max(min_chunks, min_bvp_intervals)
-    end
-
-    result = collect(chunks)
-
-    while length(result) < target_n
-        # Find the highest-cost splittable chunk
-        best_idx = 0
-        best_cost = -Inf
-        for (i, chunk) in enumerate(result)
-            width = chunk.psi_end - chunk.psi_start
-            if width > 1e-8
-                c = ode_itime_cost(chunk.psi_start, chunk.psi_end, intr)
-                if c > best_cost
-                    best_cost = c
-                    best_idx = i
-                end
-            end
-        end
-
-        best_idx == 0 && break  # No more splittable chunks
-
-        chunk = result[best_idx]
-        total_cost = best_cost
-        target_cost = total_cost / 2.0
-
-        # Bisect for ψ_mid with cost(psi_start, ψ_mid) ≈ target_cost
+    function split(chunk::IntegrationChunk)
+        half_cost = ode_itime_cost(chunk.psi_start, chunk.psi_end, intr) / 2
         lo, hi = chunk.psi_start, chunk.psi_end
         for _ in 1:50
-            mid = (lo + hi) / 2.0
-            if ode_itime_cost(chunk.psi_start, mid, intr) < target_cost
+            mid = (lo + hi) / 2
+            if ode_itime_cost(chunk.psi_start, mid, intr) < half_cost
                 lo = mid
             else
                 hi = mid
             end
         end
-        psi_mid = (lo + hi) / 2.0
+        psi_mid = (lo + hi) / 2
+        return [IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid, needs_crossing=false),
+            IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end, chunk.needs_crossing, chunk.ising, chunk.direction)]
+    end
 
-        left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
-            needs_crossing=false, ising=0, direction=1)
-        right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
-            needs_crossing=chunk.needs_crossing, ising=chunk.ising,
-            direction=chunk.direction)
-        splice!(result, best_idx, [left, right])
+    result = IntegrationChunk[]
+    for chunk in chunks
+        append!(result, chunk.needs_crossing ? split(chunk) : [chunk])
+    end
+
+    target_n = length(result)
+    if ctrl.algorithm.nchunks > 0
+        if ctrl.algorithm.nchunks < target_n
+            @warn "nchunks = $(ctrl.algorithm.nchunks) is below the $target_n chunks required by the singular surfaces crossed; clamping up."
+        end
+        target_n = max(ctrl.algorithm.nchunks, target_n)
+    else
+        # Enough sub-chunks per segment that no single long-span propagator is too ill-conditioned for the BVP
+        target_n = max(target_n, 8 * (intr.msing + 1) + intr.msing)
+    end
+
+    while length(result) < target_n
+        costs = [c.psi_end - c.psi_start > 1e-8 ? ode_itime_cost(c.psi_start, c.psi_end, intr) : -Inf for c in result]
+        cost, costliest = findmax(costs)
+        isfinite(cost) || break  # nothing left wide enough to split
+        splice!(result, costliest, split(result[costliest]))
     end
 
     return result
 end
 
 """
-    eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, propagators, chunks, S_left)
+    eulerlagrange_integration(ctrl, equil, mats, intr) -> (odet, riccati)
 
 Integrate the Euler-Lagrange equations from the axis to `intr.psilim`, crossing each singular
 surface on the way. Dispatches on `ctrl.algorithm` to
 [`riccati_eulerlagrange_integration`](@ref) (the chunked propagator BVP) or
-[`forward_eulerlagrange_integration`](@ref).
-
-Only the Riccati branch populates `propagators` / `chunks` / `S_left`, which
-`compute_delta_prime_matrix!` consumes for the Δ' BVP; the forward branch returns `nothing`
-for all three.
+[`forward_eulerlagrange_integration`](@ref). `riccati` holds the inputs of
+`compute_delta_prime_matrix`; it is `nothing` on the forward branch.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
 
@@ -272,13 +246,12 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=intr.verbose) -> (odet, nothing, nothing, nothing)
+    forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=intr.verbose) -> (odet, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
 applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.algorithm.renorm_threshold` and undoing it
-via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
-directly to force this branch regardless of `ctrl.algorithm`; `verbose` overrides
-`intr.verbose` for progress logging.
+via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. `ctrl.algorithm`
+must be a `Forward`, whose settings it reads; `verbose` overrides `intr.verbose` for progress logging.
 """
 function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal;
     verbose::Bool=intr.verbose)
@@ -287,6 +260,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
     initialize_el_at_axis!(odet, ctrl, mats, equil.profiles, intr)
 
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
+    bases = ctrl.kinetic === nothing ? asymptotic_bases(chunks, ctrl, equil, mats, intr) : nothing
 
     if verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
@@ -303,7 +277,7 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
             if ctrl.kinetic !== nothing
                 cross_kinetic_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
             else
-                cross_ideal_singular_surf!(odet, ctrl, equil, mats, intr, chunk.ising)
+                cross_ideal_singular_surf!(odet, ctrl, equil, intr, chunk.ising, bases[chunk.ising])
             end
         end
     end
@@ -321,8 +295,9 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
     # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
+    bases === nothing || fill_crossings!(odet, bases, crossing_fill_fractions(ctrl), equil, intr)
 
-    return (odet, nothing, nothing, nothing)
+    return odet, nothing
 end
 
 """
@@ -577,62 +552,68 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
 end
 
 """
-    cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
+    cross_ideal_singular_surf!(odet, ctrl, equil, intr, ising, basis)
 
-Cross ideal singular surface `ising`: reduce on the resonant rows, record the left asymptotic
-coefficients, replace the resonant solutions by the small asymptotic solutions on the far side,
-and record the right coefficients. Port of Fortran `ode_ideal_cross`.
+Cross ideal singular surface `ising` in its asymptotic basis [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502,
+Eq. 36]: the solutions are expanded in the left basis, the column carrying each resonance's big solution ends at
+the surface, the nonresonant coefficients continue into the right basis, and each small solution starts there in
+the freed column. `basis` is the surface's entry of `asymptotic_bases`. Records both coefficient sets in
+`odet.ca_l` and `odet.ca_r`, and the column reduction for `transform_u!`. Fortran `ode_ideal_cross` steps across
+with a trapezoidal rule instead.
 """
 function cross_ideal_singular_surf!(
     odet::OdeState,
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
-    mats::MatrixSplines,
     intr::ForceFreeStatesInternal,
-    ising::Int
+    ising::Int,
+    basis
 )
-
     singp = intr.sing[ising]
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    nres = length(ipert_res)
 
-    # Reduce on the resonant rows so the solutions removed below are the resonant ones
-    compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=ipert_res)
-
-    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=1.0)
-    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, mats, intr; sig=-1.0)
-    dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
-
-    ua = sing_get_ua(sing_asymp_left, dpsi)
-    odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
-
-    # The reduction put the column pivoted on ipert_res[i] at index position i; zeroed_idx records it for transform_u!
-    odet.zeroed_idx[odet.ifix] = collect(1:nres)
-    for i in 1:nres
-        odet.u[:, odet.index[i, odet.ifix], :] .= 0
-    end
-
-    # Trapezoidal step across the surface
-    params = (ctrl, equil, mats, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
-    du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    sing_der!(du1, odet.u, params, odet.psifac)
-    odet.psifac += 2 * dpsi
-    sing_der!(du2, odet.u, params, odet.psifac)
-    odet.u .+= (du1 .+ du2) .* dpsi
-
-    # Swap in the small resonant asymptotic solution on the right side
-    ua = sing_get_ua(sing_asymp_right, dpsi)
-    for i in 1:nres
-        odet.u[ipert_res[i], :, :] .= 0
-        odet.u[:, odet.index[i, odet.ifix], :] .= ua[:, ipert_res[i]+intr.numpert_total, :]
-    end
-    odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+    # Reduce first: columns left nearly parallel by the integration would lose their difference in the basis change.
+    compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+    ca = sing_get_ca(odet.u, basis.left, intr)
+    pivots, factors = eliminate_big_solutions!(ca, ipert_res)
+    next_fixup!(odet, ctrl)
+    record_crossing!(odet, pivots, factors)
+    odet.ca_l[:, :, :, ising] .= ca
+    start_small_solutions!(ca, ipert_res, pivots)
+    odet.ca_r[:, :, :, ising] .= ca
     odet.ca_populated = true
 
-    # No Δ' here: it needs the Riccati gauge (U₂ = I); see compute_delta_prime_matrix!
+    odet.psifac += 2 * basis.dpsi
+    state_from_basis!(odet.u, basis.right, [ca[:, :, 1]; ca[:, :, 2]])
+    # The next solver step records fresh reference norms.
+    odet.new = true
+
+    # No Δ' here: it needs the Riccati propagators; see compute_delta_prime_matrix
     odet.q = equil.profiles.q_spline(odet.psifac; hint=odet.spline_hint)
     store_ode_data!(odet, odet.psifac, odet.u)
+end
+
+"""
+    record_crossing!(odet, pivots, factors)
+
+Record the reduction `eliminate_big_solutions!` made at an ideal crossing as fixup `odet.ifix`, in the form
+`transform_u!` undoes, with the `pivots` columns ending there.
+"""
+function record_crossing!(odet::OdeState, pivots::Vector{Int}, factors::Matrix{ComplexF64})
+    ifix = odet.ifix
+    N = size(factors, 2)
+    odet.sing_flag[ifix] = true
+    # The previous region ends at the step before this fixup
+    odet.fixstep[ifix] = odet.step - 1
+    odet.fixfac[:, :, ifix] .= 0
+    for isol in 1:N
+        odet.fixfac[isol, isol, ifix] = 1
+    end
+    for (i, pivot) in enumerate(pivots)
+        @views odet.fixfac[pivot, :, ifix] .+= factors[i, :]
+    end
+    odet.index[:, ifix] .= [pivots; setdiff(1:N, pivots)]
+    odet.zeroed_idx[ifix] = collect(eachindex(pivots))
 end
 
 """
@@ -697,14 +678,16 @@ end
 const COLUMN_ABSTOL_CALLBACK = DiscreteCallback((u, t, integrator) -> true, refresh_column_abstol!; save_positions=(false, false))
 
 """
-    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
+    solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK, save_everystep=false)
 
-Vern9 solve of an Euler-Lagrange problem returning the end state, with the per-column abstol of `column_abstol!`.
+Vern9 solve of an Euler-Lagrange problem with the per-column abstol of `column_abstol!`, returning the end state
+or, with `save_everystep`, the state at every solver step.
 A custom `callback` must refresh that abstol itself, after any reduction or renormalization of the state.
 Errors when the solver stops short of the interval's end (e.g. the step size underflows), naming the ψ reached.
 """
-function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK)
-    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep=false, save_end=true)
+function solve_el(prob, rtol; callback=COLUMN_ABSTOL_CALLBACK, save_everystep::Bool=false)
+    # dense=false: saved steps keep the state only, not the interpolation stages.
+    sol = solve(prob, Vern9(); reltol=rtol, abstol=column_abstol(prob.u0, rtol), callback, save_everystep, dense=false, save_end=true)
     SciMLBase.successful_retcode(sol) ||
         error(
             "Euler-Lagrange integration aborted at ψ = $(@sprintf("%.6f", sol.t[end])) before ψ = $(@sprintf("%.6f", prob.tspan[2])) " *
@@ -776,7 +759,7 @@ function integrate_el_region!(
 end
 
 """
-    compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
+    compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
 Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
 growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
@@ -787,10 +770,8 @@ the previous reduction's pivot order. Errors if any norm is zero. Port of Fortra
 
   - `u` - Solution array, updated in place (the integrator state, to avoid copies)
   - `sing_flag` - Whether this call is at a singular surface
-  - `resonant_rows` - Resonant rows at an ideal crossing, pivoted on first
 """
-function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool;
-    resonant_rows=Int[])
+function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
     odet.unorm .= norm.(eachcol(u[:, :, 1]))
     if minimum(odet.unorm) == 0
@@ -813,28 +794,29 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
     end
 
     if fix_required
-        if odet.ifix < ctrl.algorithm.numunorms_init
-            odet.ifix += 1
-        else
-            @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
-            Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
-        end
-        apply_gaussian_reduction!(u, odet, intr, sing_flag; resonant_rows)
+        next_fixup!(odet, ctrl)
+        apply_gaussian_reduction!(u, odet, intr, sing_flag)
         odet.new = true
     end
 end
 
+# Advance to the next slot of the reduction record; once the storage is full the last slot is reused.
+function next_fixup!(odet::OdeState, ctrl::ForceFreeStatesControl)
+    if odet.ifix < ctrl.algorithm.numunorms_init
+        odet.ifix += 1
+    else
+        @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
+        Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
+    end
+end
+
 """
-    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
+    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
 Triangularize the solution columns of `u` in place by Gaussian reduction, recording the factors in
 `odet.fixfac`/`odet.index` for `transform_u!`. Port of Fortran `ode_fixup`.
-
-At an ideal crossing, the first pivots are the `resonant_rows`, each on the remaining column largest
-there. Growth order cannot pick the resonant solution if a `renorm_threshold` reduction fired just before the
-crossing, since every column has then grown alike.
 """
-function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
+function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
     ifix = odet.ifix
     odet.sing_flag[ifix] = sing_flag
@@ -845,18 +827,13 @@ function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr:
         odet.fixfac[isol, isol, ifix] = 1
     end
 
-    # Triangularize primary solutions, resonant rows first, then columns from largest to smallest growth
+    # Triangularize primary solutions, columns from largest to smallest growth
     growth_order = sortperm(odet.unorm; rev=true)
     row_free = trues(intr.numpert_total)
     col_free = trues(intr.numpert_total)
     for isol in 1:intr.numpert_total
-        if isol <= length(resonant_rows)
-            kpert = resonant_rows[isol]
-            ksol = argmax(j -> col_free[j] ? abs(u[kpert, j, 1]) : -Inf, 1:intr.numpert_total)
-        else
-            ksol = growth_order[findfirst(j -> col_free[j], growth_order)]
-            @views kpert = argmax(abs.(u[:, ksol, 1]) .* row_free)
-        end
+        ksol = growth_order[isol]
+        @views kpert = argmax(abs.(u[:, ksol, 1]) .* row_free)
         odet.index[isol, ifix] = ksol
         col_free[ksol] = false
         row_free[kpert] = false
@@ -1011,7 +988,7 @@ end
 
 In-place Euler-Lagrange derivative du/dψ at `psieval` [Glasser Phys. Plasmas 2016 112506 Eq. 24],
 ideal or kinetic, in the `(du, u, p, t)` form the ODE solver calls; `du` and `u` have shape
-`(numpert_total, numpert_total, 2)`. Ξ_s is not computed here; see [`compute_node_xi_s!`](@ref).
+`(numpert_total, ncolumns, 2)`. Ξ_s is not computed here; see [`compute_node_xi_s!`](@ref).
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
@@ -1039,7 +1016,7 @@ end
     el_derivatives!(du, u, kinetic, equil, mats, intr, psieval, spline_hint, mats_hint) -> q
 
 Euler-Lagrange (or, when `kinetic` is true, FKG) derivative kernel: writes du₁/dψ and du₂/dψ at
-`psieval` into `du` and returns q there. Holds no state of its own — the two hints are the
+`psieval` into `du` and returns q there, for any number of solution columns. Holds no state of its own — the two hints are the
 caller's interval-search accelerators, so concurrent callers just pass their own.
 """
 @with_pool pool function el_derivatives!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
@@ -1054,7 +1031,7 @@ caller's interval-search accelerators, so concurrent callers just pass their own
     fmat_lower = acquire!(pool, ComplexF64, Npert, Npert)
     kmat = similar!(pool, fmat_lower)
     gmat = similar!(pool, fmat_lower)
-    tmp_mat = similar!(pool, fmat_lower)
+    tmp_mat = acquire!(pool, ComplexF64, Npert, size(u, 2))
 
     fill!(tmp_mat, zero(ComplexF64))
     u1 = @view(u[:, :, 1])

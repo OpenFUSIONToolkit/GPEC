@@ -91,7 +91,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
 
         equil = load_equilibrium_from_gpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "gpec.toml"))
         # default single toroidal mode used in test data; matches intr.nlow set below
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; nn_low=1)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; nn_low=1, algorithm=GeneralizedPerturbedEquilibrium.Forward())
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
         intr.numpert_total = 32 # replacing mpert (we set equal to 32). This is the same as msol
         # set mode ranges so sing_der can form singfac_vec consistently

@@ -48,12 +48,12 @@ ForceFreeStatesResult  Riccati, ideal closure
   Modes              n = 1, m = -4:3 (8 total)
   Domain             ψ ∈ [0.0001, 0.9995], q_lim = 3.262
   Surfaces           2: 2/1 @ ψ = 0.1221, 3/1 @ ψ = 0.8804
-  Fixed boundary     not reported (the Riccati (S, I) history cannot show crossings)
+  Fixed boundary     8 crit sign changes (unvalidated, not a stability verdict)
   Free boundary      stable: et₁ = 16.4, ep₁ = 14.04, ev₁ = 2.365, vacuum λ = 2.315
-  Δ′_ii (ψ_N)        2/1: 0.1781, 3/1: -215.7
-  Solution           not computed (Riccati stores no ξ profiles)
+  Δ′_ii (ψ_N)        2/1: 0.1781, 3/1: -317.9
+  Solution           ξ profiles stored (448 ψ nodes, el_axis basis)
   Wall               ConformalWall, standoff = 0.2415 a
-  Plots              13 of 15 available (see available_plots)
+  Plots              14 of 15 available (see available_plots)
 ```
 
 The fields themselves are documented in each type's docstring.
@@ -64,12 +64,13 @@ Every plot in [`Analysis`](analysis.md) takes the result in memory or the path o
 
 ```julia-repl
 julia> available_plots(ffs)
-Plots for ForceFreeStatesResult (riccati): 13 of 15 available
+Plots for ForceFreeStatesResult (riccati): 14 of 15 available
 
 ForceFreeStates
   ✓ plot_ffs_summary           the stability panels the run supplies
-  ✗ plot_mode_displacement     needs stored ξ profiles: use the Forward integrator or a matched Galerkin solve (Riccati and unmatched Galerkin store none)
   ✓ plot_critical_determinant  critical determinant against ψ_N
+  ⋮
+  ✗ plot_cond_fbar             needs the kinetic singular-surface scan: run with a kinetic source and singfac_min > 0
   ⋮
 ```
 
@@ -143,7 +144,7 @@ bpens = [solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=f), GGJModel()).bp
 ```
 
 A scalar applies to every surface and a vector gives one value per entry of `ffs.surfaces`, core to edge.
-The problem needs a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and Riccati (`vac_flag=true`) results; a Riccati-fed match fills `bpen` and the resonant data but keeps `solution === nothing`.
+The problem needs a Δ′ payload with coil-response columns, so it accepts Galerkin (`rpec_flag=true`) and Riccati (`vac_flag=true`) results. Both publish the outer solutions the match combines in `ffs.basis`; the composite inner-region profiles need Galerkin's `cut_solution=true`, and a Riccati basis always carries its cut solution.
 `GGJModel()` is the closure-capable model; `SLAYERModel()` is slab-only and drives the tearing solve instead.
 
 ## Tearing stability

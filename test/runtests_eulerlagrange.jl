@@ -135,18 +135,25 @@ end
 
     @testset "truncate_chunks! cuts the Riccati chunks back to the edge" begin
         F = GeneralizedPerturbedEquilibrium.ForceFreeStates
-        # Crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
+        # Backward crossing chunks end just short of surfaces 1-3; the edge drops surface 3 (msing = 2).
         chunks() = [
-            F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0)
+            F.IntegrationChunk(; psi_start=a, psi_end=b, needs_crossing=i <= 3, ising=i <= 3 ? i : 0, direction=i <= 3 ? -1 : 1)
             for (i, (a, b)) in enumerate(((0.10, 0.29), (0.31, 0.59), (0.61, 0.89), (0.91, 0.99)))
         ]
         cs = chunks()
         @test F.truncate_chunks!(cs, 0.75, 2) == 3  # straddling chunk shortened, so re-integrate it
         @test length(cs) == 3 && cs[3].psi_end == 0.75 && count(c -> c.needs_crossing, cs) == 2
+        @test cs[3].direction == 1  # no surface left to cross: a forward chunk
 
+        # Edge exactly at a crossing chunk's end: its surface is dropped, so it turns forward and is re-integrated.
         cs = chunks()
-        @test F.truncate_chunks!(cs, 0.89, 2) === nothing  # edge exactly at a chunk end: nothing to re-integrate
-        @test count(c -> c.needs_crossing, cs) == 2  # but its crossing onto the dropped surface is still cleared
+        @test F.truncate_chunks!(cs, 0.89, 2) == 3
+        @test cs[3].psi_end == 0.89 && !cs[3].needs_crossing && cs[3].direction == 1
+
+        # Edge at the end of the last chunk with every surface kept: nothing changes.
+        cs = chunks()
+        @test F.truncate_chunks!(cs, 0.99, 3) === nothing
+        @test cs[3].needs_crossing && cs[3].direction == -1 && cs[4].psi_end == 0.99
     end
 
     @testset "transform_u!" begin
@@ -321,9 +328,8 @@ end
         @test FFS.column_abstol!(tol, u, 1e-6) === tol
         @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
         # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
-        c = FFS.ForceFreeStatesControl()
-        @test c.algorithm.renorm_threshold == 1e3
-        @test c.algorithm.save_interval == 1
+        @test Forward().renorm_threshold == 1e3
+        @test Forward().save_interval == 1 && Riccati().save_interval == 1
     end
 
     @testset "compute_solution_norms!" begin
@@ -386,41 +392,31 @@ end
         @test odet.index[:, 2] == [3, 1, 2]
     end
 
-    @testset "ideal-crossing reduction isolates the resonant harmonic" begin
+    @testset "ideal-crossing reduction leaves each big solution in one column" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
-        # Column 1 has the largest norm but no resonant (row 3) component; column 2 carries the resonance.
-        # Growth order alone would lead with column 1 and pivot it on row 1, leaving row 3 in columns 2 and 3.
-        u0 = zeros(ComplexF64, 3, 3, 2)
-        u0[:, 1, 1] .= [6.0, 0.5, 0.0]
-        u0[:, 2, 1] .= [0.4, 0.3, 5.0]
-        u0[:, 3, 1] .= [0.2, 2.0, 1.5]
-        u0[:, :, 2] .= 1.0
-        intr = FFS.ForceFreeStatesInternal(; numpert_total=3)
-        ctrl = FFS.ForceFreeStatesControl(; algorithm=Forward(; renorm_threshold=1e3))
-        fresh(u) = (odet = FFS.OdeState(3, 10, 10, 1); odet.u .= u; odet)
-
-        odet = fresh(u0)
-        odet.new = false
-        odet.unorm0 .= norm.(eachcol(u0[:, :, 1]))  # every column grown alike since the last reduction
-        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
-        @test odet.index[1, 1] == 2
-        @test odet.u[3, 2, 1] == u0[3, 2, 1]
-        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0  # only the lead column keeps the resonant harmonic
-        @test odet.sing_flag[1]
-
-        # A crossing right after a renorm_threshold reduction (new = true) still reduces on the resonant row.
-        odet = fresh(u0)
-        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true; resonant_rows=[3])
-        @test odet.ifix == 1 && odet.index[1, 1] == 2 && odet.new
-        @test odet.u[3, 1, 1] == 0 && odet.u[3, 3, 1] == 0
-
-        # Without resonant rows the growth-ordered reduction is unchanged.
-        odet = fresh(u0)
-        odet.new = false
-        odet.unorm0 .= 1.0
-        FFS.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
-        @test odet.index[1, 1] == 1
-        @test odet.u[3, 2, 1] != 0
+        # Asymptotic coefficients of three solutions; the resonance is basis row 3 and column 2 has most of its big solution.
+        ca0 = zeros(ComplexF64, 3, 3, 2)
+        ca0[:, 1, 1] .= [6.0, 0.5, 0.2]
+        ca0[:, 2, 1] .= [0.4, 0.3, 5.0]
+        ca0[:, 3, 1] .= [0.2, 2.0, 1.5]
+        ca0[:, :, 2] .= [1.0 2.0 3.0; 4.0 5.0 6.0; 7.0 8.0 9.0]
+        ca = copy(ca0)
+        pivots, factors = FFS.eliminate_big_solutions!(ca, [3])
+        @test pivots == [2] && factors[1, 2] == 0
+        @test ca[3, 1, 1] == 0 && ca[3, 3, 1] == 0 && ca[:, 2, :] == ca0[:, 2, :]
+        for j in (1, 3)
+            @test ca[:, j, :] ≈ ca0[:, j, :] .+ factors[1, j] .* ca0[:, 2, :]
+        end
+        # Forward records it in the form transform_u! undoes, with the pivot column ending at the surface.
+        odet = FFS.OdeState(3, 10, 10, 1)
+        odet.ifix = 1
+        FFS.record_crossing!(odet, pivots, factors)
+        @test odet.index[:, 1] == [2, 1, 3] && odet.sing_flag[1] && odet.zeroed_idx[1] == [1]
+        @test odet.fixfac[2, :, 1] == [factors[1, 1], 1, factors[1, 3]]
+        # Right of the surface the freed column is the small solution and no other column has a resonant coefficient.
+        FFS.start_small_solutions!(ca, [3], pivots)
+        @test all(iszero, ca[3, [1, 3], :])
+        @test ca[:, 2, 1] == zeros(3) && ca[:, 2, 2] == [0, 0, 1]
     end
 
     @testset "OdeState construction" begin
@@ -449,7 +445,6 @@ end
         @test size(odet.du_store) == (numpert_total, numpert_total, 0)
         @test size(odet.xi_s_store) == (numpert_total, numpert_total, 0)
         @test odet.du_store_populated == false
-        @test odet.u_store_el_basis == true
         @test length(odet.psi_store) == numsteps_init
         @test length(odet.q_store) == numsteps_init
         @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
@@ -616,6 +611,14 @@ end
         @test chunks[1].needs_crossing && !chunks[2].needs_crossing
     end
 
+    @testset "a kinetic run crosses closer by default" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        kinetic = FFS.TestKineticMatrices(; scale=1.0)
+        @test FFS.ForceFreeStatesControl().singfac_min == 5e-4
+        @test FFS.ForceFreeStatesControl(; kinetic).singfac_min == 1e-5
+        @test FFS.ForceFreeStatesControl(; kinetic, singfac_min=1e-4).singfac_min == 1e-4
+    end
+
     @testset "EdgeScanState" begin
         FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
         # Default construction with sentinel values
@@ -666,7 +669,7 @@ end
         intr.numpert_total = intr.mpert * intr.npert
         metric = FFS.make_metric(equil, intr.mpert)
         mats = FFS.build_matrix_splines(equil, intr, metric)
-        odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, mats, intr)
+        odet = first(FFS.eulerlagrange_integration(ctrl, equil, mats, intr))
         return odet, ctrl, equil, mats, intr
     end
 
@@ -721,15 +724,6 @@ end
             @test isapprox(odet_t.du_store[:, :, istep], odet.du_store[:, :, istep] * T; rtol=1e-10)
             @test isapprox(odet_t.xi_s_store[:, :, istep], odet.xi_s_store[:, :, istep] * T; rtol=1e-10)
         end
-    end
-
-    @testset "refuses a solution outside the Euler-Lagrange basis" begin
-        odet.du_store_populated = false
-        odet.du_store = Array{ComplexF64}(undef, intr.numpert_total, intr.numpert_total, 0)
-        odet.u_store_el_basis = false
-        @test !FFS.materialize_derivative_stores!(odet, equil, mats, intr)
-        @test isempty(odet.du_store)
-        @test !odet.du_store_populated
     end
 end
 
