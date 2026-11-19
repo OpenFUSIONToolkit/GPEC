@@ -301,4 +301,37 @@
         @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=0.0)
         @test_throws "chi_perp_Dc must be positive" slayer_parameters(; base..., chi_perp_Dc=Inf)
     end
+
+    @testset "trapped_fraction: exact pitch-angle integral and Lin-Liu & Miller" begin
+        using GeneralizedPerturbedEquilibrium.Utilities.NeoclassicalResistivity: trapped_fraction,
+            trapped_fraction_nodes, trapped_fraction_lin_liu_miller
+        # Model surface |B| = 1/(1 + ε cos θ), uniform θ average; reference f_t from an adaptive QuadGK integral in λ.
+        theta = range(0, 2π; length=4097)[1:end-1]
+        avg(f) = sum(f) / length(f)
+        ft_model(h, (lambda, weight)) = trapped_fraction(avg(h .^ 2), [avg(@. sqrt(max(1 - l * h, 0.0))) for l in lambda], weight)
+        refs = ((0.6, 0.852350745554), (0.36, 0.729882018970), (0.27, 0.659837024682), (0.124, 0.482295253813),
+            (0.05, 0.318778452240), (1e-2, 0.145562849918), (1e-4, 0.014623642822), (1e-6, 0.001462424358))
+        for (eps, ft_ref) in refs
+            B = @. 1 / (1 + eps * cos(theta))
+            B_max = maximum(B)
+            h = B ./ B_max
+            nodes = trapped_fraction_nodes(minimum(h))
+            @test sum(nodes[2]) ≈ 0.5 atol = 1e-14          # ∫₀¹ λ dλ
+            ft = ft_model(h, nodes)
+            @test isapprox(ft, ft_ref; atol=1e-10)
+            # Weak trapping (f_t ≈ 1.46√ε) needs the panels: doubling the nodes per panel must not move f_t.
+            @test isapprox(ft_model(h, trapped_fraction_nodes(minimum(h); n=32)), ft; atol=1e-10)
+            eps >= 0.05 || continue
+            avg_hf = avg(@. (1 - sqrt(1 - h) * (1 + h / 2)) / h^2)
+            @test isapprox(trapped_fraction_lin_liu_miller(avg(B), avg(B .^ 2), B_max, avg_hf), ft; atol=1e-3)
+        end
+        # Independent small-ε limit f_t → C√ε + O(ε^3/2), C = ¾∫₀^∞ [y^(-1/2) − 1/⟨√(y + 1 + cos θ)⟩] dy from the layer at λ → 1.
+        for eps in (1e-5, 1e-6, 1e-7)
+            B = @. 1 / (1 + eps * cos(theta))
+            h = B ./ maximum(B)
+            @test isapprox(ft_model(h, trapped_fraction_nodes(minimum(h))) / sqrt(eps), 1.4624249524405; atol=eps)
+        end
+        # Uniform |B|: no trapped particles, and a single panel integrates the polynomial integrand exactly.
+        @test ft_model(ones(length(theta)), trapped_fraction_nodes(1.0)) ≈ 0.0 atol = 1e-14
+    end
 end
