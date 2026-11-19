@@ -10,13 +10,15 @@
 # Modifications Copyright (C) 2026 Columbia Fusion Research Center and Seoul National University:
 #   - Julia translation; runtime patch, quadrature and interpolation orders, with the patch clamped on coarse grids
 #   - stencil corner by rounding, so odd orders are equivariant under the patch's pi-rotation
-#   - one sparse interpolation matrix, applied forward to the geometry and transposed to scatter weights
+#   - one near-field routine for every row: polar nodes interpolated and their weights scattered by per-node Lagrange
+#     stencils (no stored interpolation matrix), about the observer or, off the source surface, the closest source point
 #   - VACUUM kernel convention: 1/r and n.grad'(1/r) over 2pi, unit Green's-identity diagonal
 #   - far field by the trapezoidal rule on the collocation grid, without upsampling
 #   - patch geometry upsampled 2x by trigonometric interpolation to refine the polar interpolation stencil,
 #     correction weights folded back to the collocation nodes by its transpose (BIEST instead upsamples the
 #     whole surface and density and shrinks the patch)
-#   - singular correction applied to plasma-wall cross-surface blocks
+#   - plasma-wall rows: sinh-mapped radial nodes [Johnston & Elliott, Int. J. Numer. Meth. Engng 62 (2005) 564]; rows
+#     beyond NEAR_GAP node spacings take the trapezoidal rule alone
 #   - dense operator row assembly, field-period folding, stellarator-symmetric basis, threading
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -24,14 +26,12 @@
 
 """
 Thread-local scratch for `compute_3D_kernel_matrices!`, one per thread so the parallel observer loop does not race.
-`patch` and `polar` hold (r, ∂r/∂θ, ∂r/∂ζ) per node; `T` is the operator row's element type.
+`patch` holds the upsampled source patch and `M_grid` the double- and single-layer correction weights on it;
+`T` is the operator row's element type.
 """
 struct KernelWorkspace{T<:Number}
-    patch::Matrix{SVector{9,Float64}}
-    polar::Matrix{SVector{9,Float64}}
-    M_polar_single::Matrix{Float64}
-    M_polar_double::Matrix{Float64}
-    M_grid_flat::Vector{Float64}
+    patch::Matrix{SurfacePoint}
+    M_grid::Array{Float64,3}
     fold_tmp::Matrix{Float64}
     folded_patch::Matrix{T}
     row_single::Vector{T}
@@ -39,13 +39,10 @@ struct KernelWorkspace{T<:Number}
     sym_work::Vector{ComplexF64}
 end
 
-function KernelWorkspace{T}(UP_DIM::Int, RAD_DIM::Int, ANG_DIM::Int, mtheta::Int, nzeta_fp::Int, nrow::Int, nsym::Int) where {T}
+function KernelWorkspace{T}(UP_DIM::Int, mtheta::Int, nzeta_fp::Int, nrow::Int, nsym::Int) where {T}
     return KernelWorkspace{T}(
-        zeros(SVector{9,Float64}, UP_DIM, UP_DIM),
-        zeros(SVector{9,Float64}, RAD_DIM, ANG_DIM),
-        zeros(RAD_DIM, ANG_DIM),
-        zeros(RAD_DIM, ANG_DIM),
-        zeros(UP_DIM^2),
+        fill(zero(SurfacePoint), UP_DIM, UP_DIM),
+        zeros(UP_DIM, UP_DIM, 2),
         zeros(UP_DIM, mtheta),
         zeros(T, nzeta_fp, mtheta),
         zeros(T, nrow),
@@ -55,195 +52,17 @@ function KernelWorkspace{T}(UP_DIM::Int, RAD_DIM::Int, ANG_DIM::Int, mtheta::Int
 end
 
 """
-    SingularQuadratureData
+    laplace_kernel(x, y, n) -> (single, double)
 
-Precomputed polar singular-correction quadrature (Malhotra JCP 397 (2019) 108791, Sec. 3.2).
-
-## Fields
-
-  - `Gpou::Matrix{Float64}`: Partition of unity on the Cartesian patch, `Gpou = -χ` (PATCH_DIM × PATCH_DIM)
-  - `Ppou::Matrix{Float64}`: Partition of unity times polar quadrature weights (RAD_DIM × ANG_DIM)
-  - `P2G::SparseMatrixCSC{Float64,Int}`: Lagrange interpolation matrix on the 2× upsampled patch: `polar = P2G' * patch`, `grid = P2G * polar`
-  - `PATCH_DIM::Int`: Patch width `2 * PATCH_RAD + 1`
-  - `UP_DIM::Int`: Upsampled patch width `2 * PATCH_DIM - 1`
-  - `PATCH_RAD::Int`: Number of points on each side of the source point treated as singular
-  - `ANG_DIM::Int`: Number of angular quadrature points
-  - `RAD_DIM::Int`: Number of radial quadrature points
-  - `INTERP_ORDER::Int`: Lagrange interpolation order
+Laplace kernels at observer `x` from source `y` with normal `n`: `single = 1/r`, `double = (Δx·n)/r³`; `(0, 0)` at
+coincidence (`r² < 1e-30`). Written by component: `dot` would let `@fastmath` reorder the sums.
 """
-struct SingularQuadratureData
-    Gpou::Matrix{Float64}
-    Ppou::Matrix{Float64}
-    P2G::SparseMatrixCSC{Float64,Int}
-    PATCH_DIM::Int
-    UP_DIM::Int
-    PATCH_RAD::Int
-    ANG_DIM::Int
-    RAD_DIM::Int
-    INTERP_ORDER::Int
-end
-
-"""
-    SingularQuadratureData(PATCH_RAD, RAD_DIM, INTERP_ORDER)
-
-Build the polar quadrature, partitions of unity, and Lagrange interpolant for the singular patch.
-`ANG_DIM = 2 * RAD_DIM`. `INTERP_ORDER` must be `≤ 4 * PATCH_RAD + 1`, the upsampled patch width.
-
-# Arguments
-
-  - `PATCH_RAD::Int`: Number of points adjacent to source point to treat as singular
-  - `RAD_DIM::Int`: Radial quadrature order
-  - `INTERP_ORDER::Int`: Lagrange interpolation order
-
-# Returns
-
-  - `SingularQuadratureData`: Precomputed quadrature data
-"""
-function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
-
-    # Total size of square patch extracted around singular point (odd number: 2*PATCH_RAD+1)
-    PATCH_DIM = 2 * PATCH_RAD + 1
-    # We upsample the patch by 2x in each direction for better accuracy
-    UP_DIM = 2 * PATCH_DIM - 1
-    @assert INTERP_ORDER <= UP_DIM "Must have INTERP_ORDER <= UP_DIM, got INTERP_ORDER=$INTERP_ORDER, UP_DIM=$UP_DIM"
-    # Number of angular quadrature nodes in polar coordinates (uniformly distributed around circle)
-    ANG_DIM = 2 * RAD_DIM
-
-    # Setup radial quadrature
-    qx_raw, qw_raw = gausslegendre(RAD_DIM) # points on [-1,1]
-    qx = (qx_raw .+ 1) ./ 2  # [-1, 1] → [0, 1]
-    qw = qw_raw ./ 2         # Adjust weights for interval change
-
-    # χ(r) = exp(-36 r^p), p from PATCH_DIM: χ blends on the collocation grid, so it keys on the coarse patch, not UP_DIM
-    pou_power = PATCH_DIM > 45 ? 10 : (PATCH_DIM > 20 ? 8 : 6)
-    pou(r) = r ≥ 1.0 ? 0.0 : exp(-36.0 * r^pou_power)
-
-    # Gpou = -χ on the Cartesian patch
-    Gpou = zeros(PATCH_DIM, PATCH_DIM)
-    coords = LinRange(-1.0, 1.0, PATCH_DIM)
-    for (i, x) in enumerate(coords), (j, y) in enumerate(coords)
-        Gpou[i, j] = -pou(sqrt(x^2 + y^2))
-    end
-
-    # Ppou = χ(ρ) M²/4 r dr dθ [Malhotra JCP 397 (2019) 108791 eq. 38]
-    Ppou = zeros(RAD_DIM, ANG_DIM)
-    dθ = 2π / ANG_DIM
-    for j in 1:ANG_DIM, i in 1:RAD_DIM
-        dr = qw[i] * PATCH_RAD
-        rdθ = qx[i] * PATCH_RAD * dθ
-        Ppou[i, j] = pou(qx[i]) * dr * rdθ
-    end
-
-    # Spacing between Lagrange interpolation nodes in [0,1] for INTERP_ORDER-point stencil
-    h = 1.0 / (INTERP_ORDER - 1)
-
-    # Compute 2D tensor-product Lagrange basis function at (x0, x1) in local
-    # stencil coordinates for basis node (i0, i1) on uniform grid with spacing h
-    @inline function lagrange_interp(x0::Float64, x1::Float64, i0::Int, i1::Int)
-        Lx = Ly = 1.0
-        ξ0 = x0 / h
-        ξ1 = x1 / h
-        for j0 in 0:(INTERP_ORDER-1)
-            j0 != i0 && (Lx *= (ξ0 - j0) / (i0 - j0))
-        end
-        for j1 in 0:(INTERP_ORDER-1)
-            j1 != i1 && (Ly *= (ξ1 - j1) / (i1 - j1))
-        end
-        return Lx * Ly
-    end
-
-    # grid = P2G * polar, polar = P2G' * grid; each column is the INTERP_ORDER² Lagrange stencil
-    Ngrid = UP_DIM * UP_DIM
-    Npolar = RAD_DIM * ANG_DIM
-
-    # Preallocate COO storage:
-    #   I_coo[k], J_coo[k] = (row, column) index of kth nonzero
-    #   V_coo[k]           = interpolation weight
-    nnz_per_polar = INTERP_ORDER^2
-    I_coo = Vector{Int}(undef, Npolar * nnz_per_polar)
-    J_coo = Vector{Int}(undef, Npolar * nnz_per_polar)
-    V_coo = Vector{Float64}(undef, Npolar * nnz_per_polar)
-
-    idx = 1
-    for ir in 1:RAD_DIM, ia in 1:ANG_DIM
-        # Map polar node to unit square: x0, x1 ∈ [0,1] × [0,1]
-        x0 = 0.5 + 0.5 * qx[ir] * cos(dθ * (ia - 1))
-        x1 = 0.5 + 0.5 * qx[ir] * sin(dθ * (ia - 1))
-
-        # Lower-left corner indices of INTERP_ORDER × INTERP_ORDER stencil centered on (x0,x1).
-        # Round, don't truncate, and keep INTERP_ORDER odd: the stencil must be equivariant under the patch's π-rotation or stellarator symmetry is lost.
-        y0 = clamp(round(Int, x0 * (UP_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, UP_DIM - INTERP_ORDER)
-        y1 = clamp(round(Int, x1 * (UP_DIM - 1)) - (INTERP_ORDER - 1) ÷ 2, 0, UP_DIM - INTERP_ORDER)
-
-        # Local coordinates within INTERP_ORDER×INTERP_ORDER stencil, normalized to [0,1]
-        z0 = (x0 * (UP_DIM - 1) - y0) * h
-        z1 = (x1 * (UP_DIM - 1) - y1) * h
-
-        # Polar point index (column in P2G)
-        j_polar = ir + RAD_DIM * (ia - 1)
-
-        # Populate stencil contributions for this polar node
-        for i0 in 1:INTERP_ORDER, i1 in 1:INTERP_ORDER
-            # Grid point index (row in P2G), using column-major layout
-            i_grid = (y0 + i0) + UP_DIM * (y1 + i1 - 1)
-            I_coo[idx] = i_grid
-            J_coo[idx] = j_polar
-            V_coo[idx] = lagrange_interp(z0, z1, i0 - 1, i1 - 1)
-            idx += 1
-        end
-    end
-
-    # Assemble sparse interpolation matrix
-    P2G = sparse(I_coo, J_coo, V_coo, Ngrid, Npolar)
-
-    return SingularQuadratureData(Gpou, Ppou, P2G, PATCH_DIM, UP_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, INTERP_ORDER)
-end
-
-# Cached singular quadrature; rebuilt if PATCH_RAD / RAD_DIM / INTERP_ORDER change
-const SINGULAR_QUAD_CACHE = Ref{Union{Nothing,SingularQuadratureData}}(nothing)
-const _SINGULAR_QUAD_LOCK = ReentrantLock()
-
-"""
-    get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
-
-Return the cached [`SingularQuadratureData`](@ref), rebuilding it if the parameters changed. Takes a lock,
-so concurrent solves on different grids each get the data for their own parameters.
-"""
-function get_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
-    @lock _SINGULAR_QUAD_LOCK begin
-        cached = SINGULAR_QUAD_CACHE[]
-        if !isnothing(cached) &&
-           cached.PATCH_RAD == PATCH_RAD &&
-           cached.RAD_DIM == RAD_DIM &&
-           cached.INTERP_ORDER == INTERP_ORDER
-            return cached
-        end
-        data = SingularQuadratureData(PATCH_RAD, RAD_DIM, INTERP_ORDER)
-        SINGULAR_QUAD_CACHE[] = data
-        return data
-    end
-end
-
-"""
-    laplace_kernel(ox, oy, oz, sx, sy, sz, nx, ny, nz) -> (single, double)
-
-Fused Laplace kernels: `single = 1/r`, `double = (Δx·n)/r³`. Shares `√(r²)`; returns `(0, 0)` at coincidence (`r² < 1e-30`).
-"""
-@fastmath @inline function laplace_kernel(
-    ox::Float64, oy::Float64, oz::Float64,
-    sx::Float64, sy::Float64, sz::Float64,
-    nx::Float64, ny::Float64, nz::Float64
-)
-    dx = ox - sx
-    dy = oy - sy
-    dz = oz - sz
-    r2 = dx * dx + dy * dy + dz * dz
+@fastmath @inline function laplace_kernel(x::SVector{3,Float64}, y::SVector{3,Float64}, n::SVector{3,Float64})
+    Δ = x - y
+    r2 = Δ[1] * Δ[1] + Δ[2] * Δ[2] + Δ[3] * Δ[3]
     r2 < 1e-30 && return (0.0, 0.0)
     rinv = inv(sqrt(r2))
-    single = rinv
-    r3inv = rinv * rinv * rinv
-    double = (dx * nx + dy * ny + dz * nz) * r3inv
-    return (single, double)
+    return (rinv, (Δ[1] * n[1] + Δ[2] * n[2] + Δ[3] * n[3]) * (rinv * rinv * rinv))
 end
 
 """
@@ -259,55 +78,95 @@ function extract_patch!(patch::AbstractMatrix, data::AbstractVector, idx_pol_cen
 end
 
 """
-Interpolate the patch onto the polar nodes, `polar = P2G' * patch`. Each node carries all nine fields as one `SVector`,
-so `P2G` is swept once rather than once per field as `mul!` would.
+    SourceQuadrature
+
+Read-only source-surface quadrature data for `compute_3D_kernel_matrices!`, built once per call and shared across threads
+(per-thread scratch lives in [`KernelWorkspace`](@ref)).
+
+## Fields
+
+  - `source`: Underlying `PlasmaGeometry3D` or `WallGeometry3D`
+  - `points_up`: Source `(r, ∂r/∂θ, ∂r/∂ζ)` on the 2× trigonometrically upsampled grid (node `2i - 1` is collocation node `i`)
+  - `points`, `normals`: Collocation positions and area-weighted normals for the far-field trapezoidal sum
+  - `period_col`: `(field_period, period_0_col)` of each full-torus collocation node
+  - `phases`: Field-period Bloch phases `ω^{k(d-1)}` (`d = 1:nfp`)
+  - `Uθ_patch`, `Uζ_patch`: Upsampling matrices restricted to the patch about node `(1, 1)`, with `Uζ_patch` pre-folded onto field period 0 (see [`fold_patch_to_row!`](@ref))
+  - `patch_rad`, `ANG_DIM`: Patch radius (in collocation spacings) and polar angular node count
+  - `self_radial`, `cross_radial_rule`: Gauss radial rule on `[0, 1]` for same-surface rows, and [`sinh_rule`](@ref) for close plasma–wall rows
+  - `self_order`, `cross_order`: Lagrange stencil orders (`Val`) on the upsampled patch for self and plasma–wall rows
 """
-function interpolate_to_polar!(polar::Matrix{SVector{9,Float64}}, patch::Matrix{SVector{9,Float64}}, P2G::SparseMatrixCSC{Float64,Int})
-    rv, nz = rowvals(P2G), nonzeros(P2G)
-    @inbounds for c in axes(P2G, 2)
-        # Accumulates (r, ∂r/∂θ, ∂r/∂ζ) at polar node c, no allocations
-        acc = zero(SVector{9,Float64})
-        for p in nzrange(P2G, c)
-            # Lagrange weight × all nine fields at that patch node
-            acc += nz[p] * patch[rv[p]]
-        end
-        polar[c] = acc
+struct SourceQuadrature{T<:Number,P<:AbstractVector{T},S,NS,NC,R}
+    source::S
+    points_up::Vector{SurfacePoint}
+    points::Vector{SVector{3,Float64}}
+    normals::Vector{SVector{3,Float64}}
+    period_col::Vector{Tuple{Int,Int}}
+    phases::P
+    Uθ_patch::Matrix{Float64}
+    Uζ_patch::Matrix{T}
+    patch_rad::Int
+    ANG_DIM::Int
+    self_radial::Vector{Tuple{Float64,Float64}}
+    cross_radial_rule::R
+    self_order::Val{NS}
+    cross_order::Val{NC}
+end
+
+# Lagrange order on plasma–wall rows: 9 points match 11 there at 2/3 the cost
+const CROSS_INTERP_ORDER = 9
+
+function SourceQuadrature(source, phases::AbstractVector{<:Number}, patch_rad::Int, RAD_DIM::Int, INTERP_ORDER::Int)
+    mtheta, nzeta, nfp = source.mtheta, source.nzeta, length(phases)
+    UP_DIM, nzeta_fp = 4 * patch_rad + 1, nzeta ÷ nfp
+    @assert INTERP_ORDER <= UP_DIM "Must have INTERP_ORDER <= UP_DIM, got INTERP_ORDER=$INTERP_ORDER, UP_DIM=$UP_DIM"
+
+    Uθ, Uζ = trig_upsample_matrix(mtheta), trig_upsample_matrix(nzeta)
+    up = trig_upsample(hcat(source.r, source.dr_dθ, source.dr_dζ), Uθ, Uζ, mtheta, nzeta)
+    points_up = [SurfacePoint(up[k, SVector(1, 2, 3)], up[k, SVector(4, 5, 6)], up[k, SVector(7, 8, 9)]) for k in axes(up, 1)]
+
+    # Upsampling rows for the UP_DIM patch centred on collocation node 1 (fine index 1); translation invariance lets
+    # `fold_patch_to_row!` reuse them for any patch centre, and `Uζ_patch` pre-folds all nfp field periods onto period 0
+    Uθ_patch = Uθ[periodic_wrap.((1:UP_DIM) .- 2 * patch_rad, 2 * mtheta), :]
+    Uζ_patch = zeros(eltype(phases), nzeta_fp, UP_DIM)
+    for i in 1:UP_DIM, d in eachindex(phases), j in 1:nzeta_fp
+        Uζ_patch[j, i] += phases[d] * Uζ[periodic_wrap(i - 2 * patch_rad, 2 * nzeta), j+(d-1)*nzeta_fp]
     end
+
+    num_points = mtheta * nzeta
+    self_radial = let (t, w) = gausslegendre(RAD_DIM)
+        collect(zip((t .+ 1) ./ 2, w ./ 2))
+    end
+    return SourceQuadrature(
+        source, points_up,
+        [SVector{3}(@view source.r[k, :]) for k in 1:num_points],
+        [SVector{3}(@view source.normal[k, :]) for k in 1:num_points],
+        [fldmod1(k, num_points ÷ nfp) for k in 1:num_points],
+        phases, Uθ_patch, Uζ_patch, patch_rad, 2 * RAD_DIM,
+        # Plasma–wall rows: 1–8 × RAD_DIM nodes, RAD_DIM per 2 units of the sinh variable
+        self_radial, sinh_rule(RAD_DIM, 8, 2.0),
+        Val(INTERP_ORDER), Val(min(INTERP_ORDER, CROSS_INTERP_ORDER))
+    )
 end
 
 """
-Add the polar correction weights `M_polar` to the operator row: `P2G` scatters them onto the upsampled patch, and
+Add correction weights on the upsampled patch about collocation node `(i_obs, j_obs)` to the operator row:
 `Uζ_patch * M_up' * Uθ_patch` (the transposed trigonometric upsampling about the first node, field periods folded into
-`Uζ_patch`) onto the collocation nodes, shifted to the observer `(i_obs, j_obs)` by translation invariance.
+`Uζ_patch`) maps them onto the collocation nodes, shifted to `(i_obs, j_obs)` by translation invariance. `j_obs` lies
+in field period 0; a patch centred in another period passes that period's phase as `phase0`.
 """
-function scatter_polar_to_row!(
-    row::Vector{T},
-    M_polar::Matrix{Float64},
-    P2G::SparseMatrixCSC{Float64,Int},
-    Uθ_patch::Matrix{Float64},
-    Uζ_patch::Matrix{T},
-    ws::KernelWorkspace{T},
-    i_obs::Int,
-    j_obs::Int,
-    wrap_phase::T
-) where {T<:Number}
+function fold_patch_to_row!(row::Vector{T}, M_up::AbstractMatrix{Float64}, quad::SourceQuadrature, ws::KernelWorkspace{T},
+    i_obs::Int, j_obs::Int, phase0::T) where {T<:Number}
+    (; fold_tmp, folded_patch) = ws
+    mul!(fold_tmp, transpose(M_up), quad.Uθ_patch)
+    mul!(folded_patch, quad.Uζ_patch, fold_tmp)
 
-    (; M_grid_flat, fold_tmp, folded_patch) = ws
-    UP_DIM = size(Uθ_patch, 1)
-
-    # Scatter the polar corrections back to the upsampled patch
-    mul!(M_grid_flat, P2G, vec(M_polar))
-
-    # Fold the upsampled patch back to the collocation nodes
-    mul!(fold_tmp, transpose(reshape(M_grid_flat, UP_DIM, UP_DIM)), Uθ_patch)
-    mul!(folded_patch, Uζ_patch, fold_tmp)
-
+    # Shifting from node 1 to j_obs wraps entries from the end of period d - 1 into period d when j < j_obs,
+    # adding one more Bloch step `wrap_phase` (assumes geometric phases, phases[d] = wrap_phase^(d-1))
+    wrap_phase = quad.phases[min(2, end)]
     nzeta_fp, mtheta = size(folded_patch)
     @inbounds for j in 1:nzeta_fp
-        # Columns the shift pushes into the next field period fold back with one more phase step;
-        # this assumes geometric phases, phases[d] = wrap_phase^(d-1)
         j_fold = j - j_obs + 1
-        phase = j_fold < 1 ? wrap_phase : one(T)
+        phase = j_fold < 1 ? phase0 * wrap_phase : phase0
         j_fold < 1 && (j_fold += nzeta_fp)
         for i in 1:mtheta
             row[i+mtheta*(j-1)] += phase * folded_patch[j_fold, periodic_wrap(i - i_obs + 1, mtheta)]
@@ -316,12 +175,152 @@ function scatter_polar_to_row!(
 end
 
 """
+    nearest_source_node(quad, r) -> (; i, j, d, h)
+
+Collocation node `(i, j)` of `quad.source` nearest to `r`, its distance `d` from `r`, and its larger cell spacing `h`.
+Used to screen out far plasma–wall observers (`d ≥ NEAR_GAP * h`) before extracting a patch for Gauss–Newton.
+"""
+@inline function nearest_source_node(quad::SourceQuadrature, r::SVector{3,Float64})
+    (; mtheta, nzeta) = quad.source
+    k = argmin(k -> sum(abs2, r - quad.points[k]), eachindex(quad.points))
+    i, j = mod1(k, mtheta), (k - 1) ÷ mtheta + 1
+    q = quad.points_up[2i-1+2mtheta*(2j-2)]
+    return (; i, j, d=norm(r - q.r), h=max(norm(q.rθ) * (2π / mtheta), norm(q.rζ) * (2π / nzeta)))
+end
+
+"""
+    closest_source_point!(patch, quad, r, i, j) -> (; i, j, U, V, d, hθ, hζ)
+
+Refine the source point closest to `r` starting from collocation node `(i, j)`. `patch` is left holding the upsampled
+patch about the updated `(i, j)`, re-centred as the Gauss–Newton search moves, and `(U, V)` are the point's coordinates
+on it; `d` is the distance and `hθ`, `hζ` the local node spacings.
+"""
+function closest_source_point!(patch::Matrix{SurfacePoint}, quad::SourceQuadrature, r::SVector{3,Float64}, i::Int, j::Int)
+    mtheta, nzeta = quad.source.mtheta, quad.source.nzeta
+    UP_DIM, val = size(patch, 1), quad.cross_order
+    c = (UP_DIM - 1) / 2  # patch centre
+    dθ, dζ = 2π / mtheta, 2π / nzeta
+
+    U, V = c, c
+    # Re-centre `patch` on the collocation node nearest (U, V) (2 fine spacings per coarse step) so the polar disk stays inside it
+    for iter in 1:3
+        extract_patch!(patch, quad.points_up, 2i - 1, 2j - 1, 2mtheta, 2nzeta, UP_DIM)
+        U, V = closest_point(patch, r, U, V, dθ / 2, dζ / 2, val)
+        su, sv = round(Int, (U - c) / 2), round(Int, (V - c) / 2)
+        (su == sv == 0 || iter == 3) && break
+        i, j, U, V = mod1(i + su, mtheta), mod1(j + sv, nzeta), U - 2su, V - 2sv
+    end
+    q = interpolate_patch(patch, U, V, val)[1]
+    d, hθ, hζ = norm(r - q.r), norm(q.rθ) * dθ, norm(q.rζ) * dζ
+    d < 1e-3 * min(hθ, hζ) && throw(ArgumentError("plasma and wall touch (gap $(d) m)"))
+    return (; i, j, U, V, d, hθ, hζ)
+end
+
+"""
+    add_near_correction!(ws, quad, r_obs, i, j, U, V, radial, Val(N))
+
+Add the near-field correction of the row in `ws` about source point `(U, V)` of the upsampled patch about collocation
+node `(i, j)`, which `ws.patch` already holds: polar quadrature on the radial nodes `radial`
+([`foreach_polar_node`](@ref)), folded onto the row, minus the trapezoidal sum it replaces.
+"""
+function add_near_correction!(ws::KernelWorkspace{T}, quad::SourceQuadrature, r_obs::SVector{3,Float64}, i::Int, j::Int,
+    U::Float64, V::Float64, radial, ::Val{N}) where {T<:Number,N}
+    (; patch, M_grid, row_single, row_double) = ws
+    (; source, phases, patch_rad) = quad
+    populate_greenfunction = source isa PlasmaGeometry3D
+    UP_DIM, PATCH_DIM = size(patch, 1), 2 * patch_rad + 1
+    mtheta, nzeta = source.mtheta, source.nzeta
+    dθdζ = 4π^2 / (mtheta * nzeta)
+
+    # Polar quadrature, scattered onto the upsampled patch by each node's Lagrange stencil
+    fill!(M_grid, 0)
+    M_double, M_single = view(M_grid,:,:,1), view(M_grid,:,:,2)
+    foreach_polar_node(patch, U, V, radial, patch_rad, quad.ANG_DIM, Val(N)) do q, cu, cv, wu, wv, w
+        # Area-weighted normal from the interpolated tangents (single layer omits |∂r/∂θ × ∂r/∂ζ| because the RHS carries it)
+        near_single, near_double = laplace_kernel(r_obs, q.r, source.normal_orient * cross(q.rθ, q.rζ))
+        @inbounds for b in 1:N, a in 1:N
+            L = w * dθdζ * wu[a] * wv[b]
+            M_double[cu+a, cv+b] += near_double * L
+            populate_greenfunction && (M_single[cu+a, cv+b] += near_single * L)
+        end
+    end
+    # On a plasma–wall row the closest source node (i, j) can cross a seam out of period 0
+    period, j_fp = fldmod1(j, nzeta ÷ length(phases))
+    fold_patch_to_row!(row_double, M_double, quad, ws, i, j_fp, phases[period])
+    populate_greenfunction && fold_patch_to_row!(row_single, M_single, quad, ws, i, j_fp, phases[period])
+
+    # Remove the trapezoidal sum under the patch: net weight (1 - χ), with χ centred at (U, V) — offset (δu, δv) in
+    # collocation spacings from (i, j), so ±(patch_rad + 1) covers the ≤0.5-cell shift on plasma–wall rows
+    δu, δv = (U - (UP_DIM - 1) / 2) / 2, (V - (UP_DIM - 1) / 2) / 2
+    @inbounds for b in (-patch_rad-1):(patch_rad+1), a in (-patch_rad-1):(patch_rad+1)
+        χ = patch_pou(hypot(a - δu, b - δv) / patch_rad, PATCH_DIM)
+        χ == 0 && continue
+        idx_src = periodic_wrap(i + a, mtheta) + mtheta * (periodic_wrap(j + b, nzeta) - 1)
+        d_src, idx_col = quad.period_col[idx_src]
+        far_single, far_double = laplace_kernel(r_obs, quad.points[idx_src], quad.normals[idx_src])
+        populate_greenfunction && (row_single[idx_col] -= phases[d_src] * (far_single * χ * dθdζ))
+        row_double[idx_col] -= phases[d_src] * (far_double * χ * dθdζ)
+    end
+end
+
+"""
+    kernel_row!(ws, quad, observer, idx_obs)
+
+Fill `ws.row_double` (and `ws.row_single` for a plasma source) with observer `idx_obs`'s operator row: trapezoidal rule
+over all sources, then the near-field correction about the observer (same surface) or about the closest source point.
+"""
+function kernel_row!(ws::KernelWorkspace, quad::SourceQuadrature, observer, idx_obs::Int)
+    (; patch, row_single, row_double) = ws
+    (; source, phases) = quad
+    populate_greenfunction = source isa PlasmaGeometry3D
+    dθdζ = 4π^2 / (source.mtheta * source.nzeta)
+    fill!(row_double, 0)
+    populate_greenfunction && fill!(row_single, 0)
+
+    i_obs = mod1(idx_obs, observer.mtheta)
+    j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
+    r_obs = SVector{3}(@view observer.r[idx_obs, :])
+
+    # Far field: trapezoidal rule over all sources (the kernels return zero at r_src = r_obs); fold each source's field
+    # period onto period 0
+    @inbounds for idx_src in eachindex(quad.points)
+        far_single, far_double = laplace_kernel(r_obs, quad.points[idx_src], quad.normals[idx_src])
+        d, idx_col = quad.period_col[idx_src]
+        populate_greenfunction && (row_single[idx_col] += phases[d] * (far_single * dθdζ))
+        row_double[idx_col] += phases[d] * (far_double * dθdζ)
+    end
+
+    if observer === source
+        # Same surface: polar quadrature with singular correction about the observer, at the centre of its upsampled patch
+        extract_patch!(patch, quad.points_up, 2 * i_obs - 1, 2 * j_obs - 1, 2 * source.mtheta, 2 * source.nzeta, size(patch, 1))
+        c = 2.0 * quad.patch_rad
+        add_near_correction!(ws, quad, r_obs, i_obs, j_obs, c, c, quad.self_radial, quad.self_order)
+    else
+        # Cross surface: the periodic trapezoidal sum only needs a correction if the observer is close to a source point
+        node = nearest_source_node(quad, r_obs)
+        if node.d <= NEAR_GAP * node.h
+            # Close cross-surface: polar patch centred on the closest source point, with radial nodes sinh-graded to the gap
+            cp = closest_source_point!(patch, quad, r_obs, node.i, node.j)
+            # Kernel peak width in normalized patch radius ρ ∈ [0, 1], using min(hθ, hζ) for the sharpest polar direction
+            ε = cp.d / (quad.patch_rad * min(cp.hθ, cp.hζ))
+            add_near_correction!(ws, quad, r_obs, cp.i, cp.j, cp.U, cp.V, sinh_nodes(ε, 0.0, 1.0, quad.cross_radial_rule), quad.cross_order)
+        end
+    end
+
+    # Normalize so the Green's-identity term is a unit shift and the exterior/interior jump is 2I, as in the 2D kernel
+    row_double ./= 2π
+    populate_greenfunction && (row_single ./= 2π)
+end
+
+"""
     compute_3D_kernel_matrices!(grad_blocks, green_blocks, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, phases, sym_basis=nothing)
 
 3D single- and double-layer kernels with Malhotra's polar singular correction (PPCF 62 (2020) 024004).
 
-Far field: trapezoidal rule. Near field: polar quadrature blended by a partition of unity, on source data
-upsampled 2× by trigonometric interpolation.
+Far field: trapezoidal rule. Near field ([`kernel_row!`](@ref), [`add_near_correction!`](@ref)): polar quadrature blended
+by a partition of unity, on source data upsampled 2× by trigonometric interpolation, about the observer on Gauss radial
+nodes, or for a plasma–wall row about the closest source point on sinh-mapped ones. Plasma–wall rows more than `NEAR_GAP`
+source node spacings away keep the trapezoidal rule alone, as in 2D.
 
 A source in field period `d` is accumulated onto the period-0 column with weight `phases[d+1]`, so
 the block-circulant reduction is written in and the full-torus source blocks are never stored.
@@ -346,124 +345,39 @@ function compute_3D_kernel_matrices!(
     num_points = observer.mtheta * observer.nzeta
     @assert num_points % length(phases) == 0 "full-torus grid ($num_points points) is not divisible by nfp ($(length(phases)))"
     num_points_per_fp = num_points ÷ length(phases) # observer/source points in one field period
-    dθdζ = 4π^2 / num_points
 
-    # Surface sub-block of the operator this call fills
-    col_index = (source isa PlasmaGeometry3D ? 1 : 2)
-    row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
-
-    # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
+    # Surface sub-block of the operator this call fills; 𝒢 is only needed for a plasma source (Chance 1997 eqs. 26–27)
     populate_greenfunction = source isa PlasmaGeometry3D
+    col_index = populate_greenfunction ? 1 : 2
+    row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
 
     # Each reflection pair's second row follows from its first, so only the representatives are evaluated
     observers = sym_basis === nothing ? (1:num_points_per_fp) : sym_basis.pair_reps
     sym_basis === nothing || @assert isodd(INTERP_ORDER) "stellarator symmetry needs an odd INTERP_ORDER; an even stencil is not π-rotation equivariant"
 
-    # Clamp the patch on coarse grids, with a warning.
-    # Bound once into a new name: reassigning PATCH_RAD inside the branch would box it in the threaded closure below.
+    # Clamp the patch on coarse grids, with a warning
     patch_rad = min(PATCH_RAD, (min(source.mtheta, source.nzeta) - 1) ÷ 2)
     if patch_rad < PATCH_RAD
         @warn "PATCH_RAD=$(PATCH_RAD) is greater than half the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $(patch_rad), be sure to check if outputs are converged. This can be avoided by setting mtheta and nzeta to be greater than $(2 * PATCH_RAD + 1)."
     end
-
-    quad_data = get_singular_quadrature(patch_rad, RAD_DIM, INTERP_ORDER)
-    (; PATCH_DIM, UP_DIM, ANG_DIM, Ppou, Gpou, P2G) = quad_data
-
-    # Source r, ∂r/∂θ, ∂r/∂ζ on the 2× upsampled grid, where node 2i-1 is collocation node i
-    Uθ, Uζ = trig_upsample_matrix(source.mtheta), trig_upsample_matrix(source.nzeta)
-    src_up = SVector{9}.(eachrow(trig_upsample(hcat(source.r, source.dr_dθ, source.dr_dζ), Uθ, Uζ, source.mtheta, source.nzeta)))
-
-    # Upsampling restricted to the patch about the first node, with the field periods folded onto period 0 in ζ (see `scatter_polar_to_row!`)
-    Trow = eltype(phases)
-    nzeta_fp = source.nzeta ÷ length(phases)
-    Uθ_patch = Uθ[periodic_wrap.((1:UP_DIM) .- 2 * patch_rad, 2 * source.mtheta), :]
-    Uζ_patch = zeros(Trow, nzeta_fp, UP_DIM)
-    for i in 1:UP_DIM, d in eachindex(phases), j in 1:nzeta_fp
-        Uζ_patch[j, i] += phases[d] * Uζ[periodic_wrap(i - 2 * patch_rad, 2 * source.nzeta), j+(d-1)*nzeta_fp]
-    end
-    wrap_phase = phases[min(2, end)]
-
-    # Source point and normal packed per node, and each node's (field period, period-0 column), read on every observer row
-    src = [SVector{6}(source.r[k, 1], source.r[k, 2], source.r[k, 3], source.normal[k, 1], source.normal[k, 2], source.normal[k, 3]) for k in 1:num_points]
-    period_col = [fldmod1(k, num_points_per_fp) for k in 1:num_points]
+    quad = SourceQuadrature(source, phases, patch_rad, RAD_DIM, INTERP_ORDER)
 
     # One operator row is accumulated per observer, so the field-period fold and the basis change both happen before anything is stored.
     # `store_kernel_row!` needs two rows of scratch: the reconstructed partner and their combination.
     nsym = sym_basis === nothing ? 0 : 2 * num_points_per_fp
-    workspaces = [KernelWorkspace{Trow}(UP_DIM, RAD_DIM, ANG_DIM, source.mtheta, nzeta_fp, num_points_per_fp, nsym) for _ in 1:Threads.maxthreadid()]
+    workspaces = [KernelWorkspace{eltype(phases)}(4 * patch_rad + 1, source.mtheta, source.nzeta ÷ length(phases), num_points_per_fp, nsym)
+                  for _ in 1:Threads.maxthreadid()]
 
     # :static pins each task to its thread, so the threadid()-indexed scratch below stays private
     Threads.@threads :static for i_pair in eachindex(observers)
         ws = workspaces[Threads.threadid()]
-        (; patch, polar, M_polar_single, M_polar_double, row_single, row_double, sym_work) = ws
-        fill!(row_double, 0)
-        populate_greenfunction && fill!(row_single, 0)
-
-        # Convert linear index to 2D indices
-        idx_obs = observers[i_pair]
-        i_obs = mod1(idx_obs, observer.mtheta)
-        j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
-        r_obs = SVector(observer.r[idx_obs, 1], observer.r[idx_obs, 2], observer.r[idx_obs, 3])
-
-        # Far field: trapezoidal rule over all sources (the kernels return zero at r_src = r_obs)
-        @inbounds for idx_src in 1:num_points
-            # Evaluate kernels at grid points
-            s = src[idx_src]
-            far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], s[1], s[2], s[3], s[4], s[5], s[6])
-
-            # Periodic trapezoidal rule (constant weights); fold this source's field period onto period 0
-            d, idx_col = period_col[idx_src]
-            populate_greenfunction && (row_single[idx_col] += phases[d] * (far_single * dθdζ))
-            row_double[idx_col] += phases[d] * (far_double * dθdζ)
-        end
-
-        # Near field: polar quadrature with singular correction, on the upsampled patch about the observer
-        extract_patch!(patch, src_up, 2 * i_obs - 1, 2 * j_obs - 1, 2 * source.mtheta, 2 * source.nzeta, UP_DIM)
-
-        # Interpolate the geometry onto the polar nodes
-        interpolate_to_polar!(polar, patch, P2G)
-
-        # Evaluate kernels and apply quadrature weights: area element × POU, where POU contains rdrdθ already
-        @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-            q = polar[ir, ia] # = (r, ∂r/∂θ, ∂r/∂ζ) at this polar node
-            # n = ∂r/∂θ × ∂r/∂ζ from the interpolated tangents, need to reapply orientation
-            n = source.normal_orient * cross(q[SVector(4, 5, 6)], q[SVector(7, 8, 9)])
-            near_single, near_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], q[1], q[2], q[3], n[1], n[2], n[3])
-
-            M_polar_single[ir, ia] = near_single * Ppou[ir, ia] * dθdζ
-            M_polar_double[ir, ia] = near_double * Ppou[ir, ia] * dθdζ
-        end
-
-        # Scatter the singular correction on the polar nodes back to the collocation nodes
-        scatter_polar_to_row!(row_double, M_polar_double, P2G, Uθ_patch, Uζ_patch, ws, i_obs, j_obs, wrap_phase)
-        populate_greenfunction && scatter_polar_to_row!(row_single, M_polar_single, P2G, Uθ_patch, Uζ_patch, ws, i_obs, j_obs, wrap_phase)
-
-        # Remove the trapezoidal far field where the polar correction applies: Gpou = -χ, net weight is (1 - χ)
-        @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
-            # Map back to global indices
-            idx_pol = periodic_wrap(i_obs - patch_rad + i - 1, source.mtheta)
-            idx_tor = periodic_wrap(j_obs - patch_rad + j - 1, source.nzeta)
-            idx_src = idx_pol + source.mtheta * (idx_tor - 1)
-            d, idx_col = period_col[idx_src]
-
-            # Far field at this patch node (weighted by Gpou = −χ)
-            s = src[idx_src]
-            far_single, far_double = laplace_kernel(r_obs[1], r_obs[2], r_obs[3], s[1], s[2], s[3], s[4], s[5], s[6])
-
-            populate_greenfunction && (row_single[idx_col] += phases[d] * (far_single * Gpou[i, j] * dθdζ))
-            row_double[idx_col] += phases[d] * (far_double * Gpou[i, j] * dθdζ)
-        end
-
-        # Normalize so the Green's-identity term below is a unit shift and the exterior/interior jump is 2I, as in the 2D kernel
-        row_double ./= 2π
-        populate_greenfunction && (row_single ./= 2π)
-
-        store_kernel_row!(grad_blocks, sym_basis, row_double, sym_work, i_pair, row_index, col_index)
-        populate_greenfunction && store_kernel_row!(green_blocks, sym_basis, row_single, sym_work, i_pair, row_index, 1)
+        kernel_row!(ws, quad, observer, observers[i_pair])
+        store_kernel_row!(grad_blocks, sym_basis, ws.row_double, ws.sym_work, i_pair, row_index, col_index)
+        populate_greenfunction && store_kernel_row!(green_blocks, sym_basis, ws.row_single, ws.sym_work, i_pair, row_index, 1)
     end
 
     # Volume-integral term of Green's identity; invariant under the basis change, so it is the same unit shift on every block
-    if typeof(source) == typeof(observer)
+    if observer === source
         for (b, H) in enumerate(grad_blocks)
             nsize = sym_basis === nothing ? num_points_per_fp : sym_basis.block_sizes[b]
             for i in 1:nsize
