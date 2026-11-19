@@ -37,6 +37,26 @@ foreach(r -> save_to_hdf5("gpec.h5", r), (pe, kf, ef, tear))
 
 The [Workflow](workflow.md) page describes what each stage computes; the module pages document the keywords, which are the deck keys of the matching section.
 
+## Inspecting a result
+
+Each result prints a short summary at the REPL: its headline numbers, which optional products it carries and, when one is missing, why. Arrays are summarized by size or range, never printed. Inside a container, such as the named tuple `main` returns, a result prints on one line.
+
+```julia-repl
+julia> ffs
+ForceFreeStatesResult  Riccati, ideal closure
+  Physics            ideal MHD
+  Modes              n = 1, m = -4:3 (8 total)
+  Domain             ψ ∈ [0.0001, 0.9995], q_lim = 3.262
+  Surfaces           2: 2/1 @ ψ = 0.1221, 3/1 @ ψ = 0.8804
+  Fixed boundary     not reported (the Riccati (S, I) history cannot show crossings)
+  Free boundary      stable: et₁ = 16.4, ep₁ = 14.04, ev₁ = 2.365, vacuum λ = 2.315
+  Δ′_ii (ψ_N)        2/1: 0.1781, 3/1: -215.7
+  Solution           not computed (Riccati stores no ξ profiles)
+  Wall               ConformalWall, standoff = 0.2415 a
+```
+
+The fields themselves are documented in each type's docstring.
+
 ## Saving and rerunning
 
 `save_to_hdf5(target, result)` saves any stage result; `target` is a path, which opens or creates the file, or an open HDF5 file or group, which stays owned by the caller.

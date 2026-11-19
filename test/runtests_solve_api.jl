@@ -1,5 +1,6 @@
 using TOML
 using HDF5
+include("display_check.jl")
 
 # The scripting API: `PlasmaEquilibrium` / `solve(eq, alg)` / `perturbed_equilibrium` must run the
 # same pipeline the TOML driver does. Every assertion is anchored on the coarse TJ fixture
@@ -609,6 +610,7 @@ using HDF5
                 open(io -> TOML.print(io, ntv_deck), joinpath(dir, "gpec.toml"), "w")
                 reference = GPEC.main([dir])
                 @test reference.kinetic isa KineticForcesResult && reference.kinetic.pe === reference.pe
+                _check_display(reference.kinetic)
 
                 kf = kinetic_torque(reference.pe, GPEC.kinetic_forces_control(ntv_deck))
                 @test sort!(collect(keys(kf.total.method_results))) == sort!(collect(keys(reference.kinetic.total.method_results)))
