@@ -320,9 +320,10 @@ end
         @test all(tol[:, 2, 2] .≈ 1e-14)
         @test FFS.column_abstol!(tol, u, 1e-6) === tol
         @test all(FFS.column_abstol(zeros(ComplexF64, 2, 2, 2), 1e-6) .> 0)
-        # Pin the defaults: every shipped deck sets both, so the harness would not catch a revert
+        # Pin the defaults: the harness decks do not exercise them, so it would not catch a revert
         c = FFS.ForceFreeStatesControl()
         @test c.algorithm.renorm_threshold == 1e3
+        @test Forward().renorm_threshold == 1e6
         @test c.algorithm.save_interval == 1
     end
 
@@ -384,6 +385,16 @@ end
         @test_throws ErrorException FFS.move_start_off_rational!(intr, ctrl)
     end
 
+    @testset "plasma_energy_matrix pivots on u₁" begin
+        # Graded columns: `u₂ / u₁` is off by ~0.15 here, the LU of u₁ by ~1e-16
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        L = [i == j ? 1.0 + 0im : i > j ? 0.8cis(i + 2j) : 0.0im for i in 1:4, j in 1:4]
+        U1 = (L .* exp10.(range(110, 0; length=4))')[4:-1:1, :]
+        A = [cis(0.3i * j) / (i + j) for i in 1:4, j in 1:4]
+        W = A + A'
+        @test FFS.plasma_energy_matrix(cat(U1, W * U1; dims=3), 2.0) ≈ W / 4 rtol = 1e-12
+    end
+
     @testset "compute_solution_norms!" begin
         mpert = 2
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
@@ -420,6 +431,16 @@ end
         odet.u[:, 2, 1] .= [1, 0]      # small norm
         GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         @test odet.new == true  # implies fixup ran
+
+        # Case 4b: a large norm spread with independent columns does not reduce; nearly parallel columns do
+        odet.new = false
+        odet.unorm0 = ones(intr.mpert)
+        odet.u[:, :, 1] .= [1e6 0; 0 1]
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        @test odet.new == false
+        odet.u[:, :, 1] .= [1 1; 0 1e-7]
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        @test odet.new == true
 
         # Case 5: Trigger fixup via sing_flag
         odet.new = false

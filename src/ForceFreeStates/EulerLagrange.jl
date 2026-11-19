@@ -300,7 +300,7 @@ end
     forward_eulerlagrange_integration(ctrl, equil, mats, intr; verbose=intr.verbose) -> (odet, nothing, nothing, nothing)
 
 Forward branch of [`eulerlagrange_integration`](@ref): integrates chunk by chunk from the axis,
-applying Gaussian reduction whenever a solution norm ratio exceeds `ctrl.algorithm.renorm_threshold` and undoing it
+applying Gaussian reduction whenever the condition number of u₁ exceeds `ctrl.algorithm.renorm_threshold` and undoing it
 via `transform_u!` at the end, so `odet.u_store` comes back dense in the axis basis. Call
 directly to force this branch regardless of `ctrl.algorithm`; `verbose` overrides
 `intr.verbose` for progress logging.
@@ -803,8 +803,8 @@ end
 """
     compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool; resonant_rows=Int[])
 
-Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when their
-growth since the last reduction exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
+Compute the column norms of u₁ and apply `apply_gaussian_reduction!` to `u` in place when the condition
+number of u₁ with unit columns exceeds `ctrl.algorithm.renorm_threshold`, and always when `sing_flag` is set.
 The first call after a reduction records reference norms; if `sing_flag` forces a reduction there, it keeps
 the previous reduction's pivot order. Errors if any norm is zero. Port of Fortran `ode_unorm`.
 
@@ -823,7 +823,7 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
     end
 
-    # A singular surface always reduces; otherwise reduce when the growth since the last reduction is too uneven
+    # A singular surface always reduces; otherwise reduce when u₁'s columns lose independence
     fix_required = sing_flag
     if odet.new
         odet.new = false
@@ -833,8 +833,8 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
             @views odet.unorm[odet.index[:, odet.ifix]] .= (intr.numpert_total-1):-1:0
         end
     else
-        odet.unorm ./= odet.unorm0
-        fix_required |= maximum(odet.unorm) / minimum(odet.unorm) > ctrl.algorithm.renorm_threshold
+        fix_required |= @views(cond(u[:, :, 1] ./ transpose(odet.unorm), 1)) > ctrl.algorithm.renorm_threshold
+        odet.unorm ./= odet.unorm0  # growth since the last reduction still sets the pivot order
     end
 
     if fix_required
