@@ -4,6 +4,8 @@ This repo ships a small team of specialized Claude Code subagents in `.claude/ag
 
 **Invoke an agent by name** for the matching job — e.g. *"review this with the fortran-physics-reviewer"* or *"run the regression-guardian against develop"*. Do **not** "consult all the agents" reflexively: that burns the token budget and produces noise. Pick the agent whose job matches the change.
 
+**Sessions started outside this repository.** Claude Code registers these agents only when the session starts in this repository. From a session started elsewhere (for example, a parent directory that holds this repository as a sub-repository), spawn a general-purpose agent and paste the agent file's body (everything below its front matter) at the top of its prompt, with the model its front matter names. Do not substitute a hand-written checklist: the files carry repo-specific checks (FastInterpolations search hints, closed-form roots of cubic spline cells) that a generic review misses.
+
 ## Roster
 
 | Agent | Model | Role — invoke when… |

@@ -64,5 +64,5 @@ axislegend(ax; position=:rb)
 
 save_doc_figure(fig, "inner_layer", "backend_regime_map";
     script=basename(@__FILE__),
-    depends=["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/Galerkin.jl",
+    depends=["src/InnerLayer/ToroidalLayer/Ray.jl", "src/InnerLayer/ToroidalLayer/Galerkin.jl",
         "src/InnerLayer/GGJ/Shooting.jl"])

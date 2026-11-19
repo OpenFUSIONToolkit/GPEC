@@ -24,15 +24,15 @@ end
     TearingConfig(; kwargs...)
 
 Numerical scan and root-search settings for `solve(TearingProblem(...), model; config)`.
-GGJ uses physical `gamma_range` and `omega_range`, with positive growth rates and frequencies
+The toroidal-layer models (GGJ, CCC) use physical `gamma_range` and `omega_range`, with positive growth rates and frequencies
 in the result's convention: lab-frame ω for a coupled solve, each surface's E×B-frame ω for an
 uncoupled one. SLAYER uses its normalized Q box. The default
-classification selects threshold classification for SLAYER and winding classification for GGJ.
+classification selects threshold classification for SLAYER and winding classification for the toroidal-layer models.
 
 ## Fields
 
-  - `gamma_range`, `omega_range` - GGJ search bounds in 1/s and rad/s; both required for a GGJ solve.
-  - `scan_mode` - SLAYER scan method, `:amr` or `:brute_force`; GGJ uses AMR.
+  - `gamma_range`, `omega_range` - Toroidal-layer search bounds in 1/s and rad/s; both required for a GGJ or CCC solve.
+  - `scan_mode` - SLAYER scan method, `:amr` or `:brute_force`; the toroidal-layer models use AMR.
   - `Q_re_range`, `Q_im_range` - SLAYER normalized frequency search box.
   - `nre`, `nim` - Initial scan resolution.
   - `amr_passes`, `amr_max_cells` - AMR depth and cell cap.
@@ -41,7 +41,7 @@ classification selects threshold classification for SLAYER and winding classific
   - `filter_above_poles`, `filter_outside_re` - SLAYER contour filters.
   - `gamma_gap_threshold` - SLAYER growth-rate separation threshold in 1/s.
   - `polish_roots`, `validity_rtol` - Root polishing and SLAYER residual acceptance tolerance.
-  - `root_classification` - `:auto`, `:threshold`, or `:winding`; GGJ requires winding.
+  - `root_classification` - `:auto`, `:threshold`, or `:winding`; the toroidal-layer models require winding.
   - `store_scan` - Retain scan data in the result and HDF5 output.
 """
 @kwdef struct TearingConfig
