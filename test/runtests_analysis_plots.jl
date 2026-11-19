@@ -27,7 +27,9 @@ using TOML
     extractors = (
         (A.ForceFreeStates._mode_displacement_data, :solution_profiles), (A.ForceFreeStates._criterion_data, :fixed_boundary_criterion),
         (A.ForceFreeStates._energy_eigenvector_data, :free_boundary), (A.ForceFreeStates._delta_prime_data, :delta_prime),
-        (A.ForceFreeStates._cond_fbar_data, :kinetic_scan), (A.Equilibrium._global_data, :equilibrium),
+        (A.ForceFreeStates._cond_fbar_data, :kinetic_scan), (A.ForceFreeStates._energy_data, :free_boundary),
+        (A.ForceFreeStates._edge_scan_data, :edge_scan), (A.ForceFreeStates._ballooning_data, :ballooning_scan),
+        (A.Equilibrium._global_data, :equilibrium), (A.Equilibrium._profile_data, :equilibrium), (A.Equilibrium._geometry_data, :equilibrium),
         (A.PerturbedEquilibrium._coupling_data, :singular_coupling))
     _same(a::NamedTuple, b::NamedTuple) = keys(a) == keys(b) && all(_same(a[k], b[k]) for k in keys(a))
     _same(a::AbstractArray{<:Number}, b::AbstractArray{<:Number}) = size(a) == size(b) && isapprox(a, b; rtol=1e-10, nans=true)

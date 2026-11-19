@@ -2,7 +2,7 @@
 
 GPEC draws figures with [Makie](https://docs.makie.org). Makie is a weak dependency: the drawing code lives in the
 package extension `ext/GPECMakieExt/`, which loads when a session loads any Makie backend (`using CairoMakie` for
-files, `using GLMakie` for interactive windows). `src/Analysis/` holds the data extraction, the registry and the
+files, `using GLMakie` for interactive windows); with Makie loaded but no backend, a plot call throws and says so. `src/Analysis/` holds the data extraction, the registry and the
 public `plot_*` functions, and calls the extension's drawing functions through `Analysis._draw`.
 
 ## Adding an Analysis plot
