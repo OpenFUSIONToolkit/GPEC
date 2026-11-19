@@ -10,8 +10,8 @@ GGJ layer inputs; the SLAYER layer closures belong to [`SLAYERModel`](@ref) and 
 [`TearingConfig`](@ref). The plasma itself (profiles, species,
 Z_eff and transport defaults, confinement time and resistivity closure) is the equilibrium's kinetic
 data, `ffs.equil.kinetic` (see [`KineticProfileData`](@ref)), so every layer model sees one plasma.
-Solve with `solve(problem, GGJModel(); config)` or `solve(problem, SLAYERModel(); config)`.
-GGJ needs the raw Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`).
+Solve with `solve(problem, model; config)` for a toroidal layer model (`GGJModel()`, `CCCModel()`) or `SLAYERModel()`.
+A toroidal layer model needs the raw Δ′ matrix (Riccati with `vac_flag=true`, or Galerkin with `rpec_flag=true`).
 Both models report lab-frame roots from each surface's E×B rotation.
 
 ## Fields
@@ -83,7 +83,7 @@ end
 function CommonSolve.solve(prob::TearingProblem, model::SLAYERModel; config::TearingConfig=TearingConfig())
     config.gamma_range === nothing && config.omega_range === nothing || throw(ArgumentError("SLAYER uses Q_re_range and Q_im_range."))
     prob.eta === nothing && prob.rho === nothing && prob.gamma == 5 / 3 ||
-        throw(ArgumentError("SLAYER derives its layer inputs from transport profiles; eta, rho, and gamma overrides are GGJ settings."))
+        throw(ArgumentError("SLAYER derives its layer inputs from transport profiles; eta, rho, and gamma overrides are toroidal-layer (GGJ, CCC) settings."))
     ffs = prob.ffs
     equil = ffs.equil
     surfaces = ffs.surfaces

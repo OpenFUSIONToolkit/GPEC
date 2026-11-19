@@ -108,18 +108,18 @@ end
     @testset "ode_matrix: ordinary point and type-generic build" begin
         Q = 5.0im
         # x = 0 is an ordinary point: the coefficient matrix is finite there.
-        M0 = GGJ.ode_matrix(p, Q, 0.0)
+        M0 = IL.ToroidalLayer.ode_matrix(p, Q, 0.0)
         @test all(isfinite, M0)
         @test M0[1, 4] == 1 && M0[2, 5] == 1 && M0[3, 6] == 1   # v' = (Ψ',Ξ',Υ') block
         # The extended-precision build agrees with the Float64 build.
-        Md = GGJ.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
-        @test ComplexF64.(Md) ≈ GGJ.ode_matrix(p, Q, 0.3) rtol = 1e-12
+        Md = IL.ToroidalLayer.ode_matrix(Complex{GGJ.Double64}, p, Q, 0.3)
+        @test ComplexF64.(Md) ≈ IL.ToroidalLayer.ode_matrix(p, Q, 0.3) rtol = 1e-12
     end
 
     @testset "decaying_pair is an orthonormal 6×2 frame" begin
         Q = 5.0im
         θ = angle(Q) / 4
-        E = GGJ.decaying_pair(p, Q, θ, 60.0)
+        E = IL.ToroidalLayer.decaying_pair(p, Q, θ, 60.0)
         @test size(E) == (6, 2)
         @test all(isfinite, E)
         @test E' * E ≈ I(2) atol = 1e-10          # columns orthonormal
@@ -143,6 +143,58 @@ end
         @test conv.Δ[1] ≈ Δ.interchange rtol = 1e-6   # baseline == the plain solve
         @test conv.Δ[2] ≈ Δ.tearing rtol = 1e-6
         @test maximum(conv.spread) < 1e-4         # honest error bar is small here
+    end
+end
+
+# GGJ with power exponents its Wasow basis does not have, which the Wasow check below must catch.
+const TL = IL.ToroidalLayer
+struct _ShiftedExponents <: TL.ToroidalLayerParameters
+    g::IL.GGJParameters
+end
+TL.layer_rows(::Type{CT}, p::_ShiftedExponents, Q::Number, x::Number) where {CT<:Complex} = TL.layer_rows(CT, p.g, Q, x)
+TL.wasow_basis(p::_ShiftedExponents, Q::ComplexF64) = TL.wasow_basis(p.g, Q)
+TL.power_exponents(p::_ShiftedExponents) = TL.power_exponents(p.g) .+ 0.5
+TL.default_ray_angle(p::_ShiftedExponents, Q::ComplexF64) = TL.default_ray_angle(p.g, Q)
+
+# A model's Wasow basis describes its own equations: J₀ splits the power-like (1:2) from the exponential (3:6)
+# subspace, x(A₀ + A₁/x² + A₂/x⁴) with A = TJT⁻¹ is its ode_matrix in the state u = (xΨ, Ξ, Υ, (xΨ)'/x, Ξ'/x, Υ'/x),
+# and the series built from it solves the equations to round-off (GW2020 Eq. 54).
+function _wasow_matches_equations(p, Q)
+    T, J, _ = TL.wasow_basis(p, Q)
+    x = 1.7 + 0.4im
+    Sx = Matrix{ComplexF64}(Diagonal([x, 1, 1, 1, 1 / x, 1 / x]))
+    Sx[4, 1] = 1 / x
+    dSx = zeros(ComplexF64, 6, 6)
+    dSx[1, 1] = 1
+    dSx[4, 1] = -1 / x^2
+    dSx[5, 5] = dSx[6, 6] = -1 / x^2
+    A = [T * J[i] / T for i in 1:3]
+    far = x * (A[1] + A[2] / x^2 + A[3] / x^4)
+    c = TL.build_asymptotics(p, Q; kmax=12)
+    return (; split=norm(J[1][1:2, 3:6]) + norm(J[1][3:6, 1:2]),
+        equations=norm((Sx * TL.ode_matrix(p, Q, x) + dSx) / Sx - far) / norm(far),
+        series=maximum(TL.asymptotic_residual(c, 10.0 * cis(TL.default_ray_angle(p, Q)))))
+end
+
+@testset "ToroidalLayer interface" begin
+    q4 = GGJ.q4_surface_benchmark()
+
+    @testset "Wasow basis matches the layer equations" begin
+        for Q in (0.07 + 0.11im, 0.5im)                 # the series converge by s = 10 at these |Q|
+            w = _wasow_matches_equations(q4, Q)
+            @test w.split < 1e-12 && w.equations < 1e-12 && w.series < 1e-12
+            # Power exponents that are not the roots of the Wasow power block give series that do not solve the equations.
+            @test _wasow_matches_equations(_ShiftedExponents(q4), Q).series > 1e-8
+        end
+    end
+
+    @testset "backend options and model forwarding" begin
+        @test :cfl in TL.backend_options(:ray) && :nx in TL.backend_options(:galerkin)
+        @test_throws ArgumentError IL.GGJModel(; solver=:ray, nx=64)
+        γ = 5.0im * GGJ.q0(q4)
+        @test IL.solve_inner(IL.GGJModel(; cfl=0.1), q4, γ) == IL.solve_inner(IL.GGJModel(), q4, γ; cfl=0.1)
+        @test IL.solve_inner(IL.GGJModel(; solver=:galerkin, nx=256), q4, 0.1im * GGJ.q0(q4)) ==
+              IL.solve_inner(IL.GGJModel(; solver=:galerkin), q4, 0.1im * GGJ.q0(q4); nx=256)
     end
 end
 
@@ -182,4 +234,108 @@ end
     @test full.x[1] == 0 && full.Ψ[1, :] == c.Ψ[1, :] && full.Ξ[1, :] == c.Ξ[1, :]
     @test full.Ψ[2, 2] ≈ c.Ψ[1, 2] rtol = 1e-2      # odd Ψ is even, so smooth through x = 0
     @test full.certΔ < 1e-5
+end
+
+@testset "InnerLayer CCC (Cho, Choi & Choi drift-resistive layer)" begin
+    q4 = IL.GGJ.q4_surface_benchmark()
+    ccc(; Qstar=0.0, mperp=1.0) = IL.CCCParameters(q4, Qstar, mperp)
+    reldiff(a, b) = maximum(abs.(a .- b) ./ abs.(b))
+    p = ccc(; Qstar=0.5, mperp=1.4)
+
+    @testset "Wasow basis matches the layer equations" begin
+        for Q in (0.07 + 0.11im, 0.5im)
+            w = _wasow_matches_equations(p, Q)
+            @test w.split < 1e-12 && w.equations < 1e-12 && w.series < 1e-12
+        end
+    end
+
+    @testset "first-order Ξ coefficient matches the closed form" begin
+        # Q* enters the power-like solutions first through Ξ = x^{r−2}(1 + b₁/x² + …):
+        # b₁ − b₁^GGJ = −(i/8) K Q Q* (2s − 1)(1 + 4E + 4F + 4s + 4s²), s = ±√(−D_I) for the large/small column.
+        Q = 0.07 + 0.11im
+        cK = TL.build_asymptotics(ccc(; Qstar=0.3), Q; kmax=12)
+        cG = TL.build_asymptotics(q4, Q; kmax=12)
+        for (col, s) in ((1, GGJ.p1(q4)), (2, -GGJ.p1(q4)))
+            ratio(c, x) = (ua = TL.physical_ua_dua(c, x)[1]; x * ua[2, col] / ua[1, col])
+            est(x) = x^2 * (ratio(cK, x) - ratio(cG, x))
+            Δb1 = (4 * est(200.0) - est(100.0)) / 3
+            @test Δb1 ≈ -(im / 8) * q4.K * Q * 0.3 * (2s - 1) * (1 + 4q4.E + 4q4.F + 4s + 4s^2) rtol = 1e-5
+        end
+    end
+
+    @testset "Δ is independent of the contour angle" begin
+        for Q in (0.5 + 0.5im, 5.0im)
+            r = TL.solve_ray(p, Q)
+            θ = TL.default_ray_angle(p, Q)
+            @test TL.ray_angle_admissible(p, Q, θ)
+            @test reldiff(TL.solve_ray(p, Q; θ=0.5 * θ).Δ, r.Δ) < 1e-5
+        end
+        # Pin at Q = 5i (delta_convergence spread ~1e-7 there).
+        Δ = IL.solve_inner(IL.CCCModel(), p, 5.0im * GGJ.q0(q4))
+        @test Δ.interchange ≈ 433.38897 + 2358.8069im rtol = 1e-5
+        @test Δ.tearing ≈ 22.378564 + 127.277im rtol = 1e-5
+    end
+
+    @testset "reduces to GGJ" begin
+        for Q in (0.1 + 0.05im, 5.0im)
+            g = TL.solve_ray(q4, Q)
+            @test reldiff(TL.solve_ray(ccc(), Q).Δ, g.Δ) < 1e-8          # same equations, separate basis and split
+        end
+        # The departure from GGJ is linear in Q* and in M⊥/M − 1: doubling the step doubles it. At Q = 5i the M⊥/M
+        # effect is ~1e-8, below the solver's accuracy.
+        withQstar(x) = ccc(; Qstar=x)
+        withmperp(x) = ccc(; mperp=1 + x)
+        for (Q, models) in ((0.1 + 0.05im, (withQstar, withmperp)), (5.0im, (withQstar,)))
+            Δ0 = TL.solve_ray(q4, Q).Δ
+            for f in models
+                Δ1, Δ2 = TL.solve_ray(f(1e-3), Q).Δ, TL.solve_ray(f(2e-3), Q).Δ
+                @test maximum(abs.((Δ2 .- Δ0) ./ (2 .* (Δ1 .- Δ0)) .- 1)) < 1e-2
+            end
+        end
+    end
+
+    @testset "Kim, Cho & Choi (1988) Fig. 2b tearing root" begin
+        # Their surface at Q* = 0.05: the zero of Δ₋ on branch A, read from the figure as −0.019 − 0.062i.
+        kim = IL.CCCParameters(; E=-0.01, F=0.0, G=100.0, H=0.0, K=100.0, taua=1.0, taur=1.0, Qstar=0.05)
+        Δm(Q) = TL.solve_ray(kim, Q).Δ[2]
+        a, b = -0.0184 - 0.0626im, (-0.0184 - 0.0626im) * (1 + 1e-3)
+        fa, fb = Δm(a), Δm(b)
+        for _ in 1:20
+            abs(b - a) < 1e-10 && break
+            a, fa, b = b, fb, b - fb * (b - a) / (fb - fa)
+            fb = Δm(b)
+        end
+        @test b ≈ -0.0183834 - 0.0626106im rtol = 1e-5
+        @test abs(b - (-0.019 - 0.062im)) < 2e-3
+    end
+
+    @testset "model and guards" begin
+        @test IL.CCCModel() === IL.CCCModel{:ray}()
+        @test IL.model_name(IL.CCCModel()) == "ccc_ray"
+        @test_throws ArgumentError IL.CCCModel(; solver=:galerkin)
+        @test_throws ArgumentError IL.CCCModel(; nx=10)
+        @test_throws ArgumentError IL.CCCParameters(q4, 0.1, -1.0)
+        # Per-surface inputs live on the model: a number for every surface or one value per surface.
+        m = IL.CCCModel(; Qstar=[0.1, 0.2], mperp=1.2)
+        @test m.Qstar == [0.1, 0.2] && m.mperp === 1.2 && m.options == (;)
+        @test_throws ArgumentError IL.CCCModel(; mperp=0.0)
+        @test_throws "Qstar has length 2, expected 3" IL.check_layer_inputs(m, 3)
+        @test IL.check_layer_inputs(m, 2) === nothing && IL.check_layer_inputs(IL.GGJModel(), 3) === nothing
+        # A singular surface and equilibrium as layer_parameters reads them: the resistive geometry and the flux scales.
+        surf = (; restype=(; E=q4.E, F=q4.F, H=q4.H, K=q4.K, M=1.0, v1_local=1.0, avg_bsq=1.0, avg_bsq_over_dpsisq=1.0, p_local=1.0),
+            psifac=0.5, n=[1], q1=1.0)
+        eq = (; psio=1.0, params=(; volume=1.0), kinetic=nothing)
+        @test IL.layer_parameters(m, surf, eq; eta=1e-7, rho=1e-7, ising=2).Qstar == 0.2
+        @test [c.first for c in IL.layer_parameter_columns([ccc(; Qstar=0.3)])] == ["E", "F", "G", "H", "K", "M", "tau_A", "tau_R", "dVdpsi", "Q_star", "M_perp_ratio"]
+        # Just past Re Q ≈ −0.041 a root of Kim Eq. 2 crosses the negative real axis: the default angle stays continuous, and the
+        # slower family, still decaying along the ray, no longer decays on the real axis, so the solve is refused.
+        p13 = ccc(; Qstar=1.3)
+        θa, θb = TL.default_ray_angle(p13, -0.040 + 0.5im), TL.default_ray_angle(p13, -0.042 + 0.5im)
+        @test abs(θb - θa) < 1e-2
+        @test TL.ray_angle_admissible(p13, -0.040 + 0.5im, θa)
+        @test TL.parabolic_rate(p13, -0.042 + 0.5im, θb) > 0 && !TL.ray_angle_admissible(p13, -0.042 + 0.5im, θb)
+        @test_throws "stop decaying between the real axis and the ray" TL.solve_ray(p13, -0.042 + 0.5im)
+        @test_throws "must be finite" IL.CCCParameters(q4, NaN, 1.0)
+        @test IL.CCCParameters(; E=q4.E, F=q4.F, G=q4.G, H=q4.H, K=q4.K, taua=q4.taua, taur=q4.taur, Qstar=0.5).ggj.E == q4.E
+    end
 end
