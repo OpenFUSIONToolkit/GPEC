@@ -14,14 +14,14 @@ Serial forward integration with Gaussian reduction and dense solution profiles.
 ## Fields
 
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration.
-  - `renorm_threshold::Float64` - Column-norm growth threshold for Gaussian reduction or Riccati renormalization.
+  - `renorm_threshold::Float64` - Gaussian reduction fires when the condition number of u₁, columns normalized, exceeds this.
   - `numsteps_init::Int` - Initial capacity for stored ODE solution steps.
   - `numunorms_init::Int` - Initial capacity for solution-normalization records; grown on demand.
   - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.
 """
 @kwdef struct Forward <: AbstractIntegrator
     eulerlagrange_tolerance::Float64 = 1e-8
-    renorm_threshold::Float64 = 1e3
+    renorm_threshold::Float64 = 1e6
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
     save_interval::Int = 1
@@ -35,7 +35,7 @@ Chunked Riccati integration and the singular-surface boundary-value solve.
 ## Fields
 
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration.
-  - `renorm_threshold::Float64` - Column-norm growth threshold for Gaussian reduction or Riccati renormalization.
+  - `renorm_threshold::Float64` - Entry size above which the Riccati state is renormalized.
   - `numsteps_init::Int` - Initial capacity for stored ODE solution steps.
   - `numunorms_init::Int` - Initial capacity for solution-normalization records; grown on demand.
   - `save_interval::Int` - Save every Nth ODE step; always retain steps near rational surfaces.

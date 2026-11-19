@@ -51,7 +51,6 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 # Numerical settings of the forward integrator
 [Forward]
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
-renorm_threshold = 1e3        # Column-norm threshold that triggers solution renormalization
 
 [KineticForces]
 nutype = "zero"               # Collisionless operator — isolates the real-x-space collisionless energy integral

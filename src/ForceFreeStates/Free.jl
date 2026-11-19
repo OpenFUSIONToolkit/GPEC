@@ -87,6 +87,14 @@ downstream code consumes the stored ξ profiles.
 end
 
 """
+    plasma_energy_matrix(u, psio)
+
+Plasma energy matrix W_p = u₂u₁⁻¹/ψ₀² by pivoted LU of u₁. `u₂ / u₁` factors u₁ᴴ, whose rows carry the column-norm spread,
+so partial pivoting fails.
+"""
+plasma_energy_matrix(u::Array{ComplexF64,3}, psio::Real) = @views (u[:, :, 2] / lu(u[:, :, 1])) ./ psio^2
+
+"""
     compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> (wv, vac)
 
 Vacuum response matrix at the control surface `intr.psilim`, scaled by the singular factors
@@ -128,7 +136,7 @@ plasma/vacuum/total energies as a [`FreeBoundaryResult`](@ref).
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     wp = zeros(ComplexF64, numpert_total, numpert_total)
-    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    wp .= plasma_energy_matrix(odet.u, equil.psio)
 
     wv, vac = compute_scaled_wv(ctrl, equil, intr)
 
@@ -267,7 +275,7 @@ NamedTuple `(total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue)`
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
     # Compute plasma response matrix
-    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    wp .= plasma_energy_matrix(odet.u, equil.psio)
 
     # Retrieve raw vacuum matrix from spline and apply singfac analytically at the local q.
     # Singfac is not pre-applied in the spline (see free_compute_wv_spline) to avoid interpolating

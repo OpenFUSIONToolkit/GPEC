@@ -16,8 +16,8 @@ using TOML
                 return h5open(h5 -> read(h5["ForceFreeStates/FreeBoundaryStability/eigenmode_energies"])[1], joinpath(workdir, "gpec.h5"), "r")
             end
         end
-        et_ref = total_energy(1e3)
-        for renorm_threshold in (2.0, 3.0, 5.0, 10.0)
+        et_ref = total_energy(1.0)  # 1.0 reduces every step
+        for renorm_threshold in (2.0, 3.0, 5.0, 10.0, 1e3, 1e6, 1e8)
             @test total_energy(renorm_threshold) ≈ et_ref rtol = 1e-6
         end
     end

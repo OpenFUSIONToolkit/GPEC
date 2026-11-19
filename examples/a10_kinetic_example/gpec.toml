@@ -62,7 +62,6 @@ singfac_min = 1e-6             # Fractional distance from rational q at which id
 # Numerical settings of the forward integrator
 [Forward]
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
-renorm_threshold = 1e3         # Column-norm threshold that triggers solution renormalization
 
 [KineticForces]
 bounce_harmonic_max = 6        # Bounce-harmonic number
