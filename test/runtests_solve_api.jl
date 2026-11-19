@@ -695,19 +695,24 @@ include("display_check.jl")
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
             end
 
-            # The CCC layer under [Tearing], named by inner_model with Q* in [CCC].
+            # The CCC layer under [Tearing], named by inner_model with Q* in [CCC]. The run ends below q = 3, since each
+            # evaluation of the 3/1 layer costs many times the 2/1 layer's.
             mktempdir() do dir
-                ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs...)
+                ric = solve(equil, riccati; nn=1, wall=wall, ffs_kwargs..., qhigh=2.5)
                 n = length(ric.surfaces)
-                config = TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0), nre=4, nim=4, amr_passes=1)
+                config = TearingConfig(; gamma_range=(1600.0, 2600.0), omega_range=(-1500.0, 1500.0), nre=4, nim=4, amr_passes=1, store_scan=true)
                 api = solve(TearingProblem(ric; eta=fill(1e-7, n), rho=fill(1e-7, n)), CCCModel(; Qstar=fill(0.05, n)); config)
-                search = Dict{String,Any}("gamma_range" => [600.0, 2600.0], "omega_range" => [-1500.0, 1500.0], "nre" => 4, "nim" => 4, "amr_passes" => 1)
+                search = Dict{String,Any}("gamma_range" => [1600.0, 2600.0], "omega_range" => [-1500.0, 1500.0], "nre" => 4, "nim" => 4, "amr_passes" => 1,
+                    "store_scan" => true)
                 sections = Dict{String,Any}("CCC" => Dict{String,Any}("Qstar" => fill(0.05, n)),
                     "Tearing" => Dict{String,Any}("inner_model" => "CCC", "eta" => fill(1e-7, n), "rho" => fill(1e-7, n), "search" => search))
-                reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"), extra_sections=sections)]).tearing
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati", "qhigh" => 2.5), extra_sections=sections)]).tearing
 
-                @test reference.model === api.model && eltype(reference.params) <: GPEC.InnerLayer.CCCParameters
+                @test n == 1 && reference.model isa CCCModel{:ray} && reference.model.Qstar == api.model.Qstar
+                @test eltype(reference.params) <: GPEC.InnerLayer.CCCParameters && all(p -> p.Qstar == 0.05, reference.params)
                 @test isequal(reference.gamma, api.gamma) && isequal(reference.omega, api.omega)
+                # The box holds no root, so the determinant on the scan grid carries the comparison.
+                @test sort(abs.(only(reference.scan_data).Δ)) ≈ sort(abs.(only(api.scan_data).Δ)) rtol = 1e-8
             end
 
             # A forward solve has no Δ′ to match against, so the deck stops at parse time instead of after the solve.
