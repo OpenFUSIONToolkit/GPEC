@@ -11,9 +11,9 @@ const GL8_LAGRANGE_STENCILS = (lagrange_weights.(GL8_X .+ 1.0, Val(5)), lagrange
 # and per-n sinh/cosh cache are defined in PnQuadCache.jl.
 
 # Near plasma–wall rows (gap < NEAR_GAP node spacings) are integrated over ±NEAR_WINDOW node intervals about the source
-# point closest to the observer, on sinh-graded Gauss nodes: rules of 8–64 nodes, 8 per 2 units of the sinh variable
+# point closest to the observer, on sinh-graded Gauss nodes: rules of 8–64 nodes, 8 per unit of the sinh variable
 const NEAR_WINDOW = 6
-const NEAR_SINH = sinh_rule(8, 8, 2.0)
+const NEAR_SINH = sinh_rule(8, 8, 1.0)
 
 """
     compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, n)
