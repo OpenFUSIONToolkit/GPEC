@@ -26,7 +26,8 @@ function A._save(fig::Figure, path::AbstractString)
     backend = nameof(Makie.current_backend())
     backend === :GLMakie && ext in (".pdf", ".svg", ".eps") &&
         throw(ArgumentError("GLMakie writes PNG only; load CairoMakie (`using CairoMakie`) to save $ext"))
-    save(path, fig)
+    # A raster image keeps the pixel count it had at the design size.
+    ext in (".png", ".jpg", ".jpeg") ? save(path, fig; px_per_unit=2 / CANVAS_SCALE) : save(path, fig)
     return nothing
 end
 

@@ -12,11 +12,12 @@ _steps(m, a) = (vcat(m[1] - 1, m, m[end] + 1), vcat(0.0, a, 0.0))
 function _decade_ticks(lo, hi)
     k0, k1 = floor(Int, log10(lo)), ceil(Int, log10(hi))
     vals, labels = Float64[], Any[]
-    for k in k0:k1, f in (k1 - k0 <= 3 ? (1, 2, 5) : (1,))
+    for k in k0:k1, f in (k1 - k0 <= 2 ? (1, 2, 5) : (1,))
         v = f * 10.0^k
         lo <= v <= hi || continue
         push!(vals, v)
-        push!(labels, f == 1 ? rich("10", superscript(string(k))) : rich("$(f)×10", superscript(string(k))))
+        power = superscript(replace(string(k), "-" => "−"))
+        push!(labels, f == 1 ? rich("10", power) : rich("$(f)×10", power))
     end
     return (vals, labels)
 end
@@ -63,9 +64,9 @@ function EFA._plot_coil_sensitivities(labels, names, values, quantity, yscale)
     return themed() do
         xlabel, title = _SENSITIVITY_TEXT[quantity]
         fig = Figure()
-        ax = Axis(fig[1, 1]; xlabel, xscale=yscale === :log10 ? log10 : identity, xminorticksvisible=false, width=640)
+        ax = Axis(fig[1, 1]; xlabel, xscale=yscale === :log10 ? log10 : identity, xminorticksvisible=false, width=_px(640))
         omitted = _stem_rows!(ax, names, values, labels; log=yscale === :log10)
-        ax.height = 30 * (length(names) - omitted) + 30
+        ax.height = _px(30 * (length(names) - omitted) + 30)
         ax.title = omitted == 0 ? title : "$title ($omitted at roundoff not shown)"
         resize_to_layout!(fig)
         fig
@@ -74,7 +75,7 @@ end
 
 function EFA._plot_tolerance_pdf(data; corrected=true, normalize=false, xscale=:identity, show_batches=false)
     return themed() do
-        fig = Figure(; size=(820, 460))
+        fig = _figure((820, 460))
         # An as-designed overlap that is roundoff against the sampled mean (axisymmetric coils only) is not marked.
         designed(d) = d.abs_delta_total_as_designed > EFA._ROUNDOFF * d.abs_delta_sampled_mean
         d1 = data[1][2]
@@ -143,7 +144,7 @@ function EFA._plot_overlap_phasors(panels)
         end
         for c in contents(fig.layout)
             c isa GridLayout && for a in contents(c)
-                a isa Axis && (a.width = 520; a.height = 400)
+                a isa Axis && (a.width = _px(520); a.height = _px(400))
             end
         end
         resize_to_layout!(fig)
@@ -158,7 +159,7 @@ function EFA._plot_tolerance_budget(labels, parts, worst, mc)
         total = sum(p[2] for p in parts)
         factor, scale = _power(total)
         m = length(labels)
-        fig = Figure(; size=(900, max(380, 120 + 26 * m)))
+        fig = _figure((900, max(380, 120 + 26 * m)))
         ax = Axis(fig[1, 1]; yticks=(1:m, labels), xlabel=rich("worst-case contribution to |δ|", _unit(scale, "")), ygridvisible=false,
             title="Tolerance budget: Σ = $(_num(worst)) worst case", limits=((0, nothing), (0.4, m + 0.6)))
         x = repeat(1:m; outer=length(parts))
@@ -189,7 +190,7 @@ const _TAPS = ("shift x", "shift y", "shift z", "tilt x", "tilt y", "tilt z")
 
 function EFA._plot_linearity_residuals(panels, at, yscale)
     return themed() do
-        fig = Figure(; size=(820 * length(panels), 500))
+        fig = _figure((820 * length(panels), 500))
         for (j, p) in enumerate(panels)
             # Coil sets whose residuals are all zero have nothing to draw.
             shown = [any(v -> isfinite(v) && v > 0, p.residual[:, i]) for i in eachindex(p.names)]
@@ -224,7 +225,7 @@ function EFA._plot_linearity_check(check)
         scales = sort(unique(check.scale))
         positive = filter(v -> isfinite(v) && v > 0, vcat(check.relative_error, 1e-2))
         base = minimum(positive) / 3
-        fig = Figure(; size=(1000, 520))
+        fig = _figure((1000, 520))
         ax = Axis(fig[1, 1]; xticks=(1:length(names), names), xticklabelrotation=π / 6, yscale=log10, yminorticksvisible=false,
             ylabel=rich("|δ", subscript("actual"), " − δ", subscript("linear"), "| / |δ", subscript("linear"), " − δ", subscript("as designed"), "|"),
             title="Linear model error at finite displacements", limits=(nothing, (base, 3 * maximum(positive))))
@@ -288,7 +289,7 @@ _risk_scan(d) = _EF.ToleranceScan(d.scan_scale, d.scan_locking_probability_perce
 
 function EFA._plot_locking_risk(data; corrected=true, target_percent=nothing)
     return themed() do
-        fig = Figure(; size=(820, 460))
+        fig = _figure((820, 460))
         _risk_panel!(fig[1, 1], data; corrected, target_percent)
         fig
     end
@@ -344,7 +345,7 @@ end
 
 function EFA._plot_threshold_scaling(data)
     return themed() do
-        fig = Figure(; size=(860, 480))
+        fig = _figure((860, 480))
         _threshold_panel!(fig[1, 1], data)
         fig
     end
@@ -352,8 +353,8 @@ end
 
 function EFA._plot_dominant_mode_spectrum(data, modes)
     return themed() do
-        fig = Figure(; size=(820, 440))
-        ax = Axis(fig[1, 1]; xlabel="poloidal harmonic m", ylabel=rich("|V", subscript("m"), "|  (unit norm)"), title="Dominant resonant-coupling modes",
+        fig = _figure((820, 440))
+        ax = Axis(fig[1, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m", ylabel=rich("|V", subscript("m"), "|  (unit norm)"), title="Dominant resonant-coupling modes",
             limits=(nothing, (0, nothing)))
         styles = (:solid, :dash, :dot, :dashdot)
         for (j, (lbl, d)) in enumerate(data), k in modes
@@ -372,9 +373,9 @@ end
 
 function EFA._plot_applied_spectra(m, v, spectra; normalize=true)
     return themed() do
-        fig = Figure(; size=(820, 440))
+        fig = _figure((820, 440))
         factor, scale = normalize ? (1.0, "") : _power(reduce(vcat, (s for (_, s) in spectra)))
-        ax = Axis(fig[1, 1]; xlabel="poloidal harmonic m", ylabel=normalize ? "amplitude / its own peak" : rich("|b̃|", _unit(scale, "T")),
+        ax = Axis(fig[1, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m", ylabel=normalize ? "amplitude / its own peak" : rich("|b̃|", _unit(scale, "T")),
             title="Applied spectra against the dominant mode", limits=(nothing, (0, normalize ? 1.08 : nothing)))
         if normalize
             sx, sy = _steps(m, v ./ maximum(v))
@@ -393,8 +394,9 @@ end
 
 function EFA._plot_overlap_contributions(m, curves)
     return themed() do
-        fig = Figure(; size=(820, 440))
-        ax = Axis(fig[1, 1]; xlabel="poloidal harmonic m", ylabel="contribution to the resonant fraction (%)", title="Which harmonics make each coil's overlap")
+        fig = _figure((820, 440))
+        ax =
+            Axis(fig[1, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m", ylabel="contribution to the resonant fraction (%)", title="Which harmonics make each coil's overlap")
         hlines!(ax, 0; color=:black, linewidth=1)
         for (j, (name, fraction, c)) in enumerate(curves)
             stairs!(ax, _steps(m, 100 .* c)...; step=:center, color=WONG[mod1(j, 7)], linewidth=2, label="$name: sums to $(_num(fraction)) %")
@@ -409,7 +411,7 @@ function EFA._plot_surface_overlay(maps, mode)
         k = length(maps)
         ncol = k <= 3 ? k : 2
         nrow = cld(k, ncol)
-        fig = Figure(; size=(k == 1 ? 720 : 470 * ncol + 100, 340 * nrow + 60))
+        fig = _figure((k == 1 ? 720 : 470 * ncol + 100, 340 * nrow + 60))
         mpeak = maximum(abs, mode.bn)
         local hm
         for (j, (name, bm)) in enumerate(maps)
@@ -436,13 +438,13 @@ function EFA._plot_phasing_map(map, quantity, extreme)
         relative(a, b) = "toroidal phase of $b relative to $a (deg)"
         if length(map.phase_deg) == 1
             flat = maximum(arr) - minimum(arr) <= 1e-6 * maximum(abs, arr)
-            fig = Figure(; size=(820, 440))
+            fig = _figure((820, 440))
             ax = Axis(fig[1, 1]; xlabel=relative(names[1], names[2]), ylabel=label, xticks=0:90:360,
                 title=flat ? "$label: independent of phase" : "$label: $(_num(minimum(arr)))–$(_num(maximum(arr))) over the phase")
             lines!(ax, map.phase_deg[1], vec(arr); color=WONG[1], linewidth=2)
             flat && ylims!(ax, 0, 1.2 * maximum(arr))
         else
-            fig = Figure(; size=(720, 620))
+            fig = _figure((720, 620))
             v, ph = extreme
             ax = Axis(fig[1, 1]; aspect=DataAspect(), xlabel=relative(names[1], names[2]), ylabel=relative(names[2], names[3]),
                 title="$label: largest $(_num(v)) at ($(_num(ph[1]))°, $(_num(ph[2]))°)")
@@ -459,9 +461,9 @@ function EFA._plot_efc_ntv_limits(curves, threshold, budget; band=false, profile
         couplings = first.(curves)
         scanned = filter(_EF.has_rotation_scan, couplings)
         npanel = 1 + !isempty(scanned) + profiles
-        fig = Figure(; size=(700 + 520 * (npanel - 1), 480))
+        fig = _figure((700 + 520 * (npanel - 1), 480))
         ax = Axis(fig[1, 1]; xlabel=rich("intrinsic overlap δ", subscript("EF"), " / nominal threshold"), ylabel="correction current (kAt)",
-            title="Correction current with its own NTV torque ($(_num(budget)) N·m budget)", limits=((0, nothing), (0, nothing)))
+            title="Correction currents with NTV", limits=((0, nothing), (0, nothing)))
         xmax, ymax = 0.0, 0.0
         for (j, (c, cv)) in enumerate(curves)
             x = cv.delta_ef ./ threshold
@@ -521,7 +523,7 @@ function EFA._plot_correction_requirement(req)
         source = abs.(req.resonant_field_source_t)
         vals = filter(v -> isfinite(v) && v > 0, vcat(source, vec(abs.(req.resonant_field_dominant_t)), abs.(req.resonant_field_least_squares_t)))
         base = minimum(vals) / 3
-        fig = Figure(; size=(700 + 360 * k, 560))
+        fig = _figure((700 + 360 * k, 560); figure_padding=(40, 18, 10, 10))
         ax = Axis(fig[1, 1]; xticks=(1:n, labels), xlabel="rational surface q = m/n", ylabel="|resonant field| (T)", yscale=log10, yminorticksvisible=false,
             yticks=_decade_ticks(base, 3 * maximum(vals)),
             title="Resonant field of $(req.source_name) and after correction", limits=((0.4, n + 0.6), (base, 3 * maximum(vals))))
@@ -550,7 +552,7 @@ function EFA._plot_correction_requirement(req)
                 lines!(pa, [angle(f), angle(f)], [0.0, abs(f)]; color, linewidth=width)
                 scatter!(pa, [angle(f)], [abs(f)]; color, markersize=9)
                 push!(elements, LineElement(; color, linewidth=width))
-                push!(names, "$name: $(_num(abs(f))) ∠ $(round(Int, rad2deg(angle(f))))°")
+                push!(names, "$name: $(_num(abs(f))) ∠ $(_num(round(Int, rad2deg(angle(f)))))°")
             end
             Legend(fig[2, j+1], elements, names; framevisible=false, labelsize=11)
         end
@@ -565,7 +567,7 @@ function EFA._plot_needed_current(mc, array, dist, limit)
         per = (in_kat ? array.ampere_turns_kat : 1.0) / abs(array.delta)
         c = EFA._centers(in_kat ? dist.current_bin_edges_kat : dist.current_factor_bin_edges)
         pdf = in_kat ? dist.current_pdf_per_kat : dist.current_factor_pdf
-        fig = Figure(; size=(900, 500))
+        fig = _figure((900, 500))
         designed = mc.abs_delta_total_as_designed * per
         ntv = limit !== nothing && isfinite(limit.abs_delta_max_correctable) ? limit.abs_delta_max_correctable * per : 0.0
         xmax = 1.05 * max(_support_end(c, pdf), designed, ntv)
@@ -587,7 +589,7 @@ end
 
 function EFA._plot_error_field_summary(d, T, threshold, risk, keep)
     return themed() do
-        fig = Figure(; size=(keep === nothing ? 860 : 1250, threshold && risk ? 820 : 480))
+        fig = _figure((keep === nothing ? 860 : 1250, threshold && risk ? 820 : 480))
         left = Any[]
         threshold && push!(left, pos -> _threshold_panel!(pos, [("", d, T)]))
         risk && push!(left, pos -> _risk_panel!(pos, [("", d)]; target_percent=1.0))

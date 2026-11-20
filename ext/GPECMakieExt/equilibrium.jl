@@ -24,7 +24,7 @@ function _rationals_on_top!(pos, ax, d)
 end
 
 function _single_profile(d, y, label)
-    fig = Figure(; size=(760, 420))
+    fig = _figure((760, 420))
     ax = Axis(fig[1, 1]; xlabel=PSIN)
     _profile!(ax, d.psi, y, label)
     _rationals_on_top!(fig[1, 1], ax, d)
@@ -33,7 +33,7 @@ end
 
 function EQ._plot_qprofile(d; show_singular=true)
     return themed() do
-        fig = Figure(; size=(760, 420))
+        fig = _figure((760, 420))
         ax = Axis(fig[1, 1]; xlabel=PSIN)
         _profile!(ax, d.psi, d.q, "q")
         # q₀ labelled at the edge and q₉₅ at the axis, where q is far from each.
@@ -82,7 +82,7 @@ end
 
 function EQ._plot_flux_surfaces(d; n_psi=11, n_theta=18)
     return themed() do
-        fig = Figure(; size=(560, 760))
+        fig = _figure((560, 760))
         ax = Axis(fig[1, 1]; title="Flux surfaces")
         _flux_surfaces!(ax, d; n_psi, n_theta)
         _surface_legend!(fig, (2, 1), ax, d)
@@ -92,7 +92,7 @@ end
 
 function EQ._plot_equilibrium_summary(g, prof, geo)
     return themed() do
-        fig = Figure(; size=(1150, 760))
+        fig = _figure((1150, 760))
         head = Any[]
         for (sym, v, unit) in ((sub("q", "0"), g.q0, ""), (sub("q", "95"), g.q95, ""), (sub("β", "N"), g.betan, ""), ("κ", g.kappa, ""),
             (sub("I", "p"), g.ip, " MA"), (sub("B", "T"), g.bt, " T"))
@@ -127,8 +127,8 @@ function EQ._plot_gse(gse; n_theta_lines=8)
     return themed() do
         idx = round.(Int, range(1, length(gse.ys); length=n_theta_lines + 1))[1:(end-1)]
         emax, imax = findmax(gse.error)
-        fig = Figure(; size=(780, 460))
-        ax = Axis(fig[1, 1]; yscale=log10, xlabel=PSIN, ylabel="Grad–Shafranov residual",
+        fig = _figure((780, 460))
+        ax = Axis(fig[1, 1]; yscale=log10, yticks=LogTicks(WholeTicks()), xlabel=PSIN, ylabel="Grad–Shafranov residual",
             title=rich("Grad–Shafranov residual: max ", _num(emax), " at ", PSIN, " = ", _num(gse.xs[imax[1]])))
         for i in idx
             e = gse.error[:, i]
