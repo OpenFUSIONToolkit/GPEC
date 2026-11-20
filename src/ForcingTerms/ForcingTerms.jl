@@ -161,6 +161,8 @@ function load_forcing_ascii!(
     if ncols < 4
         error("ASCII forcing file must have 4 columns (n, m, amplitude_real, amplitude_imag)")
     end
+    bad = findfirst(i -> !all(x -> x isa Real, @view(data[i, 1:4])) || !isinteger(data[i, 1]) || !isinteger(data[i, 2]), 1:nrows)
+    bad === nothing || error("ASCII forcing file row $bad is not integer n and m followed by two numbers: $(join(data[bad, :], " "))")
 
     empty!(forcing_modes)
 
@@ -257,19 +259,29 @@ Abstract supertype of every external-forcing description the scripting API accep
 resonant-magnetic-perturbation field, described by where it comes from and how strongly it
 drives (a forcing-mode file, a coil set with currents, or a precomputed spectrum).
 
-Nothing is read or computed at construction; the modes are materialized against an equilibrium
-when the perturbed-equilibrium stage runs, so one `RMPField` can drive several solves.
+Construction checks the description and throws an `ArgumentError` naming the problem: a forcing file must exist and
+parse as a mode table with a known normalization, and every coil set must resolve to geometry and carry currents. The
+modes are materialized against an equilibrium only when the perturbed-equilibrium stage runs, so one `RMPField` can
+drive several solves.
 
 ## Construction
 
     RMPField(path; format=..., scale=1.0, kwargs...)
-    RMPField(coil_sets::Vector{Dict{String,Any}}; scale=1.0, kwargs...)
+    RMPField(coil_sets; scale=1.0, kwargs...)
     RMPField(ctrl::ForcingTermsControl; scale=1.0)
     RMPField(modes::Vector{ForcingMode}; scale=1.0)
 
 The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
-or `.hdf5` extension and `"ascii"` otherwise. The second form takes TOML-shaped coil blocks
-(the `[[ForcingTerms.coil_set]]` layout) and selects the coil format. Remaining `kwargs` are
+or `.hdf5` extension and `"ascii"` otherwise. The second form takes one coil set or a vector of them, each a
+NamedTuple or Dict with the `[[ForcingTerms.coil_set]]` keys, and selects the coil format:
+
+```julia
+RMPField((name="c", currents=[1e3, 500, -500, -1e3, -500, 500]); machine="d3d")   # the DIII-D C-coil, in amperes
+RMPField([(name="iu", currents=iu), (name="il", currents=il)]; machine="d3d")
+RMPField((source="pf_hoop", radius=12.0, height=1.2, currents=[2e3]))
+```
+
+Remaining `kwargs` are
 [`ForcingTermsControl`](@ref) fields. These three return a single-source leaf
 ([`RMPSource`](@ref)). The last form takes a control-surface spectrum computed elsewhere, already in
 the unit-norm `Φ_x` convention, and returns a spectrum-literal leaf ([`RMPSpectrum`](@ref)).
@@ -351,20 +363,77 @@ Forcing-data format implied by a file extension: `"hdf5"` for `.h5`/`.hdf5`, els
 """
 _infer_format(path::AbstractString) = lowercase(splitext(path)[2]) in (".h5", ".hdf5") ? "hdf5" : "ascii"
 
-RMPField(ctrl::ForcingTermsControl; scale::Number=1.0) = RMPSource(ctrl, ComplexF64(scale))
+const _NORMALIZATIONS = ("normal_field_T", "sfl_flux_Wb", "unit_flux")
 
-function RMPField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0, kwargs...)
-    ctrl = ForcingTermsControl(; forcing_data_file=abspath(path), forcing_data_format=format, kwargs...)
+# Read a forcing-mode file now, so a missing or malformed file fails when the source is built.
+function _check_forcing_file(ctrl::ForcingTermsControl)
+    path = ctrl.forcing_data_file
+    isfile(path) || throw(ArgumentError("RMPField: no forcing file at $path"))
+    modes = ForcingMode[]
+    tag = try
+        load_forcing_data!(modes, path, ctrl.forcing_data_format)
+    catch err
+        throw(
+            ArgumentError(
+                "RMPField: $path is not a forcing-mode table (format $(ctrl.forcing_data_format)): $(sprint(showerror, err)). " *
+                "A mode table holds rows of n, m, Re, Im (see `load_forcing_data!`); a coil geometry file goes in a coil set, " *
+                "as in RMPField((name=\"set\", dat_file=path, currents=[...]))."
+            )
+        )
+    end
+    isempty(modes) && throw(ArgumentError("RMPField: $path holds no forcing modes"))
+    tag in _NORMALIZATIONS || throw(ArgumentError("RMPField: $path declares normalization \"$tag\"; use one of $(join(_NORMALIZATIONS, ", "))"))
+    return nothing
+end
+
+# Resolve every coil set now, so an unknown key, a missing geometry file or a missing current fails when the source is
+# built; window-pane sets placed by standoff need the plasma surface and are resolved when materialized.
+function _check_coil_sets(ctrl::ForcingTermsControl)
+    isempty(ctrl.coil_sets_raw) && throw(ArgumentError("RMPField: a coil source needs at least one coil set"))
+    cfg = CoilConfig(ctrl)
+    for sc in cfg.coil_sets
+        label = isempty(sc.name) ? "a coil set" : "coil set \"$(sc.name)\""
+        all(iszero, sc.currents) && throw(ArgumentError("RMPField: $label has no currents; give `currents` in amperes, one per conductor"))
+        isnan(sc.standoff) || continue
+        cs = try
+            _build_raw_coil_set(cfg, sc)
+        catch err
+            hint =
+                isempty(cfg.machine) && sc.source in ("", "file") && isempty(sc.dat_file) && isempty(sc.h5_file) ?
+                " (a named set is read from <machine>_<name>.dat: pass machine=\"d3d\", say, or give a dat_file)" : ""
+            throw(ArgumentError("RMPField: $label: $(sprint(showerror, err))$hint"))
+        end
+        length(sc.currents) > cs.ncoil &&
+            throw(ArgumentError("RMPField: $label has $(length(sc.currents)) currents for its $(cs.ncoil) conductors"))
+    end
+    return nothing
+end
+
+function RMPField(ctrl::ForcingTermsControl; scale::Number=1.0)
+    fmt = ctrl.forcing_data_format
+    fmt == "coil" ? _check_coil_sets(ctrl) :
+    fmt in ("ascii", "hdf5") ? _check_forcing_file(ctrl) :
+    throw(ArgumentError("RMPField: forcing_data_format \"$fmt\" is not \"ascii\", \"hdf5\" or \"coil\""))
     return RMPSource(ctrl, ComplexF64(scale))
 end
 
-function RMPField(coil_sets::Vector{Dict{String,Any}}; scale::Number=1.0, kwargs...)
-    ctrl = ForcingTermsControl(; forcing_data_format="coil", coil_sets_raw=coil_sets, kwargs...)
-    return RMPSource(ctrl, ComplexF64(scale))
-end
+RMPField(path::AbstractString; format::String=_infer_format(path), scale::Number=1.0, kwargs...) =
+    RMPField(ForcingTermsControl(; forcing_data_file=abspath(path), forcing_data_format=format, kwargs...); scale)
 
-RMPField(modes::Vector{ForcingMode}; scale::Number=1.0) =
-    RMPSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
+# A coil set as the [[ForcingTerms.coil_set]] table: a Dict or NamedTuple, keys as strings or symbols.
+_coil_dict(d::AbstractDict) = Dict{String,Any}(string(k) => v for (k, v) in d)
+_coil_dict(nt::NamedTuple) = Dict{String,Any}(string(k) => v for (k, v) in pairs(nt))
+_coil_dict(x) = throw(ArgumentError("RMPField: a coil set is a Dict or NamedTuple of [[ForcingTerms.coil_set]] keys, not a $(typeof(x))"))
+
+RMPField(coil_sets::AbstractVector; scale::Number=1.0, kwargs...) =
+    RMPField(ForcingTermsControl(; forcing_data_format="coil", coil_sets_raw=_coil_dict.(coil_sets), kwargs...); scale)
+RMPField(coil_set::Union{AbstractDict,NamedTuple}; kwargs...) = RMPField([coil_set]; kwargs...)
+
+function RMPField(modes::Vector{ForcingMode}; scale::Number=1.0)
+    isempty(modes) && throw(ArgumentError("RMPField: a spectrum needs at least one forcing mode"))
+    all(m -> isfinite(m.amplitude), modes) || throw(ArgumentError("RMPField: a spectrum amplitude is not finite"))
+    return RMPSpectrum([ForcingMode(; n=mode.n, m=mode.m, amplitude=mode.amplitude) for mode in modes], ComplexF64(scale))
+end
 
 """
 Flattened weighted-leaf list of any [`RMPField`](@ref).

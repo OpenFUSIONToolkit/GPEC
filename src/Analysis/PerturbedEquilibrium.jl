@@ -8,311 +8,33 @@ naming what to change in the run when the source lacks the data it draws (see `A
 module PerturbedEquilibrium
 
 using HDF5
-using LaTeXStrings
-using Plots
 
-using ..Analysis: register!, _require, _can, capabilities, REASONS
-import ...PerturbedEquilibrium: PerturbedEquilibriumState
+using ..Analysis: register!, _require, _can, capabilities, REASONS, _draw
+import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
+import ..CoilForcing: plot_control_surface, _control_surface_data, _equil_helicity
 
 const Source = Union{AbstractString,PerturbedEquilibriumState}
 
 const _COUPLING = "PerturbedEquilibrium/SingularCoupling/"
 const _RESPONSE = "PerturbedEquilibrium/Response/"
 
+# The penetrated field when the run carries a nonzero one (matched runs), otherwise `nothing`.
+_penetrated(v) = isempty(v) || all(iszero, v) ? nothing : v
+
 function _coupling_data(s::PerturbedEquilibriumState)
     r = s.response
-    return (; field=s.resonant_area_weighted_field, current=s.resonant_current, island_hw=s.island_half_width, chirikov=s.chirikov_parameter,
-        delta_prime=s.delta_prime, psi=r.rational_psi, q=r.rational_q, n=r.rational_n)
+    return (; field=s.resonant_area_weighted_field, penetrated=_penetrated(s.penetrated_area_weighted_field), current=s.resonant_current, island_hw=s.island_half_width,
+        chirikov=s.chirikov_parameter,
+        delta_prime=s.delta_prime, psi=r.rational_psi, q=r.rational_q, m=r.rational_m_res, n=r.rational_n)
 end
 
 function _coupling_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
         rd(name) = read(fid[_COUPLING*name])
-        (; field=rd("resonant_area_weighted_field"), current=rd("resonant_current"), island_hw=rd("island_half_width"), chirikov=rd("chirikov_parameter"),
-            delta_prime=rd("Delta_prime"), psi=rd("rational_psi"), q=rd("rational_q"), n=rd("rational_n"))
+        pen = haskey(fid, _COUPLING * "penetrated_area_weighted_field") ? _penetrated(rd("penetrated_area_weighted_field")) : nothing
+        (; field=rd("resonant_area_weighted_field"), penetrated=pen, current=rd("resonant_current"), island_hw=rd("island_half_width"), chirikov=rd("chirikov_parameter"),
+            delta_prime=rd("Delta_prime"), psi=rd("rational_psi"), q=rd("rational_q"), m=rd("rational_m"), n=rd("rational_n"))
     end
-end
-
-"""
-    plot_resonant_area_weighted_field_amplitude(src; save_path=nothing)
-
-Scatter plot of the resonant area-weighted field `|b^r|` per rational surface vs ψ_N. One marker series
-per toroidal mode n. Integer-valued q rational surfaces are annotated. The resonant area-weighted field
-`b^r = Φ^r/A^r` is the resonant flux normalized by the scalar surface area, in tesla [Pharr 2026].
-
-Requires the perturbed equilibrium singular coupling.
-
-### Arguments
-
-  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
-
-### Keyword arguments
-
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_resonant_area_weighted_field_amplitude(src::Source; save_path=nothing)
-    _require(plot_resonant_area_weighted_field_amplitude, src)
-    p = _plot_resonant_area_weighted_field_amplitude(_coupling_data(src))
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-function _plot_resonant_area_weighted_field_amplitude(d)
-    resonant_area_weighted_field, rational_psi, rational_q, rational_n = d.field, d.psi, d.q, d.n
-
-    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|b^r| [T]",
-        title="Resonant area-weighted field |b^r| per surface", legend=:outertopright,
-        left_margin=10Plots.mm, bottom_margin=5Plots.mm)
-
-    for nn in unique(rational_n)
-        mask = rational_n .== nn
-        scatter!(p, rational_psi[mask], abs.(resonant_area_weighted_field[mask]);
-            label="n=$nn", markersize=7, markerstrokewidth=0)
-        for k in findall(mask)
-            abs(rational_q[k] - round(rational_q[k])) < 0.05 || continue
-            annotate!(p, rational_psi[k], abs(resonant_area_weighted_field[k]),
-                text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
-        end
-    end
-    return p
-end
-
-"""
-    plot_island_widths(src; save_path=nothing)
-
-Scatter plot of island half-width `w/2` per rational surface vs ψ_N.
-Integer-valued q rational surfaces are annotated.
-
-Requires the perturbed equilibrium singular coupling.
-
-### Arguments
-
-  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
-
-### Keyword arguments
-
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_island_widths(src::Source; save_path=nothing)
-    _require(plot_island_widths, src)
-    p = _plot_island_widths(_coupling_data(src))
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-function _plot_island_widths(d)
-    island_hw, rational_psi, rational_q = d.island_hw, d.psi, d.q
-
-    p = scatter(
-        rational_psi, island_hw;
-        xlabel="Norm. Poloidal Flux",
-        ylabel="w/2",
-        title="Island half-widths",
-        legend=false,
-        color=:steelblue,
-        markersize=7,
-        markerstrokewidth=0,
-        left_margin=10Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-    for k in eachindex(rational_psi)
-        abs(rational_q[k] - round(rational_q[k])) < 0.05 || continue
-        annotate!(p, rational_psi[k], island_hw[k],
-            text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
-    end
-    return p
-end
-
-"""
-    plot_chirikov_parameter(src; save_path=nothing)
-
-Scatter plot of the Chirikov overlap parameter per rational surface vs ψ_N, with a
-horizontal reference line at K = 1 (island overlap threshold). Points are colored red
-when K > 1. Integer-valued q rational surfaces are annotated.
-
-Requires the perturbed equilibrium singular coupling.
-
-### Arguments
-
-  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
-
-### Keyword arguments
-
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_chirikov_parameter(src::Source; save_path=nothing)
-    _require(plot_chirikov_parameter, src)
-    p = _plot_chirikov_parameter(_coupling_data(src))
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-function _plot_chirikov_parameter(d)
-    chirikov, rational_psi, rational_q = d.chirikov, d.psi, d.q
-
-    colors = [k > 1.0 ? :red : :steelblue for k in chirikov]
-
-    p = scatter(
-        rational_psi, chirikov;
-        xlabel="Norm. Poloidal Flux",
-        ylabel="K (Chirikov)",
-        title="Chirikov overlap parameter",
-        legend=false,
-        color=colors,
-        markersize=7,
-        markerstrokewidth=0,
-        left_margin=10Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-    hline!(p, [1.0]; linestyle=:dash, color=:black, label=nothing)
-    for k in eachindex(rational_psi)
-        abs(rational_q[k] - round(rational_q[k])) < 0.05 || continue
-        annotate!(p, rational_psi[k], chirikov[k],
-            text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
-    end
-    return p
-end
-
-"""
-    plot_driven_delta_prime(src; save_path=nothing)
-
-Scatter plot of `Re(Δ')` per rational surface vs ψ_N, computed by the perturbed
-equilibrium singular coupling.
-One marker series per toroidal mode n. Integer-valued q rational surfaces are
-annotated.
-
-This is the forcing-driven Δ' (response to the applied perturbation amplitudes
-in `forcing_modes`); for the equilibrium-intrinsic Δ' of a Riccati or Galerkin solve,
-see `ForceFreeStates.plot_delta_prime`.
-
-### Arguments
-
-  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
-
-### Keyword arguments
-
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_driven_delta_prime(src::Source; save_path=nothing)
-    _require(plot_driven_delta_prime, src)
-    p = _plot_driven_delta_prime(_coupling_data(src))
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-function _plot_driven_delta_prime(d)
-    delta_prime, rational_psi, rational_q, rational_n = d.delta_prime, d.psi, d.q, d.n
-
-    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="Re(Δ')",
-        title="Tearing stability Δ' (driven, perturbed equilibrium)", legend=:outertopright,
-        left_margin=10Plots.mm, bottom_margin=5Plots.mm)
-    hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
-
-    for nn in unique(rational_n)
-        mask = rational_n .== nn
-        dp_n = real.(delta_prime[mask])
-        colors = [v > 0 ? :red : :steelblue for v in dp_n]
-        scatter!(p, rational_psi[mask], dp_n; label="n=$nn", color=colors,
-            markersize=7, markerstrokewidth=0)
-        for (k, idx) in enumerate(findall(mask))
-            abs(rational_q[idx] - round(rational_q[idx])) < 0.05 || continue
-            annotate!(p, rational_psi[idx], dp_n[k],
-                text("  q=$(round(Int, rational_q[idx]))", 8, :left, :black))
-        end
-    end
-    return p
-end
-
-"""
-    plot_resonant_area_weighted_field(src; save_path=nothing)
-
-Five-panel summary of resonant coupling quantities at each rational surface vs ψ_N:
-
-  - `|b^r|`: resonant area-weighted field (`plot_resonant_area_weighted_field_amplitude`)
-  - `Re(Δ')`: tearing stability parameter (`plot_driven_delta_prime`)
-  - `|I_res|`: resonant current
-  - `w/2`: island half-width (`plot_island_widths`)
-  - `K`: Chirikov overlap parameter (`plot_chirikov_parameter`)
-
-Inspired by `plot_resonant_flux.py` from OMFIT GPEC.
-
-### Arguments
-
-  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
-
-### Keyword arguments
-
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_resonant_area_weighted_field(src::Source; save_path=nothing)
-    _require(plot_resonant_area_weighted_field, src)
-    d = _coupling_data(src)
-    p1 = _plot_resonant_area_weighted_field_amplitude(d)
-    p2 = _plot_driven_delta_prime(d)
-    p3 = _plot_resonant_current(d)
-    p4 = _plot_island_widths(d)
-    p5 = _plot_chirikov_parameter(d)
-
-    # Move outer legends inside so all panels have the same right margin
-    for p in (p1, p2, p3)
-        plot!(p; title="", legend=:topright)
-    end
-    for p in (p4, p5)
-        plot!(p; title="")
-    end
-
-    hide_xaxis!(p) = plot!(p; xlabel="", xformatter=_ -> "", bottom_margin=1Plots.mm)
-    for p in (p1, p2, p3, p4)
-        hide_xaxis!(p)
-    end
-
-    p = plot(p1, p2, p3, p4, p5; layout=(5, 1), size=(900, 1600))
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-# Internal helper — resonant current scatter plot
-function _plot_resonant_current(d)
-    resonant_current, rational_psi, rational_q, rational_n = d.current, d.psi, d.q, d.n
-
-    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|I_res|",
-        title="Resonant current |I_res| per surface", legend=:outertopright,
-        left_margin=10Plots.mm, bottom_margin=5Plots.mm)
-
-    for nn in unique(rational_n)
-        mask = rational_n .== nn
-        rc_n = abs.(resonant_current[mask])
-        scatter!(p, rational_psi[mask], rc_n;
-            label="n=$nn", markersize=7, markerstrokewidth=0)
-        for (k, idx) in enumerate(findall(mask))
-            abs(rational_q[idx] - round(rational_q[idx])) < 0.05 || continue
-            annotate!(p, rational_psi[idx], rc_n[k],
-                text("  q=$(round(Int, rational_q[idx]))", 8, :left, :black))
-        end
-    end
-
-    return p
 end
 
 const _COMPONENTS = Dict(
@@ -322,18 +44,22 @@ const _COMPONENTS = Dict(
     :Jb_zeta => (dataset="Jb_zeta", field=:zeta, modes=:b_modes, needs=:response_b)
 )
 
+# A response component with q on the equilibrium's profile nodes and the rational surfaces the coupling resolved.
 function _response_data(s::PerturbedEquilibriumState, component)
     c = _COMPONENTS[component]
     ffs = s.response.ffs
+    prof = ffs.equil.profiles
     return (; data=getfield(getfield(s, c.modes), c.field), psi=s.psi_grid, mlow=ffs.mlow, mhigh=ffs.mhigh, nhigh=ffs.nhigh,
-        q95=ffs.equil.params.q95, rational_psi=s.response.rational_psi)
+        q_psi=prof.xs, q=prof.q_spline.y, rational_psi=s.response.rational_psi, rational_m=s.response.rational_m_res)
 end
 
 function _response_data(h5path::AbstractString, component)
     h5open(h5path, "r") do fid
+        coupled = haskey(fid, _COUPLING * "rational_psi")
         (; data=read(fid[_RESPONSE*_COMPONENTS[component].dataset]), psi=read(fid[_RESPONSE*"psi"]), mlow=read(fid["Info/mlow"]),
-            mhigh=read(fid["Info/mhigh"]), nhigh=read(fid["Info/nhigh"]), q95=read(fid["Equilibrium/q_95"]),
-            rational_psi=haskey(fid, _COUPLING * "rational_psi") ? read(fid[_COUPLING*"rational_psi"]) : Float64[])
+            mhigh=read(fid["Info/mhigh"]), nhigh=read(fid["Info/nhigh"]), q_psi=read(fid["Equilibrium/Profiles/psi"]),
+            q=read(fid["Equilibrium/Profiles/q"]), rational_psi=coupled ? read(fid[_COUPLING*"rational_psi"]) : Float64[],
+            rational_m=coupled ? read(fid[_COUPLING*"rational_m"]) : Int[])
     end
 end
 
@@ -346,92 +72,20 @@ function _require_component(fn, src, component)
     return nothing
 end
 
-"""
-    plot_mode_spectrogram(src; component=:xi_psi, save_path=nothing)
+# Drawing functions, defined by the GPECMakieExt extension.
+function _plot_resonant_coupling end
+function _plot_mode_spectrogram end
+function _plot_perturbed_equilibrium_summary end
 
-Two-panel spectrogram of a perturbed equilibrium response field component:
-
-  - Top: `|component|` vs ψ_N, one curve per poloidal mode m. Only resonant modes
-    (m ∈ [0, nhigh·q95)) are labeled to keep the legend readable.
-  - Bottom: Heatmap of `|component|` in (m, ψ_N) space (psi on vertical axis), with
-    white dashed lines at rational surface locations.
-
-Inspired by `plot_spectrograms.py` from OMFIT GPEC.
-
-### Arguments
-
-  - `src`: A `PerturbedEquilibriumState` with the reconstructed response, or the path of a `gpec.h5` it was saved to
-
-### Keyword arguments
-
-  - `component`: Response field component to plot; one of `:xi_psi`, `:b_psi`,
-    `:Jb_theta`, `:Jb_zeta` (default: `:xi_psi`). `:b_psi` is the area-normalized
-    `b_psi_area_weighted` field; `:Jb_theta` and `:Jb_zeta` are the Jacobian-weighted
-    contravariant field components.
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_mode_spectrogram(src::Source; component=:xi_psi, save_path=nothing)
-    _require_component(plot_mode_spectrogram, src, component)
-    p = _plot_mode_spectrogram(_response_data(src, component), component)
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-function _plot_mode_spectrogram(d, component)
-    mpert = d.mhigh - d.mlow + 1
-    m_vals = d.mlow:d.mhigh
-    data_mn = d.data[:, 1:mpert]  # (npsi, mpert): first mpert columns = first n's modes
-
-    # Top panel: line plot per mode — only label resonant range m ∈ [0, nhigh·q95)
-    m_max_legend = d.nhigh * d.q95
-    p1 = plot(;
-        xlabel="Norm. Poloidal Flux",
-        ylabel="|$(component)|",
-        title="Mode spectrogram: $(component)",
-        legend=:outertopright,
-        left_margin=10Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-    cmap = cgrad(:roma, mpert; categorical=true)
-    for (i, m) in enumerate(m_vals)
-        show_label = 0 <= m < m_max_legend
-        plot!(p1, d.psi, abs.(data_mn[:, i]);
-            label=(show_label ? "m=$m" : nothing), color=cmap[i], linewidth=1.5)
-    end
-
-    # Bottom panel: heatmap in (m, ψ_N) space — psi on vertical axis, m on horizontal
-    p2 = heatmap(
-        collect(m_vals), d.psi, abs.(data_mn);
-        xlabel="m",
-        ylabel="Norm. Poloidal Flux",
-        title="",
-        colorbar_title="|$(component)|",
-        left_margin=10Plots.mm,
-        right_margin=20Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-    # Overlay rational surface locations as white dashed lines
-    for psi_s in d.rational_psi
-        hline!(p2, [psi_s]; linestyle=:dash, color=:white, linewidth=1.5, label=nothing)
-    end
-
-    return plot(p1, p2; layout=(2, 1), size=(950, 750))
-end
+const _COUPLING_ROWS = (:field, :current, :island_hw, :chirikov, :delta_prime)
 
 """
-    plot_perturbed_equilibrium_summary(src; save_path=nothing)
+    plot_resonant_area_weighted_field(src; save_path=nothing)
 
-Composite summary of perturbed equilibrium results, with each panel the source can supply:
-
-  - Top-left: Resonant area-weighted field per surface (`plot_resonant_area_weighted_field_amplitude`)
-  - Top-right: Edge |b_ψ| spectrum
-  - Bottom: ξ_ψ mode spectrogram (`plot_mode_spectrogram`)
-
-Panels the source cannot draw are left out; it throws an `ArgumentError` only when none can be drawn.
+Plot the resonant coupling at each rational surface in rows sharing a q = m/n axis: the resonant area-weighted field
+|b̄_res|, the resonant current |I_res|, the island half-width w/2, the effective island-overlap Chirikov parameter
+and the forcing-driven Re Δ′. Toroidal mode numbers are distinguished by colour; the title counts the surfaces with
+overlapping islands.
 
 ### Arguments
 
@@ -439,60 +93,458 @@ Panels the source cannot draw are left out; it throws an `ArgumentError` only wh
 
 ### Keyword arguments
 
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
-A `Plots.jl` plot object.
+A Makie `Figure`.
 """
-function plot_perturbed_equilibrium_summary(src::Source; save_path=nothing)
-    caps = capabilities(src)
-    top = Plots.Plot[]
-    _can(plot_resonant_area_weighted_field_amplitude, caps) && push!(top, _plot_resonant_area_weighted_field_amplitude(_coupling_data(src)))
-    :response_b in caps && push!(top, _plot_bpsi_edge_spectrum(_response_data(src, :b_psi)))
-    has_spectro = _can(plot_mode_spectrogram, caps)
-    if !has_spectro && isempty(top)
-        throw(ArgumentError("plot_perturbed_equilibrium_summary: no panel can be drawn: $(REASONS[:singular_coupling]); $(REASONS[:response_xi])"))
-    end
-    p = if !has_spectro
-        plot(top...; layout=(1, length(top)), size=(550 * length(top), 450))
-    else
-        p_spectro = _plot_mode_spectrogram(_response_data(src, :xi_psi), :xi_psi)
-        isempty(top) ? p_spectro : plot(top..., p_spectro; layout=@layout([grid(1, length(top)){0.35h}; b]), size=(1100, 1100))
-    end
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
+function plot_resonant_area_weighted_field(src::Source; save_path=nothing)
+    _require(plot_resonant_area_weighted_field, src)
+    return _draw(_plot_resonant_coupling, _coupling_data(src), _COUPLING_ROWS; save_path)
 end
 
-# Internal helper — |b_psi(m)| spectrum at the outermost psi surface
-function _plot_bpsi_edge_spectrum(d)
-    mpert = d.mhigh - d.mlow + 1
-    m_vals = d.mlow:d.mhigh
-    bpsi_edge = abs.(d.data[end, 1:mpert])
+"""
+    plot_resonant_area_weighted_field_amplitude(src; save_path=nothing)
 
-    p = bar(
-        collect(m_vals), bpsi_edge;
-        xlabel="m",
-        ylabel="|b_ψ|",
-        title="b_ψ spectrum at ψ edge",
-        legend=false,
-        color=:steelblue,
-        linewidth=0,
-        left_margin=10Plots.mm,
-        bottom_margin=5Plots.mm
-    )
+Plot the resonant area-weighted field |b̄_res| = |Φ_res|/A at each rational surface [Pharr 2026], in tesla, beside the
+penetrated field |b̄_pen| when the run carries one.
 
-    return p
+### Arguments
+
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
+
+### Keyword arguments
+
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_resonant_area_weighted_field_amplitude(src::Source; save_path=nothing)
+    _require(plot_resonant_area_weighted_field_amplitude, src)
+    return _draw(_plot_resonant_coupling, _coupling_data(src), (:field,); save_path)
+end
+
+"""
+    plot_island_widths(src; save_path=nothing)
+
+Plot the island half-width w/2 at each rational surface, in ψ_N.
+
+### Arguments
+
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
+
+### Keyword arguments
+
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_island_widths(src::Source; save_path=nothing)
+    _require(plot_island_widths, src)
+    return _draw(_plot_resonant_coupling, _coupling_data(src), (:island_hw,); save_path)
+end
+
+"""
+    plot_chirikov_parameter(src; save_path=nothing)
+
+Plot the effective island-overlap Chirikov parameter at each rational surface, with the overlap threshold 1 marked.
+
+### Arguments
+
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
+
+### Keyword arguments
+
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_chirikov_parameter(src::Source; save_path=nothing)
+    _require(plot_chirikov_parameter, src)
+    return _draw(_plot_resonant_coupling, _coupling_data(src), (:chirikov,); save_path)
+end
+
+"""
+    plot_driven_delta_prime(src; save_path=nothing)
+
+Plot the forcing-driven Re Δ′ at each rational surface, the response to the applied forcing; for the
+equilibrium's own Δ′ of a Riccati or Galerkin solve, see `ForceFreeStates.plot_delta_prime`.
+
+### Arguments
+
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
+
+### Keyword arguments
+
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_driven_delta_prime(src::Source; save_path=nothing)
+    _require(plot_driven_delta_prime, src)
+    return _draw(_plot_resonant_coupling, _coupling_data(src), (:delta_prime,); save_path)
+end
+
+const _STYLES = (:log_heatmap, :linear_heatmap, :lines)
+
+"""
+    plot_mode_spectrogram(src; component=:xi_psi, style=:log_heatmap, save_path=nothing)
+
+Plot a response component's poloidal harmonics against ψ_N, with the rational surfaces and the resonance m = n q(ψ)
+marked.
+
+### Arguments
+
+  - `src`: A `PerturbedEquilibriumState` with the reconstructed response, or the path of a `gpec.h5` it was saved to
+
+### Keyword arguments
+
+  - `component`: `:xi_psi` (ξ^ψ, default), `:b_psi` (the area-weighted b̄^ψ, in T), `:Jb_theta` or `:Jb_zeta` (J·b^θ and
+    J·b^ζ, in T m²)
+  - `style`: `:log_heatmap` (default), `:linear_heatmap`, or `:lines` (the eight largest harmonics)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_mode_spectrogram(src::Source; component=:xi_psi, style=:log_heatmap, save_path=nothing)
+    style in _STYLES || throw(ArgumentError("style must be :log_heatmap, :linear_heatmap or :lines"))
+    _require_component(plot_mode_spectrogram, src, component)
+    return _draw(_plot_mode_spectrogram, _response_data(src, component), component; style, save_path)
+end
+
+"""
+    plot_perturbed_equilibrium_summary(src; save_path=nothing)
+
+Plot the panels the source supplies: the resonant field at each rational surface, the edge b̄^ψ spectrum, the
+ξ^ψ spectrogram and, from a state in memory, b_n on the poloidal plane at φ = 0.
+
+### Arguments
+
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
+
+### Keyword arguments
+
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`. Throws an `ArgumentError` when no panel can be drawn.
+"""
+function plot_perturbed_equilibrium_summary(src::Source; save_path=nothing)
+    _require(plot_perturbed_equilibrium_summary, src)
+    caps = capabilities(src)
+    coupling = _can(plot_resonant_area_weighted_field_amplitude, caps) ? _coupling_data(src) : nothing
+    edge = :response_b in caps ? _response_data(src, :b_psi) : nothing
+    xi = _can(plot_mode_spectrogram, caps) ? _response_data(src, :xi_psi) : nothing
+    rz = src isa PerturbedEquilibriumState && _can(plot_perturbed_field_rz, caps) ? _poloidal_data(src, :b_n) : nothing
+    return _draw(_plot_perturbed_equilibrium_summary, coupling, edge, xi, rz; save_path)
+end
+
+# (R, Z) of the flux surface ψ at SFL angle θ ∈ [0, 1).
+function _rz(equil, psi, theta, hint)
+    r = sqrt(max(0.0, equil.rzphi_rsquared((psi, theta); hint)))
+    eta = 2π * (theta + equil.rzphi_offset((psi, theta); hint))
+    return equil.ro + r * cos(eta), equil.zo + r * sin(eta)
+end
+
+# A closed flux-surface outline in (R, Z).
+function _outline(equil, psi; ntheta=256)
+    hint = (Ref(1), Ref(1))
+    pts = [_rz(equil, psi, θ, hint) for θ in range(0, 1; length=ntheta + 1)]
+    return first.(pts), last.(pts)
+end
+
+const _NORMAL = Dict(:b_n => :b_n_modes, :xi_n => :xi_n_modes)
+
+# The stored normal field or displacement summed over harmonics into real space on the poloidal plane at toroidal angle
+# φ, on the flux-surface grid (every `every`-th ψ), with outlines of the rational surfaces and the boundary.
+function _poloidal_data(pe::PerturbedEquilibriumState, component; phi=0.0, ntheta=256, every=4)
+    haskey(_NORMAL, component) || throw(ArgumentError("component must be :b_n or :xi_n"))
+    X = getfield(pe, _NORMAL[component])
+    resp = pe.response
+    equil = resp.ffs.equil
+    rows = 1:every:length(pe.psi_grid)
+    θs = range(0, 1; length=ntheta + 1)
+    R, Z, V = (zeros(length(rows), length(θs)) for _ in 1:3)
+    hint = (Ref(1), Ref(1))
+    for (a, i) in enumerate(rows), (b, θ) in enumerate(θs)
+        psi = pe.psi_grid[i]
+        R[a, b], Z[a, b] = _rz(equil, psi, θ, hint)
+        ν = equil.rzphi_nu((psi, θ); hint)
+        V[a, b] = real(sum(X[i, k] * cis(2π * resp.m_modes[k] * θ + resp.n_modes[k] * (ν - phi)) for k in axes(X, 2)))
+    end
+    outlines = [_outline(equil, psi) for psi in vcat(resp.rational_psi, pe.psi_grid[end])]
+    return (; R, Z, values=V, outlines, phi)
+end
+
+# The boundary in (R, Z) at toroidal angle φ with its normal displacement ξ_n there.
+function _boundary_displacement(pe::PerturbedEquilibriumState; phi=0.0, ntheta=720)
+    resp = pe.response
+    equil = resp.ffs.equil
+    psi = pe.psi_grid[end]
+    X = pe.xi_n_modes[end, :]
+    hint = (Ref(1), Ref(1))
+    θs = range(0, 1; length=ntheta + 1)
+    pts = [_rz(equil, psi, θ, hint) for θ in θs]
+    xi = [real(sum(X[k] * cis(2π * resp.m_modes[k] * θ + resp.n_modes[k] * (equil.rzphi_nu((psi, θ); hint) - phi)) for k in eachindex(X))) for θ in θs]
+    return (; R=first.(pts), Z=last.(pts), xi)
+end
+
+# Island chains at toroidal angle φ between ψ_s ∓ (w/2)|cos(ξ/2)|, ξ = 2π m θ + n (ν − φ) + α with α the phase of the
+# surface's resonant field, in (θ, ψ_N) and as (R, Z) polygons; ψ is clipped to the last flux surface.
+function _island_chains(pe::PerturbedEquilibriumState, halfwidth; phi=0.0, ntheta=1440)
+    resp = pe.response
+    equil = resp.ffs.equil
+    psimax = pe.psi_grid[end]
+    hint = (Ref(1), Ref(1))
+    θs = collect(range(0, 1; length=ntheta + 1))
+    chains = NamedTuple[]
+    for row in eachindex(resp.rational_psi)
+        psis, m, n, w = resp.rational_psi[row], resp.rational_m_res[row], resp.rational_n[row], halfwidth[row]
+        w > 0 || continue
+        α = angle(pe.resonant_area_weighted_field[row])
+        half = [w * abs(cos((2π * m * θ + n * (equil.rzphi_nu((psis, θ); hint) - phi) + α) / 2)) for θ in θs]
+        lo, hi = clamp.(psis .- half, 0.0, psimax), clamp.(psis .+ half, 0.0, psimax)
+        outer = [_rz(equil, p, θ, hint) for (p, θ) in zip(hi, θs)]
+        inner = [_rz(equil, p, θ, hint) for (p, θ) in zip(lo, θs)]
+        push!(chains, (; label="$m/$n", psis, w, theta=360 .* θs .- 180, lo, hi, polygon=vcat(outer, reverse(inner))))
+    end
+    return (; chains, phi, surfaces=[_outline(equil, p * psimax) for p in range(0.1, 1; length=10)])
+end
+
+# Drawing functions, defined by the GPECMakieExt extension.
+function _plot_perturbed_field_rz end
+function _plot_islands end
+
+"""
+    plot_perturbed_field_rz(pe; component=:b_n, phi=0.0, deform=false, clip=0.9, save_path=nothing)
+
+Plot the perturbed normal field b_n or normal displacement ξ_n on the poloidal plane at toroidal angle φ, drawn on the
+flux-surface grid with the rational surfaces outlined; with `deform`, also the boundary displaced along its normal by
+a scaled ξ_n over the equilibrium outline.
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` with the stored normal field and displacement
+
+### Keyword arguments
+
+  - `component`: `:b_n` (T, default) or `:xi_n` (m)
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `deform`: Draw the displaced boundary, scaled so its largest displacement is 5 % of the minor radius (default: `false`)
+  - `clip`: Quantile of |value| that sets the symmetric colour range; larger values saturate. `1` shows the full range (default: `0.9`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_perturbed_field_rz(pe::PerturbedEquilibriumState; component=:b_n, phi=0.0, deform=false, clip=0.9, save_path=nothing)
+    _require(plot_perturbed_field_rz, pe)
+    0 < clip <= 1 || throw(ArgumentError("plot_perturbed_field_rz: clip must be in (0, 1], got $clip"))
+    d = _poloidal_data(pe, component; phi)
+    boundary = deform ? _boundary_displacement(pe; phi) : nothing
+    return _draw(_plot_perturbed_field_rz, d, component, boundary; clip, save_path)
+end
+
+"""
+    plot_effective_islands(pe; phi=0.0, save_path=nothing)
+
+Plot the island chains the effective resonant flux would open, in (θ, ψ_N) and on the poloidal plane at toroidal angle
+φ, with each chain's half-width w/2 (in ψ_N) listed.
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` with the singular coupling
+
+### Keyword arguments
+
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_effective_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
+    _require(plot_effective_islands, pe)
+    return _draw(_plot_islands, _island_chains(pe, pe.island_half_width; phi), "Effective islands"; save_path)
+end
+
+"""
+    plot_islands(pe; phi=0.0, save_path=nothing)
+
+Plot the island chains of the penetrated field in (θ, ψ_N) and on the poloidal plane at toroidal angle φ. The
+half-width scales from the effective one as w² ∝ |b̄|: w_pen = w_eff √(|b̄_pen| / |b̄_res|).
+
+### Arguments
+
+  - `pe`: A `PerturbedEquilibriumState` from a matched run, which carries a penetrated field
+
+### Keyword arguments
+
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
+    _require(plot_islands, pe)
+    ratio = abs.(pe.penetrated_area_weighted_field) ./ max.(abs.(pe.resonant_area_weighted_field), floatmin())
+    return _draw(_plot_islands, _island_chains(pe, pe.island_half_width .* sqrt.(ratio); phi), "Penetrated islands"; save_path)
+end
+
+"""
+    plot_dominant_mode_surface(src; mode=1, n=nothing, save_path=nothing)
+
+Plot dominant resonant-coupling mode `mode`, the right singular vector of the resonant coupling matrix, as the normal
+field it represents on the control surface: toroidal angle φ against poloidal angle θ, in arbitrary units (the vector
+has unit norm).
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's modes)
+
+### Keyword arguments
+
+  - `mode`: Which dominant mode, 1 the strongest (default: `1`)
+  - `n`: Toroidal mode number drawn (default: the first)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_dominant_mode_surface(src::Union{PlasmaResponse,PerturbedEquilibriumState}; mode::Int=1, n=nothing, save_path=nothing)
+    _require(plot_dominant_mode_surface, src)
+    resp = src isa PlasmaResponse ? src : src.response
+    1 <= mode <= length(resp.dominant_singular_values) ||
+        throw(ArgumentError("plot_dominant_mode_surface: mode must be 1 to $(length(resp.dominant_singular_values))"))
+    σ = resp.dominant_singular_values[mode]
+    return plot_control_surface(resp, resp.dominant_right_singular_vectors[:, mode]; n, arb=true, label="dominant mode $mode (σ = $(round(σ; sigdigits=3)))",
+        save_path)
+end
+
+# Each dominant mode's b_n at toroidal angle `phi` around the control-surface cross-section, normalized to its peak there,
+# with the boundary in (R, Z). The map's φ = 0 column of the spectrum rotated by e^{i n h φ} is the field at φ.
+function _singular_mode_rz_data(resp::PlasmaResponse, modes, phi; mtheta=512)
+    equil = resp.ffs.equil
+    hint = (Ref(1), Ref(1))
+    turn = cis(first(resp.n_modes) * _equil_helicity(equil) * phi)
+    return map(modes) do k
+        v = resp.dominant_right_singular_vectors[:, k]
+        d = _control_surface_data(resp, v .* turn; nphi=1, mtheta)
+        b = d.field[:, 1] ./ maximum(abs, d.field[:, 1])
+        pts = [_rz(equil, equil.rzphi_xs[end], mod(θ / 360, 1), hint) for θ in d.theta]
+        R, Z = first.(pts), last.(pts)
+        (; mode=k, sigma=resp.dominant_singular_values[k], phi, R=[R; R[1]], Z=[Z; Z[1]], b=[b; b[1]])
+    end
+end
+
+function _plot_singular_mode_rz end
+
+"""
+    plot_singular_mode_rz(src; modes=nothing, phi=0.0, save_path=nothing)
+
+Plot dominant resonant-coupling modes on the control-surface cross-section: the boundary in (R, Z) as a band coloured
+by each mode's normal field b_n at toroidal angle φ, normalized to its peak, one panel per mode. The modes are the
+stored decomposition's, over the rational surfaces with ψ_N ≤ 0.9.
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's modes)
+
+### Keyword arguments
+
+  - `modes`: Which dominant modes, 1 the strongest (default: the first three that exist)
+  - `phi`: Toroidal angle in radians (default: `0.0`)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_singular_mode_rz(src::Union{PlasmaResponse,PerturbedEquilibriumState}; modes=nothing, phi=0.0, save_path=nothing)
+    _require(plot_singular_mode_rz, src)
+    resp = src isa PlasmaResponse ? src : src.response
+    nk = length(resp.dominant_singular_values)
+    ks = something(modes, 1:min(3, nk))
+    all(k -> 1 <= k <= nk, ks) || throw(ArgumentError("plot_singular_mode_rz: modes must lie in 1 to $nk"))
+    return _draw(_plot_singular_mode_rz, _singular_mode_rz_data(resp, collect(ks), phi); save_path)
+end
+
+# The resonant coupling matrix of toroidal mode number `n` and its SVD C = U Σ Vᴴ: rows are rational surfaces, columns
+# poloidal harmonics; U has rows only for the surfaces inside the SVD's core window, at `retained` in the row order.
+function _coupling_matrix_data(resp::PlasmaResponse, n)
+    n = something(n, first(resp.n_modes))
+    n in resp.n_modes || throw(ArgumentError("plot_coupling_matrix: n = $n is not one of the response's toroidal mode numbers $(unique(resp.n_modes))"))
+    cols = findall(==(n), resp.n_modes)
+    rows = findall(==(n), resp.rational_n)
+    inwindow = [i for (i, r) in enumerate(resp.dominant_rational_index) if r in rows]
+    return (; m=resp.m_modes[cols], labels=["$(resp.rational_m_res[r])/$n" for r in rows], m_res=resp.rational_m_res[rows],
+        C=resp.C_resonant_area_weighted_field[rows, cols], sigma=resp.dominant_singular_values,
+        U=resp.dominant_left_singular_vectors[inwindow, :], retained=[findfirst(==(resp.dominant_rational_index[i]), rows) for i in inwindow],
+        V=resp.dominant_right_singular_vectors[cols, :])
+end
+
+function _plot_coupling_matrix end
+
+"""
+    plot_coupling_matrix(src; n=nothing, save_path=nothing)
+
+Plot the resonant coupling matrix C, the resonant area-weighted field b̄_res at each rational surface per unit applied
+harmonic b̃_m, with its singular value decomposition C = U Σ Vᴴ: |C| against surface and m, the left singular vectors
+|U| on the same surface axis, the right singular vectors |V| on the same m axis (V₁ is the dominant mode), and the
+singular values σ. Surfaces outside the decomposition's core window are shaded.
+
+### Arguments
+
+  - `src`: A `PlasmaResponse`, or a `PerturbedEquilibriumState` (its response's matrix)
+
+### Keyword arguments
+
+  - `n`: Toroidal mode number drawn (default: the first)
+  - `save_path`: If given, save the figure to this path (default: `nothing`)
+
+### Returns
+
+A Makie `Figure`.
+"""
+function plot_coupling_matrix(src::Union{PlasmaResponse,PerturbedEquilibriumState}; n=nothing, save_path=nothing)
+    _require(plot_coupling_matrix, src)
+    return _draw(_plot_coupling_matrix, _coupling_matrix_data(src isa PlasmaResponse ? src : src.response, n); save_path)
 end
 
 const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
-register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b_ψ spectrum and ξ spectrogram")
-register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,), "five resonant-coupling panels per rational surface")
+register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b̄^ψ spectrum, ξ^ψ spectrogram and b_n on the poloidal plane";
+    any_of=((:singular_coupling,), (:response_b,), (:response_xi,), (:response_n,)))
+register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,), "resonant coupling rows per rational surface")
 register!(plot_resonant_area_weighted_field_amplitude, _PE_SOURCES, (:singular_coupling,), "|b̄_res| per rational surface")
 register!(plot_island_widths, _PE_SOURCES, (:singular_coupling,), "island half-width per rational surface")
-register!(plot_chirikov_parameter, _PE_SOURCES, (:singular_coupling,), "Chirikov parameter per rational surface")
+register!(plot_chirikov_parameter, _PE_SOURCES, (:singular_coupling,), "effective island-overlap Chirikov parameter per rational surface")
 register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ′ per rational surface")
-register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "|response| per m against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
+register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
+register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
+    "a dominant resonant-coupling mode as b_n on the control surface")
+register!(plot_singular_mode_rz, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
+    "dominant resonant-coupling modes as b_n on the control-surface cross-section")
+register!(plot_coupling_matrix, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices, :dominant_mode),
+    "resonant coupling matrix |C| with its singular values and left and right singular vectors")
+register!(plot_perturbed_field_rz, (PerturbedEquilibriumState,), (:response_n,), "b_n or ξ_n on the poloidal plane (deform = true for the displaced boundary)")
+register!(plot_effective_islands, (PerturbedEquilibriumState,), (:singular_coupling,), "island chains from the effective resonant flux")
+register!(plot_islands, (PerturbedEquilibriumState,), (:penetrated_field,), "island chains from the penetrated field")
 
 end # module PerturbedEquilibrium

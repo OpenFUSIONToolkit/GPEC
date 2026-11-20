@@ -65,14 +65,15 @@ page.
 
 ### Figures do not build with the docs
 
-Figure scripts run **manually**, in the root project:
+Figure scripts run **manually**, in the root project, with CairoMakie in your global
+environment (`figure_tools.jl` loads it):
 
 ```bash
 julia --project=. docs/src/figures/<module>/make_<name>.jl
 ```
 
 They are **never** run at Documenter build time. The build only embeds the
-committed PNGs, so `docs/Project.toml` stays minimal (no `Plots`) and the build
+committed PNGs, so `docs/Project.toml` stays minimal (no plotting package) and the build
 stays fast. This is also why we do not regenerate every figure on every docs
 change — see the regeneration policy below.
 
