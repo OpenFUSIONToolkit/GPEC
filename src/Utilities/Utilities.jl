@@ -13,6 +13,7 @@ mathematical utilities.
   - `PhysicalConstants`: SI physical constants matching Fortran GPEC/SLAYER values
   - `NeoclassicalResistivity`: Spitzer/Sauter/Redl resistivity closures shared by
     the GGJ and SLAYER inner-layer models
+  - `BootstrapCurrent`: Redl bootstrap current ⟨j_bs·B⟩ as OpenFUSIONToolkit TokaMaker computes it
   - `HDF5Annotations`: self-describing metadata (long_name/units/dims attributes and
     HDF5 Dimension Scales) for the gpec.h5 output
   - `HermiteFEM`: the Hermite-cubic basis and packed grid shared by the Galerkin solvers
@@ -24,6 +25,7 @@ include("FourierCoefficients.jl")
 include("PhysicalConstants.jl")
 include("KineticProfiles.jl")
 include("NeoclassicalResistivity.jl")
+include("BootstrapCurrent.jl")
 include("HDF5Annotations.jl")
 include("Output.jl")
 include("HDF5Schema.jl")
@@ -55,5 +57,9 @@ export NeoResistivityModel, SpitzerModel, SpitzerHarmModel, SauterNeoModel, Redl
 export coulomb_log_e, eta_spitzer, tau_ee_spitzer_harm, eta_spitzer_harm
 export trapped_fraction, trapped_fraction_eps
 export nu_star_e, eta_neoclassical
+
+using .BootstrapCurrent
+export BootstrapCurrent
+export redl_coefficients, circulating_fraction, jdotB_bootstrap, bootstrap_current
 
 end # module Utilities
