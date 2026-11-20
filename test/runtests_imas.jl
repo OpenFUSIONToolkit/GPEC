@@ -229,4 +229,67 @@ using GeneralizedPerturbedEquilibrium.Equilibrium
         @test isempty(dd.mhd_linear.time_slice)
     end
 
+    # Test 8: write_imas — later stages: each n's response block, tearing roots after the ideal entries,
+    # and the torque density, whose volume integral must give the torque inside the edge.
+    @testset "write_imas: response, tearing and torque" begin
+        npsi, mpert, npert = 5, 3, 2
+        psi = collect(range(0.1, 0.9; length=npsi))
+        xi = [complex(ψ, 10j) for ψ in psi, j in 1:(mpert*npert)]
+        dVdpsi(ψ) = 2.0 + ψ                                  # m³ per unit ψ_N
+        dtdpsi = complex.(3.0 .* dVdpsi.(psi))                # uniform torque density of 3 N m⁻²
+        t_cum = complex.([3.0 * (2.0 * (ψ - psi[1]) + (ψ^2 - psi[1]^2) / 2) for ψ in psi])
+        mr = (psi_grid=psi, dtdpsi=dtdpsi, t_cumulative=t_cum, total_torque=t_cum[end])
+        result = (
+            ffs=(integrator=:forward, free_boundary=(et=[0.3 + 0im, 0.5 + 0im, 0.6 + 0im, 0.7 + 0im, 0.8 + 0im, 0.9 + 0im],
+                    n_tor_idx=[0, 1, 0, 1, 0, 1]), numpert_total=mpert * npert, npert=npert, nlow=1, mlow=-1, mhigh=1, mpert=mpert),
+            pe=(psi_grid=psi, xi_n_modes=xi, b_n_modes=2 .* xi),
+            kinetic=(total=(method_results=Dict("fgar" => mr),),),
+            equil=(profiles=(dVdpsi_spline=dVdpsi,), config=(jac_type="hamada",))
+        )
+        dd = IMASdd.dd()
+        dd.global_time = 0.0
+        GeneralizedPerturbedEquilibrium.write_imas(dd, result)
+        tm = dd.mhd_linear.time_slice[1].toroidal_mode
+        @test length(tm) == npert
+        @test tm[2].plasma.displacement_perpendicular.real == real.(xi[:, 4:6])   # the n = 2 block
+        @test tm[1].plasma.b_field_perturbed.coordinate1.imaginary == imag.(2 .* xi[:, 1:3])
+        @test tm[1].plasma.grid.dim1 ≈ sqrt.(psi)
+        @test tm[1].plasma.grid.dim2 == [-1.0, 0.0, 1.0]
+        @test tm[1].plasma.grid_type.index == 24
+        @test dd.mhd_linear.ideal_flag == 1
+        p1 = dd.core_sources.source[1].profiles_1d[1]
+        @test dd.core_sources.source[1].identifier.index == 401
+        @test dd.core_sources.source[1].identifier.name == "neoclassical"
+        @test p1.momentum_tor ≈ fill(3.0, npsi)
+        @test p1.torque_tor_inside[end] ≈ real(mr.total_torque)
+        @test !IMASdd.hasdata(p1.grid, :rho_tor_norm)        # no equilibrium in the dd
+
+        # With the equilibrium in the dd (COCOS 11), ρ_tor,N is interpolated onto the torque grid
+        dde, _ = make_mock_dd()
+        eqp = dde.equilibrium.time_slice[1].profiles_1d
+        eqp.rho_tor_norm = sqrt.(range(0, 1; length=length(eqp.psi)))
+        GeneralizedPerturbedEquilibrium.write_imas(dde, result)
+        @test dde.core_sources.source[1].profiles_1d[1].grid.rho_tor_norm ≈ sqrt.(psi) rtol = 1e-2
+
+        # Tearing is single n: two uncoupled roots follow the one ideal entry
+        tr = (enabled=true, gamma=[12.0, -3.0], omega=[2π * 100, 0.0], coupled_extraction=nothing, rational_q=[2.0, 3.0])
+        result1 = (ffs=(integrator=:forward, free_boundary=(et=[0.4 + 0im], n_tor_idx=[0]), numpert_total=1, npert=1, nlow=1),
+            tearing=tr)
+        dd1 = IMASdd.dd()
+        GeneralizedPerturbedEquilibrium.write_imas(dd1, result1)
+        tm1 = dd1.mhd_linear.time_slice[1].toroidal_mode
+        @test length(tm1) == 3
+        @test tm1[1].energy_perturbed == 0.4
+        @test [m.growthrate for m in tm1[2:3]] == tr.gamma
+        @test tm1[2].frequency ≈ 100.0
+        @test [m.m_pol_dominant for m in tm1[2:3]] == [2.0, 3.0]
+        @test all(m.perturbation_type.index == 13 && m.perturbation_type.name == "Tearing" for m in tm1[2:3])
+        @test dd1.mhd_linear.ideal_flag == 0                 # tearing roots are resistive
+
+        # The equal-arc poloidal angle has its own Fourier grid type
+        dda = IMASdd.dd()
+        GeneralizedPerturbedEquilibrium.write_imas(dda, merge(result, (equil=merge(result.equil, (config=(jac_type="equal_arc",),)),)))
+        @test dda.mhd_linear.time_slice[1].toroidal_mode[1].plasma.grid_type.index == 25
+    end
+
 end
