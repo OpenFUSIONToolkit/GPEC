@@ -145,6 +145,67 @@ include("h5_metadata_check.jl")
                 @test read(g["forcing_overlap"]) ≈ pe.dominant_forcing_overlap
                 @test isempty(_collect_metadata_violations(h5))
             end
+
+            # A Forward result carries no Δ_EF, so the asymptotic set is left empty.
+            @test isempty(resp.C_delta_mn_asymptotic) && isempty(pe.delta_mn_asymptotic) && isempty(pe.island_half_width_asymptotic)
+            @test_throws ArgumentError PE.ResonantCoupling(resp; matrix=:resonant_area_weighted_field_asymptotic)
+            @test_throws ArgumentError PE.ResonantCoupling(h5path; matrix=:resonant_area_weighted_field_asymptotic)
+            @test_throws ArgumentError PE.ResonantCoupling(resp; matrix=:resonant_current)
+        end
+    end
+
+    @testset "asymptotic Δ_mn metrics beside the finite-width ones" begin
+        template = joinpath(@__DIR__, "test_data", "regression_tj_ideal_example")
+        function riccati_run(dir, p0)
+            for name in readdir(template)
+                cp(joinpath(template, name), joinpath(dir, name))
+            end
+            cp(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat"), joinpath(dir, "forcing.dat"))
+            inputs = TOML.parsefile(joinpath(dir, "gpec.toml"))
+            inputs["ForceFreeStates"]["integrator"] = "Riccati"
+            inputs["Riccati"] = pop!(inputs, "Forward")
+            inputs["TJAnalytic"]["p0"] = p0
+            inputs["ForcingTerms"] = Dict{String,Any}("forcing_data_file" => "forcing.dat", "forcing_data_format" => "ascii")
+            inputs["PerturbedEquilibrium"] = Dict{String,Any}("compute_singular_coupling" => true)
+            open(io -> TOML.print(io, inputs), joinpath(dir, "gpec.toml"), "w")
+            return GPEC.main([dir])
+        end
+
+        # Without pressure D_I = −1/4 and the jump does not depend on the width it is taken across.
+        mktempdir() do dir
+            run = riccati_run(dir, 0.0)
+            resp, pe = run.resp, run.pe
+            for name in (:C_delta_mn, :C_resonant_current, :C_resonant_area_weighted_field, :C_island_width_sq)
+                @test getfield(resp, Symbol(name, :_asymptotic)) ≈ getfield(resp, name) rtol = 5e-3
+            end
+            for name in (:delta_mn, :resonant_current, :resonant_area_weighted_field, :island_width_sq, :island_half_width, :chirikov_parameter)
+                @test getfield(pe, Symbol(name, :_asymptotic)) ≈ getfield(pe, name) rtol = 5e-3
+            end
+
+            rc = PE.ResonantCoupling(resp; matrix=:resonant_area_weighted_field_asymptotic)
+            @test rc.C == resp.C_resonant_area_weighted_field_asymptotic
+            @test PE.ResonantCoupling(joinpath(dir, "gpec.h5"); matrix=:resonant_area_weighted_field_asymptotic).C ≈ rc.C
+            h5open(joinpath(dir, "gpec.h5"), "r") do h5
+                g = h5["PerturbedEquilibrium/SingularCoupling"]
+                @test read(g["C_Delta_mn_asymptotic"]) ≈ resp.C_delta_mn_asymptotic
+                @test read(g["Delta_mn"]) ≈ pe.delta_mn
+                @test read(g["island_half_width_asymptotic"]) ≈ pe.island_half_width_asymptotic
+                @test isempty(_collect_metadata_violations(h5))
+            end
+        end
+
+        # With pressure the finite-width jump is (1/2 + α)·w^(α − 1/2) times the asymptotic one, α = √−D_I.
+        mktempdir() do dir
+            run = riccati_run(dir, 0.1)
+            resp = run.resp
+            for row in eachindex(resp.rational_psi)
+                surf = run.ffs.surfaces[resp.rational_surface_idx[row]]
+                α = sqrt(-GPEC.LocalStability.mercier_D_I(run.local_stability, surf.psifac))
+                w = 5e-4 / abs(resp.rational_n[row] * surf.q1)
+                ratio = norm(resp.C_delta_mn[row, :]) / norm(resp.C_delta_mn_asymptotic[row, :])
+                @test ratio ≈ (0.5 + α) * w^(α - 0.5) rtol = 3e-2
+            end
+            @test norm(resp.C_delta_mn[1, :]) < 0.9 * norm(resp.C_delta_mn_asymptotic[1, :])
         end
     end
 end

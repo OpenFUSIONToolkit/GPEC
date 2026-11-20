@@ -56,8 +56,8 @@ function run_force_free_states(
     nstring = _mode_range_label(intr)
 
     # The three formalisms are exclusive. Galerkin solves the same Euler-Lagrange system
-    # variationally rather than by radial ODE integration, so it replaces both the integration
-    # and the free-boundary energies, and supplies its own vacuum response at psilim.
+    # variationally rather than by radial ODE integration, and supplies its own vacuum response at
+    # psilim; its EF columns (error_field_response) give the plasma response the free-boundary energies need.
     odet = nothing
     free_energies = nothing
     gal_data = nothing
@@ -71,6 +71,9 @@ function run_force_free_states(
         gal_data, delta_prime, basis = galerkin_solve(ctrl, equil, mats, intr; wv=wv, cut_solution=cut_solution)
         gal_dt = time() - gal_start
         @info "Galerkin solve completed in $(@sprintf("%.3f", gal_dt)) s"
+        if ctrl.vac_flag && basis !== nothing && !isempty(gal_ef_columns(gal_data))
+            free_energies = free_run(gal_wp(gal_data, equil.psio), ctrl, equil, mats, intr; verbose=intr.verbose)
+        end
     else
         if intr.verbose
             @info "Integrating Euler-Lagrange equation"
@@ -85,7 +88,7 @@ function run_force_free_states(
                 wall_desc = intr.wall_settings === nothing ? "no wall" : nameof(typeof(intr.wall_settings))
                 @info "Computing free boundary energies ($wall_desc)"
             end
-            free_energies = free_run(odet, ctrl, equil, mats, intr)
+            free_energies = free_run((odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2, ctrl, equil, mats, intr; verbose=intr.verbose)
             normalize_eigenfunctions!(odet, free_energies.wt, equil.psio)
             if real(free_energies.et[1]) < 0
                 if intr.verbose
@@ -104,7 +107,8 @@ function run_force_free_states(
                 end
                 warn_unresolved_surfaces(riccati.bases, intr.sing[1:intr.msing], ctrl.algorithm.eulerlagrange_tolerance)
                 delta_prime, coefficients = compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state;
-                    wv=free_energies.wv, wp=free_energies.wp, psio=equil.psio, extended_precision=ctrl.algorithm.extended_precision_bvp)
+                    wv=free_energies.wv, wp=free_energies.wp, psio=equil.psio, extended_precision=ctrl.algorithm.extended_precision_bvp,
+                    error_field_response=ctrl.algorithm.error_field_response)
                 if coefficients !== nothing
                     basis = outer_solution_basis(coefficients, riccati.propagators, riccati.chunks, riccati.columns, riccati.bases,
                         intr.sing, equil, mats, ModeIndices(intr), crossing_fill_fractions(ctrl))

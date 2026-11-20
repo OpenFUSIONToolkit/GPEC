@@ -409,21 +409,20 @@ function gal_assemble_rhs!(ws::GalWorkspace, mpert::Int)
 end
 
 """
-    gal_set_boundary!(ws, mpert, wv_edge)
+    gal_set_boundary!(ws, mpert, wv_edge; nef=ws.nsol - 2msing)
 
 Apply the axis (`u(0)=0` identity) and edge boundary conditions to the boundary cells' `mat`, plus the
-rpec coil-source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f). The edge
+error-field (EF) source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f). The edge
 branch is one of:
 
-  - rpec (`ncoil = ws.nsol - 2*msing > 0`): identity edge and a unit source at the edge value DOF of coil
+  - EF columns (`nef > 0`, `error_field_response`): identity edge and a unit source at the edge value DOF of EF
     column `2*msing+ipert` for each poloidal mode `ipert`. `gal_assemble_rhs!` only fills columns
     `1:2*msing`, so the injection is not clobbered.
   - free boundary (`wv_edge !== nothing`): add the vacuum block `wvac·psio²` at the edge value DOF.
   - fixed boundary (else): identity edge.
 """
-function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
+function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}}; nef::Int=ws.nsol - 2 * (length(ws.intvl) - 1))
     msing = length(ws.intvl) - 1
-    ncoil = ws.nsol - 2 * msing
 
     # axis u(0): first cell of interval 0, Hermite value DOF ip=0 (Julia index 1)
     cell = ws.intvl[1].cells[1]
@@ -434,8 +433,8 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
 
     # edge u(1): last cell of last interval, edge-value DOF ip=3 (Julia index 4, see gauss_quad swap)
     cell = ws.intvl[msing+1].cells[ws.nx]
-    if ncoil > 0
-        # rpec: identity edge + unit coil sources (gal.f)
+    if nef > 0
+        # EF columns: identity edge + unit EF sources (gal.f)
         cell.mat[:, :, 4, :] .= 0
         for idx in 1:mpert
             cell.mat[idx, idx, 4, 4] = 1

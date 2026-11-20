@@ -25,9 +25,10 @@ function save_to_hdf5(
     diag = result.diagnostics
     msing = length(result.surfaces)
     # Closed ξ profiles share dataset names and (mode, solution, psi) axis order across the Solutions groups:
-    # ForwardIntegration for an ODE integrator's columns, Match for a MatchProblem solution (on its basis's grid).
+    # ForwardIntegration for an ODE integrator's columns, GalerkinIntegration for the ideal Galerkin solution and Match
+    # for a MatchProblem solution (the last two on the grid of the outer solutions).
     xi_solution = (result.solution !== nothing && result.solution.basis === :el_axis) ? result.solution : nothing
-    matched_solution = (result.solution !== nothing && result.solution.basis === :unit_edge) ? result.solution : nothing
+    unit_edge_solution = (result.solution !== nothing && result.solution.basis === :unit_edge) ? result.solution : nothing
 
 
     # File-level metadata contract (schema_version, Conventions, title, date).
@@ -41,13 +42,13 @@ function save_to_hdf5(
         write_galerkin!(out_h5, gal_data, result.basis; basis_output=result.control.algorithm.basis_output)
     end
 
-    if matched_solution !== nothing
-        group = "ForceFreeStates/Solutions/Match"
-        out_h5["$group/psi"] = matched_solution.psi_store
-        out_h5["$group/q"] = matched_solution.q_store
-        out_h5["$group/xi_psi"] = matched_solution.u_store[:, :, 1, :]
-        out_h5["$group/dxi_psidpsi"] = matched_solution.du_store
-        out_h5["$group/xi_s"] = matched_solution.xi_s_store
+    if unit_edge_solution !== nothing
+        group = result.closure === :matched ? "ForceFreeStates/Solutions/Match" : "ForceFreeStates/Solutions/GalerkinIntegration"
+        out_h5["$group/psi"] = unit_edge_solution.psi_store
+        out_h5["$group/q"] = unit_edge_solution.q_store
+        out_h5["$group/xi_psi"] = unit_edge_solution.u_store[:, :, 1, :]
+        out_h5["$group/dxi_psidpsi"] = unit_edge_solution.du_store
+        out_h5["$group/xi_s"] = unit_edge_solution.xi_s_store
     end
 
     save_equilibrium_ingest!(out_h5, equil)
@@ -179,22 +180,19 @@ function save_to_hdf5(
     # Galerkin is the in-domain in-band subset of `SingularSurfaces/`.
     dp = result.delta_prime
     if msing > 0 && dp !== nothing
-        # Inter-surface Δ' matrix, shape [msing × msing] — PEST3-convention deltap.
-        out_h5["SingularSurfaces/Delta_prime_matrix"] = dp.matrix
-
-        # Edge coil-response matrix, stored (numpert_total × 2msing) = (edge mode, surface-side)
-        # so H5Web heatmaps read x = edge mode, y = surface-side. The carried matrix stays
-        # (2msing × numpert_total); transpose only at write.
-        isempty(dp.coil) || (out_h5["SingularSurfaces/Delta_coil"] = permutedims(dp.coil))
-
-        # Raw 2msing×2msing outer-region D' matrix, side-major [L_s1, R_s1, L_s2, R_s2, …]; pest3_decompose recovers (A', B', Γ', Δ').
-        isempty(dp.raw) || (out_h5["SingularSurfaces/Delta_prime_raw"] = dp.raw)
-
-        # Remaining PEST-3 parity blocks, when the formalism persisted them (Galerkin);
-        # Riccati recovers them from Delta_prime_raw via pest3_decompose.
-        dp.A === nothing || (out_h5["SingularSurfaces/pest3_A"] = dp.A)
-        dp.B === nothing || (out_h5["SingularSurfaces/pest3_B"] = dp.B)
-        dp.Gamma === nothing || (out_h5["SingularSurfaces/pest3_Gamma"] = dp.Gamma)
+        ss = "SingularSurfaces"
+        isempty(dp.raw_freeboundary) || (out_h5["$ss/Delta_prime_raw_freeboundary"] = dp.raw_freeboundary)
+        isempty(dp.raw_fixedboundary) || (out_h5["$ss/Delta_prime_raw_fixedboundary"] = dp.raw_fixedboundary)
+        # Δ_EF stored (edge mode × surface-side) so H5Web heatmaps read x = edge mode.
+        isempty(dp.ef) || (out_h5["$ss/Delta_EF"] = permutedims(dp.ef))
+        isempty(dp.edge_response) || (out_h5["$ss/edge_response"] = dp.edge_response)
+        for (blocks, suffix) in ((dp.freeboundary, ""), (dp.fixedboundary, "_fixedboundary"))
+            blocks === nothing && continue
+            out_h5["$ss/Delta_prime_matrix$suffix"] = blocks.Delta
+            out_h5["$ss/pest3_A$suffix"] = blocks.A
+            out_h5["$ss/pest3_B$suffix"] = blocks.B
+            out_h5["$ss/pest3_Gamma$suffix"] = blocks.Gamma
+        end
     end
     result.match === nothing || save_to_hdf5(out_h5, result.match)
 
@@ -212,7 +210,7 @@ function save_to_hdf5(
     # Jacobian-invariant); eigenmode columns are sorted most-unstable first, unit power norm, largest entry real-positive.
     fbs = "ForceFreeStates/FreeBoundaryStability"
     out_h5["$fbs/W_freeboundary"] = free_energies !== nothing ? free_energies.wt0 : ComplexF64[]
-    out_h5["$fbs/W_plasma"] = free_energies !== nothing ? free_energies.wp : ComplexF64[]
+    out_h5["$fbs/W_plasma"] = result.wp !== nothing ? result.wp : ComplexF64[]
     out_h5["$fbs/W_vacuum"] = free_energies !== nothing ? free_energies.wv : ComplexF64[]
     out_h5["$fbs/W_freeboundary_eigenmodes"] = free_energies !== nothing ? free_energies.wt : ComplexF64[]
     out_h5["$fbs/eigenmode_energies"] = free_energies !== nothing ? free_energies.et : ComplexF64[]

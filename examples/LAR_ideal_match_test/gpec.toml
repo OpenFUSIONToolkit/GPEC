@@ -1,9 +1,8 @@
 # LAR ideal-limit reference: large-aspect-ratio analytic TJ equilibrium, epsilon = a/R0 = 0.2, n = 1.
 #
-# The ideal-limit companion to LAR_resistive_match_test, identical except that [Match] ideal = true skips
-# the resistive inner layer entirely and builds the bare (perfectly shielded) coil columns. Running
-# the two side by side isolates what the inner layer contributes on this geometry. The per-surface
-# resistivity, density and rotation inputs are omitted here because the ideal limit never reads them.
+# The ideal-limit companion to LAR_resistive_match_test, identical except that it has no [Match] section:
+# the Galerkin solve's EF columns are already the perfectly shielded solution. Running the two side by
+# side isolates what the inner layer contributes on this geometry.
 # This run terminates after the stability stage.
 
 [Run]
@@ -63,7 +62,7 @@ integrator = "Galerkin" # Integration formalism, whose numerical settings are it
 truncate_at_rational_offset = false # Keep psilim at psihigh (do not truncate at last_rational_q + rational_offset_fraction)
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n (only used when truncate_at_rational_offset = true)
 
-# Outer-region singular Galerkin Delta-prime solver with rpec coil columns.
+# Outer-region singular Galerkin Delta-prime solver with error-field (EF) columns.
 [Galerkin]
 nx                     = 256   # Hermite-cubic elements per interval between singular surfaces
 nq                     = 6     # Gauss-Lobatto quadrature order per element
@@ -76,8 +75,4 @@ tol                    = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tole
 gnstep                 = 5000  # Maximum resonant-integration steps
 dx1dx2_flag            = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
 frobenius_order_ceiling = true  # Auto-raise the series order by ceil(2*Re(alpha)) on high-Mercier-index surfaces
-rpec_flag              = true  # Append mpert coil-response columns (unit edge sources) to the solve, giving the delta_coil block
-
-# Driven inner-layer matching on the finished solve in the ideal limit: the inner layer is skipped entirely.
-[Match]
-ideal                  = true  # true = build the IDEAL solution (skip the inner layer, bare coil columns)
+error_field_response              = true  # Add the error-field (EF) columns, a unit edge displacement per mode: gives Delta_EF, the ideal solution and wp
