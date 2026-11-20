@@ -17,7 +17,7 @@ function _coupling_row(d, key)
     key === :field && return (_magnitude_row(abs.(d.field), rich("|b̄", subscript("res"), "|"), "T")..., nothing)
     key === :current && return (_magnitude_row(abs.(d.current), rich("|I", subscript("res"), "|"), "A")..., nothing)
     key === :island_hw && return (d.island_hw, rich("w/2 (", PSIN, ")"), identity, nothing)
-    key === :chirikov && return (d.chirikov, "effective island-overlap\nChirikov parameter", identity, 1.0)
+    key === :chirikov && return (d.chirikov, "island overlap\nChirikov", identity, 1.0)
     return (real.(d.delta_prime), "driven Re Δ′", identity, 0.0)
 end
 
@@ -86,7 +86,7 @@ end
 
 function PE._plot_resonant_coupling(d, keys)
     return themed() do
-        fig = Figure(; size=length(keys) == 1 ? (720, 400) : (620, 150 * length(keys) + 70))
+        fig = _figure(length(keys) == 1 ? (720, 400) : (720, 150 * length(keys) + 70))
         gl = fig[1, 1] = GridLayout()
         _coupling_rows!(gl, d, keys)
         fig
@@ -137,7 +137,7 @@ function _spectrogram!(gl, d, component; style=:log_heatmap)
         axislegend(ax; position=:lt, nbanks=2)
         return ax
     end
-    ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel=PSIN, title=rich(name, " ", amp), limits=((ms[1] - 0.5, ms[end] + 0.5), (0, 1)))
+    ax = Axis(gl[1, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m", ylabel=PSIN, title=rich(name, " ", amp), limits=((ms[1] - 0.5, ms[end] + 0.5), (0, 1)))
     zmax = max(maximum(zu), floatmin())
     if style === :log_heatmap
         hm = heatmap!(ax, ms, pu, permutedims(zu); colormap=:viridis, colorscale=log10, colorrange=(1e-4zmax, zmax), lowclip=Makie.to_colormap(:viridis)[1])
@@ -156,7 +156,7 @@ end
 
 function PE._plot_mode_spectrogram(d, component; style=:log_heatmap)
     return themed() do
-        fig = Figure(; size=style === :lines ? (820, 480) : (900, 560))
+        fig = _figure(style === :lines ? (820, 480) : (900, 560))
         gl = fig[1, 1] = GridLayout()
         _spectrogram!(gl, d, component; style)
         fig
@@ -168,7 +168,7 @@ function _edge_spectrum!(gl, d)
     mpert = d.mhigh - d.mlow + 1
     ms = collect(d.mlow:d.mhigh)
     v, scale = _decade(abs.(d.data[end, 1:mpert]))
-    ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel=rich("|b̄", superscript("ψ"), subscript("m"), "| at the edge", _unit(scale, "T")),
+    ax = Axis(gl[1, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m", ylabel=rich("|b̄", superscript("ψ"), subscript("m"), "| at the edge", _unit(scale, "T")),
         title="Edge field spectrum", limits=(nothing, (0, nothing)))
     isempty(d.rational_m) || vlines!(ax, d.rational_m; color=(:black, 0.15), linewidth=1)
     stairs!(ax, vcat(ms[1] - 1, ms, ms[end] + 1), vcat(0.0, v, 0.0); step=:center, color=WONG[1], linewidth=2)
@@ -226,7 +226,7 @@ function PE._plot_singular_mode_rz(curves)
     return themed() do
         n = length(curves)
         at = "φ = " * _num(rad2deg(first(curves).phi)) * "°"
-        fig = Figure(; size=(330n + 150, 560))
+        fig = _figure((330n + 150, 560))
         for (j, c) in enumerate(curves)
             title = n == 1 ? rich("Dominant mode $(c.mode) at $at, σ = ", _num(c.sigma)) : rich("mode $(c.mode), σ = ", _num(c.sigma))
             ax = Axis(fig[1, j]; title, aspect=DataAspect(), xlabel="R (m)", ylabel="Z (m)", ylabelvisible=j == 1, yticklabelsvisible=j == 1)
@@ -245,7 +245,7 @@ function PE._plot_coupling_matrix(d)
         A = abs.(d.C)
         top = max(maximum(A), floatmin())
         ns, rank = size(A, 1), length(d.sigma)
-        fig = Figure(; size=(1150, 820))
+        fig = _figure((1150, 820))
         hax = Axis(fig[1, 1]; ylabel="rational surface q = m/n", yticks=(1:ns, d.labels), xticklabelsvisible=false,
             title=rich("Resonant coupling C: |b̄", subscript("res"), "| per unit b̃", subscript("m")))
         hm = heatmap!(hax, d.m, 1:ns, permutedims(A); colormap=:viridis, colorscale=log10, colorrange=(1e-4top, top),
@@ -258,7 +258,7 @@ function PE._plot_coupling_matrix(d)
 
         uax = Axis(fig[1, 2]; xlabel="|U|  (unit norm)", yticks=(1:ns, d.labels), yticklabelsvisible=false, title="left singular vectors",
             limits=((0, 1.05), nothing))
-        vax = Axis(fig[2, 1]; xlabel="poloidal harmonic m of the applied field b̃", ylabel="|V|  (unit norm)", title="right singular vectors",
+        vax = Axis(fig[2, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m of the applied field b̃", ylabel="|V|  (unit norm)", title="right singular vectors",
             limits=(nothing, (0, nothing)))
         for k in 1:rank
             lw = k == 1 ? 2.5 : 1.5
@@ -283,7 +283,7 @@ end
 
 function PE._plot_perturbed_field_rz(d, component, boundary; clip=0.9)
     return themed() do
-        fig = Figure(; size=(560, boundary === nothing ? 680 : 720))
+        fig = _figure((560, boundary === nothing ? 680 : 720))
         gl = fig[1, 1] = GridLayout()
         _field_rz_panel!(gl, d, component, boundary; clip)
         fig
@@ -297,7 +297,7 @@ function PE._plot_perturbed_equilibrium_summary(coupling, edge, xi, rz)
         edge === nothing || push!(top, gl -> _edge_spectrum!(gl, edge))
         rows = (isempty(top) ? 0 : 1) + (xi === nothing ? 0 : 1)
         ncol = max(1, length(top))
-        fig = Figure(; size=(1150 + (rz === nothing ? 0 : 480), rows < 2 ? 560 : 820))
+        fig = _figure((1150 + (rz === nothing ? 0 : 480), rows < 2 ? 560 : 820))
         for (c, draw!) in enumerate(top)
             gl = fig[1, c] = GridLayout()
             draw!(gl)
@@ -321,7 +321,7 @@ function PE._plot_islands(d, name)
         chains = d.chains
         isempty(chains) && throw(ArgumentError("no island has a nonzero half-width"))
         colors = Makie.resample_cmap(:viridis, length(chains) + 2)
-        fig = Figure(; size=(1250, 640))
+        fig = _figure((1250, 640))
         # (θ, ψ_N): the chains in flux coordinates, the outboard midplane central.
         bottom = max(0.0, minimum(c.psis - 1.5c.w for c in chains) - 0.03)
         a = Axis(fig[1, 1]; xlabel="poloidal angle θ (deg)", ylabel=PSIN, xticks=-180:90:180, limits=((-180, 180), (bottom, 1.02)),
