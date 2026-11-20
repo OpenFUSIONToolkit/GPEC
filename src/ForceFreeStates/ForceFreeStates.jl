@@ -37,6 +37,7 @@ include("EulerLagrange.jl")
 # Singular-surface machinery: finding/filtering, Frobenius asymptotics, GGJ coefficients
 include("Surfaces/Finding.jl")
 include("Surfaces/Asymptotics.jl")
+include("Surfaces/Crossing.jl")
 include("Surfaces/ResistEval.jl")
 
 # Outer<->inner resistive matching
@@ -52,6 +53,7 @@ include("Free.jl")
 include("Riccati/Propagators.jl")
 include("Riccati/Crossings.jl")
 include("Riccati/DeltaPrimeBVP.jl")
+include("Riccati/OuterBasis.jl")
 include("Riccati/Driver.jl")
 
 # RDCON outer-region singular Galerkin Δ′ solver (gal_solve port)

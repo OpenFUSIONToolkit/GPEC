@@ -421,7 +421,7 @@ end
 
 """
     refined_psi_grid(equil::PlasmaEquilibrium; tau, kin=nothing, mandatory=Float64[], pinned=Float64[],
-                     singfac_min=1e-4, n_min=1, bracket_coef=BRACKET_COEF,
+                     singfac_min=5e-4, n_min=1, bracket_coef=BRACKET_COEF,
                      min_spacing=MIN_KNOT_SPACING, N_cap=REFINED_N_CAP) -> Vector{Float64}
 
 Build the refined pass-2 ψ grid from a formed pass-1 equilibrium: knot density, equidistribution,
@@ -441,7 +441,7 @@ function refined_psi_grid(equil::PlasmaEquilibrium;
     kin::Union{Nothing,KineticProfileSplines}=nothing,
     mandatory::Vector{Float64}=Float64[],
     pinned::Vector{Float64}=Float64[],
-    singfac_min::Float64=1e-4,
+    singfac_min::Float64=5e-4,
     n_min::Int=1,
     bracket_coef::Float64=BRACKET_COEF,
     min_spacing::Float64=MIN_KNOT_SPACING,

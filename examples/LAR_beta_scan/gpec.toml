@@ -59,7 +59,7 @@ delta_mlow   = 8               # Expands lower bound of Fourier harmonics
 delta_mhigh  = 8               # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960            # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
-singfac_min             = 1e-4 # Fractional distance from rational q at which ideal jump enforced
+singfac_min             = 5e-4 # Distance |m - nq| from each rational surface at which the integration crosses it through its asymptotic series
 frobenius_order         = 6    # Order of the singular-surface (Frobenius) series expansion
 
 integrator = "Riccati" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
@@ -69,5 +69,4 @@ rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rati
 # Numerical settings of the Riccati integrator
 [Riccati]
 eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations
-renorm_threshold        = 1e3  # Column-norm threshold that triggers solution renormalization
-save_interval         = 1      # Save every Nth ODE step (1=all). Always saves near rational surfaces.
+save_interval         = 1      # Store every Nth solver step of each chunk (1=all); chunk ends and the edge-dW scan band are always stored

@@ -143,7 +143,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
 end
 
 """
-    gal_output_solution(ws, asymps, sings, intr, profiles, psihigh; delta=nothing) -> GalerkinSolution
+    gal_output_solution(ws, asymps, sings, intr, profiles, psihigh; delta=nothing) -> OuterSolutionBasis
 
 Build the gal-native packed radial grid (inner→edge; `GAL_INTERP_NP_RES` points per resonant/extension
 cell, `GAL_INTERP_NP` elsewhere, plus the edge point ψ=psihigh) and evaluate ξ AND the analytic ξ′ over
@@ -220,5 +220,5 @@ function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sin
         end
     end
 
-    return GalerkinSolution(psi, q, issing, xi, xi_deriv, xi_cut, cut_range)
+    return OuterSolutionBasis(psi, q, issing, xi, xi_deriv, xi_cut, cut_range)
 end

@@ -233,6 +233,17 @@ function prepare_force_free_states!(
     sing_min!(intr, ctrl, equil)
     remove_singular_surfs!(intr; psimin=intr.psilow)
 
+    # The asymptotic series each ideal crossing uses expands the equilibrium about its surface, so it loses accuracy
+    # past a radial knot. The auto grid keeps its knots clear; a fixed grid may not.
+    if ctrl.kinetic === nothing && ctrl.singfac_min > 0 && !(ctrl.algorithm isa Galerkin)
+        crowded = [s.psifac for s in intr.sing[1:intr.msing] if
+                   any(x -> abs(x - s.psifac) < ctrl.singfac_min / abs(minimum(s.n) * s.q1), equil.profiles.xs)]
+        isempty(crowded) ||
+            @warn "A radial grid knot lies within the crossing distance singfac_min/|n q'| of the rational surfaces at " *
+                  "ψ = $(round.(crowded; digits=5)), where the asymptotic series is less accurate; lower singfac_min or use the " *
+                  "auto grid (mpsi = 0)."
+    end
+
     # GGJ geometric coefficients (E, F, G, H, K, M) of each surviving singular surface; `ggj_parameters` adds τ_A / τ_R.
     if intr.msing > 0
         resist_eval_all!(intr, equil)

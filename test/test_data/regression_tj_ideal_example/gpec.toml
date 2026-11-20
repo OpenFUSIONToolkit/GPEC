@@ -30,7 +30,7 @@ nn = 1                                  # Toroidal mode number, or consecutive n
 delta_mlow = 4                          # Expands lower bound of Fourier harmonics
 delta_mhigh = 4                         # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 64                      # Number of points used in splines over poloidal angle at the plasma-vacuum interface
-singfac_min = 1e-6                      # Fractional distance from rational q at which ideal jump enforced
+singfac_min = 1e-6                      # Distance |m - nq| from each rational surface at which the integration crosses it through its asymptotic series
 integrator = "Forward"                  # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = false     # Truncate integration at (last_rational_q + rational_offset_fraction)/n; false for analytic equilibria
 

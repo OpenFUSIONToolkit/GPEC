@@ -36,7 +36,6 @@ label = "edge coil response delta_coil"
 noise_threshold = 1e-8
 order = 12
 
-# The parallel Riccati chunking depends on the thread count, which moves energies by ~5e-9 (spectrum ~1e-6 absolute) and step counts by ~2 between 1 and 16 threads; the floors below sit well above that.
 # Energies — leading generalized (W,N) pencil eigenvalues at the final truncation (psilim): power-normalized (⟨|ξ|²⟩ = 1 metric) and invariant to the working-coordinate Jacobian.
 [quantities.et_real]
 h5path = "ForceFreeStates/FreeBoundaryStability/eigenmode_energies"
@@ -95,7 +94,7 @@ label = "singular q values"
 noise_threshold = 1e-8
 order = 32
 
-# Integration — chunk-endpoint step counts move when the chunk sizing changes.
+# Integration — stored and total solver-step counts move when the chunk layout or the tolerance changes.
 [quantities.nstep]
 h5path = "ForceFreeStates/Solutions/ForwardIntegration/nstep"
 type = "int_scalar"

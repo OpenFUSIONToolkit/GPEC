@@ -145,7 +145,6 @@ singfac_min = 1e-4
 [Riccati]
 eulerlagrange_tolerance = 1e-7
 save_interval = 3
-renorm_threshold = 1e4
 """
         )
     end

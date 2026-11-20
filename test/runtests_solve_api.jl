@@ -18,15 +18,16 @@ include("display_check.jl")
     )
     wall = GPEC.Vacuum.parse_wall(get(deck, "Wall", nothing))
 
-    # The deck's `[ForceFreeStates]` block as `solve` keywords, less `nn` and the wall; its `[Forward]` numerics
-    # serve both ODE integrators.
+    # The deck's `[ForceFreeStates]` block as `solve` keywords, less `nn` and the wall; its `[Forward]` tolerance
+    # serves both ODE integrators.
     ffs_kwargs = filter(p -> !(p.first in (:nn, :wall)), GPEC.force_balance_keywords(deck, template))
     ode_kwargs = GPEC.section_keywords(deck["Forward"], "Forward", GPEC._struct_fields(Forward))
     forward = Forward(; ode_kwargs...)
-    riccati = Riccati(; ode_kwargs...)
+    riccati_kwargs = GPEC.section_keywords(delete!(copy(deck["Forward"]), "renorm_threshold"), "Riccati", GPEC._struct_fields(Riccati))
+    riccati = Riccati(; riccati_kwargs...)
 
     # Copy the fixture deck into `dir` and apply `[Equilibrium]` / `[ForceFreeStates]` overrides and extra sections.
-    # An `integrator` override moves the `[Forward]` numerics to `[Riccati]`, or drops them for Galerkin.
+    # An `integrator` override moves the `[Forward]` tolerance to `[Riccati]`, or drops the section for Galerkin.
     function _stage_deck(dir; eq_overrides=Dict{String,Any}(), ffs_overrides=Dict{String,Any}(), extra_sections=Dict{String,Any}())
         for name in readdir(template)
             cp(joinpath(template, name), joinpath(dir, name))
@@ -36,7 +37,8 @@ include("display_check.jl")
         merge!(inputs["Equilibrium"], eq_overrides)
         merge!(inputs["ForceFreeStates"], ffs_overrides)
         ode = pop!(inputs, "Forward")
-        inputs["ForceFreeStates"]["integrator"] in ("Forward", "Riccati") && (inputs[inputs["ForceFreeStates"]["integrator"]] = ode)
+        inputs["ForceFreeStates"]["integrator"] == "Forward" && (inputs["Forward"] = ode)
+        inputs["ForceFreeStates"]["integrator"] == "Riccati" && (inputs["Riccati"] = delete!(ode, "renorm_threshold"))
         foreach(section -> delete!(inputs, section), ("LocalStability", "Ballooning"))
         merge!(inputs, extra_sections)
         open(io -> TOML.print(io, inputs), toml_path, "w")
@@ -67,13 +69,14 @@ include("display_check.jl")
 
     @testset "riccati solve produces the unified delta_prime" begin
         mktempdir() do dir
-            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"))]).ffs
-            prob = ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs...)
-            api = solve(prob, Riccati(; ode_kwargs..., nchunks=40))
+            # At the default crossing distance; the fixture's own 1e-6 is below where Δ′ keeps its accuracy.
+            reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati", "singfac_min" => 5e-4))]).ffs
+            prob = ForceBalanceProblem(equil; nn=1, wall=wall, ffs_kwargs..., singfac_min=5e-4)
+            api = solve(prob, Riccati(; riccati_kwargs..., nchunks=40))
 
             @test api.integrator === :riccati
             @test api.control.algorithm.nchunks == 40
-            @test api.solution === nothing
+            @test api.solution !== nothing && api.solution.basis === :el_axis
             @test api.delta_prime !== nothing
             msing = length(api.surfaces)
             @test size(api.delta_prime.matrix) == (msing, msing)
@@ -526,7 +529,12 @@ include("display_check.jl")
             @test matched.closure === :matched
             @test matched.match !== nothing && matched.bpen == matched.match.bpen
             @test matched.wp === nothing && matched.free_boundary === nothing
-            @test matched.solution === nothing    # no Galerkin basis to build a matched ξ from
+            # The matched ξ is built from the Riccati solve's own outer solutions, on its stored grid.
+            @test ric.basis !== nothing && size(ric.basis.xi, 3) == 2 * length(ric.surfaces) + ric.numpert_total
+            @test matched.solution.basis === :unit_edge && matched.solution.psi_store == ric.basis.psi
+            @test matched.solution.u_store[:, :, 1, :] == permutedims(matched.match.xi, (1, 3, 2))
+            # A Riccati basis always carries its cut solution, so the composite inner profiles need no option.
+            @test length(solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel(; real_profiles=true)).match.inner_xi) == length(ric.surfaces)
             # It carries no ideal δW, so no plasma response can be built from it.
             @test_throws ErrorException plasma_response(matched)
             # A matched result is a new solution, not an outer solve to match again.
@@ -555,7 +563,7 @@ include("display_check.jl")
             @test matched.match !== nothing
             # The ideal reference keeps the ideal δW (only a :matched closure drops it).
             @test matched.wp === gal.wp && matched.free_boundary === gal.free_boundary
-            @test matched.solution !== nothing && matched.solution.basis === :gal_native
+            @test matched.solution !== nothing && matched.solution.basis === :unit_edge
         end
     end
 
@@ -598,6 +606,25 @@ include("display_check.jl")
                 api = solve(pass1, forward; nn=1, wall=wall, kwargs...)
                 # The equilibrium stores its analytic config, so `solve` re-forms it on the deck's grid.
                 @test api.equil.rzphi_xs == reference.equil.rzphi_xs
+            end
+        end
+
+        @testset "states filled in from the asymptotic series next to each surface" begin
+            ffs_overrides = Dict{String,Any}("singfac_min" => 5e-4, "crossing_fill_points" => 3, "crossing_fill_min" => 2e-5, "vac_flag" => false)
+            mktempdir() do dir
+                reference = GPEC.main([_stage_deck(dir; ffs_overrides=ffs_overrides)]).ffs
+                kwargs = merge(ffs_kwargs, Dict(Symbol(k) => v for (k, v) in ffs_overrides))
+                api = solve(equil, forward; nn=1, wall=wall, kwargs...)
+                @test api.solution.psi_store == reference.solution.psi_store
+                @test api.solution.u_store ≈ reference.solution.u_store rtol = 1e-12
+                # Three states on each side, the closest at crossing_fill_min, and none when switched off.
+                distance(sol, s) = abs.(sol.psi_store .- s.psifac) .* abs(s.n[1] * s.q1)
+                for s in api.surfaces
+                    inside = filter(<(5e-4 * (1 - 1e-9)), distance(api.solution, s))
+                    @test length(inside) == 6 && minimum(inside) ≈ 2e-5
+                end
+                bare = solve(equil, forward; nn=1, wall=wall, merge(kwargs, Dict{Symbol,Any}(:crossing_fill_points => 0))...)
+                @test all(s -> minimum(distance(bare.solution, s)) ≈ 5e-4, bare.surfaces)
             end
         end
 
@@ -649,6 +676,8 @@ include("display_check.jl")
                 @test reference.closure === :matched
                 @test api.bpen ≈ reference.bpen rtol = 1e-12
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
+                @test !isempty(api.match.xi)
+                @test api.match.xi ≈ reference.match.xi rtol = 1e-12
             end
 
             # The CCC layer under [Match], named by inner_model with its options in [CCC].
