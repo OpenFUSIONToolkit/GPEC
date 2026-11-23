@@ -239,6 +239,9 @@ const MAIN_H5_ANNOTATIONS = [
     "SingularSurfaces/rational_n" => (; long_name="resonant toroidal mode numbers per surface (0-padded)", dims=("surface", "mode")),
     "SingularSurfaces/D_I" =>
         (; long_name="Mercier D_I evaluated at each rational surface", dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
+    "SingularSurfaces/alpha" =>
+        (; long_name="Mercier exponent α = √(−D_I) the solve's asymptotic series used at each rational surface (ν = α − 1/2); converges to SingularSurfaces/D_I with the poloidal harmonics retained",
+            dims=("surface",), attach=(1 => "SingularSurfaces/rational_psi", 1 => "SingularSurfaces/rational_q")),
     "SingularSurfaces/ca_left" =>
         (; long_name="asymptotic large/small-solution coefficient matrices just left of each surface (zero-extent when not computed — ideal crossings only)",
             dims=("mode", "solution", "large_small", "surface")),

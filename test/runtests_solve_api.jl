@@ -102,7 +102,7 @@ include("display_check.jl")
         ideal = solve(equil, forward; nn=1, wall=wall, ffs_kwargs...)
 
         @test scaled.mats.kinetic !== nothing && ideal.mats.kinetic === nothing
-        @test scaled.closure === :regular && ideal.closure === :ideal && iszero(scaled.bpen)
+        @test scaled.closure === :regular && ideal.closure === :ideal && iszero(scaled.penetrated_area_weighted_field)
         @test !isapprox(scaled.free_boundary.et[1], ideal.free_boundary.et[1]; rtol=1e-6)
         @test factored.free_boundary.et[1] ≈ scaled.free_boundary.et[1] rtol = 1e-10
         @test factored.kinetic.kmsing == scaled.kinetic.kmsing
@@ -398,7 +398,7 @@ include("display_check.jl")
             n = length(gal.surfaces)
             slow = solve(MatchProblem(gal; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             fast = solve(MatchProblem(gal; eta=fill(1e-7, n), rho=fill(1e-7, n), rotation=fill(10.0, n)), GGJModel())
-            @test slow.bpen != fast.bpen
+            @test slow.penetrated_area_weighted_field != fast.penetrated_area_weighted_field
             # The result records which model it was matched with.
             @test slow.match.model === GGJModel()
             @test first_diff(gal, gal_snap) === nothing
@@ -432,7 +432,7 @@ include("display_check.jl")
         @test given.eta == fill(1e-7, n) && given.rho == prob.rho && given.rotation == fill(3.0, n)
         # The derived inputs solve the same as those values given explicitly.
         explicit = MatchProblem(kgal; eta=prob.eta, rho=prob.rho, rotation=prob.rotation)
-        @test solve(prob, GGJModel()).bpen == solve(explicit, GGJModel()).bpen
+        @test solve(prob, GGJModel()).penetrated_area_weighted_field == solve(explicit, GGJModel()).penetrated_area_weighted_field
         # Data without an E×B rotation need an explicit rotation.
         attach_kinetic_profiles!(kgal.equil, KineticProfileData(; psi, n_e=flat(5e19), n_i=flat(5e19), T_e=flat(1e3), T_i=flat(1e3)))
         @test_throws "give rotation" MatchProblem(kgal)
@@ -445,9 +445,9 @@ include("display_check.jl")
         layer = (eta=1e-7, rho=1e-7, rotation=1.0)
         ggj = solve(MatchProblem(ric; layer...), GGJModel())
         # Q* = 0, M⊥/M = 1 is the GGJ layer, through CCC's own Wasow basis and splitting solve.
-        @test solve(MatchProblem(ric; layer...), CCCModel(; Qstar=0.0)).bpen ≈ ggj.bpen rtol = 1e-6
+        @test solve(MatchProblem(ric; layer...), CCCModel(; Qstar=0.0)).penetrated_area_weighted_field ≈ ggj.penetrated_area_weighted_field rtol = 1e-6
         drift = solve(MatchProblem(ric; layer...), CCCModel(; Qstar=0.05, mperp=1.2))
-        @test drift.closure === :matched && all(isfinite, drift.bpen) && drift.bpen != ggj.bpen
+        @test drift.closure === :matched && all(isfinite, drift.penetrated_area_weighted_field) && drift.penetrated_area_weighted_field != ggj.penetrated_area_weighted_field
         @test drift.match.model === CCCModel(; Qstar=0.05, mperp=1.2) && all(p -> p.Qstar == 0.05 && p.mperp == 1.2, drift.match.inner_params)
         # Without kinetic data CCC needs Q* given.
         @test_throws "give Qstar, or load kinetic profiles" solve(MatchProblem(ric; layer...), CCCModel())
@@ -509,7 +509,7 @@ include("display_check.jl")
             ray = solve(prob, GGJModel(; real_profiles=true)).match
             galm = solve(prob, GGJModel(; solver=:galerkin)).match
             # Δ and the penetrated field come from the rotated solve whether or not profiles are requested.
-            @test ray.deltar == center.deltar && ray.bpen == center.bpen
+            @test ray.deltar == center.deltar && ray.penetrated_area_weighted_field == center.penetrated_area_weighted_field
             @test isempty(center.inner_psi) && isempty(center.inner_xi) && isempty(center.inner_b)
             @test !isempty(ray.inner_xi) && !isempty(galm.inner_xi)
             # At ψ_s the composite ξ is the even (Δ₊) column and b the odd (Δ₋) one, so a parity swap in the
@@ -530,7 +530,7 @@ include("display_check.jl")
             @test ric.free_boundary !== nothing && !isempty(ric.delta_prime.ef)
             matched = solve(MatchProblem(ric; eta=1e-7, rho=1e-7, rotation=1.0), GGJModel())
             @test matched.closure === :matched
-            @test matched.match !== nothing && matched.bpen == matched.match.bpen
+            @test matched.match !== nothing && matched.penetrated_area_weighted_field == matched.match.penetrated_area_weighted_field
             # The matched ξ is built from the Riccati solve's own outer solutions, on its stored grid.
             @test ric.basis !== nothing && size(ric.basis.xi, 3) == 2 * length(ric.surfaces) + ric.numpert_total
             @test matched.solution.basis === :unit_edge && matched.solution.psi_store == ric.basis.psi
@@ -542,8 +542,21 @@ include("display_check.jl")
             @test matched.wp ≈ ric.wp + ric.delta_prime.edge_response * matched.match.cout / ψ₀² rtol = 1e-12
             @test norm(matched.wp - matched.wp') > 1e-8 * norm(matched.wp)
             @test matched.free_boundary.wt0 ≈ matched.wp + ric.free_boundary.wv rtol = 1e-12
-            # The singular coupling of a matched solution is not defined yet.
-            @test_throws "matched" plasma_response(matched)
+            # The matched small coefficients are the inner layers' response Δ₊d₊ ∓ Δ₋d₋ (Wang et al. 2020 Eqs. 11c–d).
+            m = matched.match
+            for i in eachindex(ric.surfaces)
+                dplus, dminus = m.cin[2i-1, :], m.cin[2i, :]
+                @test m.small_coefficients[2i-1, :] ≈ m.deltar[i, 1] .* dplus .- m.deltar[i, 2] .* dminus rtol = 1e-8
+                @test m.small_coefficients[2i, :] ≈ m.deltar[i, 1] .* dplus .+ m.deltar[i, 2] .* dminus rtol = 1e-8
+            end
+            # A matched response carries only the asymptotic metrics, built from those coefficients, and drives a forcing.
+            resp = plasma_response(matched)
+            @test isempty(resp.C_delta_mn) && isempty(resp.C_resonant_area_weighted_field)
+            @test size(resp.C_delta_mn_asymptotic) == (length(resp.rational_psi), matched.numpert_total)
+            @test resp.C_delta_mn_asymptotic != plasma_response(ric).C_delta_mn_asymptotic
+            pe = perturbed_equilibrium(resp, RMPField(joinpath(@__DIR__, "..", "examples", "TJ_ideal_example", "forcing.dat")))
+            @test isempty(pe.delta_mn) && length(pe.delta_mn_asymptotic) == length(resp.rational_psi)
+            @test all(isfinite, pe.island_half_width_asymptotic)
             # A matched result is a new solution, not an outer solve to match again.
             @test_throws ErrorException MatchProblem(matched; eta=1e-7, rho=1e-7, rotation=1.0)
         end
@@ -578,8 +591,7 @@ include("display_check.jl")
             @test matched.wp ≈ gal.wp + F[:, 1:(2length(gal.surfaces))] * matched.match.cout / ψ₀² rtol = 1e-12
             # Its free-boundary energies use the matched response with the solve's own vacuum.
             @test matched.free_boundary.wt0 ≈ matched.wp + gal.free_boundary.wv rtol = 1e-12
-            # The singular coupling of a matched solution is not defined yet.
-            @test_throws "matched" plasma_response(matched)
+            @test isempty(plasma_response(matched).C_delta_mn)
             # The EF columns do not change either Δ′: both equal those of a solve without them.
             plain = solve(equil, Galerkin(; nx=32, error_field_response=false); nn=1, ffs_kwargs...)
             @test gal.delta_prime.raw_freeboundary == plain.delta_prime.raw_freeboundary
@@ -609,6 +621,10 @@ include("display_check.jl")
             novac = solve(equil, Galerkin(; nx=32, error_field_response=true); nn=1, merge(ffs_kwargs, Dict{Symbol,Any}(:vac_flag => false))...)
             @test novac.wp !== nothing && novac.free_boundary === nothing
             @test_throws "vac_flag=true" plasma_response(novac)
+            # The same holds for every integrator.
+            fwd_novac = solve(equil, forward; nn=1, merge(ffs_kwargs, Dict{Symbol,Any}(:vac_flag => false))...)
+            @test fwd_novac.free_boundary === nothing
+            @test_throws "vac_flag=true" plasma_response(fwd_novac)
         end
     end
 
@@ -704,7 +720,7 @@ include("display_check.jl")
 
                 @test reference.closure === api.closure === :matched
                 @test h5open(f -> haskey(f, "Info/Runtimes/match"), joinpath(dir, "gpec.h5"))
-                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.penetrated_area_weighted_field ≈ reference.penetrated_area_weighted_field rtol = 1e-12
                 @test api.match.xi ≈ reference.match.xi rtol = 1e-12
                 # The composite inner profiles need the cut solution, which Galerkin keeps only on request.
                 @test isempty(reference.match.inner_xi) && isempty(api.match.inner_xi)
@@ -719,7 +735,7 @@ include("display_check.jl")
                     extra_sections=match_sections(length(ric.surfaces), "ray"))]).ffs
 
                 @test reference.closure === :matched
-                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.penetrated_area_weighted_field ≈ reference.penetrated_area_weighted_field rtol = 1e-12
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
                 @test !isempty(api.match.xi)
                 @test api.match.xi ≈ reference.match.xi rtol = 1e-12
@@ -736,7 +752,7 @@ include("display_check.jl")
                 reference = GPEC.main([_stage_deck(dir; ffs_overrides=Dict{String,Any}("integrator" => "Riccati"), extra_sections=sections)]).ffs
 
                 @test reference.closure === :matched && reference.match.model isa CCCModel{:ray} && reference.match.model.Qstar == fill(0.05, n)
-                @test api.bpen ≈ reference.bpen rtol = 1e-12
+                @test api.penetrated_area_weighted_field ≈ reference.penetrated_area_weighted_field rtol = 1e-12
                 @test api.match.cout ≈ reference.match.cout rtol = 1e-12
             end
 

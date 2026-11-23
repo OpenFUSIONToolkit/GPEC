@@ -222,7 +222,8 @@ stored acting on b̃_x, with flux-space copies in `resp.coupling_flux` for apply
 
 Δ_mn, the current, the field and (w/2)² are built from the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4. A single-`n`
 result with `Delta_EF` also gets them from the jump of the asymptotic small solution, −2πi·χ₁·n·q′·(C_R − C_L),
-in the `_asymptotic` matrices; those are empty otherwise.
+in the `_asymptotic` matrices; those are empty otherwise. A `:matched` result takes C_L, C_R from its matched small
+coefficients and gets only the `_asymptotic` and penetrated-field matrices: its big solution is singular at each surface.
 
 ## Normalization
 
@@ -280,26 +281,31 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
 
     verbose && @info "Found $n_rational resonant (surface, n) pairs"
 
-    resp.C_resonant_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
-    resp.C_resonant_current = zeros(ComplexF64, n_rational, numpert_total)
-    resp.C_island_width_sq = zeros(ComplexF64, n_rational, numpert_total)
-    have_inner_bpen = !isempty(ffs.bpen)
-    if have_inner_bpen
+    # A matched solution carries the big solution, singular at each surface, so it gets no finite-width rows.
+    matched = ffs.closure === :matched
+    finite_size = matched ? (0, 0) : (n_rational, numpert_total)
+    resp.C_resonant_area_weighted_field = zeros(ComplexF64, finite_size)
+    resp.C_resonant_current = zeros(ComplexF64, finite_size)
+    resp.C_island_width_sq = zeros(ComplexF64, finite_size)
+    have_penetrated = !isempty(ffs.penetrated_area_weighted_field)
+    if have_penetrated
         resp.C_penetrated_area_weighted_field = zeros(ComplexF64, n_rational, numpert_total)
     else
         resp.C_penetrated_area_weighted_field = zeros(ComplexF64, 0, 0)
         @warn "No inner-layer B_pen supplied; penetrated field not computed." maxlog = 1
     end
-    resp.C_delta_mn = zeros(ComplexF64, n_rational, numpert_total)
+    resp.C_delta_mn = zeros(ComplexF64, finite_size)
     resp.rational_psi = zeros(Float64, n_rational)
     resp.rational_q = zeros(Float64, n_rational)
     resp.rational_m_res = zeros(Int, n_rational)
     resp.rational_n = zeros(Int, n_rational)
     resp.rational_surface_idx = zeros(Int, n_rational)
     resp.rational_area = zeros(Float64, n_rational)
-    # The asymptotic rows need Δ_EF, each surface's left and right small-solution coefficients per unit edge displacement.
+    # The asymptotic rows need each surface's left and right small-solution coefficients per unit edge displacement:
+    # Δ_EF for an ideal closure, Δ_EF + Δ_outᵀ·c_out once matched.
     dp = ffs.delta_prime
-    have_ef = ffs.npert == 1 && dp !== nothing && size(dp.ef) == (2msing, numpert_total)
+    small = matched ? ffs.match.small_coefficients : dp === nothing ? nothing : dp.ef
+    have_ef = ffs.npert == 1 && small !== nothing && size(small) == (2msing, numpert_total)
     asymptotic_size = have_ef ? (n_rational, numpert_total) : (0, 0)
     resp.C_resonant_area_weighted_field_asymptotic = zeros(ComplexF64, asymptotic_size)
     resp.C_resonant_current_asymptotic = zeros(ComplexF64, asymptotic_size)
@@ -347,46 +353,9 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
             # shear = n·q′/q (Fortran gpout_resp); abs(nn) only sets the sign of C_island_width_sq, not the width.
             shear = abs(nn) * sing_surf.q1 / sing_surf.q
 
-            # Evaluate ∂b^ψ/∂ψ either side of the surface; spot 5e-4 matches the Fortran singfac_min default.
-            spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
-            lpsi = sing_surf.psifac - spot_psi
-            rpsi = sing_surf.psifac + spot_psi
-
-            # Ξ, Ξ′ at lpsi/rpsi as in Fortran gpeq_sol: matched → its stored Ξ′, ideal → EL relation, kinetic → stored Ξ′.
-            if resp.unit_edge_basis
-                u_l, ud_l = _matched_solution_at(lpsi, resnum, solution, nstep)
-                u_r, ud_r = _matched_solution_at(rpsi, resnum, solution, nstep)
-            elseif use_el
-                u_l, ud_l = _el_solution_at(lpsi, resnum, solution, mats, equil, ffs, nstep)
-                u_r, ud_r = _el_solution_at(rpsi, resnum, solution, mats, equil, ffs, nstep)
-            else
-                u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
-                u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
-            end
-
-            q_l = equil.profiles.q_spline(lpsi)
-            q1_l = equil.profiles.q_deriv(lpsi)
-            q_r = equil.profiles.q_spline(rpsi)
-            q1_r = equil.profiles.q_deriv(rpsi)
-            singfac_l = m_res - nn * q_l
-            singfac_r = m_res - nn * q_r
-
-            jump_vec = Vector{ComplexF64}(undef, numpert_total)
-            for k in 1:numpert_total
-                ck = @view C_coeffs[:, k]
-                xsp_l = transpose(u_l) * ck
-                xsp1_l = transpose(ud_l) * ck
-                xsp_r = transpose(u_r) * ck
-                xsp1_r = transpose(ud_r) * ck
-                bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
-                bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
-                jump_vec[k] = bwp1_r - bwp1_l
-            end
-
-            # Inner-layer penetrated field bpen[s, :] contracts with C_coeffs like the outer solution; /area makes it area-weighted.
-            if have_inner_bpen && s <= size(ffs.bpen, 1)
-                pen_row = (transpose(C_coeffs) * @view(ffs.bpen[s, :])) ./ area
-                resp.C_penetrated_area_weighted_field[row, :] = pen_row
+            # The inner layer's penetrated area-weighted field contracts with C_coeffs like the outer solution.
+            if have_penetrated && s <= size(ffs.penetrated_area_weighted_field, 1)
+                resp.C_penetrated_area_weighted_field[row, :] = transpose(C_coeffs) * @view(ffs.penetrated_area_weighted_field[s, :])
             end
 
             # Δ_mn is the ∂b^ψ/∂ψ jump, stored over 2π·χ₁; j_c carries the surface Jacobian weighting of the current;
@@ -398,14 +367,46 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
                 island_width_sq = abs(shear) > 1e-10 ? (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx : zero(singflx)
                 return (; delta_mn=jump ./ (twopi * chi1), resonant_current, resonant_area_weighted_field=singflx ./ area, island_width_sq)
             end
-            rows = coupling_rows(jump_vec)
-            resp.C_delta_mn[row, :] = rows.delta_mn
-            resp.C_resonant_current[row, :] = rows.resonant_current
-            resp.C_resonant_area_weighted_field[row, :] = rows.resonant_area_weighted_field
-            resp.C_island_width_sq[row, :] = rows.island_width_sq
+            if !matched
+                # Evaluate ∂b^ψ/∂ψ either side of the surface; spot 5e-4 matches the Fortran singfac_min default.
+                spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
+                lpsi = sing_surf.psifac - spot_psi
+                rpsi = sing_surf.psifac + spot_psi
+
+                # Ξ, Ξ′ at lpsi/rpsi as in Fortran gpeq_sol: unit-edge basis → its stored Ξ′, ideal → EL relation, kinetic → stored Ξ′.
+                if resp.unit_edge_basis
+                    u_l, ud_l = _matched_solution_at(lpsi, resnum, solution, nstep)
+                    u_r, ud_r = _matched_solution_at(rpsi, resnum, solution, nstep)
+                elseif use_el
+                    u_l, ud_l = _el_solution_at(lpsi, resnum, solution, mats, equil, ffs, nstep)
+                    u_r, ud_r = _el_solution_at(rpsi, resnum, solution, mats, equil, ffs, nstep)
+                else
+                    u_l, ud_l = _solution_at(lpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
+                    u_r, ud_r = _solution_at(rpsi, sing_surf.psifac, resnum, m_res, nn, solution, equil, nstep)
+                end
+
+                q1_l = equil.profiles.q_deriv(lpsi)
+                q1_r = equil.profiles.q_deriv(rpsi)
+                singfac_l = m_res - nn * equil.profiles.q_spline(lpsi)
+                singfac_r = m_res - nn * equil.profiles.q_spline(rpsi)
+
+                jump_vec = Vector{ComplexF64}(undef, numpert_total)
+                for k in 1:numpert_total
+                    ck = @view C_coeffs[:, k]
+                    bwp1_l = 2π * im * chi1 * (singfac_l * (transpose(ud_l) * ck) - nn * q1_l * (transpose(u_l) * ck))
+                    bwp1_r = 2π * im * chi1 * (singfac_r * (transpose(ud_r) * ck) - nn * q1_r * (transpose(u_r) * ck))
+                    jump_vec[k] = bwp1_r - bwp1_l
+                end
+
+                rows = coupling_rows(jump_vec)
+                resp.C_delta_mn[row, :] = rows.delta_mn
+                resp.C_resonant_current[row, :] = rows.resonant_current
+                resp.C_resonant_area_weighted_field[row, :] = rows.resonant_area_weighted_field
+                resp.C_island_width_sq[row, :] = rows.island_width_sq
+            end
             if have_ef
-                # Asymptotic jump −2πi·χ₁·n·q′·(C_R − C_L): the right and left rows of Δ_EF on the edge displacement of each forcing mode.
-                rows = coupling_rows((-2π * im * chi1 * nn * sing_surf.q1) .* (transpose(edge_mn) * (dp.ef[2s, :] .- dp.ef[2s-1, :])))
+                # Asymptotic jump −2πi·χ₁·n·q′·(C_R − C_L): the right and left small-solution rows on the edge displacement of each forcing mode.
+                rows = coupling_rows((-2π * im * chi1 * nn * sing_surf.q1) .* (transpose(edge_mn) * (small[2s, :] .- small[2s-1, :])))
                 resp.C_delta_mn_asymptotic[row, :] = rows.delta_mn
                 resp.C_resonant_current_asymptotic[row, :] = rows.resonant_current
                 resp.C_resonant_area_weighted_field_asymptotic[row, :] = rows.resonant_area_weighted_field
@@ -419,8 +420,8 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
             resp.rational_n[row] = nn
             resp.rational_surface_idx[row] = s
 
-            if verbose
-                dp_diag = real(resp.C_delta_mn[row, resnum])
+            if verbose && (have_ef || !matched)
+                dp_diag = real((matched ? resp.C_delta_mn_asymptotic : resp.C_delta_mn)[row, resnum])
                 @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ_mn(diag)=$(@sprintf("%.3e", dp_diag))"
             end
         end
@@ -435,17 +436,19 @@ function build_coupling_operators!(resp::PlasmaResponse; verbose::Bool=false)
         resonant_area_weighted_field_asymptotic=resp.C_resonant_area_weighted_field_asymptotic, resonant_current_asymptotic=resp.C_resonant_current_asymptotic,
         island_width_sq_asymptotic=resp.C_island_width_sq_asymptotic, delta_mn_asymptotic=resp.C_delta_mn_asymptotic)
     flux_conform = resp.rootarea_to_area_weight .* resp.surface_area
-    resp.C_resonant_area_weighted_field = resp.C_resonant_area_weighted_field * flux_conform
-    resp.C_resonant_current = resp.C_resonant_current * flux_conform
-    resp.C_island_width_sq = resp.C_island_width_sq * flux_conform
-    resp.C_delta_mn = resp.C_delta_mn * flux_conform
+    if !matched
+        resp.C_resonant_area_weighted_field = resp.C_resonant_area_weighted_field * flux_conform
+        resp.C_resonant_current = resp.C_resonant_current * flux_conform
+        resp.C_island_width_sq = resp.C_island_width_sq * flux_conform
+        resp.C_delta_mn = resp.C_delta_mn * flux_conform
+    end
     if have_ef
         resp.C_resonant_area_weighted_field_asymptotic = resp.C_resonant_area_weighted_field_asymptotic * flux_conform
         resp.C_resonant_current_asymptotic = resp.C_resonant_current_asymptotic * flux_conform
         resp.C_island_width_sq_asymptotic = resp.C_island_width_sq_asymptotic * flux_conform
         resp.C_delta_mn_asymptotic = resp.C_delta_mn_asymptotic * flux_conform
     end
-    have_inner_bpen && (resp.C_penetrated_area_weighted_field = resp.C_penetrated_area_weighted_field * flux_conform)
+    have_penetrated && (resp.C_penetrated_area_weighted_field = resp.C_penetrated_area_weighted_field * flux_conform)
 
     return resp
 end
@@ -469,15 +472,16 @@ function apply_coupling!(state::PerturbedEquilibriumState; verbose::Bool=false)
         isnothing(j) || (forcing_flux[j] = mode.amplitude)
     end
 
-    state.resonant_area_weighted_field = C.resonant_area_weighted_field * forcing_flux
-    state.resonant_current = C.resonant_current * forcing_flux
-    state.island_width_sq = C.island_width_sq * forcing_flux
-    state.delta_mn = C.delta_mn * forcing_flux
+    # A matched response has no finite-width matrices.
+    if !isempty(C.delta_mn)
+        state.resonant_area_weighted_field = C.resonant_area_weighted_field * forcing_flux
+        state.resonant_current = C.resonant_current * forcing_flux
+        state.island_width_sq = C.island_width_sq * forcing_flux
+        state.delta_mn = C.delta_mn * forcing_flux
+        state.island_half_width, state.chirikov_parameter = island_diagnostics(state.island_width_sq, resp.rational_psi, resp.rational_surface_idx)
+    end
     isempty(C.penetrated_area_weighted_field) || (state.penetrated_area_weighted_field = C.penetrated_area_weighted_field * forcing_flux)
     state.forcing_solution_weights = resp.C_coeffs * forcing_flux
-
-    # Island diagnostics from the applied resonant vectors
-    state.island_half_width, state.chirikov_parameter = island_diagnostics(state.island_width_sq, resp.rational_psi, resp.rational_surface_idx)
     if !isempty(C.delta_mn_asymptotic)
         state.resonant_area_weighted_field_asymptotic = C.resonant_area_weighted_field_asymptotic * forcing_flux
         state.resonant_current_asymptotic = C.resonant_current_asymptotic * forcing_flux

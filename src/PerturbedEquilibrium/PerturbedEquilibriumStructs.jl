@@ -77,13 +77,15 @@ applied root-area-weighted field b̃_x to the resonant response at that surface.
   - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
   - `C_penetrated_area_weighted_field` - Penetrated area-weighted field coupling (singcoup row 4)
   - `C_delta_mn`         - Δ_mn coupling, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁ (singcoup row 5)
+    The four finite-width matrices above are empty for a `:matched` result.
   - `coupling_flux::NamedTuple` - The same matrices acting on the physical flux Φ_x (keys without the
     `C_` prefix), used for the applied resonant vectors; empty when the coupling was not built.
   - `C_resonant_area_weighted_field_asymptotic`, `C_resonant_current_asymptotic`, `C_island_width_sq_asymptotic`,
     `C_delta_mn_asymptotic` - The same four built from the jump of the asymptotic small solution,
     −2πi·χ₁·n·q′·(C_R − C_L), in place of the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4. The two agree where D_I = −1/4;
     elsewhere the finite-width matrices are (1/2 + √−D_I)·w^(√−D_I − 1/2) times these, w being that half-width in ψ_N.
-    Empty unless the result is single-`n` and carries `Delta_EF`.
+    Empty unless the result is single-`n` and carries `Delta_EF`; a `:matched` result takes C_L, C_R from its matched
+    small coefficients `match.small_coefficients`.
   - `C_coeffs::Matrix{ComplexF64}` - Edge-to-solution coefficients `u_bnd⁻¹·edge_mn` of each unit forcing mode.
 
 Metadata [n_rational] — identifies each (surface, n) row:

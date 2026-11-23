@@ -14,8 +14,8 @@ fields are empty when the solve kept no Galerkin basis.
   - `deltar`: `(msing, 2)` inner-layer Δ per surface, columns (Δ₊, Δ₋) = (interchange, tearing).
   - `forced_eigenvalue`: forced eigenvalue γ = 2πi·n·f per surface.
   - `residual`: relative residual of the linear solve.
-  - `bpen`: `(msing, nef)` penetrated resonant field at each layer center.
-  - `reconnected_flux`: `(2msing, nef)` `Δ_EF + Δ_outᵀ·cout`.
+  - `penetrated_area_weighted_field`: `(msing, nef)` penetrated 𝒥b^ψ at each layer center over the surface area, in T.
+  - `small_coefficients`: `(2msing, nef)` outer small-solution coefficient left and right of each surface, `Δ_EF + Δ_outᵀ·cout`.
   - `xi`, `xi_deriv`: `(mpert, ngrid, nef)` matched outer ξ and ξ′, one column per EF column.
   - `inner_psi`, `inner_xi`, `inner_b`: per surface, the inner ψ grid and the composite ξ_ψ and b^ψ on it; empty unless the
     inner model returns real-ψ profiles (`GGJModel(; solver=:galerkin)` or `GGJModel(; real_profiles=true)`).
@@ -29,8 +29,8 @@ struct MatchResult{P}
     deltar::Matrix{ComplexF64}
     forced_eigenvalue::Vector{ComplexF64}
     residual::Float64
-    bpen::Matrix{ComplexF64}
-    reconnected_flux::Matrix{ComplexF64}
+    penetrated_area_weighted_field::Matrix{ComplexF64}
+    small_coefficients::Matrix{ComplexF64}
     xi::Array{ComplexF64,3}
     xi_deriv::Array{ComplexF64,3}
     inner_psi::Vector{Vector{Float64}}
@@ -80,8 +80,8 @@ function save_to_hdf5(out_h5::Union{HDF5.File,HDF5.Group}, m::MatchResult)
     out_h5["$g/cout"] = m.cout
     out_h5["$g/cin"] = m.cin
     out_h5["$g/Delta_r"] = m.deltar
-    out_h5["$g/bpen"] = m.bpen
-    out_h5["$g/reconnected_flux"] = m.reconnected_flux
+    out_h5["$g/penetrated_area_weighted_field"] = m.penetrated_area_weighted_field
+    out_h5["$g/small_coefficients"] = m.small_coefficients
     out_h5["$g/forced_eigenvalue"] = m.forced_eigenvalue
     # Per-surface inner-layer ξ_ψ(ψ) (match.f intotsol); ragged grids → one dataset pair per surface.
     for i in eachindex(m.inner_psi)
@@ -113,10 +113,10 @@ const MATCH_H5_ANNOTATIONS = [
         (; long_name="inner-region matching coefficients per surface parity, per unit EF column", dims=("surface_parity", "ef")),
     "SingularSurfaces/Match/Delta_r" =>
         (; long_name="inner-layer Δ per surface and parity, (Δ₊ interchange, Δ₋ tearing)", dims=("surface", "parity")),
-    "SingularSurfaces/Match/bpen" =>
-        (; long_name="penetrated resonant field b^ψ at each layer center, per unit EF column", dims=("surface", "ef")),
-    "SingularSurfaces/Match/reconnected_flux" =>
-        (; long_name="reconnected flux Δ_EF + Δ_outᵀ·cout per surface parity, per unit EF column", dims=("surface_parity", "ef")),
+    "SingularSurfaces/Match/penetrated_area_weighted_field" =>
+        (; long_name="penetrated area-weighted field 𝒥b^ψ/A at each layer center, per unit EF column", units="T", dims=("surface", "ef")),
+    "SingularSurfaces/Match/small_coefficients" =>
+        (; long_name="matched small-solution coefficient Δ_EF + Δ_outᵀ·cout per surface side, per unit EF column", dims=("surface_parity", "ef")),
     "SingularSurfaces/Match/forced_eigenvalue" => (; long_name="forced eigenvalue γ = 2πi·n·f at each surface", units="rad/s", _MATCH_SURF...),
     "SingularSurfaces/Match/residual" => (; long_name="relative residual of the matching linear solve")
 ]

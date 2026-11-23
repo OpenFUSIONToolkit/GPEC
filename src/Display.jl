@@ -219,6 +219,8 @@ function Base.show(io::IO, ::MIME"text/plain", r::ForceFreeStates.ForceFreeState
     _row(io, "Domain", "ψ ∈ [$(_fmt(r.psilow)), $(_fmt(r.psilim))], q_lim = $(_fmt(r.qlim))" * (r.layer_overlap === nothing ? "" : " (capped by layer overlap)"))
     surf = isempty(r.surfaces) ? "none" : _list(["$(_surface_label(s)) @ ψ = $(_fmt(s.psifac))" for s in r.surfaces]; max=4)
     _row(io, "Surfaces", "$(length(r.surfaces)): " * surf)
+    isempty(r.surfaces) || any(s -> isempty(s.alpha), r.surfaces) ||
+        _row(io, "Mercier α − ½", _list(["$(_surface_label(s)): $(_fmt(real(s.alpha[1]) - 0.5))" for s in r.surfaces]; max=4))
     _row(io, "Fixed boundary", _fixed_boundary_note(r))
     _row(io, "Free boundary", _free_boundary_note(r))
     if r.delta_prime !== nothing
@@ -275,7 +277,10 @@ function Base.show(io::IO, ::MIME"text/plain", r::PlasmaResponse)
     _row(io, "Modes", "n = $(_irange(r.n_modes)), m = $(_irange(r.m_modes)) ($(length(r.m_modes)) total)")
     _row(io, "Operators", isempty(r.permeability_flux) ? _missing_operators_note(r) : "permeability, inductances $(_shape(r.permeability_flux))")
     _row(io, "Resonances", isempty(r.rational_psi) ? "none" : _list(_resonances(r)))
-    _row(io, "Coupling", isempty(r.C_resonant_area_weighted_field) ? _missing_coupling_note(r) : "C $(_shape(r.C_resonant_area_weighted_field))")
+    coupling =
+        !isempty(r.C_resonant_area_weighted_field) ? "C $(_shape(r.C_resonant_area_weighted_field))" :
+        !isempty(r.C_delta_mn_asymptotic) ? "asymptotic only, C $(_shape(r.C_delta_mn_asymptotic))" : _missing_coupling_note(r)
+    _row(io, "Coupling", coupling)
     isempty(r.dominant_singular_values) || _row(io, "Dominant σ", _list(_fmt.(r.dominant_singular_values); max=3))
     _row(io, "Torque resp.", isempty(r.T_xe) ? "not computed" : "T_xe $(_shape(r.T_xe))")
     r.unit_edge_basis && _row(io, "Basis", "unit edge displacement")

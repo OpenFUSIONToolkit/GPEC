@@ -81,6 +81,7 @@ function save_to_hdf5(
     end
     out_h5["SingularSurfaces/D_I"] = (ls !== nothing && !isempty(result.surfaces)) ?
                                      [LocalStability.mercier_D_I(ls, sing.psifac) for sing in result.surfaces] : Float64[]
+    out_h5["SingularSurfaces/alpha"] = all(sing -> !isempty(sing.alpha), result.surfaces) ? [sing.alpha[1] for sing in result.surfaces] : ComplexF64[]
 
     # Resistive-layer overlap scan, present when psilim_from_layer_overlap capped the domain.
     if result.layer_overlap !== nothing

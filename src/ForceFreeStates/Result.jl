@@ -40,9 +40,9 @@ Optional fields are `Union{Nothing,T}` and follow a presence-equals-capability r
 consumer that needs one gates on [`require`](@ref) (or [`require_solution`](@ref) for the
 ξ profiles) and warns-and-skips rather than erroring, so a result from an integrator that
 cannot supply a given product still flows through the pipeline. PerturbedEquilibrium refuses
-`:matched` results, whose singular coupling is not defined yet, and Galerkin results without `free_boundary`.
+Galerkin results without `free_boundary`, and builds only the asymptotic singular-coupling metrics for `:matched` results.
 
-Every final result records how its basis crosses the rational surfaces, so bpen and closure are always present.
+Every final result records how its basis crosses the rational surfaces, so `penetrated_area_weighted_field` and `closure` are always present.
 A Forward or Riccati solve applies the ideal jump condition at the rationals; a Galerkin solve
 is ideal-closed by its EF columns (`error_field_response`), and is unclosed without them.
 
@@ -61,8 +61,8 @@ is ideal-closed by its EF columns (`error_field_response`), and is unclosed with
   - `closure::Symbol` - How the basis crosses the rationals: `:ideal` (the ideal jump
     condition was imposed), `:regular` (kinetic terms regularize the force balance equations so no closure is needed) or
     `:matched` (an inner-layer solution was matched in). A `:matched` result carries the matched edge response as `wp`.
-  - `bpen::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated resonant field from the
-    inner layer, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` and `:regular` closure.
+  - `penetrated_area_weighted_field::Matrix{ComplexF64}` - `(msing × numpert_total)` penetrated 𝒥b^ψ at each
+    layer center over the surface area, in T, per surface (rows follow `surfaces`) and driving mode; all zeros under `:ideal` and `:regular` closure.
   - `match::Union{Nothing,MatchResult}` - The [`MatchResult`](@ref) of a `MatchProblem` solve; `nothing` otherwise.
   - `solution::Union{Nothing,SolutionProfiles}` - THE solve's ξ solution; `nothing` when the
     formalism produced none (Galerkin without `error_field_response`).
@@ -112,7 +112,7 @@ struct ForceFreeStatesResult{E<:Equilibrium.PlasmaEquilibrium,F<:MatrixSplines,P
 
     # Closure of the basis at the rationals, always present.
     closure::Symbol
-    bpen::Matrix{ComplexF64}
+    penetrated_area_weighted_field::Matrix{ComplexF64}
     match::Union{Nothing,MatchResult}
 
     # Per-formalism products; presence is the capability signal.
@@ -230,7 +230,7 @@ function build_result(
         scan_cond=intr.kinsing_scan_cond, scan_threshold=intr.kinsing_scan_threshold)
 
     closure = ctrl.kinetic === nothing ? :ideal : :regular
-    bpen = zeros(ComplexF64, intr.msing, intr.numpert_total)
+    penetrated_area_weighted_field = zeros(ComplexF64, intr.msing, intr.numpert_total)
 
     # Fixed-boundary plasma energy matrix at the edge; free of any vacuum dependence, so a
     # vac_flag=false run still publishes its energy product. Aliases free_run's when it ran.
@@ -249,7 +249,7 @@ function build_result(
         intr.mlow, intr.mhigh, intr.mpert, intr.nlow, intr.nhigh, intr.npert, intr.numpert_total,
         intr.psilow, intr.psilim, intr.qlim, intr.q1lim, intr.wall_settings,
         metric, mats, intr.sing, kinetic,
-        closure, bpen, nothing,
+        closure, penetrated_area_weighted_field, nothing,
         solution, odet, wp, free_energies, delta_prime, basis, gal_data, nothing
     )
 end

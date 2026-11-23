@@ -139,6 +139,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, mats::MatrixSplines
         end
         al = compute_sing_asymptotics(s, ctrl, equil, mats, intr; sig=-1.0, sing_order=sing_order)
         push!(asymps, GalSingAsymp(ar, al))
+        s.alpha = ar.alpha
     end
 
     # --- allocate workspace ---

@@ -103,12 +103,12 @@ label = "||gal match cout||"
 noise_threshold = 1e-6
 order = 42
 
-# Penetrated resonant field at each layer center (msing × nef) — the headline matching output.
-[quantities.gal_match_bpen_norm]
-h5path = "SingularSurfaces/Match/bpen"
+# Penetrated area-weighted field at each layer center (msing × nef), in T — the headline matching output.
+[quantities.gal_match_penetrated_field_norm]
+h5path = "SingularSurfaces/Match/penetrated_area_weighted_field"
 type = "complex_matrix"
 extract = "norm"
-label = "||gal match bpen||"
+label = "||gal match penetrated area-weighted field||"
 noise_threshold = 1e-6
 order = 43
 

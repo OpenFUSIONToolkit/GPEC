@@ -7,8 +7,8 @@
 
 Driven inner-layer matching on a finished force-free-states solve `ffs`: each rational surface
 is matched at the forced eigenvalue γ = 2πi·n·f, with f the plasma rotation frequency there.
-`solve(prob, GGJModel())` (or another toroidal layer model, e.g. `CCCModel()`) returns a copy of `ffs` with the matched solution and the penetrated
-field `bpen`. `ffs` needs `Delta_EF`, from `Galerkin()` or `Riccati()` with `error_field_response` (Riccati
+`solve(prob, GGJModel())` (or another toroidal layer model, e.g. `CCCModel()`) returns a copy of `ffs` with the matched solution and its
+`penetrated_area_weighted_field`. `ffs` needs `Delta_EF`, from `Galerkin()` or `Riccati()` with `error_field_response` (Riccati
 also needs `vac_flag`).
 
 # Keywords
@@ -90,7 +90,7 @@ closure_capable(::InnerLayer.SLAYERModel) = false
 """
     solve(prob::MatchProblem, model) -> ForceFreeStatesResult
 
-Match `prob.ffs` to the inner layer of `model`. The result has `closure = :matched`, `bpen`, the
+Match `prob.ffs` to the inner layer of `model`. The result has `closure = :matched`, `penetrated_area_weighted_field`, the
 [`MatchResult`](@ref) in `result.match`, the matched ξ, the matched edge response `wp` (see
 [`ForceFreeStatesResult`](@ref)) and, when the solve had `vac_flag`, the free-boundary energies of that response.
 """
@@ -155,10 +155,14 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.ToroidalLayerModel
 
     cout, cin, residual = _match_system(dp.raw_fixedboundary, dp.ef, deltar)
 
-    # Penetrated field at each layer center (match.f intotsol_b); cin rows per surface are (d₊, d₋).
-    bpen = zeros(ComplexF64, msing, nef)
-    for i in 1:msing, j in 1:nef
-        bpen[i, j] = pen[i, 1] * cin[2i-1, j] + pen[i, 2] * cin[2i, j]
+    # Penetrated 𝒥b^ψ at each layer center (match.f intotsol_b) over the surface area, in T; cin rows per surface are (d₊, d₋).
+    mthsurf = length(equil.rzphi_ys) - 1
+    penetrated_area_weighted_field = zeros(ComplexF64, msing, nef)
+    for i in 1:msing
+        area = Equilibrium.flux_surface_area(equil, sings[i].psifac, mthsurf)
+        for j in 1:nef
+            penetrated_area_weighted_field[i, j] = (pen[i, 1] * cin[2i-1, j] + pen[i, 2] * cin[2i, j]) / area
+        end
     end
 
     # Matched inner ξ_ψ and b^ψ per EF column: odd parity × cin[2i], even × cin[2i-1] (match.f intotsol).
@@ -171,7 +175,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.ToroidalLayerModel
         inner_b = Matrix{ComplexF64}[]
     end
 
-    reconnected_flux = Matrix{ComplexF64}(dp.ef .+ transpose(dp.raw_fixedboundary) * cout)
+    small_coefficients = Matrix{ComplexF64}(dp.ef .+ transpose(dp.raw_fixedboundary) * cout)
 
     # Matched outer ξ per EF column: EF column + Σ cout·plasma columns.
     if basis === nothing
@@ -202,7 +206,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.ToroidalLayerModel
             sols_cut = basis.xi_cut
             if isempty(sols_cut)
                 @warn "MatchProblem: the solve retained no cut solution (set cut_solution=true on Galerkin), " *
-                      "so the composite inner-region profiles are skipped; bpen and the matched outer ξ are unaffected" maxlog = 1
+                      "so the composite inner-region profiles are skipped; the penetrated field and the matched outer ξ are unaffected" maxlog = 1
                 empty!(inner_psi)
                 empty!(inner_xi)
                 empty!(inner_b)
@@ -249,7 +253,7 @@ function _compute_match(prob::MatchProblem, model::InnerLayer.ToroidalLayerModel
         end
     end
 
-    return MatchResult(cout, cin, deltar, forced_eigenvalue, residual, bpen, reconnected_flux,
+    return MatchResult(cout, cin, deltar, forced_eigenvalue, residual, penetrated_area_weighted_field, small_coefficients,
         xi, xi_deriv, inner_psi, inner_xi, inner_b, inner_params, model, prob)
 end
 
@@ -265,7 +269,7 @@ function _matched_result(ffs::ForceFreeStatesResult, match::MatchResult)
         wp = ffs.wp + dp.edge_response * match.cout ./ ffs.equil.psio^2
         ffs.free_boundary === nothing || (free_boundary = free_run(wp, ffs.control, ffs.equil, ffs.mats, ffs))
     end
-    return _with(ffs; closure=:matched, bpen=match.bpen, match=match, solution=solution, wp=wp, free_boundary=free_boundary)
+    return _with(ffs; closure=:matched, penetrated_area_weighted_field=match.penetrated_area_weighted_field, match=match, solution=solution, wp=wp, free_boundary=free_boundary)
 end
 
 # A copy of the immutable `x` with the named fields replaced.

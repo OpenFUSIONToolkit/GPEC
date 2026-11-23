@@ -71,8 +71,8 @@ include("display_check.jl")
 
             # Ideal closure: no inner layer was matched in.
             @test ffs.closure === :ideal
-            @test size(ffs.bpen) == (length(ffs.surfaces), ffs.numpert_total)
-            @test iszero(ffs.bpen)
+            @test size(ffs.penetrated_area_weighted_field) == (length(ffs.surfaces), ffs.numpert_total)
+            @test iszero(ffs.penetrated_area_weighted_field)
 
             # Forward integration produces no STRIDE propagators, hence no Δ′ matrix.
             @test ffs.delta_prime === nothing
@@ -105,9 +105,12 @@ include("display_check.jl")
             @test ffs.integrator === :riccati
             @test ffs.solution !== nothing && ffs.solution.basis === :el_axis
             @test ffs.solution.step == length(ffs.solution.psi_store) == size(ffs.solution.du_store, 3)
+            # Each surface carries the Mercier exponent its crossing used; Forward builds the same series.
+            @test all(s -> length(s.alpha) == length(s.m), ffs.surfaces)
+            @test first.(getfield.(ffs.surfaces, :alpha)) ≈ first.(getfield.(forward_result[].surfaces, :alpha))
             @test ffs.diagnostics !== nothing
             @test ffs.closure === :ideal
-            @test iszero(ffs.bpen)
+            @test iszero(ffs.penetrated_area_weighted_field)
 
             @test ffs.delta_prime !== nothing
             dp = ffs.delta_prime
@@ -231,12 +234,12 @@ include("display_check.jl")
                     # Without a match the EF columns are the ideal closure, with a Hermitian δW.
                     if ideal
                         @test ffs.closure === :ideal
-                        @test iszero(ffs.bpen)
+                        @test iszero(ffs.penetrated_area_weighted_field)
                         @test norm(ffs.wp - ffs.wp') <= 1e-8 * norm(ffs.wp)
                     else
                         @test ffs.closure === :matched
-                        @test ffs.bpen == ffs.match.bpen
-                        @test !iszero(ffs.bpen)
+                        @test ffs.penetrated_area_weighted_field == ffs.match.penetrated_area_weighted_field
+                        @test !iszero(ffs.penetrated_area_weighted_field)
                     end
 
                     # The closed profiles land in the shared Solutions layout: same names and
@@ -263,8 +266,8 @@ include("display_check.jl")
                         if !ideal
                             # Match/ is self-describing: rows follow SingularSurfaces/rational_psi, and it names the model that ran.
                             mg = f["SingularSurfaces/Match"]
-                            @test size(read(mg["bpen"]), 1) == length(read(f["SingularSurfaces/rational_psi"]))
-                            @test read(mg["reconnected_flux"]) == ffs.match.reconnected_flux
+                            @test size(read(mg["penetrated_area_weighted_field"]), 1) == length(read(f["SingularSurfaces/rational_psi"]))
+                            @test read(mg["small_coefficients"]) == ffs.match.small_coefficients
                             @test attrs(mg)["inner_model"] == GeneralizedPerturbedEquilibrium.InnerLayer.model_name(ffs.match.model)
                             @test isempty(_collect_metadata_violations(mg))
                         end

@@ -140,7 +140,7 @@ A `MatchProblem` holds the outer Δ′ a solve published plus per-surface layer 
 ```julia
 ffs = solve(eq, Galerkin(; error_field_response=true, cut_solution=true); nn=1)
 matched = solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=0.0), GGJModel())
-bpens = [solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=f), GGJModel()).bpen for f in 0.0:50.0:500.0]
+penetrated_fields = [solve(MatchProblem(ffs; eta=1e-6, rho=1e-7, rotation=f), GGJModel()).penetrated_area_weighted_field for f in 0.0:50.0:500.0]
 ```
 
 A scalar applies to every surface and a vector gives one value per entry of `ffs.surfaces`, core to edge.

@@ -50,11 +50,10 @@ their dominant modes (Park, Phys. Plasmas 16, 056115 (2009)), and with `compute_
 ψ-resolved torque response `T_xe` of a single-`n` forward kinetic solve. Apply it to an external field
 with `perturbed_equilibrium(resp, rmp)` as many times as needed.
 
-Products the producing integrator could not supply (free-boundary energies, a ξ solution) leave the
-corresponding operators empty: the step warns and is skipped. A Galerkin result carries a free-boundary
-δW only with `error_field_response` and `vac_flag`, so building a response from one without it is an error. So is a
-`:matched` result, whose singular coupling is not defined yet, and a solve with a wall: the surface
-inductance is free-space, and the response needs Λ from the same no-wall vacuum.
+A result without a ξ solution leaves the operators empty: the step warns and is skipped. A result without
+the free-boundary δW is an error (it needs `vac_flag`, and for Galerkin also `error_field_response`), and so is
+a solve with a wall: the surface inductance is free-space, and the response needs Λ from the same no-wall vacuum.
+A `:matched` result gets only the `_asymptotic` singular-coupling metrics and the penetrated field.
 """
 function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::Bool=true, compute_torque_response::Bool=false,
     verbose::Bool=false)::PlasmaResponse
@@ -63,14 +62,11 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
             "plasma_response needs a force-free-states solve without a wall: its surface inductance L is free-space, " *
             "so Λ from a wall run would mix two vacuum models. Solve with wall=nothing (no [Wall] section)."
         )
-    # The singular coupling evaluates ideal-closure resonant metrics off each surface, where a matched solution's
-    # big solution is singular.
-    ffs.closure === :matched &&
-        error("plasma_response does not support a matched result yet: its singular-coupling metrics assume the ideal closure; " *
-              "use the unmatched solve")
-    ffs.free_boundary === nothing && ffs.integrator === :galerkin &&
-        error("plasma_response needs the free-boundary δW, which this Galerkin result does not carry: solve with " *
-              "Galerkin(; error_field_response=true) and vac_flag=true")
+    ffs.free_boundary === nothing &&
+        error(
+            "plasma_response needs the free-boundary δW, which this $(ffs.integrator) result does not carry: solve with " *
+            "vac_flag=true (and Galerkin(; error_field_response=true) for a Galerkin solve)"
+        )
 
     m_modes, n_modes = mode_arrays(ffs)
     # A run has at most one ξ solution, already closed at the rationals and carrying populated
@@ -79,7 +75,7 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
     resp = PlasmaResponse(; ffs, m_modes, n_modes, compute_singular_coupling, compute_torque_response,
         unit_edge_basis=solution !== nothing && solution.basis === :unit_edge)
 
-    if ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") && ForceFreeStates.require_solution(ffs, "plasma response calculation")
+    if ForceFreeStates.require_solution(ffs, "plasma response calculation")
         build_response_operators!(resp; verbose)
         if compute_singular_coupling
             build_coupling_operators!(resp; verbose)

@@ -102,6 +102,7 @@ The number of Julia threads is set at startup (`-t N` or `JULIA_NUM_THREADS`); t
 | `ForceFreeStates/LayerOverlap/` | the resistive-layer overlap scan, when `psilim_from_layer_overlap` is set (table below) |
 | `SingularSurfaces/rational_psi`, `rational_q`, `rational_m`, `rational_n`, `dqdpsi` | the rational surfaces of the domain, core to edge |
 | `SingularSurfaces/D_I`, `E`, `F`, `G`, `H`, `K`, `M` | the Mercier index and the Glasser–Greene–Johnson layer coefficients at each surface |
+| `SingularSurfaces/alpha` | the Mercier exponent ``\alpha = \sqrt{-D_I}`` the solve's asymptotic series used at each surface; it approaches the value from `D_I` as `delta_mlow` and `delta_mhigh` are raised |
 | `SingularSurfaces/ca_left`, `ca_right` | the asymptotic (large, small) coefficients on either side of each surface, from ideal crossings |
 | `SingularSurfaces/Delta_prime_matrix` | the free-boundary Δ′ matrix in the PEST-3 convention, from `"Riccati"` or `"Galerkin"`, with `pest3_A`, `pest3_B`, `pest3_Gamma`; `Delta_prime_raw_freeboundary` is the side-major (left, right) matrix they are folded from. The same set with a `_fixedboundary` suffix is the Δ′ with a conformal wall on the plasma, `Delta_EF` the error-field response, and `edge_response` the edge momentum of each fixed-boundary big-solution column (what matching needs for the matched `W_plasma`) |
 | `SingularSurfaces/Kinetic/` | the surfaces of a kinetic solve |

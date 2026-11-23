@@ -261,6 +261,8 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
 
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
     bases = ctrl.kinetic === nothing ? asymptotic_bases(chunks, ctrl, equil, mats, intr) : nothing
+    # Each crossed surface publishes the exponent its series used.
+    bases === nothing || foreach(((ising, basis),) -> intr.sing[ising].alpha = basis.right_series.alpha, pairs(bases))
 
     if verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
