@@ -66,7 +66,7 @@ import Logging
             stability["ForceFreeStates"]["integrator"] = formalism
             foreach(name -> delete!(stability, name), ("Riccati", "Forward", "Galerkin"))
             stability[formalism] =
-                formalism == "Galerkin" ? Dict{String,Any}("nx" => 32, "rpec_flag" => true) :
+                formalism == "Galerkin" ? Dict{String,Any}("nx" => 32, "error_field_response" => true) :
                 Dict{String,Any}("eulerlagrange_tolerance" => 1e-7)
             run_workload(stability)
         end
