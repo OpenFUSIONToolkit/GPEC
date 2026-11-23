@@ -17,10 +17,11 @@ using TOML
 import ...ErrorFields as EF
 import ...PerturbedEquilibrium as PE
 import ...ForcingTerms as FT
+using ..Analysis: register!, _require, _can, _missing, _entry, _why, capabilities
 
 """
 A label paired with something to plot: a `gpec.h5` path, or a result already in memory
-(`ErrorFields.SensitivityTable`, `CoilSensitivities`, `MonteCarloResult`, `RiskResult`, or a
+(`ErrorFields.ErrorFieldsResult`, `SensitivityTable`, `CoilSensitivities`, `MonteCarloResult`, `RiskResult`, or a
 vector of `CoilOverlap`). Analysing coil geometry that was never part of a run produces the
 latter, so the plots accept both.
 """
@@ -29,7 +30,7 @@ const Sources = AbstractVector{<:Pair{String,<:Any}}
 """
 A single unlabelled source: a `gpec.h5` path, or one in-memory result.
 """
-const SingleSource = Union{AbstractString,EF.SensitivityTable,EF.CoilSensitivities,EF.MonteCarloResult,EF.RiskResult,AbstractVector{EF.CoilOverlap}}
+const SingleSource = Union{AbstractString,EF.ErrorFieldsResult,EF.SensitivityTable,EF.CoilSensitivities,EF.MonteCarloResult,EF.RiskResult,AbstractVector{EF.CoilOverlap}}
 
 _sources(source) = [_default_label(source) => source]
 _default_label(h5path::AbstractString) = basename(dirname(abspath(h5path)))
@@ -77,6 +78,30 @@ rather than separately, which would leave each half unable to find the other.
 """
 _load(pair::Tuple{EF.MonteCarloResult,EF.RiskResult}) =
     _load(merge(_present(_load(pair[1])), _present(_load(pair[2]))))
+
+# The whole assessment: the dominant-mode table and mode labels as the writer records them, from the plasma response it was made on.
+function _load(r::EF.ErrorFieldsResult)
+    resp = r.response
+    ffs = resp.ffs
+    mn_index = hcat([(i - 1) % ffs.mpert + ffs.mlow for i in 1:ffs.numpert_total], [(i - 1) ÷ ffs.mpert + ffs.nlow for i in 1:ffs.numpert_total])
+    # The dominant-mode table's shift and tilt sensitivities replace the full per-mode arrays, as in the file.
+    parts = Any[_present(_load(r.sensitivities)), _present(_load(EF.sensitivity_table(r.sensitivities, r.dominant; mode=1)))]
+    r.monte_carlo === nothing || push!(parts, _present(_load(r.monte_carlo)))
+    r.risk === nothing || push!(parts, _present(_load(r.risk)))
+    sc = r.scan
+    sc === nothing || push!(parts,
+        (; scan_scale=sc.tolerance_scale, scan_locking_probability_percent=sc.locking_probability_percent,
+            scan_locking_probability_efc_percent=sc.locking_probability_efc_percent, scan_locking_probability_spread_percent=sc.locking_probability_spread_percent,
+            scan_locking_probability_efc_spread_percent=sc.locking_probability_efc_spread_percent))
+    ctrl = r.settings.ctrl
+    push!(
+        parts,
+        _present((; tolerances=r.tolerances, fd_step_shift_m=ctrl.fd_step_shift_m, fd_step_tilt_deg=ctrl.fd_step_tilt_deg, mn_index,
+            dominant_v=isempty(resp.dominant_singular_values) ? nothing : resp.dominant_right_singular_vectors,
+            singular_values=isempty(resp.dominant_singular_values) ? nothing : resp.dominant_singular_values))
+    )
+    return _load(merge(parts...))
+end
 
 _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name for o in ovs],
     delta_as_designed=[o.delta for o in ovs], resonant_fraction_percent=[o.resonant_fraction_percent for o in ovs],
@@ -143,6 +168,10 @@ end
 _centers(edges) = (edges[1:end-1] .+ edges[2:end]) ./ 2
 _step_series(m, a) = (vcat(m[1] - 1, m, m[end] + 1), vcat(0.0, a, 0.0))
 _empty(msg) = plot(; title=msg, legend=false)
+
+# A registered source (a path or the assessment) must hold the data a single-source plot draws; other in-memory sources are what they are.
+_check(fn, src::Union{AbstractString,EF.ErrorFieldsResult}) = _require(fn, src)
+_check(fn, src) = nothing
 
 function _save(p, save_path)
     if save_path !== nothing
@@ -256,7 +285,7 @@ function _sensitivity_values(lbl, d, names, quantity::Symbol)
     vals === nothing && throw(ArgumentError("source \"$lbl\" carries no $field, so quantity=:$quantity cannot be drawn from it"))
     return abs.(vals[idx])
 end
-plot_coil_sensitivities(source::SingleSource; kwargs...) = plot_coil_sensitivities(_sources(source); kwargs...)
+plot_coil_sensitivities(source::SingleSource; kwargs...) = (_check(plot_coil_sensitivities, source); plot_coil_sensitivities(_sources(source); kwargs...))
 
 """
     plot_tolerance_pdf(sources; corrected=true, normalize=false, xscale=:identity, show_batches=false, save_path=nothing)
@@ -295,7 +324,7 @@ function plot_tolerance_pdf(sources::Sources; corrected::Bool=true, normalize::B
     any_data || return _empty("No ErrorFields/MonteCarlo data — run with a tolerance_file")
     return _save(p, save_path)
 end
-plot_tolerance_pdf(source::SingleSource; kwargs...) = plot_tolerance_pdf(_sources(source); kwargs...)
+plot_tolerance_pdf(source::SingleSource; kwargs...) = (_check(plot_tolerance_pdf, source); plot_tolerance_pdf(_sources(source); kwargs...))
 
 """
     plot_overlap_phasors(sources; coils=nothing, save_path=nothing)
@@ -347,7 +376,7 @@ function plot_overlap_phasors(sources::Sources; coils=nothing, save_path=nothing
     length(panels) == 1 && return _save(panels[1], save_path)
     return _save(plot(panels...; layout=(1, length(panels)), size=(900 * length(panels), 560)), save_path)
 end
-plot_overlap_phasors(source::SingleSource; kwargs...) = plot_overlap_phasors(_sources(source); kwargs...)
+plot_overlap_phasors(source::SingleSource; kwargs...) = (_check(plot_overlap_phasors, source); plot_overlap_phasors(_sources(source); kwargs...))
 
 """
     plot_tolerance_budget(h5path; psi_low=0.0, psi_high=CORE_PSI_HIGH, mode=1, tolerance_scale=1.0, sort=:total, top=nothing, save_path=nothing)
@@ -472,7 +501,7 @@ function plot_linearity_residuals(sources::Sources; at::Symbol=:tolerance, coils
     length(panels) == 1 && return _save(panels[1], save_path)
     return _save(plot(panels...; layout=(1, length(panels)), size=(900 * length(panels), 520)), save_path)
 end
-plot_linearity_residuals(source::SingleSource; kwargs...) = plot_linearity_residuals(_sources(source); kwargs...)
+plot_linearity_residuals(source::SingleSource; kwargs...) = (_check(plot_linearity_residuals, source); plot_linearity_residuals(_sources(source); kwargs...))
 
 """
     plot_linearity_check(check::EF.LinearityCheck; save_path=nothing)
@@ -593,7 +622,7 @@ function plot_locking_risk(sources::Sources; corrected::Bool=true, target_percen
     target_percent === nothing || hline!(p, [target_percent]; ls=:dash, c=:gray, label="target $(target_percent) %")
     return _save(p, save_path)
 end
-plot_locking_risk(source::SingleSource; kwargs...) = plot_locking_risk(_sources(source); kwargs...)
+plot_locking_risk(source::SingleSource; kwargs...) = (_check(plot_locking_risk, source); plot_locking_risk(_sources(source); kwargs...))
 
 """
     plot_threshold_scaling(sources; save_path=nothing)
@@ -623,7 +652,7 @@ function plot_threshold_scaling(sources::Sources; save_path=nothing)
     any_data || return _empty("No ErrorFields/Risk data — run with an [ErrorFields.scenario] table")
     return _save(p, save_path)
 end
-plot_threshold_scaling(source::SingleSource; kwargs...) = plot_threshold_scaling(_sources(source); kwargs...)
+plot_threshold_scaling(source::SingleSource; kwargs...) = (_check(plot_threshold_scaling, source); plot_threshold_scaling(_sources(source); kwargs...))
 
 """
     plot_dominant_mode_spectrum(sources; mode=1, save_path=nothing)
@@ -651,7 +680,7 @@ function plot_dominant_mode_spectrum(sources::Sources; mode::Int=1, save_path=no
     any_data || return _empty("No PerturbedEquilibrium/SingularCoupling/DominantMode data")
     return _save(p, save_path)
 end
-plot_dominant_mode_spectrum(source::SingleSource; kwargs...) = plot_dominant_mode_spectrum(_sources(source); kwargs...)
+plot_dominant_mode_spectrum(source::SingleSource; kwargs...) = (_check(plot_dominant_mode_spectrum, source); plot_dominant_mode_spectrum(_sources(source); kwargs...))
 
 """
     plot_applied_spectra(ctx, overlaps; normalize=true, save_path=nothing)
@@ -987,17 +1016,35 @@ function plot_needed_current(mc::EF.MonteCarloResult, array::EF.CoilOverlap; cou
 end
 
 """
-    plot_error_field_summary(h5path; save_path=nothing)
+    plot_error_field_summary(src; save_path=nothing)
 
-Four panels of a run's error-field assessment: coil sensitivities to shift, the tolerance
-Monte Carlo distributions, the overlap distribution against the threshold, and the locking
-risk against tolerance scale. Panels whose data the run did not produce say so.
+Panels of a run's error-field assessment, as many as it produced: coil sensitivities to shift, the tolerance
+Monte Carlo distributions, the overlap distribution against the threshold, and the locking risk against
+tolerance scale. `src` is an `ErrorFields.ErrorFieldsResult` or the path of a `gpec.h5` it was saved to.
 """
-function plot_error_field_summary(h5path::AbstractString; save_path=nothing)
-    src = _sources(h5path)
-    p = plot(plot_coil_sensitivities(src), plot_tolerance_pdf(src), plot_threshold_scaling(src), plot_locking_risk(src);
-        layout=(2, 2), size=(1400, 1000))
+function plot_error_field_summary(source::Union{AbstractString,EF.ErrorFieldsResult}; save_path=nothing)
+    caps = capabilities(source)
+    src = _sources(source)
+    panels = (plot_coil_sensitivities, plot_tolerance_pdf, plot_threshold_scaling, plot_locking_risk)
+    drawn = [fn(src) for fn in panels if _can(fn, caps)]
+    if isempty(drawn)
+        missing = unique(reduce(vcat, (_missing(_entry(fn), caps) for fn in panels)))
+        throw(ArgumentError("plot_error_field_summary: no panel can be drawn: $(_why(missing))"))
+    end
+    n = length(drawn)
+    n == 3 && push!(drawn, plot(; framestyle=:none))
+    p = n <= 2 ? plot(drawn...; layout=(1, n), size=(700n, 500)) : plot(drawn...; layout=(2, 2), size=(1400, 1000))
     return _save(p, save_path)
 end
+
+const _EF_SOURCES = (EF.ErrorFieldsResult, AbstractString)
+register!(plot_error_field_summary, _EF_SOURCES, (), "sensitivities, tolerance Monte Carlo, threshold and locking risk")
+register!(plot_coil_sensitivities, _EF_SOURCES, (:ef_sensitivities,), "per-coil dominant-mode sensitivities")
+register!(plot_overlap_phasors, _EF_SOURCES, (:ef_sensitivities,), "as-designed overlap δ of each coil set in the complex plane")
+register!(plot_linearity_residuals, _EF_SOURCES, (:ef_sensitivities,), "linearity residuals of the coil sensitivities")
+register!(plot_dominant_mode_spectrum, _EF_SOURCES, (:dominant_mode,), "spectrum of the dominant resonant-coupling mode")
+register!(plot_tolerance_pdf, _EF_SOURCES, (:ef_monte_carlo,), "Monte Carlo distribution of |δ|")
+register!(plot_threshold_scaling, _EF_SOURCES, (:ef_monte_carlo, :ef_risk), "|δ| distribution against the penetration threshold")
+register!(plot_locking_risk, _EF_SOURCES, (:ef_scan,), "locking risk against tolerance scale")
 
 end # module ErrorFields

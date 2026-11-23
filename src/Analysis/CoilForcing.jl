@@ -17,6 +17,8 @@ module CoilForcing
 
 using Plots
 import ...Utilities.FourierTransforms: FourierTransform, inverse
+import ...PerturbedEquilibrium: PerturbedEquilibriumState
+using ..Analysis: register!, _require
 
 """
     plot_coil_geometry_3d(coil_sets; save_path=nothing, kwargs...)
@@ -452,6 +454,33 @@ function plot_surface_3d(equil, modes, n::Int; coil_sets=nothing, mtheta::Int=18
     return plot_surface_3d(equil; color_by=c, coil_sets=coil_sets, mtheta=mtheta, nphi=nphi,
         psi=psi, colorbar_title=colorbar_title, save_path=save_path, kwargs...)
 end
+
+"""
+    plot_coil_geometry_3d(pe::PerturbedEquilibriumState; kwargs...)
+    plot_coil_geometry_rz(pe::PerturbedEquilibriumState; kwargs...)
+    plot_mode_spectrum(pe::PerturbedEquilibriumState; kwargs...)
+
+The coil plots of the coil sets a perturbed equilibrium was forced by: the (R, Z) cross-sections over its plasma
+boundary, and the forcing spectrum across its poloidal mode range.
+"""
+function plot_coil_geometry_3d(pe::PerturbedEquilibriumState; kwargs...)
+    _require(plot_coil_geometry_3d, pe)
+    return plot_coil_geometry_3d(pe.coil_sets; kwargs...)
+end
+
+function plot_coil_geometry_rz(pe::PerturbedEquilibriumState; kwargs...)
+    _require(plot_coil_geometry_rz, pe)
+    return plot_coil_geometry_rz(pe.coil_sets; equil=pe.response.ffs.equil, kwargs...)
+end
+
+function plot_mode_spectrum(pe::PerturbedEquilibriumState; kwargs...)
+    _require(plot_mode_spectrum, pe)
+    return plot_mode_spectrum(pe.forcing_modes; mlow=pe.response.ffs.mlow, mhigh=pe.response.ffs.mhigh, kwargs...)
+end
+
+register!(plot_coil_geometry_3d, (PerturbedEquilibriumState,), (:coil_sets,), "3D coil conductors")
+register!(plot_coil_geometry_rz, (PerturbedEquilibriumState,), (:coil_sets,), "coil cross-sections over the plasma boundary")
+register!(plot_mode_spectrum, (PerturbedEquilibriumState,), (:forcing_modes,), "|Φ_x(m, n)| forcing spectrum")
 
 export plot_coil_geometry_3d, plot_coil_geometry_rz
 export plot_bn_contour, plot_mode_spectrum
