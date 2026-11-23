@@ -53,6 +53,7 @@ const TEST_SUITES = [
     "runtests_multiion.jl" => "core",
     "runtests_fullruns.jl" => "api",
     "runtests_torque_response.jl" => "api",
+    "runtests_energy_decomposition.jl" => "api",
     "runtests_coils.jl" => "api",
     "runtests_imas.jl" => "api",
     "runtests_rerun_from_h5.jl" => "api",
