@@ -559,8 +559,8 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
 
         # Helper: simple nonaxisymmetric (3D) plasma boundary built from SFL-style (θ, ζ) coordinates.
         _make_3d_nonaxis_inputs(; mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2) = begin
-            θ_in = range(0, 2π; length=mtheta_in)
-            ζ_in = range(0, 2π; length=nzeta_in)
+            θ_in = range(; start=0, length=mtheta_in, step=2π / mtheta_in)
+            ζ_in = range(; start=0, length=nzeta_in, step=2π / nzeta_in)
 
             X = zeros(mtheta_in, nzeta_in)
             Y = zeros(mtheta_in, nzeta_in)
@@ -753,7 +753,7 @@ using GeneralizedPerturbedEquilibrium.Vacuum: ConformalWall, EllipticalWall, Dee
             @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(
                 folded,
                 GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(folded),
-                ConformalWall(; standoff_fraction=0.2, equal_arc_wall=false)
+                ConformalWall(; standoff_fraction=10.0, equal_arc_wall=false)
             )
         end
 

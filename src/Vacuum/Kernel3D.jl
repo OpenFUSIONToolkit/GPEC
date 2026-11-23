@@ -370,7 +370,7 @@ function compute_3D_kernel_matrices!(
     (; PATCH_DIM, UP_DIM, ANG_DIM, Ppou, Gpou, P2G) = quad_data
 
     # Source r, ∂r/∂θ, ∂r/∂ζ on the 2× upsampled grid, where node 2i-1 is collocation node i
-    Uθ, Uζ = trig_upsample_matrix(source.mtheta), trig_upsample_matrix(source.nzeta)
+    Uθ, Uζ = trig_interp_matrix(source.mtheta, 2 * source.mtheta), trig_interp_matrix(source.nzeta, 2 * source.nzeta)
     src_up = SVector{9}.(eachrow(trig_upsample(hcat(source.r, source.dr_dθ, source.dr_dζ), Uθ, Uζ, source.mtheta, source.nzeta)))
 
     # Upsampling restricted to the patch about the first node, with the field periods folded onto period 0 in ζ (see `scatter_polar_to_row!`)

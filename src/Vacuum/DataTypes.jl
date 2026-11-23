@@ -434,7 +434,6 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     num_points = mtheta * nzeta
     dθ = 2π / mtheta
     dζ = 2π / nzeta
-    θ_grid = range(; start=0, length=mtheta, step=dθ)
     ζ_grid = range(; start=0, length=nzeta, step=dζ)
 
     # Allocate output arrays
@@ -454,14 +453,9 @@ function PlasmaGeometry3D(inputs::VacuumInput)
         # Interpolate 3D inputs onto vacuum grid
         @assert !isempty(inputs.y) "y must be provided for 3D (nzeta_in > 1) inputs"
         @assert length(inputs.x) == length(inputs.y) == length(inputs.z) == inputs.mtheta_in * inputs.nzeta_in "x, y, z must have length mtheta_in * nzeta_in"
-        θ_in = range(; start=0, length=inputs.mtheta_in, step=2π / inputs.mtheta_in)
-        ζ_in = range(; start=0, length=inputs.nzeta_in, step=2π / inputs.nzeta_in)
-        θ_flat = repeat(collect(θ_grid), nzeta)
-        ζ_flat = repeat(collect(ζ_grid); inner=mtheta)
-        grid_points = (θ_flat, ζ_flat)
+        Tθ, Tζ = trig_interp_matrix(inputs.mtheta_in, mtheta), trig_interp_matrix(inputs.nzeta_in, nzeta)
         for (k, data) in enumerate((inputs.x, inputs.y, inputs.z))
-            itp = cubic_interp((θ_in, ζ_in), reshape(data, inputs.mtheta_in, inputs.nzeta_in); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive)))
-            r[:, k] = itp(grid_points)
+            r[:, k] = vec(Tθ * reshape(data, inputs.mtheta_in, inputs.nzeta_in) * transpose(Tζ))
         end
         assert_counterclockwise(hypot.(r[1:mtheta, 1], r[1:mtheta, 2]), r[1:mtheta, 3], "Plasma boundary ζ = 0 cross-section")
     end

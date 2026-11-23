@@ -118,33 +118,32 @@ function trig_tangents(r::Matrix{Float64}, mtheta::Int, nzeta::Int)
 end
 
 """
-    trig_upsample_matrix(n) -> Matrix{Float64}
+    trig_interp_matrix(n_in, n_out) -> Matrix{Float64}
 
-Values at the `2n` nodes of the twice finer grid of the trigonometric interpolant on `n` equispaced periodic nodes.
-Odd rows are the identity.
+Values at `n_out` equispaced periodic nodes of the trigonometric interpolant on `n_in` such nodes.
 """
-function trig_upsample_matrix(n::Int)
-    U = zeros(2n, n)
-    for j in 1:n, i in 1:2n
-        # Offset of fine node i from coarse node j, in fine spacings
-        r = mod(i - 2j + 1, 2n)
-        if iseven(r)
-            U[i, j] = r == 0
+function trig_interp_matrix(n_in::Int, n_out::Int)
+    T = zeros(n_out, n_in)
+    N = n_in * n_out
+    for j in 1:n_in, i in 1:n_out
+        # Offset of node i from node j is 2πp/N; integer p keeps coincident nodes exact
+        p = mod((i - 1) * n_in - (j - 1) * n_out, N)
+        if p == 0
+            T[i, j] = 1
         else
-            # Symmetric range, as in `trig_derivative_matrix`; mod(r, 4) flips with the shift exactly when csc does (odd n)
-            r > n && (r -= 2n)
-            s, c = sincospi(r / 2n)
-            # Periodic sinc at a midpoint: sign alternates every other midpoint; cot for even n (Nyquist cosine), csc for odd n
-            U[i, j] = (mod(r, 4) == 1 ? 1 : -1) * (iseven(n) ? c / s : 1 / s) / n
+            # Symmetric range, as in `trig_derivative_matrix`; cot for even n_in (Nyquist cosine), csc for odd
+            p > N ÷ 2 && (p -= N)
+            s, c = sincospi(p / N)
+            T[i, j] = sinpi(p / n_out) * (iseven(n_in) ? c / s : 1 / s) / n_in
         end
     end
-    return U
+    return T
 end
 
 """
     trig_upsample(a, Uθ, Uζ, mtheta, nzeta) -> Matrix{Float64}
 
-Columns of the `(mtheta * nzeta, k)` grid samples `a` on the 2× finer grid; `Uθ`, `Uζ` from [`trig_upsample_matrix`](@ref).
+Columns of the `(mtheta * nzeta, k)` grid samples `a` on the 2× finer grid; `Uθ`, `Uζ` from [`trig_interp_matrix`](@ref).
 """
 function trig_upsample(a::AbstractMatrix{Float64}, Uθ::Matrix{Float64}, Uζ::Matrix{Float64}, mtheta::Int, nzeta::Int)
     # 2× in θ and 2× in ζ → 4× the nodes, still θ-fastest
