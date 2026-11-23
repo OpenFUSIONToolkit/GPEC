@@ -66,7 +66,7 @@ rational_offset_fraction = 0.2
 [Forward]
 eulerlagrange_tolerance = 1e-10
 save_interval = 1        # save every Nth ODE step; steps near rational surfaces are always saved
-renorm_threshold = 1e3   # renormalize the solution basis above this column norm
+renorm_threshold = 1e6   # Gaussian reduction when the condition number of u₁ exceeds this
 ```
 
 `examples/DIIID-like_riccati_deltaprime_example` sets the same three keys under `[Riccati]`.
@@ -138,7 +138,7 @@ The perpendicular diffusivities that set the layer widths are described with the
 
 - The Riccati integrator splits the domain into chunks whose count is derived from the number of singular surfaces (`[Riccati] nchunks` overrides the target, `0` is automatic); every chunk integrates from identity initial conditions, so the result is independent of the thread count.
 - The chunk ending at each rational surface is integrated backward, from the surface inward, because the forward propagator is ill-conditioned there; the Δ′ boundary-value problem is assembled from the split forward and backward propagators for the same reason.
-- Both integrators use the adaptive ninth-order `Vern9` solver at `eulerlagrange_tolerance`; the Riccati basis is recovered by renormalizing whenever the solution exceeds `renorm_threshold`.
+- Both integrators use the adaptive ninth-order `Vern9` solver at `eulerlagrange_tolerance`; Forward reduces the basis when the condition number of u₁ exceeds `renorm_threshold`; Riccati renormalizes when an entry exceeds it.
 - The two crossing conventions differ slightly, so Riccati and Forward free-boundary energies agree to within a few percent, not to machine precision.
 
 Local stability (Mercier, resistive interchange and ballooning) is a separate stage on the same equilibrium; see [Local Stability](ballooning.md).
