@@ -6,7 +6,7 @@ const FFS = A.ForceFreeStates
 # A figure holding one panel in a nested grid.
 function _single(panel!, size, args...; kwargs...)
     return themed() do
-        fig = Figure(; size)
+        fig = _figure(size)
         gl = fig[1, 1] = GridLayout()
         panel!(gl, args...; kwargs...)
         fig
@@ -50,8 +50,8 @@ function _energies!(gl, e; which=(:total, :plasma, :vacuum))
     vals = reduce(vcat, (real.(getfield(e, _ENERGY_STYLE[w][1])) for w in which))
     lims = _symlims(vals)
     xlabel = e.matched ? "eigenmode (lowest Re λ first)" : "eigenmode (most unstable first)"
-    ax = Axis(gl[1, 1]; xlabel, ylabel=e.matched ? "Re λ of W·v = λN·v" : "eigenvalue of W·v = λN·v", title, yscale=Makie.pseudolog10,
-        limits=(nothing, lims))
+    ax = Axis(gl[1, 1]; xticks=WholeTicks(), xlabel, ylabel=e.matched ? "Re λ of W·v = λN·v" : "eigenvalue of W·v = λN·v", title,
+        yscale=Makie.pseudolog10, limits=(nothing, lims))
     e.matched || hspan!(ax, lims[1], 0; color=(:firebrick, 0.06))
     hlines!(ax, 0; color=:black, linewidth=1)
     for w in which
@@ -103,7 +103,7 @@ function _eigenvectors!(gl, d; nmodes=nothing)
     m = d.mlow .+ (0:(size(v, 1)-1))
     k = min(size(v, 2), something(nmodes, size(v, 2)))
     title = d.matched ? "Free-boundary eigenmodes, lowest Re λ at top" : "Free-boundary eigenmodes, least stable at top"
-    ax = Axis(gl[1, 1]; xlabel="poloidal harmonic m", ylabel="eigenmode", yreversed=true, title,
+    ax = Axis(gl[1, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m", ylabel="eigenmode", yreversed=true, title,
         yticks=k <= 15 ? (1:k) : [1; 5:5:k])
     hm = heatmap!(ax, m, 1:k, v[:, 1:k]; colormap=:viridis)
     Colorbar(gl[1, 2], hm; label=rich("|v", subscript("m"), "| (unit power norm)"))
@@ -132,7 +132,7 @@ FFS._plot_energy_eigenvectors(d; nmodes=nothing) = _single(_eigenvectors!, (820,
 
 function FFS._plot_edge_stability_scan(d)
     return themed() do
-        fig = Figure(; size=(820, 460))
+        fig = _figure((820, 460))
         vals = vcat(real.(d.et), real.(d.ep), real.(d.ev))
         lims = _symlims(vals)
         ax = Axis(fig[1, 1]; xlabel="edge truncation q", ylabel="free-boundary energy", yscale=Makie.pseudolog10, limits=(nothing, lims),
@@ -188,7 +188,7 @@ function _surface_side_axes!(pos, labels; xgroups=true, kwargs...)
     groups = ["q = " * l for l in labels]
     ax = Axis(pos; yticks=(1:(2ns), lr), yreversed=true, ygridvisible=false, xgridvisible=false, kwargs...)
     g = Axis(pos; yticks=(1.5:2:(2ns), groups), yreversed=true, yticksvisible=false, yticklabelpad=24, ylabel="responding surface and side",
-        xgridvisible=false, ygridvisible=false, xticksvisible=false, xticklabelsvisible=false)
+        xgridvisible=false, ygridvisible=false, xticksvisible=false, xticklabelsvisible=false, aspect=get(kwargs, :aspect, nothing))
     if xgroups
         ax.xticks = (1:(2ns), lr)
         g.xticks = (1.5:2:(2ns), groups)
@@ -211,9 +211,9 @@ function FFS._plot_delta_prime(dp; part=:real)
         v = _part(dp.matrix, part)
         k = length(dp.labels)
         labels = ["q = " * l for l in dp.labels]
-        fig = Figure(; size=(620, 520))
+        fig = _figure((620, 520))
         ax = Axis(fig[1, 1]; xticks=(1:k, labels), yticks=(1:k, labels), yreversed=true, aspect=DataAspect(), xgridvisible=false, ygridvisible=false,
-            title=rich(_part_label(part, "Δ′"), " between rational surfaces (PEST-3, ", PSIN, "-referenced)"), xlabel="driving surface",
+            title=_part_label(part, "Δ′"), xlabel="driving surface",
             ylabel="responding surface")
         hm = _complex_heatmap!(ax, 1:k, 1:k, permutedims(v), part)
         for i in 1:k, j in 1:k
@@ -228,7 +228,7 @@ end
 function FFS._plot_delta_prime_raw(dp; part=:real)
     return themed() do
         ns = length(dp.labels)
-        fig = Figure(; size=(760, 700))
+        fig = _figure((760, 700))
         ax = _surface_side_axes!(fig[1, 1], dp.labels; aspect=DataAspect(), limits=((0.5, 2ns + 0.5), (0.5, 2ns + 0.5)),
             title=rich(_part_label(part, "D′"), ": outer-region matching matrix"))
         hm = _complex_heatmap!(ax, 1:(2ns), 1:(2ns), permutedims(_part(dp.raw, part)), part)
@@ -242,8 +242,8 @@ function FFS._plot_delta_ef(dp; part=:real)
     return themed() do
         ns = length(dp.labels)
         me = dp.mlow .+ (0:(size(dp.ef, 1)-1))
-        fig = Figure(; size=(900, 560))
-        ax = _surface_side_axes!(fig[1, 1], dp.labels; xgroups=false, xlabel="applied edge harmonic m",
+        fig = _figure((900, 560))
+        ax = _surface_side_axes!(fig[1, 1], dp.labels; xgroups=false, xticks=WholeTicks(), xlabel="applied edge harmonic m",
             title=rich(_part_label(part, sub("Δ", "EF")), ": surface response to each edge harmonic"),
             limits=((me[1] - 0.5, me[end] + 0.5), (0.5, 2ns + 0.5)))
         hm = _complex_heatmap!(ax, me, 1:(2ns), _part(dp.ef, part), part)
@@ -255,7 +255,7 @@ end
 function FFS._plot_cond_fbar(d, rat)
     return themed() do
         fbar = L"\mathrm{cond}(\bar{F})"
-        fig = Figure(; size=(900, 480))
+        fig = _figure((900, 480))
         ax = Axis(fig[1, 1]; xlabel=PSIN, ylabel=fbar, yscale=log10, limits=((0, 1), nothing))
         title = d.kmsing == 0 ? "Kinetic singular surfaces: none above threshold" : "Kinetic singular surfaces: $(d.kmsing) above threshold"
         _titled_rationals!(fig[1, 1], ax, rat, title)
@@ -281,7 +281,7 @@ end
 function FFS._plot_ballooning_alpha_boundary(d; psi_min=0.0)
     return themed() do
         unstable = isfinite.(d.alpha_crit) .& (d.alpha .> d.alpha_crit)
-        fig = Figure(; size=(820, 460))
+        fig = _figure((820, 460))
         ax = Axis(fig[1, 1]; xlabel=PSIN, ylabel="normalized pressure gradient α", limits=((psi_min, 1), (0, _alpha_top(d.alpha, d.alpha_crit))),
             title=_ballooning_verdict(d.alpha, d.alpha_crit))
         band!(ax, d.psi, d.alpha, ifelse.(unstable, d.alpha_crit, d.alpha); color=(:firebrick, 0.15))
@@ -317,7 +317,7 @@ end
 
 function FFS._plot_ballooning_alpha_boundaries(bnd, dpmap; psi_min=0.0)
     return themed() do
-        fig = Figure(; size=(900, 560))
+        fig = _figure((900, 560))
         top = _alpha_top(bnd.alpha, bnd.alpha_critical1, bnd.alpha_critical2)
         ax = Axis(fig[1, 1]; xlabel=PSIN, ylabel="normalized pressure gradient α", limits=((psi_min, 1), (0, top)),
             title=_ballooning_verdict(bnd.alpha, bnd.alpha_critical1))
@@ -349,7 +349,7 @@ const _SUMMARY_PANELS = Dict(
 function FFS._plot_ffs_summary(panels)
     return themed() do
         n = length(panels)
-        fig = Figure(; size=(n == 1 ? 820 : 1150, 410 * cld(n, 2)))
+        fig = _figure((n == 1 ? 820 : 1150, 410 * cld(n, 2)))
         for (i, (kind, data...)) in enumerate(panels)
             row = cld(i, 2)
             col = (n == 1 || (i == n && isodd(n))) ? (1:2) : (isodd(i) ? 1 : 2)

@@ -27,7 +27,7 @@ end
 
 function CF._plot_coils_3d(coil_sets, surface, field; title=nothing, by_set=false)
     return themed() do
-        fig = Figure(; size=(900, 560), figure_padding=(30, 10, 10, 10))
+        fig = _figure((900, 560); figure_padding=(30, 10, 10, 10))
         title = something(title, surface === nothing ? "Coils" : "Plasma boundary and coils")
         azimuth = 1.15π
         ax = Axis3(fig[1, 1]; aspect=:data, title, titlefont=:regular, xlabel="X (m)", ylabel="Y (m)", zlabel="Z (m)", azimuth, elevation=0.32,
@@ -85,7 +85,7 @@ function CF._plot_coils_rz(coil_sets, boundary)
         # Room on the right for the set names; the axis width follows the data's aspect so no band is left empty.
         xlo, xhi = minimum(Rall) - 0.15, maximum(Rall) + 0.45
         ylo, yhi = minimum(Zall) - 0.1, maximum(Zall) + 0.1
-        height = 620
+        height = _px(620)
         fig = Figure()
         ax = Axis(fig[1, 1]; aspect=DataAspect(), height, width=round(Int, height * (xhi - xlo) / (yhi - ylo)), limits=((xlo, xhi), (ylo, yhi)),
             xlabel="R (m)", ylabel="Z (m)", title=boundary === nothing ? "Coils" : "Coils and plasma boundary")
@@ -100,7 +100,7 @@ function CF._plot_coils_rz(coil_sets, boundary)
                     lines!(ax, hypot.(cs.x[j, k, :], cs.y[j, k, :]), cs.z[j, k, :]; color, linewidth=2)
                 end
             end
-            text!(ax, maximum(R) + 0.05, sum(Z) / length(Z); text=cs.name, fontsize=11, align=(:left, :center), color)
+            text!(ax, maximum(R) + 0.05, sum(Z) / length(Z); text=cs.name, fontsize=13, align=(:left, :center), color)
         end
         resize_to_layout!(fig)
         fig
@@ -113,8 +113,8 @@ function CF._plot_forcing_spectrum(forcing_modes, mlow, mhigh, rational_m)
         factor, scale = _power([abs(f.amplitude) for f in forcing_modes])
         ms = [f.m for f in forcing_modes]
         lo, hi = something(mlow, minimum(ms)), something(mhigh, maximum(ms))
-        fig = Figure(; size=(820, 440))
-        ax = Axis(fig[1, 1]; xlabel="poloidal harmonic m", ylabel=rich("|Φ", subscript("x"), "(m, n)|", _unit(scale, "")),
+        fig = _figure((820, 440))
+        ax = Axis(fig[1, 1]; xticks=WholeTicks(), xlabel="poloidal harmonic m", ylabel=rich("|Φ", subscript("x"), "(m, n)|", _unit(scale, "")),
             title="Coil forcing spectrum on the control surface", limits=((lo - 1.5, hi + 1.5), (0, nothing)))
         isempty(rational_m) || vlines!(ax, rational_m; color=(:black, 0.15), linewidth=1)
         for (i, n) in enumerate(ns)
@@ -131,7 +131,7 @@ end
 function CF._plot_surface_map(d; title, arb=false)
     return themed() do
         values, scale = _decade(d.field)
-        fig = Figure(; size=(900, 500))
+        fig = _figure((900, 500))
         ax = Axis(fig[1, 1]; title)
         hm = _surface_slice!(ax, d.phi, d.theta, values)
         d.coils === nothing || _coil_traces!(ax, d.coils)

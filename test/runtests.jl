@@ -37,6 +37,13 @@ Set(registered) == Set(discovered) || error("Update test/suites.jl to cover ever
 group = get(ENV, "GPEC_TEST_GROUP", "")
 isempty(group) || group in last.(TEST_SUITES) || error("Unknown GPEC_TEST_GROUP: $group")
 selected = isempty(ARGS) ? [file for (file, suite) in TEST_SUITES if isempty(group) || suite == group] : ARGS
+# The plots group draws with CairoMakie, which is not a dependency: a full run without it skips the group and says so,
+# while naming the group or one of its files still fails.
+if isempty(ARGS) && isempty(group) && Base.find_package("CairoMakie") === nothing
+    plot_files = [file for (file, suite) in TEST_SUITES if suite == "plots"]
+    @warn "Skipping the plots test group: CairoMakie is not installed. Add it to the default environment to run these files." plot_files
+    setdiff!(selected, plot_files)
+end
 for testfile in selected
     run_test_file(testfile)
 end

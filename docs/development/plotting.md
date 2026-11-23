@@ -2,7 +2,7 @@
 
 GPEC draws figures with [Makie](https://docs.makie.org). Makie is a weak dependency: the drawing code lives in the
 package extension `ext/GPECMakieExt/`, which loads when a session loads any Makie backend (`using CairoMakie` for
-files, `using GLMakie` for interactive windows). `src/Analysis/` holds the data extraction, the registry and the
+files, `using GLMakie` for interactive windows); with Makie loaded but no backend, a plot call throws and says so. `src/Analysis/` holds the data extraction, the registry and the
 public `plot_*` functions, and calls the extension's drawing functions through `Analysis._draw`.
 
 ## Adding an Analysis plot
@@ -41,8 +41,8 @@ Every plot:
 - **Drawing.** Add the `A.<Module>._plot_x` method to the matching file in `ext/GPECMakieExt/`. Build the figure inside
   `themed() do ... end`, and reuse the shared renderers before writing new ones: `_surface_slice!` (a field on the
   control surface in φ and θ), `_poloidal_slice!` (a field on the (R, Z) flux-surface grid), `_coil_traces!`,
-  `_surfaces_on_top!` (rational surfaces along the top of a ψ_N axis), and the label helpers in `theme.jl` (`_num`,
-  `_power`, `_unit`, `sub`, `sup`, `PSIN`).
+  `_surfaces_on_top!` (rational surfaces along the top of a ψ_N axis; it leaves out a label that would run into its
+  neighbour), and the label helpers in `theme.jl` (`_num`, `_power`, `_unit`, `sub`, `sup`, `PSIN`).
 - **Tests.** `test/runtests_analysis_plots.jl` draws every registered plot from both sources and checks the refusals;
   add an extractor to its list when the plot reads new data. Plot tests run in the `plots` test group, which stacks a
   CairoMakie environment onto the load path; the other groups never load Makie.
@@ -52,6 +52,12 @@ Every plot:
 - **One theme.** `GPEC_THEME` in `ext/GPECMakieExt/theme.jl`: 15 pt labels, 13 pt ticks, a 16 pt regular-weight
   title, faint grid, full box, the colour-blind-safe Wong palette, and legends on a light translucent backing placed in
   empty space or outside the data. Figure size follows the panel count, with no empty grid cells.
+- **Canvas size.** Create every figure with `_figure((width, height))` and wrap any fixed panel dimension in `_px`,
+  never `Figure(; size=...)` directly. Sizes are written at their design size (820 wide for a single panel) and laid
+  out `CANVAS_SCALE` = 1/1.35 as large, so text, lines and markers keep their tuned proportions to each other and are
+  larger relative to the figure: about 9 pt text when a single-panel figure is printed 5 inches wide. Saved raster
+  images keep the pixel count of the design size. A title or label must fit its panel at that canvas; shorten the
+  wording before shrinking the text.
 - **Self-describing.** The title and axis labels say what is plotted, its normalization and its units. A run label
   appears only when several runs are overlaid.
 - **Typography.** Real glyphs and rich text, never ASCII `_` or `^`: ψ_N, ξ^ψ_m, |b̄_res|, Δ′. Units in parentheses.
@@ -60,7 +66,8 @@ Every plot:
   near-constant data is reported as such.
 - **Axes.** Per-rational-surface quantities go on an evenly spaced categorical `q = m/n` axis, as stems and dots,
   unless where in ψ they sit is the point. Use a log scale when the data span more than about two decades, with ticks
-  at whole decades, and a diverging, symmetric colour range for signed data. Values that are roundoff against the
+  at whole decades, and a diverging, symmetric colour range for signed data. An axis that counts harmonics or
+  eigenmodes ticks on whole numbers (`WholeTicks()`). Values that are roundoff against the
   run's scale are left out and counted in the title.
 - **3D.** Equal data aspect, and solid surfaces occlude what is behind them (CairoMakie has no depth buffer, so draw
   in back-to-front order).

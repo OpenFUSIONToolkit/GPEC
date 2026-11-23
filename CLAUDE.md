@@ -25,6 +25,9 @@ julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(); include("
 # Run specific test file
 julia --project=. test/runtests.jl test/runtests_solovev.jl
 
+# The plot tests (runtests_analysis_plots.jl, runtests_error_fields_plots.jl) need CairoMakie in the default
+# environment: cd ~; julia -e 'using Pkg; Pkg.add("CairoMakie")'. A full run without it skips them and says so.
+
 # Available test files:
 
 # - test/runtests_vacuum_julia.jl   # Julia vacuum module
