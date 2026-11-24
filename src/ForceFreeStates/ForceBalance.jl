@@ -135,6 +135,8 @@ function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verb
     ctrl.kinetic === nothing && ctrl.kinetic_factor != 1 &&
         error("kinetic_factor scales the kinetic matrices, but no kinetic source is set: pass kinetic=... " *
               "([ForceFreeStates] kinetic = \"KineticForces\")")
+    ctrl.kinetic isa PerpendicularInertia && !(ctrl.kinetic_factor > 0) &&
+        throw(ArgumentError("kinetic_factor is γ² for PerpendicularInertia and must be positive, got $(ctrl.kinetic_factor)"))
     # A kinetic model (not supplied or synthetic matrices) is evaluated on the equilibrium's kinetic profiles.
     ctrl.kinetic === nothing || ctrl.kinetic isa Union{KineticMatrices,TestKineticMatrices,PerpendicularInertia} || equil.kinetic !== nothing ||
         error("the KineticForces kinetic source needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
