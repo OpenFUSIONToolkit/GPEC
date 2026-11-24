@@ -159,14 +159,14 @@ function normalized_frame(u::AbstractArray{ComplexF64,3})
 end
 
 """
-    maslov_match(θold, Vold, θnew, Vnew) -> (w, maxrot, overlap)
+    maslov_match(θold, Vold, θnew, Vnew) -> (up, down, maxrot, overlap)
 
 Follow each eigenphase from one step to the next through the eigenvectors, assigning old to new by greatest
 overlap |⟨v_old, v_new⟩| first until every pair is matched (the eigenvectors of a unitary Ψ are orthonormal,
 so a clear step gives overlaps near 1; within a cluster of nearly equal phases the assignment is arbitrary
 but harmless, since swapped partners rotate by the same small arcs). Each phase moves along the shortest arc
-δ = angle(exp(i(θnew − θold))); return the signed number of arcs that cross π (a conjugate point, +1 upward
-and −1 downward), the largest |δ|, and the smallest overlap used.
+δ = angle(exp(i(θnew − θold))); return the numbers of arcs that cross π upward and downward (each a conjugate
+point), the largest |δ|, and the smallest overlap used.
 """
 function maslov_match(θold::AbstractVector{Float64}, Vold::AbstractMatrix{ComplexF64}, θnew::AbstractVector{Float64}, Vnew::AbstractMatrix{ComplexF64})
     O = abs.(Vold' * Vnew)
@@ -181,14 +181,15 @@ function maslov_match(θold::AbstractVector{Float64}, Vold::AbstractMatrix{Compl
         O[j, :] .= -1.0
         O[:, k] .= -1.0
     end
-    w, maxrot = 0, 0.0
+    up, down, maxrot = 0, 0, 0.0
     for k in 1:N
         d = angle(cis(θnew[k] - θold[partner[k]]))
         maxrot = max(maxrot, abs(d))
         target = θold[partner[k]] + d
-        w += target > π ? 1 : target <= -π ? -1 : 0
+        up += target > π
+        down += target <= -π
     end
-    return w, maxrot, overlap
+    return up, down, maxrot, overlap
 end
 
 """
@@ -208,7 +209,8 @@ end
     maslov_advance!(odet, u; refine=nothing, depth=0)
 
 Advance the conjugate-point count from the stored eigenpairs to those of frame `u`: add the signed number
-of eigenphases that crossed π to `odet.nconj`. A phase that rotated by more than π/4 in the step leaves its
+of eigenphases that crossed π to `odet.nconj`, and the upward and downward wraps to `odet.nconj_up` and
+`odet.nconj_down`. A phase that rotated by more than π/4 in the step leaves its
 direction of travel in doubt (an eigenvalue of W⁻¹ passing zero or infinity quickly), so when `refine(τ)`
 can supply the frame at fraction τ of the step (the integrator's dense output), the step is bisected, up to
 six times, until every arc is short. The step is counted in `odet.nconj_flags` when a rotation above π/2
@@ -226,14 +228,16 @@ function maslov_advance!(odet::OdeState, u::AbstractArray{ComplexF64,3}; refine=
     end
     θnew, Vnew = similar(odet.maslov_theta), similar(odet.maslov_vecs)
     defect = cayley_eigen!(θnew, Vnew, u1, u2, odet.maslov_s)
-    w, maxrot, _ = maslov_match(odet.maslov_theta, odet.maslov_vecs, θnew, Vnew)
+    up, down, maxrot, _ = maslov_match(odet.maslov_theta, odet.maslov_vecs, θnew, Vnew)
     if maxrot > π / 4 && refine !== nothing && depth < 6
         maslov_advance!(odet, refine(0.5); refine=τ -> refine(0.5 * τ), depth=depth + 1)
         return maslov_advance!(odet, u; refine=τ -> refine(0.5 + 0.5 * τ), depth=depth + 1)
     end
     odet.maslov_defect = max(odet.maslov_defect, defect)
     (maxrot > π / 2 || defect > 1e-3) && (odet.nconj_flags += 1)
-    odet.nconj += w
+    odet.nconj += up - down
+    odet.nconj_up += up
+    odet.nconj_down += down
     odet.maslov_theta .= θnew
     odet.maslov_vecs .= Vnew
     return odet

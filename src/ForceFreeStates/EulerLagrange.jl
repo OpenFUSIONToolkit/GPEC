@@ -71,9 +71,12 @@ records needed to undo it, and singular-surface asymptotic coefficients.
     `PerpendicularInertia` one); off by default since it costs two LU factorizations and one eigenvalue solve per accepted step.
   - `nconj::Int` - Signed running count of Cayley eigenphases that wrapped through π (conjugate points, fixed-boundary modes inside the
     ψ interval), reseeded after each ideal crossing so it counts per Newcomb interval.
+  - `nconj_up::Int`, `nconj_down::Int` - Eigenphase wraps through π upward and downward over the run; a Lagrangian frame wraps every
+    conjugate point the same way, so both nonzero means a miscounted step.
   - `nzero_conj::Int` - Number of conjugate points, `abs(nconj)` at the end of the run; −1 when the count did not run.
   - `nconj_flags::Int` - Accepted steps whose count is unreliable (an eigenphase rotation above π/2, or a unitarity defect above 1e-3 that
-    shows the frame is not Lagrangian to working precision); a nonzero value means `nzero_conj` may be wrong.
+    shows the frame is not Lagrangian to working precision), plus one when wraps ran in both directions; a nonzero value means
+    `nzero_conj` may be wrong.
   - `maslov_theta::Vector{Float64}` - Cayley eigenphases at the last counted step, aligned with the columns of `maslov_vecs`.
   - `maslov_vecs::Matrix{ComplexF64}` - Cayley eigenvectors at the last counted step, which identify each eigenphase across a step.
   - `maslov_pending::Bool` - Whether the next accepted step seeds the eigenphases and the Cayley scale instead of advancing the count.
@@ -127,6 +130,8 @@ records needed to undo it, and singular-surface asymptotic coefficients.
     # Exact conjugate-point count
     count_conj::Bool = false
     nconj::Int = 0
+    nconj_up::Int = 0
+    nconj_down::Int = 0
     nzero_conj::Int = -1
     nconj_flags::Int = 0
     maslov_theta::Vector{Float64} = zeros(Float64, numpert_total)
@@ -345,7 +350,10 @@ function forward_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
-    odet.count_conj && (odet.nzero_conj = abs(odet.nconj))
+    if odet.count_conj
+        odet.nzero_conj = abs(odet.nconj)
+        odet.nconj_up > 0 && odet.nconj_down > 0 && (odet.nconj_flags += 1)
+    end
 
     # Undo Gaussian reduction to get true solution vectors
     transform_u!(odet, intr)
