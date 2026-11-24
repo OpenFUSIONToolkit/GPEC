@@ -202,8 +202,11 @@ include("h5_metadata_check.jl")
     @testset "growth rate is independent of the poloidal angle" begin
         # The A, C, H bands differ between angles (the cross band C is 12–16 % of √(|A||H|) here), γ² must not
         gamma_sq = map(("hamada", "pest", "boozer", "equal_arc")) do jac_type
-            angle_deck = merge(deck, Dict{String,Any}("TJAnalytic" => merge(deck["TJAnalytic"], Dict{String,Any}("qa" => 2.9)),
-                "Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("jac_type" => jac_type))))
+            angle_deck = merge(
+                deck,
+                Dict{String,Any}("TJAnalytic" => merge(deck["TJAnalytic"], Dict{String,Any}("qa" => 2.9)),
+                    "Equilibrium" => merge(deck["Equilibrium"], Dict{String,Any}("jac_type" => jac_type)))
+            )
             angle_equil = GPEC.Equilibrium.PlasmaEquilibrium(GPEC.equilibrium_config(angle_deck, template), GPEC.analytic_config(angle_deck))
             gr = FFS.growth_rate(ForceBalanceProblem(angle_equil; nn=1, wall, ffs_kwargs...), forward; inertia=FFS.PerpendicularInertia(; rho=1e-7))
             @test gr.converged

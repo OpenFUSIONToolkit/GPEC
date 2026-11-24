@@ -206,8 +206,9 @@ function maybe_reform_equilibrium(
     if implied > 1.5 * (length(psi_nodes) - 1)
         remedy = "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
         if implied > Equilibrium.REFINED_N_CAP
-            remedy = "the grid is capped at $(Equilibrium.REFINED_N_CAP) knots, so psi_accuracy cannot refine it further and results may be under-resolved; " *
-                     "a poloidal angle with smoother metric harmonics (jac_type = \"hamada\") needs fewer knots"
+            remedy =
+                "the grid is capped at $(Equilibrium.REFINED_N_CAP) knots, so psi_accuracy cannot refine it further and results may be under-resolved; " *
+                "a poloidal angle with smoother metric harmonics (jac_type = \"hamada\") needs fewer knots"
         end
         @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " * remedy
     end
