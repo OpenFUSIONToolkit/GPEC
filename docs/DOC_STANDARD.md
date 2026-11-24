@@ -87,7 +87,7 @@ and writes a machine-readable entry to `docs/src/figures/manifest.toml`:
 script  = "make_rotated_ray_contour.jl"
 commit  = "3a0837e3"
 date    = "2026-07-08"
-depends = ["src/InnerLayer/GGJ/Ray.jl"]
+depends = ["src/InnerLayer/ToroidalLayer/Ray.jl"]
 ```
 
 `depends` lists the repo-relative source files whose *numbers* the figure

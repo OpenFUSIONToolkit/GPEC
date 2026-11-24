@@ -1,6 +1,6 @@
 # Analysis
 
-`Analysis` holds the plotting and post-processing functions for GPEC results, grouped by the stage they read; each works on the in-memory result or on `gpec.h5`.
+`Analysis` holds the plotting and post-processing functions for GPEC results, grouped by the stage they read. Each registered plot takes the in-memory result or the path of the `gpec.h5` it was saved to; `available_plots` lists them with what each source can draw (see [Plotting a result](api.md#Plotting-a-result)).
 
 ## Submodules
 
@@ -16,6 +16,13 @@ Figure conventions for spectrum plots are in `docs/development/plotting.md` of t
 
 ```@docs
 GeneralizedPerturbedEquilibrium.Analysis
+```
+
+## Plot registry
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Analysis]
+Pages = ["Registry.jl"]
 ```
 
 ## ForceFreeStates

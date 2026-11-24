@@ -15,6 +15,7 @@ using Plots
 # analytically) and a tilted one, checked in memory, through the HDF5 writer/reader, and
 # through the post-hoc gpec.h5 entry point that rebuilds the equilibrium from the file.
 include("h5_metadata_check.jl")
+include("display_check.jl")
 
 @testset "error fields" begin
     GPEC = GeneralizedPerturbedEquilibrium
@@ -119,6 +120,8 @@ include("h5_metadata_check.jl")
             end
 
             @test sens.coil_names == ["hoop_tilted", "hoop_axi", "hoop_efc"]
+            _check_main_display(res)
+            foreach(_check_display, (res.error_fields.monte_carlo, res.error_fields.risk))
             N = ffs.numpert_total
             @test size(sens.field_as_designed) == (N, 3)
             @test size(sens.shift_sensitivity_per_m) == (N, 3, 3)
@@ -255,6 +258,20 @@ include("h5_metadata_check.jl")
             @test AEF.plot_coil_sensitivities(["run" => h5path, "again" => h5path]; quantity=:tilt)[1][:yaxis][:guide] == "|δ| per degree of tilt"
             @test AEF.plot_coil_sensitivities(h5path; quantity=:rim)[1][:yaxis][:guide] == "|δ| per mm of rim displacement"
             @test_throws ArgumentError AEF.plot_coil_sensitivities(h5path; quantity=:bogus)
+
+            # The assessment in memory supplies what its saved file does, and every registered plot draws from both.
+            ef = res.error_fields
+            from_result, from_file = AEF._load(ef), AEF._load(h5path)
+            for k in keys(from_result)
+                k === :tolerances && continue
+                a, b = from_result[k], from_file[k]
+                @test (a === nothing && b === nothing) || (a isa AbstractArray{<:Number} ? isapprox(a, b; rtol=1e-10) : isequal(a, b))
+            end
+            for e in GPEC.Analysis.PLOTS
+                GPEC.Analysis._accepts(e, ef) || continue
+                @test e.fn(ef) isa Plots.Plot
+                @test e.fn(h5path) isa Plots.Plot
+            end
 
             # An in-memory table plots the same way a stored run does, which is the whole point of
             # the dual entry points: coil geometry that was never part of a run has no file to read.
@@ -564,6 +581,26 @@ include("h5_metadata_check.jl")
             pe.response.ffs.equil.kinetic = nothing
             @test_throws "needs kinetic profiles" EF.efc_couplings(pe.response, sets, rc, dom, cfg, GPEC.KineticForces.KineticForcesControl())
             pe.response.ffs.equil.kinetic = attached
+
+            # Species-resolved torque of the run's own perturbation, on the diagnostics' axis boundary: the
+            # main ion resolved on its own reproduces the single-ion torque, and a D-T list's torque is the
+            # sum of its members' own torques.
+            KF, EQ = GPEC.KineticForces, GPEC.Equilibrium
+            kf_ctrl = KF.KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
+            kin = ffs.equil.kinetic
+            kp = KF.ntv_profiles(kf_ctrl, ffs.equil)
+            resolve(list) = EQ.resolve_ntv_species(kin, list; electron=false, zimp=kin.impurity_charge, mimp=kin.impurity_mass)
+            kf_intr = KF.KineticForcesInternal(ffs.equil; verbose=false)
+            KF.set_perturbation_data!(kf_intr, pe, ffs, ffs.equil, ffs.metric)
+            psi_c = KF.axis_validity_boundary(kf_ctrl, nothing, kp, ffs.equil, Float64[sng.psifac for sng in ffs.surfaces])
+            torque(species) = EF.ntv_torque_state(kf_intr, kf_ctrl, ffs.equil, kp, species, 0.0; axis_psi_c=psi_c).method_results["fgar"].total_torque
+            single = torque(nothing)
+            @test isfinite(single) && single != 0
+            zi, mi = KF.main_ion(ffs.equil)
+            @test torque(resolve([EQ.IonSpecies(; z=zi, m=mi, fraction=1.0)])) ≈ single rtol = 1e-6
+            dt = resolve([EQ.IonSpecies(; z=zi, m=2, fraction=0.5), EQ.IonSpecies(; z=zi, m=3, fraction=0.5)])
+            @test length(dt) >= 2 && !any(s.electron for s in dt)
+            @test torque(dt) ≈ sum(torque(dt[i:i]) for i in eachindex(dt)) rtol = 1e-12
 
             # Central differences: doubling the step moves the derivatives at O(h²).
             coarse = EF.compute_coil_sensitivities(sets[1:1], rc, ffs.equil, cfg,

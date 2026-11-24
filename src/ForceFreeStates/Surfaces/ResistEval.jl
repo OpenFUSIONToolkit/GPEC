@@ -56,7 +56,7 @@ end
     resist_geometry(equil, psifac, q1; gamma=5/3) -> ResistGeometry
 
 Glasser, Greene & Johnson 1975 (Phys. Fluids 18, 875) resistive-layer coefficients at `psifac`,
-geometric part only (no η or ρ); `ggj_parameters` adds τ_A and τ_R. Port of Fortran RDCON `resist_eval`.
+geometric part only (no η or ρ); `InnerLayer.GGJ.ggj_parameters` adds τ_A and τ_R. Port of Fortran RDCON `resist_eval`.
 
 # Arguments
 
@@ -165,25 +165,6 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
         f_trap, R_major, eps_local,
         p, p1, v1
     )
-end
-
-"""
-    ggj_parameters(sing, equil; eta, rho, gamma=5/3, ising=0) -> InnerLayer.GGJParameters
-
-GGJ layer parameters at `sing` from its `restype` geometry and the local η (Ω·m) and ρ (kg/m³).
-"""
-function ggj_parameters(sing::SingType, equil::Equilibrium.PlasmaEquilibrium;
-    eta::Real, rho::Real, gamma::Real=5 / 3, ising::Int=0)
-    rg = sing.restype
-    rg === nothing && throw(ArgumentError("ggj_parameters: the surface at ψ=$(sing.psifac) has restype = nothing; run resist_eval_all! first"))
-    equil.params.volume === nothing && throw(ArgumentError("ggj_parameters: equil.params.volume is nothing"))
-    MU_0 = Utilities.PhysicalConstants.MU_0
-    chi1 = 2π * equil.psio
-    taua = sqrt(rho * rg.M * MU_0) / abs(2π * Int(sing.n[1]) * sing.q1 * chi1 / rg.v1_local)
-    taur = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta
-    G = rg.avg_bsq / (rg.M * gamma * rg.p_local)
-    return InnerLayer.GGJParameters(; E=rg.E, F=rg.F, G=G, H=rg.H, K=rg.K, M=rg.M,
-        taua=taua, taur=taur, v1=rg.v1_local / equil.params.volume, ising=ising)
 end
 
 """

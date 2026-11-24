@@ -1,13 +1,14 @@
 @testset "Tearing: TearingProblem + TearingConfig + HDF5 output" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium: GGJModel, SLAYERModel, TearingProblem, TearingConfig, solve
+    using GeneralizedPerturbedEquilibrium: GGJModel, CCCModel, SLAYERModel, TearingProblem, TearingConfig, solve
     using GeneralizedPerturbedEquilibrium.Tearing
     using GeneralizedPerturbedEquilibrium.Tearing.Dispersion
     using HDF5
     using TOML
 
     include("h5_metadata_check.jl")
+    include("display_check.jl")
     # ------- Helper: build a synthetic SLAYERParameters with full control
     function _mk_params(; rs=0.5, lu=1e7, tauk=1e-4,
         Q_e=-1.0, Q_i=0.5, m=2, n=1, ising=1,
@@ -106,6 +107,7 @@
         r = solve(TearingProblem(no_surfaces), SLAYERModel())
         @test isempty(r.params)
         @test r.enabled == false
+        @test repr(r) == "TearingResult(disabled)"
 
         # With surfaces to analyse, the profiles must come from the equilibrium.
         bare = (equil=(; kinetic=nothing), surfaces=[nothing], delta_prime=nothing)
@@ -185,13 +187,34 @@
             @test coupled.omega[1] ≈ 2π * 1e3 rtol = 1e-2
             @test coupled.gamma[1] ≈ still.gamma[1] rtol = 1e-2
             @test coupled.gamma[1] != still.gamma[1]
+            foreach(_check_display, (still, coupled))
+            foreach(_check_display, still.per_surface_extraction)
             # The LAR deck carries no kinetic profiles, so a missing ρ is named in the error.
-            @test_throws "GGJ tearing: give rho, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7), GGJModel();
+            @test_throws "Toroidal-layer tearing: give rho, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7), GGJModel();
                 config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
             @test_throws "SLAYER input" solve(
                 TearingProblem(ffs; eta=1e-7, rho=1e-7,
                     critical_resonant_field=GeneralizedPerturbedEquilibrium.Tearing.CriticalResonantFieldControl()), GGJModel();
                 config=TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0)))
+
+            # CCC tearing on the same solve: at Q* = 0, M⊥/M = 1 it is the GGJ layer, through its own Wasow basis and splitting solve.
+            box = TearingConfig(; gamma_range=(600.0, 2600.0), omega_range=(-1500.0, 1500.0), nre=4, nim=4, amr_passes=1)
+            ccc = solve(TearingProblem(ffs; eta=1e-7, rho=1e-7), CCCModel(; Qstar=0.0); config=box)
+            @test ccc.model === CCCModel(; Qstar=0.0) && eltype(ccc.params) <: CCCParameters
+            @test ccc.gamma ≈ still.gamma rtol = 1e-6
+            @test ccc.omega ≈ still.omega atol = 1e-3 * maximum(abs, still.gamma)
+            mktemp() do path, io
+                close(io)
+                h5open(f -> save_to_hdf5(f, ccc), path, "w")
+                h5open(path, "r") do f
+                    @test read(attributes(f["Tearing"])["layer_model"]) == "ccc"
+                    @test read(f["Tearing/PerSurface/Q_star"]) == zeros(length(ffs.surfaces))
+                    @test read(f["Tearing/PerSurface/M_perp_ratio"]) == ones(length(ffs.surfaces))
+                end
+            end
+            # Without kinetic data CCC needs Q* given, and a per-surface Q* needs one value per surface.
+            @test_throws "give Qstar, or load kinetic profiles" solve(TearingProblem(ffs; eta=1e-7, rho=1e-7), CCCModel(); config=box)
+            @test_throws "Qstar has length" solve(TearingProblem(ffs; eta=1e-7, rho=1e-7), CCCModel(; Qstar=zeros(length(ffs.surfaces) + 1)); config=box)
         end
     end
 
