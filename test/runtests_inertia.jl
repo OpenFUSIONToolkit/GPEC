@@ -35,6 +35,19 @@ include("h5_metadata_check.jl")
         end
         @test all(>(0), eigvals(Hermitian(bands(kw, 1, ipsi_mid))))
         @test all(>(0), eigvals(Hermitian(bands(kw, 6, ipsi_mid))))
+        # K is positive definite on (ξ_s, Ξ) jointly, not only on each block; the cross band C enters only here and through γ
+        for ipsi in (2, ipsi_mid, metric.mpsi - 1)
+            A, C, H = bands(kw, 1, ipsi), bands(kw, 3, ipsi), bands(kw, 6, ipsi)
+            @test isposdef(Hermitian([A C; C' H]))
+        end
+        # Pointwise |∇ψ × u|² = B²: AH − C² = (Jμ₀ρ)²/B², to the accuracy of the metric's Jacobian (4.8e-5 measured here)
+        chi1, mu0rho = 2π * equil.psio, GPEC.Utilities.MU_0 * 1e-7
+        worst = maximum(Iterators.product(1:metric.mpsi, 1:metric.mtheta)) do (ipsi, jtheta)
+            g = metric.fs[ipsi, jtheta, 1:7]
+            a, c, h, b2 = FFS._inertia_integrands(g..., equil.profiles.q_spline(metric.xs[ipsi]), chi1, mu0rho)
+            return abs((a * h - c^2) / ((g[7] * mu0rho)^2 / b2) - 1)
+        end
+        @test worst <= 2e-4
 
         kw2, _ = FFS.inertia_kinetic_matrices(FFS.PerpendicularInertia(; rho=2e-7), equil, intr, metric)
         @test kw2 ≈ 2kw rtol = 1e-12
@@ -95,6 +108,7 @@ include("h5_metadata_check.jl")
         prob = ForceBalanceProblem(equil; nn=1, wall, ffs_kwargs...)
         gr = FFS.growth_rate(prob, forward; inertia=FFS.PerpendicularInertia(; rho=1e-7))
         @test gr.gamma == 0
+        @test !gr.below_floor && gr.bracket == (0.0, 0.0)
         @test gr.gamma_sq == 0
         @test gr.result === nothing
         @test length(gr.history) == 1
@@ -166,16 +180,23 @@ include("h5_metadata_check.jl")
         @test all(h.nzero == 0 for h in gr.history)
         @test abs(minimum(real, gr.result.free_boundary.et)) <= 1e-6 * abs(gr.history[1].lambda)
         @test gr.result.closure == :regular && isnan(gr.omega_star_pi)
+        # The bracket closed to rtol around the reported root, and the count is the full Morse index
+        lo, hi = gr.bracket
+        @test lo <= gr.gamma_sq <= hi && hi - lo <= 1e-3 * hi && !gr.below_floor
+        @test all(h.nneg >= (h.lambda < 0) for h in gr.history)
+        @test all(r.diagnostics.nconj_up == 0 || r.diagnostics.nconj_down == 0 for r in (gr.marginal, gr.result))
         # Running out of iterations is reported, not hidden
         short = @test_logs (:warn, r"no convergence in 1 steps") match_mode = :any FFS.growth_rate(kink_prob, forward; inertia, maxiter=1, marginal=gr.marginal)
         @test !short.converged && short.gamma > 0 && short.result !== nothing
         # A root below gamma_sq_min counts as marginal: γ = 0, no inertial solve reported
         floor = FFS.growth_rate(kink_prob, forward; inertia, gamma_sq_min=1e12, marginal=gr.marginal)
         @test floor.gamma == 0 && floor.gamma_sq == 0 && floor.result === nothing && floor.converged
+        @test floor.below_floor && floor.bracket[1] == 0 && floor.bracket[2] < 1e12
         @test all(h.lambda > 0 for h in floor.history[2:end])
         # The marginal problem must be ideal, and the density positive
         @test_throws "ideal marginal problem" FFS.growth_rate(ForceBalanceProblem(kink_equil; nn=1, wall, ffs_kwargs..., kinetic=GPEC.KineticForcesControl()), forward; inertia)
         @test_throws "finite and positive" FFS.inertia_kinetic_matrices(FFS.PerpendicularInertia(; rho=0.0), equil, intr, metric)
+        @test_throws "must be positive" solve(ForceBalanceProblem(kink_equil; nn=1, wall, ffs_kwargs..., kinetic=inertia, kinetic_factor=-1.0), forward)
     end
 
     @testset "growth rate is independent of the poloidal angle" begin
@@ -208,6 +229,11 @@ include("h5_metadata_check.jl")
         walled = FFS.growth_rate(ForceBalanceProblem(hp_equil; nn=1, wall=close_wall, ffs_kwargs...), forward; inertia, gamma_sq_init=1e8)
         @test walled.gamma > 0
         @test any(h.nzero > 0 for h in walled.history)
+        # Below the fixed-boundary eigenvalue the least free-boundary energy is positive, yet modes are faster: only the full count says so
+        r9 = FFS._solve_force_balance(ForceBalanceProblem(hp_equil; nn=1, wall, ffs_kwargs..., kinetic=inertia, kinetic_factor=9e7), forward;
+            count_conjugate_points=true)
+        @test minimum(real, r9.free_boundary.et) > 0
+        @test r9.diagnostics.nzero_conj + count(<(0), real.(r9.free_boundary.et)) > 0
     end
 
     @testset "root iteration with a dominant end value" begin
@@ -216,13 +242,16 @@ include("h5_metadata_check.jl")
         x, converged, lo, hi = FFS._sign_change_root(f, 1e11, 1e12, f(1e11), f(1e12); rtol=1e-3, ftol=1e-6, scale=1.0, maxiter=30)
         @test converged
         @test abs(x / 3e11 - 1) < 2e-3
-        # A well-conditioned sign change keeps the plain interpolation steps
+        # A well-conditioned sign change keeps the plain interpolation steps; one probe across the ftol hit closes the bracket
         nev = Ref(0)
         g(x) = (nev[] += 1; x / 4e10 - 1)
-        x, converged, _, _ = FFS._sign_change_root(g, 1e10, 1e11, g(1e10), g(1e11); rtol=1e-3, ftol=1e-6, scale=1.0, maxiter=30)
+        x, converged, lo, hi = FFS._sign_change_root(g, 1e10, 1e11, g(1e10), g(1e11); rtol=1e-3, ftol=1e-6, scale=1.0, maxiter=30)
         @test converged
         @test x ≈ 4e10 rtol = 1e-6
-        @test nev[] == 3
+        @test nev[] == 4 && hi - lo <= 1e-3 * hi
+        # A small |λ| next to a pole (large scale) no longer stops a wide bracket
+        x, converged, lo, hi = FFS._sign_change_root(g, 1e10, 1e11, g(1e10), g(1e11); rtol=1e-3, ftol=1.0, scale=1.0, maxiter=30)
+        @test converged && hi - lo <= 1e-3 * hi && lo <= 4e10 <= hi
         # maxiter exhausted is reported, never an end of the bracket as converged
         x, converged, lo, hi = FFS._sign_change_root(f, 1e11, 1e12, f(1e11), f(1e12); rtol=1e-12, ftol=0.0, scale=1.0, maxiter=3)
         @test !converged && lo < x <= hi && x < 1e12

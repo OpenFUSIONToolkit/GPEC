@@ -92,6 +92,14 @@ The ELITE formulation. Source of the perpendicular-inertia growth-rate model tha
 
 ---
 
+> J. P. Goedbloed and P. H. Sakanaka, "New approach to magnetohydrodynamic stability. I. A practical stability concept,"
+> *Physics of Fluids* **17**, 908 (1974).
+> DOI: [10.1063/1.1694831](https://doi.org/10.1063/1.1694831)
+
+σ-stability: the modified energy principle δW + σ²K, whose negative index counts the modes growing faster than σ. Basis of the count `growth_rate` brackets its root with.
+
+---
+
 ## PerturbedEquilibrium
 
 > J.-K. Park, A. H. Boozer, and A. H. Glasser, "Computation of three-dimensional tokamak and spherical torus equilibria,"
