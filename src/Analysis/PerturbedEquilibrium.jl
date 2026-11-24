@@ -1,8 +1,9 @@
 """
     PerturbedEquilibrium
 
-Post-processing and visualization functions for GPEC perturbed equilibrium results stored
-in the `PerturbedEquilibrium/` group of a GPEC HDF5 output file.
+Post-processing and visualization functions for GPEC perturbed equilibrium results. Each plot takes the
+`PerturbedEquilibriumState` in memory or the path of a `gpec.h5` it was saved to, and throws an `ArgumentError`
+naming what to change in the run when the source lacks the data it draws (see `Analysis.available_plots`).
 """
 module PerturbedEquilibrium
 
@@ -10,26 +11,40 @@ using HDF5
 using LaTeXStrings
 using Plots
 
-# Check that a PE dataset exists and is non-empty.
-function _has_pe_data(h5path, key)
+using ..Analysis: register!, _require, _can, capabilities, REASONS
+import ...PerturbedEquilibrium: PerturbedEquilibriumState
+
+const Source = Union{AbstractString,PerturbedEquilibriumState}
+
+const _COUPLING = "PerturbedEquilibrium/SingularCoupling/"
+const _RESPONSE = "PerturbedEquilibrium/Response/"
+
+function _coupling_data(s::PerturbedEquilibriumState)
+    r = s.response
+    return (; field=s.resonant_area_weighted_field, current=s.resonant_current, island_hw=s.island_half_width, chirikov=s.chirikov_parameter,
+        delta_prime=s.delta_prime, psi=r.rational_psi, q=r.rational_q, n=r.rational_n)
+end
+
+function _coupling_data(h5path::AbstractString)
     h5open(h5path, "r") do fid
-        haskey(fid, key) && !isempty(read(fid[key]))
+        rd(name) = read(fid[_COUPLING*name])
+        (; field=rd("resonant_area_weighted_field"), current=rd("resonant_current"), island_hw=rd("island_half_width"), chirikov=rd("chirikov_parameter"),
+            delta_prime=rd("Delta_prime"), psi=rd("rational_psi"), q=rd("rational_q"), n=rd("rational_n"))
     end
 end
 
 """
-    plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
+    plot_resonant_area_weighted_field_amplitude(src; save_path=nothing)
 
 Scatter plot of the resonant area-weighted field `|b^r|` per rational surface vs ψ_N. One marker series
 per toroidal mode n. Integer-valued q rational surfaces are annotated. The resonant area-weighted field
 `b^r = Φ^r/A^r` is the resonant flux normalized by the scalar surface area, in tesla [Pharr 2026].
 
-Requires the perturbed equilibrium module to have been run and
-`SingularCoupling/resonant_area_weighted_field` to be present in the HDF5 file.
+Requires the perturbed equilibrium singular coupling.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium output
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -39,17 +54,15 @@ Requires the perturbed equilibrium module to have been run and
 
 A `Plots.jl` plot object.
 """
-function plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
-    base = "PerturbedEquilibrium/SingularCoupling/"
-    _has_pe_data(h5path, base * "resonant_area_weighted_field") ||
-        return plot(; title="No resonant area-weighted field data — run with perturbed equilibrium enabled", legend=false)
+function plot_resonant_area_weighted_field_amplitude(src::Source; save_path=nothing)
+    _require(plot_resonant_area_weighted_field_amplitude, src)
+    p = _plot_resonant_area_weighted_field_amplitude(_coupling_data(src))
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    resonant_area_weighted_field, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base*"resonant_area_weighted_field"]),
-        read(fid[base*"rational_psi"]),
-        read(fid[base*"rational_q"]),
-        read(fid[base*"rational_n"])
-    end
+function _plot_resonant_area_weighted_field_amplitude(d)
+    resonant_area_weighted_field, rational_psi, rational_q, rational_n = d.field, d.psi, d.q, d.n
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|b^r| [T]",
         title="Resonant area-weighted field |b^r| per surface", legend=:outertopright,
@@ -65,22 +78,20 @@ function plot_resonant_area_weighted_field_amplitude(h5path; save_path=nothing)
                 text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
         end
     end
-
-    isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
 """
-    plot_island_widths(h5path; save_path=nothing)
+    plot_island_widths(src; save_path=nothing)
 
 Scatter plot of island half-width `w/2` per rational surface vs ψ_N.
 Integer-valued q rational surfaces are annotated.
 
-Requires `SingularCoupling/island_half_width` in the HDF5 file.
+Requires the perturbed equilibrium singular coupling.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium output
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -90,16 +101,15 @@ Requires `SingularCoupling/island_half_width` in the HDF5 file.
 
 A `Plots.jl` plot object.
 """
-function plot_island_widths(h5path; save_path=nothing)
-    base = "PerturbedEquilibrium/SingularCoupling/"
-    _has_pe_data(h5path, base * "island_half_width") ||
-        return plot(; title="No island width data — run with perturbed equilibrium enabled", legend=false)
+function plot_island_widths(src::Source; save_path=nothing)
+    _require(plot_island_widths, src)
+    p = _plot_island_widths(_coupling_data(src))
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    island_hw, rational_psi, rational_q = h5open(h5path, "r") do fid
-        read(fid[base*"island_half_width"]),
-        read(fid[base*"rational_psi"]),
-        read(fid[base*"rational_q"])
-    end
+function _plot_island_widths(d)
+    island_hw, rational_psi, rational_q = d.island_hw, d.psi, d.q
 
     p = scatter(
         rational_psi, island_hw;
@@ -118,23 +128,21 @@ function plot_island_widths(h5path; save_path=nothing)
         annotate!(p, rational_psi[k], island_hw[k],
             text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
     end
-
-    isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
 """
-    plot_chirikov_parameter(h5path; save_path=nothing)
+    plot_chirikov_parameter(src; save_path=nothing)
 
 Scatter plot of the Chirikov overlap parameter per rational surface vs ψ_N, with a
 horizontal reference line at K = 1 (island overlap threshold). Points are colored red
 when K > 1. Integer-valued q rational surfaces are annotated.
 
-Requires `SingularCoupling/chirikov_parameter` in the HDF5 file.
+Requires the perturbed equilibrium singular coupling.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium output
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -144,16 +152,15 @@ Requires `SingularCoupling/chirikov_parameter` in the HDF5 file.
 
 A `Plots.jl` plot object.
 """
-function plot_chirikov_parameter(h5path; save_path=nothing)
-    base = "PerturbedEquilibrium/SingularCoupling/"
-    _has_pe_data(h5path, base * "chirikov_parameter") ||
-        return plot(; title="No Chirikov data — run with perturbed equilibrium enabled", legend=false)
+function plot_chirikov_parameter(src::Source; save_path=nothing)
+    _require(plot_chirikov_parameter, src)
+    p = _plot_chirikov_parameter(_coupling_data(src))
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    chirikov, rational_psi, rational_q = h5open(h5path, "r") do fid
-        read(fid[base*"chirikov_parameter"]),
-        read(fid[base*"rational_psi"]),
-        read(fid[base*"rational_q"])
-    end
+function _plot_chirikov_parameter(d)
+    chirikov, rational_psi, rational_q = d.chirikov, d.psi, d.q
 
     colors = [k > 1.0 ? :red : :steelblue for k in chirikov]
 
@@ -175,28 +182,24 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
         annotate!(p, rational_psi[k], chirikov[k],
             text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
     end
-
-    isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
 """
-    plot_driven_delta_prime(h5path; save_path=nothing)
+    plot_driven_delta_prime(src; save_path=nothing)
 
 Scatter plot of `Re(Δ')` per rational surface vs ψ_N, computed by the perturbed
-equilibrium module (from `PerturbedEquilibrium/SingularCoupling/Delta_prime`).
+equilibrium singular coupling.
 One marker series per toroidal mode n. Integer-valued q rational surfaces are
 annotated.
 
 This is the forcing-driven Δ' (response to the applied perturbation amplitudes
-in `intr.forcing_modes`); for the equilibrium-intrinsic Δ' from the STRIDE BVP,
-read `SingularSurfaces/Delta_prime_matrix` from the HDF5 directly.
-
-Requires `PerturbedEquilibrium/SingularCoupling/Delta_prime` in the HDF5 file.
+in `forcing_modes`); for the equilibrium-intrinsic Δ' of a Riccati or Galerkin solve,
+see `ForceFreeStates.plot_delta_prime`.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -206,17 +209,15 @@ Requires `PerturbedEquilibrium/SingularCoupling/Delta_prime` in the HDF5 file.
 
 A `Plots.jl` plot object.
 """
-function plot_driven_delta_prime(h5path; save_path=nothing)
-    base = "PerturbedEquilibrium/SingularCoupling/"
-    _has_pe_data(h5path, base * "Delta_prime") ||
-        return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
+function plot_driven_delta_prime(src::Source; save_path=nothing)
+    _require(plot_driven_delta_prime, src)
+    p = _plot_driven_delta_prime(_coupling_data(src))
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    delta_prime, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base*"Delta_prime"]),
-        read(fid[base*"rational_psi"]),
-        read(fid[base*"rational_q"]),
-        read(fid[base*"rational_n"])
-    end
+function _plot_driven_delta_prime(d)
+    delta_prime, rational_psi, rational_q, rational_n = d.delta_prime, d.psi, d.q, d.n
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="Re(Δ')",
         title="Tearing stability Δ' (driven, perturbed equilibrium)", legend=:outertopright,
@@ -235,13 +236,11 @@ function plot_driven_delta_prime(h5path; save_path=nothing)
                 text("  q=$(round(Int, rational_q[idx]))", 8, :left, :black))
         end
     end
-
-    isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
 """
-    plot_resonant_area_weighted_field(h5path; save_path=nothing)
+    plot_resonant_area_weighted_field(src; save_path=nothing)
 
 Five-panel summary of resonant coupling quantities at each rational surface vs ψ_N:
 
@@ -255,7 +254,7 @@ Inspired by `plot_resonant_flux.py` from OMFIT GPEC.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium output
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -265,12 +264,14 @@ Inspired by `plot_resonant_flux.py` from OMFIT GPEC.
 
 A `Plots.jl` plot object.
 """
-function plot_resonant_area_weighted_field(h5path; save_path=nothing)
-    p1 = plot_resonant_area_weighted_field_amplitude(h5path)
-    p2 = plot_driven_delta_prime(h5path)
-    p3 = _plot_resonant_current(h5path)
-    p4 = plot_island_widths(h5path)
-    p5 = plot_chirikov_parameter(h5path)
+function plot_resonant_area_weighted_field(src::Source; save_path=nothing)
+    _require(plot_resonant_area_weighted_field, src)
+    d = _coupling_data(src)
+    p1 = _plot_resonant_area_weighted_field_amplitude(d)
+    p2 = _plot_driven_delta_prime(d)
+    p3 = _plot_resonant_current(d)
+    p4 = _plot_island_widths(d)
+    p5 = _plot_chirikov_parameter(d)
 
     # Move outer legends inside so all panels have the same right margin
     for p in (p1, p2, p3)
@@ -292,17 +293,8 @@ function plot_resonant_area_weighted_field(h5path; save_path=nothing)
 end
 
 # Internal helper — resonant current scatter plot
-function _plot_resonant_current(h5path)
-    base = "PerturbedEquilibrium/SingularCoupling/"
-    _has_pe_data(h5path, base * "resonant_current") ||
-        return plot(; title="No resonant current data", legend=false)
-
-    resonant_current, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base*"resonant_current"]),
-        read(fid[base*"rational_psi"]),
-        read(fid[base*"rational_q"]),
-        read(fid[base*"rational_n"])
-    end
+function _plot_resonant_current(d)
+    resonant_current, rational_psi, rational_q, rational_n = d.current, d.psi, d.q, d.n
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|I_res|",
         title="Resonant current |I_res| per surface", legend=:outertopright,
@@ -323,8 +315,39 @@ function _plot_resonant_current(h5path)
     return p
 end
 
+const _COMPONENTS = Dict(
+    :xi_psi => (dataset="xi_psi", field=:psi, modes=:xi_modes, needs=:response_xi),
+    :b_psi => (dataset="b_psi_area_weighted", field=:b_psi_area_weighted, modes=:b_modes, needs=:response_b),  # area-normalized b^ψ
+    :Jb_theta => (dataset="Jb_theta", field=:theta, modes=:b_modes, needs=:response_b),
+    :Jb_zeta => (dataset="Jb_zeta", field=:zeta, modes=:b_modes, needs=:response_b)
+)
+
+function _response_data(s::PerturbedEquilibriumState, component)
+    c = _COMPONENTS[component]
+    ffs = s.response.ffs
+    return (; data=getfield(getfield(s, c.modes), c.field), psi=s.psi_grid, mlow=ffs.mlow, mhigh=ffs.mhigh, nhigh=ffs.nhigh,
+        q95=ffs.equil.params.q95, rational_psi=s.response.rational_psi)
+end
+
+function _response_data(h5path::AbstractString, component)
+    h5open(h5path, "r") do fid
+        (; data=read(fid[_RESPONSE*_COMPONENTS[component].dataset]), psi=read(fid[_RESPONSE*"psi"]), mlow=read(fid["Info/mlow"]),
+            mhigh=read(fid["Info/mhigh"]), nhigh=read(fid["Info/nhigh"]), q95=read(fid["Equilibrium/q_95"]),
+            rational_psi=haskey(fid, _COUPLING * "rational_psi") ? read(fid[_COUPLING*"rational_psi"]) : Float64[])
+    end
+end
+
+# Check `component` names a response field `src` holds; `_require` covers ξ, which every component's run also has.
+function _require_component(fn, src, component)
+    haskey(_COMPONENTS, component) || throw(ArgumentError("component must be one of :xi_psi, :b_psi, :Jb_theta, :Jb_zeta"))
+    _require(fn, src)
+    need = _COMPONENTS[component].needs
+    need in capabilities(src) || throw(ArgumentError("$(nameof(fn)): $(REASONS[need])"))
+    return nothing
+end
+
 """
-    plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
+    plot_mode_spectrogram(src; component=:xi_psi, save_path=nothing)
 
 Two-panel spectrogram of a perturbed equilibrium response field component:
 
@@ -337,13 +360,13 @@ Inspired by `plot_spectrograms.py` from OMFIT GPEC.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium response output
+  - `src`: A `PerturbedEquilibriumState` with the reconstructed response, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
   - `component`: Response field component to plot; one of `:xi_psi`, `:b_psi`,
-    `:Jb_theta`, `:Jb_zeta` (default: `:xi_psi`). `:b_psi` reads the area-normalized
-    `b_psi_area_weighted` dataset; `:Jb_theta` and `:Jb_zeta` are the Jacobian-weighted
+    `:Jb_theta`, `:Jb_zeta` (default: `:xi_psi`). `:b_psi` is the area-normalized
+    `b_psi_area_weighted` field; `:Jb_theta` and `:Jb_zeta` are the Jacobian-weighted
     contravariant field components.
   - `save_path`: If provided, save the figure to this path (default: `nothing`)
 
@@ -351,36 +374,20 @@ Inspired by `plot_spectrograms.py` from OMFIT GPEC.
 
 A `Plots.jl` plot object.
 """
-function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
-    comp_map = Dict(
-        :xi_psi => "xi_psi",
-        :b_psi => "b_psi_area_weighted",  # area-normalized b^ψ
-        :Jb_theta => "Jb_theta",
-        :Jb_zeta => "Jb_zeta"
-    )
-    haskey(comp_map, component) ||
-        error("component must be one of :xi_psi, :b_psi, :Jb_theta, :Jb_zeta")
+function plot_mode_spectrogram(src::Source; component=:xi_psi, save_path=nothing)
+    _require_component(plot_mode_spectrogram, src, component)
+    p = _plot_mode_spectrogram(_response_data(src, component), component)
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
 
-    base = "PerturbedEquilibrium/Response/"
-    dataset_path = base * comp_map[component]
-
-    _has_pe_data(h5path, dataset_path) ||
-        return plot(; title="No response data — run with perturbed equilibrium enabled", legend=false)
-
-    data, psi_response, mlow, mhigh, nhigh, q95, rational_psi = h5open(h5path, "r") do fid
-        read(fid[dataset_path]),
-        read(fid[base*"psi"]),
-        read(fid["Info/mlow"]), read(fid["Info/mhigh"]), read(fid["Info/nhigh"]),
-        read(fid["Equilibrium/q_95"]),
-        read(fid["PerturbedEquilibrium/SingularCoupling/rational_psi"])
-    end
-
-    mpert = mhigh - mlow + 1
-    m_vals = mlow:mhigh
-    data_mn = data[:, 1:mpert]  # (npsi, mpert): first mpert columns = first n's modes
+function _plot_mode_spectrogram(d, component)
+    mpert = d.mhigh - d.mlow + 1
+    m_vals = d.mlow:d.mhigh
+    data_mn = d.data[:, 1:mpert]  # (npsi, mpert): first mpert columns = first n's modes
 
     # Top panel: line plot per mode — only label resonant range m ∈ [0, nhigh·q95)
-    m_max_legend = nhigh * q95
+    m_max_legend = d.nhigh * d.q95
     p1 = plot(;
         xlabel="Norm. Poloidal Flux",
         ylabel="|$(component)|",
@@ -392,13 +399,13 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     cmap = cgrad(:roma, mpert; categorical=true)
     for (i, m) in enumerate(m_vals)
         show_label = 0 <= m < m_max_legend
-        plot!(p1, psi_response, abs.(data_mn[:, i]);
+        plot!(p1, d.psi, abs.(data_mn[:, i]);
             label=(show_label ? "m=$m" : nothing), color=cmap[i], linewidth=1.5)
     end
 
     # Bottom panel: heatmap in (m, ψ_N) space — psi on vertical axis, m on horizontal
     p2 = heatmap(
-        collect(m_vals), psi_response, abs.(data_mn);
+        collect(m_vals), d.psi, abs.(data_mn);
         xlabel="m",
         ylabel="Norm. Poloidal Flux",
         title="",
@@ -408,28 +415,27 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
         bottom_margin=5Plots.mm
     )
     # Overlay rational surface locations as white dashed lines
-    for psi_s in rational_psi
+    for psi_s in d.rational_psi
         hline!(p2, [psi_s]; linestyle=:dash, color=:white, linewidth=1.5, label=nothing)
     end
 
-    p = plot(p1, p2; layout=(2, 1), size=(950, 750))
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
+    return plot(p1, p2; layout=(2, 1), size=(950, 750))
 end
 
 """
-    plot_perturbed_equilibrium_summary(h5path; save_path=nothing)
+    plot_perturbed_equilibrium_summary(src; save_path=nothing)
 
-Three-panel composite summary of perturbed equilibrium results:
+Composite summary of perturbed equilibrium results, with each panel the source can supply:
 
   - Top-left: Resonant area-weighted field per surface (`plot_resonant_area_weighted_field_amplitude`)
   - Top-right: Edge |b_ψ| spectrum
   - Bottom: ξ_ψ mode spectrogram (`plot_mode_spectrogram`)
 
+Panels the source cannot draw are left out; it throws an `ArgumentError` only when none can be drawn.
+
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium output
+  - `src`: A `PerturbedEquilibriumState`, or the path of a `gpec.h5` it was saved to
 
 ### Keyword arguments
 
@@ -439,32 +445,31 @@ Three-panel composite summary of perturbed equilibrium results:
 
 A `Plots.jl` plot object.
 """
-function plot_perturbed_equilibrium_summary(h5path; save_path=nothing)
-    p_islands = plot_resonant_area_weighted_field_amplitude(h5path)
-    p_bpsi = _plot_bpsi_edge_spectrum(h5path)
-    p_spectro = plot_mode_spectrogram(h5path; component=:xi_psi)
-
-    l = @layout [grid(1, 2){0.35h}; b]
-    p = plot(p_islands, p_bpsi, p_spectro; layout=l, size=(1100, 1100))
+function plot_perturbed_equilibrium_summary(src::Source; save_path=nothing)
+    caps = capabilities(src)
+    top = Plots.Plot[]
+    _can(plot_resonant_area_weighted_field_amplitude, caps) && push!(top, _plot_resonant_area_weighted_field_amplitude(_coupling_data(src)))
+    :response_b in caps && push!(top, _plot_bpsi_edge_spectrum(_response_data(src, :b_psi)))
+    has_spectro = _can(plot_mode_spectrogram, caps)
+    if !has_spectro && isempty(top)
+        throw(ArgumentError("plot_perturbed_equilibrium_summary: no panel can be drawn: $(REASONS[:singular_coupling]); $(REASONS[:response_xi])"))
+    end
+    p = if !has_spectro
+        plot(top...; layout=(1, length(top)), size=(550 * length(top), 450))
+    else
+        p_spectro = _plot_mode_spectrogram(_response_data(src, :xi_psi), :xi_psi)
+        isempty(top) ? p_spectro : plot(top..., p_spectro; layout=@layout([grid(1, length(top)){0.35h}; b]), size=(1100, 1100))
+    end
 
     isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
 # Internal helper — |b_psi(m)| spectrum at the outermost psi surface
-function _plot_bpsi_edge_spectrum(h5path)
-    base = "PerturbedEquilibrium/Response/"
-    _has_pe_data(h5path, base * "b_psi_area_weighted") ||
-        return plot(; title="No b_psi data — run with perturbed equilibrium enabled", legend=false)
-
-    data, mlow, mhigh = h5open(h5path, "r") do fid
-        read(fid[base*"b_psi_area_weighted"]),
-        read(fid["Info/mlow"]), read(fid["Info/mhigh"])
-    end
-
-    mpert = mhigh - mlow + 1
-    m_vals = mlow:mhigh
-    bpsi_edge = abs.(data[end, 1:mpert])
+function _plot_bpsi_edge_spectrum(d)
+    mpert = d.mhigh - d.mlow + 1
+    m_vals = d.mlow:d.mhigh
+    bpsi_edge = abs.(d.data[end, 1:mpert])
 
     p = bar(
         collect(m_vals), bpsi_edge;
@@ -480,5 +485,14 @@ function _plot_bpsi_edge_spectrum(h5path)
 
     return p
 end
+
+const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
+register!(plot_perturbed_equilibrium_summary, _PE_SOURCES, (), "resonant field, edge b_ψ spectrum and ξ spectrogram")
+register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,), "five resonant-coupling panels per rational surface")
+register!(plot_resonant_area_weighted_field_amplitude, _PE_SOURCES, (:singular_coupling,), "|b̄_res| per rational surface")
+register!(plot_island_widths, _PE_SOURCES, (:singular_coupling,), "island half-width per rational surface")
+register!(plot_chirikov_parameter, _PE_SOURCES, (:singular_coupling,), "Chirikov parameter per rational surface")
+register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ′ per rational surface")
+register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "|response| per m against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
 
 end # module PerturbedEquilibrium

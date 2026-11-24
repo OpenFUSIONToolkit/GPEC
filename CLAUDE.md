@@ -56,6 +56,16 @@ using GeneralizedPerturbedEquilibrium
 
 Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to compare performance between branches or commits (default case: `examples/DIIID-like_ideal_example`). Full usage, flags, and benchmark-script conventions (never duplicate example inputs into `benchmarks/`; outputs go under `benchmarks/`, not committed) are in **[`docs/development/benchmarking.md`](docs/development/benchmarking.md)**.
 
+### Running cases and scans
+
+A fresh Julia process spends ~12 s loading GPEC and tens of seconds compiling its first case before computing anything, and an edit under `src/` adds a ~3 min package rebuild. Structure runs to pay that once:
+- Loop over deck variants in one process, each case in its own directory with its own log; never one `julia` per case. Parallelize with a job array of chunks (one process per task) rather than threads.
+- Build the image once before submitting (`Pkg.precompile()`), with a `JULIA_CPU_TARGET` covering every node type when login and compute CPUs differ.
+- Run scans from a worktree pinned to a commit and do not edit it while jobs run; keep edit-test loops in one warm Julia session with Revise.
+- Keep threads, build mode and commit fixed across compared points, and log load/first-case time separately from compute.
+
+Measurements, a scan script, a warm-worker pattern for agents, and the state-isolation rules are in **[`docs/development/running-scans.md`](docs/development/running-scans.md)**.
+
 ### Regression Harness
 
 ***This should be used at least once every single pull request before merging into develop. This test harness is what tracks values as they evolve across changes to the code, and must be both kept up to date and used consistently. Do not forget this and make sure to suggest any new regression cases or updates to existing ones as needed. Remind the user of its existence and report back the output regression report you get when modifying the code significantly. This is extremely important, do not forget this tidbit.***
@@ -92,7 +102,7 @@ Full branch-naming table, hotfix workflow, versioning scheme, and merge-conflict
 
 ## Agent Team
 
-This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them.
+This repo ships a small team of specialized Claude Code subagents in `.claude/agents/`. They are **stateless reviewers** — each runs in its own context on a specific deliverable and reports back; **the main session is the integrator**, not a delegator. Invoke an agent by name for the matching job (e.g. *"review this with the fortran-physics-reviewer"*); don't reflexively consult all of them. They register only in a session started in this repository; from a session started elsewhere, paste the agent file's body into a general-purpose agent's prompt rather than writing your own checklist.
 
 Roster, the recommended review pipeline (physics fidelity → readability → performance → regression), and per-consultation budget rules are in **[`.claude/agents/README.md`](.claude/agents/README.md)**.
 
@@ -122,6 +132,14 @@ Roster, the recommended review pipeline (physics fidelity → readability → pe
 
 ### Plotting
 Spectrum-plot (`seriestype=:steppre` / `step_series`) and figure-saving conventions are in **[`docs/development/plotting.md`](docs/development/plotting.md)** — read before writing any plotting code.
+
+**Adding a plot.** Every plot in `src/Analysis/` takes a result in memory or a `gpec.h5` path and is registered in `src/Analysis/Registry.jl`, which `available_plots` and the REPL summaries read:
+- Read the data through one `_x_data(src)` method per source (the result's fields, and the same datasets from the file), and draw from the returned NamedTuple only, so both sources go through one plotting body.
+- Start the public `plot_x(src; ...)` with `_require(plot_x, src)`, which throws the registry's reason when the source lacks the data; never draw a "No data" placeholder or return `nothing`. Composite summaries skip the panels they cannot draw (`_can`) and throw only when none can.
+- Call `register!(plot_x, sources, needs, description)` after the definition. `needs` names capabilities; a new one gets a `capabilities` predicate for each result type that can hold it, a dataset in `_H5_CAPABILITIES`, and a `REASONS` sentence saying what to change in the run.
+- `test/runtests_analysis_plots.jl` checks every registered plot from both sources automatically; add an extractor to its list when the plot reads new data.
+
+**REPL summaries.** `src/Display.jl` gives every result type a one-line `show` and a short `text/plain` summary. A new result type gets both, plus an entry in `_DISPLAY_FIELDS`; a new field on a summarized type is classified there as shown or omitted, which `test/display_check.jl` enforces.
 
 ### Subagent Consultations
 

@@ -75,7 +75,7 @@ using .ForceFreeStates:
     AbstractIntegrator, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, ForceFreeStatesResult, PerpendicularInertia, IdealGrowthRateResult, growth_rate,
     GrowthRateConfig, ion_diamagnetic_frequency
 using .ForceFreeStates: MatchProblem
-using .InnerLayer: GGJModel, SLAYERModel
+using .InnerLayer: GGJModel, CCCModel, SLAYERModel
 using .Tearing: TearingProblem, TearingConfig, TearingResult, CriticalResonantFieldControl
 using .LocalStability: LocalStabilityProblem, Ballooning, LocalStabilityResult
 using .Equilibrium: PlasmaEquilibrium, KineticProfileData, IonSpecies, attach_kinetic_profiles!
@@ -83,6 +83,7 @@ using .ForcingTerms: RMPField
 using .PerturbedEquilibrium: plasma_response, perturbed_equilibrium, PlasmaResponse
 using .KineticForces: kinetic_torque, KineticForcesControl, KineticForcesResult
 using .ErrorFields: error_fields, ErrorFieldsResult
+using .Analysis: available_plots
 
 using .ForceFreeStates: ForceBalanceProblem, kinetic_matrices, _prepare_solve, maybe_reform_equilibrium, ForceFreeStatesControl, kinetic_source
 include("Deck.jl")
@@ -316,9 +317,10 @@ export solve, plasma_response, perturbed_equilibrium, kinetic_torque, error_fiel
 export KineticProfileData, IonSpecies, attach_kinetic_profiles!
 export PlasmaEquilibrium, ForceBalanceProblem, Forward, Riccati, Galerkin, TestKineticMatrices, KineticMatrices, kinetic_matrices, ForceFreeStatesResult, RMPField, PlasmaResponse
 export PerpendicularInertia, IdealGrowthRateResult, GrowthRateConfig, growth_rate, ion_diamagnetic_frequency
-export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, SLAYERModel
+export MatchProblem, TearingProblem, TearingConfig, TearingResult, GGJModel, CCCModel, SLAYERModel
 export LocalStabilityProblem, Ballooning, LocalStabilityResult
 export KineticForcesControl, KineticForcesResult, ErrorFieldsResult
+export available_plots
 
 include("Precompile.jl")
 

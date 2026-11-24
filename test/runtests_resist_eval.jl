@@ -6,7 +6,7 @@
     using GeneralizedPerturbedEquilibrium.LocalStability
     using GeneralizedPerturbedEquilibrium.Utilities
     using GeneralizedPerturbedEquilibrium.InnerLayer
-    using GeneralizedPerturbedEquilibrium.ForceFreeStates: ggj_parameters
+    using GeneralizedPerturbedEquilibrium.InnerLayer.GGJ: ggj_parameters
     using FastInterpolations
     using TOML
 
