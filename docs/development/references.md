@@ -34,6 +34,25 @@ The ForceFreeStates module (ideal MHD stability analysis) implements methods fro
   - Published: Physics of Plasmas **25**, 032507 (2018)
   - Describes: Riccati method for ideal MHD eigenvalue problem
 
+- **Arnold (1967)**: "On a characteristic class entering into conditions of quantization"
+  - Published: Functional Analysis and Its Applications **1**, 1 (1967)
+  - Describes: the Maslov index of a path of Lagrangian subspaces, counted through the eigenvalues of a unitary (Cayley) image; basis of the exact conjugate-point count `nzero_conj` in `FixedBoundaryStability.jl`
+
+- **Robbin & Salamon (1993)**: "The Maslov index for paths"
+  - Published: Topology **32**, 827 (1993)
+  - Describes: the Maslov index as a signed count of crossings of a Lagrangian path with a reference subspace, which is what the Cayley eigenphases crossing π compute step by step
+
+- **Wilson, Snyder, Huysmans & Miller (2002)**: "Numerical studies of edge localized instabilities in tokamaks"
+  - Published: Physics of Plasmas **9**, 1277 (2002)
+  - Describes: the ELITE formulation; Eq. 9 is the perpendicular (incompressible) inertia that `PerpendicularInertia` implements; the growth rate is found by shooting with a secant iteration on an edge matching eigenvalue
+
+- **Snyder, Wilson et al. (2002)**: "Edge localized modes and the pedestal: A model based on coupled peeling–ballooning modes"
+  - Published: Physics of Plasmas **9**, 2037 (2002)
+  - Describes: ELITE's peeling–ballooning application and the γ > ω_*pi/2 diamagnetic-stabilization test that `IdealGrowthRateResult.omega_star_pi` serves
+
+- **Lunniss (2016)**: "Arbitrary-n ELITE" (PhD thesis, University of York; etheses.whiterose.ac.uk/16638)
+  - Describes: ELITE's radial finite-difference sweep (App. A.1), the edge matching matrix T(γ²) and the fictitious eigenvalue λ(γ²) driven to zero (§2.5.8), and the arbitrary-n inertia options; the comparison point for the count-based bracket of `growth_rate`, which ELITE does not have
+
 ## PerturbedEquilibrium Module
 
 The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calculations from:

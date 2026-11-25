@@ -68,6 +68,38 @@ Reformulates the DCON eigenvalue problem as a Riccati matrix ODE, enabling paral
 
 ---
 
+> P. B. Snyder, R. J. Groebner, A. W. Leonard, T. H. Osborne, and H. R. Wilson, "Development and validation of a predictive model for the pedestal height,"
+> *Physics of Plasmas* **16**, 056118 (2009).
+> DOI: [10.1063/1.3122146](https://doi.org/10.1063/1.3122146)
+
+The EPED1 pedestal model. Source of the diamagnetic threshold γ > ω_*pi/2 with an effective ω_*pi linear in n, against which the ideal growth rate from `growth_rate` is compared (see the thresholds section of the stability page).
+
+---
+
+> P. B. Snyder, R. J. Groebner, J. W. Hughes, T. H. Osborne, M. Beurskens, A. W. Leonard, H. R. Wilson, and X. Q. Xu, "A first-principles predictive model of the pedestal height and width: development, testing and ITER optimization with the EPED model,"
+> *Nuclear Fusion* **51**, 103016 (2011).
+> DOI: [10.1088/0029-5515/51/10/103016](https://doi.org/10.1088/0029-5515/51/10/103016)
+
+The EPED1.6 model. Replaces the linear-in-n diamagnetic threshold with a two-segment fit to two-fluid calculations that rolls over at high n.
+
+---
+
+> H. R. Wilson, P. B. Snyder, G. T. A. Huysmans, and R. L. Miller, "Numerical studies of edge localized instabilities in tokamaks,"
+> *Physics of Plasmas* **9**, 1277 (2002).
+> DOI: [10.1063/1.1459058](https://doi.org/10.1063/1.1459058)
+
+The ELITE formulation. Source of the perpendicular-inertia growth-rate model that `PerpendicularInertia` and `growth_rate` follow.
+
+---
+
+> J. P. Goedbloed and P. H. Sakanaka, "New approach to magnetohydrodynamic stability. I. A practical stability concept,"
+> *Physics of Fluids* **17**, 908 (1974).
+> DOI: [10.1063/1.1694831](https://doi.org/10.1063/1.1694831)
+
+σ-stability: the modified energy principle δW + σ²K, whose negative index counts the modes growing faster than σ. Basis of the count `growth_rate` brackets its root with.
+
+---
+
 ## PerturbedEquilibrium
 
 > J.-K. Park, A. H. Boozer, and A. H. Glasser, "Computation of three-dimensional tokamak and spherical torus equilibria,"

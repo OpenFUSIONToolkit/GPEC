@@ -92,9 +92,12 @@ ffs = solve(prob, Riccati())
 ffs = solve(eq, Riccati(); nn=1, vac_flag=true)   # equivalent one-line form
 ```
 """
-function CommonSolve.solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false)
+CommonSolve.solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false) = _solve_force_balance(prob, alg; verbose)
+
+# `solve` with the internal switch for the exact conjugate-point count, which growth_rate turns on for its solves.
+function _solve_force_balance(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false, count_conjugate_points::Bool=false)
     total_start = time()
-    ctrl, intr, equil, metric, mats, layer_overlap = _prepare_solve(prob, alg; verbose)
+    ctrl, intr, equil, metric, mats, layer_overlap = _prepare_solve(prob, alg; verbose, count_conjugate_points)
     result = run_force_free_states(ctrl, equil, mats, intr, metric; cut_solution=alg isa Galerkin && alg.cut_solution)
     result = _with(result; problem=prob, algorithm=alg, layer_overlap=layer_overlap)
 
@@ -123,7 +126,7 @@ end
 
 # Everything solve does before the integration: the control, the mode space, the (re-formed) equilibrium, the metric,
 # the matrices, the layer-overlap scan and the kinetic matrices.
-function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false)
+function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verbose::Bool=false, count_conjugate_points::Bool=false)
     equil = prob.equil
     ctrl_kwargs = copy(prob.ctrl_kwargs)
     ctrl = ForceFreeStatesControl(; algorithm=alg, ctrl_kwargs...)
@@ -132,10 +135,12 @@ function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verb
     ctrl.kinetic === nothing && ctrl.kinetic_factor != 1 &&
         error("kinetic_factor scales the kinetic matrices, but no kinetic source is set: pass kinetic=... " *
               "([ForceFreeStates] kinetic = \"KineticForces\")")
+    ctrl.kinetic isa PerpendicularInertia && !(ctrl.kinetic_factor > 0) &&
+        throw(ArgumentError("kinetic_factor is γ² for PerpendicularInertia and must be positive, got $(ctrl.kinetic_factor)"))
     # A kinetic model (not supplied or synthetic matrices) is evaluated on the equilibrium's kinetic profiles.
-    ctrl.kinetic === nothing || ctrl.kinetic isa Union{KineticMatrices,TestKineticMatrices} || equil.kinetic !== nothing ||
+    ctrl.kinetic === nothing || ctrl.kinetic isa Union{KineticMatrices,TestKineticMatrices,PerpendicularInertia} || equil.kinetic !== nothing ||
         error("the KineticForces kinetic source needs kinetic profiles on the equilibrium: set kinetic_file or call attach_kinetic_profiles!")
-    ctrl.kinetic isa Union{Nothing,KineticMatrices,TestKineticMatrices} || Equilibrium.has_ntv_fields(equil.kinetic) ||
+    ctrl.kinetic isa Union{Nothing,KineticMatrices,TestKineticMatrices,PerpendicularInertia} || Equilibrium.has_ntv_fields(equil.kinetic) ||
         error("the KineticForces kinetic source needs n_e, T_i, T_e and omega_E in the kinetic profiles; the kinetic file lacks at least one")
     ctrl.kinetic !== nothing && !(alg isa Forward) &&
         error("$(nameof(typeof(alg)))() does not support kinetic runs; use Forward().")
@@ -148,7 +153,7 @@ function _prepare_solve(prob::ForceBalanceProblem, alg::AbstractIntegrator; verb
               "nodes; regenerate the file in double precision for converged Δ′." file = eq_config.eq_filename
     end
 
-    intr = ForceFreeStatesInternal(; verbose)
+    intr = ForceFreeStatesInternal(; verbose, count_conjugate_points)
     intr.wall_settings = prob.wall
 
     resolve_mode_space!(intr, ctrl)
@@ -199,8 +204,13 @@ function maybe_reform_equilibrium(
     equil = Equilibrium.reform(equil, psi_nodes)
     implied = Equilibrium.implied_knot_count(equil; tau=eq_config.psi_accuracy, kin=kinetic_profiles)
     if implied > 1.5 * (length(psi_nodes) - 1)
-        @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " *
-              "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
+        remedy = "pass 1 may have under-sampled a feature; consider tightening psi_accuracy"
+        if implied > Equilibrium.REFINED_N_CAP
+            remedy =
+                "the grid is capped at $(Equilibrium.REFINED_N_CAP) knots, so psi_accuracy cannot refine it further and results may be under-resolved; " *
+                "a poloidal angle with smoother metric harmonics (jac_type = \"hamada\") needs fewer knots"
+        end
+        @warn "Two-pass psi grid: refined equilibrium implies $implied knots vs $(length(psi_nodes) - 1) used — " * remedy
     end
     @info "Two-pass psi grid: $(length(psi_nodes)) knots, $(length(mandatory)) rational surfaces pinned (n=$(_mode_range_label(intr)))"
 
@@ -271,6 +281,9 @@ function prepare_force_free_states!(
         km = ctrl.kinetic
     elseif ctrl.kinetic isa TestKineticMatrices
         intr.verbose && @info "Computing kinetic matrices (synthetic test matrices, scale $(ctrl.kinetic.scale))"
+        km = evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric)
+    elseif ctrl.kinetic isa PerpendicularInertia
+        intr.verbose && @info "Computing perpendicular-inertia matrices (γ² = $(ctrl.kinetic_factor) s⁻²)"
         km = evaluate_kinetic_matrices(ctrl, equil, mats, intr, metric)
     elseif ctrl.kinetic !== nothing
         intr.verbose && @info "Computing kinetic matrices (KineticForces model)"

@@ -142,6 +142,9 @@ function evaluate_kinetic_matrices(
     if ctrl.kinetic isa TestKineticMatrices
         kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, intr.numpert_total, mpsi, ctrl.kinetic.scale, intr.mlow, mats, xs)
         return matrices(collect(xs), kw_flat, kt_flat)
+    elseif ctrl.kinetic isa PerpendicularInertia
+        kw_flat, kt_flat = inertia_kinetic_matrices(ctrl.kinetic, equil, intr, metric)
+        return matrices(collect(xs), kw_flat, kt_flat)
     end
     isnothing(calculated_source) && error(
         "The KineticForces kinetic source requires the KineticForces callback: solve the problem, or pass " *

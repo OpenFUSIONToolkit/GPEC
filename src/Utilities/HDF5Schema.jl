@@ -289,6 +289,7 @@ const RUNTIME_H5_ANNOTATIONS = [
     "Info/Runtimes/equilibrium" => (; long_name="wall-clock time of the Equilibrium construction stage", units="s"),
     "Info/Runtimes/local_stability" => (; long_name="wall-clock time of the LocalStability stage (Mercier, resistive interchange and ballooning scans)", units="s"),
     "Info/Runtimes/force_free_states" => (; long_name="wall-clock time of the ForceFreeStates stability stage", units="s"),
+    "Info/Runtimes/growth_rate" => (; long_name="wall-clock time of the ForceFreeStates growth-rate stage (inertial γ² root search)", units="s"),
     "Info/Runtimes/match" => (; long_name="wall-clock time of the [Match] inner-layer matching stage", units="s"),
     "Info/Runtimes/tearing" => (; long_name="wall-clock time of the Tearing stage (SLAYER inner-layer solve)", units="s"),
     "Info/Runtimes/perturbed_equilibrium" => (; long_name="wall-clock time of the PerturbedEquilibrium stage", units="s"),
