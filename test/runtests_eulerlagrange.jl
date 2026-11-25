@@ -423,6 +423,25 @@ end
         @test odet.u[3, 2, 1] != 0
     end
 
+    @testset "a zero crossing right after the smallest eigenvalue switches" begin
+        F = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
+        equil = GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium(
+            GeneralizedPerturbedEquilibrium.equilibrium_config(inputs, ex),
+            GeneralizedPerturbedEquilibrium.analytic_config(inputs))
+        # W⁻¹ = diag(a, b) per step: the smallest switches from a to b (crit +0.3 → -0.25, no crossing),
+        # then b crosses 0 while crit becomes a (crit -0.25 → +0.6), which an interpolated midpoint rejects.
+        odet = F.OdeState(2, 4, 1, 1)
+        odet.step = 3
+        odet.psi_store[1:3] = [0.2, 0.3, 0.4]
+        for (i, w) in enumerate(([0.3, -0.5], [0.6, -0.25], [0.6, 5.0]))
+            odet.u_store[:, :, 1, i] = diagm(ComplexF64.(w))
+            odet.u_store[:, :, 2, i] = I(2)
+        end
+        @test F.evaluate_stability_criterion!(odet, equil.profiles) == 1
+    end
+
     @testset "OdeState construction" begin
         # Test basic OdeState initialization
         numpert_total = 5
