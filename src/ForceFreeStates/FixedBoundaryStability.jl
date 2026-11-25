@@ -130,7 +130,8 @@ Zero crossings of a solution in a chunk beyond those of the chunk's principal so
 negative eigenvalues of `direction`·herm(X_sᴴ P₁₂⁻¹ X_e), a Morse index split exact for F̄ > 0. `u_s` and `u_e` hold
 the solution at the chunk's integration start and end in one column basis, X are their U₁ blocks, and `P12` is the
 U₁ block of the principal solution at the end. Each column is first divided by the norm of its `u_s` column, as their
-spread near the axis would otherwise turn the small eigenvalues into sign noise.
+spread near the axis would otherwise turn the small eigenvalues into sign noise. The split is Eq. (5.19) of
+arXiv:2107.01928 [Elyseeva, Šepitka & Šimon Hilscher, J. Dyn. Differ. Equ. 35, 2589 (2023)].
 """
 function crossings_beyond_principal(P12::AbstractMatrix{ComplexF64}, u_s::AbstractArray{ComplexF64,3}, u_e::AbstractArray{ComplexF64,3}, direction::Int)
     colnorms = [norm(view(u_s, :, j, :)) for j in axes(u_s, 2)]'
