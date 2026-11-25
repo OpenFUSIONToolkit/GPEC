@@ -61,5 +61,5 @@ annotate!(plt, 8.0, 3e-6,
 
 save_doc_figure(plt, "inner_layer", "backend_regime_map";
     script=basename(@__FILE__),
-    depends=["src/InnerLayer/GGJ/Ray.jl", "src/InnerLayer/GGJ/Galerkin.jl",
+    depends=["src/InnerLayer/ToroidalLayer/Ray.jl", "src/InnerLayer/ToroidalLayer/Galerkin.jl",
         "src/InnerLayer/GGJ/Shooting.jl"])
