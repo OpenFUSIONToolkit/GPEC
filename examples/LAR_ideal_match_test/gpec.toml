@@ -58,7 +58,7 @@ mtheta_vacuum = 960            # Number of points used in splines over poloidal 
 singfac_min             = 5e-4  # Distance |m - nq| from each rational surface at which the integration crosses it through its asymptotic series
 frobenius_order         = 6     # Power-series order for the singular-surface asymptotics
 
-integrator = "Galerkin" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
+integrator = "Galerkin" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = false # Keep psilim at psihigh (do not truncate at last_rational_q + rational_offset_fraction)
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n (only used when truncate_at_rational_offset = true)
 

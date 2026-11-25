@@ -121,6 +121,56 @@ label = "gal match residual"
 noise_threshold = 1e-10
 order = 44
 
+# Perturbed equilibrium of the matched result under the C-coil: the penetrated field and the asymptotic resonant metrics
+# (a matched result has no finite-width metrics).
+[quantities.gal_pe_penetrated_field_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/penetrated_area_weighted_field"
+type = "complex_vector"
+extract = "all_complex"
+label = "matched penetrated field per row"
+noise_threshold = 1e-8
+order = 45
+
+[quantities.gal_pe_c_penetrated_norm]
+h5path = "PerturbedEquilibrium/SingularCoupling/C_penetrated_area_weighted_field"
+type = "complex_matrix"
+extract = "norm"
+label = "||matched C_penetrated_area_weighted_field||"
+noise_threshold = 1e-8
+order = 46
+
+[quantities.gal_pe_delta_mn_asymptotic_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/Delta_mn_asymptotic"
+type = "complex_vector"
+extract = "all_complex"
+label = "matched asymptotic Delta_mn per row"
+noise_threshold = 1e-8
+order = 47
+
+[quantities.gal_pe_resonant_field_asymptotic_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field_asymptotic"
+type = "complex_vector"
+extract = "all_complex"
+label = "matched asymptotic resonant field per row"
+noise_threshold = 1e-8
+order = 48
+
+[quantities.gal_pe_island_half_width_asymptotic]
+h5path = "PerturbedEquilibrium/SingularCoupling/island_half_width_asymptotic"
+type = "real_vector"
+extract = "all_real"
+label = "matched asymptotic island half-width per row"
+noise_threshold = 1e-8
+order = 49
+
+[quantities.gal_pe_permeability_diag]
+h5path = "PerturbedEquilibrium/ResponseMatrices/permeability"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "matched permeability diagonal"
+noise_threshold = 1e-8
+order = 50
+
 [quantities.runtime]
 h5path = ""
 type = "runtime"

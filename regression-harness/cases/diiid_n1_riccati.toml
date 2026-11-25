@@ -1,8 +1,7 @@
-# Regression case: DIII-D-like n=1 Δ' matrix from the Riccati chunked propagator BVP.
-# The Riccati integrator is the only one that produces SingularSurfaces/Delta_prime_matrix, so
-# this case is the canonical Δ' track (its sibling diiid_n1 runs the forward integrator and
-# carries the ξ/perturbed-equilibrium quantities instead). Also tracks the free-boundary
-# energies and singular-surface locations the BVP depends on, so a Δ' move can be attributed.
+# Regression case: DIII-D-like n=1 Δ' matrix from the Riccati chunked propagator BVP, and the Riccati
+# plasma response to the C-coil. The canonical Δ' track (its sibling diiid_n1 runs the forward integrator),
+# with the resonant coupling from both the finite-width jump and the asymptotic small solution. Also tracks the
+# free-boundary energies and singular-surface locations the BVP depends on, so a Δ' move can be attributed.
 # Each [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
 # noise floor below which a difference is treated as zero.
 [case]
@@ -161,6 +160,72 @@ extract = "value"
 label = "beta_n"
 noise_threshold = 1e-12
 order = 62
+
+# Plasma response to the C-coil: the resonant coupling from the finite-width ∂b^ψ/∂ψ jump and, through Delta_EF,
+# from the asymptotic small solution (_asymptotic); the solver's own exponent α at each surface.
+[quantities.alpha]
+h5path = "SingularSurfaces/alpha"
+type = "complex_vector"
+extract = "all_complex"
+label = "solver exponent alpha per surface"
+noise_threshold = 1e-10
+order = 70
+
+[quantities.permeability_diag]
+h5path = "PerturbedEquilibrium/ResponseMatrices/permeability"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "permeability diagonal"
+noise_threshold = 1e-8
+order = 71
+
+[quantities.delta_mn_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/Delta_mn"
+type = "complex_vector"
+extract = "all_complex"
+label = "forcing-driven Delta_mn per row"
+noise_threshold = 1e-8
+order = 72
+
+[quantities.delta_mn_asymptotic_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/Delta_mn_asymptotic"
+type = "complex_vector"
+extract = "all_complex"
+label = "forcing-driven asymptotic Delta_mn per row"
+noise_threshold = 1e-8
+order = 73
+
+[quantities.resonant_field_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field"
+type = "complex_vector"
+extract = "all_complex"
+label = "resonant field per row"
+noise_threshold = 1e-8
+order = 74
+
+[quantities.resonant_field_asymptotic_all]
+h5path = "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field_asymptotic"
+type = "complex_vector"
+extract = "all_complex"
+label = "asymptotic resonant field per row"
+noise_threshold = 1e-8
+order = 75
+
+[quantities.island_half_width_asymptotic]
+h5path = "PerturbedEquilibrium/SingularCoupling/island_half_width_asymptotic"
+type = "real_vector"
+extract = "all_real"
+label = "asymptotic island half-width per row"
+noise_threshold = 1e-8
+order = 76
+
+[quantities.c_delta_mn_asymptotic_norm]
+h5path = "PerturbedEquilibrium/SingularCoupling/C_Delta_mn_asymptotic"
+type = "complex_matrix"
+extract = "norm"
+label = "||C_Delta_mn_asymptotic||"
+noise_threshold = 1e-8
+order = 77
 
 # Runtime
 [quantities.runtime]

@@ -182,8 +182,8 @@ From Julia, the same pipeline is `GeneralizedPerturbedEquilibrium.main(["example
 | `DIIID-like_ideal_example` | DIII-D-like H-mode, n = 1: free-boundary ideal stability, local stability, C-coil-driven perturbed equilibrium and NTV torque; the default benchmark case |
 | `DIIID-like_ideal_multi_n_example` | the same plasma with n = 1 and 2 solved together and driven by mixed-n coil currents |
 | `DIIID-like_ideal_example_IMAS` | the same equilibrium read from an `IMASdd.dd`, run from `run_imas_example.jl` |
-| `DIIID-like_riccati_deltaprime_example` | the Δ′ matrix on the `"Riccati"` integrator, no forcing |
-| `DIIID-like_gal_resistive_example` | the `"Galerkin"` outer-region Δ′ solve, no forcing |
+| `DIIID-like_riccati_deltaprime_example` | the Δ′ matrix on the `"Riccati"` integrator, and its plasma response to the C-coil with the `_asymptotic` resonant metrics |
+| `DIIID-like_gal_resistive_example` | the `"Galerkin"` outer-region Δ′ solve matched to a resistive layer, and the matched plasma response to the C-coil |
 | `DIIID-like_SLAYER_example` | tearing growth rates and critical resonant fields with the `SLAYER` layer model |
 | `DIIID-like_truncation_example` | the resistive-layer overlap cap on the edge of the integration domain |
 | `DIIID-like_error_field_example` | error-field sensitivities, Monte Carlo tolerances and locking risk for the DIII-D poloidal-field coils |
