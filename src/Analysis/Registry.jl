@@ -53,10 +53,10 @@ const REASONS = Dict{Symbol,String}(
     :kinetic_scan => "needs the kinetic singular-surface scan: run with a kinetic source and singfac_min > 0",
     :ballooning_scan => "needs the ballooning scan: add a [LocalStability] section",
     :singular_coupling => "needs the singular coupling: run PerturbedEquilibrium with compute_singular_coupling = true",
-    :response_xi => "needs the reconstructed displacement ξ: run PerturbedEquilibrium on a Forward free-boundary result",
-    :response_n => "needs the stored normal field and displacement: run PerturbedEquilibrium on a Forward free-boundary result",
+    :response_xi => "needs the reconstructed displacement ξ: run PerturbedEquilibrium on a free-boundary result",
+    :response_n => "needs the stored normal field and displacement: run PerturbedEquilibrium on a free-boundary result",
     :penetrated_field => "needs a penetrated field: ideal runs have none; it comes from a matched (resistive) run",
-    :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a Forward free-boundary result",
+    :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a free-boundary result",
     :coil_sets => "needs coil forcing: give ForcingTerms coil sets (forcing_data_format = \"coil\")",
     :forcing_modes => "needs forcing modes: give ForcingTerms a forcing",
     :ef_sensitivities => "needs the coil sensitivities: add an [ErrorFields] section",
@@ -102,7 +102,7 @@ capabilities(r::FT.RMPField) =
 
 function capabilities(r::PlasmaResponse)
     caps = Set{Symbol}()
-    isempty(r.C_resonant_area_weighted_field) || push!(caps, :coupling_matrices)
+    isempty(r.C_resonant_area_weighted_field) && isempty(r.C_resonant_area_weighted_field_asymptotic) || push!(caps, :coupling_matrices)
     isempty(r.dominant_singular_values) || push!(caps, :dominant_mode)
     return caps
 end
@@ -110,7 +110,7 @@ end
 # A perturbed equilibrium holds its response's capabilities as well as those of its own drive.
 function capabilities(s::PerturbedEquilibriumState)
     caps = capabilities(s.response)
-    isempty(s.resonant_area_weighted_field) || push!(caps, :singular_coupling)
+    isempty(s.resonant_area_weighted_field) && isempty(s.resonant_area_weighted_field_asymptotic) || push!(caps, :singular_coupling)
     s.xi_modes === nothing || push!(caps, :response_xi)
     s.b_modes === nothing || push!(caps, :response_b)
     s.b_n_modes === nothing || s.xi_n_modes === nothing || push!(caps, :response_n)
@@ -141,7 +141,8 @@ const _H5_CAPABILITIES = (
     :delta_ef => "SingularSurfaces/Delta_EF",
     :kinetic_scan => "SingularSurfaces/Kinetic/scan_psi",
     :ballooning_scan => "LocalStability/alpha",
-    :singular_coupling => "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field",
+    :singular_coupling =>
+        ("PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field", "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field_asymptotic"),
     :response_xi => "PerturbedEquilibrium/Response/xi_psi",
     :response_b => "PerturbedEquilibrium/Response/b_psi_area_weighted",
     :ef_sensitivities => EF._H5_GROUP,

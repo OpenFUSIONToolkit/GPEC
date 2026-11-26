@@ -14,7 +14,8 @@ end
 
 # Each coupling row: values, label, y scale and reference line (nothing for none).
 function _coupling_row(d, key)
-    key === :field && return (_magnitude_row(abs.(d.field), rich("|b̄", subscript("res"), "|"), "T")..., nothing)
+    key === :field && return (_magnitude_row(abs.(d.penetrated === nothing ? d.field : vcat(d.field, d.penetrated)), rich("|b̄", subscript("res"), "|"), "T")...,
+        nothing)
     key === :current && return (_magnitude_row(abs.(d.current), rich("|I", subscript("res"), "|"), "A")..., nothing)
     key === :island_hw && return (d.island_hw, rich("w/2 (", PSIN, ")"), identity, nothing)
     key === :chirikov && return (d.chirikov, "island overlap\nChirikov", identity, 1.0)
@@ -30,16 +31,17 @@ const _ROW_TITLES = Dict(
 )
 
 function _coupling_title(d, keys)
-    :chirikov in keys || return _ROW_TITLES[only(keys) === :field && d.penetrated !== nothing ? :field_pen : only(keys)]
+    :chirikov in keys || return rich(_ROW_TITLES[only(keys) === :field && d.penetrated !== nothing ? :field_pen : only(keys)], d.asymptotic ? " (asymptotic)" : "")
+    head = d.asymptotic ? "Asymptotic coupling" : "Resonant coupling"
     k = count(>=(1), d.chirikov)
-    return k == 0 ? "Resonant coupling: Chirikov parameter < 1 on every surface" : "Resonant coupling: islands overlap on $k of $(length(d.chirikov)) surfaces"
+    return k == 0 ? "$head: Chirikov parameter < 1 on every surface" : "$head: islands overlap on $k of $(length(d.chirikov)) surfaces"
 end
 
 # The field row with the penetrated field: b̄_res and b̄_pen as paired stems on one shared scale.
 function _field_pair!(ax, d, x)
     v, ylabel, yscale = _magnitude_row(vcat(abs.(d.field), abs.(d.penetrated)), rich("|b̄|"), "T")
     k = length(x)
-    ax.ylabel, ax.yscale = ylabel, yscale
+    ax.ylabel = ylabel
     positive = filter(>(0), v)
     base = yscale === log10 ? minimum(positive) / 3 : 0.0
     yscale === identity && ylims!(ax, 0, 1.12 * maximum(positive))
@@ -228,13 +230,13 @@ function PE._plot_singular_mode_rz(curves)
         at = "φ = " * _num(rad2deg(first(curves).phi)) * "°"
         fig = _figure((330n + 150, 560))
         for (j, c) in enumerate(curves)
-            title = n == 1 ? rich("Dominant mode $(c.mode) at $at, σ = ", _num(c.sigma)) : rich("mode $(c.mode), σ = ", _num(c.sigma))
+            title = n == 1 ? rich("Dominant mode $(c.mode) of C_$(c.matrix) at $at, σ = ", _num(c.sigma)) : rich("mode $(c.mode), σ = ", _num(c.sigma))
             ax = Axis(fig[1, j]; title, aspect=DataAspect(), xlabel="R (m)", ylabel="Z (m)", ylabelvisible=j == 1, yticklabelsvisible=j == 1)
             lines!(ax, c.R, c.Z; color=c.b, colormap=DIVERGING, colorrange=(-1, 1), linewidth=16)
             lines!(ax, c.R, c.Z; color=:black, linewidth=1)
         end
         Colorbar(fig[1, n+1]; colormap=DIVERGING, limits=(-1, 1), label=rich("b", subscript("n"), " at $at (arb.)"))
-        n > 1 && Label(fig[0, 1:n], "Dominant resonant-coupling modes on the control surface"; font=:bold, fontsize=16)
+        n > 1 && Label(fig[0, 1:n], "Dominant modes of C_$(first(curves).matrix) on the control surface"; font=:bold, fontsize=16)
         fig
     end
 end
@@ -247,14 +249,14 @@ function PE._plot_coupling_matrix(d)
         ns, rank = size(A, 1), length(d.sigma)
         fig = _figure((1150, 820))
         hax = Axis(fig[1, 1]; ylabel="rational surface q = m/n", yticks=(1:ns, d.labels), xticklabelsvisible=false,
-            title=rich("Resonant coupling C: |b̄", subscript("res"), "| per unit b̃", subscript("m")))
+            title=rich("Coupling C_$(d.matrix) per unit b̃", subscript("m")))
         hm = heatmap!(hax, d.m, 1:ns, permutedims(A); colormap=:viridis, colorscale=log10, colorrange=(1e-4top, top),
             lowclip=Makie.to_colormap(:viridis)[1])
         scatter!(hax, d.m_res, 1:ns; marker=:rect, color=:transparent, strokecolor=:white, strokewidth=1.5, markersize=16)
         for s in setdiff(1:ns, d.retained)
             poly!(hax, Rect(d.m[1] - 0.5, s - 0.5, length(d.m), 1); color=(:white, 0.55))
         end
-        Colorbar(fig[1, 3], hm; label="|C|  (T per unit b̃)")
+        Colorbar(fig[1, 3], hm; label="|C|  (per unit b̃)")
 
         uax = Axis(fig[1, 2]; xlabel="|U|  (unit norm)", yticks=(1:ns, d.labels), yticklabelsvisible=false, title="left singular vectors",
             limits=((0, 1.05), nothing))
@@ -269,7 +271,7 @@ function PE._plot_coupling_matrix(d)
         linkxaxes!(hax, vax)
         axislegend(vax; position=:rt, framevisible=false)
 
-        sax = Axis(fig[2, 2]; xlabel="mode k", ylabel=rich("σ", subscript("k"), "  (T per unit b̃)"), title="singular values", xticks=1:rank,
+        sax = Axis(fig[2, 2]; xlabel="mode k", ylabel=rich("σ", subscript("k"), "  (per unit b̃)"), title="singular values", xticks=1:rank,
             limits=(nothing, (0, 1.12 * maximum(d.sigma))))
         stem!(sax, 1:rank, d.sigma; color=[WONG[mod1(k, 7)] for k in 1:rank], stemcolor=(:gray, 0.6), markersize=12)
 
@@ -316,20 +318,32 @@ function PE._plot_perturbed_equilibrium_summary(coupling, edge, xi, rz)
     end
 end
 
-function PE._plot_islands(d, name)
+function PE._plot_islands(d, name; effective=nothing)
     return themed() do
         chains = d.chains
-        isempty(chains) && throw(ArgumentError("no island has a nonzero half-width"))
-        colors = Makie.resample_cmap(:viridis, length(chains) + 2)
+        under = effective === nothing ? NamedTuple[] : effective.chains
+        isempty(chains) && isempty(under) && throw(ArgumentError("no island has a nonzero half-width"))
+        labels = unique([c.label for c in vcat(under, chains)])
+        palette = Makie.resample_cmap(:viridis, length(labels) + 2)
+        color(c) = palette[findfirst(==(c.label), labels)+1]
         fig = _figure((1250, 640))
         # (θ, ψ_N): the chains in flux coordinates, the outboard midplane central.
-        bottom = max(0.0, minimum(c.psis - 1.5c.w for c in chains) - 0.03)
+        bottom = max(0.0, minimum(c.psis - 1.5c.w for c in vcat(under, chains)) - 0.03)
         a = Axis(fig[1, 1]; xlabel="poloidal angle θ (deg)", ylabel=PSIN, xticks=-180:90:180, limits=((-180, 180), (bottom, 1.02)),
             title="$name at φ = $(_num(rad2deg(d.phi)))°")
-        for (k, c) in enumerate(chains)
+        for c in under
             shift = circshift(1:length(c.theta), length(c.theta) ÷ 2)
-            band!(a, sort(c.theta), c.lo[shift], c.hi[shift]; color=(colors[k+1], 0.6))
-            hlines!(a, c.psis; color=(colors[k+1], 0.9), linewidth=0.8, linestyle=:dash)
+            θ = sort(c.theta)
+            band!(a, θ, c.lo[shift], c.hi[shift]; color=(color(c), 0.12))
+            lines!(a, θ, c.lo[shift]; color=color(c), linewidth=1.2, linestyle=:dash)
+            lines!(a, θ, c.hi[shift]; color=color(c), linewidth=1.2, linestyle=:dash)
+        end
+        for c in chains
+            shift = circshift(1:length(c.theta), length(c.theta) ÷ 2)
+            band!(a, sort(c.theta), c.lo[shift], c.hi[shift]; color=(color(c), effective === nothing ? 0.6 : 0.75))
+        end
+        for c in (isempty(under) ? chains : under)
+            hlines!(a, c.psis; color=(color(c), 0.9), linewidth=0.8, linestyle=:dot)
             text!(a, -178, c.psis; text=c.label, align=(:left, :center), fontsize=11)
         end
         # (R, Z): the same chains on the poloidal plane.
@@ -337,12 +351,27 @@ function PE._plot_islands(d, name)
         for s in d.surfaces[1:(end-1)]
             lines!(b, s...; color=(:black, 0.15), linewidth=0.8)
         end
-        for (k, c) in enumerate(chains)
-            poly!(b, Point2f.(c.polygon); color=(colors[k+1], 0.7), strokewidth=0)
+        for c in under
+            pts = Point2f.(c.polygon)
+            poly!(b, pts; color=(color(c), 0.12), strokewidth=0)
+            lines!(b, vcat(pts, pts[1:1]); color=color(c), linewidth=1.0, linestyle=:dash)
+        end
+        for c in chains
+            poly!(b, Point2f.(c.polygon); color=(color(c), 0.7), strokewidth=0)
         end
         lines!(b, d.surfaces[end]...; color=:black, linewidth=1.5)
-        Legend(fig[1, 3], [PolyElement(; color=(colors[k+1], 0.7)) for k in eachindex(chains)], ["$(c.label):  $(_num(c.w))" for c in chains],
-            rich("w/2 (", PSIN, ")"); framevisible=false)
+        if effective === nothing
+            Legend(fig[1, 3], [PolyElement(; color=(color(c), 0.7)) for c in chains], ["$(c.label):  $(_num(c.w))" for c in chains],
+                rich("w/2 (", PSIN, ")"); framevisible=false)
+        else
+            w_pen = Dict(c.label => c.w for c in chains)
+            w_eff = Dict(c.label => c.w for c in under)
+            Legend(fig[1, 3],
+                [[PolyElement(; color=(palette[k+1], 0.75)) for k in eachindex(labels)],
+                    [PolyElement(; color=(:gray, 0.12), strokecolor=:gray, strokewidth=1.2, linestyle=:dash), PolyElement(; color=(:gray, 0.75))]],
+                [["$l:  $(_num(get(w_eff, l, 0.0))) → $(_num(get(w_pen, l, 0.0)))" for l in labels], ["effective", "penetrated"]],
+                [rich("w/2 (", PSIN, "): effective → penetrated"), "islands"]; framevisible=false)
+        end
         colsize!(fig.layout, 1, Relative(0.5))
         fig
     end

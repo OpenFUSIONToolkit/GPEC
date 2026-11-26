@@ -82,8 +82,7 @@ applied root-area-weighted field b̃_x to the resonant response at that surface.
     `C_` prefix), used for the applied resonant vectors; empty when the coupling was not built.
   - `C_resonant_area_weighted_field_asymptotic`, `C_resonant_current_asymptotic`, `C_island_width_sq_asymptotic`,
     `C_delta_mn_asymptotic` - The same four built from the jump of the asymptotic small solution,
-    −2πi·χ₁·n·q′·(C_R − C_L), in place of the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4. The two agree where D_I = −1/4;
-    elsewhere the finite-width matrices are (1/2 + √−D_I)·w^(√−D_I − 1/2) times these, w being that half-width in ψ_N.
+    −2πi·χ₁·n·q′·(C_R − C_L), in place of the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4. The two agree where D_I = −1/4.
     Empty unless the result is single-`n` and carries `Delta_EF`; a `:matched` result takes C_L, C_R from its matched
     small coefficients `match.small_coefficients`.
   - `C_coeffs::Matrix{ComplexF64}` - Edge-to-solution coefficients `u_bnd⁻¹·edge_mn` of each unit forcing mode.
