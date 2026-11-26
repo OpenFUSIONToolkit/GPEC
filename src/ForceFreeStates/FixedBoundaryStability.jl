@@ -8,19 +8,21 @@ non-Hermitian beyond tolerance at any step.
 function evaluate_stability_criterion!(odet::OdeState, profiles::Equilibrium.ProfileSplines)
 
     resize!(odet.crit_store, odet.step)
-    nzero = 0
-    nonherm_count = 0
-
-    for istep in 1:odet.step
-        zero_cross, nonherm = check_for_zero_crossings!(odet, profiles, istep)
-        if zero_cross
-            nzero += 1
+    nonherm = fill(false, odet.step)
+    # The criterion of each stored state is independent of the others.
+    nblas = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    try
+        Threads.@threads for istep in 1:odet.step
+            crit, nonherm[istep] = compute_smallest_eigenvalue(@view odet.u_store[:, :, :, istep])
+            odet.crit_store[istep] = crit * profiles.dVdpsi_spline(odet.psi_store[istep])^2
         end
-        if nonherm
-            nonherm_count += 1
-        end
+    finally
+        BLAS.set_num_threads(nblas)
     end
+    nzero = count(istep -> is_zero_crossing(odet, profiles, istep), 2:odet.step)
 
+    nonherm_count = count(nonherm)
     if nonherm_count > 0
         @warn "W inverse matrix was non-Hermitian beyond tolerance at $nonherm_count integration step(s)"
     end
@@ -29,43 +31,23 @@ function evaluate_stability_criterion!(odet::OdeState, profiles::Equilibrium.Pro
 end
 
 """
-    check_for_zero_crossings!(odet, profiles, istep) -> zero_cross, nonherm
+    is_zero_crossing(odet, profiles, istep) -> Bool
 
-Compute `crit` (smallest-magnitude eigenvalue of W⁻¹, scaled by (dV/dψ)²) at step `istep` into
-`odet.crit_store`, and report whether it changed sign since the previous step. A sign change counts
-only if the interpolated midpoint confirms it is a genuine crossing rather than noise.
-
-### Returns
-
-  - `zero_cross::Bool`: True if a physical zero crossing was detected
-  - `nonherm::Bool`: True if W⁻¹ was non-Hermitian beyond tolerance
+Whether `odet.crit_store` (the smallest-magnitude eigenvalue of W⁻¹, scaled by (dV/dψ)²) changes sign between steps
+`istep - 1` and `istep` at a genuine crossing rather than noise: its value at the interpolated crossing must lie
+between its two neighbors and well below both.
 """
-@with_pool pool function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
-
-    u = acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
+function is_zero_crossing(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
+    crit, crit_prev = odet.crit_store[istep], odet.crit_store[istep-1]
+    crit * crit_prev < 0 || return false
     psi = odet.psi_store[istep]
-    u .= odet.u_store[:, :, :, istep]
-    dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
-    crit_val, nonherm = compute_smallest_eigenvalue(u)
-    odet.crit_store[istep] = crit_val * dVdpsi^2
-
-    zero_cross = false
-    if istep > 1 && odet.crit_store[istep] * odet.crit_store[istep-1] < 0
-        crit = odet.crit_store[istep]
-        crit_prev = odet.crit_store[istep-1]
-        # Reject noise: crit at the interpolated crossing must lie between and well below both neighbors
-        fac = crit / (crit - crit_prev)
-        psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
-        u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep-1]))
-        dVdpsi = profiles.dVdpsi_spline(psi_mid; hint=odet.spline_hint)
-        crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
-        crit_mid = crit_mid_val * dVdpsi^2
-        if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
-            zero_cross = true
-            @info "Zero crossing detected at ψ = $(@sprintf("%.3f", psi_mid))"
-        end
-    end
-    return zero_cross, nonherm
+    fac = crit / (crit - crit_prev)
+    psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
+    u_mid = @views odet.u_store[:, :, :, istep] .- fac .* (odet.u_store[:, :, :, istep] .- odet.u_store[:, :, :, istep-1])
+    crit_mid = first(compute_smallest_eigenvalue(u_mid)) * profiles.dVdpsi_spline(psi_mid; hint=odet.spline_hint)^2
+    confirmed = (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
+    confirmed && @info "Zero crossing detected at ψ = $(@sprintf("%.3f", psi_mid))"
+    return confirmed
 end
 
 """

@@ -67,7 +67,7 @@ import Logging
             foreach(name -> delete!(stability, name), ("Riccati", "Forward", "Galerkin"))
             stability[formalism] =
                 formalism == "Galerkin" ? Dict{String,Any}("nx" => 32, "rpec_flag" => true) :
-                Dict{String,Any}("renorm_threshold" => 1e3, "eulerlagrange_tolerance" => 1e-7)
+                Dict{String,Any}("eulerlagrange_tolerance" => 1e-7)
             run_workload(stability)
         end
         run_workload(response; files=("kinetic.dat" => kinetic_table,))

@@ -24,11 +24,10 @@ function save_to_hdf5(
     gal_data = result.galerkin
     diag = result.diagnostics
     msing = length(result.surfaces)
-    # Closed ξ profiles are written into the producing formalism's Solutions group with the
-    # same dataset names and (mode, solution, psi) axis order: ForwardIntegration for the
-    # axis-basis sweep, GalerkinIntegration for the matched gal solution (its own grid).
+    # Closed ξ profiles share dataset names and (mode, solution, psi) axis order across the Solutions groups:
+    # ForwardIntegration for an ODE integrator's columns, Match for a MatchProblem solution (on its basis's grid).
     xi_solution = (result.solution !== nothing && result.solution.basis === :el_axis) ? result.solution : nothing
-    gal_solution = (result.solution !== nothing && result.solution.basis === :gal_native) ? result.solution : nothing
+    matched_solution = (result.solution !== nothing && result.solution.basis === :unit_edge) ? result.solution : nothing
 
 
     # File-level metadata contract (schema_version, Conventions, title, date).
@@ -39,16 +38,16 @@ function save_to_hdf5(
 
     # Outer-region Galerkin solver outputs (RDCON), if it ran
     if gal_data !== nothing
-        write_galerkin!(out_h5, gal_data; basis_output=result.control.algorithm.basis_output)
+        write_galerkin!(out_h5, gal_data, result.basis; basis_output=result.control.algorithm.basis_output)
     end
 
-    if gal_solution !== nothing
-        gal = "ForceFreeStates/Solutions/GalerkinIntegration"
-        out_h5["$gal/psi"] = gal_solution.psi_store
-        out_h5["$gal/q"] = gal_solution.q_store
-        out_h5["$gal/xi_psi"] = gal_solution.u_store[:, :, 1, :]
-        out_h5["$gal/dxi_psidpsi"] = gal_solution.du_store
-        out_h5["$gal/xi_s"] = gal_solution.xi_s_store
+    if matched_solution !== nothing
+        group = "ForceFreeStates/Solutions/Match"
+        out_h5["$group/psi"] = matched_solution.psi_store
+        out_h5["$group/q"] = matched_solution.q_store
+        out_h5["$group/xi_psi"] = matched_solution.u_store[:, :, 1, :]
+        out_h5["$group/dxi_psidpsi"] = matched_solution.du_store
+        out_h5["$group/xi_s"] = matched_solution.xi_s_store
     end
 
     save_equilibrium_ingest!(out_h5, equil)

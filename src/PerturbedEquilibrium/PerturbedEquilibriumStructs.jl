@@ -48,8 +48,8 @@ spectra.
 
   - `ffs::ForceFreeStatesResult` - The result the operators were built from.
   - `m_modes`, `n_modes` - Poloidal and toroidal mode number of each entry of a spectrum [numpert_total].
-  - `odet_from_gal::Bool` - The solution is the gal-native matched basis, whose `du_store` carries the
-    analytic Galerkin Ξ′; selects that branch of the singular-coupling Ξ′ evaluation.
+  - `unit_edge_basis::Bool` - The solution is a `MatchProblem` one (`basis = :unit_edge`); the singular coupling
+    then takes Ξ′ from its `du_store`.
   - `compute_singular_coupling::Bool`, `compute_torque_response::Bool` - The [`plasma_response`](@ref) options it was built with.
   - `flux_matrix::Matrix{ComplexF64}` - Control-surface flux of the free-boundary eigenmodes [mode × eigenmode].
   - `plasma_inductance_flux`, `surface_inductance_flux`, `permeability_flux` - Λ, L and P = Λ·L⁻¹ acting
@@ -101,7 +101,7 @@ on a `ResonantCoupling`):
     ffs::ForceFreeStatesResult
     m_modes::Vector{Int} = Int[]
     n_modes::Vector{Int} = Int[]
-    odet_from_gal::Bool = false
+    unit_edge_basis::Bool = false
     compute_singular_coupling::Bool = true
     compute_torque_response::Bool = false
 

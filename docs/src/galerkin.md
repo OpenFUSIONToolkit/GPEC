@@ -38,7 +38,8 @@ A `[Match]` section matches the inner layer to its Δ′ and gives a driven ``\x
 | `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, on the same path as the Riccati result, so downstream stages never branch on which formalism ran |
 | `SingularSurfaces/Delta_prime_raw`, `Delta_coil` | the side-major matching matrix and the coil-response columns (`rpec_flag = true`) |
 | `SingularSurfaces/pest3_A`, `pest3_B`, `pest3_Gamma` | the PEST-3 interchange and mixed blocks ``A'``, ``B'``, ``\Gamma'`` |
-| `ForceFreeStates/Solutions/GalerkinIntegration/` | the closed ``\xi`` profiles on the Galerkin grid, the surface list, the factorization used (`solver`) and, with `basis_output = true`, the `Basis/` group |
+| `ForceFreeStates/Solutions/GalerkinIntegration/` | the surface list, the factorization used (`solver`) and, with `basis_output = true`, the `Basis/` group |
+| `ForceFreeStates/Solutions/Match/` | with a `[Match]` section, the closed ``\xi`` profiles on the Galerkin grid |
 
 Nothing is written under `ForceFreeStates/FreeBoundaryStability/`.
 

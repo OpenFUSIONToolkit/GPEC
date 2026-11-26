@@ -12,6 +12,28 @@ Supertype for objects that carry the resolved (m, n) mode space — `mlow`, `mhi
 abstract type ModeSpace end
 
 """
+    ModeIndices(modes::ModeSpace)
+
+Immutable copy of a mode space's indexing, for code that must not see the rest of its source.
+
+## Fields
+
+  - `mlow::Int`, `mhigh::Int`, `mpert::Int` - Lowest and highest poloidal harmonic and their count.
+  - `nlow::Int`, `nhigh::Int`, `npert::Int` - Lowest and highest toroidal harmonic and their count.
+  - `numpert_total::Int` - Number of (m, n) harmonics, `mpert * npert`.
+"""
+struct ModeIndices <: ModeSpace
+    mlow::Int
+    mhigh::Int
+    mpert::Int
+    nlow::Int
+    nhigh::Int
+    npert::Int
+    numpert_total::Int
+end
+ModeIndices(m::ModeSpace) = ModeIndices(m.mlow, m.mhigh, m.mpert, m.nlow, m.nhigh, m.npert, m.numpert_total)
+
+"""
     ForceFreeStatesInternal
 
 Solve-time scratch state for a force-balance solve: the resolved mode space, singular surfaces and integration limits.
@@ -59,26 +81,6 @@ Solve-time scratch state for a force-balance solve: the resolved mode space, sin
     q1lim::Float64 = 0.0
     wall_settings::Union{Nothing,Vacuum.WallSettings} = nothing
     verbose::Bool = false
-    """
-    Inter-surface Δ' matrix, `msing × msing`, PEST3 convention: the odd-parity projection of
-    `delta_prime_raw`, set by `compute_delta_prime_matrix!` (Riccati path only).
-    """
-    delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-
-    """
-    Edge coil-response matrix, `2msing × numpert_total`: column k is the resonant small-solution
-    response at each surface side to a unit source on edge mode k (Eq. 37 rpec edge condition,
-    `_solve_bvp_edge_coil`). Empty unless the S-axis vacuum-edge BVP was assembled.
-    """
-    delta_coil::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
-
-    """
-    Raw `2msing × 2msing` outer-region matching matrix D' (Pletzer–Dewar 1991, before parity
-    rotation), side-major ordering `[L_s1, R_s1, …, L_sm, R_sm]`. `pest3_decompose` recovers the
-    A', B', Γ', Δ' blocks. No ½ prefactor (matches Fortran rdcon; the paper applies ½).
-    Empty unless the Riccati integrator was used.
-    """
-    delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """
@@ -98,8 +100,14 @@ Physical and workflow controls for a force-balance solve, together with its sele
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `singfac_min::Float64` - Fractional distance from rational q at which the ideal jump condition is enforced. Default 1e-4 suits the Riccati Δ′ (smaller values add a
-    spurious imaginary part); Forward runs feeding PerturbedEquilibrium need about 1e-6 for the outer-surface singular coupling to converge.
+  - `singfac_min::Float64` - Distance `|m − nq|` from each rational surface at which the ideal integration stops and
+    the surface is crossed through its asymptotic series. Energies do not depend on it; Δ′ loses accuracy below
+    about 1e-5, and the series does beyond the first radial-grid knot. Default 5e-4. A `kinetic` run stops this far
+    from each kinetic singular surface and steps across by a trapezoidal rule, whose error grows as the distance
+    cubed, so its default is 1e-5.
+  - `crossing_fill_points::Int` - Stored states added on each side of each crossed rational surface from its asymptotic
+    series, log-spaced in distance between `singfac_min` and `crossing_fill_min`. Zero adds none.
+  - `crossing_fill_min::Float64` - Distance `|m − nq|` from the surface of the closest of those states.
   - `truncate_at_rational_offset::Bool` - Truncate the domain at `(last_rational_q + rational_offset_fraction) / n` instead of at `qhigh` / `psihigh`, avoiding a spurious
     δW kink when the integration ends just below a rational. Right for diverted equilibria (default `true`); set `false` for limited/analytic equilibria with finite edge
     q (Solovev, LAR), where it cuts too much edge. Multi-n runs warn and fall back to `qhigh` / `psihigh`.
@@ -131,14 +139,16 @@ Physical and workflow controls for a force-balance solve, together with its sele
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    singfac_min::Float64 = 1e-4   # Required nonzero for the Riccati path.
+    kinetic::Any = nothing
+    kinetic_factor::Float64 = 1.0
+    singfac_min::Float64 = kinetic === nothing ? 5e-4 : 1e-5   # Required nonzero for the Riccati path.
+    crossing_fill_points::Int = 5
+    crossing_fill_min::Float64 = 1e-5
     truncate_at_rational_offset::Bool = true
     psilim_from_layer_overlap::Union{Bool,InnerLayer.SLAYERModel} = false
     rational_offset_fraction::Float64 = 0.2
     frobenius_order::Int = 6
     qhigh::Float64 = 1e3
-    kinetic::Any = nothing
-    kinetic_factor::Float64 = 1.0
     qlow::Float64 = 0.0
     dW_edge_scan_start::Float64 = 0.99
     truncate_at_dW_peak::Bool = false
