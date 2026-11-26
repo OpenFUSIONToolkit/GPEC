@@ -11,7 +11,7 @@ using .PerturbedEquilibrium: PerturbedEquilibriumState
 using .KineticForces: MethodResult, KineticForcesState
 using .ErrorFields: MonteCarloResult, RiskResult, EFCCoupling
 using .Tearing: GrowthRateResult
-using .ForcingTerms: ForcingFile, ForcingCoils, ForcingSpectrum, ForcingLeaf, ForcingFieldSum
+using .ForcingTerms: ForcingFile, ForcingCoils, ForcingSpectrum, ForcingMagneticMaterial, ForcingLeaf, ForcingFieldSum
 
 _fmt(x::Real) = @sprintf("%.4g", x)
 _fmt(::Nothing) = "—"
@@ -298,6 +298,7 @@ function _field_label(f::ForcingCoils)
     sets = [!isempty(sc.name) ? sc.name : !isempty(sc.source) ? sc.source : "coil set" for sc in c.coil_sets]
     return string(isempty(c.machine) ? "" : c.machine * " ", "coils ", _list(sets))
 end
+_field_label(f::ForcingMagneticMaterial) = string("magnetic material ", _list([m.name for m in f.materials]))
 _field_label(f::ForcingSpectrum) = string("spectrum of ", _plural(length(f.modes), "mode"), ", n = ", _irange([m.n for m in f.modes]))
 
 Base.show(io::IO, f::ForcingLeaf) = print(io, "ForcingField(", f.scale == 1 ? "" : _weight(f.scale), _field_label(f), ")")

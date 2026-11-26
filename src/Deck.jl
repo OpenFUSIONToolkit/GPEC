@@ -407,14 +407,16 @@ end
 
 The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent, with its
 relative file paths resolved against the deck directory `path`. The `[[ForcingTerms.coil_set]]`
-array of tables is passed through as `coil_sets_raw`.
+and `[[ForcingTerms.magnetic_material]]` arrays of tables are passed through as `coil_sets_raw` and `magnetic_materials_raw`.
 """
 function forcing_terms_control(inputs::AbstractDict, path::AbstractString)
     "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl()
     forcing_raw = _deck_paths(inputs["ForcingTerms"], path, ("forcing_data_file", "dat_dir"))
     coil_sets_raw = Dict{String,Any}[_deck_paths(d, path, ("dat_file", "h5_file")) for d in get(forcing_raw, "coil_set", Dict{String,Any}[])]
-    kwargs = section_keywords(_without(forcing_raw, "coil_set"), "ForcingTerms", _struct_fields(ForcingTerms.ForcingTermsControl, (:coil_sets_raw,)))
-    return ForcingTerms.ForcingTermsControl(; kwargs..., coil_sets_raw=coil_sets_raw)
+    magnetic_materials_raw = Dict{String,Any}[_deck_paths(d, path, ("h5_file",)) for d in get(forcing_raw, "magnetic_material", Dict{String,Any}[])]
+    kwargs = section_keywords(_without(_without(forcing_raw, "coil_set"), "magnetic_material"), "ForcingTerms",
+        _struct_fields(ForcingTerms.ForcingTermsControl, (:coil_sets_raw, :magnetic_materials_raw)))
+    return ForcingTerms.ForcingTermsControl(; kwargs..., coil_sets_raw, magnetic_materials_raw)
 end
 
 """
@@ -485,8 +487,8 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     forcing = forcing_terms_control(inputs, path)
     if haskey(inputs, "ErrorFields")
         perturbed_equilibrium === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section")
-        !isempty(forcing.coil_sets_raw) && isempty(forcing.forcing_data_file) ||
-            error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must hold coil sets and no forcing_data_file")
+        !isempty(forcing.coil_sets_raw) && isempty(forcing.forcing_data_file) && isempty(forcing.magnetic_materials_raw) ||
+            error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must hold coil sets and no forcing_data_file or magnetic material")
     end
     tearing_model = haskey(inputs, "Tearing") ? get(inputs["Tearing"], "inner_model", nothing) : nothing
     match_model = match === nothing ? nothing : _inner_model_token(match.model)
@@ -612,8 +614,9 @@ end
 
 # [ForcingTerms] of a forcing control, its coil sets as [[ForcingTerms.coil_set]].
 function _forcing_table(ctrl::ForcingTerms.ForcingTermsControl)
-    table = _deck_table(ctrl, (:coil_sets_raw,))
+    table = _deck_table(ctrl, (:coil_sets_raw, :magnetic_materials_raw))
     isempty(ctrl.coil_sets_raw) || (table["coil_set"] = Any[_deck_out(d) for d in ctrl.coil_sets_raw])
+    isempty(ctrl.magnetic_materials_raw) || (table["magnetic_material"] = Any[_deck_out(d) for d in ctrl.magnetic_materials_raw])
     return table
 end
 

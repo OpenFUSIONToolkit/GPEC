@@ -321,6 +321,7 @@ function build_inputs_from_h5(args::Vector{String})
         ft = get!(inputs, "ForcingTerms", Dict{String,Any}())
         # The recorded modes are the whole forcing, so the replay drops every other source.
         delete!(ft, "coil_set")
+        delete!(ft, "magnetic_material")
         ft["forcing_data_file"] = forcing_file
         ft["forcing_data_format"] = "hdf5"
     end

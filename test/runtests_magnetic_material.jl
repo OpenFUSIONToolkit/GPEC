@@ -161,4 +161,64 @@ sphere_points(d; c=zeros(3)) = reduce(hcat, [c .+ d .* [sin(t) * cos(p), sin(t) 
         @test_throws "unknown keys" ForcingTerms._parse_magnetic_material_config(Dict{String,Any}("name" => "plate", "mu0Ms" => 1.6))
         @test_throws "needs a saturation_field" load_magnetic_material(MagneticMaterialConfig(; name="plate", h5_file=geometry))
     end
+
+    @testset "a point inside an element is an error" begin
+        @test_throws "lies inside element 1" material_field(plate, zeros(3, 1) .+ [0.0, 0.0, Ms], reshape([0.01, -0.02, 0.005], 3, 1))
+    end
+
+    @testset "saturated along the equilibrium field, driving only n = k·N from a ring" begin
+        EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+        FT = GeneralizedPerturbedEquilibrium.ForcingTerms
+        gfile = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk")
+        equil = EQ.PlasmaEquilibrium(
+            EQ.EquilibriumConfig(; eq_filename=gfile, eq_type="efit", jac_type="hamada",
+                grid_type="core_edge_packed", psilow=0.01, psihigh=0.995, mpsi=64, mtheta=256)
+        )
+        rot(φ) = [cos(φ) -sin(φ) 0; sin(φ) cos(φ) 0; 0 0 1]
+        R0, Z0, hb = 2.38, equil.zo, [0.015, 0.04, 0.05]     # outboard, between the separatrix and the flux grid's edge
+        ring(N) = box_material([(hb, rot(φ) * [R0, 0.0, Z0], rot(φ)) for φ in 2π .* (0:N-1) ./ N]; saturation_field=1.6, fill_fraction=0.8)
+
+        one = box_material([(hb, [R0, 0.0, Z0], I(3))]; saturation_field=1.6, fill_fraction=0.8)
+        M = saturated_magnetization(one, equil)
+        B0 = EQ.equilibrium_field(equil, [R0], [Z0])
+        @test norm(M) ≈ 0.8 * 1.6 / MU0
+        @test M[:, 1] ./ norm(M) ≈ normalize([B0.B_R[1], B0.B_phi[1], B0.B_Z[1]])     # at φ = 0, (x, y, z) = (R, φ, Z)
+        inside = box_material([(hb, [equil.ro + 0.3, 0.0, equil.zo], I(3))])
+        @test_throws "inside the separatrix" saturated_magnetization(inside, equil)
+        @test_throws "outside the equilibrium's flux grid" saturated_magnetization(box_material([(hb, [3.0, 0.0, 0.0], I(3))]), equil)
+
+        # Axisymmetric B₀ makes every element of a ring identical up to rotation, so only n = k·N survives.
+        N = 8
+        mats = [ring(N)]
+        mags = [saturated_magnetization(mats[1], equil)]
+        cfg = FT.CoilConfig(; mtheta_coil=128)
+        psi = equil.rzphi_xs[end]
+        peak(n) = maximum(abs(mode.amplitude) for mode in material_forcing_modes(mats, mags, equil, cfg, n, -10, 20; psi))
+        @test peak(N) > 0
+        @test peak(1) < 1e-8 * peak(N) && peak(3) < 1e-8 * peak(N)
+        # Breaking the ring by removing one element drives n = 1.
+        broken = box_material([(hb, rot(φ) * [R0, 0.0, Z0], rot(φ)) for φ in 2π .* (1:N-1) ./ N]; saturation_field=1.6, fill_fraction=0.8)
+        @test maximum(abs(m.amplitude) for m in material_forcing_modes([broken], [saturated_magnetization(broken, equil)], equil, cfg, 1, -10, 20; psi)) >
+              1e-3 * peak(N)
+    end
+
+    @testset "a ForcingField leaf, from the API and from a deck" begin
+        GPEC = GeneralizedPerturbedEquilibrium
+        dir = mktempdir()
+        geometry = write_magnetic_material_h5(joinpath(dir, "plates.h5"), [box_material([(h, [9.0, 0.0, 0.0], I(3))])])
+        leaf = ForcingField(only(read_magnetic_material_h5(geometry)); nzeta_coil=64)
+        @test leaf isa GPEC.ForcingTerms.ForcingMagneticMaterial && leaf.nzeta == 64 && leaf.mtheta == 480
+        @test (2im * leaf).scale == 2im && repr(leaf) == "ForcingField(magnetic material boxes)"
+        write(joinpath(dir, "forcing.dat"), "1 2 1e-4 0.0\n")
+        block = Dict{String,Any}("name" => "boxes", "h5_file" => "plates.h5", "saturation_field" => 1.7, "fill_fraction" => 0.5)
+        ctrl = GPEC.forcing_terms_control(
+            Dict{String,Any}("ForcingTerms" => Dict{String,Any}("forcing_data_file" => "forcing.dat",
+                "mtheta_coil" => 96, "magnetic_material" => [block])), dir)
+        field = ForcingField(ctrl)
+        @test [typeof(t) for t in field.terms] == [GPEC.ForcingTerms.ForcingFile, GPEC.ForcingTerms.ForcingMagneticMaterial]
+        material = field.terms[2]
+        @test material.mtheta == 96 && material.nzeta == 0
+        @test only(material.materials).saturation_field == 1.7 && only(material.materials).fill_fraction == 0.5
+        @test GPEC._forcing_table(ctrl)["magnetic_material"][1]["h5_file"] == joinpath(dir, "plates.h5")
+    end
 end

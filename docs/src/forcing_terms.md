@@ -1,7 +1,7 @@
 # Forcing Terms
 
 `ForcingTerms` specifies the external magnetic perturbation that drives the perturbed equilibrium: the spectrum of the normal field on the control surface at `psilim`, given either as a file of (m, n) amplitudes or computed by Biot–Savart from coil geometry.
-The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs. Every source it holds (a `forcing_data_file`, coil sets) drives the plasma, and their spectra are summed into the `ForcingField` that `perturbed_equilibrium` applies to the plasma response.
+The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs. Every source it holds (a `forcing_data_file`, coil sets, magnetic materials) drives the plasma, and their spectra are summed into the `ForcingField` that `perturbed_equilibrium` applies to the plasma response.
 
 ## Normalization
 
@@ -106,6 +106,21 @@ The field is linear in the coils, so a `CoilForcingGrid` built once per equilibr
 ```julia
 forcing_grid = CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)
 spectra = [coil_forcing_modes(cs, forcing_grid, n, m_low, m_high) for cs in coil_sets]
+```
+
+## Magnetic materials
+
+Each `[[ForcingTerms.magnetic_material]]` block adds a set of ferritic elements, closed triangulated polyhedra read from an HDF5 geometry file (`magnetic_material/<name>/vertices`, `triangles`, `element_offsets`; see `read_magnetic_material_h5`).
+Every element is saturated along the equilibrium field at its centroid, ``M = f\,\mu_0 M_s\,\hat B_0/\mu_0``, and its field is the exact field of a uniformly magnetized polyhedron: a surface charge ``M\cdot\hat n`` on each face, each triangle integrated in closed form (Van Oosterom & Strackee, IEEE Trans. Biomed. Eng. 30, 125 (1983)).
+That field is sampled on the same `mtheta_coil × nzeta_coil` boundary grid as the coils.
+The equilibrium must carry its flux map outside the plasma (a g-file or IMAS), every vertex must lie inside that map's grid and outside the separatrix, and no control-surface point may lie inside an element.
+
+```toml
+[[ForcingTerms.magnetic_material]]
+name = "iter_inserts"          # set to read from the geometry file
+h5_file = "iter_inserts.h5"    # magnetic_material/<name>/ geometry
+saturation_field = 1.7         # μ₀M_s, in tesla
+fill_fraction = 1.0            # magnetic fraction of each element's volume
 ```
 
 ## Outputs

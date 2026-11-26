@@ -191,8 +191,8 @@ end
     compute_magnetic_material_field!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, material, magnetization)
 
 Exact field of `material` with each element uniformly magnetized, `magnetization` `[3, nelement]` (Cartesian, A/m),
-at observation points outside the material given in cylindrical coordinates (m, rad, m), as cylindrical components
-in tesla. Uniform M is a surface charge σ = M·n̂ on each face, and a flat triangle with constant charge has a
+at observation points given in cylindrical coordinates (m, rad, m), as cylindrical components in tesla; a point
+inside an element is an error. Uniform M is a surface charge σ = M·n̂ on each face, and a flat triangle with constant charge has a
 closed-form field: ∫ (r − r′)/|r − r′|³ dA′ = n̂ Ω + Σ_edges m̂ₑ ln[(R₁ + R₂ + ℓ)/(R₁ + R₂ − ℓ)], with Ω the signed
 solid angle the triangle subtends (Van Oosterom & Strackee, IEEE Trans. Biomed. Eng. 30, 125 (1983)) and m̂ₑ its
 outward in-plane edge normals. Then B = μ₀/4π · Σ_faces σ (n̂ Ω + Σ_edges m̂ₑ Lₑ). Threaded over observation points;
@@ -214,9 +214,11 @@ function compute_magnetic_material_field!(
     nelement = length(material.element_offsets) - 1
     size(magnetization) == (3, nelement) || throw(DimensionMismatch("magnetization must be 3 × $nelement, got $(size(magnetization))"))
     faces = _charged_faces(material, magnetization)
+    lo, hi = _element_boxes(material)
     Threads.@threads for i in 1:nobs
         sp, cp = sincos(obs_phi[i])
         r = SVector(obs_R[i] * cp, obs_R[i] * sp, obs_Z[i])
+        _check_outside(material, lo, hi, r)
         H = zero(SVector{3,Float64})
         for f in faces
             H += f.σ * _triangle_kernel(r, f)
@@ -224,6 +226,34 @@ function compute_magnetic_material_field!(
         B_R[i] = MU0_OVER_4PI * (H[1] * cp + H[2] * sp)
         B_phi[i] = MU0_OVER_4PI * (-H[1] * sp + H[2] * cp)
         B_Z[i] = MU0_OVER_4PI * H[3]
+    end
+    return nothing
+end
+
+# Bounding box of each element, [3, nelement] lower and upper corners.
+function _element_boxes(material::MagneticMaterial)
+    nelement = length(material.element_offsets) - 1
+    lo, hi = fill(Inf, 3, nelement), fill(-Inf, 3, nelement)
+    for e in 1:nelement, t in (material.element_offsets[e]+1):material.element_offsets[e+1], k in 1:3
+        v = view(material.vertices, :, material.triangles[k, t])
+        lo[:, e] .= min.(view(lo, :, e), v)
+        hi[:, e] .= max.(view(hi, :, e), v)
+    end
+    return lo, hi
+end
+
+# The field formula holds only outside the material: the solid angles of an element's faces sum to ±4π inside it, 0 outside.
+function _check_outside(material::MagneticMaterial, lo, hi, r)
+    for e in axes(lo, 2)
+        all(k -> lo[k, e] <= r[k] <= hi[k, e], 1:3) || continue
+        Ω = 0.0
+        for t in (material.element_offsets[e]+1):material.element_offsets[e+1]
+            a, b, c = (SVector{3,Float64}(view(material.vertices, :, material.triangles[k, t])) - r for k in 1:3)
+            na, nb, nc = norm(a), norm(b), norm(c)
+            Ω -= 2 * atan(dot(a, cross(b, c)), na * nb * nc + dot(a, b) * nc + dot(a, c) * nb + dot(b, c) * na)
+        end
+        abs(Ω) > 2π && throw(ArgumentError(@sprintf("magnetic material \"%s\": the point (x, y, z) = (%.3f, %.3f, %.3f) m lies inside element %d",
+            material.name, r[1], r[2], r[3], e)))
     end
     return nothing
 end
@@ -266,6 +296,56 @@ end
     return Ω * f.n + edges
 end
 
-export MagneticMaterial, MagneticMaterialConfig, load_magnetic_material
+"""
+    saturated_magnetization(material, equil) -> Matrix{Float64}
+
+Magnetization `[3, nelement]` in A/m (Cartesian) of each element of `material`, saturated along the equilibrium
+field at its centroid: M = f μ₀M_s B̂₀ / μ₀ with f the fill fraction. Every vertex must lie inside the equilibrium's flux
+grid and outside the separatrix (ψ_N ≥ 1).
+"""
+function saturated_magnetization(material::MagneticMaterial, equil::Equilibrium.PlasmaEquilibrium)
+    V = material.vertices
+    psi_norm = Equilibrium.equilibrium_field(equil, hypot.(V[1, :], V[2, :]), V[3, :]).psi_norm
+    k = findfirst(<(1), psi_norm)
+    k === nothing || throw(
+        ArgumentError(
+            @sprintf(
+                "magnetic material \"%s\": vertex %d at (R, Z) = (%.3f, %.3f) m lies at ψ_N = %.4f, inside the separatrix",
+                material.name, k, hypot(V[1, k], V[2, k]), V[3, k], psi_norm[k])
+        )
+    )
+    c = material.centroid
+    φ = atan.(c[2, :], c[1, :])
+    B = Equilibrium.equilibrium_field(equil, hypot.(c[1, :], c[2, :]), c[3, :])
+    Bx, By = B.B_R .* cos.(φ) .- B.B_phi .* sin.(φ), B.B_R .* sin.(φ) .+ B.B_phi .* cos.(φ)
+    Ms = material.fill_fraction * material.saturation_field / (4π * MU0_OVER_4PI)
+    Bmag = sqrt.(Bx .^ 2 .+ By .^ 2 .+ B.B_Z .^ 2)
+    return Ms .* vcat((Bx ./ Bmag)', (By ./ Bmag)', (B.B_Z ./ Bmag)')
+end
+
+"""
+    material_forcing_modes(materials, magnetizations, equil, cfg::CoilConfig, n, m_low, m_high; psi) -> Vector{ForcingMode}
+
+Unit-norm forcing modes (`Φ_x`) of toroidal mode `n` and poloidal modes `m_low:m_high` driven by `materials`, each
+magnetized by the matching entry of `magnetizations` (see [`saturated_magnetization`](@ref)), on the control surface
+`psi` sampled on the boundary grid of `cfg` (`mtheta_coil`, `nzeta_coil`).
+"""
+function material_forcing_modes(materials::Vector{MagneticMaterial}, magnetizations, equil::Equilibrium.PlasmaEquilibrium,
+    cfg::CoilConfig, n::Int, m_low::Int, m_high::Int; psi::Float64)
+    forcing_grid = CoilForcingGrid(equil, cfg, n; psi)
+    nobs = length(forcing_grid.obs_R)
+    B_R, B_Z = zeros(nobs), zeros(nobs)
+    B = (zeros(nobs), zeros(nobs), zeros(nobs))
+    for (material, M) in zip(materials, magnetizations)
+        compute_magnetic_material_field!(B..., forcing_grid.obs_R, forcing_grid.obs_phi, forcing_grid.obs_Z, material, M)
+        B_R .+= B[1]
+        B_Z .+= B[3]
+    end
+    bn = zeros(forcing_grid.grid.mtheta, forcing_grid.grid.nzeta)
+    project_normal_flux!(bn, B_R, B_Z, forcing_grid.grid)
+    return fourier_decompose_bn(bn, forcing_grid.grid, n, m_low, m_high)
+end
+
+export MagneticMaterial, MagneticMaterialConfig, load_magnetic_material, saturated_magnetization, material_forcing_modes
 export read_magnetic_material_h5, write_magnetic_material_h5, save_magnetic_material_to_h5, load_magnetic_material_from_h5_group!
 export compute_magnetic_material_field!

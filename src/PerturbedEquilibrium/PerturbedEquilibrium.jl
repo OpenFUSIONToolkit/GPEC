@@ -204,6 +204,25 @@ function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTer
 end
 
 """
+    materialize_forcing_modes(ffs, field::ForcingTerms.ForcingMagneticMaterial; verbose=false, kwargs...) -> (modes, coil_sets)
+
+Materialize a magnetic-material leaf: saturate each set along the equilibrium field, sample its exact field on the
+control surface `ffs.psilim` for every toroidal mode of the solve, and apply the leaf's weight. No coil geometry is produced.
+"""
+function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTerms.ForcingMagneticMaterial; verbose::Bool=false, kwargs...)
+    equil = ffs.equil
+    magnetizations = [ForcingTerms.saturated_magnetization(material, equil) for material in field.materials]
+    cfg = ForcingTerms.CoilConfig(; mtheta_coil=field.mtheta, nzeta_coil=field.nzeta)
+    modes = ForcingMode[]
+    for n in ffs.nlow:ffs.nhigh
+        verbose && @info "Computing magnetic material forcing modes for n = $n"
+        append!(modes, ForcingTerms.material_forcing_modes(field.materials, magnetizations, equil, cfg, n, ffs.mlow, ffs.mhigh; psi=ffs.psilim))
+    end
+    field.scale == 1 || (modes = [ForcingMode(; n=mode.n, m=mode.m, amplitude=field.scale * mode.amplitude) for mode in modes])
+    return modes, ForcingTerms.CoilSet[]
+end
+
+"""
     materialize_forcing_modes(ffs, field::ForcingTerms.ForcingSpectrum; kwargs...) -> (modes, coil_sets)
 
 Materialize a spectrum-literal leaf: fresh copies of its unit-norm modes, weighted. Nothing is read
