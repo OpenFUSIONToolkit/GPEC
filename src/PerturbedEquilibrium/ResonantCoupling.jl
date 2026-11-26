@@ -28,30 +28,39 @@ struct ResonantCoupling
     flux_conform::Matrix{ComplexF64}
 end
 
+# The coupling matrices that map b̃ to a field at the rational surfaces, by their name without the `C_` prefix.
+const _FIELD_COUPLINGS = (:resonant_area_weighted_field, :resonant_area_weighted_field_asymptotic, :penetrated_area_weighted_field)
+_check_field_coupling(matrix::Symbol) = matrix in _FIELD_COUPLINGS || throw(ArgumentError("matrix must be one of $(_FIELD_COUPLINGS), got :$matrix"))
+
 """
-    ResonantCoupling(resp::PlasmaResponse)
+    ResonantCoupling(resp::PlasmaResponse; matrix=:resonant_area_weighted_field)
 
 In-memory construction from a [`PlasmaResponse`](@ref): the coupling matrix, row and column labels
-and conform operator all come from `resp`. Errors when `resp` carries no singular-coupling matrix.
+and conform operator all come from `resp`. `matrix` names the coupling to wrap, a `C_` field of `resp` without
+the prefix: `:resonant_area_weighted_field`, `:resonant_area_weighted_field_asymptotic` or
+`:penetrated_area_weighted_field`. Errors when `resp` does not carry it.
 """
-function ResonantCoupling(resp::PlasmaResponse)
-    isempty(resp.C_resonant_area_weighted_field) &&
-        throw(ArgumentError("the plasma response carries no singular-coupling matrix (compute_singular_coupling off, or no resonant surfaces)"))
-    return ResonantCoupling(resp.C_resonant_area_weighted_field, resp.rational_psi, resp.rational_q,
-        resp.rational_m_res, resp.rational_n, resp.m_modes, resp.n_modes, resp.rootarea_to_area_weight .* resp.surface_area)
+function ResonantCoupling(resp::PlasmaResponse; matrix::Symbol=:resonant_area_weighted_field)
+    _check_field_coupling(matrix)
+    C = getfield(resp, Symbol(:C_, matrix))
+    isempty(C) && throw(ArgumentError("the plasma response carries no C_$matrix (compute_singular_coupling off, no resonant surfaces, " *
+                                      "or a result that cannot supply it)"))
+    return ResonantCoupling(C, resp.rational_psi, resp.rational_q, resp.rational_m_res, resp.rational_n, resp.m_modes, resp.n_modes,
+        resp.rootarea_to_area_weight .* resp.surface_area)
 end
 
 """
-    ResonantCoupling(h5path::AbstractString)
+    ResonantCoupling(h5path::AbstractString; matrix=:resonant_area_weighted_field)
 
 Post-hoc construction from a `gpec.h5` written with both the response and singular-coupling
-steps enabled: reads `PerturbedEquilibrium/SingularCoupling/`, the stored conform operator under
-`PerturbedEquilibrium/ResponseMatrices/`, and the column labels from `Info/mn_index`.
+steps enabled: reads `C_<matrix>` and the row labels from `PerturbedEquilibrium/SingularCoupling/`, the stored
+conform operator under `PerturbedEquilibrium/ResponseMatrices/`, and the column labels from `Info/mn_index`.
 """
-function ResonantCoupling(h5path::AbstractString)
+function ResonantCoupling(h5path::AbstractString; matrix::Symbol=:resonant_area_weighted_field)
+    _check_field_coupling(matrix)
     h5open(h5path, "r") do f
-        haskey(f, "PerturbedEquilibrium/SingularCoupling/C_resonant_area_weighted_field") ||
-            throw(ArgumentError("$h5path has no singular-coupling matrix"))
+        haskey(f, "PerturbedEquilibrium/SingularCoupling/C_$matrix") ||
+            throw(ArgumentError("$h5path has no singular-coupling matrix C_$matrix"))
         haskey(f, "PerturbedEquilibrium/ResponseMatrices/rootarea_to_area_weight_operator") ||
             throw(ArgumentError("$h5path has no control-surface conform operator"))
         haskey(f, "Info/mn_index") || throw(ArgumentError("$h5path has no Info/mn_index mode labels"))
@@ -59,7 +68,7 @@ function ResonantCoupling(h5path::AbstractString)
         mn = read(f["Info/mn_index"])
         S = read(f["PerturbedEquilibrium/ResponseMatrices/rootarea_to_area_weight_operator"])
         A = read(f["PerturbedEquilibrium/ResponseMatrices/surface_area"])
-        return ResonantCoupling(read(sc["C_resonant_area_weighted_field"]), read(sc["rational_psi"]), read(sc["rational_q"]),
+        return ResonantCoupling(read(sc["C_$matrix"]), read(sc["rational_psi"]), read(sc["rational_q"]),
             read(sc["rational_m"]), read(sc["rational_n"]), mn[:, 1], mn[:, 2], S .* A)
     end
 end

@@ -132,7 +132,7 @@ Physical and workflow controls for a force-balance solve, together with its sele
 """
 @kwdef struct ForceFreeStatesControl{A<:AbstractIntegrator}
     algorithm::A = Riccati()
-    vac_flag::Bool = false
+    vac_flag::Bool = true
     mtheta_vacuum::Int = 480
     nzeta_vacuum::Int = 1
     nn_low::Int = 0

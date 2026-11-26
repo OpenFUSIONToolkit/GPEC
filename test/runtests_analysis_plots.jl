@@ -106,6 +106,9 @@ using TOML
             @test A.capabilities(ret.resp) ⊆ A.capabilities(ret.pe)
             @test plot_dominant_mode_surface(ret.resp; mode=length(ret.resp.dominant_singular_values)) isa Figure
             @test_throws "mode must be 1 to" plot_dominant_mode_surface(ret.resp; mode=length(ret.resp.dominant_singular_values) + 1)
+            # Any coupling matrix the response carries can be decomposed and drawn; other names are refused.
+            @test A.PerturbedEquilibrium.plot_coupling_matrix(ret.resp; matrix=:resonant_current) isa Figure
+            @test_throws "matrix must be one of" A.PerturbedEquilibrium.plot_coupling_matrix(ret.resp; matrix=:bogus)
             @test_throws "coils = true needs" CF.plot_control_surface(ret.resp, ret.resp.dominant_right_singular_vectors[:, 1]; coils=true)
             # A bare equilibrium marks the q = m/n crossings of n = 1, which include every surface the solve found.
             bare, solved = A.Equilibrium._surfaces(ret.equil), A.Equilibrium._surfaces(ret.ffs)
@@ -142,6 +145,34 @@ using TOML
         end
     end
 
+    @testset "matched Riccati run draws the asymptotic coupling and both island sets" begin
+        mktempdir() do dir
+            ret, h5 = _run_fixture(
+                dir,
+                "regression_tj_ideal_example";
+                edit=d -> (d["ForceFreeStates"]["integrator"] = "Riccati"; d["Riccati"] = delete!(pop!(d, "Forward"), "renorm_threshold")),
+                sections=Dict{String,Any}(
+                    "Match" => Dict{String,Any}("eta" => 1e-7, "rho" => 3e-7, "rotation" => 1.0),
+                    "ForcingTerms" => Dict{String,Any}("forcing_data_format" => "coil", "mtheta_coil" => 240, "nzeta_coil" => 32,
+                        "coil_set" => [Dict{String,Any}("name" => "hoop", "source" => "pf_hoop", "radius" => 12.0, "height" => 1.2,
+                            "currents" => [2.0e3], "tiltx" => [3.0])]),
+                    "PerturbedEquilibrium" => Dict{String,Any}("compute_singular_coupling" => true))
+            )
+            @test ret.ffs.closure === :matched
+            for x in (ret.resp, ret.pe)
+                _check_sources(x, h5)
+            end
+            caps = A.capabilities(ret.pe)
+            @test :singular_coupling in caps && :coupling_matrices in caps && :penetrated_field in caps
+            P = A.PerturbedEquilibrium
+            # A matched result has only the asymptotic set, the default; asking for the finite-width one names what is missing.
+            @test_throws "no finite-width resonant coupling" P.plot_resonant_area_weighted_field(ret.pe; asymptotic=false)
+            @test_throws "no finite-width resonant coupling" P.plot_islands(ret.pe; asymptotic=false)
+            @test P.plot_coupling_matrix(ret.pe; matrix=:penetrated_area_weighted_field) isa Figure
+            @test_throws "carries no C_resonant_area_weighted_field" P.plot_coupling_matrix(ret.pe; matrix=:resonant_area_weighted_field)
+        end
+    end
+
     @testset "Riccati run offers Δ′ and solution profiles" begin
         mktempdir() do dir
             ret, h5 = _run_fixture(dir, "regression_solovev_ideal_example";
@@ -152,7 +183,7 @@ using TOML
             @test A.ForceFreeStates.plot_ffs_summary(ret.ffs) isa Figure
             # The Δ′ family draws any part of its complex entries and refuses others.
             @test A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:abs) isa Figure
-            @test A.ForceFreeStates.plot_delta_coil(h5; part=:imag) isa Figure
+            @test A.ForceFreeStates.plot_delta_ef(h5; part=:imag) isa Figure
             @test_throws ArgumentError A.ForceFreeStates.plot_delta_prime(ret.ffs; part=:phase)
         end
     end

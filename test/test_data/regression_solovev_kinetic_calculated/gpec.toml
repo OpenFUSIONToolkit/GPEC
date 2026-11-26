@@ -45,7 +45,7 @@ delta_mhigh = 0               # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 64                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 
 kinetic = "KineticForces"     # Kinetic source: the drift-kinetic matrices of the [KineticForces] model (omit for an ideal run)
-integrator = "Forward" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
+integrator = "Forward" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 singfac_min = 1e-4            # Distance |m - nq| from each rational surface at which the integration crosses it through its asymptotic series
 
 # Numerical settings of the forward integrator

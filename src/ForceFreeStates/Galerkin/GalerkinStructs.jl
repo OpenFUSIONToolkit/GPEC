@@ -124,6 +124,8 @@ Solver internals and FEM diagnostics of the outer-region Galerkin solve. The Δ�
     core→edge, in the order the Δ′ matrices are indexed.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
   - `solver::String` — factorization actually used: `"cholesky"`, `"LU"`, or `"none"` when no resonant surfaces were present.
+  - `edge_response::Matrix{ComplexF64}` — `(mpert, nsol)` edge momentum FΞ′ + KΞ of every solution column
+    (`gal_edge_response`); the EF columns give `W_P·ψ₀²`. Empty if no resonant surfaces.
 """
 struct GalerkinResult
     msing::Int
@@ -134,4 +136,5 @@ struct GalerkinResult
     di::Vector{Float64}
     alpha::Vector{ComplexF64}
     solver::String
+    edge_response::Matrix{ComplexF64}
 end

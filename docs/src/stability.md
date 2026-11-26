@@ -41,8 +41,8 @@ Its global boundary-value problem over all surfaces gives the Δ′ matrix of [G
 
 `[ForceFreeStates] integrator` selects the radial method; its numerical settings sit in a section of the same name.
 
-- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in its asymptotic basis and assembles the Δ′ matrix. It stores the solution at every solver step, like Forward, so its result carries ``\xi`` profiles; `plasma_response` does not accept a Riccati result yet.
-- `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction as the solutions grow, crossing each rational surface in its asymptotic basis as Riccati does. It returns dense displacement profiles, and is the only integrator whose result `plasma_response` accepts (the response operators are built from the dense ``\xi`` solution; a wall is refused too) and the only one that supports the kinetic solve.
+- `"Riccati"` (the default; `[Riccati]`) splits the domain into independent chunks integrated in parallel, crosses each rational surface in its asymptotic basis and assembles the Δ′ matrix. It stores the solution at every solver step, like Forward, so its result carries ``\xi`` profiles and `plasma_response` accepts it.
+- `"Forward"` (`[Forward]`) integrates the system directly in ``(U_1, U_2)`` with Gaussian reduction as the solutions grow, crossing each rational surface in its asymptotic basis as Riccati does. It returns dense displacement profiles, and is the only integrator that supports the kinetic solve.
 - `"Galerkin"` (`[Galerkin]`) solves the outer region variationally on a finite-element basis, giving the resistive Δ′ matrix and the PEST-3 blocks but no free-boundary energies; see [Galerkin Solver](galerkin.md).
 
 `kinetic = "KineticForces"` replaces the ideal energy matrices by their drift-kinetic form, which needs `[Equilibrium] kinetic_file`; see [Kinetic Forces](kinetic_forces.md).
@@ -59,7 +59,7 @@ qlow = 1.02              # inner edge of the integration domain
 qhigh = 1e3              # outer bound of qlim (see Integration domain)
 delta_mlow = 8           # extra poloidal modes below the resonant range
 delta_mhigh = 8          # extra poloidal modes above it
-integrator = "Forward"   # "Riccati" is the default; "Forward" (and no [Wall]) is required for [PerturbedEquilibrium]
+integrator = "Forward"   # "Riccati" is the default; [PerturbedEquilibrium] takes either, or an error_field_response "Galerkin", and no [Wall]
 truncate_at_rational_offset = true
 rational_offset_fraction = 0.2
 
@@ -81,7 +81,7 @@ ffs = solve(eq, Riccati(; eulerlagrange_tolerance=1e-10); nn=1, delta_mlow=8, de
 
 real(ffs.free_boundary.et[1])                 # least free-boundary eigenmode energy: negative is unstable
 for (s, sing) in enumerate(ffs.surfaces)
-    println("q = $(sing.m[1])/$(sing.n[1]) at ψ_N = $(sing.psifac): Δ′ = $(real(ffs.delta_prime.matrix[s, s]))")
+    println("q = $(sing.m[1])/$(sing.n[1]) at ψ_N = $(sing.psifac): Δ′ = $(real(ffs.delta_prime.freeboundary.Delta[s, s]))")
 end
 ```
 
@@ -102,8 +102,9 @@ The number of Julia threads is set at startup (`-t N` or `JULIA_NUM_THREADS`); t
 | `ForceFreeStates/LayerOverlap/` | the resistive-layer overlap scan, when `psilim_from_layer_overlap` is set (table below) |
 | `SingularSurfaces/rational_psi`, `rational_q`, `rational_m`, `rational_n`, `dqdpsi` | the rational surfaces of the domain, core to edge |
 | `SingularSurfaces/D_I`, `E`, `F`, `G`, `H`, `K`, `M` | the Mercier index and the Glasser–Greene–Johnson layer coefficients at each surface |
+| `SingularSurfaces/alpha` | the Mercier exponent ``\alpha = \sqrt{-D_I}`` the solve's asymptotic series used at each surface; it approaches the value from `D_I` as `delta_mlow` and `delta_mhigh` are raised |
 | `SingularSurfaces/ca_left`, `ca_right` | the asymptotic (large, small) coefficients on either side of each surface, from ideal crossings |
-| `SingularSurfaces/Delta_prime_matrix` | the Δ′ matrix in the PEST-3 convention, from `"Riccati"` or `"Galerkin"`; `Delta_prime_raw` is the side-major (left, right) matrix it is folded from, `Delta_coil` the edge coil-response columns |
+| `SingularSurfaces/Delta_prime_matrix` | the free-boundary Δ′ matrix in the PEST-3 convention, from `"Riccati"` or `"Galerkin"`, with `pest3_A`, `pest3_B`, `pest3_Gamma`; `Delta_prime_raw_freeboundary` is the side-major (left, right) matrix they are folded from. The same set with a `_fixedboundary` suffix is the Δ′ with a conformal wall on the plasma, `Delta_EF` the error-field response, and `edge_response` the edge momentum of each fixed-boundary big-solution column (what matching needs for the matched `W_plasma`) |
 | `SingularSurfaces/Kinetic/` | the surfaces of a kinetic solve |
 
 The energy matrices are power-normalized: the eigenmode energies are the generalized eigenvalues of the pencil ``W v = \lambda N v``, with ``N`` the surface-norm matrix ``\xi^\dagger N \xi = \langle|\xi|^2\rangle`` built from the Jacobian Fourier coefficients, so each is an energy per unit surface-averaged squared displacement rather than joules, and the spectrum is invariant to the working coordinate because ``W`` and ``N`` transform by the same congruence.

@@ -2,6 +2,9 @@ using LinearAlgebra, Logging, TOML
 
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
+# Plasma energy matrix of an integration's edge state.
+edge_wp(odet, equil) = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+
 # A fixture (Solovev by default) prepared as solve prepares it, up to the integration. Each integration mutates its
 # intr (sing[s].delta_prime etc.), so every run takes a freshly prepared one.
 function prepared_solovev(; fixture="regression_solovev_ideal_example", integrator="Riccati", singfac_min=nothing, nchunks=0, over=Dict{String,Any}())
@@ -26,7 +29,7 @@ end
 function solovev_energies(integrator, singfac_min; fixture="regression_solovev_ideal_example")
     ctrl, intr, equil, _, mats = prepared_solovev(; fixture, integrator, singfac_min)
     odet = first(FFS.eulerlagrange_integration(ctrl, equil, mats, intr))
-    return FFS.free_run(odet, ctrl, equil, mats, intr).et
+    return FFS.free_run(edge_wp(odet, equil), ctrl, equil, mats, intr).et
 end
 
 @testset "Riccati Integration Tests" begin
@@ -166,9 +169,9 @@ end
         function delta_prime(nchunks)
             ctrl, intr, equil, _, mats = prepared_solovev(; fixture="regression_tj_ideal_example", nchunks)
             odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
-            wv = FFS.free_run(odet, ctrl, equil, mats, intr).wv
+            wv = FFS.free_run(edge_wp(odet, equil), ctrl, equil, mats, intr).wv
             result, _ = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
-            return result.matrix, riccati.chunks
+            return result.freeboundary.Delta, riccati.chunks
         end
         dp_auto, chunks_auto = delta_prime(0)
         dp_few, chunks_few = delta_prime(1)
@@ -190,7 +193,7 @@ end
     @testset "the Δ′ solutions on the stored grid" begin
         ctrl, intr, equil, _, mats = prepared_solovev(; fixture="regression_tj_ideal_example")
         odet, riccati = FFS.riccati_eulerlagrange_integration(ctrl, equil, mats, intr)
-        wv = FFS.free_run(odet, ctrl, equil, mats, intr).wv
+        wv = FFS.free_run(edge_wp(odet, equil), ctrl, equil, mats, intr).wv
         delta_prime, coefficients = FFS.compute_delta_prime_matrix(intr, riccati.propagators, riccati.chunks, riccati.columns.axis_state; wv, psio=equil.psio)
         basis = FFS.outer_solution_basis(coefficients, riccati.propagators, riccati.chunks, riccati.columns, riccati.bases, intr.sing, equil, mats,
             FFS.ModeIndices(intr), FFS.crossing_fill_fractions(ctrl))
@@ -225,13 +228,14 @@ end
         @test intr.psilim == odet.psi_store[end] == chunks[end].psi_end
         @test length(propagators) == length(chunks) && count(c -> c.needs_crossing, chunks) == intr.msing
         @test odet.u_store[:, :, :, end] ≈ odet.u
-        free = FFS.free_run(odet, ctrl, equil, mats, intr)
+        free = FFS.free_run(edge_wp(odet, equil), ctrl, equil, mats, intr)
         @test isfinite(free.et[1])
         # The Δ′ system reproduces the plasma response of the axis-to-edge products, and says so when it does not.
         delta_prime, coefficients = @test_logs min_level = Logging.Warn FFS.compute_delta_prime_matrix(intr, propagators, chunks, axis_state;
             wv=free.wv, wp=free.wp, psio=equil.psio)
-        @test size(delta_prime.matrix) == (intr.msing, intr.msing) && all(isfinite, delta_prime.matrix)
-        @test size(delta_prime.coil) == (2 * intr.msing, intr.numpert_total)
+        @test size(delta_prime.freeboundary.Delta) == size(delta_prime.fixedboundary.Delta) == (intr.msing, intr.msing)
+        @test all(isfinite, delta_prime.raw_freeboundary) && all(isfinite, delta_prime.raw_fixedboundary)
+        @test size(delta_prime.ef) == (2 * intr.msing, intr.numpert_total)
         basis = FFS.outer_solution_basis(
             coefficients,
             propagators,
