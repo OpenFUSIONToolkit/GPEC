@@ -1,10 +1,19 @@
 using Pkg;
 Pkg.activate(joinpath(@__DIR__, "../.."))
-using GeneralizedPerturbedEquilibrium, Plots, Printf, HDF5
+# The figures need a Makie backend from your global environment: CairoMakie saves files, GLMakie opens windows.
+using GeneralizedPerturbedEquilibrium, CairoMakie, Printf, HDF5
 using GeneralizedPerturbedEquilibrium: PerturbedEquilibrium, ErrorFields
-isinteractive() ? plotlyjs() : gr()
+AEF = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields
 
 h5path = joinpath(@__DIR__, "gpec.h5")
+# Show a figure and save it beside this script.
+function show_and_save(fig, name)
+    display(fig)
+    path = joinpath(@__DIR__, name * ".png")
+    save(path, fig)
+    println("Saved: ", path)
+    return fig
+end
 
 # The run stored every coil set's spectrum linearization. Project it onto the dominant
 # resonant-coupling mode over the core window (ψ_N ≤ 0.9, the default) to see which coils matter.
@@ -24,17 +33,8 @@ end
 # Error field per millimetre of in-plane shift and per millimetre of rim displacement from tilt,
 # F coils only, both in the units mechanical tolerances arrive in. Axisymmetric hoops have no
 # nominal n=1 drive, so the sensitivities are their whole error-field story.
-p_shift = bar(names[fcoils], full.abs_delta_shift_per_mm[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
-    ylabel="|δ| per mm", title="Dominant-mode error field per mm of F-coil shift", xrotation=45, xticks=(1:length(fcoils), names[fcoils]),
-    left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
-p_tilt = bar(names[fcoils], full.abs_delta_rim_per_mm[fcoils]; label="core window ψ_N ≤ 0.9", alpha=0.75,
-    ylabel="|δ| per mm of rim", title="Dominant-mode error field per mm of F-coil rim displacement", xrotation=45,
-    xticks=(1:length(fcoils), names[fcoils]), left_margin=12Plots.mm, bottom_margin=8Plots.mm, legend=:topright)
-p_sens = plot(p_shift, p_tilt; layout=(2, 1), size=(900, 700))
-display(p_sens)
-sens_path = joinpath(@__DIR__, "fcoil_sensitivities.png")
-Plots.savefig(p_sens, sens_path)
-println("Saved: ", abspath(sens_path))
+show_and_save(AEF.plot_coil_sensitivities(full; quantity=:shift, coils=names[fcoils]), "fcoil_shift_sensitivity")
+show_and_save(AEF.plot_coil_sensitivities(full; quantity=:rim, coils=names[fcoils]), "fcoil_rim_sensitivity")
 
 # Where the sensitivity lives in mode space: the spectrum derivative of the most and least
 # sensitive F coils under a 1 mm shift along x, against the C-coil's nominal spectrum.
@@ -42,78 +42,49 @@ step_series(m, a) = (vcat(m[1] - 1, m, m[end] + 1), vcat(0.0, a, 0.0))
 m = sens.m_modes
 order = sortperm(full.abs_delta_shift_per_mm[fcoils]; rev=true)
 picks = [fcoils[order[1]], fcoils[order[end]]]
-p_spec = plot(; xlabel="poloidal mode m", ylabel="|b̃| [T]", yscale=:log10, legend=:topleft,
-    title="Root-area-weighted spectra: C-coil as built vs F coils shifted 1 mm in x",
-    left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
 c = findfirst(==("d3d_c"), names)   # file-based sets are named machine_name
-me, ae = step_series(m, max.(abs.(sens.field_as_designed[:, c]), 1e-30))
-plot!(p_spec, me, ae; seriestype=:steppre, lw=2, label="C-coil nominal (20 A)")
-for j in picks
-    me, ae = step_series(m, max.(1e-3 .* abs.(sens.shift_sensitivity_per_m[:, 1, j]), 1e-30))
-    plot!(p_spec, me, ae; seriestype=:steppre, lw=2, label="$(names[j]) ∂b̃/∂Δx · 1 mm")
+spectra = vcat([("C-coil nominal (20 A)", abs.(sens.field_as_designed[:, c]))],
+    [("$(names[j]) ∂b̃/∂Δx · 1 mm", 1e-3 .* abs.(sens.shift_sensitivity_per_m[:, 1, j])) for j in picks])
+floor = minimum(minimum(filter(>(0), a)) for (_, a) in spectra) / 3
+top = maximum(maximum(a) for (_, a) in spectra)
+fig = Figure(; size=(1100, 420))
+ax = Axis(fig[1, 1]; xlabel="poloidal mode m", ylabel="|b̃| (T)", yscale=log10,
+    title="Root-area-weighted spectra: C-coil as built vs F coils shifted 1 mm in x")
+for (label, a) in spectra
+    stairs!(ax, step_series(m, max.(a, floor))...; step=:center, linewidth=2, label)
 end
-display(p_spec)
-spec_path = joinpath(@__DIR__, "fcoil_spectra.png")
-Plots.savefig(p_spec, spec_path)
-println("Saved: ", abspath(spec_path))
+ylims!(ax, floor, 2top)
+Legend(fig[1, 2], ax; framevisible=false)
+show_and_save(fig, "fcoil_spectra")
 
 # The tolerance Monte Carlo: the intrinsic and corrected |δ| distributions the run wrote (full
 # window, dominant mode), and a post-hoc re-run over the edge window with the same tolerances.
 mc = ErrorFields.MonteCarloResult(h5path)
 mc_edge = ErrorFields.run_monte_carlo(h5path; psi_low=0.7, nsample=200_000, nbatch=4, seed=1)
+show_and_save(AEF.plot_tolerance_pdf(["all rational surfaces" => mc, "ψ_N ≥ 0.7" => mc_edge]), "tolerance_pdf")
 centers(m) = (m.abs_delta_bin_edges[1:end-1] .+ m.abs_delta_bin_edges[2:end]) ./ 2
-p_pdf = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright,
-    title="Tolerance Monte Carlo: |δ| over sampled misalignments", left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
-plot!(p_pdf, centers(mc), mc.abs_delta_pdf; lw=2, label="intrinsic, all rational surfaces")
-plot!(p_pdf, centers(mc), mc.abs_delta_efc_pdf; lw=2, label="corrected (efc_factor = 2)")
-plot!(p_pdf, centers(mc_edge), mc_edge.abs_delta_pdf; lw=2, ls=:dash, label="intrinsic, ψ_N ≥ 0.7")
-vline!(p_pdf, [mc.abs_delta_total_as_designed]; ls=:dot, c=:black, label="as designed")
-display(p_pdf)
-pdf_path = joinpath(@__DIR__, "tolerance_pdf.png")
-Plots.savefig(p_pdf, pdf_path)
-println("Saved: ", abspath(pdf_path))
 @printf("⟨|δ|⟩ = %.3e intrinsic, %.3e corrected; as designed %.3e; batch spread of ⟨|δ|⟩ ≈ %.1e\n",
     mc.abs_delta_sampled_mean, mc.abs_delta_efc_sampled_mean, mc.abs_delta_total_as_designed,
     maximum(abs.(vec(sum(mc.abs_delta_pdf_batches .* centers(mc) .* diff(mc.abs_delta_bin_edges); dims=1)) .- mc.abs_delta_sampled_mean)))
 
-# Locking risk: the threshold distribution against the overlap distribution, and the risk against
+# Locking risk: the overlap distribution against the threshold's distribution, and the risk against
 # tolerance scale with the allowable tolerance for a 1 % target read off the scan.
 scan = ErrorFields.ToleranceScan(h5path)
-risk_nominal = h5open(
+locking_probability_percent, locking_probability_efc_percent, thr_nom = h5open(
     f -> (read(f["ErrorFields/Risk/locking_probability_percent"]), read(f["ErrorFields/Risk/locking_probability_efc_percent"]),
-        read(f["ErrorFields/Risk/threshold_fit"]), read(f["ErrorFields/Risk/threshold_pdf"]), read(f["ErrorFields/Risk/locking_probability_given_delta"])), h5path, "r")
-locking_probability_percent, locking_probability_efc_percent, thr_nom, thr_pdf, p_given = risk_nominal
-p_thr = plot(; xlabel="dominant-mode overlap |δ|", ylabel="probability density", legend=:topright, xscale=:log10,
-    title="Overlap distribution vs ITPA penetration threshold", left_margin=12Plots.mm, bottom_margin=6Plots.mm, size=(900, 420))
-c = centers(mc)
-keep = c .> 0
-plot!(p_thr, c[keep], mc.abs_delta_pdf[keep] ./ maximum(mc.abs_delta_pdf); lw=2, label="intrinsic |δ| (normalized)")
-plot!(p_thr, c[keep], mc.abs_delta_efc_pdf[keep] ./ maximum(mc.abs_delta_efc_pdf); lw=2, label="corrected |δ| (normalized)")
-plot!(p_thr, c[keep], thr_pdf[keep] ./ maximum(thr_pdf); lw=2, c=:black, label="threshold density (normalized)")
-plot!(p_thr, mc.abs_delta_bin_edges[2:end], p_given[2:end]; lw=1.5, ls=:dash, c=:red, label="P(lock | δ)")
-vline!(p_thr, [thr_nom]; ls=:dot, c=:black, label="nominal threshold")
-p_scan = plot(; xlabel="tolerance scale (× tolerances.toml)", ylabel="locking probability [%]", xscale=:log10, yscale=:log10,
-    legend=:topleft, title="Risk vs tolerance scale", left_margin=12Plots.mm, bottom_margin=6Plots.mm)
-plot!(p_scan, scan.tolerance_scale, max.(scan.locking_probability_percent, 1e-4); marker=:circle, lw=2, label="intrinsic")
-plot!(p_scan, scan.tolerance_scale, max.(scan.locking_probability_efc_percent, 1e-4); marker=:square, lw=2, label="corrected")
-hline!(p_scan, [1.0]; ls=:dash, c=:gray, label="1 % target")
-p_risk = plot(p_thr, p_scan; layout=(2, 1), size=(900, 760))
-display(p_risk)
-risk_path = joinpath(@__DIR__, "locking_risk.png")
-Plots.savefig(p_risk, risk_path)
-println("Saved: ", abspath(risk_path))
+        read(f["ErrorFields/Risk/threshold_fit"])), h5path, "r")
+show_and_save(AEF.plot_threshold_scaling(h5path), "threshold_scaling")
+show_and_save(AEF.plot_locking_risk(h5path; target_percent=1.0), "locking_risk")
 @printf("P_lock = %.2f %% intrinsic, %.2f %% corrected at the design tolerances; allowable scale for 1 %%: %.2f (intrinsic), %.2f (corrected)\n",
     locking_probability_percent, locking_probability_efc_percent, ErrorFields.allowable_tolerance(scan, 1.0), ErrorFields.allowable_tolerance(scan, 1.0; corrected=true))
 
-# The same figures through the Analysis module, which overplots design revisions when given
-# several `label => gpec.h5` pairs.
-p_summary = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields.plot_error_field_summary(h5path; save_path=joinpath(@__DIR__, "error_field_summary.png"))
-display(p_summary)
+# The run's assessment on one page. The single-run figures above overplot design revisions when
+# given several `label => gpec.h5` pairs.
+show_and_save(AEF.plot_error_field_summary(h5path), "error_field_summary")
 
 # How much intrinsic error field the C-coil could correct before its own NTV torque, at a
 # 4 N·m budget, costs the rotation that holds the penetration threshold up.
-p_ntv = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields.plot_efc_ntv_limits(h5path; torque_budget=4.0, save_path=joinpath(@__DIR__, "efc_ntv_limits.png"))
-display(p_ntv)
+show_and_save(AEF.plot_efc_ntv_limits(h5path; torque_budget=4.0), "efc_ntv_limits")
 for c in ErrorFields.read_efc_couplings(h5path)
     lim = ErrorFields.max_correctable_overlap(c; delta_threshold=thr_nom, torque_budget=4.0)
     @printf("%s: |δ| = %.3e per kAt, resonant fraction %.1f %%, torque %.3e (full) / %.3e (residual) N·m per kAt²; correctable up to %.2f × threshold\n",
@@ -126,7 +97,6 @@ end
 # The context holds everything that does not depend on which coils are being judged, so any
 # geometry can be swept against it. Here the example's own coils, shifted a millimetre, stand in
 # for a second revision.
-AEF = GeneralizedPerturbedEquilibrium.Analysis.ErrorFields
 FT = GeneralizedPerturbedEquilibrium.ForcingTerms
 
 ctx = ErrorFields.ResonantDriveContext(h5path)
@@ -150,6 +120,5 @@ pair = ErrorFields.combine_overlaps(as_built, as_built[1].coil_name => 1.0, as_b
 # against the dominant mode.
 for (name, fn) in (("applied_spectra", AEF.plot_applied_spectra), ("overlap_contributions", AEF.plot_overlap_contributions),
     ("surface_overlay", AEF.plot_surface_overlay))
-    path = joinpath(@__DIR__, "$name.png")
-    display(fn(ctx, as_built; save_path=path))
+    show_and_save(fn(ctx, as_built), name)
 end
