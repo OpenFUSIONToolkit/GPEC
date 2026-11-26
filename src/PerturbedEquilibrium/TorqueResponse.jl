@@ -87,27 +87,6 @@ end
 torque_profile(tr::TorqueResponse, b̃::AbstractVector{<:Number}) = torque_profile(tr.T_xe, b̃)
 
 """
-    coil_flux_spectra(ffs, coil_sets, cfg) -> Matrix{ComplexF64}
-
-Unit-norm control-surface flux spectrum `Φ_x` of every coil set as built, one column per set
-on the solve's (m, n) ordering `[numpert_total × ncoil_set]`: Biot-Savart on the control
-surface `ffs.psilim` sampled with the run's own `cfg` grid, so the columns sum to the run's
-coil forcing.
-"""
-function coil_flux_spectra(ffs::ForceFreeStatesResult, coil_sets::Vector{CoilSet}, cfg::ForcingTerms.CoilConfig)
-    grids = [(n, ForcingTerms.CoilForcingGrid(ffs.equil, cfg, n; psi=ffs.psilim)) for n in ffs.nlow:ffs.nhigh]
-    M = zeros(ComplexF64, ffs.numpert_total, length(coil_sets))
-    for (j, cs) in enumerate(coil_sets)
-        modes = ForcingMode[]
-        for (n, grid) in grids
-            append!(modes, ForcingTerms.coil_forcing_modes(cs, grid, n, ffs.mlow, ffs.mhigh))
-        end
-        M[:, j] = map_forcing_to_eigenmodes(modes, ffs)
-    end
-    return M
-end
-
-"""
     build_torque_response!(resp; verbose=false)
 
 Store the torque response `T_xe` of the solve on `resp`, from its flux-space permeability.
@@ -122,27 +101,17 @@ function build_torque_response!(resp::PlasmaResponse; verbose::Bool=false)
 end
 
 """
-    apply_torque_response!(state, forcing; verbose=false)
+    apply_torque_response!(state; verbose=false)
 
 Contract the torque response of `state.response` with the forcing of `state` into
-`state.torque_response`. Every forcing source is one column of `T_source`: each coil set
-(`state.coil_sets`, on the grid `forcing` carries) when the forcing is a coil leaf, otherwise the
-applied spectrum as a single source, named after its forcing file when it is one. A source's Φ_x column is
-referred to b̃ through `R = S·A`, so `T_source = B̃†·T_xe·B̃` with `B̃ = R⁻¹·Φ_source` (the Fortran `gcoil`).
+`state.torque_response`. Every forcing source of `state` (`state.source_names`) is one column of `T_source`:
+`T_source = B̃†·T_xe·B̃` with `B̃ = state.source_b_rootarea` (the Fortran `gcoil`).
 """
-function apply_torque_response!(state::PerturbedEquilibriumState, forcing::ForcingTerms.ForcingField; verbose::Bool=false)
+function apply_torque_response!(state::PerturbedEquilibriumState; verbose::Bool=false)
     resp = state.response
     ffs = resp.ffs
-    source_b = zeros(ComplexF64, ffs.numpert_total, 0)
-    source_names = String[]
-    if forcing isa ForcingTerms.ForcingCoils && !isempty(state.coil_sets)
-        flux_conform = resp.rootarea_to_area_weight .* resp.surface_area
-        source_b = flux_conform \ coil_flux_spectra(ffs, state.coil_sets, forcing.config)
-        source_names = [cs.name for cs in state.coil_sets]
-    elseif !isempty(state.forcing_b_rootarea)
-        source_b = reshape(state.forcing_b_rootarea, :, 1)
-        source_names = [forcing isa ForcingTerms.ForcingFile ? basename(forcing.path) : "forcing"]
-    end
+    source_b = isempty(state.source_b_rootarea) ? zeros(ComplexF64, ffs.numpert_total, 0) : state.source_b_rootarea
+    source_names = isempty(state.source_b_rootarea) ? String[] : state.source_names
 
     T_xe = resp.T_xe
     npsi = size(T_xe, 3)

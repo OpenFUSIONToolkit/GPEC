@@ -276,7 +276,7 @@ drive several solves.
     ForcingField(cfg::CoilConfig; scale=1.0)
     ForcingField(ctrl::ForcingTermsControl; scale=1.0)
     ForcingField(modes::Vector{ForcingMode}; scale=1.0)
-    ForcingField(materials::Vector{MagneticMaterial}; mtheta_coil=480, nzeta_coil=0, scale=1.0)
+    ForcingField(materials::Vector{MagneticMaterial}; groups=nothing, mtheta_coil=480, nzeta_coil=0, scale=1.0)
 
 The first form points at a forcing-mode file, `format` defaulting to `"hdf5"` for an `.h5`
 or `.hdf5` extension and `"ascii"` otherwise. The second form takes one coil set or a vector of them, each a
@@ -294,7 +294,7 @@ section, the sum of every source it holds. The file forms return a [`ForcingFile
 takes a control-surface spectrum computed elsewhere, already in the unit-norm `Φ_x` convention, and returns a
 spectrum-literal leaf ([`ForcingSpectrum`](@ref)). The material form takes one [`MagneticMaterial`](@ref) set or several,
 saturated along the equilibrium field, whose field is sampled on the `mtheta_coil × nzeta_coil` boundary grid, and
-returns a [`ForcingMagneticMaterial`](@ref) leaf.
+returns a [`ForcingMagneticMaterial`](@ref) leaf; `groups`, one label per set, merges sets into named forcing sources.
 
 ## Algebra
 
@@ -378,12 +378,14 @@ its centroid when materialized, whose exact field is sampled on the control surf
 ## Fields
 
   - `materials::Vector{MagneticMaterial}` - The material sets.
+  - `groups::Vector{String}` - Forcing-source label of each set; sets sharing one are reported as one source, and `""` is the set's own name.
   - `mtheta::Int` - Poloidal points of the boundary grid.
   - `nzeta::Int` - Toroidal points of the boundary grid; 0 = auto, 32(|n| + 1).
   - `scale::ComplexF64` - The source's weight in a linear combination, as for [`ForcingFile`](@ref).
 """
 struct ForcingMagneticMaterial <: ForcingField
     materials::Vector{MagneticMaterial}
+    groups::Vector{String}
     mtheta::Int
     nzeta::Int
     scale::ComplexF64
@@ -477,8 +479,9 @@ function ForcingField(ctrl::ForcingTermsControl; scale::Number=1.0)
     isempty(ctrl.coil_sets_raw) || push!(sources, ForcingField(CoilConfig(ctrl)))
     isempty(ctrl.forcing_data_file) || push!(sources, ForcingField(ctrl.forcing_data_file; format=ctrl.forcing_data_format))
     isempty(ctrl.magnetic_materials_raw) ||
-        push!(sources, ForcingField(load_magnetic_material.(_parse_magnetic_material_config.(ctrl.magnetic_materials_raw));
-            ctrl.mtheta_coil, ctrl.nzeta_coil))
+        let cfgs = _parse_magnetic_material_config.(ctrl.magnetic_materials_raw)
+            push!(sources, ForcingField(load_magnetic_material.(cfgs); groups=[c.group for c in cfgs], ctrl.mtheta_coil, ctrl.nzeta_coil))
+        end
     isempty(sources) && throw(
         ArgumentError(
             "ForcingField: [ForcingTerms] holds no forcing source; give [[ForcingTerms.coil_set]] " *
@@ -497,9 +500,11 @@ ForcingField(coil_sets::AbstractVector; scale::Number=1.0, kwargs...) =
     ForcingField(ForcingTermsControl(; coil_sets_raw=_coil_dict.(coil_sets), kwargs...); scale)
 ForcingField(coil_set::Union{AbstractDict,NamedTuple}; kwargs...) = ForcingField([coil_set]; kwargs...)
 
-function ForcingField(materials::Vector{MagneticMaterial}; mtheta_coil::Int=480, nzeta_coil::Int=0, scale::Number=1.0)
+function ForcingField(materials::Vector{MagneticMaterial}; groups=nothing, mtheta_coil::Int=480, nzeta_coil::Int=0, scale::Number=1.0)
     isempty(materials) && throw(ArgumentError("ForcingField: a magnetic material source needs at least one set"))
-    return ForcingMagneticMaterial(materials, mtheta_coil, nzeta_coil, ComplexF64(scale))
+    groups = groups === nothing ? fill("", length(materials)) : String.(collect(groups))
+    length(groups) == length(materials) || throw(ArgumentError("ForcingField: $(length(groups)) groups for $(length(materials)) material sets"))
+    return ForcingMagneticMaterial(materials, groups, mtheta_coil, nzeta_coil, ComplexF64(scale))
 end
 ForcingField(material::MagneticMaterial; kwargs...) = ForcingField([material]; kwargs...)
 
@@ -521,7 +526,7 @@ Base.:-(a::ForcingField, b::ForcingField) = a + (-1 * b)
 Base.:*(c::Number, f::ForcingFile) = ForcingFile(f.path, f.format, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::ForcingCoils) = ForcingCoils(f.config, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::ForcingSpectrum) = ForcingSpectrum(f.modes, ComplexF64(c) * f.scale)
-Base.:*(c::Number, f::ForcingMagneticMaterial) = ForcingMagneticMaterial(f.materials, f.mtheta, f.nzeta, ComplexF64(c) * f.scale)
+Base.:*(c::Number, f::ForcingMagneticMaterial) = ForcingMagneticMaterial(f.materials, f.groups, f.mtheta, f.nzeta, ComplexF64(c) * f.scale)
 Base.:*(c::Number, f::ForcingFieldSum) = ForcingFieldSum([c * t for t in f.terms])
 Base.:*(f::ForcingField, c::Number) = c * f
 

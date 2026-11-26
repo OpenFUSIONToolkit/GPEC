@@ -220,5 +220,29 @@ sphere_points(d; c=zeros(3)) = reduce(hcat, [c .+ d .* [sin(t) * cos(p), sin(t) 
         @test material.mtheta == 96 && material.nzeta == 0
         @test only(material.materials).saturation_field == 1.7 && only(material.materials).fill_fraction == 0.5
         @test GPEC._forcing_table(ctrl)["magnetic_material"][1]["h5_file"] == joinpath(dir, "plates.h5")
+        @test only(material.groups) == ""
+        grouped = GPEC.forcing_terms_control(
+            Dict{String,Any}(
+                "ForcingTerms" => Dict{String,Any}(
+                    "magnetic_material" => [merge(block, Dict{String,Any}("group" => "tbm")), merge(block, Dict{String,Any}("fill_fraction" => 0.2))])
+            ), dir)
+        @test ForcingField(grouped).groups == ["tbm", ""]
+        @test ForcingField([only(read_magnetic_material_h5(geometry))]; groups=["fi"]).groups == ["fi"]
+        @test_throws "1 groups for 2 material sets" ForcingField(read_magnetic_material_h5(geometry)[[1, 1]]; groups=["fi"])
+        @test_throws "unknown keys" GPEC.ForcingTerms._parse_magnetic_material_config(Dict{String,Any}("name" => "x", "grup" => "tbm"))
+    end
+
+    @testset "forcing sources: grouping, naming and the total" begin
+        PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+        FM = GeneralizedPerturbedEquilibrium.ForcingTerms.ForcingMode
+        spec(pairs...) = [FM(; n=n, m=m, amplitude=a) for (n, m, a) in pairs]
+        a, b, c = spec((1, 2, 1.0), (1, 3, 2.0im)), spec((1, 2, 0.5), (1, 4, 1.0)), spec((1, 3, -1.0))
+        grouped = PE._grouped_sources(["fi", "tbm", "fi"], [a, b, c], 2.0 + 0.0im)
+        @test first.(grouped) == ["fi", "tbm"]
+        @test [(m.m, m.amplitude) for m in grouped[1].second] == [(2, 2.0 + 0.0im), (3, -2.0 + 4.0im)]
+        @test [(m.m, m.amplitude) for m in grouped[2].second] == [(2, 1.0 + 0.0im), (4, 2.0 + 0.0im)]
+        total = PE._total_forcing(grouped)
+        @test [(m.m, m.amplitude) for m in total] == [(2, 3.0 + 0.0im), (3, -2.0 + 4.0im), (4, 2.0 + 0.0im)]
+        @test PE._unique_names(["c", "c", "fi", "c"]) == ["c", "c_2", "fi", "c_3"]
     end
 end

@@ -74,6 +74,8 @@ function apply_response!(state::PerturbedEquilibriumState; verbose::Bool=false)
     forcing_b_rootarea = flux_conform \ forcing_flux
     response_b_rootarea = flux_conform \ response_flux
     state.forcing_b_rootarea = forcing_b_rootarea
+    isempty(state.source_modes) ||
+        (state.source_b_rootarea = flux_conform \ reduce(hcat, [map_forcing_to_eigenmodes(modes, ffs) for modes in state.source_modes]))
     state.response_b_rootarea = response_b_rootarea
     state.forcing_b = bare_to_rootarea \ forcing_b_rootarea
     state.response_b = bare_to_rootarea \ response_b_rootarea

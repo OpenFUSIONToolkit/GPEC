@@ -142,28 +142,57 @@ function compute_perturbed_equilibrium(
     preloaded_coil_sets::Vector{CoilSet}=CoilSet[]
 )::PerturbedEquilibriumState
     ffs = resp.ffs
-    modes, coil_sets = materialize_forcing_modes(ffs, forcing; preloaded_coil_sets, verbose)
-    state = PerturbedEquilibriumState(; response=resp, forcing, forcing_modes=modes,
+    sources, coil_sets = materialize_forcing_modes(ffs, forcing; preloaded_coil_sets, verbose)
+    state = PerturbedEquilibriumState(; response=resp, forcing, forcing_modes=_total_forcing(sources),
+        source_names=_unique_names(first.(sources)), source_modes=last.(sources),
         coil_sets=isempty(coil_sets) ? preloaded_coil_sets : coil_sets, regularization_width=Float64(regularization_width))
 
     isempty(resp.permeability_flux) || apply_response!(state; verbose)
     isempty(resp.coupling_flux) || apply_coupling!(state; verbose)
-    isempty(resp.T_xe) || apply_torque_response!(state, forcing; verbose)
+    isempty(resp.T_xe) || apply_torque_response!(state; verbose)
     if !isempty(resp.dominant_right_singular_vectors) && !isempty(state.forcing_b_rootarea)
         state.dominant_forcing_overlap = resp.dominant_right_singular_vectors' * state.forcing_b_rootarea
+        state.dominant_source_overlap = resp.dominant_right_singular_vectors' * state.source_b_rootarea
     end
     return state
 end
 
-"""
-    materialize_forcing_modes(ffs, field::ForcingTerms.ForcingCoils; preloaded_coil_sets=CoilSet[], verbose=false)
-        -> (modes::Vector{ForcingMode}, coil_sets::Vector{CoilSet})
+# The forcing of all sources: a lone source's modes as they are, otherwise the (n, m) sums sorted by (n, m).
+function _total_forcing(sources::Vector{Pair{String,Vector{ForcingMode}}})
+    length(sources) == 1 && return [ForcingMode(; n=m.n, m=m.m, amplitude=m.amplitude) for m in only(sources).second]
+    amplitudes = Dict{Tuple{Int,Int},ComplexF64}()
+    for (_, modes) in sources, mode in modes
+        amplitudes[(mode.n, mode.m)] = get(amplitudes, (mode.n, mode.m), 0.0 + 0.0im) + mode.amplitude
+    end
+    return [ForcingMode(; n=n, m=m, amplitude=amplitudes[(n, m)]) for (n, m) in sort!(collect(keys(amplitudes)))]
+end
 
-Pure computation of the control-surface forcing spectrum of a coil leaf: build the geometry (or reuse
-`preloaded_coil_sets` from the gpec.h5 replay path), integrate the Biot-Savart field on the control surface at
-`ffs.psilim`, the integration limit, for every toroidal mode of the solve, and apply the leaf's weight. Modes are in
-the unit-norm convention the response step consumes. The second return value is the coil geometry used, which the
-writer snapshots for replay. Every `materialize_forcing_modes` method returns fresh modes and mutates nothing.
+# Source names made unique by appending _2, _3, … to repeats.
+function _unique_names(names::Vector{String})
+    seen = Dict{String,Int}()
+    return map(names) do name
+        k = seen[name] = get(seen, name, 0) + 1
+        k == 1 ? name : "$(name)_$k"
+    end
+end
+
+# Sum the per-member spectra of each label, in order of first appearance, and apply a leaf's weight.
+function _grouped_sources(labels::Vector{String}, member_modes::Vector{Vector{ForcingMode}}, scale::ComplexF64)
+    return map(unique(labels)) do label
+        modes = _total_forcing([label => member for (l, member) in zip(labels, member_modes) if l == label])
+        label => [ForcingMode(; n=m.n, m=m.m, amplitude=scale * m.amplitude) for m in modes]
+    end
+end
+
+"""
+    materialize_forcing_modes(ffs, field; preloaded_coil_sets=CoilSet[], verbose=false)
+        -> (sources::Vector{Pair{String,Vector{ForcingMode}}}, coil_sets::Vector{CoilSet})
+
+The control-surface spectrum of each forcing source of `field`, in the unit-norm Φ_x convention the response consumes,
+on the control surface `ffs.psilim` for every toroidal mode of the solve, with each leaf's weight applied. A source is a
+coil set, a forcing file (named after it), a spectrum literal (`"spectrum"`) or a magnetic material set; sets sharing a
+`group` are one source named by it. A sum concatenates its leaves' sources. The second return value is the coil geometry
+used, which the writer snapshots for replay (`preloaded_coil_sets` replaces it on the gpec.h5 replay path).
 """
 function materialize_forcing_modes(
     ffs::ForceFreeStatesResult,
@@ -173,22 +202,19 @@ function materialize_forcing_modes(
 )
     equil, cfg = ffs.equil, field.config
     coil_sets = isempty(preloaded_coil_sets) ? ForcingTerms.load_coil_sets(cfg, ffs.nlow; equil=equil) : preloaded_coil_sets
-    modes = ForcingMode[]
+    labels = length(cfg.coil_sets) == length(coil_sets) ?
+             [isempty(sc.group) ? cs.name : sc.group for (sc, cs) in zip(cfg.coil_sets, coil_sets)] : [cs.name for cs in coil_sets]
+    per_set = [ForcingMode[] for _ in coil_sets]
     for n in ffs.nlow:ffs.nhigh
-        modes_n = ForcingMode[]
-        ForcingTerms.compute_coil_forcing_modes!(modes_n, coil_sets, equil, cfg, n, ffs.mlow, ffs.mhigh; psi=ffs.psilim, verbose=verbose)
-        append!(modes, modes_n)
+        grid = ForcingTerms.CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)
+        verbose && @info "Computing coil forcing modes: mtheta=$(grid.grid.mtheta), nzeta=$(grid.grid.nzeta), n=$n, $(length(coil_sets)) coil sets"
+        for (k, cs) in enumerate(coil_sets)
+            append!(per_set[k], ForcingTerms.coil_forcing_modes(cs, grid, n, ffs.mlow, ffs.mhigh))
+        end
     end
-    field.scale == 1 || (modes = [ForcingMode(; n=mode.n, m=mode.m, amplitude=field.scale * mode.amplitude) for mode in modes])
-    return modes, coil_sets
+    return _grouped_sources(labels, per_set, field.scale), coil_sets
 end
 
-"""
-    materialize_forcing_modes(ffs, field::ForcingTerms.ForcingFile; verbose=false, kwargs...) -> (modes, coil_sets)
-
-Materialize a forcing-mode file: read its modes, convert their normalization onto the run's `mlow:mhigh` on the
-control surface `ffs.psilim`, and apply the leaf's weight. No coil geometry is produced.
-"""
 function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTerms.ForcingFile; verbose::Bool=false, kwargs...)
     file_modes = ForcingMode[]
     norm_tag = load_forcing_data!(file_modes, field.path, field.format, verbose)
@@ -199,61 +225,39 @@ function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTer
         # Normalize on the same control surface as the coil field: psilim, the integration limit.
         append!(modes, convert_forcing_normalization(modes_n, norm_tag, ffs.equil, n, ffs.mlow:ffs.mhigh; psi=ffs.psilim))
     end
-    field.scale == 1 || (modes = [ForcingMode(; n=mode.n, m=mode.m, amplitude=field.scale * mode.amplitude) for mode in modes])
-    return modes, ForcingTerms.CoilSet[]
+    return _grouped_sources([basename(field.path)], [modes], field.scale), ForcingTerms.CoilSet[]
 end
 
-"""
-    materialize_forcing_modes(ffs, field::ForcingTerms.ForcingMagneticMaterial; verbose=false, kwargs...) -> (modes, coil_sets)
-
-Materialize a magnetic-material leaf: saturate each set along the equilibrium field, sample its exact field on the
-control surface `ffs.psilim` for every toroidal mode of the solve, and apply the leaf's weight. No coil geometry is produced.
-"""
 function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTerms.ForcingMagneticMaterial; verbose::Bool=false, kwargs...)
     equil = ffs.equil
+    labels = [isempty(g) ? m.name : g for (m, g) in zip(field.materials, field.groups)]
     magnetizations = [ForcingTerms.saturated_magnetization(material, equil) for material in field.materials]
     cfg = ForcingTerms.CoilConfig(; mtheta_coil=field.mtheta, nzeta_coil=field.nzeta)
-    modes = ForcingMode[]
+    per_set = [ForcingMode[] for _ in field.materials]
     for n in ffs.nlow:ffs.nhigh
         verbose && @info "Computing magnetic material forcing modes for n = $n"
-        append!(modes, ForcingTerms.material_forcing_modes(field.materials, magnetizations, equil, cfg, n, ffs.mlow, ffs.mhigh; psi=ffs.psilim))
+        for k in eachindex(field.materials)
+            append!(per_set[k], ForcingTerms.material_forcing_modes(field.materials[k:k], magnetizations[k:k], equil, cfg, n, ffs.mlow, ffs.mhigh; psi=ffs.psilim))
+        end
     end
-    field.scale == 1 || (modes = [ForcingMode(; n=mode.n, m=mode.m, amplitude=field.scale * mode.amplitude) for mode in modes])
-    return modes, ForcingTerms.CoilSet[]
+    return _grouped_sources(labels, per_set, field.scale), ForcingTerms.CoilSet[]
 end
 
-"""
-    materialize_forcing_modes(ffs, field::ForcingTerms.ForcingSpectrum; kwargs...) -> (modes, coil_sets)
-
-Materialize a spectrum-literal leaf: fresh copies of its unit-norm modes, weighted. Nothing is read
-or integrated, and no coil geometry is produced.
-"""
 function materialize_forcing_modes(::ForceFreeStatesResult, field::ForcingTerms.ForcingSpectrum; kwargs...)
-    return [ForcingMode(; n=mode.n, m=mode.m, amplitude=field.scale * mode.amplitude) for mode in field.modes], ForcingTerms.CoilSet[]
+    return _grouped_sources(["spectrum"], [field.modes], field.scale), ForcingTerms.CoilSet[]
 end
 
-"""
-    materialize_forcing_modes(ffs, field::ForcingTerms.ForcingFieldSum; kwargs...) -> (modes, coil_sets)
-
-Materialize a lazy linear combination of forcing sources: each weighted leaf is evaluated
-independently and the mode amplitudes are summed per (n, m), sorted by (n, m). Coil geometry from
-every coil-format leaf is concatenated in the second return value; `preloaded_coil_sets` is ignored for sums.
-"""
 function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTerms.ForcingFieldSum;
     preloaded_coil_sets::Vector{ForcingTerms.CoilSet}=ForcingTerms.CoilSet[],
     verbose::Bool=false)
-    amplitudes = Dict{Tuple{Int,Int},ComplexF64}()
+    sources = Pair{String,Vector{ForcingMode}}[]
     coil_sets = ForcingTerms.CoilSet[]
     for term in field.terms
-        term_modes, term_coils = materialize_forcing_modes(ffs, term; verbose=verbose)
-        for mode in term_modes
-            key = (mode.n, mode.m)
-            amplitudes[key] = get(amplitudes, key, 0.0 + 0.0im) + mode.amplitude
-        end
+        term_sources, term_coils = materialize_forcing_modes(ffs, term; verbose=verbose)
+        append!(sources, term_sources)
         append!(coil_sets, term_coils)
     end
-    modes = [ForcingMode(; n=n, m=m, amplitude=amplitudes[(n, m)]) for (n, m) in sort!(collect(keys(amplitudes)))]
-    return modes, coil_sets
+    return sources, coil_sets
 end
 
 end # module PerturbedEquilibrium

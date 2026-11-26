@@ -63,6 +63,7 @@ Shifts/tilts apply to every source (the analytic geometry is built first, then t
 
   - `name`: coil set name; resolves to `{dat_dir}/{machine}_{name}.dat`, or selects a set by name
     from a multi-set `.h5` file
+  - `group`: forcing-source label; coil sets sharing a group are reported as one source, named by it (default: the set's own name)
   - `source`: coil source discriminator (see above); empty/`"file"` reads a geometry file
   - `dat_file`: explicit path to .dat file (overrides `machine`+`name` convention)
   - `h5_file`: explicit path to .h5 file (multi-set; `name` selects which set, else the sole set)
@@ -95,6 +96,7 @@ Window-pane standoff placement (alternative to `rz_corners`; needs an equilibriu
 """
 Base.@kwdef struct CoilSetConfig
     name::String = ""
+    group::String = ""
     source::String = ""
     dat_file::String = ""
     h5_file::String = ""
@@ -186,6 +188,7 @@ function _parse_coil_set_config(d::Dict{String,Any})
     corners = [Float64.(c) for c in get(d, "rz_corners", Vector{Float64}[])]
     return CoilSetConfig(;
         name=get(d, "name", ""),
+        group=get(d, "group", ""),
         source=get(d, "source", ""),
         dat_file=get(d, "dat_file", ""),
         h5_file=get(d, "h5_file", ""),

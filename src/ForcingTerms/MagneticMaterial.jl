@@ -78,12 +78,14 @@ One `[[ForcingTerms.magnetic_material]]` TOML block.
 ## Fields
 
   - `name::String` - Set to read from the geometry file, and its identifier.
+  - `group::String` - Forcing-source label; sets sharing a group are reported as one source, named by it (default: the set's name).
   - `h5_file::String` - Geometry file holding `magnetic_material/<name>/`; see [`read_magnetic_material_h5`](@ref).
   - `saturation_field::Float64` - Saturation magnetization μ₀M_s of the material, in tesla.
   - `fill_fraction::Float64` - Fraction of each element's volume that is magnetic material (default 1).
 """
 Base.@kwdef struct MagneticMaterialConfig
     name::String = ""
+    group::String = ""
     h5_file::String = ""
     saturation_field::Float64 = NaN
     fill_fraction::Float64 = 1.0

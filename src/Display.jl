@@ -343,6 +343,9 @@ function Base.show(io::IO, ::MIME"text/plain", s::PerturbedEquilibriumState)
         _row(io, "Chirikov", "max $(_fmt(maximum(s.chirikov_parameter)))")
     end
     isempty(s.dominant_forcing_overlap) || _row(io, "Dominant", "overlap with mode 1 = $(_fmt(abs(first(s.dominant_forcing_overlap)))) T")
+    length(s.source_names) > 1 && _row(io, "Sources",
+        isempty(s.dominant_source_overlap) ? _list(s.source_names) :
+        _list(["$(n) $(_fmt(abs(s.dominant_source_overlap[1, k]))) T" for (k, n) in enumerate(s.source_names)]))
     _row(io, "Profiles", s.xi_modes === nothing ? "not computed" : "ξ, b on $(length(s.psi_grid)) ψ nodes")
     s.torque_response === nothing || _row(io, "Torque resp.", "computed")
     iszero(s.regularization_width) || _row(io, "Regularized", "width $(_fmt(s.regularization_width))")

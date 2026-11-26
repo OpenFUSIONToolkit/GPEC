@@ -46,6 +46,14 @@ function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilib
     !isempty(state.response_b_rootarea) && (pe_group["response_b_root_area"] = state.response_b_rootarea)
     !isempty(state.response_b_area) && (pe_group["response_b_area"] = state.response_b_area)
 
+    # Each forcing source's b̃, whose columns sum to forcing_b_root_area, and its dominant-mode overlap
+    if !isempty(state.source_b_rootarea)
+        sources_group = create_group(pe_group, "ForcingSources")
+        sources_group["source_name"] = state.source_names
+        sources_group["forcing_b_root_area"] = state.source_b_rootarea
+        isempty(state.dominant_source_overlap) || (sources_group["dominant_forcing_overlap"] = state.dominant_source_overlap)
+    end
+
     # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
     # root-area-weighted field (b̃) space. Recover the area-weighted field b̄ with the stored
     # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
@@ -233,6 +241,14 @@ const PE_H5_ANNOTATIONS = [
     "forcing_b_root_area" => (; long_name="control-surface forcing spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
     "forcing_b_area" => (; long_name="control-surface forcing spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),
     "response_b" => (; long_name="control-surface response spectrum, bare normal field b", units="T", dims=("mode",)),
+    "ForcingSources/source_name" =>
+        (; long_name="name of each forcing source: a coil set, forcing file, spectrum literal or magnetic material set, or the group merging several"),
+    "ForcingSources/forcing_b_root_area" =>
+        (; long_name="control-surface forcing spectrum of each source, root-area-weighted field b̃; the columns sum to forcing_b_root_area",
+            units="T", dims=("mode", "source")),
+    "ForcingSources/dominant_forcing_overlap" =>
+        (; long_name="coefficient of each source's b̃ on each singular mode, Vᴴ·b̃; the columns sum to SingularCoupling/DominantMode/forcing_overlap",
+            units="T", dims=("rank", "source")),
     "response_b_root_area" => (; long_name="control-surface response spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
     "response_b_area" => (; long_name="control-surface response spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),
     "ResponseMatrices/plasma_inductance" => (; long_name="plasma inductance Λ̃ in root-area-weighted field space", dims=("mode_row", "mode_col")),
@@ -393,7 +409,7 @@ const PE_H5_ANNOTATIONS = [
         (;
             long_name="torque response matrix on the applied root-area-weighted field b̃, cumulative inside ψ_N: b̃†·T_xe·b̃/2 is the complex torque (Re = toroidal torque, Im = 2n·δW ideal+kinetic); the Hermitian part is the torque quadratic form",
             units="N*m/T^2", dims=("mode_row", "mode_col", "psi"), attach=(1 => "TorqueResponse/m", 2 => "TorqueResponse/m", 3 => "TorqueResponse/psi")),
-    "TorqueResponse/source_name" => (; long_name="name of each forcing source of T_source (coil set or forcing file)"),
+    "TorqueResponse/source_name" => (; long_name="name of each forcing source of T_source, as ForcingSources/source_name"),
     "TorqueResponse/T_source" =>
         (;
             long_name="torque response matrix in forcing-source space, cumulative inside ψ_N: s†·T_source·s/2 is the complex torque of the sources driven at s times their strength as built",

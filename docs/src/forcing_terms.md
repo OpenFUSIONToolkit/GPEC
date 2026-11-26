@@ -123,9 +123,16 @@ saturation_field = 1.7         # μ₀M_s, in tesla
 fill_fraction = 1.0            # magnetic fraction of each element's volume
 ```
 
+## Forcing sources
+
+Each coil set, forcing file, spectrum and magnetic material set is one forcing source, and the run records each source's contribution beside the total.
+Give several `[[ForcingTerms.coil_set]]` or `[[ForcingTerms.magnetic_material]]` blocks the same `group = "<label>"` to report them as one source named by the label, for example the seven region sets of the test blanket modules as `group = "tbm"`; a block without `group` is its own source, named after the set.
+From the API, `ForcingField(materials; groups=[...])` takes one label per material set.
+
 ## Outputs
 
 The applied spectrum is written with the response: `PerturbedEquilibrium/ForcingModes/` (`m`, `n`, `amplitude`) and the control-surface spectra `PerturbedEquilibrium/forcing_b`, `forcing_b_root_area` and `forcing_b_area` (see [Perturbed Equilibrium](perturbed_equilibrium.md)).
+Each source's root-area-weighted field and its overlap with the dominant modes go to `PerturbedEquilibrium/ForcingSources/` (`source_name`, `forcing_b_root_area` on `(mode, source)`, `dominant_forcing_overlap` on `(rank, source)`); their columns sum to the totals, and the torque response's `T_source` uses the same sources.
 A forcing file is captured raw with its tag under `Input/RawInputs/ForcingTerms/`, and the coil geometry as used, after shifts and tilts, under `Input/RawInputs/Coils/`, so that `main(["gpec.h5"])` can replay the run without the original files; see the [Scripting API](api.md).
 
 ## API reference
