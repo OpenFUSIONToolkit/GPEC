@@ -171,21 +171,13 @@ function fourier_decompose_bn(
 )
     mtheta = grid.mtheta
     nzeta = grid.nzeta
-
-    # Build Fourier basis: exp(-i*(m*θ - n*ζ))
-    # Using 3D call with npert=1, nlow=n gives shape (mpert, mtheta*nzeta)
-    basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
-
-    bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j]
+    @assert size(bn) == (mtheta, nzeta)
     scale = 2.0 / (mtheta * nzeta)
 
-    bmn = scale .* (basis * bn_flat)
-
-    modes = ForcingMode[]
-    for (idx, m) in enumerate(m_low:m_high)
-        push!(modes, ForcingMode(; n=n, m=m, amplitude=bmn[idx]))
-    end
-    return modes
+    # The sum separates: Σ_i e^{-imθᵢ} Σ_j bn[i,j] e^{inζⱼ}, on the uniform θ = 2π(i-1)/mtheta, ζ = 2π(j-1)/nzeta grid.
+    bn_n = bn * cis.(n .* range(0; length=nzeta, step=2π / nzeta))
+    θ = range(0; length=mtheta, step=2π / mtheta)
+    return [ForcingMode(; n=n, m=m, amplitude=scale * sum(bn_n[i] * cis(-m * θ[i]) for i in 1:mtheta)) for m in m_low:m_high]
 end
 
 """

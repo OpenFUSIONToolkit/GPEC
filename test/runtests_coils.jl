@@ -275,6 +275,14 @@ end
         i == idx && continue
         @test abs(mode.amplitude) < 0.05
     end
+
+    # A general field against the full 2D basis the decomposition sums over.
+    bn_rand = [sin(3θ + 0.7) * cos(2ζ) + 0.3cos(7θ - ζ) + 0.1 * (i + 3j) / (mtheta + nzeta) for (i, θ) in enumerate(theta_grid), (j, ζ) in enumerate(zeta_grid)]
+    for n in (0, 1, 2, -3)
+        basis = ForcingTerms.compute_fourier_coefficients(mtheta, -12:12, nzeta, [n])
+        direct = (2 / (mtheta * nzeta)) .* (basis * vec(bn_rand))
+        @test [m.amplitude for m in ForcingTerms.fourier_decompose_bn(bn_rand, grid, n, -12, 12)] ≈ direct rtol = 1e-12
+    end
 end
 
 # ---------------------------------------------------------------------------
