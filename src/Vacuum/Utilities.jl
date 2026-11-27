@@ -83,6 +83,78 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
 end
 
 """
+    trig_derivative_matrix(n) -> Matrix{Float64}
+
+Derivative at the nodes of the trigonometric interpolant on `n` equispaced periodic nodes.
+For even `n` the Nyquist mode is a cosine, whose derivative vanishes at the nodes.
+"""
+function trig_derivative_matrix(n::Int)
+    D = zeros(n, n)
+    for j in 1:n, i in 1:n
+        r = mod(i - j, n)
+        r == 0 && continue
+        # Symmetric range keeps sin(πr/n) away from π, where it loses relative precision; the sign factor absorbs the shift
+        r > n ÷ 2 && (r -= n)
+        s, c = sincospi(r / n)
+        D[i, j] = (isodd(r) ? -0.5 : 0.5) * (iseven(n) ? c / s : 1 / s)
+    end
+    return D
+end
+
+"""
+    trig_tangents(r, mtheta, nzeta) -> (dr_dθ, dr_dζ)
+
+Tangents of the trigonometric interpolant of the `(mtheta * nzeta, 3)` grid samples `r`.
+"""
+function trig_tangents(r::Matrix{Float64}, mtheta::Int, nzeta::Int)
+    Dθ, Dζ = trig_derivative_matrix(mtheta), trig_derivative_matrix(nzeta)
+    dr_dθ, dr_dζ = similar(r), similar(r)
+    for k in 1:3
+        R = reshape(r[:, k], mtheta, nzeta)
+        dr_dθ[:, k] = vec(Dθ * R)
+        dr_dζ[:, k] = vec(R * transpose(Dζ))
+    end
+    return dr_dθ, dr_dζ
+end
+
+"""
+    trig_interp_matrix(n_in, n_out) -> Matrix{Float64}
+
+Values at `n_out` equispaced periodic nodes of the trigonometric interpolant on `n_in` such nodes.
+"""
+function trig_interp_matrix(n_in::Int, n_out::Int)
+    T = zeros(n_out, n_in)
+    N = n_in * n_out
+    for j in 1:n_in, i in 1:n_out
+        # Offset of node i from node j is 2πp/N; integer p keeps coincident nodes exact
+        p = mod((i - 1) * n_in - (j - 1) * n_out, N)
+        if p == 0
+            T[i, j] = 1
+        else
+            # Symmetric range, as in `trig_derivative_matrix`; cot for even n_in (Nyquist cosine), csc for odd
+            p > N ÷ 2 && (p -= N)
+            s, c = sincospi(p / N)
+            T[i, j] = sinpi(p / n_out) * (iseven(n_in) ? c / s : 1 / s) / n_in
+        end
+    end
+    return T
+end
+
+"""
+    trig_upsample(a, Uθ, Uζ, mtheta, nzeta) -> Matrix{Float64}
+
+Columns of the `(mtheta * nzeta, k)` grid samples `a` on the 2× finer grid; `Uθ`, `Uζ` from [`trig_interp_matrix`](@ref).
+"""
+function trig_upsample(a::AbstractMatrix{Float64}, Uθ::Matrix{Float64}, Uζ::Matrix{Float64}, mtheta::Int, nzeta::Int)
+    # 2× in θ and 2× in ζ → 4× the nodes, still θ-fastest
+    a_up = Matrix{Float64}(undef, 4 * mtheta * nzeta, size(a, 2))
+    for k in axes(a, 2)
+        a_up[:, k] = vec(Uθ * reshape(a[:, k], mtheta, nzeta) * transpose(Uζ))
+    end
+    return a_up
+end
+
+"""
     periodic_wrap(x, n) -> Int
 
 `mod1(x, n)` without a division. Only valid for `1 - n ≤ x ≤ 2n`.
