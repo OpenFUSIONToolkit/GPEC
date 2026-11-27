@@ -259,6 +259,18 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         @test intr.psilim <= equil.params.psihigh_resolved
         q_at_psilim = equil.profiles.q_spline(intr.psilim)
         @test isapprox(q_at_psilim, intr.qlim; atol=1e-6)
+        # q peaking inside the domain: a qhigh above qmax ends the domain at psihigh, with the q found there.
+        pr = equil.profiles
+        q_peak = @. 2 + 3 * pr.xs - 2 * pr.xs^2
+        equil_peak = deepcopy(equil)
+        equil_peak.profiles = GeneralizedPerturbedEquilibrium.Equilibrium.ProfileSplines(pr.xs, pr.F_spline.y, pr.P_spline.y, pr.dVdpsi_spline.y, q_peak)
+        GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_qfind!(equil_peak)
+        @test equil_peak.params.qmax > equil_peak.profiles.q_spline(equil_peak.params.psihigh_resolved) + 0.01
+        intr_peak = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr_peak,
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; qhigh=10.0, truncate_at_rational_offset=false), equil_peak)
+        @test intr_peak.psilim == equil_peak.params.psihigh_resolved
+        @test isapprox(intr_peak.qlim, equil_peak.profiles.q_spline(intr_peak.psilim); atol=1e-12)
         ctrl_dmlim = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(; qhigh=equil.params.qmax, truncate_at_rational_offset=true)
         intr_unresolved = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
         @test_throws ErrorException GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr_unresolved, ctrl_dmlim, equil)

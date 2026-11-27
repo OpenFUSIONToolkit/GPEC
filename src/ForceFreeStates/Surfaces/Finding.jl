@@ -176,6 +176,9 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
             profiles.xs[jpsi], Roots.Newton()
         )
         intr.q1lim = profiles.q_deriv(intr.psilim)
+    else
+        # The domain ends at psihigh: pair it with its own q, which lies below qmax when q peaks inside.
+        intr.qlim = profiles.q_spline(intr.psilim)
     end
 end
 
