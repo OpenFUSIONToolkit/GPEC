@@ -278,8 +278,23 @@ end
 """
     write_imas(dd, result)
 
-Write one `dd.mhd_linear` `toroidal_mode` entry per toroidal mode number, with the least-stable
-(minimum real part) free-boundary `energy_perturbed` of that n. `result` is the named tuple `main` returns.
+Write the key results of a run into the IMAS data dictionary `dd`. `result` is the named tuple `main` returns;
+a stage that did not run writes nothing.
+
+  - `dd.mhd_linear` `toroidal_mode[j]`, one per toroidal mode number n: the least-stable (minimum real part)
+    free-boundary `energy_perturbed` of that n and, after a perturbed-equilibrium solve, the response's normal
+    displacement ξ_n [m] (`plasma.displacement_perpendicular`) and normal field b_n [T]
+    (`plasma.b_field_perturbed.coordinate1`) by poloidal harmonic on the code's ψ grid
+    (`plasma.grid.dim1` = √ψ_N, `dim2` = m; grid type 25 for the equal-arc poloidal angle, 24 otherwise). The
+    coefficients are the code's own, of exp(i(mθ − nζ)) in its magnetic angles; they are not converted to the
+    dictionary's exp(i(nφ − mθ)) in COCOS 11 angles.
+  - Further `toroidal_mode` entries after those, `perturbation_type` 13 (`Tearing`), one per tearing root
+    (one per surface uncoupled, one coupled): `growthrate` [1/s] and `frequency` [Hz]. `ideal_flag` is then 0.
+  - `dd.core_sources` `source`, identifier `neoclassical`, one per kinetic-torque method: the NTV torque density
+    `momentum_tor` [N m⁻²] and the torque inside each surface `torque_tor_inside` [N m] on `grid.psi_norm`, with
+    `grid.rho_tor_norm` interpolated from `dd.equilibrium` when the dd holds the equilibrium.
+
+Δ' and the resonant fields at the rational surfaces have no IMAS slot and are not written.
 """
 function write_imas(dd, result)
     ffs = result.ffs
@@ -306,7 +321,84 @@ function write_imas(dd, result)
         mode.energy_perturbed = minimum(real.(free_energies.et[n_indices])) # least-stable energy for this n-toroidal mode
     end
 
+    pe = get(result, :pe, nothing)
+    pe === nothing || _write_imas_response!(ts, ffs, pe, result.equil)
+    tearing = get(result, :tearing, nothing)
+    tearing === nothing || _write_imas_tearing!(dd.mhd_linear, ts, ffs, tearing)
+    kinetic = get(result, :kinetic, nothing)
+    kinetic === nothing || _write_imas_torque!(dd, result.equil, kinetic)
     return dd
+end
+
+# Response ξ_n and b_n of each n by poloidal harmonic, on √ψ_N × m (a Fourier grid in the working poloidal angle).
+function _write_imas_response!(ts, ffs, pe, equil)
+    (pe.xi_n_modes === nothing || pe.b_n_modes === nothing || isempty(pe.psi_grid)) && return nothing
+    ms = collect(Float64, ffs.mlow:ffs.mhigh)
+    grid_type = equil.config.jac_type == "equal_arc" ? (25, "inverse_rhopolnorm_equal_arc_fourier") :
+                (24, "inverse_rhopolnorm_straight_field_line_fourier")
+    for j in 0:(ffs.npert-1)
+        cols = (j*ffs.mpert+1):((j+1)*ffs.mpert)    # mode index i ↔ (m, n) = ((i-1)%mpert + mlow, (i-1)÷mpert + nlow)
+        plasma = ts.toroidal_mode[j+1].plasma
+        plasma.grid_type.index, plasma.grid_type.name = grid_type
+        plasma.grid.dim1 = sqrt.(pe.psi_grid)
+        plasma.grid.dim2 = ms
+        xi, bn = pe.xi_n_modes[:, cols], pe.b_n_modes[:, cols]
+        plasma.displacement_perpendicular.real = real.(xi)
+        plasma.displacement_perpendicular.imaginary = imag.(xi)
+        plasma.b_field_perturbed.coordinate1.real = real.(bn)
+        plasma.b_field_perturbed.coordinate1.imaginary = imag.(bn)
+    end
+    return nothing
+end
+
+# One toroidal_mode per tearing root, after the ideal entries; tearing is solved for a single n.
+function _write_imas_tearing!(mhd_linear, ts, ffs, tearing)
+    (tearing.enabled && !isempty(tearing.gamma) && ffs.npert == 1) || return nothing
+    mhd_linear.ideal_flag = 0    # the tearing roots are resistive
+    coupled = tearing.coupled_extraction !== nothing
+    nideal = length(ts.toroidal_mode)
+    resize!(ts.toroidal_mode, nideal + length(tearing.gamma))
+    for (k, (γ, ω)) in enumerate(zip(tearing.gamma, tearing.omega))
+        mode = ts.toroidal_mode[nideal+k]
+        mode.n_tor = ffs.nlow
+        mode.perturbation_type.index = 13
+        mode.perturbation_type.name = "Tearing"
+        mode.perturbation_type.description = coupled ? "coupled tearing root of all rational surfaces" :
+                                             "uncoupled tearing root of one rational surface"
+        coupled || isempty(tearing.rational_q) || (mode.m_pol_dominant = round(tearing.rational_q[k] * ffs.nlow))
+        mode.growthrate = γ
+        mode.frequency = ω / (2π)
+    end
+    return nothing
+end
+
+# ρ_tor,N at the given ψ_N from the dd's active equilibrium slice (the IMAS-fed case), or nothing without one.
+function _rho_tor_norm(dd, psi_norm)
+    isempty(dd.equilibrium.time_slice) && return nothing
+    eqt = dd.equilibrium.time_slice[]
+    p = eqt.profiles_1d
+    (IMASdd.hasdata(p, :psi) && IMASdd.hasdata(p, :rho_tor_norm)) || return nothing
+    g = eqt.global_quantities
+    pn = (p.psi .- g.psi_axis) ./ (g.psi_boundary - g.psi_axis)
+    return linear_interp(pn, p.rho_tor_norm).(psi_norm)
+end
+
+# NTV torque (real part) of each method as a neoclassical core source: density per volume and torque inside ψ_N.
+function _write_imas_torque!(dd, equil, kinetic)
+    for (method, r) in sort!(collect(kinetic.total.method_results); by=first)
+        isempty(r.psi_grid) && continue
+        src = resize!(dd.core_sources.source, :neoclassical, "identifier.description" => "GPEC NTV torque, method $method"; wipe=false)
+        src.identifier.name = "neoclassical"
+        p1 = resize!(src.profiles_1d; wipe=false)
+        rho = _rho_tor_norm(dd, r.psi_grid)
+        rho === nothing || (p1.grid.rho_tor_norm = rho)
+        setproperty!(p1.grid, :psi_norm, copy(r.psi_grid); error_on_missing_coordinates=false)
+        dVdpsi = [equil.profiles.dVdpsi_spline(ψ) for ψ in r.psi_grid]
+        # Without ρ_tor,N (a run not fed from the dd) the profiles are kept on ψ_N alone.
+        setproperty!(p1, :momentum_tor, real.(r.dtdpsi) ./ dVdpsi; error_on_missing_coordinates=false)
+        setproperty!(p1, :torque_tor_inside, real.(r.t_cumulative); error_on_missing_coordinates=false)
+    end
+    return nothing
 end
 
 export main, write_imas
