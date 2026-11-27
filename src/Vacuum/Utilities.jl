@@ -1,3 +1,62 @@
+# Shared quadrature and close-wall utilities (2D and 3D)
+
+"""
+    periodic_wrap(x, n) -> Int
+
+`mod1(x, n)` without a division. Only valid for `1 - n ≤ x ≤ 2n`.
+"""
+@inline periodic_wrap(x::Int, n::Int) = x < 1 ? x + n : (x > n ? x - n : x)
+
+# cᵢ = 1/∏_{j≠i}(i - j) on the nodes 0:N-1, for every order up to 21 (factorial(21) overflows Int)
+const LAGRANGE_DENOMINATORS = ntuple(N -> ntuple(i -> (-1)^(N - i) / (factorial(i - 1) * factorial(N - i)), N), 21)
+
+"""
+    lagrange_weights(ξ, Val(N)) -> SVector{N,Float64}
+
+Lagrange cardinal weights at `ξ` on the uniform nodes `0:(N - 1)`: wᵢ = cᵢ ∏_{j≠i} (ξ - j + 1).
+"""
+@inline function lagrange_weights(ξ, ::Val{N}) where {N}
+    c = LAGRANGE_DENOMINATORS[N]
+    return SVector(ntuple(i -> foldl(*, ntuple(j -> j == i ? 1.0 : ξ - (j - 1), Val(N)); init=c[i]), Val(N)))
+end
+
+# Plasma–wall rows whose observer is more than NEAR_GAP source node spacings h from the source surface take the periodic
+# trapezoidal rule alone, in 2D and 3D: its error ∝ exp(-2πd/h) is ~1e-11 there. Nearer rows are integrated about the
+# closest source point, which stays accurate down to MIN_WALL_GAP_CELLS cells of the coarser grid
+const NEAR_GAP = 4.0
+const MIN_WALL_GAP_CELLS = 0.1
+
+"""
+    sinh_rule(Q, nmax, step) -> (; rules, step)
+
+Gauss–Legendre rules on [0, 1] with `Q, 2Q, …, nmax Q` nodes for [`sinh_nodes`](@ref), which takes `⌈Δs/step⌉ Q` nodes
+on a span `Δs` of the sinh variable.
+"""
+function sinh_rule(Q::Int, nmax::Int, step::Float64)
+    rules = map(1:nmax) do m
+        t, w = gausslegendre(m * Q)
+        return (t .+ 1) ./ 2, w ./ 2
+    end
+    return (; rules, step)
+end
+
+"""
+    sinh_nodes(ε, a, b, rule) -> iterator of (ρ, w)
+
+Quadrature nodes and weights on `[a, b]` for a kernel peaked at `ρ = 0` with width `ε`: `ρ = ε sinh(s)`, Gauss in `s`
+between `asinh(a/ε)` and `asinh(b/ε)` [Johnston & Elliott, Int. J. Numer. Meth. Engng 62 (2005) 564], from a
+[`sinh_rule`](@ref).
+"""
+@inline function sinh_nodes(ε::Float64, a::Float64, b::Float64, rule)
+    sa, sb = asinh(a / ε), asinh(b / ε)
+    Δs = sb - sa
+    # Δs grows as log(1/ε) for small gaps, so scale the Gauss order to keep a roughly uniform node density in s (dρ = ε cosh(s) ds)
+    t_nodes, t_weights = rule.rules[clamp(ceil(Int, Δs / rule.step), 1, length(rule.rules))]
+    return ((ε * sinh(sa + Δs * t_nodes[i]), t_weights[i] * Δs * ε * cosh(sa + Δs * t_nodes[i])) for i in eachindex(t_nodes))
+end
+
+# 2D contour and spline utilities
+
 """
     extract_plasma_surface_at_psi(equil::Equilibrium.PlasmaEquilibrium, ψ::Float64) -> (r, z, ν)
 
@@ -83,6 +142,53 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
 end
 
 """
+    periodic_splines(x, z) -> (dx_dθ, dz_dθ, spline_x, spline_z)
+
+Periodic cubic splines of a closed curve sampled on the uniform grid `θ = 2π(k - 1)/M`, and their derivatives on it.
+"""
+function periodic_splines(x::Vector{Float64}, z::Vector{Float64})
+    θ = range(; start=0, length=length(x), step=2π / length(x))
+    bc = PeriodicBC(; endpoint=:exclusive, period=2π)
+    spline_x, spline_z = cubic_interp(θ, x; bc), cubic_interp(θ, z; bc)
+    return spline_x.(θ; deriv=DerivOp(1)), spline_z.(θ; deriv=DerivOp(1)), spline_x, spline_z
+end
+
+"""
+    curve_point(curve, θ) -> (x, z, ∂x/∂θ, ∂z/∂θ)
+
+Point and tangent of a 2D geometry's spline at any angle `θ`.
+"""
+@inline function curve_point(curve, θ)
+    θ = mod(θ, 2π)
+    return curve.spline_x(θ), curve.spline_z(θ), curve.spline_x(θ; deriv=DerivOp(1)), curve.spline_z(θ; deriv=DerivOp(1))
+end
+
+"""
+    closest_point(curve, x, z) -> (; θ, d, h)
+
+Point of a counter-clockwise 2D geometry closest to `(x, z)`, by Newton on its spline from the nearest node: its angle `θ`,
+the signed distance `d` along the outward normal, and the local node spacing `h`.
+"""
+function closest_point(curve, x, z)
+    M = length(curve.x)
+    θ = 2π / M * (argmin(@. (curve.x - x)^2 + (curve.z - z)^2) - 1)
+    for _ in 1:30
+        X, Z, Xθ, Zθ = curve_point(curve, θ)
+        Xθθ, Zθθ = curve.spline_x(mod(θ, 2π); deriv=DerivOp(2)), curve.spline_z(mod(θ, 2π); deriv=DerivOp(2))
+        # Newton step on ½|(x, z) - (X(θ), Z(θ))|², clamped to one grid spacing
+        Δ = clamp(((x - X) * Xθ + (z - Z) * Zθ) / (Xθ^2 + Zθ^2 - (x - X) * Xθθ - (z - Z) * Zθθ), -2π / M, 2π / M)
+        θ += Δ
+        abs(Δ) < 1e-14 && break
+    end
+    X, Z, Xθ, Zθ = curve_point(curve, θ)
+    J = hypot(Xθ, Zθ)
+    # Outward unit normal of a counter-clockwise (R, Z) contour is (Zθ, -Xθ) / J, so d > 0 outside and d < 0 inside
+    return (; θ=mod(θ, 2π), d=((x - X) * Zθ - (z - Z) * Xθ) / J, h=J * 2π / M)
+end
+
+# 3D spectral grid and singular-patch utilities
+
+"""
     trig_derivative_matrix(n) -> Matrix{Float64}
 
 Derivative at the nodes of the trigonometric interpolant on `n` equispaced periodic nodes.
@@ -155,33 +261,93 @@ function trig_upsample(a::AbstractMatrix{Float64}, Uθ::Matrix{Float64}, Uζ::Ma
 end
 
 """
-    periodic_wrap(x, n) -> Int
+    SurfacePoint(r, rθ, rζ)
 
-`mod1(x, n)` without a division. Only valid for `1 - n ≤ x ≤ 2n`.
+A 3D surface point with its tangents ∂r/∂θ, ∂r/∂ζ, interpolated together on the singular-correction patch.
 """
-@inline periodic_wrap(x::Int, n::Int) = x < 1 ? x + n : (x > n ? x - n : x)
+struct SurfacePoint
+    r::SVector{3,Float64}
+    rθ::SVector{3,Float64}
+    rζ::SVector{3,Float64}
+end
+
+Base.:+(a::SurfacePoint, b::SurfacePoint) = SurfacePoint(a.r + b.r, a.rθ + b.rθ, a.rζ + b.rζ)
+Base.:*(w::Real, a::SurfacePoint) = SurfacePoint(w * a.r, w * a.rθ, w * a.rζ)
+Base.zero(::Type{SurfacePoint}) = SurfacePoint(zero(SVector{3,Float64}), zero(SVector{3,Float64}), zero(SVector{3,Float64}))
 
 """
-    cross3!(c, a, b, idx)
-
-Write the cross product of rows `idx` of the `(N, 3)` matrices `a` and `b` into row `idx` of `c`.
+Partition of unity `χ(r) = exp(-36 r^p)` of the singular-correction patch, `r` in patch radii. `p` keys on `PATCH_DIM`, the
+collocation patch, since χ blends on the collocation grid.
 """
-@inline function cross3!(
-    c::AbstractMatrix,
-    a::AbstractMatrix,
-    b::AbstractMatrix,
-    idx::Int
-)
-    @inbounds begin
-        a1 = a[idx, 1]
-        a2 = a[idx, 2]
-        a3 = a[idx, 3]
-        b1 = b[idx, 1]
-        b2 = b[idx, 2]
-        b3 = b[idx, 3]
+@inline function patch_pou(r::Float64, PATCH_DIM::Int)
+    pou_power = PATCH_DIM > 45 ? 10 : (PATCH_DIM > 20 ? 8 : 6)
+    return r ≥ 1.0 ? 0.0 : exp(-36.0 * r^pou_power)
+end
 
-        c[idx, 1] = a2 * b3 - a3 * b2
-        c[idx, 2] = a3 * b1 - a1 * b3
-        c[idx, 3] = a1 * b2 - a2 * b1
+"""
+    patch_stencil(U, V, UP_DIM, Val(N)) -> (cu, cv, wu, wv)
+
+0-based corner and Lagrange weights of the `N × N` interpolation stencil at 0-based upsampled-patch coordinates `(U, V)`.
+The corner is rounded, not truncated, so an odd `N` is equivariant under the patch's π-rotation (stellarator symmetry),
+and clamped to the patch.
+"""
+@inline function patch_stencil(U::Float64, V::Float64, UP_DIM::Int, val::Val{N}) where {N}
+    cu = clamp(round(Int, U) - (N - 1) ÷ 2, 0, UP_DIM - N)
+    cv = clamp(round(Int, V) - (N - 1) ÷ 2, 0, UP_DIM - N)
+    return cu, cv, lagrange_weights(U - cu, val), lagrange_weights(V - cv, val)
+end
+
+"""
+    interpolate_patch(patch, U, V, Val(N)) -> (q, cu, cv, wu, wv)
+
+`N × N` Lagrange interpolant of the patch at 0-based coordinates `(U, V)`, with its stencil.
+"""
+@inline function interpolate_patch(patch::Matrix{SurfacePoint}, U::Float64, V::Float64, val::Val{N}) where {N}
+    cu, cv, wu, wv = patch_stencil(U, V, size(patch, 1), val)
+    q = zero(SurfacePoint)
+    @inbounds for b in 1:N, a in 1:N
+        q += (wu[a] * wv[b]) * patch[cu+a, cv+b]
+    end
+    return q, cu, cv, wu, wv
+end
+
+"""
+    closest_point(patch, r, U, V, dU, dV, Val(N)) -> (U, V)
+
+Patch coordinates of the surface point closest to `r`, by Gauss–Newton on the patch interpolant from `(U, V)`; `dU`, `dV`
+are the patch's node spacings in θ and ζ. Steps are capped at 2 nodes.
+"""
+function closest_point(patch::Matrix{SurfacePoint}, r::SVector{3,Float64}, U::Float64, V::Float64, dU::Float64, dV::Float64, val::Val)
+    for _ in 1:20
+        q = interpolate_patch(patch, U, V, val)[1]
+        # 2×2 Gauss–Newton step (JᵀJ) Δ = Jᵀ(r - q.r) in patch-node coordinates ∂r/∂U = rθ dU, ∂r/∂V = rζ dV
+        e, ru, rv = r - q.r, q.rθ * dU, q.rζ * dV
+        g1, g2, h11, h12, h22 = dot(ru, e), dot(rv, e), dot(ru, ru), dot(ru, rv), dot(rv, rv)
+        ΔU = clamp((h22 * g1 - h12 * g2) / (h11 * h22 - h12^2), -2.0, 2.0)
+        ΔV = clamp((h11 * g2 - h12 * g1) / (h11 * h22 - h12^2), -2.0, 2.0)
+        U, V = U + ΔU, V + ΔV
+        abs(ΔU) + abs(ΔV) < 1e-10 && break
+    end
+    return U, V
+end
+
+"""
+    foreach_polar_node(f, patch, U, V, radial, patch_rad, ANG_DIM, Val(N))
+
+Polar quadrature of radius `patch_rad` collocation nodes about patch point `(U, V)`, on radial nodes `(ρ, dρ)` in
+`radial` (ρ in patch radii). Calls `f(q, cu, cv, wu, wv, w)` at each node with the interpolated patch data, its stencil,
+and the area weight χ(ρ) ρ dρ dα in collocation-node units [Malhotra JCP 397 (2019) 108791 eq. 38].
+"""
+function foreach_polar_node(f, patch::Matrix{SurfacePoint}, U::Float64, V::Float64, radial, patch_rad::Int, ANG_DIM::Int, val::Val)
+    # One patch radius = patch_rad collocation cells (area scale patch_rad²) = c = 2·patch_rad upsampled-patch spacings
+    PATCH_DIM, c = 2 * patch_rad + 1, 2.0 * patch_rad
+    # The radial weights do not depend on the angle, so the POU and sinh map are evaluated once per row
+    rings = [(ρ, patch_pou(ρ, PATCH_DIM) * patch_rad^2 * ρ * dρ * (2π / ANG_DIM)) for (ρ, dρ) in radial]
+    @inbounds for ia in 1:ANG_DIM
+        sα, cα = sincos(2π * (ia - 1) / ANG_DIM)
+        for (ρ, w) in rings
+            q, cu, cv, wu, wv = interpolate_patch(patch, U + c * ρ * cα, V + c * ρ * sα, val)
+            f(q, cu, cv, wu, wv, w)
+        end
     end
 end

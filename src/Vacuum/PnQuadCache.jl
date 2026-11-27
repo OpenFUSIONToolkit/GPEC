@@ -40,13 +40,11 @@ const _PN_CACHE_LOCK = Threads.SpinLock()
 """
     reset_caches!()
 
-Empty Vacuum's run-filled module-level caches: the per-n Legendre quadrature entries and the
-singular-quadrature data. Called after the precompile workload so no run state is serialized
+Empty Vacuum's run-filled module-level cache of per-n Legendre quadrature entries. Called after the precompile workload so no run state is serialized
 into the package image.
 """
 function reset_caches!()
     @lock _PN_CACHE_LOCK empty!(_PN_CACHE)
-    @lock _SINGULAR_QUAD_LOCK SINGULAR_QUAD_CACHE[] = nothing
     return nothing
 end
 
