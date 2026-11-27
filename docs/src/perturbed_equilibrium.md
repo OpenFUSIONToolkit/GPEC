@@ -7,7 +7,7 @@ It is the stage that turns a stability calculation into the quantities of error-
 
 The force-free states of [Stability](stability.md) give the displacement inside the plasma for any boundary value, and the [Vacuum](vacuum.md) response gives the field outside it.
 On the control surface at `psilim` the two are joined by requiring continuity of the normal field, which fixes the plasma response to an applied spectrum uniquely ([Park et al. (2007a)](citations.md#PerturbedEquilibrium), [Park et al. (2009)](citations.md#PerturbedEquilibrium)).
-`plasma_response(ffs)` builds the operators of that response once, with no reference to a drive; `perturbed_equilibrium(resp, rmp)` applies them to one external field from [Forcing Terms](forcing_terms.md), so a scan over fields reuses one response.
+`plasma_response(ffs)` builds the operators of that response once, with no reference to a drive; `perturbed_equilibrium(resp, field)` applies them to one external field from [Forcing Terms](forcing_terms.md), so a scan over fields reuses one response.
 `compute_perturbed_equilibrium` is the lower-level form of the same call.
 
 The resonant part of the response is reported at every rational surface as the singular coupling: the pitch-resonant field and current, the island half-width and the Chirikov overlap parameter.
@@ -41,7 +41,9 @@ The run writes up to five coupling matrices under `PerturbedEquilibrium/Singular
 | `C_resonant_current` | the pitch-resonant current | A/T |
 | `C_island_width_sq` | the squared island half-width | 1/T |
 | `C_penetrated_area_weighted_field` | the penetrated field, when the run computes it | dimensionless |
-| `C_Delta_prime` | the forcing-driven Δ′ | 1/T |
+| `C_Delta_mn` | the forcing-driven ``\Delta_{mn}`` | 1/T |
+
+All but the penetrated field are built from the jump of ``\partial b^\psi/\partial\psi`` across ``|m - nq| = 5\times10^{-4}``. That jump depends on the width it is taken across wherever the Mercier index ``D_I \ne -1/4``, so a single-n run on a `"Riccati"` or `error_field_response` `"Galerkin"` solve also writes each of them with the suffix `_asymptotic`, built from the jump of the asymptotic small solution, which no width enters; the applied quantities carry the same suffix, and `ResonantCoupling(src; matrix=:resonant_area_weighted_field_asymptotic)` wraps that resonant-field matrix.
 
 `ResonantCoupling` wraps the first; any of the others decomposes over any window of surfaces through the bare-matrix form of `dominant_coupling`, with the ``\tilde b`` conform taken from a `ResonantCoupling` of the same file, since the bare matrix carries no (m, n) labels for `check_mode_basis` to guard the projection:
 
@@ -58,7 +60,7 @@ A kinetic forward solve (`integrator = "Forward"`, `kinetic = "KineticForces"`) 
 With `compute_torque_response = true`, `plasma_response` refers that quadratic form back to the applied root-area-weighted field ``\tilde b`` and stores it at every node as the torque response matrix ``T_{xe}(\psi)``, cumulative in ψ, under `PerturbedEquilibrium/TorqueResponse/`; it is the `T_xe` of the Fortran GPEC, in the basis of the stored response matrices, in N·m/T².
 ``T_{xe}`` is built on the ``+n`` harmonic alone and is therefore twice the physical value, so the cumulative complex torque of an applied spectrum is ``T(\psi) = \tilde b^\dagger T_{xe}(\psi)\, \tilde b / 2`` (`torque_profile` applies the 1/2), with ``\operatorname{Re} T`` the toroidal torque inside ψ, equal to `Energies/toroidal_torque` at the control surface, and ``\operatorname{Im} T = 2n\,\delta W``.
 Only the Hermitian part ``(T_{xe} + T_{xe}^\dagger)/2`` contributes to the torque; its eigenvectors are the applied spectra of extremal torque, and the anti-Hermitian part carries the energy.
-Each `perturbed_equilibrium(resp, rmp)` call contracts ``T_{xe}`` with its field into a `TorqueResponse`: the applied torque ``T_\mathrm{applied}`` and the source form ``T_\mathrm{source} = M^\dagger T M`` with one column of ``M`` per forcing source, so that driving the sources at scale factors ``s`` gives ``s^\dagger T_\mathrm{source}\, s / 2``.
+Each `perturbed_equilibrium(resp, field)` call contracts ``T_{xe}`` with its field into a `TorqueResponse`: the applied torque ``T_\mathrm{applied}`` and the source form ``T_\mathrm{source} = M^\dagger T M`` with one column of ``M`` per forcing source, so that driving the sources at scale factors ``s`` gives ``s^\dagger T_\mathrm{source}\, s / 2``.
 
 ## Governing equations
 
@@ -91,15 +93,15 @@ The coupling matrices `C_*` map the applied ``\tilde b`` to each of these quanti
 
 ## Running it
 
-The response needs a force-free-states solve with `integrator = "Forward"` and no `[Wall]`.
-`"Forward"` is the only integrator that retains the dense ``\xi`` solution the operators are built from: a `"Riccati"` solve (the deck default) makes `plasma_response` warn that the response is skipped and return empty operators, so the failure surfaces only when a field is applied, and a `"Galerkin"` or `[Match]`ed solve, which publishes no free-boundary δW, is an error.
+The response needs a force-free-states solve with `vac_flag = true` and no `[Wall]`.
+The operators are built from a dense ``\xi`` solution with its free-boundary δW, which a `"Riccati"` solve (the deck default), a `"Forward"` solve and a `"Galerkin"` solve with `error_field_response = true` all provide when `vac_flag = true`: a `"Galerkin"` solve without those flags or a `[Match]`ed solve, whose singular coupling is not defined yet, is an error. The ψ-resolved torque response (`compute_torque_response`) needs a `"Forward"` kinetic solve.
 A solve with a wall is an error too, because the surface inductance is the free-space one and ``\Lambda`` from a wall run would mix two vacuum models; the wall case of a stability study is therefore a separate deck.
 
 From `examples/DIIID-like_ideal_example/gpec.toml`, after the `[ForceFreeStates]` solve and a `[ForcingTerms]` drive:
 
 ```toml
 [ForceFreeStates]
-integrator = "Forward"             # the dense ξ solution the response needs ("Riccati" is the default); no [Wall]
+integrator = "Forward"             # the dense ξ solution the response needs ("Riccati", the default, supplies one too); no [Wall]
 
 [PerturbedEquilibrium]
 compute_singular_coupling = true   # resonant fields, islands and Chirikov parameter
@@ -114,11 +116,11 @@ In a script the same two steps are
 using GeneralizedPerturbedEquilibrium
 
 resp = plasma_response(ffs; compute_singular_coupling=true)
-pe   = perturbed_equilibrium(resp, rmp; regularization_width=0.05)   # rmp: an RMPField, see the Scripting API
+pe   = perturbed_equilibrium(resp, field; regularization_width=0.05)   # field: a ForcingField, see the Scripting API
 save_to_hdf5("gpec.h5", pe)
 ```
 
-with the `RMPField` built from coils or a file as on the [Scripting API](api.md) page; computing the response does not write a file.
+with the `ForcingField` built from coils or a file as on the [Scripting API](api.md) page; computing the response does not write a file.
 
 ## Outputs
 
@@ -141,8 +143,9 @@ with the `RMPField` built from coils or a file as on the [Scripting API](api.md)
 | `PerturbedEquilibrium/SingularCoupling/resonant_current` | the pitch-resonant current | A |
 | `PerturbedEquilibrium/SingularCoupling/island_width_sq`, `island_half_width` | ``w_s^2`` and ``w_s`` in ψ_N | |
 | `PerturbedEquilibrium/SingularCoupling/chirikov_parameter` | ``\sigma_s`` | |
-| `PerturbedEquilibrium/SingularCoupling/Delta_prime` | the forcing-driven tearing Δ′ per surface | |
+| `PerturbedEquilibrium/SingularCoupling/Delta_mn` | the forcing-driven ``\Delta_{mn}`` per surface | |
 | `PerturbedEquilibrium/SingularCoupling/C_*` | the coupling matrices from the applied ``\tilde b`` to each quantity above | |
+| `PerturbedEquilibrium/SingularCoupling/*_asymptotic` | the resonant field, current, island widths, Chirikov parameter, ``\Delta_{mn}`` and their `C_*` matrices from the jump of the asymptotic small solution | as above |
 | `PerturbedEquilibrium/SingularCoupling/DominantMode/singular_values`, `right_singular_vectors`, `left_singular_vectors`, `rational_index`, `forcing_overlap` | the core-window SVD of the resonant-field coupling | |
 | `PerturbedEquilibrium/Energies/plasma_energy`, `vacuum_energy`, `surface_energy` | the perturbed energies | J |
 | `PerturbedEquilibrium/Energies/toroidal_torque` | the boundary-response torque ``T_\phi`` | N·m |
@@ -184,7 +187,6 @@ GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_dominant_coupling!
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.TorqueResponse
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_response_matrix
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.torque_profile
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.coil_flux_spectra
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.build_torque_response!
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.apply_torque_response!
 ```

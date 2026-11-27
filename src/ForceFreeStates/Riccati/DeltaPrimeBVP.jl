@@ -26,26 +26,29 @@ function warn_unresolved_surfaces(bases::AbstractDict, surfaces::Vector{SingType
 end
 
 """
-    compute_delta_prime_matrix(intr, propagators, chunks, axis_state; wv=nothing, wp=nothing, psio=0.0, extended_precision=false) -> (delta_prime, coefficients)
+    compute_delta_prime_matrix(intr, propagators, chunks, axis_state; wv=nothing, wp=nothing, psio=0.0,
+        extended_precision=false, error_field_response=true) -> (delta_prime, coefficients)
 
-Solve the STRIDE boundary-value problem for the inter-surface Δ' matrix
-[Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eq. 37].
+Solve the STRIDE boundary-value problem for the inter-surface Δ' matrices
+[Glasser & Kolemen 2018, Phys. Plasmas 25, 082502, Eq. 37]: with the vacuum at the edge, and with ξ(edge) = 0.
 
 ### Arguments
 
   - `intr`: Read for its mode space and singular surfaces.
   - `propagators`, `chunks`, `axis_state`: From `riccati_eulerlagrange_integration`.
-  - `wv`: Singfac-scaled vacuum response for the edge condition `wp + wv = 0`; `nothing` puts a conducting wall there.
+  - `wv`: Singfac-scaled vacuum response for the edge condition `wp + wv = 0`. With `nothing` only the ξ(edge) = 0
+    problem is solved, and no Δ_EF.
   - `wp`: The run's plasma response, used only as a check: a warning is issued when the edge momentum of the Δ_EF
     solve differs from it by more than `DELTA_PRIME_RESPONSE_MISMATCH`.
   - `psio`: Poloidal flux normalization.
   - `extended_precision`: Solve in `Complex{Double64}`.
+  - `error_field_response`: Also solve for Δ_EF.
 
 ### Returns
 
-  - `delta_prime`: A [`DeltaPrimeData`](@ref) whose `coil` is Δ_EF (empty without `wv`).
-  - `coefficients`: The BVP's solution vectors, one column per solution: the 2·msing Δ' solves, side-major, then the
-    N of Δ_EF. Input of `outer_solution_basis`; `nothing` without `wv`.
+  - `delta_prime`: A [`DeltaPrimeData`](@ref).
+  - `coefficients`: The solution vectors of the ξ(edge) = 0 problem, one column per solution: the 2·msing Δ' solves,
+    side-major, then the N of Δ_EF. Input of `outer_solution_basis`; `nothing` without Δ_EF.
 
 Both are `nothing` when no surface is crossed or, with a warning, when a surface carries more than one resonant mode.
 """
@@ -57,7 +60,8 @@ function compute_delta_prime_matrix(
     wv::Union{Nothing,Matrix{ComplexF64}}=nothing,
     wp::Union{Nothing,Matrix{ComplexF64}}=nothing,
     psio::Float64=0.0,
-    extended_precision::Bool=false
+    extended_precision::Bool=false,
+    error_field_response::Bool=true
 )
     intr.msing == 0 && return nothing, nothing
     _has_unsupported_multi_resonance(intr) && return nothing, nothing
@@ -71,26 +75,29 @@ function compute_delta_prime_matrix(
     uAxis = Matrix(qr(axis_state).Q)[:, 1:N]
     M, col_edge = _assemble_bvp(uShootR, uShootL, uAxis, ipert_all, msing, N, wv, psio)
 
-    # Δ_EF: needs a vacuum edge in the assembled matrix.
-    delta_ef = Matrix{ComplexF64}(undef, 0, 0)
-    delta_ef_solutions = nothing
-    if wv !== nothing
-        delta_ef, delta_ef_solutions = _solve_bvp_delta_ef(M, col_edge, msing, N, ipert_all)
-        if wp !== nothing
-            # Unit edge displacement, so the edge U₂ is the plasma response times ψ₀².
-            wp_bvp = uShootR[msing][(N+1):(2N), :] * delta_ef_solutions[_col_right(msing, N), :] ./ psio^2
-            mismatch = norm(wp_bvp - wp) / norm(wp)
-            if mismatch > DELTA_PRIME_RESPONSE_MISMATCH
-                @warn "Riccati: the plasma response from the Δ' system differs from the axis-to-edge one by $(@sprintf("%.1e", mismatch)) " *
-                      "(relative), so the chunk propagators have lost accuracy. Raise [Riccati] nchunks (now $(length(chunks)) chunks); " *
-                      "beyond about 150 poloidal harmonics also set extended_precision_bvp."
-            end
+    none = Matrix{ComplexF64}(undef, 0, 0)
+    if wv === nothing
+        # Assembled with the conducting-wall edge, so this is the ξ(edge) = 0 problem.
+        raw_fixedboundary, edge_response, _ = _solve_bvp_raw(M, msing, N, ipert_all, col_edge, extended_precision)
+        return DeltaPrimeData(none, raw_fixedboundary, none, edge_response), nothing
+    end
+    raw_freeboundary, _, _ = _solve_bvp_raw(M, msing, N, ipert_all, col_edge, extended_precision)
+    Mc = _fixed_edge_bvp(M, msing, N, col_edge)
+    raw_fixedboundary, edge_response, delta_prime_solutions = _solve_bvp_raw(Mc, msing, N, ipert_all, col_edge, extended_precision)
+    error_field_response || return DeltaPrimeData(raw_freeboundary, raw_fixedboundary, none, edge_response), nothing
+
+    delta_ef, delta_ef_solutions = _solve_bvp_delta_ef(Mc, msing, N, ipert_all)
+    if wp !== nothing
+        # Unit edge displacement, so the edge unknowns U₂(edge) are the plasma response times ψ₀².
+        wp_bvp = delta_ef_solutions[col_edge, :] ./ psio^2
+        mismatch = norm(wp_bvp - wp) / norm(wp)
+        if mismatch > DELTA_PRIME_RESPONSE_MISMATCH
+            @warn "Riccati: the plasma response from the Δ' system differs from the axis-to-edge one by $(@sprintf("%.1e", mismatch)) " *
+                  "(relative), so the chunk propagators have lost accuracy. Raise [Riccati] nchunks (now $(length(chunks)) chunks); " *
+                  "beyond about 150 poloidal harmonics also set extended_precision_bvp."
         end
     end
-    # The raw side-major D' (Fortran gal_write_delta layout) feeds `pest3_decompose`; Riccati leaves the blocks unfilled.
-    delta_prime, delta_prime_raw, delta_prime_solutions = _solve_bvp_and_combine_pest3(M, msing, N, ipert_all, extended_precision)
-    coefficients = wv === nothing ? nothing : [delta_prime_solutions delta_ef_solutions]
-    return DeltaPrimeData(delta_prime, delta_prime_raw, delta_ef, nothing, nothing, nothing), coefficients
+    return DeltaPrimeData(raw_freeboundary, raw_fixedboundary, delta_ef, edge_response), [delta_prime_solutions delta_ef_solutions]
 end
 
 # Column index helpers for the BVP matrix. j is the 1-based singular-surface index,
@@ -230,16 +237,25 @@ function _assemble_bvp(uShootR::Vector{Matrix{ComplexF64}},
     return M, col_edge
 end
 
-# Δ_EF (2·msing × N): the small-solution coefficient at each surface side per unit displacement of each edge mode,
-# from the BVP with its edge fixed. Also returns the N solution vectors.
-function _solve_bvp_delta_ef(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int, ipert_all::Vector{Int})
+# The BVP matrix `M` with its Eq. (38) vacuum-edge rows [Glasser & Kolemen 2018, Phys. Plasmas 25, 082502] replaced by
+# the conducting-wall edge of the `wv = nothing` assembly: U₁(edge) equals the right-hand side of the first N edge rows
+# (0 for the fixed-boundary D') and the edge unknowns hold U₂(edge).
+function _fixed_edge_bvp(M::Matrix{ComplexF64}, msing::Int, N::Int, col_edge)
     nMat = size(M, 1)
-    bot = (nMat-2msing-N+1):(nMat-2msing)   # Eq. (38) bottom rows, carrying the W_V block
+    edge_rows = (nMat-2msing-2N+1):(nMat-2msing)
     Mc = copy(M)
-    Mc[bot, :] .= 0
-    Mc[bot, col_edge] .= I(N)               # Dirichlet edge: the edge coefficients equal the source
+    Mc[edge_rows, col_edge] .= 0
+    Mc[edge_rows[(N+1):end], col_edge] .= -I(N)
+    return Mc
+end
+
+# Δ_EF (2·msing × N) from the fixed-edge BVP matrix `Mc`: the small-solution coefficient at each surface side for a
+# unit edge displacement in each poloidal mode. Also returns the N solution vectors.
+function _solve_bvp_delta_ef(Mc::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int})
+    nMat = size(Mc, 1)
+    u1_rows = (nMat-2msing-2N+1):(nMat-2msing-N)
     B = zeros(ComplexF64, nMat, N)
-    B[bot, :] .= I(N)                       # unit displacement, one column per edge poloidal mode
+    B[u1_rows, :] .= I(N)                   # unit edge displacement, one column per edge poloidal mode
     X = lu(Mc) \ B
     delta_ef = zeros(ComplexF64, 2msing, N)
     for j in 1:msing
@@ -251,9 +267,9 @@ function _solve_bvp_delta_ef(M::Matrix{ComplexF64}, col_edge, msing::Int, N::Int
     return delta_ef, X
 end
 
-# Solve the BVP and apply the PEST3 four-term combination, in Complex{Double64} when `extended_precision`. Returns
-# Δ', the raw side-major D' and the 2·msing solution vectors.
-function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int}, extended_precision::Bool)
+# Solve the BVP for the raw side-major D' (2·msing × 2·msing), in Complex{Double64} when `extended_precision`. Also
+# returns the edge unknowns of each solve (N × 2·msing) and the 2·msing solution vectors.
+function _solve_bvp_raw(M::Matrix{ComplexF64}, msing::Int, N::Int, ipert_all::Vector{Int}, col_edge, extended_precision::Bool)
     nMat = size(M, 1)
     s2 = 2 * msing
     Tc = extended_precision ? Complex{Double64} : ComplexF64
@@ -280,67 +296,5 @@ function _solve_bvp_and_combine_pest3(M::Matrix{ComplexF64}, msing::Int, N::Int,
             dp_raw[dRow, 2ksing] = x[_col_right(ksing, N)[ipert_k+N]]
         end
     end
-
-    # PEST3 four-term combination [Chance PPPL-2527]: Δ'[i,j] = (NW − NE − SW + SE) on each 2×2 block of dp_raw.
-    deltap = zeros(Tc, msing, msing)
-    for i in 1:msing, j in 1:msing
-        deltap[i, j] = dp_raw[2i, 2j] - dp_raw[2i, 2j-1] - dp_raw[2i-1, 2j] + dp_raw[2i-1, 2j-1]
-    end
-    return ComplexF64.(deltap), ComplexF64.(dp_raw), solutions
-end
-
-"""
-    pest3_decompose(dp_raw::AbstractMatrix) -> NamedTuple{(:A, :B, :Γ, :Δ)}
-
-Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
-ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
-blocks. Given rows and columns paired by surface (odd index = left, even
-index = right), the Fortran RDCON parity combination is
-
-```
-A'(i,j) = RR + RL + LR + LL    (even-i, even-j)   — interchange↔interchange
-B'(i,j) = RR − RL + LR − LL    (even-i, odd-j)    — interchange↔tearing
-Γ'(i,j) = RR + RL − LR − LL    (odd-i,  even-j)   — tearing↔interchange
-Δ'(i,j) = RR − RL − LR + LL    (odd-i,  odd-j)    — tearing↔tearing
-```
-
-where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
-`LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
-
-No Pletzer–Dewar ½ prefactor, matching Fortran RDCON; it cancels in `det(D' − D(γ)) = 0`.
-
-The Δ' block returned here equals `DeltaPrimeData.matrix`.
-
-# Arguments
-
-  - `dp_raw` — 2m×2m complex matrix (typically `DeltaPrimeData.raw`).
-
-# Returns
-
-Named tuple `(A, B, Γ, Δ)` of m×m matrices, the blocks of `D' = [[A' B'] [Γ' Δ']]` in the
-`det(D' − D(γ)) = 0` problem (interchange upper-left, tearing lower-right).
-"""
-function pest3_decompose(dp_raw::AbstractMatrix)
-    s2 = size(dp_raw, 1)
-    size(dp_raw, 2) == s2 ||
-        throw(ArgumentError("pest3_decompose: dp_raw must be square, got $(size(dp_raw))"))
-    iseven(s2) ||
-        throw(ArgumentError("pest3_decompose: dp_raw side must be 2m for integer m, got $s2"))
-    m = s2 ÷ 2
-    Tc = eltype(dp_raw)
-    Ap = zeros(Tc, m, m)
-    Bp = zeros(Tc, m, m)
-    Gp = zeros(Tc, m, m)
-    Dp = zeros(Tc, m, m)
-    for i in 1:m, j in 1:m
-        LL = dp_raw[2i-1, 2j-1]
-        LR = dp_raw[2i-1, 2j]
-        RL = dp_raw[2i, 2j-1]
-        RR = dp_raw[2i, 2j]
-        Ap[i, j] = RR + RL + LR + LL
-        Bp[i, j] = RR - RL + LR - LL
-        Gp[i, j] = RR + RL - LR - LL
-        Dp[i, j] = RR - RL - LR + LL
-    end
-    return (A=Ap, B=Bp, Γ=Gp, Δ=Dp)
+    return ComplexF64.(dp_raw), solutions[col_edge, :], solutions
 end

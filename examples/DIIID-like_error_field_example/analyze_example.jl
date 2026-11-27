@@ -24,10 +24,9 @@ full = ErrorFields.sensitivity_table(sens, PerturbedEquilibrium.dominant_couplin
 names = full.coil_names
 fcoils = findall(startswith("F"), names)
 
-println("coil       |δ_nom|    per mm of shift   per mm of rim    curvature")
+println("coil       |δ_nom|    per mm of shift   per mm of rim")
 for (j, nm) in enumerate(names)
-    @printf("%-8s %10.3e   %13.3e   %13.3e   %9.1e\n", nm, abs(full.delta_as_designed[j]), full.abs_delta_shift_per_mm[j],
-        full.abs_delta_rim_per_mm[j], max(maximum(sens.shift_linearity_residual[:, j]), maximum(sens.tilt_linearity_residual[:, j])))
+    @printf("%-8s %10.3e   %13.3e   %13.3e\n", nm, abs(full.delta_as_designed[j]), full.abs_delta_shift_per_mm[j], full.abs_delta_rim_per_mm[j])
 end
 
 # Error field per millimetre of in-plane shift and per millimetre of rim displacement from tilt,

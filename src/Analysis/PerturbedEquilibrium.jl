@@ -10,7 +10,7 @@ module PerturbedEquilibrium
 using HDF5
 
 using ..Analysis: register!, _require, _can, capabilities, REASONS, _draw
-import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse
+import ...PerturbedEquilibrium: PerturbedEquilibriumState, PlasmaResponse, dominant_coupling
 import ..CoilForcing: plot_control_surface, _control_surface_data, _equil_helicity
 
 const Source = Union{AbstractString,PerturbedEquilibriumState}
@@ -21,21 +21,35 @@ const _RESPONSE = "PerturbedEquilibrium/Response/"
 # The penetrated field when the run carries a nonzero one (matched runs), otherwise `nothing`.
 _penetrated(v) = isempty(v) || all(iszero, v) ? nothing : v
 
-function _coupling_data(s::PerturbedEquilibriumState)
+# The asymptotic set by default when the source carries no finite-width one (a matched result).
+_default_asymptotic(s::PerturbedEquilibriumState) = isempty(s.resonant_area_weighted_field)
+_default_asymptotic(h5path::AbstractString) = h5open(fid -> !haskey(fid, _COUPLING * "resonant_area_weighted_field"), h5path, "r")
+
+_set_name(asymptotic::Bool) = asymptotic ? "asymptotic" : "finite-width"
+
+# The applied resonant rows of one coupling set: from the finite-width ∂b^ψ/∂ψ jump, or with `asymptotic` from the asymptotic small solution.
+function _coupling_data(s::PerturbedEquilibriumState, asymptotic::Bool)
     r = s.response
-    return (; field=s.resonant_area_weighted_field, penetrated=_penetrated(s.penetrated_area_weighted_field), current=s.resonant_current, island_hw=s.island_half_width,
-        chirikov=s.chirikov_parameter,
-        delta_prime=s.delta_prime, psi=r.rational_psi, q=r.rational_q, m=r.rational_m_res, n=r.rational_n)
+    sfx = asymptotic ? "_asymptotic" : ""
+    pick(name) = getfield(s, Symbol(name, sfx))
+    isempty(pick(:resonant_area_weighted_field)) && throw(ArgumentError("this result carries no $(_set_name(asymptotic)) resonant coupling"))
+    return (; asymptotic, field=pick(:resonant_area_weighted_field), penetrated=_penetrated(s.penetrated_area_weighted_field), current=pick(:resonant_current),
+        island_hw=pick(:island_half_width), chirikov=pick(:chirikov_parameter), delta_mn=pick(:delta_mn), psi=r.rational_psi, q=r.rational_q,
+        m=r.rational_m_res, n=r.rational_n)
 end
 
-function _coupling_data(h5path::AbstractString)
+function _coupling_data(h5path::AbstractString, asymptotic::Bool)
     h5open(h5path, "r") do fid
+        sfx = asymptotic ? "_asymptotic" : ""
+        haskey(fid, _COUPLING * "resonant_area_weighted_field" * sfx) || throw(ArgumentError("$h5path carries no $(_set_name(asymptotic)) resonant coupling"))
         rd(name) = read(fid[_COUPLING*name])
         pen = haskey(fid, _COUPLING * "penetrated_area_weighted_field") ? _penetrated(rd("penetrated_area_weighted_field")) : nothing
-        (; field=rd("resonant_area_weighted_field"), penetrated=pen, current=rd("resonant_current"), island_hw=rd("island_half_width"), chirikov=rd("chirikov_parameter"),
-            delta_prime=rd("Delta_prime"), psi=rd("rational_psi"), q=rd("rational_q"), m=rd("rational_m"), n=rd("rational_n"))
+        (; asymptotic, field=rd("resonant_area_weighted_field" * sfx), penetrated=pen, current=rd("resonant_current" * sfx),
+            island_hw=rd("island_half_width" * sfx), chirikov=rd("chirikov_parameter" * sfx), delta_mn=rd("Delta_mn" * sfx), psi=rd("rational_psi"),
+            q=rd("rational_q"), m=rd("rational_m"), n=rd("rational_n"))
     end
 end
+_coupling_data(src, asymptotic::Nothing=nothing) = _coupling_data(src, _default_asymptotic(src))
 
 const _COMPONENTS = Dict(
     :xi_psi => (dataset="xi_psi", field=:psi, modes=:xi_modes, needs=:response_xi),
@@ -77,14 +91,14 @@ function _plot_resonant_coupling end
 function _plot_mode_spectrogram end
 function _plot_perturbed_equilibrium_summary end
 
-const _COUPLING_ROWS = (:field, :current, :island_hw, :chirikov, :delta_prime)
+const _COUPLING_ROWS = (:field, :current, :island_hw, :chirikov, :delta_mn)
 
 """
-    plot_resonant_area_weighted_field(src; save_path=nothing)
+    plot_resonant_area_weighted_field(src; asymptotic=nothing, save_path=nothing)
 
 Plot the resonant coupling at each rational surface in rows sharing a q = m/n axis: the resonant area-weighted field
 |b̄_res|, the resonant current |I_res|, the island half-width w/2, the effective island-overlap Chirikov parameter
-and the forcing-driven Re Δ′. Toroidal mode numbers are distinguished by colour; the title counts the surfaces with
+and the forcing-driven Re Δ_mn. Toroidal mode numbers are distinguished by colour; the title counts the surfaces with
 overlapping islands.
 
 ### Arguments
@@ -93,19 +107,21 @@ overlapping islands.
 
 ### Keyword arguments
 
+  - `asymptotic`: Draw the coupling from the asymptotic small solution (the `_asymptotic` outputs) instead of the finite-width
+    jump (default: the asymptotic set when the result carries only that one, as a matched result does)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_resonant_area_weighted_field(src::Source; save_path=nothing)
+function plot_resonant_area_weighted_field(src::Source; asymptotic::Union{Nothing,Bool}=nothing, save_path=nothing)
     _require(plot_resonant_area_weighted_field, src)
-    return _draw(_plot_resonant_coupling, _coupling_data(src), _COUPLING_ROWS; save_path)
+    return _draw(_plot_resonant_coupling, _coupling_data(src, asymptotic), _COUPLING_ROWS; save_path)
 end
 
 """
-    plot_resonant_area_weighted_field_amplitude(src; save_path=nothing)
+    plot_resonant_area_weighted_field_amplitude(src; asymptotic=nothing, save_path=nothing)
 
 Plot the resonant area-weighted field |b̄_res| = |Φ_res|/A at each rational surface [Pharr 2026], in tesla, beside the
 penetrated field |b̄_pen| when the run carries one.
@@ -116,19 +132,21 @@ penetrated field |b̄_pen| when the run carries one.
 
 ### Keyword arguments
 
+  - `asymptotic`: Draw the coupling from the asymptotic small solution (the `_asymptotic` outputs) instead of the finite-width
+    jump (default: the asymptotic set when the result carries only that one, as a matched result does)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_resonant_area_weighted_field_amplitude(src::Source; save_path=nothing)
+function plot_resonant_area_weighted_field_amplitude(src::Source; asymptotic::Union{Nothing,Bool}=nothing, save_path=nothing)
     _require(plot_resonant_area_weighted_field_amplitude, src)
-    return _draw(_plot_resonant_coupling, _coupling_data(src), (:field,); save_path)
+    return _draw(_plot_resonant_coupling, _coupling_data(src, asymptotic), (:field,); save_path)
 end
 
 """
-    plot_island_widths(src; save_path=nothing)
+    plot_island_widths(src; asymptotic=nothing, save_path=nothing)
 
 Plot the island half-width w/2 at each rational surface, in ψ_N.
 
@@ -138,19 +156,21 @@ Plot the island half-width w/2 at each rational surface, in ψ_N.
 
 ### Keyword arguments
 
+  - `asymptotic`: Draw the coupling from the asymptotic small solution (the `_asymptotic` outputs) instead of the finite-width
+    jump (default: the asymptotic set when the result carries only that one, as a matched result does)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_island_widths(src::Source; save_path=nothing)
+function plot_island_widths(src::Source; asymptotic::Union{Nothing,Bool}=nothing, save_path=nothing)
     _require(plot_island_widths, src)
-    return _draw(_plot_resonant_coupling, _coupling_data(src), (:island_hw,); save_path)
+    return _draw(_plot_resonant_coupling, _coupling_data(src, asymptotic), (:island_hw,); save_path)
 end
 
 """
-    plot_chirikov_parameter(src; save_path=nothing)
+    plot_chirikov_parameter(src; asymptotic=nothing, save_path=nothing)
 
 Plot the effective island-overlap Chirikov parameter at each rational surface, with the overlap threshold 1 marked.
 
@@ -160,22 +180,24 @@ Plot the effective island-overlap Chirikov parameter at each rational surface, w
 
 ### Keyword arguments
 
+  - `asymptotic`: Draw the coupling from the asymptotic small solution (the `_asymptotic` outputs) instead of the finite-width
+    jump (default: the asymptotic set when the result carries only that one, as a matched result does)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_chirikov_parameter(src::Source; save_path=nothing)
+function plot_chirikov_parameter(src::Source; asymptotic::Union{Nothing,Bool}=nothing, save_path=nothing)
     _require(plot_chirikov_parameter, src)
-    return _draw(_plot_resonant_coupling, _coupling_data(src), (:chirikov,); save_path)
+    return _draw(_plot_resonant_coupling, _coupling_data(src, asymptotic), (:chirikov,); save_path)
 end
 
 """
-    plot_driven_delta_prime(src; save_path=nothing)
+    plot_driven_delta_mn(src; asymptotic=nothing, save_path=nothing)
 
-Plot the forcing-driven Re Δ′ at each rational surface, the response to the applied forcing; for the
-equilibrium's own Δ′ of a Riccati or Galerkin solve, see `ForceFreeStates.plot_delta_prime`.
+Plot the forcing-driven Re Δ_mn at each rational surface, the jump of ∂b^ψ/∂ψ across it that the applied forcing
+drives; for the equilibrium's Δ′ matrix of a Riccati or Galerkin solve, see `ForceFreeStates.plot_delta_prime`.
 
 ### Arguments
 
@@ -183,15 +205,17 @@ equilibrium's own Δ′ of a Riccati or Galerkin solve, see `ForceFreeStates.plo
 
 ### Keyword arguments
 
+  - `asymptotic`: Draw the coupling from the asymptotic small solution (the `_asymptotic` outputs) instead of the finite-width
+    jump (default: the asymptotic set when the result carries only that one, as a matched result does)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
 ### Returns
 
 A Makie `Figure`.
 """
-function plot_driven_delta_prime(src::Source; save_path=nothing)
-    _require(plot_driven_delta_prime, src)
-    return _draw(_plot_resonant_coupling, _coupling_data(src), (:delta_prime,); save_path)
+function plot_driven_delta_mn(src::Source; asymptotic::Union{Nothing,Bool}=nothing, save_path=nothing)
+    _require(plot_driven_delta_mn, src)
+    return _draw(_plot_resonant_coupling, _coupling_data(src, asymptotic), (:delta_mn,); save_path)
 end
 
 const _STYLES = (:log_heatmap, :linear_heatmap, :lines)
@@ -244,7 +268,7 @@ A Makie `Figure`. Throws an `ArgumentError` when no panel can be drawn.
 function plot_perturbed_equilibrium_summary(src::Source; save_path=nothing)
     _require(plot_perturbed_equilibrium_summary, src)
     caps = capabilities(src)
-    coupling = _can(plot_resonant_area_weighted_field_amplitude, caps) ? _coupling_data(src) : nothing
+    coupling = _can(plot_resonant_area_weighted_field_amplitude, caps) ? _coupling_data(src, nothing) : nothing
     edge = :response_b in caps ? _response_data(src, :b_psi) : nothing
     xi = _can(plot_mode_spectrogram, caps) ? _response_data(src, :xi_psi) : nothing
     rz = src isa PerturbedEquilibriumState && _can(plot_perturbed_field_rz, caps) ? _poloidal_data(src, :b_n) : nothing
@@ -301,9 +325,9 @@ function _boundary_displacement(pe::PerturbedEquilibriumState; phi=0.0, ntheta=7
     return (; R=first.(pts), Z=last.(pts), xi)
 end
 
-# Island chains at toroidal angle φ between ψ_s ∓ (w/2)|cos(ξ/2)|, ξ = 2π m θ + n (ν − φ) + α with α the phase of the
-# surface's resonant field, in (θ, ψ_N) and as (R, Z) polygons; ψ is clipped to the last flux surface.
-function _island_chains(pe::PerturbedEquilibriumState, halfwidth; phi=0.0, ntheta=1440)
+# Island chains at toroidal angle φ between ψ_s ∓ (w/2)|cos(ξ/2)|, ξ = 2π m θ + n (ν − φ) + α with α the phase of `field`
+# on that surface, in (θ, ψ_N) and as (R, Z) polygons; ψ is clipped to the last flux surface.
+function _island_chains(pe::PerturbedEquilibriumState, halfwidth, field; phi=0.0, ntheta=1440)
     resp = pe.response
     equil = resp.ffs.equil
     psimax = pe.psi_grid[end]
@@ -313,7 +337,7 @@ function _island_chains(pe::PerturbedEquilibriumState, halfwidth; phi=0.0, nthet
     for row in eachindex(resp.rational_psi)
         psis, m, n, w = resp.rational_psi[row], resp.rational_m_res[row], resp.rational_n[row], halfwidth[row]
         w > 0 || continue
-        α = angle(pe.resonant_area_weighted_field[row])
+        α = angle(field[row])
         half = [w * abs(cos((2π * m * θ + n * (equil.rzphi_nu((psis, θ); hint) - phi) + α) / 2)) for θ in θs]
         lo, hi = clamp.(psis .- half, 0.0, psimax), clamp.(psis .+ half, 0.0, psimax)
         outer = [_rz(equil, p, θ, hint) for (p, θ) in zip(hi, θs)]
@@ -359,10 +383,10 @@ function plot_perturbed_field_rz(pe::PerturbedEquilibriumState; component=:b_n, 
 end
 
 """
-    plot_effective_islands(pe; phi=0.0, save_path=nothing)
+    plot_effective_islands(pe; asymptotic=nothing, phi=0.0, save_path=nothing)
 
 Plot the island chains the effective resonant flux would open, in (θ, ψ_N) and on the poloidal plane at toroidal angle
-φ, with each chain's half-width w/2 (in ψ_N) listed.
+φ, with each chain's half-width w/2 (in ψ_N) listed. The chains take the phase of the stored effective field.
 
 ### Arguments
 
@@ -370,6 +394,8 @@ Plot the island chains the effective resonant flux would open, in (θ, ψ_N) and
 
 ### Keyword arguments
 
+  - `asymptotic`: Use the coupling from the asymptotic small solution (the `_asymptotic` outputs) instead of the finite-width
+    jump (default: the asymptotic set when the result carries only that one, as a matched result does)
   - `phi`: Toroidal angle in radians (default: `0.0`)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
@@ -377,16 +403,19 @@ Plot the island chains the effective resonant flux would open, in (θ, ψ_N) and
 
 A Makie `Figure`.
 """
-function plot_effective_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
+function plot_effective_islands(pe::PerturbedEquilibriumState; asymptotic::Union{Nothing,Bool}=nothing, phi=0.0, save_path=nothing)
     _require(plot_effective_islands, pe)
-    return _draw(_plot_islands, _island_chains(pe, pe.island_half_width; phi), "Effective islands"; save_path)
+    d = _coupling_data(pe, asymptotic)
+    title = d.asymptotic ? "Effective islands (asymptotic)" : "Effective islands"
+    return _draw(_plot_islands, _island_chains(pe, d.island_hw, d.field; phi), title; save_path)
 end
 
 """
-    plot_islands(pe; phi=0.0, save_path=nothing)
+    plot_islands(pe; asymptotic=nothing, phi=0.0, save_path=nothing)
 
-Plot the island chains of the penetrated field in (θ, ψ_N) and on the poloidal plane at toroidal angle φ. The
-half-width scales from the effective one as w² ∝ |b̄|: w_pen = w_eff √(|b̄_pen| / |b̄_res|).
+Plot the island chains of the penetrated field over those the effective resonant flux would open, in (θ, ψ_N) and on the
+poloidal plane at toroidal angle φ. The penetrated half-width scales from the effective one as w² ∝ |b̄|:
+w_pen = w_eff √(|b̄_pen| / |b̄_res|). Each chain takes the phase of its own field.
 
 ### Arguments
 
@@ -394,6 +423,8 @@ half-width scales from the effective one as w² ∝ |b̄|: w_pen = w_eff √(|b�
 
 ### Keyword arguments
 
+  - `asymptotic`: Use the effective coupling from the asymptotic small solution (the `_asymptotic` outputs) instead of the
+    finite-width jump (default: the asymptotic set when the result carries only that one, as a matched result does)
   - `phi`: Toroidal angle in radians (default: `0.0`)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
@@ -401,18 +432,33 @@ half-width scales from the effective one as w² ∝ |b̄|: w_pen = w_eff √(|b�
 
 A Makie `Figure`.
 """
-function plot_islands(pe::PerturbedEquilibriumState; phi=0.0, save_path=nothing)
+function plot_islands(pe::PerturbedEquilibriumState; asymptotic::Union{Nothing,Bool}=nothing, phi=0.0, save_path=nothing)
     _require(plot_islands, pe)
-    ratio = abs.(pe.penetrated_area_weighted_field) ./ max.(abs.(pe.resonant_area_weighted_field), floatmin())
-    return _draw(_plot_islands, _island_chains(pe, pe.island_half_width .* sqrt.(ratio); phi), "Penetrated islands"; save_path)
+    d = _coupling_data(pe, asymptotic)
+    pen = pe.penetrated_area_weighted_field
+    w_pen = d.island_hw .* sqrt.(abs.(pen) ./ max.(abs.(d.field), floatmin()))
+    effective = _island_chains(pe, d.island_hw, d.field; phi)
+    return _draw(_plot_islands, _island_chains(pe, w_pen, pen; phi), "Penetrated and effective islands"; effective, save_path)
+end
+
+# The coupling matrices a response can carry, by their name without the `C_` prefix.
+const _MATRICES = (:resonant_area_weighted_field, :resonant_current, :island_width_sq, :delta_mn, :penetrated_area_weighted_field,
+    :resonant_area_weighted_field_asymptotic, :resonant_current_asymptotic, :island_width_sq_asymptotic, :delta_mn_asymptotic)
+
+# The named coupling matrix of `resp` and its SVD over the core window, as the stored dominant mode is taken.
+function _coupling_svd(resp::PlasmaResponse, matrix, fn)
+    name = something(matrix, isempty(resp.C_resonant_area_weighted_field) ? :resonant_area_weighted_field_asymptotic : :resonant_area_weighted_field)
+    name in _MATRICES || throw(ArgumentError("$(nameof(fn)): matrix must be one of $(_MATRICES), got :$name"))
+    C = getfield(resp, Symbol(:C_, name))
+    (isempty(C) || all(iszero, C)) && throw(ArgumentError("$(nameof(fn)): the plasma response carries no C_$name"))
+    return (; name, C, dom=dominant_coupling(C, resp.rational_psi))
 end
 
 """
-    plot_dominant_mode_surface(src; mode=1, n=nothing, save_path=nothing)
+    plot_dominant_mode_surface(src; matrix=nothing, mode=1, n=nothing, save_path=nothing)
 
-Plot dominant resonant-coupling mode `mode`, the right singular vector of the resonant coupling matrix, as the normal
-field it represents on the control surface: toroidal angle φ against poloidal angle θ, in arbitrary units (the vector
-has unit norm).
+Plot dominant mode `mode` of a coupling matrix, its right singular vector, as the normal field it represents on the
+control surface: toroidal angle φ against poloidal angle θ, in arbitrary units (the vector has unit norm).
 
 ### Arguments
 
@@ -420,6 +466,10 @@ has unit norm).
 
 ### Keyword arguments
 
+  - `matrix`: The coupling matrix, a `C_` field of the response without the prefix: `:resonant_area_weighted_field`,
+    `:resonant_current`, `:island_width_sq`, `:delta_mn`, their `_asymptotic` forms, or `:penetrated_area_weighted_field`
+    (default: `:resonant_area_weighted_field`, or `:resonant_area_weighted_field_asymptotic` for a response that carries only
+    the asymptotic set, as a matched one does)
   - `mode`: Which dominant mode, 1 the strongest (default: `1`)
   - `n`: Toroidal mode number drawn (default: the first)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
@@ -428,40 +478,42 @@ has unit norm).
 
 A Makie `Figure`.
 """
-function plot_dominant_mode_surface(src::Union{PlasmaResponse,PerturbedEquilibriumState}; mode::Int=1, n=nothing, save_path=nothing)
+function plot_dominant_mode_surface(src::Union{PlasmaResponse,PerturbedEquilibriumState}; matrix::Union{Nothing,Symbol}=nothing, mode::Int=1, n=nothing,
+    save_path=nothing)
     _require(plot_dominant_mode_surface, src)
     resp = src isa PlasmaResponse ? src : src.response
-    1 <= mode <= length(resp.dominant_singular_values) ||
-        throw(ArgumentError("plot_dominant_mode_surface: mode must be 1 to $(length(resp.dominant_singular_values))"))
-    σ = resp.dominant_singular_values[mode]
-    return plot_control_surface(resp, resp.dominant_right_singular_vectors[:, mode]; n, arb=true, label="dominant mode $mode (σ = $(round(σ; sigdigits=3)))",
-        save_path)
+    c = _coupling_svd(resp, matrix, plot_dominant_mode_surface)
+    nk = length(c.dom.singular_values)
+    1 <= mode <= nk || throw(ArgumentError("plot_dominant_mode_surface: mode must be 1 to $nk"))
+    σ = c.dom.singular_values[mode]
+    return plot_control_surface(resp, c.dom.right_singular_vectors[:, mode]; n, arb=true,
+        label="dominant mode $mode of C_$(c.name) (σ = $(round(σ; sigdigits=3)))", save_path)
 end
 
 # Each dominant mode's b_n at toroidal angle `phi` around the control-surface cross-section, normalized to its peak there,
 # with the boundary in (R, Z). The map's φ = 0 column of the spectrum rotated by e^{i n h φ} is the field at φ.
-function _singular_mode_rz_data(resp::PlasmaResponse, modes, phi; mtheta=512)
+function _singular_mode_rz_data(resp::PlasmaResponse, c, modes, phi; mtheta=512)
     equil = resp.ffs.equil
     hint = (Ref(1), Ref(1))
     turn = cis(first(resp.n_modes) * _equil_helicity(equil) * phi)
     return map(modes) do k
-        v = resp.dominant_right_singular_vectors[:, k]
+        v = c.dom.right_singular_vectors[:, k]
         d = _control_surface_data(resp, v .* turn; nphi=1, mtheta)
         b = d.field[:, 1] ./ maximum(abs, d.field[:, 1])
         pts = [_rz(equil, equil.rzphi_xs[end], mod(θ / 360, 1), hint) for θ in d.theta]
         R, Z = first.(pts), last.(pts)
-        (; mode=k, sigma=resp.dominant_singular_values[k], phi, R=[R; R[1]], Z=[Z; Z[1]], b=[b; b[1]])
+        (; mode=k, matrix=c.name, sigma=c.dom.singular_values[k], phi, R=[R; R[1]], Z=[Z; Z[1]], b=[b; b[1]])
     end
 end
 
 function _plot_singular_mode_rz end
 
 """
-    plot_singular_mode_rz(src; modes=nothing, phi=0.0, save_path=nothing)
+    plot_singular_mode_rz(src; matrix=nothing, modes=nothing, phi=0.0, save_path=nothing)
 
-Plot dominant resonant-coupling modes on the control-surface cross-section: the boundary in (R, Z) as a band coloured
-by each mode's normal field b_n at toroidal angle φ, normalized to its peak, one panel per mode. The modes are the
-stored decomposition's, over the rational surfaces with ψ_N ≤ 0.9.
+Plot the dominant modes of a coupling matrix on the control-surface cross-section: the boundary in (R, Z) as a band
+coloured by each mode's normal field b_n at toroidal angle φ, normalized to its peak, one panel per mode. The modes come
+from the matrix's SVD over the rational surfaces with ψ_N ≤ 0.9.
 
 ### Arguments
 
@@ -469,6 +521,10 @@ stored decomposition's, over the rational surfaces with ψ_N ≤ 0.9.
 
 ### Keyword arguments
 
+  - `matrix`: The coupling matrix, a `C_` field of the response without the prefix: `:resonant_area_weighted_field`,
+    `:resonant_current`, `:island_width_sq`, `:delta_mn`, their `_asymptotic` forms, or `:penetrated_area_weighted_field`
+    (default: `:resonant_area_weighted_field`, or `:resonant_area_weighted_field_asymptotic` for a response that carries only
+    the asymptotic set, as a matched one does)
   - `modes`: Which dominant modes, 1 the strongest (default: the first three that exist)
   - `phi`: Toroidal angle in radians (default: `0.0`)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
@@ -477,38 +533,40 @@ stored decomposition's, over the rational surfaces with ψ_N ≤ 0.9.
 
 A Makie `Figure`.
 """
-function plot_singular_mode_rz(src::Union{PlasmaResponse,PerturbedEquilibriumState}; modes=nothing, phi=0.0, save_path=nothing)
+function plot_singular_mode_rz(src::Union{PlasmaResponse,PerturbedEquilibriumState}; matrix::Union{Nothing,Symbol}=nothing, modes=nothing, phi=0.0,
+    save_path=nothing)
     _require(plot_singular_mode_rz, src)
     resp = src isa PlasmaResponse ? src : src.response
-    nk = length(resp.dominant_singular_values)
+    c = _coupling_svd(resp, matrix, plot_singular_mode_rz)
+    nk = length(c.dom.singular_values)
     ks = something(modes, 1:min(3, nk))
     all(k -> 1 <= k <= nk, ks) || throw(ArgumentError("plot_singular_mode_rz: modes must lie in 1 to $nk"))
-    return _draw(_plot_singular_mode_rz, _singular_mode_rz_data(resp, collect(ks), phi); save_path)
+    return _draw(_plot_singular_mode_rz, _singular_mode_rz_data(resp, c, collect(ks), phi); save_path)
 end
 
-# The resonant coupling matrix of toroidal mode number `n` and its SVD C = U Σ Vᴴ: rows are rational surfaces, columns
-# poloidal harmonics; U has rows only for the surfaces inside the SVD's core window, at `retained` in the row order.
-function _coupling_matrix_data(resp::PlasmaResponse, n)
+# Coupling matrix `c` of toroidal mode number `n` and its SVD C = U Σ Vᴴ: rows are rational surfaces, columns poloidal
+# harmonics; U has rows only for the surfaces inside the SVD's core window, at `retained` in the row order.
+function _coupling_matrix_data(resp::PlasmaResponse, c, n)
     n = something(n, first(resp.n_modes))
     n in resp.n_modes || throw(ArgumentError("plot_coupling_matrix: n = $n is not one of the response's toroidal mode numbers $(unique(resp.n_modes))"))
     cols = findall(==(n), resp.n_modes)
     rows = findall(==(n), resp.rational_n)
-    inwindow = [i for (i, r) in enumerate(resp.dominant_rational_index) if r in rows]
-    return (; m=resp.m_modes[cols], labels=["$(resp.rational_m_res[r])/$n" for r in rows], m_res=resp.rational_m_res[rows],
-        C=resp.C_resonant_area_weighted_field[rows, cols], sigma=resp.dominant_singular_values,
-        U=resp.dominant_left_singular_vectors[inwindow, :], retained=[findfirst(==(resp.dominant_rational_index[i]), rows) for i in inwindow],
-        V=resp.dominant_right_singular_vectors[cols, :])
+    dom = c.dom
+    inwindow = [i for (i, r) in enumerate(dom.rational_index) if r in rows]
+    return (; matrix=c.name, m=resp.m_modes[cols], labels=["$(resp.rational_m_res[r])/$n" for r in rows], m_res=resp.rational_m_res[rows],
+        C=c.C[rows, cols], sigma=dom.singular_values, U=dom.left_singular_vectors[inwindow, :],
+        retained=[findfirst(==(dom.rational_index[i]), rows) for i in inwindow], V=dom.right_singular_vectors[cols, :])
 end
 
 function _plot_coupling_matrix end
 
 """
-    plot_coupling_matrix(src; n=nothing, save_path=nothing)
+    plot_coupling_matrix(src; matrix=nothing, n=nothing, save_path=nothing)
 
-Plot the resonant coupling matrix C, the resonant area-weighted field b̄_res at each rational surface per unit applied
-harmonic b̃_m, with its singular value decomposition C = U Σ Vᴴ: |C| against surface and m, the left singular vectors
-|U| on the same surface axis, the right singular vectors |V| on the same m axis (V₁ is the dominant mode), and the
-singular values σ. Surfaces outside the decomposition's core window are shaded.
+Plot a coupling matrix C, the response at each rational surface per unit applied harmonic b̃_m (by default the resonant
+area-weighted field b̄_res), with its singular value decomposition C = U Σ Vᴴ: |C| against surface and m, the left
+singular vectors |U| on the same surface axis, the right singular vectors |V| on the same m axis (V₁ is the dominant
+mode), and the singular values σ. Surfaces outside the decomposition's core window are shaded.
 
 ### Arguments
 
@@ -516,6 +574,10 @@ singular values σ. Surfaces outside the decomposition's core window are shaded.
 
 ### Keyword arguments
 
+  - `matrix`: The coupling matrix, a `C_` field of the response without the prefix: `:resonant_area_weighted_field`,
+    `:resonant_current`, `:island_width_sq`, `:delta_mn`, their `_asymptotic` forms, or `:penetrated_area_weighted_field`
+    (default: `:resonant_area_weighted_field`, or `:resonant_area_weighted_field_asymptotic` for a response that carries only
+    the asymptotic set, as a matched one does)
   - `n`: Toroidal mode number drawn (default: the first)
   - `save_path`: If given, save the figure to this path (default: `nothing`)
 
@@ -523,9 +585,10 @@ singular values σ. Surfaces outside the decomposition's core window are shaded.
 
 A Makie `Figure`.
 """
-function plot_coupling_matrix(src::Union{PlasmaResponse,PerturbedEquilibriumState}; n=nothing, save_path=nothing)
+function plot_coupling_matrix(src::Union{PlasmaResponse,PerturbedEquilibriumState}; matrix::Union{Nothing,Symbol}=nothing, n=nothing, save_path=nothing)
     _require(plot_coupling_matrix, src)
-    return _draw(_plot_coupling_matrix, _coupling_matrix_data(src isa PlasmaResponse ? src : src.response, n); save_path)
+    resp = src isa PlasmaResponse ? src : src.response
+    return _draw(_plot_coupling_matrix, _coupling_matrix_data(resp, _coupling_svd(resp, matrix, plot_coupling_matrix), n); save_path)
 end
 
 const _PE_SOURCES = (PerturbedEquilibriumState, AbstractString)
@@ -535,16 +598,16 @@ register!(plot_resonant_area_weighted_field, _PE_SOURCES, (:singular_coupling,),
 register!(plot_resonant_area_weighted_field_amplitude, _PE_SOURCES, (:singular_coupling,), "|b̄_res| per rational surface")
 register!(plot_island_widths, _PE_SOURCES, (:singular_coupling,), "island half-width per rational surface")
 register!(plot_chirikov_parameter, _PE_SOURCES, (:singular_coupling,), "effective island-overlap Chirikov parameter per rational surface")
-register!(plot_driven_delta_prime, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ′ per rational surface")
+register!(plot_driven_delta_mn, _PE_SOURCES, (:singular_coupling,), "forcing-driven Δ_mn per rational surface")
 register!(plot_mode_spectrogram, _PE_SOURCES, (:response_xi,), "response harmonics against ψ_N (component = :xi_psi, :b_psi, :Jb_theta, :Jb_zeta)")
-register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
-    "a dominant resonant-coupling mode as b_n on the control surface")
-register!(plot_singular_mode_rz, (PlasmaResponse, PerturbedEquilibriumState), (:dominant_mode,),
-    "dominant resonant-coupling modes as b_n on the control-surface cross-section")
-register!(plot_coupling_matrix, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices, :dominant_mode),
-    "resonant coupling matrix |C| with its singular values and left and right singular vectors")
+register!(plot_dominant_mode_surface, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices,),
+    "a dominant mode of a coupling matrix as b_n on the control surface (matrix = which C_)")
+register!(plot_singular_mode_rz, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices,),
+    "dominant modes of a coupling matrix as b_n on the control-surface cross-section (matrix = which C_)")
+register!(plot_coupling_matrix, (PlasmaResponse, PerturbedEquilibriumState), (:coupling_matrices,),
+    "a coupling matrix |C| with its singular values and left and right singular vectors (matrix = which C_)")
 register!(plot_perturbed_field_rz, (PerturbedEquilibriumState,), (:response_n,), "b_n or ξ_n on the poloidal plane (deform = true for the displaced boundary)")
 register!(plot_effective_islands, (PerturbedEquilibriumState,), (:singular_coupling,), "island chains from the effective resonant flux")
-register!(plot_islands, (PerturbedEquilibriumState,), (:penetrated_field,), "island chains from the penetrated field")
+register!(plot_islands, (PerturbedEquilibriumState,), (:singular_coupling, :penetrated_field), "island chains from the penetrated field over the effective ones")
 
 end # module PerturbedEquilibrium

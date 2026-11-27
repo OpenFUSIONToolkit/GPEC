@@ -48,12 +48,12 @@ control-surface response operators (inductances, permeability, reluctance; Park 
 Plasmas 14, 052110 (2007)) and, with `compute_singular_coupling`, the singular-coupling matrices and
 their dominant modes (Park, Phys. Plasmas 16, 056115 (2009)), and with `compute_torque_response` the
 ψ-resolved torque response `T_xe` of a single-`n` forward kinetic solve. Apply it to an external field
-with `perturbed_equilibrium(resp, rmp)` as many times as needed.
+with `perturbed_equilibrium(resp, field)` as many times as needed.
 
-Products the producing integrator could not supply (free-boundary energies, a ξ solution) leave the
-corresponding operators empty: the step warns and is skipped. Galerkin and `:matched` results publish
-no free-boundary δW yet, so building a response from one is an error. So is a solve with a wall: the
-surface inductance is free-space, and the response needs Λ from the same no-wall vacuum.
+A result without a ξ solution leaves the operators empty: the step warns and is skipped. A result without
+the free-boundary δW is an error (it needs `vac_flag`, and for Galerkin also `error_field_response`), and so is
+a solve with a wall: the surface inductance is free-space, and the response needs Λ from the same no-wall vacuum.
+A `:matched` result gets only the `_asymptotic` singular-coupling metrics and the penetrated field.
 """
 function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::Bool=true, compute_torque_response::Bool=false,
     verbose::Bool=false)::PlasmaResponse
@@ -62,24 +62,20 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
             "plasma_response needs a force-free-states solve without a wall: its surface inductance L is free-space, " *
             "so Λ from a wall run would mix two vacuum models. Solve with wall=nothing (no [Wall] section)."
         )
-    # Galerkin and matched results publish no plasma edge response wp, so no operator could be built.
-    if ffs.free_boundary === nothing && (ffs.integrator === :galerkin || ffs.closure === :matched)
-        error("plasma_response needs the free-boundary δW, which a $(ffs.integrator) result with $(ffs.closure) closure " *
-              "does not publish yet; use a forward solve")
-    end
+    ffs.free_boundary === nothing &&
+        error(
+            "plasma_response needs the free-boundary δW, which this $(ffs.integrator) result does not carry: solve with " *
+            "vac_flag=true (and Galerkin(; error_field_response=true) for a Galerkin solve)"
+        )
 
     m_modes, n_modes = mode_arrays(ffs)
     # A run has at most one ξ solution, already closed at the rationals and carrying populated
-    # Ξ′ / Ξ_s stores. A matched solution's stored Ξ′ is used as is downstream.
+    # Ξ′ / Ξ_s stores. A unit-edge solution's stored Ξ′ is used as is downstream.
     solution = ffs.solution
     resp = PlasmaResponse(; ffs, m_modes, n_modes, compute_singular_coupling, compute_torque_response,
         unit_edge_basis=solution !== nothing && solution.basis === :unit_edge)
 
-    # A Riccati result carries ξ profiles, but the response operators are not validated on them yet.
-    riccati = ffs.integrator === :riccati
-    riccati && @warn "Skipping plasma response calculation: a Riccati result is not accepted yet; use the Forward integrator"
-    if !riccati && ForceFreeStates.require(ffs, :free_boundary, "plasma response calculation") &&
-       ForceFreeStates.require_solution(ffs, "plasma response calculation")
+    if ForceFreeStates.require_solution(ffs, "plasma response calculation")
         build_response_operators!(resp; verbose)
         if compute_singular_coupling
             build_coupling_operators!(resp; verbose)
@@ -91,11 +87,11 @@ function plasma_response(ffs::ForceFreeStatesResult; compute_singular_coupling::
 end
 
 """
-    perturbed_equilibrium(resp, rmp; regularization_width=0.0, verbose=false, coil_sets=nothing)
+    perturbed_equilibrium(resp, field; regularization_width=0.0, verbose=false, coil_sets=nothing)
         -> PerturbedEquilibriumState
 
-Drive the plasma response `resp` (from [`plasma_response`](@ref)) with the external field `rmp`, an
-[`RMPField`](@ref GeneralizedPerturbedEquilibrium.ForcingTerms.RMPField), and return the perturbed-equilibrium result. One response serves any number of
+Drive the plasma response `resp` (from [`plasma_response`](@ref)) with the external field `field`, an
+[`ForcingField`](@ref GeneralizedPerturbedEquilibrium.ForcingTerms.ForcingField), and return the perturbed-equilibrium result. One response serves any number of
 fields, so a scan rebuilds no operator.
 
 `regularization_width` smooths the ideal 1/(m−nq) divergence in the profile reconstruction (Fortran
@@ -104,19 +100,19 @@ Call `save_to_hdf5(target, pe)` to save the result. `coil_sets` injects already-
 
 ```julia
 resp = plasma_response(ffs)
-pe = perturbed_equilibrium(resp, RMPField("forcing.dat"))
+pe = perturbed_equilibrium(resp, ForcingField("forcing.dat"))
 ```
 """
 function perturbed_equilibrium(
     resp::PlasmaResponse,
-    rmp::ForcingTerms.RMPField;
+    field::ForcingTerms.ForcingField;
     regularization_width::Real=0.0,
     verbose::Bool=false,
     coil_sets::Union{Nothing,Vector{CoilSet}}=nothing
 )
     # Injected coil geometry (gpec.h5 replay with `--coil-source coils`) lets the coil field
     # be recomputed from stored geometry without the .dat/.h5 files.
-    pe_state = compute_perturbed_equilibrium(resp, rmp; regularization_width, verbose,
+    pe_state = compute_perturbed_equilibrium(resp, field; regularization_width, verbose,
         preloaded_coil_sets=coil_sets === nothing ? CoilSet[] : copy(coil_sets))
 
     return pe_state
@@ -126,8 +122,8 @@ end
     compute_perturbed_equilibrium(resp, forcing; regularization_width=0.0, verbose=true,
                                   preloaded_coil_sets=CoilSet[])::PerturbedEquilibriumState
 
-Drive the operators of `resp` with one external field: materialize `forcing` (a `ForcingTermsControl`
-or any [`ForcingTerms.RMPField`](@ref)) on the control surface, then apply the response and the
+Drive the operators of `resp` with one external field: materialize `forcing` (any
+[`ForcingTerms.ForcingField`](@ref)) on the control surface, then apply the response and the
 singular coupling to it, reconstruct the perturbed profiles, and contract any torque response with
 the forcing sources. Steps whose operators `resp` does not carry are skipped, leaving only the
 forcing spectrum.
@@ -140,122 +136,128 @@ forcing spectrum.
 """
 function compute_perturbed_equilibrium(
     resp::PlasmaResponse,
-    forcing::Union{ForcingTerms.ForcingTermsControl,ForcingTerms.RMPField};
+    forcing::ForcingTerms.ForcingField;
     regularization_width::Real=0.0,
     verbose::Bool=true,
     preloaded_coil_sets::Vector{CoilSet}=CoilSet[]
 )::PerturbedEquilibriumState
     ffs = resp.ffs
-    modes, coil_sets = materialize_forcing_modes(ffs, forcing; preloaded_coil_sets, verbose)
-    state = PerturbedEquilibriumState(; response=resp, forcing=forcing isa ForcingTerms.RMPField ? forcing : ForcingTerms.RMPField(forcing),
-        forcing_modes=modes,
+    sources, coil_sets = materialize_forcing_modes(ffs, forcing; preloaded_coil_sets, verbose)
+    state = PerturbedEquilibriumState(; response=resp, forcing, forcing_modes=_total_forcing(sources),
+        source_names=_unique_names(first.(sources)), source_modes=last.(sources),
         coil_sets=isempty(coil_sets) ? preloaded_coil_sets : coil_sets, regularization_width=Float64(regularization_width))
 
     isempty(resp.permeability_flux) || apply_response!(state; verbose)
     isempty(resp.coupling_flux) || apply_coupling!(state; verbose)
-    isempty(resp.T_xe) || apply_torque_response!(state, forcing; verbose)
+    isempty(resp.T_xe) || apply_torque_response!(state; verbose)
     if !isempty(resp.dominant_right_singular_vectors) && !isempty(state.forcing_b_rootarea)
         state.dominant_forcing_overlap = resp.dominant_right_singular_vectors' * state.forcing_b_rootarea
+        state.dominant_source_overlap = resp.dominant_right_singular_vectors' * state.source_b_rootarea
     end
     return state
 end
 
+# The forcing of all sources: a lone source's modes as they are, otherwise the (n, m) sums sorted by (n, m).
+function _total_forcing(sources::Vector{Pair{String,Vector{ForcingMode}}})
+    length(sources) == 1 && return [ForcingMode(; n=m.n, m=m.m, amplitude=m.amplitude) for m in only(sources).second]
+    amplitudes = Dict{Tuple{Int,Int},ComplexF64}()
+    for (_, modes) in sources, mode in modes
+        amplitudes[(mode.n, mode.m)] = get(amplitudes, (mode.n, mode.m), 0.0 + 0.0im) + mode.amplitude
+    end
+    return [ForcingMode(; n=n, m=m, amplitude=amplitudes[(n, m)]) for (n, m) in sort!(collect(keys(amplitudes)))]
+end
+
+# Source names made unique by appending _2, _3, … to repeats.
+function _unique_names(names::Vector{String})
+    seen = Dict{String,Int}()
+    return map(names) do name
+        k = seen[name] = get(seen, name, 0) + 1
+        k == 1 ? name : "$(name)_$k"
+    end
+end
+
+# Sum the per-member spectra of each label, in order of first appearance, and apply a leaf's weight.
+function _grouped_sources(labels::Vector{String}, member_modes::Vector{Vector{ForcingMode}}, scale::ComplexF64)
+    return map(unique(labels)) do label
+        modes = _total_forcing([label => member for (l, member) in zip(labels, member_modes) if l == label])
+        label => [ForcingMode(; n=m.n, m=m.m, amplitude=scale * m.amplitude) for m in modes]
+    end
+end
+
 """
-    materialize_forcing_modes(ffs, forcing; preloaded_coil_sets=CoilSet[], verbose=false)
-        -> (modes::Vector{ForcingMode}, coil_sets::Vector{CoilSet})
+    materialize_forcing_modes(ffs, field; preloaded_coil_sets=CoilSet[], verbose=false)
+        -> (sources::Vector{Pair{String,Vector{ForcingMode}}}, coil_sets::Vector{CoilSet})
 
-Pure computation of the control-surface forcing spectrum: turn a forcing description into
-fresh `ForcingMode`s, for every toroidal mode of the solve and in the unit-norm convention
-the response step consumes. Nothing is mutated — the caller owns where the result lands.
-
-Coil formats build the geometry (or reuse `preloaded_coil_sets` from the gpec.h5 replay
-path) and integrate the Biot-Savart field on the control surface; file formats read the
-modes from `forcing_data_file` and convert their normalization onto the run's `mlow:mhigh`. Both branches evaluate on
-`ffs.psilim`, the integration limit. The second return value is the coil geometry actually
-used (empty for file formats), which the writer snapshots for replay.
+The control-surface spectrum of each forcing source of `field`, in the unit-norm Φ_x convention the response consumes,
+on the control surface `ffs.psilim` for every toroidal mode of the solve, with each leaf's weight applied. A source is a
+coil set, a forcing file (named after it), a spectrum literal (`"spectrum"`) or a magnetic material set; sets sharing a
+`group` are one source named by it. A sum concatenates its leaves' sources. The second return value is the coil geometry
+used, which the writer snapshots for replay (`preloaded_coil_sets` replaces it on the gpec.h5 replay path).
 """
 function materialize_forcing_modes(
     ffs::ForceFreeStatesResult,
-    forcing::ForcingTerms.ForcingTermsControl;
+    field::ForcingTerms.ForcingCoils;
     preloaded_coil_sets::Vector{ForcingTerms.CoilSet}=ForcingTerms.CoilSet[],
     verbose::Bool=false
 )
-    equil = ffs.equil
+    equil, cfg = ffs.equil, field.config
+    coil_sets = isempty(preloaded_coil_sets) ? ForcingTerms.load_coil_sets(cfg, ffs.nlow; equil=equil) : preloaded_coil_sets
+    labels = length(cfg.coil_sets) == length(coil_sets) ?
+             [isempty(sc.group) ? cs.name : sc.group for (sc, cs) in zip(cfg.coil_sets, coil_sets)] : [cs.name for cs in coil_sets]
+    per_set = [ForcingMode[] for _ in coil_sets]
+    for n in ffs.nlow:ffs.nhigh
+        grid = ForcingTerms.CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)
+        verbose && @info "Computing coil forcing modes: mtheta=$(grid.grid.mtheta), nzeta=$(grid.grid.nzeta), n=$n, $(length(coil_sets)) coil sets"
+        for (k, cs) in enumerate(coil_sets)
+            append!(per_set[k], ForcingTerms.coil_forcing_modes(cs, grid, n, ffs.mlow, ffs.mhigh))
+        end
+    end
+    return _grouped_sources(labels, per_set, field.scale), coil_sets
+end
+
+function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTerms.ForcingFile; verbose::Bool=false, kwargs...)
+    file_modes = ForcingMode[]
+    norm_tag = load_forcing_data!(file_modes, field.path, field.format, verbose)
     modes = ForcingMode[]
-    coil_sets = ForcingTerms.CoilSet[]
+    for n in ffs.nlow:ffs.nhigh
+        modes_n = filter(m -> m.n == n, file_modes)
+        isempty(modes_n) && continue
+        # Normalize on the same control surface as the coil field: psilim, the integration limit.
+        append!(modes, convert_forcing_normalization(modes_n, norm_tag, ffs.equil, n, ffs.mlow:ffs.mhigh; psi=ffs.psilim))
+    end
+    return _grouped_sources([basename(field.path)], [modes], field.scale), ForcingTerms.CoilSet[]
+end
 
-    if forcing.forcing_data_format == "coil"
-        cfg = ForcingTerms.CoilConfig(forcing)
-        coil_sets = isempty(preloaded_coil_sets) ?
-                    ForcingTerms.load_coil_sets(cfg, ffs.nlow; equil=equil) : preloaded_coil_sets
-        for n in ffs.nlow:ffs.nhigh
-            modes_n = ForcingMode[]
-            ForcingTerms.compute_coil_forcing_modes!(
-                modes_n, coil_sets, equil, cfg, n, ffs.mlow, ffs.mhigh;
-                psi=ffs.psilim, verbose=verbose
-            )
-            append!(modes, modes_n)
-        end
-    else
-        file_modes = ForcingMode[]
-        norm_tag = load_forcing_data!(file_modes, forcing.forcing_data_file, forcing.forcing_data_format, verbose)
-        for n in ffs.nlow:ffs.nhigh
-            modes_n = filter(m -> m.n == n, file_modes)
-            isempty(modes_n) && continue
-            # Normalize on the same control surface as the coil branch: psilim, the integration limit.
-            append!(modes, convert_forcing_normalization(modes_n, norm_tag, equil, n, ffs.mlow:ffs.mhigh; psi=ffs.psilim))
+function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTerms.ForcingMagneticMaterial; verbose::Bool=false, kwargs...)
+    equil = ffs.equil
+    labels = [isempty(g) ? m.name : g for (m, g) in zip(field.materials, field.groups)]
+    magnetizations = [ForcingTerms.saturated_magnetization(material, equil) for material in field.materials]
+    cfg = ForcingTerms.CoilConfig(; mtheta_coil=field.mtheta, nzeta_coil=field.nzeta)
+    per_set = [ForcingMode[] for _ in field.materials]
+    for n in ffs.nlow:ffs.nhigh
+        verbose && @info "Computing magnetic material forcing modes for n = $n"
+        for k in eachindex(field.materials)
+            append!(per_set[k], ForcingTerms.material_forcing_modes(field.materials[k:k], magnetizations[k:k], equil, cfg, n, ffs.mlow, ffs.mhigh; psi=ffs.psilim))
         end
     end
-
-    return modes, coil_sets
+    return _grouped_sources(labels, per_set, field.scale), ForcingTerms.CoilSet[]
 end
 
-"""
-    materialize_forcing_modes(ffs, rmp::ForcingTerms.RMPSource; kwargs...) -> (modes, coil_sets)
-
-Materialize a single-source [`ForcingTerms.RMPField`](@ref) leaf and apply its weight. The
-returned modes are fresh objects, so weighting never reaches back into any caller state.
-"""
-function materialize_forcing_modes(ffs::ForceFreeStatesResult, rmp::ForcingTerms.RMPSource; kwargs...)
-    modes, coil_sets = materialize_forcing_modes(ffs, rmp.ctrl; kwargs...)
-    if rmp.scale != 1
-        modes = [ForcingMode(; n=mode.n, m=mode.m, amplitude=rmp.scale * mode.amplitude) for mode in modes]
-    end
-    return modes, coil_sets
+function materialize_forcing_modes(::ForceFreeStatesResult, field::ForcingTerms.ForcingSpectrum; kwargs...)
+    return _grouped_sources(["spectrum"], [field.modes], field.scale), ForcingTerms.CoilSet[]
 end
 
-"""
-    materialize_forcing_modes(ffs, rmp::ForcingTerms.RMPSpectrum; kwargs...) -> (modes, coil_sets)
-
-Materialize a spectrum-literal leaf: fresh copies of its unit-norm modes, weighted. Nothing is read
-or integrated, and no coil geometry is produced.
-"""
-function materialize_forcing_modes(::ForceFreeStatesResult, rmp::ForcingTerms.RMPSpectrum; kwargs...)
-    return [ForcingMode(; n=mode.n, m=mode.m, amplitude=rmp.scale * mode.amplitude) for mode in rmp.modes], ForcingTerms.CoilSet[]
-end
-
-"""
-    materialize_forcing_modes(ffs, rmp::ForcingTerms.RMPFieldSum; kwargs...) -> (modes, coil_sets)
-
-Materialize a lazy linear combination of forcing sources: each weighted leaf is evaluated
-independently and the mode amplitudes are summed per (n, m), sorted by (n, m). Coil geometry from
-every coil-format leaf is concatenated in the second return value; `preloaded_coil_sets` is ignored for sums.
-"""
-function materialize_forcing_modes(ffs::ForceFreeStatesResult, rmp::ForcingTerms.RMPFieldSum;
+function materialize_forcing_modes(ffs::ForceFreeStatesResult, field::ForcingTerms.ForcingFieldSum;
     preloaded_coil_sets::Vector{ForcingTerms.CoilSet}=ForcingTerms.CoilSet[],
     verbose::Bool=false)
-    amplitudes = Dict{Tuple{Int,Int},ComplexF64}()
+    sources = Pair{String,Vector{ForcingMode}}[]
     coil_sets = ForcingTerms.CoilSet[]
-    for term in rmp.terms
-        term_modes, term_coils = materialize_forcing_modes(ffs, term; verbose=verbose)
-        for mode in term_modes
-            key = (mode.n, mode.m)
-            amplitudes[key] = get(amplitudes, key, 0.0 + 0.0im) + mode.amplitude
-        end
+    for term in field.terms
+        term_sources, term_coils = materialize_forcing_modes(ffs, term; verbose=verbose)
+        append!(sources, term_sources)
         append!(coil_sets, term_coils)
     end
-    modes = [ForcingMode(; n=n, m=m, amplitude=amplitudes[(n, m)]) for (n, m) in sort!(collect(keys(amplitudes)))]
-    return modes, coil_sets
+    return sources, coil_sets
 end
 
 end # module PerturbedEquilibrium

@@ -16,7 +16,7 @@ on the plasma inside ψ and whose imaginary part is `2n·δW` of that plasma (id
   - `psi::Vector{Float64}` - ψ_N of each stored node of the solve `[npsi]`
   - `m_modes`, `n_modes::Vector{Int}` - (m, n) of each row and column of `T_xe` `[numpert_total]`
   - `T_xe::Array{ComplexF64,3}` - torque response on b̃, N·m/T² `[numpert_total × numpert_total × npsi]`
-  - `source_names::Vector{String}` - name of each forcing source of `T_source`: the coil sets, or the forcing file `[nsource]`
+  - `source_names::Vector{String}` - name of each forcing source of `T_source`, as `PerturbedEquilibriumState.source_names` `[nsource]`
   - `T_source::Array{ComplexF64,3}` - torque response in forcing-source space `[nsource × nsource × npsi]`,
     N·m per squared scale factor of each source as built: driving the sources at `s` times their deck
     currents or file amplitudes gives the complex 2× torque `s†·T_source·s`. Empty without forcing.
@@ -39,7 +39,7 @@ end
 The source-independent half of a perturbed equilibrium: the control-surface response and
 singular-coupling operators of one force-free-states result, built once by
 [`plasma_response`](@ref) and applied to any number of external fields by
-`perturbed_equilibrium(resp, rmp)` (Park et al., Phys. Plasmas 14, 052110 (2007); Park,
+`perturbed_equilibrium(resp, field)` (Park et al., Phys. Plasmas 14, 052110 (2007); Park,
 Phys. Plasmas 16, 056115 (2009)). Operators the result could not supply (no free-boundary
 energies or no ξ solution) are left empty, and forcing such a response yields only the forcing
 spectra.
@@ -48,7 +48,7 @@ spectra.
 
   - `ffs::ForceFreeStatesResult` - The result the operators were built from.
   - `m_modes`, `n_modes` - Poloidal and toroidal mode number of each entry of a spectrum [numpert_total].
-  - `unit_edge_basis::Bool` - The solution is a `MatchProblem` one (`basis = :unit_edge`); the singular coupling
+  - `unit_edge_basis::Bool` - The solution is a Galerkin or `MatchProblem` one (`basis = :unit_edge`); the singular coupling
     then takes Ξ′ from its `du_store`.
   - `compute_singular_coupling::Bool`, `compute_torque_response::Bool` - The [`plasma_response`](@ref) options it was built with.
   - `flux_matrix::Matrix{ComplexF64}` - Control-surface flux of the free-boundary eigenmodes [mode × eigenmode].
@@ -76,9 +76,15 @@ applied root-area-weighted field b̃_x to the resonant response at that surface.
   - `C_resonant_current` - Resonant current coupling (singcoup row 2)
   - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
   - `C_penetrated_area_weighted_field` - Penetrated area-weighted field coupling (singcoup row 4)
-  - `C_delta_prime`      - Δ' coupling (singcoup row 5)
-  - `coupling_flux::NamedTuple` - The same five matrices acting on the physical flux Φ_x (keys without the
+  - `C_delta_mn`         - Δ_mn coupling, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁ (singcoup row 5)
+    The four finite-width matrices above are empty for a `:matched` result.
+  - `coupling_flux::NamedTuple` - The same matrices acting on the physical flux Φ_x (keys without the
     `C_` prefix), used for the applied resonant vectors; empty when the coupling was not built.
+  - `C_resonant_area_weighted_field_asymptotic`, `C_resonant_current_asymptotic`, `C_island_width_sq_asymptotic`,
+    `C_delta_mn_asymptotic` - The same four built from the jump of the asymptotic small solution,
+    −2πi·χ₁·n·q′·(C_R − C_L), in place of the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4. The two agree where D_I = −1/4.
+    Empty unless the result is single-`n` and carries `Delta_EF`; a `:matched` result takes C_L, C_R from its matched
+    small coefficients `match.small_coefficients`.
   - `C_coeffs::Matrix{ComplexF64}` - Edge-to-solution coefficients `u_bnd⁻¹·edge_mn` of each unit forcing mode.
 
 Metadata [n_rational] — identifies each (surface, n) row:
@@ -124,7 +130,11 @@ on a `ResonantCoupling`):
     C_resonant_current::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_island_width_sq::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     C_penetrated_area_weighted_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
-    C_delta_prime::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_delta_mn::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_resonant_area_weighted_field_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_resonant_current_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_island_width_sq_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
+    C_delta_mn_asymptotic::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     coupling_flux::NamedTuple = (;)
     C_coeffs::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
 
@@ -155,8 +165,11 @@ The perturbed equilibrium driven by one external field: the forcing materialized
 ## Fields
 
   - `response::PlasmaResponse` - The operators this field was applied to.
-  - `forcing` - The [`ForcingTerms.RMPField`](@ref) applied.
+  - `forcing` - The [`ForcingTerms.ForcingField`](@ref) applied.
   - `forcing_modes::Vector{ForcingMode}` - The materialized control-surface forcing Φ_x.
+  - `source_names::Vector{String}` - The forcing sources whose spectra sum to `forcing_modes`: one per coil set, forcing file,
+    spectrum literal and magnetic material set, sets sharing a `group` as one source named by it `[nsource]`.
+  - `source_modes::Vector{Vector{ForcingMode}}` - Each source's materialized control-surface forcing Φ_x `[nsource]`.
   - `coil_sets::Vector{CoilSet}` - Coil geometry used (coil-format forcing); captured for the gpec.h5 rerun snapshot.
   - `regularization_width::Float64` - Width the profiles were reconstructed with (Fortran `reg_spot`): 0, no
     regularization (Fortran `reg_flag = f`). Set it, typically to 0.05, only to drive KineticForces with an
@@ -175,14 +188,18 @@ Response fields (mode space):
 Applied resonant vectors [n_rational] = C · forcing, on the rows of `response`.
 Matches Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`.
 
-  - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_prime`
+  - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_mn`
   - `forcing_solution_weights` - `C_coeffs`·Φ_x, the forcing's weights on the edge-driven solutions
+  - `resonant_area_weighted_field_asymptotic`, `resonant_current_asymptotic`, `island_width_sq_asymptotic`, `delta_mn_asymptotic` -
+    the same from the response's `_asymptotic` matrices; empty when it has none
 
 Diagnostics [n_rational]:
 
   - `island_half_width::Vector{Float64}` - w/2 = sqrt(|island_width_sq|) from applied forcing
   - `chirikov_parameter::Vector{Float64}` - Island overlap metric
+  - `island_half_width_asymptotic`, `chirikov_parameter_asymptotic` - the same from `island_width_sq_asymptotic`
   - `dominant_forcing_overlap` - Vᴴ·b̃_x, the applied forcing's coefficient on each dominant mode [rank]
+  - `dominant_source_overlap` - Vᴴ·b̃ of each forcing source `[rank × nsource]`; its columns sum to `dominant_forcing_overlap`
 
 Control-surface forcing/response spectra [numpert_total], in the three Pharr (2026) field
 representations (all tesla; no flux/weber is stored):
@@ -190,6 +207,7 @@ representations (all tesla; no flux/weber is stored):
   - `forcing_b`/`response_b` - bare normal field b (Σ⁻¹·b̃)
   - `forcing_b_rootarea`/`response_b_rootarea` - root-area-weighted field b̃ (coordinate-invariant)
   - `forcing_b_area`/`response_b_area` - area-weighted field b̄ (= S·b̃; flux is Φ = A·b̄)
+  - `source_b_rootarea` - b̃ of each forcing source `[numpert_total × nsource]`; its columns sum to `forcing_b_rootarea`
 
 Energies (Joules; Fortran gpout convention). Congruence-invariant scalars
 (energy = Φ†·G⁻¹·Φ = b̃†·G̃⁻¹·b̃), evaluated from the brief internal flux vectors Φ_x, Φ_tot with the
@@ -206,12 +224,14 @@ well-conditioned flux-space inductances L, Λ:
 Torque response (kinetic forward solves with `compute_torque_response`):
 
   - `torque_response::Union{Nothing,TorqueResponse}` - the ψ-resolved torque response matrices on the
-    applied b̃ and on the coil sets, with the run's own forcing contracted; see [`TorqueResponse`](@ref)
+    applied b̃ and on the forcing sources, with the run's own forcing contracted; see [`TorqueResponse`](@ref)
 """
 @kwdef mutable struct PerturbedEquilibriumState
     response::PlasmaResponse
-    forcing::Union{Nothing,ForcingTerms.RMPField} = nothing
+    forcing::Union{Nothing,ForcingTerms.ForcingField} = nothing
     forcing_modes::Vector{ForcingMode} = ForcingMode[]
+    source_names::Vector{String} = String[]
+    source_modes::Vector{Vector{ForcingMode}} = Vector{ForcingMode}[]
     coil_sets::Vector{CoilSet} = CoilSet[]
     regularization_width::Float64 = 0.0
 
@@ -229,17 +249,25 @@ Torque response (kinetic forward solves with `compute_torque_response`):
     resonant_current::Vector{ComplexF64} = ComplexF64[]
     island_width_sq::Vector{ComplexF64} = ComplexF64[]
     penetrated_area_weighted_field::Vector{ComplexF64} = ComplexF64[]
-    delta_prime::Vector{ComplexF64} = ComplexF64[]
+    delta_mn::Vector{ComplexF64} = ComplexF64[]
     forcing_solution_weights::Vector{ComplexF64} = ComplexF64[]
+    resonant_area_weighted_field_asymptotic::Vector{ComplexF64} = ComplexF64[]
+    resonant_current_asymptotic::Vector{ComplexF64} = ComplexF64[]
+    island_width_sq_asymptotic::Vector{ComplexF64} = ComplexF64[]
+    delta_mn_asymptotic::Vector{ComplexF64} = ComplexF64[]
 
     # Diagnostics [n_rational]
     island_half_width::Vector{Float64} = Float64[]
     chirikov_parameter::Vector{Float64} = Float64[]
+    island_half_width_asymptotic::Vector{Float64} = Float64[]
+    chirikov_parameter_asymptotic::Vector{Float64} = Float64[]
     dominant_forcing_overlap::Vector{ComplexF64} = ComplexF64[]  # Vᴴ·b̃_x [rank]
+    dominant_source_overlap::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
 
     # Control-surface forcing/response spectra in the three weightings of field representations [numpert_total], tesla
     forcing_b::Vector{ComplexF64} = ComplexF64[]  # bare normal field b (forcing Φ_x)
     forcing_b_rootarea::Vector{ComplexF64} = ComplexF64[]  # root-area-weighted field b̃ (coordinate-invariant)
+    source_b_rootarea::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)
     forcing_b_area::Vector{ComplexF64} = ComplexF64[]  # area-weighted field b̄
     response_b::Vector{ComplexF64} = ComplexF64[]  # bare normal field b (response Φ_tot = P·Φ_x)
     response_b_rootarea::Vector{ComplexF64} = ComplexF64[]  # root-area-weighted field b̃

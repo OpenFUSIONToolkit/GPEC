@@ -33,14 +33,15 @@ const _MOVED_KEYS = Dict{String,Dict{String,String}}(
         "extended_precision_bvp" => "moved to [Riccati]",
         "nchunks" => "moved to [Riccati]",
         "gal_match_flag" => "add a [Match] section to match the inner layer",
-        "gal_ideal_flag" => "moved to [Match] as ideal",
+        "gal_ideal_flag" => "removed: a Galerkin solve with [Galerkin] error_field_response = true is the ideal solution",
         "gal_inner_solver" => "moved to [GGJ] as solver",
         (k => "moved to the integrator's section, [Forward] or [Riccati]" for k in _ODE_DECK_KEYS)...,
         (k => "moved to [Forward]" for k in _FORWARD_DECK_KEYS)...,
         ("gal_$k" => "moved to [Match] as $k" for k in ("eta", "rho", "rotation", "gamma"))...,
         ("gal_inner_$k" => "moved to [GGJ] as $k" for k in ("xfac", "nx", "nq", "cutoff", "kmax"))...,
         ("gal_$k" => "moved to [Galerkin] as $k" for k in ("nx", "nq", "pfac", "dx0", "dx1", "dx2", "cutoff", "tol", "gnstep",
-                "dx1dx2_flag", "rpec_flag", "edge_onesided"))...,
+            "dx1dx2_flag", "edge_onesided"))...,
+        "gal_rpec_flag" => "moved to [Galerkin] as error_field_response",
         "gal_sing_order_ceiling" => "moved to [Galerkin] as frobenius_order_ceiling"),
     "LocalStability" => Dict{String,String}(
         k => "moved to [Ballooning]" for k in ("ode_tol", "n_scan", "max_alpha_scale", "alpha_tol", "psi_window")),
@@ -354,7 +355,7 @@ end
 """
 function match_from_deck(inputs::AbstractDict)
     haskey(inputs, "Match") || return nothing
-    fields = Dict{Symbol,Any}(:eta => Any, :rho => Any, :rotation => Any, :gamma => Any, :ideal => Bool, :inner_model => String)
+    fields = Dict{Symbol,Any}(:eta => Any, :rho => Any, :rotation => Any, :gamma => Any, :inner_model => String)
     problem = section_keywords(inputs["Match"], "Match", fields)
     inner_model = _selector(inputs["Match"], "Match", "inner_model", _TOROIDAL_LAYER_TOKENS, "GGJ")
     delete!(problem, :inner_model)
@@ -406,15 +407,16 @@ end
 
 The `[ForcingTerms]` section of a parsed deck as a control struct, defaults when absent, with its
 relative file paths resolved against the deck directory `path`. The `[[ForcingTerms.coil_set]]`
-array of tables is passed through as `coil_sets_raw`.
+and `[[ForcingTerms.magnetic_material]]` arrays of tables are passed through as `coil_sets_raw` and `magnetic_materials_raw`.
 """
 function forcing_terms_control(inputs::AbstractDict, path::AbstractString)
-    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl(; forcing_data_file=joinpath(path, "forcing.dat"))
+    "ForcingTerms" in keys(inputs) || return ForcingTerms.ForcingTermsControl()
     forcing_raw = _deck_paths(inputs["ForcingTerms"], path, ("forcing_data_file", "dat_dir"))
-    haskey(forcing_raw, "forcing_data_file") || (forcing_raw["forcing_data_file"] = joinpath(path, "forcing.dat"))
     coil_sets_raw = Dict{String,Any}[_deck_paths(d, path, ("dat_file", "h5_file")) for d in get(forcing_raw, "coil_set", Dict{String,Any}[])]
-    kwargs = section_keywords(_without(forcing_raw, "coil_set"), "ForcingTerms", _struct_fields(ForcingTerms.ForcingTermsControl, (:coil_sets_raw,)))
-    return ForcingTerms.ForcingTermsControl(; kwargs..., coil_sets_raw=coil_sets_raw)
+    magnetic_materials_raw = Dict{String,Any}[_deck_paths(d, path, ("h5_file",)) for d in get(forcing_raw, "magnetic_material", Dict{String,Any}[])]
+    kwargs = section_keywords(_without(_without(forcing_raw, "coil_set"), "magnetic_material"), "ForcingTerms",
+        _struct_fields(ForcingTerms.ForcingTermsControl, (:coil_sets_raw, :magnetic_materials_raw)))
+    return ForcingTerms.ForcingTermsControl(; kwargs..., coil_sets_raw, magnetic_materials_raw)
 end
 
 """
@@ -477,16 +479,16 @@ function parse_deck(inputs::AbstractDict, path::AbstractString)
     if match !== nothing
         (; keywords, algorithm) = force_balance
         first(keywords[:nn]) == last(keywords[:nn]) || error("[Match] is single-n: set [ForceFreeStates] nn to one toroidal mode number")
-        (algorithm isa Galerkin && algorithm.rpec_flag) || (algorithm isa Riccati && get(keywords, :vac_flag, false)) ||
-            error("[Match] needs Δ′: use integrator = \"Galerkin\" with [Galerkin] rpec_flag = true, or \"Riccati\" with vac_flag = true")
+        hasproperty(algorithm, :error_field_response) && algorithm.error_field_response ||
+            error("[Match] needs Δ_EF: use the \"Galerkin\" or \"Riccati\" integrator with error_field_response = true")
     end
     tearing = tearing_from_deck(inputs)
     perturbed_equilibrium = perturbed_equilibrium_from_deck(inputs)
     forcing = forcing_terms_control(inputs, path)
     if haskey(inputs, "ErrorFields")
         perturbed_equilibrium === nothing && error("[ErrorFields] needs a [PerturbedEquilibrium] section")
-        forcing.forcing_data_format == "coil" ||
-            error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must use forcing_data_format = \"coil\" (got \"$(forcing.forcing_data_format)\")")
+        !isempty(forcing.coil_sets_raw) && isempty(forcing.forcing_data_file) && isempty(forcing.magnetic_materials_raw) ||
+            error("[ErrorFields] linearizes coil geometry, so [ForcingTerms] must hold coil sets and no forcing_data_file or magnetic material")
     end
     tearing_model = haskey(inputs, "Tearing") ? get(inputs["Tearing"], "inner_model", nothing) : nothing
     match_model = match === nothing ? nothing : _inner_model_token(match.model)
@@ -612,8 +614,23 @@ end
 
 # [ForcingTerms] of a forcing control, its coil sets as [[ForcingTerms.coil_set]].
 function _forcing_table(ctrl::ForcingTerms.ForcingTermsControl)
-    table = _deck_table(ctrl, (:coil_sets_raw,))
+    table = _deck_table(ctrl, (:coil_sets_raw, :magnetic_materials_raw))
     isempty(ctrl.coil_sets_raw) || (table["coil_set"] = Any[_deck_out(d) for d in ctrl.coil_sets_raw])
+    isempty(ctrl.magnetic_materials_raw) || (table["magnetic_material"] = Any[_deck_out(d) for d in ctrl.magnetic_materials_raw])
+    return table
+end
+
+# [ForcingTerms] of a single forcing source: a file by path, coils by their settings and the non-default keys of each set.
+_forcing_table(f::ForcingTerms.ForcingFile) = Dict{String,Any}("forcing_data_file" => f.path, "forcing_data_format" => f.format)
+
+function _forcing_table(f::ForcingTerms.ForcingCoils)
+    cfg, default = f.config, ForcingTerms.CoilSetConfig()
+    table = Dict{String,Any}("machine" => cfg.machine, "mtheta_coil" => cfg.mtheta_coil, "nzeta_coil" => cfg.nzeta_coil)
+    cfg.dat_dir == ForcingTerms.BUNDLED_COIL_DIR || (table["dat_dir"] = cfg.dat_dir)
+    table["coil_set"] = Any[
+        Dict{String,Any}(String(k) => _deck_out(getfield(sc, k)) for k in fieldnames(ForcingTerms.CoilSetConfig) if !isequal(getfield(sc, k), getfield(default, k)))
+        for sc in cfg.coil_sets
+    ]
     return table
 end
 
@@ -660,7 +677,7 @@ function deck_sections(pe::PerturbedEquilibrium.PerturbedEquilibriumState)
     sections = Dict{String,Any}("PerturbedEquilibrium" => table)
     forcing === nothing && return sections
     sections["ForcingTerms"] =
-        forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? _forcing_table(forcing.ctrl) :
+        forcing isa Union{ForcingTerms.ForcingFile,ForcingTerms.ForcingCoils} && forcing.scale == 1 ? _forcing_table(forcing) :
         Dict{String,Any}("forcing_data_format" => "hdf5", "forcing_data_file" => _RECORDED_FORCING)
     return sections
 end

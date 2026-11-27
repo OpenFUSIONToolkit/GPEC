@@ -2,11 +2,13 @@
     compute_coil_sensitivities(coil_sets, rc, equil, cfg, ctrl=ErrorFieldsControl(); psi, b_t0, verbose=false) -> CoilSensitivities
 
 Linearize the control-surface spectrum of every coil set in `coil_sets` with respect to its six
-rigid-body degrees of freedom, by central differences of the Biot-Savart spectrum on the surface
-`psi` (the solve's integration limit, `ffs.psilim`) sampled once per toroidal mode of `rc`.
-The nominal spectrum is evaluated too. Tilt taps rotate about the pivot named by
-`ctrl.rotation_center`, in degrees; `b_t0` is the axis toroidal field (tesla) for the δ
-normalization. Errors on a set carrying no current.
+rigid-body degrees of freedom, exactly, from one pass of the Biot-Savart field and its gradient at
+the points of the surface `psi` (the solve's integration limit, `ffs.psilim`) sampled once per
+toroidal mode of `rc`. Moving a set by `h·ê` changes its field at a fixed point by `−h (ê·∇)B`, and
+rotating it by `θ` about `â` through the pivot `p` by `θ (â × B − ((â × (x − p))·∇)B)`; the surface
+and its normals stay fixed. Tilt taps rotate about the pivot named by `ctrl.rotation_center`, in
+degrees; `b_t0` is the axis toroidal field (tesla) for the δ normalization. Errors on a set
+carrying no current.
 
 Spectra are on `rc`'s (m, n) ordering, conformed with [`rootarea_field`](@ref), so
 [`coupling_overlap`](@ref) applies directly.
@@ -24,8 +26,6 @@ function compute_coil_sensitivities(
     isempty(coil_sets) && throw(ArgumentError("compute_coil_sensitivities: no coil sets given"))
     ctrl.rotation_center in ("conductor", "set") ||
         throw(ArgumentError("rotation_center must be \"conductor\" or \"set\" (got \"$(ctrl.rotation_center)\")"))
-    (ctrl.fd_step_shift_m > 0 && ctrl.fd_step_tilt_deg > 0) ||
-        throw(ArgumentError("finite-difference steps must be positive (got $(ctrl.fd_step_shift_m) m, $(ctrl.fd_step_tilt_deg) deg)"))
     b_t0 > 0 || throw(ArgumentError("b_t0 must be a positive field magnitude (got $b_t0)"))
     for cs in coil_sets
         all(iszero, cs.currents) &&
@@ -35,54 +35,97 @@ function compute_coil_sensitivities(
     N = length(rc.m_modes)
     nset = length(coil_sets)
     grids = forcing_grids(rc, equil, cfg; psi)
-    spectrum(cs::CoilSet) = applied_spectrum(cs, rc, grids)
+    m_low, m_high = extrema(rc.m_modes)
 
     nominal = zeros(ComplexF64, N, nset)
     shift = zeros(ComplexF64, N, 3, nset)
     tilt = zeros(ComplexF64, N, 3, nset)
-    shift_resid = zeros(3, nset)
-    tilt_resid = zeros(3, nset)
-    h_shift = ctrl.fd_step_shift_m
-    h_tilt = ctrl.fd_step_tilt_deg
 
     for (j, cs) in enumerate(coil_sets)
         t_start = time()
-        b0 = spectrum(cs)
-        nominal[:, j] = b0
-        pivot = ctrl.rotation_center == "set" ? _set_center(cs) : nothing
-
-        first_norm = zeros(3, 2)
-        second_norm = zeros(3, 2)
-        for axis in 1:3, (kind, h, out) in ((:shift, h_shift, shift), (:tilt, h_tilt, tilt))
-            plus = spectrum(_rigidly_perturbed(cs, kind, axis, h, pivot))
-            minus = spectrum(_rigidly_perturbed(cs, kind, axis, -h, pivot))
-            out[:, axis, j] = (plus .- minus) ./ (2h)
-            col = kind === :shift ? 1 : 2
-            first_norm[axis, col] = norm(plus .- minus)
-            second_norm[axis, col] = norm(plus .+ minus .- 2 .* b0)
+        set_pivot = ctrl.rotation_center == "set" ? _set_center(cs) : nothing
+        strands = ForcingTerms.PrecomputedSegments[]
+        pivots = NTuple{3,Float64}[]
+        for c in 1:cs.ncoil, k in 1:cs.s
+            iszero(cs.currents[c]) && continue
+            push!(strands, ForcingTerms.precompute_segments(cs, c, k, cs.currents[c] * cs.nw))
+            strand = (view(cs.x, c, k, :), view(cs.y, c, k, :), view(cs.z, c, k, :))
+            push!(pivots, something(set_pivot, ForcingTerms._arc_length_center(strand...)))
         end
 
-        # Curvature relative to the set's largest linear response, so a tap vanishing by symmetry is not judged against itself.
-        scale = maximum(first_norm)
-        resid = scale > 0 ? second_norm ./ scale : zeros(3, 2)
-        shift_resid[:, j] = resid[:, 1]
-        tilt_resid[:, j] = resid[:, 2]
+        # Modes of the nominal field, then the shifts along x, y, z, then the tilts about the three axes.
+        modes = [ForcingMode[] for _ in 1:7]
+        for (n, grid) in grids
+            F = _rigid_motion_fields(strands, pivots, grid)
+            for k in 1:7
+                bn = zeros(grid.grid.mtheta, grid.grid.nzeta)
+                ForcingTerms.project_normal_flux!(bn, view(F, 1, k, :), view(F, 2, k, :), grid.grid)
+                append!(modes[k], ForcingTerms.fourier_decompose_bn(bn, grid.grid, n, m_low, m_high))
+            end
+        end
+        nominal[:, j] = rootarea_field(rc, modes[1])
+        for a in 1:3
+            shift[:, a, j] = rootarea_field(rc, modes[1+a])
+            tilt[:, a, j] = rootarea_field(rc, modes[4+a])
+        end
 
-        worst = maximum(resid)
-        worst > 1e-2 &&
-            @warn "Coil set \"$(cs.name)\": finite-difference curvature $(@sprintf("%.2e", worst)) of the first difference; reduce fd_step_shift_m / fd_step_tilt_deg"
         verbose &&
-            @info "  $(cs.name): |b̃| = $(@sprintf("%.3e", norm(b0))) T, " *
+            @info "  $(cs.name): |b̃| = $(@sprintf("%.3e", norm(nominal[:, j]))) T, " *
                   "max |∂b̃/∂x| = $(@sprintf("%.3e", maximum(norm, eachslice(shift[:, :, j]; dims=2)))) T/m, " *
-                  "max |∂b̃/∂θ| = $(@sprintf("%.3e", maximum(norm, eachslice(tilt[:, :, j]; dims=2)))) T/deg, curvature $(@sprintf("%.1e", worst)) ($(@sprintf("%.2f", time() - t_start)) s)"
+                  "max |∂b̃/∂θ| = $(@sprintf("%.3e", maximum(norm, eachslice(tilt[:, :, j]; dims=2)))) T/deg ($(@sprintf("%.2f", time() - t_start)) s)"
     end
 
     return CoilSensitivities(
         [cs.name for cs in coil_sets], copy(rc.m_modes), copy(rc.n_modes), b_t0,
-        nominal, shift, tilt, shift_resid, tilt_resid,
+        nominal, shift, tilt,
         [maximum(abs, cs.currents) for cs in coil_sets], [cs.nw for cs in coil_sets],
         [ForcingTerms.nominal_major_radius(cs) for cs in coil_sets]
     )
+end
+
+# Rotation axes of the single-axis tilts of `apply_transforms`: tiltx turns about +x, tilty about −y, tiltz about +z.
+const _TILT_AXES = ((1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0))
+
+_cross(a, b) = (a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1])
+_matvec(J, v) = (J[1] * v[1] + J[4] * v[2] + J[7] * v[3], J[2] * v[1] + J[5] * v[2] + J[8] * v[3], J[3] * v[1] + J[6] * v[2] + J[9] * v[3])
+
+"""
+    _rigid_motion_fields(strands, pivots, grid::CoilForcingGrid) -> Array{Float64,3}
+
+Cylindrical `(B_R, B_Z)` at each point of `grid` of the strands together, and their derivatives under each rigid
+motion, `[2, 7, nobs]`: the field, then its change per metre of shift along x, y, z, then per degree of tilt about
+`_TILT_AXES` with each strand turning about its entry of `pivots`.
+"""
+function _rigid_motion_fields(strands::Vector{ForcingTerms.PrecomputedSegments}, pivots::Vector{NTuple{3,Float64}}, grid::ForcingTerms.CoilForcingGrid)
+    nobs = length(grid.obs_R)
+    F = zeros(2, 7, nobs)
+    Threads.@threads for i in 1:nobs
+        sp, cp = sincos(grid.obs_phi[i])
+        taps = _rigid_motion_point((grid.obs_R[i] * cp, grid.obs_R[i] * sp, grid.obs_Z[i]), strands, pivots)
+        for k in 1:7
+            F[1, k, i] = taps[k][1] * cp + taps[k][2] * sp
+            F[2, k, i] = taps[k][3]
+        end
+    end
+    return F
+end
+
+# Field and rigid-motion derivatives at the Cartesian point x, in the order of `_rigid_motion_fields`.
+function _rigid_motion_point(x::NTuple{3,Float64}, strands, pivots)
+    b = (0.0, 0.0, 0.0)
+    J = ntuple(_ -> 0.0, Val(9))
+    t1 = t2 = t3 = (0.0, 0.0, 0.0)
+    @inbounds for s in eachindex(strands)
+        bs, Js = ForcingTerms._accumulate_precomputed_gradient(x[1], x[2], x[3], strands[s])
+        b = b .+ bs
+        J = J .+ Js
+        d = x .- pivots[s]
+        t1 = t1 .+ _cross(_TILT_AXES[1], bs) .- _matvec(Js, _cross(_TILT_AXES[1], d))
+        t2 = t2 .+ _cross(_TILT_AXES[2], bs) .- _matvec(Js, _cross(_TILT_AXES[2], d))
+        t3 = t3 .+ _cross(_TILT_AXES[3], bs) .- _matvec(Js, _cross(_TILT_AXES[3], d))
+    end
+    deg = π / 180
+    return (b, (-J[1], -J[2], -J[3]), (-J[4], -J[5], -J[6]), (-J[7], -J[8], -J[9]), t1 .* deg, t2 .* deg, t3 .* deg)
 end
 
 """

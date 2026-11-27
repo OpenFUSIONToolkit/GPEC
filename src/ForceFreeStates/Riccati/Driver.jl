@@ -16,6 +16,8 @@ function riccati_eulerlagrange_integration(
     odet = _initialize_parallel_odet(ctrl, equil, mats, intr)
     chunks = balance_integration_chunks(chunk_el_integration_bounds(odet, ctrl, intr; bidirectional=true), ctrl, intr)
     bases = asymptotic_bases(chunks, ctrl, equil, mats, intr)
+    # Each crossed surface publishes the exponent its series used.
+    foreach(((ising, basis),) -> intr.sing[ising].alpha = basis.right_series.alpha, pairs(bases))
     if intr.verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
         @info "   Riccati FM: $(length(chunks)) chunks over $(Threads.nthreads()) thread$(Threads.nthreads() == 1 ? "" : "s")"

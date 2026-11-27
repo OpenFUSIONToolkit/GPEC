@@ -63,6 +63,7 @@ Shifts/tilts apply to every source (the analytic geometry is built first, then t
 
   - `name`: coil set name; resolves to `{dat_dir}/{machine}_{name}.dat`, or selects a set by name
     from a multi-set `.h5` file
+  - `group`: forcing-source label; coil sets sharing a group are reported as one source, named by it (default: the set's own name)
   - `source`: coil source discriminator (see above); empty/`"file"` reads a geometry file
   - `dat_file`: explicit path to .dat file (overrides `machine`+`name` convention)
   - `h5_file`: explicit path to .h5 file (multi-set; `name` selects which set, else the sole set)
@@ -95,6 +96,7 @@ Window-pane standoff placement (alternative to `rz_corners`; needs an equilibriu
 """
 Base.@kwdef struct CoilSetConfig
     name::String = ""
+    group::String = ""
     source::String = ""
     dat_file::String = ""
     h5_file::String = ""
@@ -137,15 +139,14 @@ end
 """
     CoilConfig
 
-Top-level coil configuration from the `[ForcingTerms]` TOML section when
-`forcing_data_format = "coil"`.
+Top-level coil configuration from the `[ForcingTerms]` TOML section.
 
 ## Fields
 
   - `machine`: machine name prefix for .dat files (e.g. "d3d")
   - `dat_dir`: directory containing .dat files; defaults to bundled `coil_geometries/`
   - `mtheta_coil`: poloidal grid resolution for boundary field evaluation (default: 480)
-  - `nzeta_coil`: toroidal grid resolution; 0 = auto (32 × n)
+  - `nzeta_coil`: toroidal grid resolution; 0 = auto, 32(|n| + 1)
   - `coil_sets`: parsed `[[ForcingTerms.coil_set]]` blocks
 """
 Base.@kwdef struct CoilConfig
@@ -156,15 +157,16 @@ Base.@kwdef struct CoilConfig
     coil_sets::Vector{CoilSetConfig} = CoilSetConfig[]
 end
 
+# The coil geometry files shipped with the package, the default `dat_dir`.
+const BUNDLED_COIL_DIR = joinpath(@__DIR__, "coil_geometries")
+
 """
     CoilConfig(ft_ctrl::ForcingTermsControl)
 
 Construct a `CoilConfig` from a `ForcingTermsControl` populated from TOML.
 """
 function CoilConfig(ft_ctrl::ForcingTermsControl)
-    dat_dir = isempty(ft_ctrl.dat_dir) ?
-              joinpath(@__DIR__, "coil_geometries") :
-              ft_ctrl.dat_dir
+    dat_dir = isempty(ft_ctrl.dat_dir) ? BUNDLED_COIL_DIR : ft_ctrl.dat_dir
 
     coil_sets = CoilSetConfig[_parse_coil_set_config(d) for d in ft_ctrl.coil_sets_raw]
 
@@ -186,6 +188,7 @@ function _parse_coil_set_config(d::Dict{String,Any})
     corners = [Float64.(c) for c in get(d, "rz_corners", Vector{Float64}[])]
     return CoilSetConfig(;
         name=get(d, "name", ""),
+        group=get(d, "group", ""),
         source=get(d, "source", ""),
         dat_file=get(d, "dat_file", ""),
         h5_file=get(d, "h5_file", ""),

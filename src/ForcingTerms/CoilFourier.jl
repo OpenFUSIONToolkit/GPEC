@@ -16,7 +16,7 @@ suitable for the perturbed equilibrium pipeline.
 
 using FastInterpolations: cubic_interp, PeriodicBC, DerivOp
 
-# Default toroidal points per period when nzeta_coil is not specified
+# Toroidal points per period of n; the default grid is this × (|n| + 1), the extra period resolving the source's own toroidal structure.
 const NZETA_POINTS_PER_PERIOD = 32
 
 """
@@ -171,21 +171,13 @@ function fourier_decompose_bn(
 )
     mtheta = grid.mtheta
     nzeta = grid.nzeta
-
-    # Build Fourier basis: exp(-i*(m*θ - n*ζ))
-    # Using 3D call with npert=1, nlow=n gives shape (mpert, mtheta*nzeta)
-    basis = compute_fourier_coefficients(mtheta, m_low:m_high, nzeta, [n])
-
-    bn_flat = vec(bn)  # column-major: bn_flat[i + (j-1)*mtheta] = bn[i,j]
+    @assert size(bn) == (mtheta, nzeta)
     scale = 2.0 / (mtheta * nzeta)
 
-    bmn = scale .* (basis * bn_flat)
-
-    modes = ForcingMode[]
-    for (idx, m) in enumerate(m_low:m_high)
-        push!(modes, ForcingMode(; n=n, m=m, amplitude=bmn[idx]))
-    end
-    return modes
+    # The sum separates: Σ_i e^{-imθᵢ} Σ_j bn[i,j] e^{inζⱼ}, on the uniform θ = 2π(i-1)/mtheta, ζ = 2π(j-1)/nzeta grid.
+    bn_n = bn * cis.(n .* range(0; length=nzeta, step=2π / nzeta))
+    θ = range(0; length=mtheta, step=2π / mtheta)
+    return [ForcingMode(; n=n, m=m, amplitude=scale * sum(bn_n[i] * cis(-m * θ[i]) for i in 1:mtheta)) for m in m_low:m_high]
 end
 
 """
@@ -254,11 +246,11 @@ end
     CoilForcingGrid(equil, cfg, n; psi=equil.rzphi_xs[end])
 
 Sample the control surface `psi` at `cfg.mtheta_coil × nzeta` points, with `nzeta` taken
-from `cfg.nzeta_coil` or `NZETA_POINTS_PER_PERIOD` per toroidal period of `n`. Pass
+from `cfg.nzeta_coil` or `NZETA_POINTS_PER_PERIOD × (|n| + 1)`. Pass
 `psi = psilim` whenever a solve is at hand (see `sample_boundary_grid`).
 """
 function CoilForcingGrid(equil::Equilibrium.PlasmaEquilibrium, cfg::CoilConfig, n::Int; psi::Float64=equil.rzphi_xs[end])
-    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * max(1, abs(n))
+    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * (abs(n) + 1)
     grid = sample_boundary_grid(equil, cfg.mtheta_coil, nzeta; psi)
 
     # Lay out observation points: (theta_i, zeta_j) → cylindrical (R, phi, Z)

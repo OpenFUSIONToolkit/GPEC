@@ -1,8 +1,9 @@
-# DIII-D-like H-mode resistive-MHD example: outer-region singular Galerkin Δ′ solve.
-# n=1 tearing stability on the bundled geqdsk: the gal solver computes the Δ′
-# matching matrix (PEST-3 convention) plus rpec coil-response columns (delta_coil).
-# The core_edge_packed radial grid is densest at the axis and edge; psihigh = 0.993
-# stays clear of the separatrix. No forcing and no PerturbedEquilibrium stage.
+# DIII-D-like H-mode resistive-MHD example: outer-region singular Galerkin Δ′ solve, matched to a resistive inner layer.
+# n=1 on the bundled geqdsk: the gal solver computes the Δ′ matching matrix (PEST-3 convention) plus
+# error-field (EF) columns (Delta_EF); [Match] closes each rational surface with the inner layer, and the
+# perturbed equilibrium of that matched result under the DIII-D C-coil reports the penetrated field and the
+# _asymptotic resonant metrics. The core_edge_packed radial grid is densest at the axis and edge; psihigh = 0.993
+# stays clear of the separatrix.
 [Run]
 verbose = true                 # Log each stage's progress
 
@@ -47,14 +48,14 @@ mtheta_vacuum = 512            # Number of points used in splines over poloidal 
 singfac_min = 5e-4             # Distance |m - nq| from each rational surface at which the integration crosses it through its asymptotic series
 
 # Integrator selection and domain truncation (see ForceFreeStatesControl docstring for details)
-integrator = "Galerkin" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
+integrator = "Galerkin" # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = false # Keep psilim at psihigh (do not truncate at last_rational_q + rational_offset_fraction)
 rational_offset_fraction = 0.2 # Truncate integration at (last_rational_q + rational_offset_fraction) / n (only used when truncate_at_rational_offset = true)
 
 frobenius_order = 6 # Order of singular layer (Frobenius) expansion at rational surfaces
 
-# Outer-region singular Galerkin Δ′ solver with rpec coil columns.
-# This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
+# Outer-region singular Galerkin Δ′ solver with error-field (EF) columns.
+# This case exercises the gal solve AND the EF/edge path (Delta_EF) for regression tracking.
 [Galerkin]
 nx                     = 256   # Hermite-cubic elements per interval between singular surfaces
 nq                     = 6     # Gauss-Lobatto quadrature order per element
@@ -67,7 +68,7 @@ tol                    = 1e-10 # Resonant-cell adaptive-quadrature (QuadGK) tole
 gnstep                 = 5000  # Maximum resonant-integration steps
 dx1dx2_flag            = true  # Enable the special dx1/dx2 element sizing for resonant/extension cells
 frobenius_order_ceiling = true  # Auto-raise the series order by ceil(2·Re(α)) on high-Mercier-index surfaces
-rpec_flag              = true  # Append mpert coil-response columns (unit edge sources) to the solve → delta_coil block
+error_field_response              = true  # Add the error-field (EF) columns, a unit edge displacement per mode: gives Delta_EF, the ideal solution and wp
 
 # Driven inner-layer matching on the finished solve. Per-surface resistive inputs (core→edge) for a DIII-D-like case:
 # η=8e-8, ρ=3.3e-7 kg/m³ (ni≈1e20 m^-3), rotation=1 Hz, Γ=5/3. 4 surfaces.
@@ -76,3 +77,14 @@ eta                    = [8e-8, 8e-8, 8e-8, 8e-8]          # Per-surface resisti
 rho                    = [3.3e-7, 3.3e-7, 3.3e-7, 3.3e-7]  # Per-surface mass density ρ [kg/m³] (core→edge)
 rotation               = [1.0, 1.0, 1.0, 1.0]             # Per-surface rotation frequency f [Hz] (core→edge); forced eigenvalue γ_s = 2πi·n·f
 gamma                  = 1.6666666666666667               # Ratio of specific heats Γ for the resistive-layer coefficients (5/3)
+
+[ForcingTerms]
+machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
+mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
+
+[[ForcingTerms.coil_set]]
+name = "c"                              # Coil set; resolves to coil_geometries/d3d_c.dat (DIII-D C-coil, 6 coils)
+currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
+
+[PerturbedEquilibrium]
+compute_singular_coupling = true        # Compute singular layer coupling metrics

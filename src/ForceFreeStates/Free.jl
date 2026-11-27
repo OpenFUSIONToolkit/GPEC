@@ -87,7 +87,7 @@ downstream code consumes the stored ξ profiles.
 end
 
 """
-    compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> (wv, vac)
+    compute_scaled_wv(ctrl, equil, modes) -> (wv, vac)
 
 Vacuum response matrix at the control surface `intr.psilim`, scaled by the singular factors
 `(m - n·q)(m' - n'·q)` [Chance Phys. Plasmas 1997 2161 eq. 126]. Handles 2D single-n, 2D
@@ -98,7 +98,7 @@ share it. Returns the scaled `wv` alongside the full vacuum response `vac`, whos
 point clouds the free-boundary result carries to HDF5. `wv` aliases `vac.wv`, which is
 scaled in place.
 """
-function compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+function compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ModeSpace)
     (; mlow, mhigh, nlow, nhigh, psilim, qlim, wall_settings) = intr
     vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mtheta_vacuum, ctrl.nzeta_vacuum, mlow:mhigh, nlow:nhigh)
     vac = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
@@ -109,28 +109,24 @@ function compute_scaled_wv(ctrl::ForceFreeStatesControl, equil::Equilibrium.Plas
 end
 
 """
-    free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal) -> FreeBoundaryResult
+    free_run(wp, ctrl, equil, mats, modes) -> FreeBoundaryResult
 
-Free-boundary energies at `intr.psilim`: the plasma response from the ODE edge state plus the
-singfac-scaled vacuum matrix, diagonalized as the pencil (W, N). Returns the eigenmodes and their
-plasma/vacuum/total energies as a [`FreeBoundaryResult`](@ref).
+Free-boundary energies and eigenmodes of `W = wp + wv` at `modes.psilim`, for a plasma energy matrix `wp`
+(Hermitian or not) and the singfac-scaled vacuum matrix `wv` of `ctrl`'s wall.
 """
-@with_pool pool function free_run(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, mats::MatrixSplines, intr::ForceFreeStatesInternal)
+@with_pool pool function free_run(wp::Matrix{ComplexF64}, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    mats::MatrixSplines, modes::ModeSpace; verbose::Bool=false)
+
+    wv, vac = compute_scaled_wv(ctrl, equil, modes)
 
     # Initializations and allocations
-    (; mpert, numpert_total, psilim, npert) = intr
+    (; mpert, numpert_total, psilim, npert) = modes
     wpt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     wvt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     tmp_mat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
     dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
-
-    # Compute plasma response matrix W = U₂ * U₁⁻¹
-    wp = zeros(ComplexF64, numpert_total, numpert_total)
-    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
-
-    wv, vac = compute_scaled_wv(ctrl, equil, intr)
 
     # Power-normalization matrix N at the plasma edge: ξ†·N·ξ = ⟨|ξ|²⟩ (see power_norm_matrix!).
     # The Jacobian band is evaluated at psilim (same surface as W), not at the last grid surface.
@@ -187,7 +183,7 @@ plasma/vacuum/total energies as a [`FreeBoundaryResult`](@ref).
     ev = diag(wvt)
 
     # Write energies to screen
-    if intr.verbose
+    if verbose
         @info "Least Stable Eigenmode Energies:\n" *
               "  Plasma = $((@sprintf "%+.3e %+.3ei" real(ep[1]) imag(ep[1])))\n" *
               "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(ev[1]) imag(ev[1])))\n" *

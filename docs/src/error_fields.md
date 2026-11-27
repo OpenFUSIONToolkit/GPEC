@@ -11,7 +11,7 @@ Once one plasma solve exists the resonant drive is linear in each coil's motion,
 4. **Locking risk** (`[ErrorFields.scenario]`, `[ErrorFields.Risk]`, `ErrorFields/Risk/`): the overlap distribution against the empirical penetration-threshold scaling, giving the locking probability and its scan against tolerance scale, from which the allowable tolerance follows.
 5. **Correction limits** (`[ErrorFields.NTV]`, `ErrorFields/NTV/`): how much correction current each array may carry before the NTV torque of its non-resonant field spends the rotation budget, and how much it needs.
 
-For every named coil set of a coil-forced run the stage evaluates the root-area-weighted control-surface spectrum ``\tilde b`` of the set as built and its central-difference derivatives with respect to the six rigid-body degrees of freedom, the shifts ``(\Delta x, \Delta y, \Delta z)`` in metres and the rotations ``(\theta_x, \theta_y, \theta_z)`` about the machine axes in degrees, placed on the run's (m, n) ordering so that they are exactly the vectors the resonant coupling matrix and its singular vectors act on (see [Dominant resonant-coupling mode](perturbed_equilibrium.md#Dominant-resonant-coupling-mode)).
+For every named coil set of a coil-forced run the stage evaluates the root-area-weighted control-surface spectrum ``\tilde b`` of the set as built and its exact derivatives with respect to the six rigid-body degrees of freedom, the shifts ``(\Delta x, \Delta y, \Delta z)`` in metres and the rotations ``(\theta_x, \theta_y, \theta_z)`` right-handed about the machine ``+x``, ``-y`` and ``+z`` axes in degrees, placed on the run's (m, n) ordering so that they are exactly the vectors the resonant coupling matrix and its singular vectors act on (see [Dominant resonant-coupling mode](perturbed_equilibrium.md#Dominant-resonant-coupling-mode)).
 The stored primitive is the linearization of the spectrum, not a scalar, so the resonant surfaces retained, the singular mode and the normalization are post-hoc choices, and every later step can be re-evaluated from `gpec.h5` without a new plasma solve.
 In the snippets below `EF` is `GeneralizedPerturbedEquilibrium.ErrorFields` and `AEF` is `GeneralizedPerturbedEquilibrium.Analysis.ErrorFields`.
 
@@ -47,13 +47,11 @@ It holds only while the plasma still rotates, so the current is capped at ``I_\m
 
 ## Running it
 
-The stage needs a `[PerturbedEquilibrium]` run with `forcing_data_format = "coil"` and the singular coupling computed; `examples/DIIID-like_error_field_example` is the complete case, with the DIII-D C-coil as the n = 1 source and the eighteen F coils as single-filament hoops whose error-field content is entirely their sensitivity to misalignment.
+The stage needs a `[PerturbedEquilibrium]` run with `[ForcingTerms]` coil sets and the singular coupling computed; `examples/DIIID-like_error_field_example` is the complete case, with the DIII-D C-coil as the n = 1 source and the eighteen F coils as single-filament hoops whose error-field content is entirely their sensitivity to misalignment.
 From its deck:
 
 ```toml
 [ErrorFields]
-fd_step_shift_m = 1e-3          # central-difference step of the rigid shifts [m]
-fd_step_tilt_deg = 0.1          # central-difference step of the rigid tilts [degrees]
 rotation_center = "conductor"   # tilt pivot: each conductor's own centre, or "set" for the whole set's
 exclude_coils = []              # coil sets that are not error-field sources (the NTV efc_coils are excluded automatically)
 tolerance_file = "tolerances.toml"   # manufacturing tolerances, relative to the deck directory
@@ -154,7 +152,7 @@ AEF.plot_error_field_summary("gpec.h5"; save_path="error_field_summary.png")
 
 | Dataset | Meaning |
 |---|---|
-| `ErrorFields/CoilSensitivities/field_as_designed`, `shift_sensitivity_per_m`, `tilt_sensitivity_per_deg` | the control-surface spectrum of each coil set as built and its derivatives with respect to the rigid shifts and tilts, with the current pattern they were evaluated at and the finite-difference linearity residual per tap |
+| `ErrorFields/CoilSensitivities/field_as_designed`, `shift_sensitivity_per_m`, `tilt_sensitivity_per_deg` | the control-surface spectrum of each coil set as built and its derivatives with respect to the rigid shifts and tilts, with the current pattern they were evaluated at |
 | `ErrorFields/CoilSensitivities/DominantMode/delta_as_designed`, … | the overlaps and sensitivities projected onto the run's full-window dominant mode, their direction-averaged in-plane magnitudes, and the shift and tilt that would cancel the as-designed overlap |
 | `ErrorFields/MonteCarlo/abs_delta_pdf`, `abs_delta_efc_pdf`, `abs_delta_bin_edges` | the intrinsic and corrected ``\lvert\delta\rvert`` histograms over the sampled tolerances, per batch and averaged |
 | `ErrorFields/MonteCarlo/abs_delta_total_as_designed`, `abs_delta_worst_case` | the overlap of the design as built and the worst-case bound with every term at its tolerance edge and in phase |
@@ -167,7 +165,8 @@ Every dataset name follows one grammar, `<quantity>[_<instance>][_efc][_<statist
 
 ## Numerical notes
 
-- The sensitivities assume the overlap is linear in the misalignments out to the tolerance edge; the run checks it only at the finite-difference step, and `linearity_check` displaces each coil set by `±scale × tolerance` and recomputes its overlap to report the relative error of the linear model at the largest scale a tolerance scan will use (one Biot–Savart pass per row).
+- The derivatives are exact: moving a coil set by ``h\hat e`` changes its field at a fixed control-surface point by ``-h(\hat e\cdot\nabla)\mathbf B``, and rotating it by ``\theta`` about ``\hat a`` through the pivot ``\mathbf p`` by ``\theta[\hat a\times\mathbf B - ((\hat a\times(\mathbf x-\mathbf p))\cdot\nabla)\mathbf B]``, with ``\nabla\mathbf B`` from the closed-form gradient of each straight segment's field (Hanson & Hirshman 2002), so one Biot–Savart pass gives all six.
+- The sensitivities assume the overlap is linear in the misalignments out to the tolerance edge; `linearity_check` displaces each coil set by `±scale × tolerance` and recomputes its overlap to report the relative error of the linear model at the largest scale a tolerance scan will use (one Biot–Savart pass per row).
 - Monte Carlo batches are seeded individually, so results are bit-identical for any thread count; `risk_convergence` repeats the Monte Carlo over sample and bin counts, and the batch spread must fall as ``1/\sqrt{n_\mathrm{sample}}`` while the value must not move with the bin count by more than the spread.
 - A threshold scaling is fitted for one toroidal mode number, so the risk refuses a run that spans several; project onto one n's coupling first.
 - A coil set whose field at the run's toroidal mode is round-off (an axisymmetric hoop at n = 1) has no resonant fraction and reports `NaN` rather than the ratio of two noise vectors.

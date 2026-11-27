@@ -44,6 +44,39 @@ segment, so the contribution is zero for ρ² below `BIOT_SAVART_MIN_DIST_SQ`.
 end
 
 """
+    _segment_field_gradient(rx, ry, rz, dlx, dly, dlz, len) -> ((bx, by, bz), J)
+
+`_segment_field` and its gradient with respect to the observation point, `J[a, b] = ∂B_a/∂x_b` as a
+column-major 9-tuple, from the gradient of the Hanson & Hirshman factor `2s/(RᵢR_f(s² − L²))`, `s = Rᵢ + R_f`.
+Both are zero where `_segment_field` treats the observer as on the conductor.
+"""
+@inline function _segment_field_gradient(rx::Float64, ry::Float64, rz::Float64,
+    dlx::Float64, dly::Float64, dlz::Float64, len::Float64)
+    ri = sqrt(rx * rx + ry * ry + rz * rz)
+    fx = rx - dlx
+    fy = ry - dly
+    fz = rz - dlz
+    rf = sqrt(fx * fx + fy * fy + fz * fz)
+    s = ri + rf
+    on_wire = 2 * ri * rf * (s - len) <= BIOT_SAVART_MIN_DIST_SQ * s
+    ri = ifelse(on_wire, 1.0, ri)
+    rf = ifelse(on_wire, 1.0, rf)
+    q = ifelse(on_wire, 1.0, s * s - len * len)
+    f = ifelse(on_wire, 0.0, 2 * s / (ri * rf * q))
+    cx = dly * rz - dlz * ry
+    cy = dlz * rx - dlx * rz
+    cz = dlx * ry - dly * rx
+    c = 1 / s - 2 * s / q
+    gi = f * (c - 1 / ri) / ri
+    gf = f * (c - 1 / rf) / rf
+    gx = gi * rx + gf * fx
+    gy = gi * ry + gf * fy
+    gz = gi * rz + gf * fz
+    J = (cx * gx, cy * gx + f * dlz, cz * gx - f * dly, cx * gy - f * dlz, cy * gy, cz * gy + f * dlx, cx * gz + f * dly, cy * gz - f * dlx, cz * gz)
+    return (cx * f, cy * f, cz * f), J
+end
+
+"""
     PrecomputedSegments
 
 Pre-computed segment vectors, lengths and start points for one conductor strand, stored
@@ -168,6 +201,23 @@ Sum the exact segment fields of one `PrecomputedSegments` strand at `(ox, oy, oz
     end
 
     return bx_acc * pf, by_acc * pf, bz_acc * pf
+end
+
+"""
+    _accumulate_precomputed_gradient(ox, oy, oz, seg) -> ((bx, by, bz), J)
+
+Field and observation-point gradient of one `PrecomputedSegments` strand at `(ox, oy, oz)`, scaled by its prefactor;
+see `_segment_field_gradient`.
+"""
+@inline function _accumulate_precomputed_gradient(ox::Float64, oy::Float64, oz::Float64, seg::PrecomputedSegments)
+    b = (0.0, 0.0, 0.0)
+    J = ntuple(_ -> 0.0, Val(9))
+    @inbounds @simd for l in 1:seg.nseg
+        bl, Jl = _segment_field_gradient(ox - seg.x0[l], oy - seg.y0[l], oz - seg.z0[l], seg.dlx[l], seg.dly[l], seg.dlz[l], seg.len[l])
+        b = b .+ bl
+        J = J .+ Jl
+    end
+    return b .* seg.prefactor, J .* seg.prefactor
 end
 
 """

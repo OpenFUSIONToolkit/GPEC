@@ -18,11 +18,7 @@ const EF_H5_ANNOTATIONS = [
     "field_as_designed" => (; long_name="root-area-weighted control-surface field b̃ of each coil set as built", units="T", dims=("mode", "coil_set")),
     "shift_sensitivity_per_m" => (; long_name="∂b̃/∂(Δx, Δy, Δz) of each coil set under a rigid Cartesian shift", units="T/m", dims=("mode", "axis", "coil_set")),
     "tilt_sensitivity_per_deg" =>
-        (; long_name="∂b̃/∂(θx, θy, θz) of each coil set under a rigid rotation about the machine axes", units="T/deg", dims=("mode", "axis", "coil_set")),
-    "shift_linearity_residual" =>
-        (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖ of each shift tap relative to the set's largest first difference", dims=("axis", "coil_set")),
-    "tilt_linearity_residual" =>
-        (; long_name="finite-difference curvature ‖b̃(+h)+b̃(−h)−2b̃(0)‖ of each tilt tap relative to the set's largest first difference", dims=("axis", "coil_set")),
+        (; long_name="∂b̃/∂(θx, θy, θz) of each coil set under a rigid rotation right-handed about the machine +x, −y, +z axes", units="T/deg", dims=("mode", "axis", "coil_set")),
     "peak_current" => (; long_name="largest conductor current magnitude of each coil set at which the spectra were evaluated", units="A"),
     "winding_multiplier" => (; long_name="turns per conductor element of each coil set"),
     "major_radius_m" => (; long_name="arc-length-weighted major radius of each coil set, the lever arm converting a tilt angle to rim displacement", units="m"),
@@ -50,8 +46,6 @@ function save_to_hdf5(h5file::Union{HDF5.File,HDF5.Group}, sens::CoilSensitiviti
     g["field_as_designed"] = sens.field_as_designed
     g["shift_sensitivity_per_m"] = sens.shift_sensitivity_per_m
     g["tilt_sensitivity_per_deg"] = sens.tilt_sensitivity_per_deg
-    g["shift_linearity_residual"] = sens.shift_linearity_residual
-    g["tilt_linearity_residual"] = sens.tilt_linearity_residual
     g["peak_current"] = sens.peak_current
     g["winding_multiplier"] = sens.winding_multiplier
     g["major_radius_m"] = sens.major_radius_m
@@ -87,7 +81,6 @@ function CoilSensitivities(h5path::AbstractString)
         return CoilSensitivities(
             read(g["coil_name"]), mn[:, 1], mn[:, 2], Float64(read(f["Equilibrium/B_T_axis"])),
             read(g["field_as_designed"]), read(g["shift_sensitivity_per_m"]), read(g["tilt_sensitivity_per_deg"]),
-            read(g["shift_linearity_residual"]), read(g["tilt_linearity_residual"]),
             read(g["peak_current"]), read(g["winding_multiplier"]), read(g["major_radius_m"])
         )
     end

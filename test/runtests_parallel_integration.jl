@@ -30,11 +30,10 @@ end
             x = factor \ rhs
             raw[row, :] = x[[3, 5]]
         end
-        delta = reshape([raw[2, 2] - raw[2, 1] - raw[1, 2] + raw[1, 1]], 1, 1)
-        return ComplexF64.(delta), ComplexF64.(raw)
+        return ComplexF64.(raw)
     end
-    extended = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], true)[1:2]
-    ordinary = FFS._solve_bvp_and_combine_pest3(M, 1, 1, [1], false)[1:2]
+    extended = FFS._solve_bvp_raw(M, 1, 1, [1], 6:6, true)[1]
+    ordinary = FFS._solve_bvp_raw(M, 1, 1, [1], 6:6, false)[1]
     @test extended == reference
     @test ordinary != reference
     @test all(isapprox.(ordinary, reference; rtol=1e-8))
@@ -205,7 +204,7 @@ end
         function run_solovev(integrator)
             ctrl, intr, equil, metric, mats = _prepared_solovev(integrator)
             odet = first(GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, mats, intr))
-            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run(odet, ctrl, equil, mats, intr)
+            vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run((odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2, ctrl, equil, mats, intr)
             return real(vac.et[1]), intr
         end
 

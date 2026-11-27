@@ -104,7 +104,7 @@ end
 
 function _warn_coarse_toroidal_grid(cfg::CoilConfig, rc::ResonantCoupling)
     for n in sort(unique(rc.n_modes))
-        nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : ForcingTerms.NZETA_POINTS_PER_PERIOD * max(1, abs(n))
+        nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : ForcingTerms.NZETA_POINTS_PER_PERIOD * (abs(n) + 1)
         per_period = nzeta / max(1, abs(n))
         per_period < MIN_NZETA_PER_PERIOD && @warn "Toroidal boundary grid is $(round(per_period; digits=1)) points per period for n = $n, " *
               "below the $MIN_NZETA_PER_PERIOD where helical coils are converged. Pass nzeta_coil to override the stored deck's value."

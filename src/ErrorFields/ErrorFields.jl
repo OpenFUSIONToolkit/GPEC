@@ -17,8 +17,8 @@ plasma solve or a new Biot-Savart integration.
 - `Overlap.jl`: `ResonantDriveContext` (everything a finished run offers for judging coil geometry,
   gathered once), `coil_overlaps`, `combine_overlaps`, `applied_spectrum` — the entry point for
   evaluating a coil design against a stored solve without re-running the plasma
-- `Sensitivity.jl`: `compute_coil_sensitivities` (central-difference sweep of every rigid
-  shift and tilt of every coil set on one shared boundary grid), `sensitivity_table`
+- `Sensitivity.jl`: `compute_coil_sensitivities` (exact derivatives of every coil set's spectrum
+  under each rigid shift and tilt, from the field and its gradient on one shared boundary grid), `sensitivity_table`
 - `Output.jl`: HDF5 writer under `ErrorFields/CoilSensitivities/` and the matching reader
 - `ToleranceTOML.jl`: the tolerance input file — `read_tolerance_toml`, `ToleranceSet`,
   `validate_tolerances`, and the tilt unit conversion `tilt_tolerance_deg`

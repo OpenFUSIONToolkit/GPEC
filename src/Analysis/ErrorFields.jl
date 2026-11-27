@@ -41,7 +41,6 @@ _default_label(_) = ""
 const _BLANK = (; coil_names=nothing, delta_as_designed=nothing, abs_delta_shift_per_mm=nothing,
     abs_delta_tilt_per_deg=nothing, abs_delta_rim_per_mm=nothing, shift_sensitivity_per_m=nothing, tilt_sensitivity_per_deg=nothing,
     field_as_designed=nothing, b_t0=nothing, resonant_fraction_percent=nothing, major_radius_m=nothing,
-    shift_linearity_residual=nothing, tilt_linearity_residual=nothing, fd_step_shift_m=nothing, fd_step_tilt_deg=nothing,
     tolerances=nothing, abs_delta_bin_edges=nothing, abs_delta_pdf=nothing, abs_delta_efc_pdf=nothing, abs_delta_pdf_batches=nothing, abs_delta_total_as_designed=nothing,
     abs_delta_worst_case=nothing, abs_delta_sampled_mean=nothing, clamped_fraction=nothing, threshold_pdf=nothing,
     locking_probability_given_delta=nothing, threshold_fit=nothing, locking_probability_percent=nothing, locking_probability_efc_percent=nothing,
@@ -56,8 +55,7 @@ _load(t::EF.SensitivityTable) = _load((; coil_names=t.coil_names, delta_as_desig
     abs_delta_rim_per_mm=t.abs_delta_rim_per_mm, shift_sensitivity_per_m=t.shift_sensitivity_per_m, tilt_sensitivity_per_deg=t.tilt_sensitivity_per_deg))
 
 _load(s::EF.CoilSensitivities) = _load((; coil_names=s.coil_names, field_as_designed=s.field_as_designed, b_t0=s.b_t0,
-    shift_sensitivity_per_m=s.shift_sensitivity_per_m, tilt_sensitivity_per_deg=s.tilt_sensitivity_per_deg, major_radius_m=s.major_radius_m,
-    shift_linearity_residual=s.shift_linearity_residual, tilt_linearity_residual=s.tilt_linearity_residual))
+    shift_sensitivity_per_m=s.shift_sensitivity_per_m, tilt_sensitivity_per_deg=s.tilt_sensitivity_per_deg, major_radius_m=s.major_radius_m))
 
 _load(r::EF.MonteCarloResult) =
     _load((; abs_delta_bin_edges=r.abs_delta_bin_edges, abs_delta_pdf=r.abs_delta_pdf, abs_delta_efc_pdf=r.abs_delta_efc_pdf, abs_delta_pdf_batches=r.abs_delta_pdf_batches,
@@ -100,25 +98,13 @@ function _load(r::EF.ErrorFieldsResult)
         (; scan_scale=sc.tolerance_scale, scan_locking_probability_percent=sc.locking_probability_percent,
             scan_locking_probability_efc_percent=sc.locking_probability_efc_percent, scan_locking_probability_spread_percent=sc.locking_probability_spread_percent,
             scan_locking_probability_efc_spread_percent=sc.locking_probability_efc_spread_percent))
-    ctrl = r.settings.ctrl
-    push!(
-        parts,
-        _present((; tolerances=r.tolerances, fd_step_shift_m=ctrl.fd_step_shift_m, fd_step_tilt_deg=ctrl.fd_step_tilt_deg, _dominant(r.response)...))
-    )
+    push!(parts, _present((; tolerances=r.tolerances, _dominant(r.response)...)))
     return _load(merge(parts...))
 end
 
 _load(ovs::AbstractVector{EF.CoilOverlap}) = _load((; coil_names=[o.coil_name for o in ovs],
     delta_as_designed=[o.delta for o in ovs], resonant_fraction_percent=[o.resonant_fraction_percent for o in ovs],
     b_t0=isempty(ovs) ? nothing : first(ovs).b_t0))
-
-# The finite-difference steps the run's sensitivities were taken at, from the recorded deck; a
-# file without one gets the control defaults, which is what an unset deck used.
-function _fd_steps(f)
-    defaults = EF.ErrorFieldsControl()
-    ef = haskey(f, "Input/gpec_toml_raw") ? get(TOML.parse(read(f["Input/gpec_toml_raw"])), "ErrorFields", Dict{String,Any}()) : Dict{String,Any}()
-    return Float64(get(ef, "fd_step_shift_m", defaults.fd_step_shift_m)), Float64(get(ef, "fd_step_tilt_deg", defaults.fd_step_tilt_deg))
-end
 
 function _load_h5(h5path::AbstractString)
     tolerances = EF.read_tolerance_snapshot(h5path)
@@ -128,7 +114,6 @@ function _load_h5(h5path::AbstractString)
         # two spellings of the schema drift apart silently, and a renamed group would surface as an
         # empty plot rather than an error.
         cs, mc, rk = EF._H5_GROUP, EF._MC_GROUP, EF._RISK_GROUP
-        h_shift, h_tilt = _fd_steps(f)
         (
             coil_names=has(cs) ? read(f["$cs/coil_name"]) : nothing,
             delta_as_designed=has(cs) ? read(f["$cs/DominantMode/delta_as_designed"]) : nothing,
@@ -140,10 +125,6 @@ function _load_h5(h5path::AbstractString)
             field_as_designed=has(cs) ? read(f["$cs/field_as_designed"]) : nothing,
             b_t0=has("Equilibrium/B_T_axis") ? Float64(read(f["Equilibrium/B_T_axis"])) : nothing,
             major_radius_m=has(cs) ? read(f["$cs/major_radius_m"]) : nothing,
-            shift_linearity_residual=has(cs) ? read(f["$cs/shift_linearity_residual"]) : nothing,
-            tilt_linearity_residual=has(cs) ? read(f["$cs/tilt_linearity_residual"]) : nothing,
-            fd_step_shift_m=h_shift,
-            fd_step_tilt_deg=h_tilt,
             tolerances=tolerances,
             abs_delta_bin_edges=has(mc) ? read(f["$mc/abs_delta_bin_edges"]) : nothing,
             abs_delta_pdf=has(mc) ? read(f["$mc/abs_delta_pdf"]) : nothing,
@@ -199,30 +180,6 @@ function _sensitivity_values(lbl, d, names, quantity::Symbol)
     return abs.(vals[idx])
 end
 
-# The six taps' residual ratios per coil set (6 × n), at the finite-difference step or rescaled
-# by tolerance / step to the coil's own tolerance.
-function _linearity_matrix(lbl, d, names, at::Symbol; tolerances=nothing, fd_step_shift_m=nothing, fd_step_tilt_deg=nothing)
-    idx = _coil_indices(lbl, d, names)
-    r = vcat(d.shift_linearity_residual[:, idx], d.tilt_linearity_residual[:, idx])
-    at === :step && return r
-    ts = tolerances === nothing ? d.tolerances : tolerances
-    ts === nothing && throw(ArgumentError("source \"$lbl\" carries no tolerance snapshot; pass tolerances=ToleranceSet or use at=:step"))
-    h_shift = something(fd_step_shift_m, d.fd_step_shift_m, EF.ErrorFieldsControl().fd_step_shift_m)
-    h_tilt = something(fd_step_tilt_deg, d.fd_step_tilt_deg, EF.ErrorFieldsControl().fd_step_tilt_deg)
-    tol_of = Dict(t.name => t for t in ts.coils)
-    for (k, i) in enumerate(idx)
-        t = get(tol_of, d.coil_names[i], nothing)
-        shift_tol = t === nothing ? 0.0 : t.shift_tol_m
-        tilt_tol =
-            t === nothing ? 0.0 :
-            d.major_radius_m === nothing ? throw(ArgumentError("source \"$lbl\" carries no major radii, needed to convert a tilt tolerance in metres")) :
-            EF.tilt_tolerance_deg(t.tilt_tol, t.tilt_units, d.major_radius_m[i]; name="coil set $(d.coil_names[i])")
-        r[1:3, k] .*= shift_tol / h_shift
-        r[4:6, k] .*= tilt_tol / h_tilt
-    end
-    return r
-end
-
 _centers(edges) = (edges[1:end-1] .+ edges[2:end]) ./ 2
 
 # A registered source (a path or the assessment) must hold the data a single-source plot draws; other in-memory sources are what they are.
@@ -271,7 +228,6 @@ function _plot_coil_sensitivities end
 function _plot_tolerance_pdf end
 function _plot_overlap_phasors end
 function _plot_tolerance_budget end
-function _plot_linearity_residuals end
 function _plot_linearity_check end
 function _plot_locking_risk end
 function _plot_threshold_scaling end
@@ -398,30 +354,6 @@ function plot_tolerance_budget(h5path::AbstractString; psi_low::Real=0.0, psi_hi
     mc = d.abs_delta_pdf === nothing ? nothing : (; abs_delta_sampled_mean=d.abs_delta_sampled_mean, abs_delta_total_as_designed=d.abs_delta_total_as_designed)
     return plot_tolerance_budget(terms; monte_carlo=mc, kwargs...)
 end
-
-"""
-    plot_linearity_residuals(sources; at=:tolerance, coils=nothing, tolerances=nothing, fd_step_shift_m=nothing, fd_step_tilt_deg=nothing, yscale=:log10, save_path=nothing)
-    plot_linearity_residuals(source; kwargs...)
-
-Plot how linear each coil set's field is in its rigid motions: for the six taps (shift and tilt about `x`, `y`, `z`)
-the ratio of the central second difference to the largest first difference among the set's taps, as stored in
-`ErrorFields/CoilSensitivities/*_linearity_residual`. `at = :step` shows it at the finite-difference steps;
-`at = :tolerance` rescales each tap by `tolerance / step` to the coil's own tolerance range. Tolerances come from the
-file's snapshot or `tolerances`; steps from the recorded deck or `fd_step_shift_m` and `fd_step_tilt_deg`. The 1 % level
-at which the sensitivity calculation warns is marked. One panel per source, on a log axis unless `yscale = :identity`.
-"""
-function plot_linearity_residuals(sources::Sources; at::Symbol=:tolerance, coils=nothing, tolerances=nothing, fd_step_shift_m=nothing,
-    fd_step_tilt_deg=nothing, yscale::Symbol=:log10, save_path=nothing)
-    at in (:step, :tolerance) || throw(ArgumentError("at must be :step or :tolerance"))
-    yscale in (:identity, :log10) || throw(ArgumentError("yscale must be :identity or :log10"))
-    panels = map(_labelled(sources)) do (lbl, d)
-        d.shift_linearity_residual === nothing && throw(ArgumentError("plot_linearity_residuals: source \"$lbl\" has no linearity residuals; run with an [ErrorFields] section"))
-        names = coils === nothing ? d.coil_names : String.(collect(coils))
-        (; label=lbl, names, residual=_linearity_matrix(lbl, d, names, at; tolerances, fd_step_shift_m, fd_step_tilt_deg))
-    end
-    return _draw(_plot_linearity_residuals, panels, at, yscale; save_path)
-end
-plot_linearity_residuals(source::SingleSource; kwargs...) = (_check(plot_linearity_residuals, source); plot_linearity_residuals(_sources(source); kwargs...))
 
 """
     plot_linearity_check(check::EF.LinearityCheck; save_path=nothing)
@@ -668,7 +600,6 @@ register!(plot_error_field_summary, _EF_SOURCES, (), "overlap against the thresh
     any_of=((:ef_monte_carlo, :ef_risk), (:ef_scan,), (:ef_sensitivities,)))
 register!(plot_coil_sensitivities, _EF_SOURCES, (:ef_sensitivities,), "per-coil dominant-mode sensitivities")
 register!(plot_overlap_phasors, _EF_SOURCES, (:ef_sensitivities,), "as-designed overlap δ of each coil set in the complex plane")
-register!(plot_linearity_residuals, _EF_SOURCES, (:ef_sensitivities,), "linearity residuals of the coil sensitivities")
 register!(plot_dominant_mode_spectrum, (_EF_SOURCES..., PE.PlasmaResponse, PE.PerturbedEquilibriumState), (:dominant_mode,),
     "spectra of the dominant resonant-coupling modes")
 register!(plot_tolerance_pdf, _EF_SOURCES, (:ef_monte_carlo,), "Monte Carlo distribution of |δ|")

@@ -278,6 +278,68 @@ using TOML
         @test finite(eq_r)
     end
 
+    @testset "Machine-frame equilibrium field" begin
+        EQ = GeneralizedPerturbedEquilibrium.Equilibrium
+        FT = GeneralizedPerturbedEquilibrium.ForcingTerms
+        gfile = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "TkMkr_D3Dlike_Hmode.geqdsk")
+        cfg = EQ.EquilibriumConfig(; eq_filename=gfile, eq_type="efit", jac_type="hamada", grid_type="core_edge_packed", psilow=0.01, psihigh=0.995, mpsi=64, mtheta=256)
+        equil = EQ.PlasmaEquilibrium(cfg)
+        ingest = equil.ingest
+
+        # A flux surface at scale × its traced minor radius, counterclockwise in the (R, Z) plane.
+        psi = equil.rzphi_xs[end]
+        function surface(θ; scale=1.0)
+            rminor = scale .* sqrt.(equil.rzphi_rsquared.(Ref(psi), θ))
+            η = 2π .* (θ .+ equil.rzphi_offset.(Ref(psi), θ))
+            return equil.ro .+ rminor .* cos.(η), equil.zo .+ rminor .* sin.(η)
+        end
+
+        # On the traced knots of the outermost surface: its flux, and |B| as the solver found it.
+        R, Z = surface(equil.rzphi_ys)
+        B = EQ.equilibrium_field(equil, R, Z)
+        @test maximum(abs, B.psi_norm .- psi) < 1e-7
+        @test sqrt.(B.B_R .^ 2 .+ B.B_phi .^ 2 .+ B.B_Z .^ 2) ≈ equil.eqfun_B.(Ref(psi), equil.rzphi_ys) rtol = 1e-4
+        @test all(sign.(B.B_phi) .== ingest.bt_sign)
+
+        # Ampère just outside the plasma: counterclockwise in (R, Z) circulates about -φ̂, so the loop integral is -μ₀ I_φ.
+        R, Z = surface(collect(range(0, 1; length=4001)); scale=1.03)
+        B = EQ.equilibrium_field(equil, R, Z)
+        mid(v) = (v[1:end-1] .+ v[2:end]) ./ 2
+        ip = parse(Float64, readlines(gfile)[4][1:16])     # the header's plasma current, in A
+        @test sum(mid(B.B_R) .* diff(R) .+ mid(B.B_Z) .* diff(Z)) ≈ -sign(ip) * 4π * 1e-7 * abs(ip) rtol = 1e-3
+
+        # The coil kernel's frame: a hoop at the axis carrying current with the plasma's sign gives the same B_Z outboard.
+        φ = range(0, 2π; length=721)
+        hoop = FT.CoilSet("hoop", 1, 1, 1.0, 721, reshape(equil.ro .* cos.(φ), 1, 1, :), reshape(equil.ro .* sin.(φ), 1, 1, :),
+            fill(equil.zo, 1, 1, 721), [ingest.ip_sign * 1e6])
+        r_out = [maximum(R) + 0.05]
+        Bc = (zeros(1), zeros(1), zeros(1))
+        FT.compute_biot_savart_boundary!(Bc..., r_out, [0.0], [equil.zo], [hoop])
+        @test sign(Bc[3][1]) == sign(EQ.equilibrium_field(equil, r_out, [equil.zo]).B_Z[1]) == -ingest.ip_sign
+
+        # Reversing the file's signs reverses the matching components.
+        flipped = deepcopy(equil)
+        flipped.ingest = EQ.DirectIngest(ingest.sq_xs, ingest.sq_fs, ingest.psi_xs, ingest.psi_ys, ingest.psi_rz, ingest.rmin, ingest.rmax,
+            ingest.zmin, ingest.zmax, ingest.psio, -ingest.bt_sign, -ingest.ip_sign)
+        Bf = EQ.equilibrium_field(flipped, R, Z)
+        @test Bf.B_R == -B.B_R && Bf.B_Z == -B.B_Z && Bf.B_phi == -B.B_phi
+
+        # F follows the profile inside the plasma and is the edge value outside it, also past the X-point where ψ_N < 1.
+        law = EQ.separatrix_q_law(equil)
+        rx, zx = law.r_x[1], law.z_x[1]
+        d = hypot(rx - equil.ro, zx - equil.zo)
+        rr = [equil.ro, ingest.rmax - 0.01, rx + 0.06 * (rx - equil.ro) / d]
+        zz = [equil.zo, equil.zo, zx + 0.06 * (zx - equil.zo) / d]
+        Bv = EQ.equilibrium_field(equil, rr, zz)
+        @test Bv.psi_norm[1] < 1e-6 && Bv.psi_norm[2] > 1 && Bv.psi_norm[3] < 1
+        @test Bv.B_phi .* rr ≈ ingest.bt_sign .* ingest.sq_fs[[1, end, end], 1] rtol = 1e-6
+        @test abs(ingest.sq_fs[1, 1] - ingest.sq_fs[end, 1]) > 1e-3 * ingest.sq_fs[end, 1]
+
+        @test_throws "outside the equilibrium's flux grid" EQ.equilibrium_field(equil, [ingest.rmax + 0.1], [0.0])
+        sol = EQ.PlasmaEquilibrium(EQ.EquilibriumConfig(; eq_type="sol", psilow=0.01, psihigh=0.99, mpsi=16, mtheta=32), EQ.SolovevConfig(; mr=32, mz=32, ma=32))
+        @test_throws "only g-file and IMAS" EQ.equilibrium_field(sol, [1.0], [0.0])
+    end
+
     @testset "Load TokaMaker i-file" begin
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
         # One TokaMaker solve written by save_eqdsk (g65) and save_ifile (i33x65, real*8 and real*4)

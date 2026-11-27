@@ -11,7 +11,7 @@ using .PerturbedEquilibrium: PerturbedEquilibriumState
 using .KineticForces: MethodResult, KineticForcesState
 using .ErrorFields: MonteCarloResult, RiskResult, EFCCoupling
 using .Tearing: GrowthRateResult
-using .ForcingTerms: RMPSource, RMPSpectrum, RMPFieldSum
+using .ForcingTerms: ForcingFile, ForcingCoils, ForcingSpectrum, ForcingMagneticMaterial, ForcingLeaf, ForcingFieldSum
 
 _fmt(x::Real) = @sprintf("%.4g", x)
 _fmt(::Nothing) = "—"
@@ -134,8 +134,9 @@ function Base.show(io::IO, fb::FreeBoundaryResult)
 end
 
 function Base.show(io::IO, d::DeltaPrimeData)
-    source = d.A === nothing ? "Riccati" : "Galerkin"
-    return print(io, "DeltaPrimeData(", source, ", ", _shape(d.matrix), ")")
+    boundaries = join([b for (b, blocks) in (("free", d.freeboundary), ("fixed", d.fixedboundary)) if blocks !== nothing], " + ")
+    msing = size(something(d.freeboundary, d.fixedboundary).Delta, 1)
+    return print(io, "DeltaPrimeData(", boundaries, " boundary, ", _plural(msing, "surface"), isempty(d.ef) ? "" : ", Δ_EF", ")")
 end
 
 function Base.show(io::IO, g::GalerkinResult)
@@ -193,17 +194,18 @@ end
 function _free_boundary_note(r::ForceFreeStates.ForceFreeStatesResult)
     fb = r.free_boundary
     if fb === nothing
-        r.closure === :matched && return "not computed (a matched closure carries no ideal δW)"
         return r.control.vac_flag ? "not computed by the $(r.integrator) integrator" : "not computed (vac_flag = false)"
     end
-    verdict = real(first(fb.et)) < 0 ? "unstable" : "stable"
     e(z) = _energy(r, first(z))
-    return "$verdict: et₁ = $(e(fb.et)), ep₁ = $(e(fb.ep)), ev₁ = $(e(fb.ev)), vacuum λ = $(_fmt(fb.vacuum_eigenvalue))"
+    energies = "et₁ = $(e(fb.et)), ep₁ = $(e(fb.ep)), ev₁ = $(e(fb.ev)), vacuum λ = $(_fmt(fb.vacuum_eigenvalue))"
+    # A matched closure's non-Hermitian W carries no stability verdict.
+    r.closure === :matched && return energies
+    return (real(first(fb.et)) < 0 ? "unstable" : "stable") * ": " * energies
 end
 
 # m/n of each row of the Δ′ matrix: Galerkin solves across its in-band subset of the surfaces.
 function _delta_prime_labels(r::ForceFreeStates.ForceFreeStatesResult)
-    k = minimum(size(r.delta_prime.matrix))
+    k = size(something(r.delta_prime.freeboundary, r.delta_prime.fixedboundary).Delta, 1)
     g = r.galerkin
     g !== nothing && length(g.sing_m) == k && return ["$(m)/$(n)" for (m, n) in zip(g.sing_m, g.sing_n)]
     length(r.surfaces) == k && return _surface_label.(r.surfaces)
@@ -217,11 +219,14 @@ function Base.show(io::IO, ::MIME"text/plain", r::ForceFreeStates.ForceFreeState
     _row(io, "Domain", "ψ ∈ [$(_fmt(r.psilow)), $(_fmt(r.psilim))], q_lim = $(_fmt(r.qlim))" * (r.layer_overlap === nothing ? "" : " (capped by layer overlap)"))
     surf = isempty(r.surfaces) ? "none" : _list(["$(_surface_label(s)) @ ψ = $(_fmt(s.psifac))" for s in r.surfaces]; max=4)
     _row(io, "Surfaces", "$(length(r.surfaces)): " * surf)
+    isempty(r.surfaces) || any(s -> isempty(s.alpha), r.surfaces) ||
+        _row(io, "Mercier α − ½", _list(["$(_surface_label(s)): $(_fmt(real(s.alpha[1]) - 0.5))" for s in r.surfaces]; max=4))
     _row(io, "Fixed boundary", _fixed_boundary_note(r))
     _row(io, "Free boundary", _free_boundary_note(r))
     if r.delta_prime !== nothing
-        dp = r.delta_prime.matrix
-        _row(io, "Δ′_ii (ψ_N)", _list(["$l: $(_fmt(real(dp[i, i])))" for (i, l) in enumerate(_delta_prime_labels(r))]; max=4))
+        free = r.delta_prime.freeboundary !== nothing
+        dp = something(r.delta_prime.freeboundary, r.delta_prime.fixedboundary).Delta
+        _row(io, free ? "Δ′_ii (ψ_N)" : "Δ′_ii fixed boundary (ψ_N)", _list(["$l: $(_fmt(real(dp[i, i])))" for (i, l) in enumerate(_delta_prime_labels(r))]; max=4))
     end
     _row(io, "Solution", _solution_note(r))
     r.galerkin === nothing || _row(io, "Galerkin", "$(_plural(r.galerkin.msing, "surface")), $(r.galerkin.solver) factorization")
@@ -240,7 +245,7 @@ function Base.show(io::IO, ::MIME"text/plain", m::MatchResult)
     print(io, "MatchResult  ", InnerLayer.model_name(m.model))
     _row(io, "Surfaces", "$(size(m.deltar, 1)) matched, $(size(m.cout, 2)) edge drives")
     _row(io, "Residual", _fmt(m.residual))
-    _row(io, "Forced γ [rad/s]", isempty(m.rpec_eig) ? "none" : _list(_fmt.(m.rpec_eig); max=3))
+    _row(io, "Forced γ [rad/s]", isempty(m.forced_eigenvalue) ? "none" : _list(_fmt.(m.forced_eigenvalue); max=3))
     outer = isempty(m.xi) ? "not computed" : "$(_shape(m.xi)) (one column per edge drive)"
     _row(io, "Stored", "matched outer ξ $outer, inner profiles $(isempty(m.inner_psi) ? "not computed" : "on $(length(m.inner_psi)) surfaces")")
     return nothing
@@ -253,7 +258,6 @@ _resonances(r::PlasmaResponse) = ["$(m)/$(n)" for (m, n) in zip(r.rational_m_res
 function _missing_operators_note(r::PlasmaResponse)
     r.ffs.free_boundary === nothing && return "not computed (needs a free-boundary result)"
     r.ffs.solution === nothing && return "not computed (needs stored ξ profiles)"
-    r.ffs.integrator === :riccati && return "not computed (a Riccati result is not accepted yet)"
     return "not computed"
 end
 
@@ -273,10 +277,13 @@ function Base.show(io::IO, ::MIME"text/plain", r::PlasmaResponse)
     _row(io, "Modes", "n = $(_irange(r.n_modes)), m = $(_irange(r.m_modes)) ($(length(r.m_modes)) total)")
     _row(io, "Operators", isempty(r.permeability_flux) ? _missing_operators_note(r) : "permeability, inductances $(_shape(r.permeability_flux))")
     _row(io, "Resonances", isempty(r.rational_psi) ? "none" : _list(_resonances(r)))
-    _row(io, "Coupling", isempty(r.C_resonant_area_weighted_field) ? _missing_coupling_note(r) : "C $(_shape(r.C_resonant_area_weighted_field))")
+    coupling =
+        !isempty(r.C_resonant_area_weighted_field) ? "C $(_shape(r.C_resonant_area_weighted_field))" :
+        !isempty(r.C_delta_mn_asymptotic) ? "asymptotic only, C $(_shape(r.C_delta_mn_asymptotic))" : _missing_coupling_note(r)
+    _row(io, "Coupling", coupling)
     isempty(r.dominant_singular_values) || _row(io, "Dominant σ", _list(_fmt.(r.dominant_singular_values); max=3))
     _row(io, "Torque resp.", isempty(r.T_xe) ? "not computed" : "T_xe $(_shape(r.T_xe))")
-    r.unit_edge_basis && _row(io, "Basis", "matched solution, unit edge displacement")
+    r.unit_edge_basis && _row(io, "Basis", "unit edge displacement")
     _plots_row(io, r)
     return nothing
 end
@@ -285,21 +292,22 @@ end
 
 _weight(w) = string(iszero(real(w)) && !iszero(imag(w)) ? _fmt(imag(w)) * "im" : _fmt(w), " × ")
 
-function _rmp_label(f::RMPSource)
-    c = f.ctrl
-    c.forcing_data_format == "coil" || return string(basename(c.forcing_data_file), " (", c.forcing_data_format, ")")
-    sets = [isempty(get(d, "name", "")) ? get(d, "source", "coil set") : d["name"] for d in c.coil_sets_raw]
+_field_label(f::ForcingFile) = string(basename(f.path), " (", f.format, ")")
+function _field_label(f::ForcingCoils)
+    c = f.config
+    sets = [!isempty(sc.name) ? sc.name : !isempty(sc.source) ? sc.source : "coil set" for sc in c.coil_sets]
     return string(isempty(c.machine) ? "" : c.machine * " ", "coils ", _list(sets))
 end
-_rmp_label(f::RMPSpectrum) = string("spectrum of ", _plural(length(f.modes), "mode"), ", n = ", _irange([m.n for m in f.modes]))
+_field_label(f::ForcingMagneticMaterial) = string("magnetic material ", _list([m.name for m in f.materials]))
+_field_label(f::ForcingSpectrum) = string("spectrum of ", _plural(length(f.modes), "mode"), ", n = ", _irange([m.n for m in f.modes]))
 
-Base.show(io::IO, f::Union{RMPSource,RMPSpectrum}) = print(io, "RMPField(", f.scale == 1 ? "" : _weight(f.scale), _rmp_label(f), ")")
-Base.show(io::IO, f::RMPFieldSum) = print(io, "RMPField(sum of ", _plural(length(f.terms), "term"), ")")
+Base.show(io::IO, f::ForcingLeaf) = print(io, "ForcingField(", f.scale == 1 ? "" : _weight(f.scale), _field_label(f), ")")
+Base.show(io::IO, f::ForcingFieldSum) = print(io, "ForcingField(sum of ", _plural(length(f.terms), "term"), ")")
 
-function Base.show(io::IO, ::MIME"text/plain", f::RMPFieldSum)
-    print(io, "RMPField  sum of ", _plural(length(f.terms), "term"))
+function Base.show(io::IO, ::MIME"text/plain", f::ForcingFieldSum)
+    print(io, "ForcingField  sum of ", _plural(length(f.terms), "term"))
     for t in f.terms
-        print(io, "\n  ", _weight(t.scale), _rmp_label(t))
+        print(io, "\n  ", _weight(t.scale), _field_label(t))
     end
     return nothing
 end
@@ -335,6 +343,9 @@ function Base.show(io::IO, ::MIME"text/plain", s::PerturbedEquilibriumState)
         _row(io, "Chirikov", "max $(_fmt(maximum(s.chirikov_parameter)))")
     end
     isempty(s.dominant_forcing_overlap) || _row(io, "Dominant", "overlap with mode 1 = $(_fmt(abs(first(s.dominant_forcing_overlap)))) T")
+    length(s.source_names) > 1 && _row(io, "Sources",
+        isempty(s.dominant_source_overlap) ? _list(s.source_names) :
+        _list(["$(n) $(_fmt(abs(s.dominant_source_overlap[1, k]))) T" for (k, n) in enumerate(s.source_names)]))
     _row(io, "Profiles", s.xi_modes === nothing ? "not computed" : "ξ, b on $(length(s.psi_grid)) ψ nodes")
     s.torque_response === nothing || _row(io, "Torque resp.", "computed")
     iszero(s.regularization_width) || _row(io, "Regularized", "width $(_fmt(s.regularization_width))")

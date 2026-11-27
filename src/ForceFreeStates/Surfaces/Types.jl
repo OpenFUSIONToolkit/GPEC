@@ -13,6 +13,9 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
+  - `alpha::Vector{ComplexF64}` - Mercier exponent α = √(−D_I) of each resonant harmonic, as the solve's asymptotic series
+    found it from the retained poloidal harmonics; it approaches the Mercier index of the equilibrium as the solve converges
+    in m. Empty where no ideal asymptotic series was built.
   - `delta_prime::Vector{ComplexF64}` - **Debug stub, not physically valid.** Per-surface ca-based Δ' estimate;
     use `ForceFreeStatesResult.delta_prime` (STRIDE global BVP, Glasser & Kolemen 2018, Phys. Plasmas 25, 082502) for tearing stability.
 """
@@ -23,6 +26,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
+    alpha::Vector{ComplexF64} = ComplexF64[]
     delta_prime::Vector{ComplexF64} = ComplexF64[]
     restype::Any = nothing       # ResistGeometry from ResistEval.jl (populated by resist_eval_all!); typed `Any` to avoid a cross-file type reference
 end

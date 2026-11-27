@@ -16,7 +16,7 @@ mtheta = 256                            # Number of poloidal grid points
 
 [ForcingTerms]
 forcing_data_file = "forcing.dat"       # Manual mode table (n, m, amplitude_real, amplitude_imag)
-forcing_data_format = "ascii"           # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
+forcing_data_format = "ascii"           # Format of the forcing-mode table: "ascii" or "hdf5"
 
 [PerturbedEquilibrium]
 compute_singular_coupling = true        # Compute singular layer coupling metrics
@@ -44,7 +44,7 @@ delta_mlow = 8                          # Expands lower bound of Fourier harmoni
 delta_mhigh = 8                         # Expands upper bound of Fourier harmonics
 mtheta_vacuum = 960                     # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 singfac_min = 5e-4                      # Distance |m - nq| from each rational surface at which the integration crosses it through its asymptotic series
-integrator = "Forward"                  # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for [PerturbedEquilibrium]/kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
+integrator = "Forward"                  # Integration formalism, whose numerical settings are its own section: "Forward" (dense ξ, needed for kinetic), "Riccati" (chunked propagator BVP, unlocks the singular-surface Δ′ matrix), or "Galerkin" (outer-region singular Galerkin Δ′)
 truncate_at_rational_offset = false     # Truncate integration at (last_rational_q + rational_offset_fraction)/n; false for analytic equilibria
 
 # Numerical settings of the forward integrator

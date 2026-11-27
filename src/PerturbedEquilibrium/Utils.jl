@@ -46,6 +46,14 @@ function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilib
     !isempty(state.response_b_rootarea) && (pe_group["response_b_root_area"] = state.response_b_rootarea)
     !isempty(state.response_b_area) && (pe_group["response_b_area"] = state.response_b_area)
 
+    # Each forcing source's b̃, whose columns sum to forcing_b_root_area, and its dominant-mode overlap
+    if !isempty(state.source_b_rootarea)
+        sources_group = create_group(pe_group, "ForcingSources")
+        sources_group["source_name"] = state.source_names
+        sources_group["forcing_b_root_area"] = state.source_b_rootarea
+        isempty(state.dominant_source_overlap) || (sources_group["dominant_forcing_overlap"] = state.dominant_source_overlap)
+    end
+
     # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
     # root-area-weighted field (b̃) space. Recover the area-weighted field b̄ with the stored
     # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
@@ -125,18 +133,34 @@ function save_to_hdf5(file::Union{HDF5.File,HDF5.Group}, state::PerturbedEquilib
     !isempty(resp.C_resonant_current) && (coupling_group["C_resonant_current"] = resp.C_resonant_current)
     !isempty(resp.C_island_width_sq) && (coupling_group["C_island_width_sq"] = resp.C_island_width_sq)
     !isempty(resp.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = resp.C_penetrated_area_weighted_field)
-    !isempty(resp.C_delta_prime) && (coupling_group["C_Delta_prime"] = resp.C_delta_prime)
+    !isempty(resp.C_delta_mn) && (coupling_group["C_Delta_mn"] = resp.C_delta_mn)
 
     # Applied resonant vectors [n_rational]
     !isempty(state.resonant_area_weighted_field) && (coupling_group["resonant_area_weighted_field"] = state.resonant_area_weighted_field)
     !isempty(state.resonant_current) && (coupling_group["resonant_current"] = state.resonant_current)
     !isempty(state.island_width_sq) && (coupling_group["island_width_sq"] = state.island_width_sq)
     !isempty(state.penetrated_area_weighted_field) && (coupling_group["penetrated_area_weighted_field"] = state.penetrated_area_weighted_field)
-    !isempty(state.delta_prime) && (coupling_group["Delta_prime"] = state.delta_prime)
+    !isempty(state.delta_mn) && (coupling_group["Delta_mn"] = state.delta_mn)
     !isempty(state.forcing_solution_weights) && (coupling_group["forcing_solution_weights"] = state.forcing_solution_weights)
     !isempty(resp.rational_area) && (coupling_group["rational_area"] = resp.rational_area)
     !isempty(state.island_half_width) && (coupling_group["island_half_width"] = state.island_half_width)
     !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)
+
+    # The same matrices and applied vectors from the jump of the asymptotic small solution
+    if !isempty(resp.C_delta_mn_asymptotic)
+        coupling_group["C_resonant_area_weighted_field_asymptotic"] = resp.C_resonant_area_weighted_field_asymptotic
+        coupling_group["C_resonant_current_asymptotic"] = resp.C_resonant_current_asymptotic
+        coupling_group["C_island_width_sq_asymptotic"] = resp.C_island_width_sq_asymptotic
+        coupling_group["C_Delta_mn_asymptotic"] = resp.C_delta_mn_asymptotic
+    end
+    if !isempty(state.delta_mn_asymptotic)
+        coupling_group["resonant_area_weighted_field_asymptotic"] = state.resonant_area_weighted_field_asymptotic
+        coupling_group["resonant_current_asymptotic"] = state.resonant_current_asymptotic
+        coupling_group["island_width_sq_asymptotic"] = state.island_width_sq_asymptotic
+        coupling_group["Delta_mn_asymptotic"] = state.delta_mn_asymptotic
+        coupling_group["island_half_width_asymptotic"] = state.island_half_width_asymptotic
+        coupling_group["chirikov_parameter_asymptotic"] = state.chirikov_parameter_asymptotic
+    end
 
     # Metadata [n_rational]
     !isempty(resp.rational_psi) && (coupling_group["rational_psi"] = resp.rational_psi)
@@ -195,9 +219,9 @@ end
 function _record_forcing_snapshot!(file, state::PerturbedEquilibriumState)
     forcing = state.forcing
     forcing === nothing && return nothing
-    snapshot = forcing isa ForcingTerms.RMPSource && forcing.scale == 1 ? ForcingTerms.snapshot_forcing_modes(forcing.ctrl) :
+    forcing isa ForcingTerms.ForcingCoils && forcing.scale == 1 && return nothing
+    snapshot = forcing isa ForcingTerms.ForcingFile && forcing.scale == 1 ? ForcingTerms.snapshot_forcing_modes(forcing) :
                (state.forcing_modes, "unit_flux")
-    snapshot === nothing && return nothing
     modes, normalization = snapshot
     ForcingTerms.save_forcing_to_h5(modes, replace_group!(file, "Input/RawInputs/ForcingTerms"); normalization)
     return nothing
@@ -217,6 +241,14 @@ const PE_H5_ANNOTATIONS = [
     "forcing_b_root_area" => (; long_name="control-surface forcing spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
     "forcing_b_area" => (; long_name="control-surface forcing spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),
     "response_b" => (; long_name="control-surface response spectrum, bare normal field b", units="T", dims=("mode",)),
+    "ForcingSources/source_name" =>
+        (; long_name="name of each forcing source: a coil set, forcing file, spectrum literal or magnetic material set, or the group merging several"),
+    "ForcingSources/forcing_b_root_area" =>
+        (; long_name="control-surface forcing spectrum of each source, root-area-weighted field b̃; the columns sum to forcing_b_root_area",
+            units="T", dims=("mode", "source")),
+    "ForcingSources/dominant_forcing_overlap" =>
+        (; long_name="coefficient of each source's b̃ on each singular mode, Vᴴ·b̃; the columns sum to SingularCoupling/DominantMode/forcing_overlap",
+            units="T", dims=("rank", "source")),
     "response_b_root_area" => (; long_name="control-surface response spectrum, root-area-weighted field b̃ (coordinate-invariant)", units="T", dims=("mode",)),
     "response_b_area" => (; long_name="control-surface response spectrum, area-weighted field b̄ (Φ = A·b̄)", units="T", dims=("mode",)),
     "ResponseMatrices/plasma_inductance" => (; long_name="plasma inductance Λ̃ in root-area-weighted field space", dims=("mode_row", "mode_col")),
@@ -281,8 +313,8 @@ const PE_H5_ANNOTATIONS = [
     "SingularCoupling/C_penetrated_area_weighted_field" =>
         (; long_name="coupling matrix: applied b̃ → penetrated area-weighted field", dims=("surface", "mode"),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
-    "SingularCoupling/C_Delta_prime" =>
-        (; long_name="coupling matrix: applied b̃ → forcing-driven Δ'", units="1/T", dims=("surface", "mode"),
+    "SingularCoupling/C_Delta_mn" =>
+        (; long_name="coupling matrix: applied b̃ → Δ_mn, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁", units="1/T", dims=("surface", "mode"),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
     "SingularCoupling/resonant_area_weighted_field" =>
         (; long_name="resonant area-weighted field b̄^r = Φ^r/A^r per rational surface (coordinate-invariant)", units="T", dims=("surface",),
@@ -296,8 +328,8 @@ const PE_H5_ANNOTATIONS = [
     "SingularCoupling/penetrated_area_weighted_field" =>
         (; long_name="penetrated area-weighted field per rational surface", units="T", dims=("surface",),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
-    "SingularCoupling/Delta_prime" =>
-        (; long_name="forcing-driven tearing Δ' per rational surface (Riccati; response to applied forcing)", dims=("surface",),
+    "SingularCoupling/Delta_mn" =>
+        (; long_name="forcing-driven Δ_mn per rational surface, the ∂b^ψ/∂ψ jump across |m − nq| = 5e-4 over 2π·χ₁", dims=("surface",),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
     "SingularCoupling/forcing_solution_weights" =>
         (; long_name="weights of the forcing solutions in the singular-coupling decomposition", dims=("surface",),
@@ -309,6 +341,36 @@ const PE_H5_ANNOTATIONS = [
         (; long_name="island half-width per rational surface (in ψ_N)", dims=("surface",), attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
     "SingularCoupling/chirikov_parameter" =>
         (; long_name="Chirikov overlap parameter: island half-width / half-distance to the neighbouring rational surface", dims=("surface",),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/C_resonant_area_weighted_field_asymptotic" =>
+        (; long_name="coupling matrix: applied b̃ → resonant area-weighted field, from the jump of the asymptotic small solution", dims=("surface", "mode"),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/C_resonant_current_asymptotic" =>
+        (; long_name="coupling matrix: applied b̃ → pitch-resonant current, from the jump of the asymptotic small solution", units="A/T", dims=("surface", "mode"),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/C_island_width_sq_asymptotic" =>
+        (; long_name="coupling matrix: applied b̃ → squared island half-width, from the jump of the asymptotic small solution", units="1/T", dims=("surface", "mode"),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/C_Delta_mn_asymptotic" =>
+        (; long_name="coupling matrix: applied b̃ → Δ_mn of the asymptotic small solution, −2πi·χ₁·n·q′·(C_R − C_L) over 2π·χ₁", units="1/T", dims=("surface", "mode"),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/resonant_area_weighted_field_asymptotic" =>
+        (; long_name="resonant area-weighted field per rational surface, from the jump of the asymptotic small solution", units="T", dims=("surface",),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/resonant_current_asymptotic" =>
+        (; long_name="pitch-resonant current per rational surface, from the jump of the asymptotic small solution", units="A", dims=("surface",),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/island_width_sq_asymptotic" =>
+        (; long_name="squared island half-width per rational surface (in ψ_N²), from the jump of the asymptotic small solution", dims=("surface",),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/Delta_mn_asymptotic" =>
+        (; long_name="forcing-driven Δ_mn of the asymptotic small solution per rational surface, over 2π·χ₁", dims=("surface",),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/island_half_width_asymptotic" =>
+        (; long_name="island half-width per rational surface (in ψ_N), from the jump of the asymptotic small solution", dims=("surface",),
+            attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
+    "SingularCoupling/chirikov_parameter_asymptotic" =>
+        (; long_name="Chirikov overlap parameter from the asymptotic island half-widths", dims=("surface",),
             attach=(1 => "SingularCoupling/rational_psi", 1 => "SingularCoupling/rational_q")),
     "SingularCoupling/rational_psi" => (; long_name="normalized poloidal flux ψ_N of each rational surface", scale="psi_rational"),
     "SingularCoupling/rational_q" =>
@@ -347,7 +409,7 @@ const PE_H5_ANNOTATIONS = [
         (;
             long_name="torque response matrix on the applied root-area-weighted field b̃, cumulative inside ψ_N: b̃†·T_xe·b̃/2 is the complex torque (Re = toroidal torque, Im = 2n·δW ideal+kinetic); the Hermitian part is the torque quadratic form",
             units="N*m/T^2", dims=("mode_row", "mode_col", "psi"), attach=(1 => "TorqueResponse/m", 2 => "TorqueResponse/m", 3 => "TorqueResponse/psi")),
-    "TorqueResponse/source_name" => (; long_name="name of each forcing source of T_source (coil set or forcing file)"),
+    "TorqueResponse/source_name" => (; long_name="name of each forcing source of T_source, as ForcingSources/source_name"),
     "TorqueResponse/T_source" =>
         (;
             long_name="torque response matrix in forcing-source space, cumulative inside ψ_N: s†·T_source·s/2 is the complex torque of the sources driven at s times their strength as built",

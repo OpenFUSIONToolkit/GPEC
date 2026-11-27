@@ -44,24 +44,24 @@ What each capability needs, worded as what to change in the run to get it.
 const REASONS = Dict{Symbol,String}(
     :equilibrium => "needs an equilibrium",
     :singular_surfaces => "needs rational surfaces in the integration domain",
-    :solution_profiles => "needs stored ξ profiles: use the Forward or Riccati integrator, or a matched Galerkin solve (unmatched Galerkin stores none)",
+    :solution_profiles => "needs stored ξ profiles: use the Forward or Riccati integrator, or Galerkin with error_field_response = true",
     :fixed_boundary_criterion => "needs the critical determinant scan: use the Forward or Riccati integrator (Galerkin computes none)",
-    :free_boundary => "needs the free-boundary energies: run with vac_flag = true and the Forward or Riccati integrator",
+    :free_boundary => "needs the free-boundary energies: run with vac_flag = true (Galerkin also needs error_field_response = true)",
     :edge_scan => "needs the edge stability scan: set dW_edge_scan_start below psilim",
     :delta_prime => "needs the Δ′ matrix: use the Riccati or Galerkin integrator (Forward computes none)",
-    :delta_coil => "needs Δ_coil: use the Riccati integrator, or Galerkin with rpec_flag = true",
+    :delta_ef => "needs Δ_EF: use Galerkin, or Riccati with vac_flag = true, with error_field_response = true",
     :kinetic_scan => "needs the kinetic singular-surface scan: run with a kinetic source and singfac_min > 0",
     :ballooning_scan => "needs the ballooning scan: add a [LocalStability] section",
     :singular_coupling => "needs the singular coupling: run PerturbedEquilibrium with compute_singular_coupling = true",
-    :response_xi => "needs the reconstructed displacement ξ: run PerturbedEquilibrium on a Forward free-boundary result",
-    :response_n => "needs the stored normal field and displacement: run PerturbedEquilibrium on a Forward free-boundary result",
+    :response_xi => "needs the reconstructed displacement ξ: run PerturbedEquilibrium on a free-boundary result",
+    :response_n => "needs the stored normal field and displacement: run PerturbedEquilibrium on a free-boundary result",
     :penetrated_field => "needs a penetrated field: ideal runs have none; it comes from a matched (resistive) run",
-    :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a Forward free-boundary result",
-    :coil_sets => "needs coil forcing: give ForcingTerms coil sets (forcing_data_format = \"coil\")",
+    :response_b => "needs the reconstructed perturbed field b: run PerturbedEquilibrium on a free-boundary result",
+    :coil_sets => "needs coil forcing: give [ForcingTerms] coil sets",
     :forcing_modes => "needs forcing modes: give ForcingTerms a forcing",
     :ef_sensitivities => "needs the coil sensitivities: add an [ErrorFields] section",
     :dominant_mode => "needs the dominant resonant-coupling mode: run PerturbedEquilibrium with compute_singular_coupling = true",
-    :coil_source => "needs a coil source: give RMPField coil sets (a mode table or spectrum has no geometry to draw)",
+    :coil_source => "needs a coil source: give ForcingField coil sets (a mode table or spectrum has no geometry to draw)",
     :coupling_matrices => "needs the resonant coupling matrices: run plasma_response with compute_singular_coupling = true",
     :ef_monte_carlo => "needs the tolerance Monte Carlo: give ErrorFields a tolerance file",
     :ef_risk => "needs the locking risk: give ErrorFields a tolerance file and a scenario",
@@ -89,20 +89,19 @@ function capabilities(r::ForceFreeStatesResult)
     diag === nothing || isempty(diag.crit_store) || push!(caps, :fixed_boundary_criterion)
     diag === nothing || isempty(diag.edge_scan.psi) || push!(caps, :edge_scan)
     r.free_boundary === nothing || isempty(r.free_boundary.et) || push!(caps, :free_boundary)
-    r.delta_prime === nothing || isempty(r.delta_prime.matrix) || push!(caps, :delta_prime)
-    r.delta_prime === nothing || isempty(r.delta_prime.coil) || push!(caps, :delta_coil)
+    r.delta_prime === nothing || push!(caps, :delta_prime)
+    r.delta_prime === nothing || isempty(r.delta_prime.ef) || push!(caps, :delta_ef)
     isempty(r.kinetic.scan_psi) || push!(caps, :kinetic_scan)
     return caps
 end
 
 capabilities(r::LocalStabilityResult) = isempty(r.alpha) ? Set{Symbol}() : Set([:ballooning_scan])
 
-capabilities(r::FT.RMPField) =
-    any(t -> t isa FT.RMPSource && t.ctrl.forcing_data_format == "coil", FT._rmp_terms(r)) ? Set([:coil_source]) : Set{Symbol}()
+capabilities(r::FT.ForcingField) = any(t -> t isa FT.ForcingCoils, FT._field_terms(r)) ? Set([:coil_source]) : Set{Symbol}()
 
 function capabilities(r::PlasmaResponse)
     caps = Set{Symbol}()
-    isempty(r.C_resonant_area_weighted_field) || push!(caps, :coupling_matrices)
+    isempty(r.C_resonant_area_weighted_field) && isempty(r.C_resonant_area_weighted_field_asymptotic) || push!(caps, :coupling_matrices)
     isempty(r.dominant_singular_values) || push!(caps, :dominant_mode)
     return caps
 end
@@ -110,7 +109,7 @@ end
 # A perturbed equilibrium holds its response's capabilities as well as those of its own drive.
 function capabilities(s::PerturbedEquilibriumState)
     caps = capabilities(s.response)
-    isempty(s.resonant_area_weighted_field) || push!(caps, :singular_coupling)
+    isempty(s.resonant_area_weighted_field) && isempty(s.resonant_area_weighted_field_asymptotic) || push!(caps, :singular_coupling)
     s.xi_modes === nothing || push!(caps, :response_xi)
     s.b_modes === nothing || push!(caps, :response_b)
     s.b_n_modes === nothing || s.xi_n_modes === nothing || push!(caps, :response_n)
@@ -132,15 +131,17 @@ end
 const _H5_CAPABILITIES = (
     :equilibrium => "Equilibrium/Profiles/psi",
     :singular_surfaces => "SingularSurfaces/rational_psi",
-    :solution_profiles => ("ForceFreeStates/Solutions/ForwardIntegration/xi_psi", "ForceFreeStates/Solutions/Match/xi_psi"),
+    :solution_profiles =>
+        ("ForceFreeStates/Solutions/ForwardIntegration/xi_psi", "ForceFreeStates/Solutions/GalerkinIntegration/xi_psi", "ForceFreeStates/Solutions/Match/xi_psi"),
     :fixed_boundary_criterion => "ForceFreeStates/Solutions/ForwardIntegration/crit",
     :edge_scan => "ForceFreeStates/EdgeScan/psi",
     :free_boundary => "ForceFreeStates/FreeBoundaryStability/eigenmode_energies",
-    :delta_prime => "SingularSurfaces/Delta_prime_matrix",
-    :delta_coil => "SingularSurfaces/Delta_coil",
+    :delta_prime => ("SingularSurfaces/Delta_prime_matrix", "SingularSurfaces/Delta_prime_matrix_fixedboundary"),
+    :delta_ef => "SingularSurfaces/Delta_EF",
     :kinetic_scan => "SingularSurfaces/Kinetic/scan_psi",
     :ballooning_scan => "LocalStability/alpha",
-    :singular_coupling => "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field",
+    :singular_coupling =>
+        ("PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field", "PerturbedEquilibrium/SingularCoupling/resonant_area_weighted_field_asymptotic"),
     :response_xi => "PerturbedEquilibrium/Response/xi_psi",
     :response_b => "PerturbedEquilibrium/Response/b_psi_area_weighted",
     :ef_sensitivities => EF._H5_GROUP,

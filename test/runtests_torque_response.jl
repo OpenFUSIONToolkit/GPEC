@@ -14,7 +14,6 @@ include("h5_metadata_check.jl")
 const _TORQUE_RESPONSE_SECTIONS = """
 
 [ForcingTerms]
-forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
 mtheta_coil = 128                       # Poloidal grid for boundary B·n̂ evaluation
 nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
 
@@ -81,6 +80,9 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
                 @test read(g["T_applied"]) == tr.T_applied
                 @test read(g["total_torque"]) == real(tr.T_applied[end])
                 @test read(g["psi"]) == tr.psi
+                fs = h5["PerturbedEquilibrium/ForcingSources"]
+                @test read(fs["source_name"]) == pe.source_names
+                @test read(fs["forcing_b_root_area"]) == pe.source_b_rootarea
                 @test haskey(h5, "ForceFreeStates/EulerLagrangeMatrices/Kinetic/f0")
                 bad = _collect_metadata_violations(h5)
                 isempty(bad) || @error "metadata violations" bad
@@ -134,21 +136,46 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
         end
 
         @testset "forcing-source matrix: coil sets" begin
-            M = _PE_TR.coil_flux_spectra(ffs, coil_sets, cfg)
-            @test size(M) == (N, 2)
-            @test vec(sum(M; dims=2)) ≈ Φx rtol = 1e-10
+            # Each coil set's spectrum on the run's grid, built without the materialization under test.
+            M = zeros(ComplexF64, N, length(coil_sets))
+            for (j, cs) in enumerate(coil_sets)
+                grid = _GPE_TR.ForcingTerms.CoilForcingGrid(ffs.equil, cfg, nn; psi=ffs.psilim)
+                M[:, j] = _PE_TR.map_forcing_to_eigenmodes(_GPE_TR.ForcingTerms.coil_forcing_modes(cs, grid, nn, ffs.mlow, ffs.mhigh), ffs)
+            end
             M̃ = R \ M
+            @test pe.source_names == ["pane_upper", "pane_lower"]
+            @test pe.source_b_rootarea ≈ M̃ rtol = 1e-10
+            @test vec(sum(pe.source_b_rootarea; dims=2)) ≈ b̃ rtol = 1e-10
             for k in (1, npsi ÷ 2, npsi)
                 @test tr.T_source[:, :, k] ≈ M̃' * tr.T_xe[:, :, k] * M̃ rtol = 1e-10
             end
             @test sum(tr.T_source[:, :, end]) / 2 ≈ tr.T_applied[end] rtol = 1e-10
         end
 
+        @testset "forcing-source matrix: grouped coil sets are one source" begin
+            raw = [merge(d, Dict{String,Any}("group" => "panes")) for d in ft_ctrl.coil_sets_raw]
+            grouped = _GPE_TR.ForcingTerms.ForcingField(
+                _GPE_TR.ForcingTerms.ForcingTermsControl(; ft_ctrl.machine, ft_ctrl.dat_dir,
+                    ft_ctrl.mtheta_coil, ft_ctrl.nzeta_coil, coil_sets_raw=raw)
+            )
+            pg = perturbed_equilibrium(resp, grouped; verbose=false)
+            ts = pg.torque_response
+            @test pg.source_names == ["panes"] && ts.source_names == ["panes"]
+            @test vec(pg.source_b_rootarea) ≈ b̃ rtol = 1e-10
+            @test ts.T_source[1, 1, :] ≈ vec(sum(tr.T_source; dims=(1, 2))) rtol = 1e-10
+        end
+
         @testset "forcing-source matrix: a forcing file is one source" begin
-            file_state = deepcopy(pe)
-            file_ctrl = _GPE_TR.ForcingTerms.ForcingTermsControl(; forcing_data_file="forcing.dat")
-            _PE_TR.apply_torque_response!(file_state, file_ctrl)
-            ts = file_state.torque_response
+            # The run's own forcing written as a unit-norm mode table drives the same response as one source.
+            table = joinpath(dir, "forcing.dat")
+            open(table, "w") do io
+                println(io, "# normalization: unit_flux")
+                for m in pe.forcing_modes
+                    println(io, m.n, " ", m.m, " ", real(m.amplitude), " ", imag(m.amplitude))
+                end
+            end
+            pf = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.ForcingField(table); verbose=false)
+            ts = pf.torque_response
             @test ts.source_names == ["forcing.dat"]
             @test size(ts.T_source) == (1, 1, npsi)
             @test ts.T_source[1, 1, :] ./ 2 ≈ tr.T_applied rtol = 1e-8
@@ -157,7 +184,7 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
         @testset "regularization on a kinetic result" begin
             # No regularization by default; an explicit width still reaches the regularized profiles.
             @test pe.regularization_width == 0.0
-            reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.RMPField(ft_ctrl); regularization_width=0.05,
+            reg = perturbed_equilibrium(resp, _GPE_TR.ForcingTerms.ForcingField(ft_ctrl); regularization_width=0.05,
                 coil_sets=pe.coil_sets, verbose=false)
             @test reg.regularization_width == 0.05
             @test reg.forcing_b ≈ pe.forcing_b rtol = 1e-12
@@ -169,7 +196,7 @@ compute_torque_response = true          # Build the ψ-resolved torque response 
             # A response without its operators cannot carry a torque response.
             @test_throws ArgumentError _PE_TR.build_torque_response!(_PE_TR.PlasmaResponse(; ffs))
             # The torque response is opt-in: a response built without it contracts nothing.
-            plain = perturbed_equilibrium(plasma_response(ffs; compute_singular_coupling=false, verbose=false), _GPE_TR.ForcingTerms.RMPField(ft_ctrl);
+            plain = perturbed_equilibrium(plasma_response(ffs; compute_singular_coupling=false, verbose=false), _GPE_TR.ForcingTerms.ForcingField(ft_ctrl);
                 coil_sets=pe.coil_sets, verbose=false)
             @test isempty(plain.response.T_xe) && plain.torque_response === nothing
         end

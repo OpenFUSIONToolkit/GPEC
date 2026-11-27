@@ -1,7 +1,7 @@
 # Forcing Terms
 
 `ForcingTerms` specifies the external magnetic perturbation that drives the perturbed equilibrium: the spectrum of the normal field on the control surface at `psilim`, given either as a file of (m, n) amplitudes or computed by Biot–Savart from coil geometry.
-The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs; its result is the `RMPField` that `perturbed_equilibrium` applies to the plasma response.
+The `[ForcingTerms]` section is read when `[PerturbedEquilibrium]` runs. Every source it holds (a `forcing_data_file`, coil sets, magnetic materials) drives the plasma, and their spectra are summed into the `ForcingField` that `perturbed_equilibrium` applies to the plasma response.
 
 ## Normalization
 
@@ -39,17 +39,15 @@ end
 
 ## Coils
 
-`forcing_data_format = "coil"` computes the field from coil geometry: the plasma boundary is sampled on an `mtheta_coil × nzeta_coil` grid, the Biot–Savart field of every coil set is evaluated there, projected onto the normal flux and Fourier decomposed.
+Coil sets compute the field from coil geometry: the plasma boundary is sampled on an `mtheta_coil × nzeta_coil` grid, the Biot–Savart field of every coil set is evaluated there, projected onto the normal flux and Fourier decomposed.
 The toroidal angle of each observation point includes the straight-field-line offset ``\nu(\psi, \theta)`` and the helicity ``\mathrm{sign}(B_T)\,\mathrm{sign}(I_p)`` of the equilibrium, without which the decomposition would be wrong.
 Each `[[ForcingTerms.coil_set]]` block supplies one coil set, selected by `source`; shifts and tilts (`shiftx/y/z`, `tiltx/y/z`, `n_tilt`, …) apply to every source, which is what the [Error Fields](error_fields.md) stage sweeps.
 From `examples/DIIID-like_ideal_example/gpec.toml` (the first block) and the other sources:
 
 ```toml
 [ForcingTerms]
-forcing_data_format = "coil"
 machine = "d3d"
 mtheta_coil = 480
-nzeta_coil = 32
 
 # ASCII .dat file, resolved to {dat_dir}/{machine}_{name}.dat
 [[ForcingTerms.coil_set]]
@@ -110,9 +108,31 @@ forcing_grid = CoilForcingGrid(equil, cfg, n; psi=ffs.psilim)
 spectra = [coil_forcing_modes(cs, forcing_grid, n, m_low, m_high) for cs in coil_sets]
 ```
 
+## Magnetic materials
+
+Each `[[ForcingTerms.magnetic_material]]` block adds a set of ferritic elements, closed triangulated polyhedra read from an HDF5 geometry file (`magnetic_material/<name>/vertices`, `triangles`, `element_offsets`; see `read_magnetic_material_h5`).
+Every element is saturated along the equilibrium field at its centroid, ``M = f\,\mu_0 M_s\,\hat B_0/\mu_0``, and its field is the exact field of a uniformly magnetized polyhedron: a surface charge ``M\cdot\hat n`` on each face, each triangle integrated in closed form (Van Oosterom & Strackee, IEEE Trans. Biomed. Eng. 30, 125 (1983)).
+That field is sampled on the same `mtheta_coil × nzeta_coil` boundary grid as the coils.
+The equilibrium must carry its flux map outside the plasma (a g-file or IMAS), every vertex must lie inside that map's grid and outside the separatrix, and no control-surface point may lie inside an element.
+
+```toml
+[[ForcingTerms.magnetic_material]]
+name = "iter_inserts"          # set to read from the geometry file
+h5_file = "iter_inserts.h5"    # magnetic_material/<name>/ geometry
+saturation_field = 1.7         # μ₀M_s, in tesla
+fill_fraction = 1.0            # magnetic fraction of each element's volume
+```
+
+## Forcing sources
+
+Each coil set, forcing file, spectrum and magnetic material set is one forcing source, and the run records each source's contribution beside the total.
+Give several `[[ForcingTerms.coil_set]]` or `[[ForcingTerms.magnetic_material]]` blocks the same `group = "<label>"` to report them as one source named by the label, for example the seven region sets of the test blanket modules as `group = "tbm"`; a block without `group` is its own source, named after the set.
+From the API, `ForcingField(materials; groups=[...])` takes one label per material set.
+
 ## Outputs
 
 The applied spectrum is written with the response: `PerturbedEquilibrium/ForcingModes/` (`m`, `n`, `amplitude`) and the control-surface spectra `PerturbedEquilibrium/forcing_b`, `forcing_b_root_area` and `forcing_b_area` (see [Perturbed Equilibrium](perturbed_equilibrium.md)).
+Each source's root-area-weighted field and its overlap with the dominant modes go to `PerturbedEquilibrium/ForcingSources/` (`source_name`, `forcing_b_root_area` on `(mode, source)`, `dominant_forcing_overlap` on `(rank, source)`); their columns sum to the totals, and the torque response's `T_source` uses the same sources.
 A forcing file is captured raw with its tag under `Input/RawInputs/ForcingTerms/`, and the coil geometry as used, after shifts and tilts, under `Input/RawInputs/Coils/`, so that `main(["gpec.h5"])` can replay the run without the original files; see the [Scripting API](api.md).
 
 ## API reference

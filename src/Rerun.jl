@@ -303,6 +303,8 @@ function build_inputs_from_h5(args::Vector{String})
         )
     end
 
+    use_coils && forcing_snapshot !== nothing &&
+        error("--coil-source coils replays a run forced by coils alone; $source_h5 records its forcing as modes (a file, a weighted source or a sum)")
     output_dir, output_name = resolve_rerun_output_path(source_h5, cli.output_dir, cli.output_name)
     isdir(output_dir) || mkpath(output_dir)
 
@@ -317,6 +319,9 @@ function build_inputs_from_h5(args::Vector{String})
         modes, normalization = forcing_snapshot
         h5open(f -> ForcingTerms.save_forcing_to_h5(modes, f; normalization), joinpath(output_dir, forcing_file), "w")
         ft = get!(inputs, "ForcingTerms", Dict{String,Any}())
+        # The recorded modes are the whole forcing, so the replay drops every other source.
+        delete!(ft, "coil_set")
+        delete!(ft, "magnetic_material")
         ft["forcing_data_file"] = forcing_file
         ft["forcing_data_format"] = "hdf5"
     end
