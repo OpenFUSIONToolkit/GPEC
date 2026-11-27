@@ -90,8 +90,6 @@ include("error_fields_fixture.jl")
             @test size(sens.tilt_sensitivity_per_deg) == (N, 3, 3)
             @test sens.b_t0 == ffs.equil.params.bt0
             @test sens.peak_current == [2.0e3, 2.0e3, 2.0e3]
-            @test all(<(1e-2), sens.shift_linearity_residual)
-            @test all(<(1e-2), sens.tilt_linearity_residual)
 
             # These coils are the run's forcing: the nominal spectra sum to the run's own b̃.
             @test vec(sum(sens.field_as_designed; dims=2)) ≈ pe.forcing_b_rootarea rtol = 1e-10
@@ -344,18 +342,11 @@ include("error_fields_fixture.jl")
             @test from_file.abs_delta_worst_case ≈ mc.abs_delta_worst_case rtol = 1e-10
             @test EF.worst_case_terms(table, snapshot, plot_sets; tolerance_scale=2.0).abs_delta_shift_tolerance[i_axi] > terms.abs_delta_shift_tolerance[i_axi]
 
-            # Linearity residuals: at the tolerance each tap is the stored ratio scaled by
-            # tolerance / step, with the metres tilt of the tilted hoop converted through its radius.
+            # A tilt tolerance in metres converts through the stored radius as through the coil set's own.
             i_tilted = findfirst(==("hoop_tilted"), sens.coil_names)
-            tilt_deg = EF.tilt_tolerance_deg(0.002, "m", sens.major_radius_m[i_tilted])
-            @test tilt_deg ≈ EF.tilt_tolerance_deg(0.002, "m", plot_sets[findfirst(cs -> cs.name == "hoop_tilted", plot_sets)])
+            @test EF.tilt_tolerance_deg(0.002, "m", sens.major_radius_m[i_tilted]) ≈
+                  EF.tilt_tolerance_deg(0.002, "m", plot_sets[findfirst(cs -> cs.name == "hoop_tilted", plot_sets)])
             @test_throws ArgumentError EF.tilt_tolerance_deg(5.0, "m", 1.5)
-            at_tol = AEF._linearity_matrix("run", AEF._load(h5path), sens.coil_names, :tolerance)
-            @test size(at_tol) == (6, 3)
-            @test at_tol[1, i_tilted] ≈ sens.shift_linearity_residual[1, i_tilted] * (0.5e-3 / 1e-3) rtol = 1e-12
-            @test at_tol[4, i_tilted] ≈ sens.tilt_linearity_residual[1, i_tilted] * (tilt_deg / 0.1) rtol = 1e-12
-            @test at_tol[6, i_axi] ≈ sens.tilt_linearity_residual[3, i_axi] * (0.019 / 0.1) rtol = 1e-12
-            @test AEF._linearity_matrix("run", AEF._load(h5path), sens.coil_names, :step) == hcat(vcat(sens.shift_linearity_residual, sens.tilt_linearity_residual))
 
             pmap = EF.phasing_map(h5path, ["hoop_tilted", "hoop_axi"]; nphase=36)
             @test length(pmap.phase_deg) == 1 && size(pmap.delta_per_kat) == (36,)
@@ -459,11 +450,15 @@ include("error_fields_fixture.jl")
             @test length(dt) >= 2 && !any(s.electron for s in dt)
             @test torque(dt) ≈ sum(torque(dt[i:i]) for i in eachindex(dt)) rtol = 1e-12
 
-            # Central differences: doubling the step moves the derivatives at O(h²).
-            coarse = EF.compute_coil_sensitivities(sets[1:1], rc, ffs.equil, cfg,
-                EF.ErrorFieldsControl(; fd_step_shift_m=2e-3, fd_step_tilt_deg=0.2); psi=ffs.psilim, b_t0=sens.b_t0)
-            @test coarse.shift_sensitivity_per_m ≈ sens.shift_sensitivity_per_m[:, :, 1:1] rtol = 1e-4
-            @test coarse.tilt_sensitivity_per_deg ≈ sens.tilt_sensitivity_per_deg[:, :, 1:1] rtol = 1e-3
+            # The exact derivatives are the limit of central differences of the displaced set.
+            spectrum(cs) = EF.applied_spectrum(cs, rc, EF.forcing_grids(rc, ffs.equil, cfg; psi=ffs.psilim))
+            for (kind, h, S) in ((:shift, 1e-4, sens.shift_sensitivity_per_m), (:tilt, 1e-2, sens.tilt_sensitivity_per_deg))
+                scale = maximum(norm, eachslice(S[:, :, 1]; dims=2))
+                for axis in 1:3
+                    fd = (spectrum(EF._rigidly_perturbed(sets[1], kind, axis, h, nothing)) - spectrum(EF._rigidly_perturbed(sets[1], kind, axis, -h, nothing))) / 2h
+                    @test norm(fd - S[:, axis, 1]) <= 1e-5 * scale
+                end
+            end
 
             # Single-conductor sets: the set pivot is the conductor pivot.
             set_pivot = EF.compute_coil_sensitivities(sets[1:1], rc, ffs.equil, cfg,
@@ -498,8 +493,8 @@ include("error_fields_fixture.jl")
                 else
                     @test isnan(o.resonant_fraction_percent)
                 end
-                # And it is the same number the sensitivity sweep gets for its nominal tap.
-                @test o.delta ≈ table.delta_as_designed[j] rtol = 1e-10
+                # And it is the same number the sensitivity sweep gets for its nominal tap, up to round-off for the axisymmetric hoop.
+                @test o.delta ≈ table.delta_as_designed[j] rtol = 1e-10 atol = 1e-12 * maximum(abs, table.delta_as_designed)
             end
 
             # Combining these sets at unit weight is the run's own forcing, which the run wrote out.
@@ -529,14 +524,12 @@ include("error_fields_fixture.jl")
             @test EF.regrid(cfg).nzeta_coil == cfg.nzeta_coil
             @test_logs (:warn, r"points per period") match_mode = :any EF.ResonantDriveContext(ffs.equil, rc, coarse_cfg; psilim=ffs.psilim, b_t0=sens.b_t0)
 
-            # Guards: a current-free set, a bad pivot name, a non-positive step.
+            # Guards: a current-free set, a non-positive field, a bad pivot name.
             dead = FT.CoilSet(sets[1].name, sets[1].ncoil, sets[1].s, sets[1].nw, sets[1].nsec, sets[1].x, sets[1].y, sets[1].z, zeros(sets[1].ncoil))
             @test_throws ArgumentError EF.compute_coil_sensitivities([dead], rc, ffs.equil, cfg; psi=ffs.psilim, b_t0=sens.b_t0)
             @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg; psi=ffs.psilim, b_t0=0.0)
             @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
                 EF.ErrorFieldsControl(; rotation_center="pack"); psi=ffs.psilim, b_t0=sens.b_t0)
-            @test_throws ArgumentError EF.compute_coil_sensitivities(sets, rc, ffs.equil, cfg,
-                EF.ErrorFieldsControl(; fd_step_shift_m=0.0); psi=ffs.psilim, b_t0=sens.b_t0)
         end
     end
 

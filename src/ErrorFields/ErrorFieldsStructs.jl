@@ -9,8 +9,6 @@ never inputs: the full spectra are stored and projected post hoc with [`sensitiv
 
 ## Fields
 
-  - `fd_step_shift_m`: central-difference step for the rigid shifts, in metres
-  - `fd_step_tilt_deg`: central-difference step for the rigid tilts, in degrees
   - `rotation_center`: pivot of the tilt taps — `"conductor"` rotates every conductor of a set
     about its own arc-length centre, `"set"` rotates the whole set rigidly about its common
     arc-length centre (a winding pack moving as one body)
@@ -19,8 +17,6 @@ never inputs: the full spectra are stored and projected post hoc with [`sensitiv
     worst-case bound and scans, and no tolerance may name them. `[ErrorFields.NTV] efc_coils` are always excluded
 """
 Base.@kwdef struct ErrorFieldsControl
-    fd_step_shift_m::Float64 = 1e-3
-    fd_step_tilt_deg::Float64 = 0.1
     rotation_center::String = "conductor"
     exclude_coils::Vector{String} = String[]
 end
@@ -36,8 +32,8 @@ degrees of freedom, on the (m, n) column ordering of the [`ResonantCoupling`](@r
 against. Spectra are root-area-weighted fields b̃ in tesla, the vector the coupling matrix and
 its singular vectors act on, so projecting any of them onto a mode is one inner product.
 
-Shifts are Cartesian translations of the whole set; tilts are rotations about the machine
-x, y, z axes through the pivot selected by `ErrorFieldsControl.rotation_center`. A coil set's
+Shifts are Cartesian translations of the whole set; tilts are rotations right-handed about the
+machine +x, −y and +z axes through the pivot selected by `ErrorFieldsControl.rotation_center`. A coil set's
 spectrum is proportional to its currents, so the table is specific to the current pattern it
 was evaluated with; `peak_current` and `winding_multiplier` let a user renormalize per ampere-turn.
 
@@ -50,10 +46,6 @@ was evaluated with; `peak_current` and `winding_multiplier` let a user renormali
   - `field_as_designed`: b̃ of each set as built, tesla `[numpert_total × ncoil_set]`
   - `shift_sensitivity_per_m`: ∂b̃/∂(Δx, Δy, Δz), tesla per metre `[numpert_total × 3 × ncoil_set]`
   - `tilt_sensitivity_per_deg`: ∂b̃/∂(θx, θy, θz), tesla per degree `[numpert_total × 3 × ncoil_set]`
-  - `shift_linearity_residual`, `tilt_linearity_residual`: ‖b̃(+h) + b̃(−h) − 2b̃(0)‖ of each tap
-    relative to the set's largest first difference ‖b̃(+h) − b̃(−h)‖ over all six taps, a
-    window-independent measure of how much second-order response the linearization drops at
-    the step taken `[3 × ncoil_set]`
   - `peak_current`: largest conductor current magnitude of each set, amperes `[ncoil_set]`
   - `winding_multiplier`: turns per conductor element of each set `[ncoil_set]`
   - `major_radius_m`: arc-length-weighted major radius of each set, metres `[ncoil_set]` — the lever
@@ -67,8 +59,6 @@ struct CoilSensitivities
     field_as_designed::Matrix{ComplexF64}
     shift_sensitivity_per_m::Array{ComplexF64,3}
     tilt_sensitivity_per_deg::Array{ComplexF64,3}
-    shift_linearity_residual::Matrix{Float64}
-    tilt_linearity_residual::Matrix{Float64}
     peak_current::Vector{Float64}
     winding_multiplier::Vector{Float64}
     major_radius_m::Vector{Float64}

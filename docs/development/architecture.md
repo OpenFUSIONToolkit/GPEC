@@ -127,7 +127,7 @@ Splines are provided by the external `FastInterpolations` package rather than by
     - Reads kinetic profiles configured under `[KineticForces]`
 
 11. **ErrorFields** (`src/ErrorFields/`) - Error-field sensitivity to coil misalignment
-    - `Sensitivity.jl` - central-difference linearization of every coil set's control-surface spectrum with respect to its rigid shifts and tilts, on one shared boundary grid
+    - `Sensitivity.jl` - exact linearization of every coil set's control-surface spectrum with respect to its rigid shifts and tilts, from the Biot–Savart field and its gradient on one shared boundary grid
     - `sensitivity_table` projects that linearization onto any windowed dominant mode post hoc (in memory or from `gpec.h5`); consumes `PerturbedEquilibrium.ResonantCoupling` and `ForcingTerms.coil_forcing_modes`
     - Configured under `[ErrorFields]`; writes `ErrorFields/CoilSensitivities/`
 

@@ -69,11 +69,6 @@ include("error_fields_fixture.jl")
         @test AEF.plot_tolerance_budget(table, snapshot, sets; monte_carlo=mc, sort=:name) isa Figure
         @test AEF.plot_tolerance_budget(terms; top=1, sort=:none) isa Figure
         @test_throws ArgumentError AEF.plot_tolerance_budget(terms; sort=:bogus)
-        @test AEF.plot_linearity_residuals(h5path; at=:step, yscale=:log10) isa Figure
-        @test AEF.plot_linearity_residuals(sens; tolerances=snapshot, fd_step_shift_m=1e-3, fd_step_tilt_deg=0.1) isa Figure
-        @test_throws ArgumentError AEF.plot_linearity_residuals(sens)
-        @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; at=:bogus)
-        @test_throws ArgumentError AEF.plot_linearity_residuals(h5path; yscale=:bogus)
 
         # Phasors: one panel per source; the axisymmetric hoop alone has no n ≠ 0 field to draw.
         @test length(_axes(AEF.plot_overlap_phasors(["file" => h5path, "memory" => table]))) == 2

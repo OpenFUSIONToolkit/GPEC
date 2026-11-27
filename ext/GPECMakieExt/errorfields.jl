@@ -186,37 +186,6 @@ function EFA._plot_tolerance_budget(labels, parts, worst, mc)
     end
 end
 
-const _TAPS = ("shift x", "shift y", "shift z", "tilt x", "tilt y", "tilt z")
-
-function EFA._plot_linearity_residuals(panels, at, yscale)
-    return themed() do
-        fig = _figure((820 * length(panels), 500))
-        for (j, p) in enumerate(panels)
-            # Coil sets whose residuals are all zero have nothing to draw.
-            shown = [any(v -> isfinite(v) && v > 0, p.residual[:, i]) for i in eachindex(p.names)]
-            names, r = p.names[shown], p.residual[:, shown]
-            n = length(names)
-            title = _with_label(p.label, "Linearity of the rigid-motion response")
-            all(shown) || (title *= " ($(count(!, shown)) with zero residuals not shown)")
-            ax = Axis(fig[1, j]; xticks=(1:n, names), xticklabelrotation=π / 6, yscale=yscale === :log10 ? log10 : identity, yminorticksvisible=false,
-                ylabel=at === :step ? "2nd difference / largest 1st, at the FD step" : "2nd difference / largest 1st, at the tolerance", title)
-            positive = filter(v -> isfinite(v) && v > 0, vcat(vec(r), 1e-2))
-            base = yscale === :log10 ? minimum(positive) / 3 : 0.0
-            yscale === :log10 && (ax.yticks = _decade_ticks(base, 3 * maximum(positive)))
-            for t in 1:6
-                x = (1:n) .+ (t - 3.5) * (0.8 / 6)
-                ok = [isfinite(v) && v > (yscale === :log10 ? 0 : -Inf) for v in r[t, :]]
-                rangebars!(ax, x[ok], fill(base, count(ok)), r[t, ok]; color=(WONG[t], 0.4), whiskerwidth=0, linewidth=2)
-                scatter!(ax, x[ok], r[t, ok]; color=WONG[t], markersize=7, label=_TAPS[t])
-            end
-            hlines!(ax, 1e-2; color=:black, linestyle=:dash, linewidth=1, label="1 %")
-            ylims!(ax, base, (yscale === :log10 ? 3 : 1.15) * maximum(positive))
-            axislegend(ax; position=:rt, nbanks=2)
-        end
-        fig
-    end
-end
-
 const _CHECK_MARKERS = (:circle, :diamond, :utriangle, :rect, :star5, :hexagon)
 
 function EFA._plot_linearity_check(check)
